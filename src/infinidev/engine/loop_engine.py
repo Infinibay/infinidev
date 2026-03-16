@@ -992,6 +992,16 @@ class LoopEngine(AgentEngine):
                                 tc.function.arguments,
                             )
 
+                            # Intercept send_message: emit to TUI chat
+                            if tc.function.name == "send_message":
+                                try:
+                                    _msg_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                                    _emit_loop_event("loop_user_message", agent.project_id, agent.agent_id, {
+                                        "message": _msg_args.get("message", ""),
+                                    })
+                                except Exception:
+                                    pass
+
                             # Detect errors / hallucinated tools and log visibly
                             _tool_error = _extract_tool_error(result)
 

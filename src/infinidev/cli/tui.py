@@ -9,13 +9,12 @@ from textual.screen import ModalScreen
 from typing import Optional, Callable, Set
 from textual.widgets import (
     Header, Footer, Static, TextArea, Label, OptionList, Markdown,
-    DirectoryTree, TabbedContent, TabPane,
+    DirectoryTree, TabbedContent, TabPane, LoadingIndicator,
 )
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal, VerticalScroll
 from textual.binding import Binding
 from textual import on, events, work
-from watchfiles import FileChange
 
 # Infinidev imports
 from infinidev.agents.base import InfinidevAgent
@@ -312,6 +311,13 @@ class InfinidevTUI(App):
     .agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
     .agent-msg MarkdownH1, .agent-msg MarkdownH2, .agent-msg MarkdownH3 { margin: 1 0 0 0; padding: 0; background: transparent; border: none; }
     .system-msg { height: auto; color: #a0a060; text-style: italic; margin-bottom: 1; padding: 0 1; }
+
+    /* Status bar */
+    #status-bar { height: 1; background: $surface-darken-1; color: $text-muted; padding: 0 2; dock: bottom; }
+
+    /* Thinking indicator */
+    #thinking-indicator { height: auto; padding: 0 1; color: #5b7fbf; }
+    #thinking-indicator LoadingIndicator { height: 1; color: #5b7fbf; background: transparent; }
     """
 
     BINDINGS = [
@@ -347,6 +353,7 @@ class InfinidevTUI(App):
                 yield SidebarPanel("STEPS", id="steps-panel")
                 yield SidebarPanel("ACTIONS", id="actions-panel")
                 yield SidebarPanel("LOGS", id="logs-panel")
+        yield Static("", id="status-bar")
         yield Footer()
 
     # ── Lifecycle ─────────────────────────────────────────
@@ -363,6 +370,7 @@ class InfinidevTUI(App):
 
         self.engine = LoopEngine()
         self.agent = InfinidevAgent(agent_id="tui_agent")
+        self._update_status_bar()
 
         from infinidev.config.tech_detection import detect_tech_hints
         self.agent._tech_hints = detect_tech_hints(os.getcwd())
@@ -415,6 +423,60 @@ class InfinidevTUI(App):
             pass
         tabs.active = "chat-pane"
         self.query_one("#chat-input", ChatInput).focus()
+
+    # ── File watcher integration ────────────────────────
+
+    def _start_file_watcher(self):
+        """Initialize and start the file watcher."""
+        workspace = os.getcwd()
+        self._file_watcher = FileWatcher(
+            workspace=workspace,
+            callback=self._on_file_change,
+            visible_paths_callback=self._get_visible_paths
+        )
+        self._watcher_started = self._file_watcher.start()
+        if self._watcher_started:
+            self.add_message("System", "File watcher enabled", "system")
+
+    def _on_file_change(self, file_path: str):
+        """Callback when a file change is detected in a visible directory."""
+        self.call_from_thread(self._refresh_visible_tree, str(file_path))
+
+    def _refresh_visible_tree(self, changed_path: str):
+        """Refresh only the visible portion of the file tree containing the changed file."""
+        try:
+            tree = self.query_one("#file-tree", DirectoryTree)
+            # Refresh the entire tree - Textual handles incremental updates efficiently
+            tree.refresh()
+            logger = logging.getLogger(__name__)
+            logger.debug(f"File tree refreshed due to change: {changed_path}")
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to refresh file tree: {e}")
+
+    def _get_visible_paths(self) -> Set[str]:
+        """Get set of currently expanded/visible directory paths."""
+        visible_paths = set()
+        try:
+            tree = self.query_one("#file-tree", DirectoryTree)
+            # Track expanded nodes from the tree
+            for node_id in tree._expanded_nodes:
+                try:
+                    node = tree.get_node(node_id)
+                    if node and hasattr(node, 'path'):
+                        visible_paths.add(str(node.path))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return visible_paths
+
+    def on_exit_app(self) -> None:
+        """Clean up file watcher on app exit."""
+        if self._file_watcher and self._file_watcher.is_running():
+            self._file_watcher.stop()
+            logger = logging.getLogger(__name__)
+            logger.info("File watcher stopped on app exit")
 
     # ── File explorer events ─────────────────────────────
 
@@ -534,6 +596,11 @@ class InfinidevTUI(App):
                 action_text += f"   {tool_detail}"
             self.query_one("#actions-panel").update_content(action_text)
 
+        elif event_type == "loop_user_message":
+            msg = data.get("message", "")
+            if msg:
+                self.add_message("Infinidev", msg, "agent")
+
         elif event_type == "loop_log":
             level = data.get("level", "warning")
             msg = data.get("message", "")
@@ -582,7 +649,54 @@ class InfinidevTUI(App):
         if user_text.startswith("/"):
             self.handle_command(user_text)
         else:
+            self._show_thinking()
             self.run_engine(user_text)
+
+    class ThinkingWidget(Static):
+        """Animated thinking indicator with color-cycling characters."""
+
+        _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        _COLORS = [
+            "#5b7fbf", "#6b8fcf", "#7b9fdf", "#8bafef",
+            "#7b9fdf", "#6b8fcf", "#5b7fbf", "#4b6faf",
+            "#5b7fbf", "#6b8fcf",
+        ]
+
+        def __init__(self, **kwargs):
+            super().__init__("", **kwargs)
+            self._tick = 0
+
+        def on_mount(self) -> None:
+            self.set_interval(0.12, self._animate)
+
+        def _animate(self) -> None:
+            self._tick += 1
+            chars = []
+            for i, ch in enumerate(self._FRAMES):
+                color = self._COLORS[(self._tick + i) % len(self._COLORS)]
+                chars.append(f"[{color}]{ch}[/{color}]")
+            spinner = " ".join(chars)
+            self.update(f" {spinner}  [#7b9fdf]Infinidev is thinking...[/#7b9fdf]")
+
+    def _update_status_bar(self) -> None:
+        from infinidev.config.settings import settings
+        model = settings.LLM_MODEL.split("/", 1)[-1] if "/" in settings.LLM_MODEL else settings.LLM_MODEL
+        cwd = os.path.basename(os.getcwd())
+        self.query_one("#status-bar", Static).update(f" Model: {model}  │  Project: {cwd}")
+
+    def _show_thinking(self) -> None:
+        """Mount the thinking indicator at the bottom of chat history."""
+        history = self.query_one("#chat-history")
+        indicator = Vertical(self.ThinkingWidget(), id="thinking-indicator")
+        history.mount(indicator)
+        history.scroll_end(animate=False)
+
+    def _hide_thinking(self) -> None:
+        """Remove the thinking indicator."""
+        try:
+            self.query_one("#thinking-indicator").remove()
+        except Exception:
+            pass
 
     @work(exclusive=True, thread=True)
     def run_engine(self, user_input: str):
@@ -599,12 +713,15 @@ class InfinidevTUI(App):
                 )
                 if not result or not result.strip():
                     result = "Done. (no additional output)"
+                self.call_from_thread(self._hide_thinking)
                 self.call_from_thread(self.add_message, "Infinidev", result, "agent")
                 store_conversation_turn(self.session_id, 'assistant', result, result[:200])
             finally:
                 self.agent.deactivate()
+                self.call_from_thread(self._hide_thinking)
                 self.call_from_thread(self.query_one("#actions-panel").update_content, "Idle")
         except Exception as e:
+            self.call_from_thread(self._hide_thinking)
             self.call_from_thread(self.add_message, "Error", str(e), "system")
 
     # ── Commands ─────────────────────────────────────────
@@ -649,6 +766,7 @@ class InfinidevTUI(App):
                 from infinidev.config.settings import reload_all as _reload
                 _reload()
                 self.add_message("System", f"Model updated to: {settings.LLM_MODEL}", "system")
+                self._update_status_bar()
             elif subcmd == "list":
                 self._list_models()
             elif subcmd == "manage":
@@ -721,6 +839,7 @@ class InfinidevTUI(App):
             settings.save_user_settings({"LLM_MODEL": new_model})
             _reload()
             self.add_message("System", f"Model changed to: {new_model}", "system")
+            self._update_status_bar()
             self.query_one("#chat-input", ChatInput).focus()
         self.push_screen(ModelPickerScreen(models, current_tag), callback=on_dismiss)
 

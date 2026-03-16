@@ -55,6 +55,7 @@ knowledge base of findings.
 - **web_search** / **web_fetch**: Research documentation, APIs, or error messages online.
 - **record_finding** / **search_findings** / **read_findings**: Manage the knowledge base.
 - **update_finding** / **delete_finding**: Keep findings accurate and up to date.
+- **send_message**: Send a message to the user WITHOUT ending the task. Use for progress updates, intermediate results, or questions while you keep working.
 
 ## Git Workflow
 
