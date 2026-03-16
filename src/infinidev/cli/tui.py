@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 from textual.app import App, ComposeResult
 from textual.screen import ModalScreen
+from typing import Optional, Callable, Set
 from textual.widgets import (
     Header, Footer, Static, TextArea, Label, OptionList, Markdown,
     DirectoryTree, TabbedContent, TabPane,
@@ -14,6 +15,7 @@ from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal, VerticalScroll
 from textual.binding import Binding
 from textual import on, events, work
+from watchfiles import FileChange
 
 # Infinidev imports
 from infinidev.agents.base import InfinidevAgent
@@ -22,6 +24,7 @@ from infinidev.db.service import (
     init_db, store_conversation_turn, get_recent_summaries,
 )
 from infinidev.config.settings import reload_all
+from infinidev.cli.file_watcher import FileWatcher
 
 # ── Extension → language map for TextArea syntax highlighting ────────────
 _EXT_LANG = {
@@ -363,6 +366,14 @@ class InfinidevTUI(App):
 
         from infinidev.config.tech_detection import detect_tech_hints
         self.agent._tech_hints = detect_tech_hints(os.getcwd())
+
+        # Initialize file watcher
+        self._file_watcher: Optional[FileWatcher] = None
+        self._watcher_started = False
+        self._expand_handlers: list[Callable] = []
+        self._collapse_handlers: list[Callable] = []
+        self._visible_paths: set[pathlib.Path] = set()
+        self._start_file_watcher()
 
     # ── Focus actions ────────────────────────────────────
 

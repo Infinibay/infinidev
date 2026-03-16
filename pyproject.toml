@@ -36,6 +36,7 @@ dependencies = [
     "tree-sitter-xml>=0.7.0",
     "tree-sitter-markdown>=0.3.0",
     "tree-sitter-regex>=0.24.0",
+    "watchfiles>=0.24.0",
 ]
 
 [project.scripts]
