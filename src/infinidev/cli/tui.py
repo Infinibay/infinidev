@@ -646,7 +646,10 @@ class InfinidevTUI(App):
         self.query_one("#autocomplete-menu", OptionList).remove_class("-visible")
         user_text = event.value
         self.add_message("You", user_text, "user")
-        if user_text.startswith("/"):
+        if user_text.startswith("!"):
+            # Shell command: execute directly
+            self._execute_shell_command(user_text[1:])  # Strip the '!' prefix
+        elif user_text.startswith("/"):
             self.handle_command(user_text)
         else:
             self._show_thinking()
@@ -698,6 +701,43 @@ class InfinidevTUI(App):
         except Exception:
             pass
 
+    def _execute_shell_command(self, command: str):
+        """Execute a shell command directly and display output."""
+        import shlex
+        import subprocess
+
+        if not command or not command.strip():
+            self.add_message("System", "No command specified.", "system")
+            return
+
+        self.add_message("Shell", f"Executing: {command}", "system")
+
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=os.getcwd(),
+            )
+
+            output_lines = []
+            if result.stdout:
+                output_lines.append(f"[bold #4a9f4a]stdout:[/bold #4a9f4a]\n{result.stdout}")
+            if result.stderr:
+                output_lines.append(f"[bold #ff6b6b]stderr:[/bold #ff6b6b]\n{result.stderr}")
+
+            output_text = "\n".join(output_lines) if output_lines else "(no output)"
+            exit_info = f"\n[bold]Exit code:[/bold] {result.returncode}"
+
+            self.add_message("Shell", output_text + exit_info, "system")
+
+        except subprocess.TimeoutExpired:
+            self.add_message("Shell", "Command timed out after 60 seconds.", "system")
+        except Exception as e:
+            self.add_message("Shell", f"Execution failed: {e}", "system")
+
     @work(exclusive=True, thread=True)
     def run_engine(self, user_input: str):
         try:
@@ -745,6 +785,8 @@ class InfinidevTUI(App):
                 "F2 / F3 / F4         Focus: Chat / Explorer / Sidebar\n"
                 "^W                   Close file tab\n"
                 "─────────────────────────────────────\n"
+                "!ls                  Execute shell command\n"
+                "!grep foo *.py       Run shell with piping\n"
                 "/models              Show current model\n"
                 "/models list         List available Ollama models\n"
                 "/models set <name>   Change model\n"
