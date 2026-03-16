@@ -303,12 +303,12 @@ class InfinidevTUI(App):
     .sidebar-content { margin-bottom: 1; padding: 1; background: $surface-lighten-1; height: auto; max-height: 10; overflow-y: scroll; color: $text; }
 
     /* ── Chat messages ──────────────────────────────────── */
-    .user-msg { color: #c4c4c4; margin-bottom: 1; background: #1a2a1a; padding: 0 1; border-left: tall #4a9f4a; }
-    .agent-msg { color: #e0e0e0; margin-bottom: 1; background: #1a1a2a; padding: 0 1; border-left: tall #5b7fbf; }
+    .user-msg { height: auto; color: #c4c4c4; margin-bottom: 1; background: #1a2a1a; padding: 0 1; border-left: tall #4a9f4a; }
+    .agent-msg { height: auto; color: #e0e0e0; margin-bottom: 1; background: #1a1a2a; padding: 0 1; border-left: tall #5b7fbf; }
     .agent-msg Markdown { margin: 0; padding: 0; background: transparent; }
     .agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
     .agent-msg MarkdownH1, .agent-msg MarkdownH2, .agent-msg MarkdownH3 { margin: 1 0 0 0; padding: 0; background: transparent; border: none; }
-    .system-msg { color: #a0a060; text-style: italic; margin-bottom: 1; padding: 0 1; }
+    .system-msg { height: auto; color: #a0a060; text-style: italic; margin-bottom: 1; padding: 0 1; }
     """
 
     BINDINGS = [
