@@ -8,7 +8,7 @@ from infinidev.tools.git import (
     GitBranchTool, GitCommitTool,
     GitDiffTool, GitStatusTool,
 )
-from infinidev.tools.shell import ExecuteCommandTool
+from infinidev.tools.shell import ExecuteCommandTool, CodeInterpreterTool
 from infinidev.tools.web import WebSearchTool, WebFetchTool
 from infinidev.tools.knowledge import (
     RecordFindingTool, ReadFindingsTool, SearchFindingsTool,
@@ -20,7 +20,7 @@ from infinidev.tools.chat import SendMessageTool
 
 FILE_TOOLS = [ReadFileTool, WriteFileTool, EditFileTool, ListDirectoryTool, CodeSearchTool, GlobTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
-SHELL_TOOLS = [ExecuteCommandTool]
+SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
 WEB_TOOLS = [WebSearchTool, WebFetchTool]
 KNOWLEDGE_TOOLS = [
     RecordFindingTool, ReadFindingsTool, SearchFindingsTool,

@@ -33,13 +33,13 @@ class SmartContextSummarizer:
         Returns:
             Formatted summary string for system prompt injection
         """
-        if not state.action_history or not state.plan:
+        if not state.history or not state.plan:
             return ""
 
-        summaries = self._analyze_actions(state.action_history)
-        decisions = self._extract_decisions(state.action_history)
-        errors = self._extract_errors(state.action_history)
-        pending = self._extract_pending(state.plan, state.action_history)
+        summaries = self._analyze_actions(state.history)
+        decisions = self._extract_decisions(state.history)
+        errors = self._extract_errors(state.history)
+        pending = self._extract_pending(state.plan, state.history)
 
         return self._format_summary(
             summaries=summaries,
@@ -49,25 +49,40 @@ class SmartContextSummarizer:
             max_tokens=self.max_tokens,
         )
 
-    def _analyze_actions(self, history: List[ActionRecord]) -> dict:
-        """Group actions by file and detect patterns."""
+    def _analyze_actions(self, history: list[ActionRecord]) -> dict:
+        """Group actions by file and detect patterns.
+        
+        Note: Uses summary text to infer file operations since ActionRecord
+        doesn't expose detailed tool_call data.
+        """
         files_modified = defaultdict(list)
         file_sequences = []
         current_sequence = []
+        
+        # Extract file paths from action summaries (format: "Read/write/edit <path>")
+        file_patterns = [
+            r"(?:Read|wrote|Wrote|edit|Edit|edited|EDITED)\s+([\w/._-]+)",
+            r"(?:Read|wrote|Wrote|edit|Edit|edited|EDITED)\s+\`+([\w/._-]+)\`+",
+        ]
 
         for record in history:
-            for tool_call in record.tool_calls:
-                if tool_call.get("tool_name") in ["read_file", "write_file", "edit_file"]:
-                    file_path = tool_call.get("args", {}).get("file_path")
-                    if file_path:
-                        files_modified[file_path].append(record.summary)
+            # Try to extract file path from summary
+            file_path = None
+            for pattern in file_patterns:
+                match = re.search(pattern, record.summary, re.IGNORECASE)
+                if match:
+                    file_path = match.group(1)
+                    break
 
-                        if current_sequence and current_sequence[-1] == file_path:
-                            current_sequence.append(file_path)
-                        else:
-                            if len(current_sequence) > 1:
-                                file_sequences.append(current_sequence)
-                            current_sequence = [file_path]
+            if file_path:
+                files_modified[file_path].append(record.summary)
+
+                if current_sequence and current_sequence[-1] == file_path:
+                    current_sequence.append(file_path)
+                else:
+                    if len(current_sequence) > 1:
+                        file_sequences.append(current_sequence)
+                    current_sequence = [file_path]
 
         if len(current_sequence) > 1:
             file_sequences.append(current_sequence)

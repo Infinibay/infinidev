@@ -1,9 +1,12 @@
 """TUI implementation for Infinidev using Textual."""
 
+import logging
 import os
 import pathlib
 import uuid
 from typing import Any
+
+logger = logging.getLogger(__name__)
 from textual.app import App, ComposeResult
 from textual.screen import ModalScreen
 from typing import Optional, Callable, Set
