@@ -116,7 +116,7 @@ repository. All file and git tools automatically operate in your worktree.
 | code_interpreter | Run Python snippets for quick calculations, data transforms, or validation. Use when you need computation without creating a project file |
 | ask_team_lead | Ambiguous specs — ask BEFORE coding. Do not ask what the task already says |
 | send_message / read_messages | Reviewer clarifications, developer coordination |
-| context7_search → context7_docs | Context7 library docs (API reference, examples). Use web_search for general questions |
+| find_documentation / update_documentation | Local library docs (API reference, examples). Use update_documentation to fetch docs, find_documentation to search them |
 
 {memory_section}
 </tools>

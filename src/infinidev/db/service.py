@@ -156,6 +156,53 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_conv_session
             ON conversation_turns(session_id, created_at)
         """)
+        # Library documentation storage with FTS5 search
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS library_docs (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                library_name   TEXT NOT NULL,
+                language       TEXT NOT NULL DEFAULT 'unknown',
+                version        TEXT NOT NULL DEFAULT 'latest',
+                section_title  TEXT NOT NULL,
+                section_order  INTEGER NOT NULL DEFAULT 0,
+                content        TEXT NOT NULL,
+                embedding      BLOB,
+                source_urls    TEXT DEFAULT '[]',
+                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(library_name, language, version, section_title)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_library_docs_lookup
+                ON library_docs(library_name, language, version)
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS library_docs_fts USING fts5(
+                section_title, content, content=library_docs, content_rowid=id
+            )
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS library_docs_ai AFTER INSERT ON library_docs BEGIN
+                INSERT INTO library_docs_fts(rowid, section_title, content)
+                VALUES (new.id, new.section_title, new.content);
+            END
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS library_docs_ad AFTER DELETE ON library_docs BEGIN
+                INSERT INTO library_docs_fts(library_docs_fts, rowid, section_title, content)
+                VALUES ('delete', old.id, old.section_title, old.content);
+            END
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS library_docs_au AFTER UPDATE ON library_docs BEGIN
+                INSERT INTO library_docs_fts(library_docs_fts, rowid, section_title, content)
+                VALUES ('delete', old.id, old.section_title, old.content);
+                INSERT INTO library_docs_fts(rowid, section_title, content)
+                VALUES (new.id, new.section_title, new.content);
+            END
+        """)
+
         # Migrate existing databases: add columns that may be missing
         _migrate_add_column(conn, "findings", "session_id", "TEXT")
         _migrate_add_column(conn, "findings", "validation_method", "TEXT")

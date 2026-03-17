@@ -57,6 +57,8 @@ COMMANDS = [
     ("/models manage", "Pick a model interactively"),
     ("/findings", "Browse all findings"),
     ("/knowledge", "Browse project knowledge"),
+    ("/documentation", "Browse cached library documentation"),
+    ("/docs", "Browse cached library documentation (alias)"),
     ("/clear", "Clear chat history"),
     ("/help", "Show this help"),
     ("/exit", "Exit the CLI"),
@@ -363,6 +365,83 @@ class FindingsBrowserScreen(ModalScreen[None]):
             finding["content"] or "(no content)",
         ]
         detail.update("\n".join(lines))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class DocsBrowserScreen(ModalScreen[None]):
+    """Modal to browse locally cached library documentation."""
+
+    CSS = """
+    DocsBrowserScreen { align: center middle; }
+    #docs-box { width: 90%; height: 85%; background: $surface; border: tall $primary; padding: 1 2; }
+    #docs-title { text-align: center; text-style: bold; margin-bottom: 1; }
+    #docs-body { height: 1fr; }
+    #docs-lib-list { width: 30%; height: 100%; }
+    #docs-section-list { width: 25%; height: 100%; border-left: tall $primary; }
+    #docs-content { width: 45%; height: 100%; border-left: tall $primary; padding: 0 1; overflow-y: auto; }
+    #docs-hint { text-align: center; color: $text-muted; margin-top: 1; }
+    """
+    BINDINGS = [Binding("escape", "close", "Close", show=True)]
+
+    def __init__(self, libraries: list[dict], sections: dict[str, list[dict]]):
+        super().__init__()
+        self._libraries = libraries  # [{"library_name", "language", "version", "section_count"}]
+        self._sections = sections    # {key: [{"section_title", "content", "section_order"}]}
+        self._current_lib_key: str | None = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="docs-box"):
+            yield Label("Library Documentation", id="docs-title")
+            with Horizontal(id="docs-body"):
+                yield OptionList(id="docs-lib-list")
+                yield OptionList(id="docs-section-list")
+                yield VerticalScroll(Static("Select a library to browse its documentation.", id="docs-content-text"), id="docs-content")
+            yield Label("↑↓ = navigate · Tab = switch panel · Esc = close", id="docs-hint")
+
+    def on_mount(self) -> None:
+        ol = self.query_one("#docs-lib-list", OptionList)
+        if not self._libraries:
+            ol.add_option(Option("(no documentation yet)", id="__empty__"))
+        else:
+            for lib in self._libraries:
+                label = f"{lib['library_name']} ({lib['language']}) v{lib['version']}  [{lib['section_count']} sections]"
+                ol.add_option(Option(label, id=lib["key"]))
+        ol.focus()
+
+    @on(OptionList.OptionHighlighted, "#docs-lib-list")
+    def on_lib_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option.id == "__empty__":
+            return
+        key = event.option.id
+        if key == self._current_lib_key:
+            return
+        self._current_lib_key = key
+        # Populate sections list
+        sl = self.query_one("#docs-section-list", OptionList)
+        sl.clear_options()
+        secs = self._sections.get(key, [])
+        for sec in secs:
+            sl.add_option(Option(sec["section_title"], id=f"{key}::{sec['section_title']}"))
+        # Show first section content
+        detail = self.query_one("#docs-content-text", Static)
+        if secs:
+            detail.update(f"[bold]{secs[0]['section_title']}[/bold]\n{'─' * 40}\n{secs[0]['content']}")
+        else:
+            detail.update("(no sections)")
+
+    @on(OptionList.OptionHighlighted, "#docs-section-list")
+    def on_section_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        if not event.option.id or not self._current_lib_key:
+            return
+        section_title = event.option.id.split("::", 1)[1] if "::" in event.option.id else event.option.id
+        secs = self._sections.get(self._current_lib_key, [])
+        sec = next((s for s in secs if s["section_title"] == section_title), None)
+        if not sec:
+            return
+        detail = self.query_one("#docs-content-text", Static)
+        detail.update(f"[bold]{sec['section_title']}[/bold]\n{'─' * 40}\n{sec['content']}")
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -1156,6 +1235,7 @@ class InfinidevTUI(App):
                 "/models manage       Pick a model interactively\n"
                 "/findings            Browse all findings\n"
                 "/knowledge           Browse project knowledge\n"
+                "/documentation       Browse cached library docs\n"
                 "/clear               Clear chat\n"
                 "/exit, /quit         Exit",
                 "system",
@@ -1182,6 +1262,8 @@ class InfinidevTUI(App):
             self._browse_findings(filter_type=None)
         elif cmd == "/knowledge":
             self._browse_findings(filter_type="project_context")
+        elif cmd == "/documentation" or cmd == "/docs":
+            self._browse_documentation()
         else:
             self.add_message("System", f"Unknown command: {cmd}", "system")
 
@@ -1195,6 +1277,49 @@ class InfinidevTUI(App):
             findings = [f for f in findings if f["finding_type"] == filter_type]
         title = "Project Knowledge" if filter_type == "project_context" else "All Findings"
         self.call_from_thread(self.push_screen, FindingsBrowserScreen(findings, title=title))
+
+    @work(thread=True)
+    def _browse_documentation(self):
+        from infinidev.db.service import execute_with_retry
+
+        def _load(conn):
+            rows = conn.execute(
+                """\
+                SELECT library_name, language, version, section_title, section_order, content
+                FROM library_docs
+                ORDER BY library_name, language, version, section_order
+                """
+            ).fetchall()
+            return rows
+
+        rows = execute_with_retry(_load) or []
+
+        # Group by library
+        libs: list[dict] = []
+        sections: dict[str, list[dict]] = {}
+        seen_keys: set[str] = set()
+
+        for row in rows:
+            key = f"{row['library_name']}|{row['language']}|{row['version']}"
+            if key not in seen_keys:
+                seen_keys.add(key)
+                libs.append({
+                    "key": key,
+                    "library_name": row["library_name"],
+                    "language": row["language"],
+                    "version": row["version"],
+                    "section_count": 0,
+                })
+            sections.setdefault(key, []).append({
+                "section_title": row["section_title"],
+                "section_order": row["section_order"],
+                "content": row["content"],
+            })
+
+        for lib in libs:
+            lib["section_count"] = len(sections.get(lib["key"], []))
+
+        self.call_from_thread(self.push_screen, DocsBrowserScreen(libs, sections))
 
     @work(thread=True)
     def _list_models(self):

@@ -26,7 +26,7 @@ Designed to work with open-weight models (7B-14B) running on consumer hardware v
 
 ```bash
 # Clone and install
-git clone https://github.com/yourusername/infinidev.git
+git clone https://github.com/Infinibay/infinidev.git
 cd infinidev
 uv sync
 

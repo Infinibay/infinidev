@@ -17,6 +17,7 @@ from infinidev.tools.knowledge import (
     SearchKnowledgeTool, SummarizeFindingsTool,
 )
 from infinidev.tools.chat import SendMessageTool
+from infinidev.tools.docs import DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool
 
 FILE_TOOLS = [ReadFileTool, WriteFileTool, EditFileTool, ListDirectoryTool, CodeSearchTool, GlobTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
@@ -29,8 +30,9 @@ KNOWLEDGE_TOOLS = [
     SearchKnowledgeTool, SummarizeFindingsTool,
 ]
 CHAT_TOOLS = [SendMessageTool]
+DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
 
 def get_tools_for_role(role: str) -> list:
     """Simplified tool selection for the CLI."""
-    tool_classes = FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS
+    tool_classes = FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS + DOCS_TOOLS
     return [cls() for cls in tool_classes]
