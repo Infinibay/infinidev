@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from infinidev.engine.loop_models import LoopState
+from infinidev.engine.summarizer import SmartContextSummarizer
 
 CLI_AGENT_IDENTITY = """\
 ## Identity
@@ -231,6 +232,15 @@ def build_iteration_prompt(
     <current-action>, <next-actions>, and <expected-output> XML blocks.
     """
     parts: list[str] = []
+
+    # Smart context summarizer - injects condensed action history
+    summarizer = SmartContextSummarizer()
+    smart_summary = summarizer.generate_summary(state)
+    if smart_summary:
+        parts.append(
+            "<smart-context-summary>\n"
+            f"Loop progress summary:\n{smart_summary}\n</smart-context-summary>"
+        )
 
     # Project knowledge (auto-injected from DB)
     if project_knowledge:
