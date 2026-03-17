@@ -1,63 +1,36 @@
 """Context window calculator for Infinidev TUI.
 
-Calculates remaining tokens for both chat and task context windows
-based on the selected model's context limits.
+Tracks the last prompt token usage against the model's context window limit.
+Each LLM call rebuilds the full prompt from scratch, so only the most recent
+prompt_tokens value matters for context window usage.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-
-
-class ModelInfo(BaseModel):
-    """Information about a model from Ollama."""
-    name: str = ""
-    size: int = 0
-    context_length: int = 2048  # Default fallback
-    details: dict[str, Any] = Field(default_factory=dict)
-
-    @property
-    def max_tokens(self) -> int:
-        """Get max context length, with fallbacks."""
-        # Try known keys for context length
-        for key in ["context_length", "context_len", "max_ctx", "ctx_len"]:
-            if key in self.details:
-                val = self.details[key]
-                if isinstance(val, int):
-                    return val
-        return self.context_length
 
 
 class ContextWindowCalculator:
     """Calculates and tracks context window usage.
 
-    Manages two separate context windows:
-    - Chat context: User messages and responses
-    - Task context: Task descriptions and execution summaries
-
-    Both windows share the same max_context limit.
+    Tracks two values:
+    - last_prompt_tokens: Tokens used in the most recent LLM call (= real context usage)
+    - total_tokens: Cumulative tokens across all LLM calls in the current task
     """
 
     def __init__(self, model_name: str = "", max_context: int = 4096):
         self.model_name = model_name
         self.max_context: int = max_context
-        self._chat_tokens: int = 0
-        self._task_tokens: int = 0
+        self._last_prompt_tokens: int = 0
+        self._task_prompt_tokens: int = 0
 
     async def update_model_context(self) -> None:
-        """Fetch model info from Ollama and update max context.
-
-        Uses /api/show to get the real context_length from model_info,
-        which reflects the actual model architecture limit (e.g. 262144
-        for qwen3.5) rather than the default num_ctx runtime parameter.
-        """
+        """Fetch model info from Ollama and update max context."""
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
 
@@ -74,7 +47,6 @@ class ContextWindowCalculator:
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                # Use /api/show to get full model metadata including real context length
                 resp = await client.post(
                     f"{base_url}/api/show",
                     json={"name": bare_model},
@@ -83,8 +55,6 @@ class ContextWindowCalculator:
                     data = resp.json()
                     self.model_name = bare_model
 
-                    # Extract context_length from model_info
-                    # Keys follow the pattern: <family>.context_length
                     model_info = data.get("model_info", {})
                     for key, val in model_info.items():
                         if key.endswith(".context_length") and isinstance(val, int):
@@ -94,7 +64,7 @@ class ContextWindowCalculator:
                     logger.info(f"Model {bare_model} context length: {self.max_context}")
                     return
 
-                # Fallback: try /api/tags if /api/show fails
+                # Fallback: try /api/tags
                 resp = await client.get(f"{base_url}/api/tags")
                 if resp.status_code == 200:
                     data = resp.json()
@@ -109,69 +79,82 @@ class ContextWindowCalculator:
         except Exception as e:
             logger.warning(f"Could not fetch model info: {e}")
 
-    def calculate_usage(self, chat_tokens: int, task_tokens: int) -> None:
-        """Update usage for both context windows."""
-        self._chat_tokens = chat_tokens
-        self._task_tokens = task_tokens
+    def update_chat(self, user_input: str, session_summaries: list[str] | None = None) -> None:
+        """Estimate chat context tokens from user input + session history.
+
+        Uses ~4 chars per token as a rough estimate (standard heuristic).
+        """
+        text = user_input
+        if session_summaries:
+            text += "\n".join(session_summaries)
+        self._last_prompt_tokens = max(1, len(text) // 4)
+
+    def update_task(self, task_prompt_tokens: int = 0) -> None:
+        """Update task context with prompt_tokens from the last LLM call."""
+        if task_prompt_tokens:
+            self._task_prompt_tokens = task_prompt_tokens
 
     def get_context_status(self) -> dict[str, Any]:
-        """Get current context window status."""
+        """Get current context window status for the UI."""
+        max_ctx = self.max_context
+        prompt = self._last_prompt_tokens
+        task = self._task_prompt_tokens
+
+        prompt_remaining = max(0, max_ctx - prompt)
+        prompt_pct = min(1.0, prompt / max_ctx) if max_ctx > 0 else 0.0
+
+        task_remaining = max(0, max_ctx - task)
+        task_pct = min(1.0, task / max_ctx) if max_ctx > 0 else 0.0
+
         return {
             "model": self.model_name or "unknown",
-            "max_context": self.max_context,
+            "max_context": max_ctx,
             "chat": {
-                "name": "chat",
-                "current_tokens": self._chat_tokens,
-                "max_tokens": self.max_context,
-                "remaining_tokens": max(0, self.max_context - self._chat_tokens),
-                "usage_percentage": min(1.0, self._chat_tokens / self.max_context) if self.max_context > 0 else 0.0,
+                "name": "prompt",
+                "current_tokens": prompt,
+                "max_tokens": max_ctx,
+                "remaining_tokens": prompt_remaining,
+                "usage_percentage": prompt_pct,
             },
             "tasks": {
-                "name": "tasks",
-                "current_tokens": self._task_tokens,
-                "max_tokens": self.max_context,
-                "remaining_tokens": max(0, self.max_context - self._task_tokens),
-                "usage_percentage": min(1.0, self._task_tokens / self.max_context) if self.max_context > 0 else 0.0,
+                "name": "task",
+                "current_tokens": task,
+                "max_tokens": max_ctx,
+                "remaining_tokens": task_remaining,
+                "usage_percentage": task_pct,
             },
-            "remaining": max(0, self.max_context - (self._chat_tokens + self._task_tokens)),
-            "total_used": self._chat_tokens + self._task_tokens,
-            "combined_remaining": max(0, self.max_context - (self._chat_tokens + self._task_tokens)),
         }
+
+    # --- Properties for tests / external access ---
 
     @property
     def chat_remaining(self) -> int:
-        """Get remaining chat tokens."""
-        return max(0, self.max_context - self._chat_tokens)
+        return max(0, self.max_context - self._last_prompt_tokens)
 
     @property
     def task_remaining(self) -> int:
-        """Get remaining task tokens."""
-        return max(0, self.max_context - self._task_tokens)
+        return max(0, self.max_context - self._task_prompt_tokens)
 
     @property
     def chat_usage_percentage(self) -> float:
-        """Get chat window usage percentage (0.0 to 1.0)."""
         if self.max_context == 0:
             return 0.0
-        return min(1.0, self._chat_tokens / self.max_context)
+        return min(1.0, self._last_prompt_tokens / self.max_context)
 
     @property
     def task_usage_percentage(self) -> float:
-        """Get task window usage percentage (0.0 to 1.0)."""
         if self.max_context == 0:
             return 0.0
-        return min(1.0, self._task_tokens / self.max_context)
+        return min(1.0, self._task_prompt_tokens / self.max_context)
 
     @property
     def total_remaining(self) -> int:
-        """Get total remaining tokens across both windows."""
-        return self.chat_remaining + self.task_remaining
+        return self.chat_remaining
 
     @property
     def chat_window(self) -> dict[str, Any]:
-        """Get chat window data for tests."""
         return {
-            "current_tokens": self._chat_tokens,
+            "current_tokens": self._last_prompt_tokens,
             "max_tokens": self.max_context,
             "remaining_tokens": self.chat_remaining,
             "usage_percentage": self.chat_usage_percentage,
@@ -179,21 +162,18 @@ class ContextWindowCalculator:
 
     @property
     def task_window(self) -> dict[str, Any]:
-        """Get task window data for tests."""
         return {
-            "current_tokens": self._task_tokens,
+            "current_tokens": self._task_prompt_tokens,
             "max_tokens": self.max_context,
             "remaining_tokens": self.task_remaining,
             "usage_percentage": self.task_usage_percentage,
         }
 
 
-# Global calculator instance with model name from settings
+# Global calculator instance
 def _get_initial_model_name() -> str:
-    """Get the current model name from settings."""
     from infinidev.config.llm import get_litellm_params
     from infinidev.config.settings import settings
-
     llm_params = get_litellm_params()
     return llm_params.get("model", settings.LLM_MODEL)
 
@@ -202,6 +182,5 @@ calculator = ContextWindowCalculator(model_name=_get_initial_model_name(), max_c
 
 
 async def get_context_status() -> dict[str, Any]:
-    """Get current context window status."""
     await calculator.update_model_context()
     return calculator.get_context_status()

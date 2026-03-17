@@ -132,12 +132,12 @@ class ContextPanel(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static("Loading...", id="context-model-name")
-        # Prompt section — real prompt_tokens from LLM
-        yield Static("[bold]Context Window[/bold]", classes="ctx-section-title")
+        # Chat section — last prompt_tokens from LLM
+        yield Static("[bold]Chat Usage[/bold]", classes="ctx-section-title")
         yield Static("", id="chat-details", classes="ctx-detail")
         yield Static("", id="chat-bar", classes="ctx-bar")
-        # Cumulative section — total tokens used across all calls
-        yield Static("[bold]Total Used[/bold]", classes="ctx-section-title")
+        # Task section — last prompt tokens during task execution
+        yield Static("[bold]Task Usage[/bold]", classes="ctx-section-title")
         yield Static("", id="task-details", classes="ctx-detail")
         yield Static("", id="task-bar", classes="ctx-bar")
 
@@ -152,7 +152,7 @@ class ContextPanel(Vertical):
             f"[bold]{model}[/bold]  [dim]({max_ctx} ctx)[/dim]"
         )
 
-        # Chat window
+        # Chat window - show last prompt tokens instead of cumulative
         chat = status.get("chat", {})
         self._update_section(
             "#chat-details", "#chat-bar",
@@ -161,7 +161,7 @@ class ContextPanel(Vertical):
             chat.get("usage_percentage", 0.0),
         )
 
-        # Task window
+        # Task window - show cumulative tokens
         tasks = status.get("tasks", {})
         self._update_section(
             "#task-details", "#task-bar",
@@ -1063,30 +1063,9 @@ class InfinidevTUI(App):
     def _refresh_context_panel(self, task_tokens: int = 0,
                                prompt_tokens: int = 0,
                                completion_tokens: int = 0) -> None:
-        """Refresh the context panel with real LLM-reported token counts.
-
-        Args:
-            task_tokens: Cumulative total tokens across all LLM calls (for info).
-            prompt_tokens: prompt_tokens from the most recent LLM response —
-                           this is the real context window usage.
-            completion_tokens: completion_tokens from the most recent LLM response.
-        """
-        self.context_calculator.calculate_usage(
-            chat_tokens=prompt_tokens,
-            task_tokens=task_tokens,
-        )
-        status = self.context_calculator.get_context_status()
-        # Override: "chat" section shows the real prompt_tokens as context usage
-        if prompt_tokens:
-            max_ctx = status.get("max_context", 4096)
-            status["chat"] = {
-                "name": "prompt",
-                "current_tokens": prompt_tokens,
-                "max_tokens": max_ctx,
-                "remaining_tokens": max(0, max_ctx - prompt_tokens),
-                "usage_percentage": min(1.0, prompt_tokens / max_ctx) if max_ctx > 0 else 0.0,
-            }
-        self._context_panel.update_status(status)
+        """Refresh the context panel with task prompt tokens from the loop engine."""
+        self.context_calculator.update_task(task_prompt_tokens=prompt_tokens)
+        self._context_panel.update_status(self.context_calculator.get_context_status())
 
     # ── Focus actions ────────────────────────────────────
 
@@ -1567,8 +1546,16 @@ class InfinidevTUI(App):
         try:
             reload_all()
             store_conversation_turn(self.session_id, 'user', user_input)
-            self.agent._session_summaries = get_recent_summaries(self.session_id, limit=10)
+            summaries = get_recent_summaries(self.session_id, limit=10)
+            self.agent._session_summaries = summaries
             self.agent.activate_context(session_id=self.session_id)
+
+            # Update chat context usage
+            self.context_calculator.update_chat(user_input, summaries)
+            self.call_from_thread(
+                self._context_panel.update_status,
+                self.context_calculator.get_context_status(),
+            )
             try:
                 result = self.engine.execute(
                     agent=self.agent,

@@ -327,8 +327,9 @@ def build_iteration_prompt(
         parts.append(f"<expected-output>\n{expected_output}\n</expected-output>")
 
     # Context budget — inform the agent how much context remains
-    if max_context_tokens > 0 and state.total_tokens > 0:
-        used = state.total_tokens
+    # Use last_prompt_tokens (actual context window usage) not total_tokens (cumulative)
+    if max_context_tokens > 0 and state.last_prompt_tokens > 0:
+        used = state.last_prompt_tokens
         remaining = max(0, max_context_tokens - used)
         pct_used = min(100.0, (used / max_context_tokens) * 100)
 
