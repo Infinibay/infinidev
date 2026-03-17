@@ -65,6 +65,8 @@ $PYINSTALLER \
     --hidden-import chromadb \
     --hidden-import prompt_toolkit \
     --collect-all textual \
+    --collect-data crewai \
+    --collect-data litellm \
     --collect-data trafilatura \
     --distpath "$SCRIPT_DIR/dist" \
     --workpath "$SCRIPT_DIR/build" \

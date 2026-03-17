@@ -28,12 +28,7 @@ Example: "Add JWT validation middleware — task 42"
 - If rejected ("remote has new commits"): run `git pull origin main --rebase`, then retry.
 - Do NOT use force=true unless the Team Lead explicitly instructs it.
 
-### OPEN PULL REQUEST
-**create_pr**(title="<task title> (task-{task_id})", body="<changes + acceptance criteria>", base="main", draft=false)
-→ `POST $FORGEJO_API_URL/repos/{owner}/{repo}/pulls`
-- Only call AFTER push succeeds. base MUST always be "main".
-- PR body MUST list each acceptance criterion and confirm it is met.
-- Note the pr_number from the response.
+
 """
 
 

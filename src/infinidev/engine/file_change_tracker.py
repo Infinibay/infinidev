@@ -59,8 +59,8 @@ class FileChangeTracker:
             return None
 
         diff_lines = list(difflib.unified_diff(
-            original.splitlines(keepends=True),
-            current.splitlines(keepends=True),
+            original.splitlines(),
+            current.splitlines(),
             fromfile=f"a/{os.path.basename(path)}",
             tofile=f"b/{os.path.basename(path)}",
             lineterm="",

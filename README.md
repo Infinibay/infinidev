@@ -10,11 +10,16 @@ Designed to work with open-weight models (7B-14B) running on consumer hardware v
 
 - **Plan-execute-summarize loop** — the agent breaks tasks into steps, executes them with tools, and summarizes results. No bloated context windows.
 - **Full-featured TUI** — tabbed interface with chat, file explorer, syntax-highlighted editor, sidebar with live progress, and autocomplete for commands.
+- **Live file change diffs** — collapsible widgets showing colorized unified diffs with line numbers for every file the agent modifies, updated in real time during task execution.
+- **Context window tracking** — dual progress bars showing Chat Usage (your input + session history) and Task Usage (actual prompt tokens from the LLM), with automatic budget warnings when context runs low.
+- **Settings editor** — modal settings browser with section grouping, inline editing, and save/cancel buttons. Accessible via `/settings`.
 - **Persistent knowledge base** — the agent records what it learns about your project (classes, patterns, APIs) and recalls it in future sessions. Critical for small models.
 - **Dual tool-calling modes** — auto-detects whether the LLM supports native function calling or falls back to JSON-in-text parsing.
-- **20+ built-in tools** — file operations, git, shell, web search/fetch, knowledge management with semantic dedup.
+- **30+ built-in tools** — file operations, git, shell, web search/fetch, knowledge management with semantic dedup.
 - **Project-local state** — settings, DB, and logs live in `.infinidev/` inside your project directory.
 - **Model management** — list, switch, and interactively pick Ollama models from the TUI.
+- **Documentation management** — browse and manage cached library documentation.
+
 
 ## Requirements
 
@@ -31,7 +36,7 @@ cd infinidev
 uv sync
 
 # Make sure Ollama is running with a model
-ollama pull qwen2.5-coder:7b
+ollama pull qwen3-coder:30b
 
 # Launch
 uv run infinidev
@@ -60,7 +65,7 @@ The TUI has three panels:
 ### Classic Mode
 
 ```bash
-uv run infinidev --no-tui
+uv run infinidev --classic
 ```
 
 Text-only mode for minimal terminals or piping.
@@ -74,8 +79,12 @@ Text-only mode for minimal terminals or piping.
 | `/models list` | List available Ollama models |
 | `/models set <name>` | Change the active model |
 | `/models manage` | Interactive model picker |
+| `/settings` | Show or edit settings configuration |
+| `/settings browse` | Open settings editor modal |
 | `/findings` | Browse all knowledge base findings |
 | `/knowledge` | Browse project context knowledge |
+| `/documentation` | Browse cached library documentation |
+| `/docs` | Browse cached library documentation (alias) |
 | `/clear` | Clear chat history and panels |
 | `/exit` | Quit |
 
@@ -92,12 +101,14 @@ Text-only mode for minimal terminals or piping.
 Settings are stored in `.infinidev/settings.json` in your project directory. They can also be set via environment variables with the `INFINIDEV_` prefix.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
-| `LLM_MODEL` | `ollama_chat/qwen2.5-coder:7b` | LiteLLM model identifier |
+|--|---------|--|
+| `LLM_MODEL` | `ollama_chat/qwen3-coder:30b` | LiteLLM model identifier |
 | `LLM_BASE_URL` | `http://localhost:11434` | Ollama / LLM API base URL |
 | `LOOP_MAX_ITERATIONS` | `50` | Max planning iterations per task |
 | `LOOP_MAX_TOTAL_TOOL_CALLS` | `200` | Global tool call limit per task |
 | `LOOP_HISTORY_WINDOW` | `0` | Summaries to keep (0 = all) |
+| `FORGEJO_API_URL` | `""` | Forgejo API URL |
+| `FORGEJO_OWNER` | `""` | Forgejo owner |
 
 ## Architecture
 
@@ -106,7 +117,7 @@ src/infinidev/
   cli/          # TUI (Textual) and classic CLI entry points
   engine/       # Plan-execute-summarize loop engine
   agents/       # Agent role definitions and tool binding
-  tools/        # 20+ tools: file, git, shell, web, knowledge
+  tools/        # 30+ tools: file, git, shell, web, knowledge, documentation
   config/       # Settings, LLM params, model capability probing
   db/           # SQLite with FTS5, findings, artifacts, conversations
   prompts/      # System prompts, tech-specific guidelines

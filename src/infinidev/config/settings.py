@@ -62,9 +62,7 @@ class Settings(BaseSettings):
     CODE_INTERPRETER_TIMEOUT: int = 120
     CODE_INTERPRETER_MAX_OUTPUT: int = 50000
 
-    # Forgejo (optional)
-    FORGEJO_API_URL: str = ""
-    FORGEJO_OWNER: str = ""
+
 
     model_config = {"env_prefix": "INFINIDEV_"}
 

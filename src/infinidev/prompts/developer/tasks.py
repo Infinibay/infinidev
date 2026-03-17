@@ -197,18 +197,13 @@ Use **git_diff** to review your own changes before committing. Check for:
 
 Remove any debugging artifacts before committing.
 
-### Step 7: Commit, Push, and Open PR
-Follow the COMMIT, PUSH, and OPEN PR steps from the Git Workflow above.
+### Step 7: Commit and Push
+Follow the COMMIT and PUSH steps from the Git Workflow above.
 Concretely:
 1. **git_commit** — stages all changes (`git add -A`) and commits
    (`git commit -m "<message>"`).
 2. **git_push** — pushes the branch to origin on the Forgejo server
    (`git push -u origin <branch>`).
-3. **create_pr** — opens a pull request against base="main".
-   Re-read the task with **get_task** to refresh acceptance criteria —
-   the PR body must list each criterion and confirm it is satisfied.
-   create_pr **automatically sets `pr_number` and `pr_url`** on the
-   task record when a Forgejo PR is created.
 
 ### Step 8: Post Review Comment and Submit
 The Code Reviewer is a separate agent — they only see what is committed

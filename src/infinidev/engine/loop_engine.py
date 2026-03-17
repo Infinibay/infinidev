@@ -155,8 +155,7 @@ _TOOL_DETAIL_KEYS: dict[str, list[str]] = {
     "git_push": ["branch"],
     "git_diff": ["branch", "file_path"],
     "git_status": [],
-    "create_pr": ["title"],
-    "merge_pr": ["pr_number"],
+
     "web_search": ["query"],
     "web_fetch": ["url"],
     "search_knowledge": ["query"],
