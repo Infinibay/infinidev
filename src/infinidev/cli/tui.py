@@ -29,6 +29,7 @@ from infinidev.db.service import (
 from infinidev.config.settings import reload_all
 from infinidev.cli.file_watcher import FileWatcher
 from infinidev.ui.widgets.context_widgets import QueuedMessageWidget, QueuedMessageStatus
+from infinidev.ui.widgets.file_diff_widget import FileChangeDiffWidget, colorize_diff
 
 # ── Extension → language map for TextArea syntax highlighting ────────────
 _EXT_LANG = {
@@ -556,6 +557,7 @@ class InfinidevTUI(App):
 
     /* ── Chat messages ───────────────────────────────── */
     .user-msg { height: auto; color: #a8ffc8; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: tall #2df97f; }
+    .pending-msg { height: auto; color: #7aad7a; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: dashed #2a8a4f; opacity: 80%; }
     .agent-msg { height: auto; color: #d0e4ff; margin-bottom: 1; background: #0a101a; padding: 0 1; border-left: tall #4da6ff; }
     .agent-msg Markdown { margin: 0; padding: 0; background: transparent; }
     .agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
@@ -566,9 +568,9 @@ class InfinidevTUI(App):
     #status-bar { height: 1; background: $surface-darken-1; color: $text-muted; padding: 0 2; dock: bottom; }
 
     /* Thinking indicator */
-    #thinking-indicator { height: auto; margin: 1 0; color: #7b9fdf; align: center middle; }
-    #thinking-indicator Static { text-align: center; width: 100%; }
-    #thinking-indicator LoadingIndicator { height: 1; }
+    .thinking-indicator { height: auto; margin: 1 0; color: #7b9fdf; align: center middle; }
+    .thinking-indicator Static { text-align: center; width: 100%; }
+    .thinking-indicator LoadingIndicator { height: 1; }
 
     /* ── Context Windows ────────────────────────────────────── */
     #context-panel {
@@ -686,6 +688,7 @@ class InfinidevTUI(App):
         self.session_id = str(uuid.uuid4())
         self._log_lines: list[str] = []
         self._open_files: dict[str, str] = {}  # tab_id → file_path
+        self._file_diff_widgets: dict[str, FileChangeDiffWidget] = {}  # path → widget
 
         self.engine = LoopEngine()
         self.agent = InfinidevAgent(agent_id="tui_agent")
@@ -975,6 +978,24 @@ class InfinidevTUI(App):
             if msg:
                 self.add_message("Infinidev", msg, "agent")
 
+        elif event_type == "loop_file_changed":
+            path = data.get("path", "")
+            diff = data.get("diff", "")
+            action = data.get("action", "modified")
+            num_changes = data.get("num_changes", 1)
+            if path in self._file_diff_widgets:
+                self._file_diff_widgets[path].update_diff(diff, num_changes, action)
+            else:
+                widget = FileChangeDiffWidget(path, diff, action)
+                self._file_diff_widgets[path] = widget
+                history = self.query_one("#chat-history")
+                thinking = self.query(".thinking-indicator")
+                if thinking:
+                    history.mount(widget, before=thinking.first())
+                else:
+                    history.mount(widget)
+                history.scroll_end(animate=False)
+
         elif event_type == "loop_log":
             level = data.get("level", "warning")
             msg = data.get("message", "")
@@ -1010,6 +1031,10 @@ class InfinidevTUI(App):
             plain = re.sub(r"\[/?[^\]]*\]", "", content)
             return Static(plain)
 
+    def _is_thinking(self) -> bool:
+        """Return True if the thinking indicator is currently visible."""
+        return len(self.query(".thinking-indicator")) > 0
+
     def add_message(self, sender: str, text: str, type: str = "agent", queued: bool = False, queue_index: int | None = None):
         """Add a message to the chat history.
 
@@ -1021,12 +1046,19 @@ class InfinidevTUI(App):
             queue_index: Queue position if queued (1-based)
         """
         history = self.query_one("#chat-history")
-        msg_class = f"{type}-msg"
         color = self._SENDER_COLORS.get(type, "#cccccc")
         text = str(text) if text else ""
 
+        # If thinking is active and this is a user message, show as pending
+        is_pending = type == "user" and self._is_thinking()
+        msg_class = "pending-msg" if is_pending else f"{type}-msg"
+
         container = Vertical(classes=msg_class)
-        header = self._safe_static(f"[bold {color}]{sender}:[/bold {color}]")
+        header_text = f"[bold {color}]{sender}:[/bold {color}]"
+        if is_pending:
+            header_text = f"[dim bold]{sender} (pending):[/dim bold]"
+        header = self._safe_static(header_text)
+
         if type == "agent" and ("```" in text or "**" in text or "# " in text):
             body = Markdown(text)
         else:
@@ -1040,7 +1072,14 @@ class InfinidevTUI(App):
             )
             container.mount(queue_label)
 
-        history.mount(container)
+        # If thinking, mount read messages before the indicator, pending after
+        thinking_widgets = self.query(".thinking-indicator")
+        if thinking_widgets and not is_pending:
+            # Non-pending message while thinking → place before the indicator
+            history.mount(container, before=thinking_widgets.first())
+        else:
+            history.mount(container)
+
         container.mount(header)
         container.mount(body)
         history.scroll_end(animate=False)
@@ -1095,14 +1134,6 @@ class InfinidevTUI(App):
         if len(self._queued_messages) == 0:
             self._hide_thinking()
 
-    def _hide_thinking(self) -> None:
-        """Hide the thinking indicator."""
-        try:
-            indicator = self.query_one("#thinking-indicator", Vertical)
-            indicator.remove()
-        except Exception:
-            pass
-
     # ── Submit / engine ──────────────────────────────────
 
     @on(ChatInput.Submitted)
@@ -1127,21 +1158,33 @@ class InfinidevTUI(App):
 
     def _show_thinking(self) -> None:
         """Mount the thinking indicator at the bottom of chat history."""
+        # Remove any leftover indicators from a previous run
+        self._hide_thinking()
         history = self.query_one("#chat-history")
         indicator = Vertical(
             Static("Infinidev is thinking..."),
             LoadingIndicator(),
-            id="thinking-indicator",
+            classes="thinking-indicator",
         )
         history.mount(indicator)
         history.scroll_end(animate=False)
 
     def _hide_thinking(self) -> None:
-        """Remove the thinking indicator."""
-        try:
-            self.query_one("#thinking-indicator").remove()
-        except Exception:
-            pass
+        """Remove all thinking indicators and promote pending messages."""
+        for widget in self.query(".thinking-indicator"):
+            widget.remove()
+        # Promote pending messages to normal user messages
+        color = self._SENDER_COLORS.get("user", "#cccccc")
+        for widget in list(self.query(".pending-msg")):
+            widget.remove_class("pending-msg")
+            widget.add_class("user-msg")
+            # Update header: first Static child is always the header
+            try:
+                statics = widget.query(Static)
+                if statics:
+                    statics.first().update(f"[bold {color}]You:[/bold {color}]")
+            except Exception:
+                pass
 
     def _execute_shell_command(self, command: str):
         """Execute a shell command directly and display output."""
@@ -1182,6 +1225,7 @@ class InfinidevTUI(App):
 
     @work(exclusive=True, thread=True)
     def run_engine(self, user_input: str):
+        self._file_diff_widgets = {}
         try:
             reload_all()
             store_conversation_turn(self.session_id, 'user', user_input)

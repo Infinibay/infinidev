@@ -28,6 +28,7 @@ from infinidev.engine.loop_models import (
     StepOperation,
     StepResult,
 )
+from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.loop_tools import (
     STEP_COMPLETE_SCHEMA,
     build_tool_dispatch,
@@ -225,6 +226,96 @@ def _extract_tool_error(result: str) -> str:
     except (json.JSONDecodeError, TypeError):
         pass
     return ""
+
+
+# ── File change tracking helpers ────────────────────────────────────────────
+
+_FILE_CHANGE_TOOLS = {"edit_file", "write_file"}
+_MAX_TRACK_FILE_SIZE = 1_000_000  # 1 MB — skip tracking larger files
+
+
+def _extract_file_path_from_args(tool_name: str, arguments: str | dict) -> str | None:
+    """Extract the file path from edit_file / write_file arguments."""
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(args, dict):
+        return None
+    return args.get("path")
+
+
+def _capture_pre_content(
+    tool_name: str,
+    arguments: str | dict,
+    tracker: FileChangeTracker,
+) -> str | None:
+    """Read file content before a write/edit tool mutates it."""
+    import os as _os
+    if tool_name not in _FILE_CHANGE_TOOLS or not tracker.active:
+        return None
+    file_path = _extract_file_path_from_args(tool_name, arguments)
+    if not file_path:
+        return None
+    file_path = _os.path.abspath(_os.path.expanduser(file_path))
+    if not _os.path.isfile(file_path):
+        return None  # new file — original is empty
+    try:
+        size = _os.path.getsize(file_path)
+        if size > _MAX_TRACK_FILE_SIZE:
+            return None
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _maybe_emit_file_change(
+    tool_name: str,
+    arguments: str | dict,
+    result: str,
+    pre_content: str | None,
+    tracker: FileChangeTracker,
+    project_id: int,
+    agent_id: str,
+) -> None:
+    """After a write/edit tool call, record the change and emit a TUI event."""
+    import os as _os
+    if tool_name not in _FILE_CHANGE_TOOLS or not tracker.active:
+        return
+
+    # Skip if the tool returned an error
+    if _extract_tool_error(result):
+        return
+
+    file_path = _extract_file_path_from_args(tool_name, arguments)
+    if not file_path:
+        return
+    file_path = _os.path.abspath(_os.path.expanduser(file_path))
+
+    # Read current content after the mutation
+    try:
+        if not _os.path.isfile(file_path):
+            return
+        size = _os.path.getsize(file_path)
+        if size > _MAX_TRACK_FILE_SIZE:
+            return
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            after_content = f.read()
+    except Exception:
+        return
+
+    before = pre_content if pre_content is not None else ""
+    diff_text = tracker.record(file_path, before, after_content)
+    if not diff_text:
+        return
+
+    _emit_loop_event("loop_file_changed", project_id, agent_id, {
+        "path": file_path,
+        "diff": diff_text,
+        "action": tracker.get_action(file_path),
+        "num_changes": tracker.get_change_count(file_path),
+    })
 
 
 def _log_start(agent_id: str, agent_name: str, role: str, desc: str, tool_count: int) -> None:
@@ -735,6 +826,9 @@ class LoopEngine(AgentEngine):
         tool_schemas = build_tool_schemas(tools) if tools else [STEP_COMPLETE_SCHEMA]
         tool_dispatch = build_tool_dispatch(tools) if tools else {}
 
+        # File change tracker for this task
+        file_tracker = FileChangeTracker()
+
         # Check model capabilities for manual tool calling mode
         from infinidev.config.model_capabilities import get_model_capabilities
         caps = get_model_capabilities()
@@ -1022,10 +1116,22 @@ class LoopEngine(AgentEngine):
                         # Collect tool results for both modes
                         tool_results_text: list[str] = []  # For manual mode
                         for tc in regular_calls:
+                            # Pre-hook: capture file content before edit/write
+                            _pre_content = _capture_pre_content(
+                                tc.function.name, tc.function.arguments, file_tracker,
+                            )
+
                             result = execute_tool_call(
                                 tool_dispatch,
                                 tc.function.name,
                                 tc.function.arguments,
+                            )
+
+                            # Post-hook: record file change and emit diff event
+                            _maybe_emit_file_change(
+                                tc.function.name, tc.function.arguments, result,
+                                _pre_content, file_tracker,
+                                agent.project_id, agent.agent_id,
                             )
 
                             # Intercept send_message: emit to TUI chat
@@ -1327,6 +1433,7 @@ class LoopEngine(AgentEngine):
                         next_steps=step_result.next_steps,
                     )
                 else:
+                    file_tracker.deactivate()
                     if verbose:
                         _log_finish(agent_name, "done", iteration + 1, state.total_tool_calls, state.total_tokens)
                     _emit_loop_event("loop_finished", agent.project_id, agent.agent_id, {
@@ -1341,6 +1448,7 @@ class LoopEngine(AgentEngine):
                     )
 
             if step_result.status == "blocked":
+                file_tracker.deactivate()
                 if verbose:
                     _log_finish(agent_name, "blocked", iteration + 1, state.total_tool_calls, state.total_tokens)
                 _emit_loop_event("loop_finished", agent.project_id, agent.agent_id, {
@@ -1356,6 +1464,7 @@ class LoopEngine(AgentEngine):
             if state.plan.steps and not state.plan.has_pending:
                 consecutive_all_done += 1
                 if consecutive_all_done >= 2:
+                    file_tracker.deactivate()
                     if verbose:
                         _log_finish(agent_name, "done", iteration + 1, state.total_tool_calls, state.total_tokens)
                     _emit_loop_event("loop_finished", agent.project_id, agent.agent_id, {
@@ -1372,6 +1481,7 @@ class LoopEngine(AgentEngine):
                 consecutive_all_done = 0
 
         # Outer loop exhausted
+        file_tracker.deactivate()
         if verbose:
             _log_finish(agent_name, "exhausted", max_iterations, state.total_tool_calls, state.total_tokens)
         _emit_loop_event("loop_finished", agent.project_id, agent.agent_id, {
@@ -1469,10 +1579,18 @@ class LoopEngine(AgentEngine):
                                         "content": '{"status": "acknowledged"}',
                                     })
                                     break
+                                _pre_content_g = _capture_pre_content(
+                                    tc.function.name, tc.function.arguments, file_tracker,
+                                )
                                 tc_result = execute_tool_call(
                                     tool_dispatch,
                                     tc.function.name,
                                     tc.function.arguments,
+                                )
+                                _maybe_emit_file_change(
+                                    tc.function.name, tc.function.arguments, tc_result,
+                                    _pre_content_g, file_tracker,
+                                    agent.project_id, agent.agent_id,
                                 )
                                 messages.append({
                                     "role": "tool",

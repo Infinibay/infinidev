@@ -85,7 +85,7 @@ class DocFlow:
             raise RuntimeError(f"Web search returned no results for {library_name}")
 
         # Step 2: fetch content from URLs
-        raw_content = self._fetch_content(urls)
+        raw_content = self._fetch_content(urls, library_name=library_name)
         if not raw_content:
             raise RuntimeError(f"Could not fetch content from any URL for {library_name}")
 
@@ -111,12 +111,24 @@ class DocFlow:
         lang_label = language if language != "unknown" else ""
         ver_label = f" {version}" if version != "latest" else ""
 
-        # Targeted queries — include "library", "package", or "module" to disambiguate
+        # Map languages to their package managers/registries for better search
+        pkg_hints = {
+            "python": "pypi pip",
+            "javascript": "npm",
+            "typescript": "npm",
+            "rust": "crates.io cargo",
+            "go": "pkg.go.dev",
+            "ruby": "rubygems gem",
+            "java": "maven",
+            "php": "packagist composer",
+            "csharp": "nuget",
+            "c#": "nuget",
+        }.get(language.lower(), "") if language != "unknown" else ""
+
         queries = [
-            f"{library_name} {lang_label} library official documentation{ver_label}".strip(),
-            f"{library_name} {lang_label} package API reference".strip(),
-            f"site:readthedocs.io OR site:github.com {library_name} {lang_label}".strip(),
-            f"{library_name} {lang_label} tutorial getting started examples".strip(),
+            f"{library_name} {lang_label} {pkg_hints} documentation".strip(),
+            f"{library_name} {lang_label} API reference docs".strip(),
+            f"{library_name} {lang_label} getting started tutorial code examples".strip(),
         ]
 
         urls: list[str] = []
@@ -132,14 +144,46 @@ class DocFlow:
                     seen.add(url)
                     urls.append(url)
 
+        # Also try direct well-known URLs for common registries
+        direct_urls = self._build_direct_urls(library_name, language)
+        for url in direct_urls:
+            if url not in seen:
+                seen.add(url)
+                urls.insert(0, url)  # Prioritize direct URLs
+
         # Sort: doc domains first, then rest
         doc_urls = [u for u in urls if _is_doc_domain(u)]
         other_urls = [u for u in urls if not _is_doc_domain(u)]
         return (doc_urls + other_urls)[:10]
 
-    def _fetch_content(self, urls: list[str]) -> str:
+    def _build_direct_urls(self, library_name: str, language: str) -> list[str]:
+        """Build well-known documentation URLs based on language and library name."""
+        name = library_name.lower().replace(" ", "-")
+        urls: list[str] = []
+        lang = language.lower() if language != "unknown" else ""
+
+        if lang == "python":
+            urls.append(f"https://pypi.org/project/{name}/")
+            urls.append(f"https://{name}.readthedocs.io/en/latest/")
+        elif lang in ("javascript", "typescript"):
+            urls.append(f"https://www.npmjs.com/package/{name}")
+        elif lang == "rust":
+            urls.append(f"https://docs.rs/{name}/latest/")
+            urls.append(f"https://crates.io/crates/{name}")
+        elif lang == "go":
+            urls.append(f"https://pkg.go.dev/{name}")
+        elif lang == "ruby":
+            urls.append(f"https://rubygems.org/gems/{name}")
+
+        # GitHub is language-agnostic
+        urls.append(f"https://github.com/{name}/{name}")
+
+        return urls
+
+    def _fetch_content(self, urls: list[str], library_name: str = "") -> str:
         parts: list[str] = []
         total_len = 0
+        lib_lower = library_name.lower()
         for url in urls:
             if total_len >= _MAX_CONTENT_CHARS:
                 break
@@ -147,9 +191,14 @@ class DocFlow:
                 content = fetch_with_trafilatura(url)
             except Exception:
                 continue
-            if content and len(content) > 100:  # Skip near-empty pages
-                parts.append(f"--- Source: {url} ---\n{content}")
-                total_len += len(content)
+            if not content or len(content) < 100:
+                continue
+            # Validate relevance: content must mention the library name
+            if lib_lower and lib_lower not in content.lower():
+                logger.debug("Skipping URL %s — content does not mention '%s'", url, library_name)
+                continue
+            parts.append(f"--- Source: {url} ---\n{content}")
+            total_len += len(content)
         return "\n\n".join(parts)[:_MAX_CONTENT_CHARS]
 
     def _plan_sections(self, library_name: str, language: str, raw_content: str) -> list[dict]:
