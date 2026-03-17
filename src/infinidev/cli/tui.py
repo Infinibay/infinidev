@@ -89,7 +89,109 @@ class SidebarPanel(Vertical):
             self.content_static.update(plain)
 
 
+class ContextPanel(Vertical):
+    """Widget showing per-window context usage: used, available, and %."""
 
+    CSS = """
+    ContextPanel {
+        width: 100%;
+        margin-bottom: 1;
+        padding: 1;
+        background: $surface-lighten-1;
+        border: solid $primary;
+    }
+    #context-model-name {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+        color: $primary;
+    }
+    .ctx-section-title {
+        text-style: bold;
+        margin-top: 1;
+        color: $text;
+    }
+    .ctx-detail {
+        margin-left: 2;
+        color: $text;
+    }
+    .ctx-bar {
+        margin-left: 2;
+    }
+    """
+
+    def __init__(self, id: str = None):
+        super().__init__(id=id)
+        self._status: dict[str, Any] = {}
+
+    def compose(self) -> ComposeResult:
+        yield Static("Loading...", id="context-model-name")
+        # Chat section
+        yield Static("[bold]Chat[/bold]", classes="ctx-section-title")
+        yield Static("", id="chat-details", classes="ctx-detail")
+        yield Static("", id="chat-bar", classes="ctx-bar")
+        # Task section
+        yield Static("[bold]Task[/bold]", classes="ctx-section-title")
+        yield Static("", id="task-details", classes="ctx-detail")
+        yield Static("", id="task-bar", classes="ctx-bar")
+
+    def update_status(self, status: dict[str, Any]) -> None:
+        """Update the panel with new status data."""
+        self._status = status
+        max_ctx = status.get("max_context", 4096)
+
+        # Model name
+        model = status.get("model", "unknown")
+        self.query_one("#context-model-name", Static).update(
+            f"[bold]{model}[/bold]  [dim]({max_ctx} ctx)[/dim]"
+        )
+
+        # Chat window
+        chat = status.get("chat", {})
+        self._update_section(
+            "#chat-details", "#chat-bar",
+            chat.get("current_tokens", 0),
+            chat.get("remaining_tokens", max_ctx),
+            chat.get("usage_percentage", 0.0),
+        )
+
+        # Task window
+        tasks = status.get("tasks", {})
+        self._update_section(
+            "#task-details", "#task-bar",
+            tasks.get("current_tokens", 0),
+            tasks.get("remaining_tokens", max_ctx),
+            tasks.get("usage_percentage", 0.0),
+        )
+
+    def _update_section(self, details_id: str, bar_id: str,
+                        used: int, available: int, pct: float) -> None:
+        """Update one context section (chat or task)."""
+        pct_val = min(pct, 1.0)
+        pct_str = f"{pct_val * 100:.1f}%"
+
+        # Color based on usage
+        if pct_val > 0.8:
+            color = "red"
+        elif pct_val > 0.5:
+            color = "yellow"
+        else:
+            color = "green"
+
+        self.query_one(details_id, Static).update(
+            f"Used: [bold]{used}[/bold]  "
+            f"Available: [bold {color}]{available}[/bold {color}]  "
+            f"({pct_str})"
+        )
+
+        # Progress bar
+        bar_width = 20
+        filled = int(bar_width * pct_val)
+        empty = bar_width - filled
+        bar = "\\[" + "█" * filled + "░" * empty + "\\]"
+        self.query_one(bar_id, Static).update(
+            f"[bold {color}]{bar}[/bold {color}] {pct_str}"
+        )
 
 
 class ChatInput(TextArea):
@@ -546,14 +648,25 @@ class InfinidevTUI(App):
 
     def _refresh_context_panel(self, task_tokens: int = 0) -> None:
         """Recalculate and refresh the context panel display."""
-        # Estimate chat tokens from message history
+        # Collect chat text from message history
         history = self.query_one("#chat-history")
         chat_text = ""
         for msg in history.query(Static):
             content = str(msg._Static__content) if hasattr(msg, '_Static__content') else ""
             chat_text += content
-        # Rough estimate: ~4 chars per token
-        chat_tokens = len(chat_text) // 4
+
+        # Use litellm token_counter for accurate counting
+        try:
+            import litellm
+            from infinidev.config.settings import settings
+            chat_tokens = litellm.token_counter(
+                model=settings.LLM_MODEL,
+                text=chat_text,
+            ) if chat_text else 0
+        except Exception:
+            # Fallback if litellm tokenizer fails
+            chat_tokens = len(chat_text) // 4
+
         self.context_calculator.calculate_usage(
             chat_tokens=chat_tokens,
             task_tokens=task_tokens,

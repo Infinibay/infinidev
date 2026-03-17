@@ -52,51 +52,60 @@ class ContextWindowCalculator:
         self._task_tokens: int = 0
 
     async def update_model_context(self) -> None:
-        """Fetch model info from Ollama and update max context."""
+        """Fetch model info from Ollama and update max context.
+
+        Uses /api/show to get the real context_length from model_info,
+        which reflects the actual model architecture limit (e.g. 262144
+        for qwen3.5) rather than the default num_ctx runtime parameter.
+        """
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
 
         llm_params = get_litellm_params()
         model = llm_params.get("model", settings.LLM_MODEL)
-
-        # Try to get model info from Ollama API
         base_url = llm_params.get("base_url", settings.LLM_BASE_URL)
+
+        # Strip ollama prefixes to get the bare model name for API calls
+        bare_model = model
+        for prefix in ("ollama_chat/", "ollama/"):
+            if bare_model.startswith(prefix):
+                bare_model = bare_model[len(prefix):]
+                break
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
+                # Use /api/show to get full model metadata including real context length
+                resp = await client.post(
+                    f"{base_url}/api/show",
+                    json={"name": bare_model},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    self.model_name = bare_model
+
+                    # Extract context_length from model_info
+                    # Keys follow the pattern: <family>.context_length
+                    model_info = data.get("model_info", {})
+                    for key, val in model_info.items():
+                        if key.endswith(".context_length") and isinstance(val, int):
+                            self.max_context = val
+                            break
+
+                    logger.info(f"Model {bare_model} context length: {self.max_context}")
+                    return
+
+                # Fallback: try /api/tags if /api/show fails
                 resp = await client.get(f"{base_url}/api/tags")
                 if resp.status_code == 200:
                     data = resp.json()
-                    models = data.get("models", [])
-
-                    # Find the current model - handle both prefixed and unprefixed names
-                    model_info = None
-                    for m in models:
+                    for m in data.get("models", []):
                         m_name = m.get("name", "")
-                        # Try multiple matching strategies
-                        if model in m_name or m_name in model or model.replace("ollama_chat/", "").replace("ollama_", "") in m_name or m_name.replace("ollama_chat/", "").replace("ollama_", "") in model.replace("ollama_chat/", "").replace("ollama_", ""):
-                            model_info = ModelInfo(
-                                name=m_name,
-                                size=m.get("size", 0),
-                                context_length=m.get("details", {}).get("context_length", 2048),
-                                details=m.get("details", {}),
-                            )
+                        if bare_model in m_name or m_name in bare_model:
+                            self.model_name = m_name
+                            ctx = m.get("details", {}).get("context_length", 0)
+                            if ctx:
+                                self.max_context = ctx
                             break
-                    
-                    # If no exact match found, try first available model as fallback
-                    if not model_info and models:
-                        model_info = ModelInfo(
-                            name=models[0].get("name", ""),
-                            size=models[0].get("size", 0),
-                            context_length=models[0].get("details", {}).get("context_length", 2048),
-                            details=models[0].get("details", {}),
-                        )
-                        logger.info(f"Using first model as fallback: {model_info.name}")
-
-                    if model_info:
-                        self.model_name = model_info.name
-                        self.max_context = model_info.max_tokens
-                        logger.info(f"Model {model} context length: {self.max_context}")
         except Exception as e:
             logger.warning(f"Could not fetch model info: {e}")
 
