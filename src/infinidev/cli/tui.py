@@ -74,7 +74,14 @@ class SidebarPanel(Vertical):
         yield self.content_static
 
     def update_content(self, text: str):
-        self.content_static.update(text)
+        import re
+        try:
+            from rich.text import Text
+            Text.from_markup(text)
+            self.content_static.update(text)
+        except Exception:
+            plain = re.sub(r"\[/?[^\]]*\]", "", text)
+            self.content_static.update(plain)
 
 
 class ChatInput(TextArea):
@@ -304,20 +311,21 @@ class InfinidevTUI(App):
     .sidebar-title { background: $primary; color: white; padding: 0 1; margin-bottom: 0; }
     .sidebar-content { margin-bottom: 1; padding: 1; background: $surface-lighten-1; height: auto; max-height: 10; overflow-y: scroll; color: $text; }
 
-    /* ── Chat messages ──────────────────────────────────── */
-    .user-msg { height: auto; color: #c4c4c4; margin-bottom: 1; background: #1a2a1a; padding: 0 1; border-left: tall #4a9f4a; }
-    .agent-msg { height: auto; color: #e0e0e0; margin-bottom: 1; background: #1a1a2a; padding: 0 1; border-left: tall #5b7fbf; }
+    /* ── Chat messages ───────────────────────────────── */
+    .user-msg { height: auto; color: #a8ffc8; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: tall #2df97f; }
+    .agent-msg { height: auto; color: #d0e4ff; margin-bottom: 1; background: #0a101a; padding: 0 1; border-left: tall #4da6ff; }
     .agent-msg Markdown { margin: 0; padding: 0; background: transparent; }
     .agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
     .agent-msg MarkdownH1, .agent-msg MarkdownH2, .agent-msg MarkdownH3 { margin: 1 0 0 0; padding: 0; background: transparent; border: none; }
-    .system-msg { height: auto; color: #a0a060; text-style: italic; margin-bottom: 1; padding: 0 1; }
+    .system-msg { height: auto; color: #ffcc4d; text-style: italic; margin-bottom: 1; padding: 0 1; border-left: tall #ffaa00; background: #1a1500; }
 
     /* Status bar */
     #status-bar { height: 1; background: $surface-darken-1; color: $text-muted; padding: 0 2; dock: bottom; }
 
     /* Thinking indicator */
-    #thinking-indicator { height: auto; padding: 0 1; color: #5b7fbf; }
-    #thinking-indicator LoadingIndicator { height: 1; color: #5b7fbf; background: transparent; }
+    #thinking-indicator { height: auto; margin: 1 0; color: #7b9fdf; align: center middle; }
+    #thinking-indicator Static { text-align: center; width: 100%; }
+    #thinking-indicator LoadingIndicator { height: 1; }
     """
 
     BINDINGS = [
@@ -622,6 +630,20 @@ class InfinidevTUI(App):
 
     _SENDER_COLORS = {"user": "#6fbf6f", "agent": "#7a9fd4", "system": "#c8c870"}
 
+    @staticmethod
+    def _safe_static(content: str) -> Static:
+        """Create a Static widget, falling back to plain text if markup is invalid."""
+        import re
+        try:
+            # Test-render the markup to catch errors before mounting
+            from rich.text import Text
+            Text.from_markup(content)
+            return Static(content)
+        except Exception:
+            # Strip all Rich markup tags and show plain text
+            plain = re.sub(r"\[/?[^\]]*\]", "", content)
+            return Static(plain)
+
     def add_message(self, sender: str, text: str, type: str = "agent"):
         history = self.query_one("#chat-history")
         msg_class = f"{type}-msg"
@@ -629,11 +651,11 @@ class InfinidevTUI(App):
         text = str(text) if text else ""
 
         container = Vertical(classes=msg_class)
-        header = Static(f"[bold {color}]{sender}:[/bold {color}]")
+        header = self._safe_static(f"[bold {color}]{sender}:[/bold {color}]")
         if type == "agent" and ("```" in text or "**" in text or "# " in text):
             body = Markdown(text)
         else:
-            body = Static(text)
+            body = self._safe_static(text)
         history.mount(container)
         container.mount(header)
         container.mount(body)
@@ -655,32 +677,6 @@ class InfinidevTUI(App):
             self._show_thinking()
             self.run_engine(user_text)
 
-    class ThinkingWidget(Static):
-        """Animated thinking indicator with color-cycling characters."""
-
-        _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        _COLORS = [
-            "#5b7fbf", "#6b8fcf", "#7b9fdf", "#8bafef",
-            "#7b9fdf", "#6b8fcf", "#5b7fbf", "#4b6faf",
-            "#5b7fbf", "#6b8fcf",
-        ]
-
-        def __init__(self, **kwargs):
-            super().__init__("", **kwargs)
-            self._tick = 0
-
-        def on_mount(self) -> None:
-            self.set_interval(0.12, self._animate)
-
-        def _animate(self) -> None:
-            self._tick += 1
-            chars = []
-            for i, ch in enumerate(self._FRAMES):
-                color = self._COLORS[(self._tick + i) % len(self._COLORS)]
-                chars.append(f"[{color}]{ch}[/{color}]")
-            spinner = " ".join(chars)
-            self.update(f" {spinner}  [#7b9fdf]Infinidev is thinking...[/#7b9fdf]")
-
     def _update_status_bar(self) -> None:
         from infinidev.config.settings import settings
         model = settings.LLM_MODEL.split("/", 1)[-1] if "/" in settings.LLM_MODEL else settings.LLM_MODEL
@@ -690,7 +686,11 @@ class InfinidevTUI(App):
     def _show_thinking(self) -> None:
         """Mount the thinking indicator at the bottom of chat history."""
         history = self.query_one("#chat-history")
-        indicator = Vertical(self.ThinkingWidget(), id="thinking-indicator")
+        indicator = Vertical(
+            Static("Infinidev is thinking..."),
+            LoadingIndicator(),
+            id="thinking-indicator",
+        )
         history.mount(indicator)
         history.scroll_end(animate=False)
 
@@ -724,9 +724,9 @@ class InfinidevTUI(App):
 
             output_lines = []
             if result.stdout:
-                output_lines.append(f"[bold #4a9f4a]stdout:[/bold #4a9f4a]\n{result.stdout}")
+                output_lines.append(f"[bold #00ff88]stdout:[/bold #00ff88]\n{result.stdout}")
             if result.stderr:
-                output_lines.append(f"[bold #ff6b6b]stderr:[/bold #ff6b6b]\n{result.stderr}")
+                output_lines.append(f"[bold #ff4466]stderr:[/bold #ff4466]\n{result.stderr}")
 
             output_text = "\n".join(output_lines) if output_lines else "(no output)"
             exit_info = f"\n[bold]Exit code:[/bold] {result.returncode}"
@@ -883,7 +883,7 @@ class InfinidevTUI(App):
             self.add_message("System", f"Model changed to: {new_model}", "system")
             self._update_status_bar()
             self.query_one("#chat-input", ChatInput).focus()
-        self.push_screen(ModelPickerScreen(models, current_tag), callback=on_dismiss)
+        self.call_from_thread(self.push_screen, ModelPickerScreen(models, current_tag), callback=on_dismiss)
 
 
 if __name__ == "__main__":
