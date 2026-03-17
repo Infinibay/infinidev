@@ -7,13 +7,14 @@ import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.screen import ModalScreen
 from typing import Optional, Callable, Set
 from textual.widgets import (
     Header, Footer, Static, TextArea, Label, OptionList, Markdown,
     DirectoryTree, TabbedContent, TabPane, LoadingIndicator,
-    ProgressBar,
+    ProgressBar, Button,
 )
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal, VerticalScroll
@@ -26,7 +27,7 @@ from infinidev.engine.loop_engine import LoopEngine, set_event_callback
 from infinidev.db.service import (
     init_db, store_conversation_turn, get_recent_summaries,
 )
-from infinidev.config.settings import reload_all
+from infinidev.config.settings import reload_all, Settings
 from infinidev.cli.file_watcher import FileWatcher
 from infinidev.ui.widgets.context_widgets import QueuedMessageWidget, QueuedMessageStatus
 from infinidev.ui.widgets.file_diff_widget import FileChangeDiffWidget, colorize_diff
@@ -56,6 +57,8 @@ COMMANDS = [
     ("/models list", "List available Ollama models"),
     ("/models set", "Change Ollama model (e.g., /models set llama3)"),
     ("/models manage", "Pick a model interactively"),
+    ("/settings", "Show or edit settings configuration"),
+    ("/settings browse", "Open settings editor modal"),
     ("/findings", "Browse all findings"),
     ("/knowledge", "Browse project knowledge"),
     ("/documentation", "Browse cached library documentation"),
@@ -129,12 +132,12 @@ class ContextPanel(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static("Loading...", id="context-model-name")
-        # Chat section
-        yield Static("[bold]Chat[/bold]", classes="ctx-section-title")
+        # Prompt section — real prompt_tokens from LLM
+        yield Static("[bold]Context Window[/bold]", classes="ctx-section-title")
         yield Static("", id="chat-details", classes="ctx-detail")
         yield Static("", id="chat-bar", classes="ctx-bar")
-        # Task section
-        yield Static("[bold]Task[/bold]", classes="ctx-section-title")
+        # Cumulative section — total tokens used across all calls
+        yield Static("[bold]Total Used[/bold]", classes="ctx-section-title")
         yield Static("", id="task-details", classes="ctx-detail")
         yield Static("", id="task-bar", classes="ctx-bar")
 
@@ -306,6 +309,335 @@ class ModelPickerScreen(ModalScreen[str | None]):
     @on(OptionList.OptionSelected, "#model-picker-list")
     def on_select(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class SettingsEditorScreen(ModalScreen[None]):
+    """Modal to view and edit all Infinidev settings."""
+
+    CSS = """
+    SettingsEditorScreen {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.65);
+    }
+    #settings-box {
+        width: 80%;
+        height: 80%;
+        background: $surface;
+        border: round $primary;
+        padding: 0;
+    }
+    #settings-title {
+        width: 100%;
+        text-align: center;
+        text-style: bold;
+        color: $primary;
+        padding: 1 2;
+        background: $surface-darken-2;
+        border-bottom: solid $primary-darken-2;
+    }
+    #settings-list {
+        height: 1fr;
+        background: $surface;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
+        scrollbar-color: $primary-darken-2;
+        scrollbar-color-hover: $primary;
+        scrollbar-color-active: $primary;
+    }
+    #settings-list > .option-list--option-highlighted {
+        background: $primary 20%;
+    }
+    #settings-footer {
+        width: 100%;
+        height: auto;
+        align: center middle;
+        padding: 1 2;
+        background: $surface-darken-2;
+        border-top: solid $primary-darken-2;
+    }
+    #settings-footer Horizontal {
+        width: auto;
+        height: auto;
+        align: center middle;
+    }
+    #settings-footer Button {
+        margin: 0 1;
+    }
+    #settings-hint {
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
+        margin-top: 1;
+        height: auto;
+    }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=True),
+        Binding("ctrl+enter", "save", "Save", show=True),
+    ]
+
+    # Define all settings with their metadata
+    SETTINGS_INFO = {
+        "DB_PATH": {"section": "Database", "default": "~/.infinidev/infinidev.db", "type": "string"},
+        "MAX_RETRIES": {"section": "Database", "default": 5, "type": "int"},
+        "RETRY_BASE_DELAY": {"section": "Database", "default": 0.1, "type": "float"},
+        "COMMAND_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int"},
+        "WEB_TIMEOUT": {"section": "Timeouts", "default": 30, "type": "int"},
+        "GIT_PUSH_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int"},
+        "SANDBOX_ENABLED": {"section": "Sandbox", "default": False, "type": "bool"},
+        "ALLOWED_BASE_DIRS": {"section": "Sandbox", "default": ["/"]},
+        "ALLOWED_COMMANDS": {"section": "Sandbox", "default": []},
+        "MAX_FILE_SIZE_BYTES": {"section": "File Limits", "default": 5242880, "type": "int"},
+        "MAX_DIR_LISTING": {"section": "File Limits", "default": 1000, "type": "int"},
+        "LLM_MODEL": {"section": "LLM", "default": "ollama_chat/qwen2.5-coder:7b", "type": "string"},
+        "LLM_BASE_URL": {"section": "LLM", "default": "http://localhost:11434", "type": "string"},
+        "LLM_API_KEY": {"section": "LLM", "default": "ollama", "type": "string"},
+        "EMBEDDING_PROVIDER": {"section": "Embedding", "default": "ollama", "type": "string"},
+        "EMBEDDING_MODEL": {"section": "Embedding", "default": "nomic-embed-text", "type": "string"},
+        "EMBEDDING_BASE_URL": {"section": "Embedding", "default": "http://localhost:11434", "type": "string"},
+        "LOOP_MAX_ITERATIONS": {"section": "Loop Engine", "default": 50, "type": "int"},
+        "LOOP_MAX_TOOL_CALLS_PER_ACTION": {"section": "Loop Engine", "default": 0, "type": "int"},
+        "LOOP_MAX_TOTAL_TOOL_CALLS": {"section": "Loop Engine", "default": 200, "type": "int"},
+        "LOOP_HISTORY_WINDOW": {"section": "Loop Engine", "default": 0, "type": "int"},
+        "WEB_CACHE_TTL_SECONDS": {"section": "Web Tools", "default": 3600, "type": "int"},
+        "WEB_RPM_LIMIT": {"section": "Web Tools", "default": 20, "type": "int"},
+        "WEB_ROBOTS_CACHE_TTL": {"section": "Web Tools", "default": 3600, "type": "int"},
+        "DEDUP_SIMILARITY_THRESHOLD": {"section": "Deduplication", "default": 0.82, "type": "float"},
+        "WORKSPACE_BASE_DIR": {"section": "Workspace", "default": ".", "type": "string"},
+        "CODE_INTERPRETER_TIMEOUT": {"section": "Code Interpreter", "default": 120, "type": "int"},
+        "CODE_INTERPRETER_MAX_OUTPUT": {"section": "Code Interpreter", "default": 50000, "type": "int"},
+        "FORGEJO_API_URL": {"section": "Forgejo", "default": "", "type": "string"},
+        "FORGEJO_OWNER": {"section": "Forgejo", "default": "", "type": "string"},
+    }
+
+    def __init__(self, settings: Settings):
+        super().__init__()
+        self._settings = settings
+        self._edited_values: dict[str, str] = {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="settings-box"):
+            yield Label("Settings", id="settings-title")
+            yield OptionList(id="settings-list")
+            with Vertical(id="settings-footer"):
+                with Horizontal():
+                    yield Button("Save", variant="success", id="btn-save")
+                    yield Button("Cancel", variant="error", id="btn-cancel")
+                yield Label("[dim]↑↓ navigate   Enter edit[/dim]", id="settings-hint")
+
+    def on_mount(self) -> None:
+        ol = self.query_one("#settings-list", OptionList)
+
+        # Group settings by section
+        sections: dict[str, list[tuple[str, dict]]] = {}
+        for key, info in self.SETTINGS_INFO.items():
+            section = info["section"]
+            if section not in sections:
+                sections[section] = []
+            sections[section].append((key, info))
+
+        # Add section headers and settings
+        first = True
+        for section_name in sorted(sections.keys()):
+            # Blank line separator between sections (except before first)
+            if not first:
+                ol.add_option(Option("", id=f"__blank__{section_name}"))
+            first = False
+            # Section header with line decoration
+            header = f"[bold cyan]── {section_name} ──[/bold cyan]"
+            ol.add_option(Option(header, id=f"__section__{section_name}"))
+
+            for key, info in sorted(sections[section_name], key=lambda x: x[0]):
+                current_value = getattr(self._settings, key, info.get("default", ""))
+                display = str(current_value) if current_value not in (None, "", []) else "[italic dim]not set[/italic dim]"
+                value_markup = f"[dim]{display}[/dim]" if current_value not in (None, "", []) else display
+                ol.add_option(
+                    Option(
+                        f"  [bold]{key}[/bold]  {value_markup}",
+                        id=key,
+                    )
+                )
+
+        ol.focus()
+
+    def _is_non_setting(self, option_id: str | None) -> bool:
+        """Check if an option is a section header or blank separator."""
+        if not option_id:
+            return True
+        return option_id.startswith("__section__") or option_id.startswith("__blank__")
+
+    @on(OptionList.OptionHighlighted, "#settings-list")
+    def on_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        if self._is_non_setting(event.option.id):
+            return
+
+    @on(OptionList.OptionSelected, "#settings-list")
+    def on_select(self, event: OptionList.OptionSelected) -> None:
+        if self._is_non_setting(event.option.id):
+            return
+        self._show_setting_editor(event.option.id)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-save":
+            self.action_save()
+        elif event.button.id == "btn-cancel":
+            self.action_cancel()
+
+    def _show_setting_editor(self, setting_key: str) -> None:
+        current_value = getattr(self._settings, setting_key, None)
+        setting_type = self.SETTINGS_INFO.get(setting_key, {}).get("type", "string")
+
+        # Create a simple input screen
+        editor = SettingValueEditor(setting_key, current_value, setting_type)
+        self.app.push_screen(editor, lambda value: self._on_value_updated(setting_key, value))
+
+    def _on_value_updated(self, key: str, value: str | None) -> None:
+        if value is not None:
+            self._edited_values[key] = value
+            # Update the option label to show edited value
+            ol = self.query_one("#settings-list", OptionList)
+            display_value = self._format_value(value, self.SETTINGS_INFO.get(key, {}).get("type", "string"))
+            for i in range(ol.option_count):
+                opt = ol.get_option_at_index(i)
+                if opt.id == key:
+                    ol.replace_option_prompt(opt.id, f"  [bold white]{key}[/bold white]  [bold green]{display_value}[/bold green] [dim italic](edited)[/dim italic]")
+                    break
+        self.query_one("#settings-list", OptionList).focus()
+
+    def _format_value(self, value: str, value_type: str) -> str:
+        """Format value for display based on its type."""
+        try:
+            if value_type == "int":
+                return str(int(value))
+            elif value_type == "float":
+                return str(float(value))
+            elif value_type == "bool":
+                return "true" if value.lower() in ("true", "1", "yes") else "false"
+            return value
+        except (ValueError, AttributeError):
+            return value
+
+    def action_save(self) -> None:
+        """Save all edited settings."""
+        if not self._edited_values:
+            self.dismiss(None)
+            return
+        
+        self.query_one("#settings-list", OptionList).blur()
+        
+        from infinidev.config.settings import reload_all
+        try:
+            self._settings.save_user_settings(self._edited_values)
+            reload_all()
+            self.add_message("System", f"Saved {len(self._edited_values)} settings. Reloaded.", "system")
+            self.dismiss(None)
+        except Exception as e:
+            self.add_message("System", f"Failed to save settings: {e}", "system")
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        """Cancel and discard changes."""
+        self.dismiss(None)
+
+    @work(exclusive=True, thread=True)
+    def add_message(self, sender: str, text: str, type: str = "agent") -> None:
+        """Add a temporary message to indicate save status."""
+        from textual.widgets import Static
+        from textual.containers import Vertical
+        
+        history = self.query_one("#settings-box", Vertical)
+        msg = Static(f"[bold {type}]{sender}:[/bold {type}] {text}", classes=f"{type}-msg")
+        history.mount(msg)
+        self.set_timer(3.0, lambda m=msg: m.remove())
+
+
+class SettingValueEditor(ModalScreen[str | None]):
+    """Modal to edit a single setting value."""
+
+    CSS = """
+    SettingValueEditor {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.7);
+    }
+    #setting-editor-box {
+        width: 60%;
+        max-height: 40%;
+        background: $surface;
+        border: round $primary;
+        padding: 0;
+    }
+    #setting-editor-title {
+        width: 100%;
+        text-align: center;
+        text-style: bold;
+        color: $primary;
+        padding: 1 2;
+        background: $surface-darken-2;
+        border-bottom: solid $primary-darken-2;
+    }
+    #setting-editor-input {
+        width: 100%;
+        height: auto;
+        max-height: 8;
+        margin: 1 2;
+    }
+    #setting-editor-footer {
+        width: 100%;
+        height: auto;
+        align: center middle;
+        padding: 1 2;
+        background: $surface-darken-2;
+        border-top: solid $primary-darken-2;
+    }
+    #setting-editor-footer Horizontal {
+        width: auto;
+        height: auto;
+        align: center middle;
+    }
+    #setting-editor-footer Button {
+        margin: 0 1;
+    }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=True),
+        Binding("enter", "save", "Save", show=True),
+    ]
+
+    def __init__(self, key: str, current_value, value_type: str):
+        super().__init__()
+        self._key = key
+        self._current_value = current_value
+        self._value_type = value_type
+        self._new_value = str(current_value)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="setting-editor-box"):
+            yield Label(f"Edit: {self._key}", id="setting-editor-title")
+            yield TextArea(self._new_value, id="setting-editor-input")
+            with Vertical(id="setting-editor-footer"):
+                with Horizontal():
+                    yield Button("Save", variant="success", id="btn-editor-save")
+                    yield Button("Cancel", variant="error", id="btn-editor-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#setting-editor-input", TextArea).focus()
+        self.query_one("#setting-editor-input", TextArea).select_all()
+
+    @on(TextArea.Changed, "#setting-editor-input")
+    def on_change(self, event: TextArea.Changed) -> None:
+        self._new_value = event.text
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-editor-save":
+            self.action_save()
+        elif event.button.id == "btn-editor-cancel":
+            self.action_cancel()
+
+    def action_save(self) -> None:
+        self.dismiss(self._new_value if self._new_value else self._current_value)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -728,32 +1060,32 @@ class InfinidevTUI(App):
         status = self.context_calculator.get_context_status()
         self.call_from_thread(self._context_panel.update_status, status)
 
-    def _refresh_context_panel(self, task_tokens: int = 0) -> None:
-        """Recalculate and refresh the context panel display."""
-        # Collect chat text from message history
-        history = self.query_one("#chat-history")
-        chat_text = ""
-        for msg in history.query(Static):
-            content = str(msg._Static__content) if hasattr(msg, '_Static__content') else ""
-            chat_text += content
+    def _refresh_context_panel(self, task_tokens: int = 0,
+                               prompt_tokens: int = 0,
+                               completion_tokens: int = 0) -> None:
+        """Refresh the context panel with real LLM-reported token counts.
 
-        # Use litellm token_counter for accurate counting
-        try:
-            import litellm
-            from infinidev.config.settings import settings
-            chat_tokens = litellm.token_counter(
-                model=settings.LLM_MODEL,
-                text=chat_text,
-            ) if chat_text else 0
-        except Exception:
-            # Fallback if litellm tokenizer fails
-            chat_tokens = len(chat_text) // 4
-
+        Args:
+            task_tokens: Cumulative total tokens across all LLM calls (for info).
+            prompt_tokens: prompt_tokens from the most recent LLM response —
+                           this is the real context window usage.
+            completion_tokens: completion_tokens from the most recent LLM response.
+        """
         self.context_calculator.calculate_usage(
-            chat_tokens=chat_tokens,
+            chat_tokens=prompt_tokens,
             task_tokens=task_tokens,
         )
         status = self.context_calculator.get_context_status()
+        # Override: "chat" section shows the real prompt_tokens as context usage
+        if prompt_tokens:
+            max_ctx = status.get("max_context", 4096)
+            status["chat"] = {
+                "name": "prompt",
+                "current_tokens": prompt_tokens,
+                "max_tokens": max_ctx,
+                "remaining_tokens": max(0, max_ctx - prompt_tokens),
+                "usage_percentage": min(1.0, prompt_tokens / max_ctx) if max_ctx > 0 else 0.0,
+            }
         self._context_panel.update_status(status)
 
     # ── Focus actions ────────────────────────────────────
@@ -961,9 +1293,12 @@ class InfinidevTUI(App):
                 plan_text += f"\n[{status}]"
             self.query_one("#plan-panel").update_content(plan_text)
 
-            # Update context window display with token usage from engine
-            task_tokens = data.get("tokens_total", 0)
-            self._refresh_context_panel(task_tokens=task_tokens)
+            # Update context window display with real LLM-reported tokens
+            self._refresh_context_panel(
+                task_tokens=data.get("tokens_total", 0),
+                prompt_tokens=data.get("prompt_tokens", 0),
+                completion_tokens=data.get("completion_tokens", 0),
+            )
 
         elif event_type == "loop_tool_call":
             tool_name = data.get("tool_name", "")
@@ -972,6 +1307,13 @@ class InfinidevTUI(App):
             if tool_detail:
                 action_text += f"   {tool_detail}"
             self.query_one("#actions-panel").update_content(action_text)
+
+            # Update context window after each tool call
+            self._refresh_context_panel(
+                task_tokens=data.get("tokens_total", 0),
+                prompt_tokens=data.get("prompt_tokens", 0),
+                completion_tokens=data.get("completion_tokens", 0),
+            )
 
         elif event_type == "loop_user_message":
             msg = data.get("message", "")
@@ -1083,10 +1425,6 @@ class InfinidevTUI(App):
         container.mount(header)
         container.mount(body)
         history.scroll_end(animate=False)
-
-        # Refresh context panel to reflect updated chat tokens
-        if hasattr(self, '_context_panel'):
-            self._refresh_context_panel()
 
     def add_queued_message(self, sender: str, text: str, type: str = "agent") -> QueuedMessageWidget:
         """Add a message to the queue (not yet processed).
@@ -1252,6 +1590,129 @@ class InfinidevTUI(App):
 
     # ── Commands ─────────────────────────────────────────
 
+    # ── Settings Helper Methods ───────────────────────────────
+
+    def _get_settings_info(self):
+        """Get formatted settings information."""
+        from infinidev.config.settings import settings, SETTINGS_FILE
+
+        lines = [
+            f"[bold]Infinidev Settings (from {SETTINGS_FILE})[/bold]",
+            "",
+            "[bold]LLM[/bold]",
+            f"  {settings.LLM_MODEL:<50} (LLM_MODEL)",
+            f"  {settings.LLM_BASE_URL:<50} (LLM_BASE_URL)",
+            "",
+            "[bold]Loop Engine[/bold]",
+            f"  {settings.LOOP_MAX_ITERATIONS:<50} (LOOP_MAX_ITERATIONS)",
+            f"  {settings.LOOP_MAX_TOTAL_TOOL_CALLS:<50} (LOOP_MAX_TOTAL_TOOL_CALLS)",
+            "",
+            "[bold]Code Interpreter[/bold]",
+            f"  {settings.CODE_INTERPRETER_TIMEOUT:<50} (CODE_INTERPRETER_TIMEOUT)",
+            "",
+            "[bold]UI[/bold]",
+            f"  {settings.model_dump().get('LOG_LEVEL', 'warning'):<50} (LOG_LEVEL)",
+        ]
+        return "\n".join(lines)
+
+    def _convert_value_to_type(self, key: str, value: str):
+        """Convert a string value to the appropriate type based on the setting key."""
+        type_map = {
+            "LLM_MODEL": str,
+            "LLM_BASE_URL": str,
+            "DB_PATH": str,
+            "WORKSPACE_BASE_DIR": str,
+            "EMBEDDING_PROVIDER": str,
+            "EMBEDDING_MODEL": str,
+            "EMBEDDING_BASE_URL": str,
+            "FORGEJO_API_URL": str,
+            "FORGEJO_OWNER": str,
+            "LOOP_MAX_ITERATIONS": int,
+            "LOOP_MAX_TOOL_CALLS_PER_ACTION": int,
+            "LOOP_MAX_TOTAL_TOOL_CALLS": int,
+            "LOOP_HISTORY_WINDOW": int,
+            "MAX_RETRIES": int,
+            "RETRY_BASE_DELAY": float,
+            "COMMAND_TIMEOUT": int,
+            "WEB_TIMEOUT": int,
+            "GIT_PUSH_TIMEOUT": int,
+            "MAX_FILE_SIZE_BYTES": int,
+            "MAX_DIR_LISTING": int,
+            "WEB_CACHE_TTL_SECONDS": int,
+            "WEB_RPM_LIMIT": int,
+            "WEB_ROBOTS_CACHE_TTL": int,
+            "DEDUP_SIMILARITY_THRESHOLD": float,
+            "CODE_INTERPRETER_TIMEOUT": int,
+            "CODE_INTERPRETER_MAX_OUTPUT": int,
+            "SANDBOX_ENABLED": bool,
+        }
+        type_class = type_map.get(key, str)
+        if type_class == bool:
+            return value.lower() in ("true", "1", "yes")
+        try:
+            return type_class(value)
+        except ValueError:
+            raise ValueError(f"Invalid value for {key}: {value}")
+
+    def _handle_settings(self, parts: list[str]):
+        """Handle the /settings command."""
+        from infinidev.config.settings import settings, SETTINGS_FILE, reload_all
+        import shutil
+
+        subcmd = parts[1].lower() if len(parts) > 1 else "info"
+
+        if subcmd == "reset":
+            if SETTINGS_FILE.exists():
+                SETTINGS_FILE.unlink()
+            reload_all()
+            self.add_message("System", "Settings reset to defaults. Reloaded.", "system")
+        elif subcmd == "export" and len(parts) > 2:
+            export_path = parts[2]
+            try:
+                shutil.copy(SETTINGS_FILE, export_path)
+                self.add_message("System", f"Settings exported to: {export_path}", "system")
+            except Exception as e:
+                self.add_message("System", f"Export failed: {e}", "system")
+        elif subcmd == "import" and len(parts) > 2:
+            import_path = parts[2]
+            try:
+                if not SETTINGS_FILE.exists():
+                    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(import_path, SETTINGS_FILE)
+                reload_all()
+                self.add_message("System", f"Settings imported from: {import_path}. Reloaded.", "system")
+            except FileNotFoundError:
+                self.add_message("System", f"Import failed: File not found: {import_path}", "system")
+            except Exception as e:
+                self.add_message("System", f"Import failed: {e}", "system")
+        elif subcmd == "info" or subcmd == "" or len(parts) == 1:
+            if len(parts) == 1:
+                # No subcommand provided - open the interactive modal
+                self._browse_settings()
+            else:
+                self.add_message("System", self._get_settings_info(), "system")
+        else:
+            # Show or set specific setting
+            setting_key = subcmd.upper()
+            value_to_set = parts[2] if len(parts) > 2 else None
+
+            try:
+                if value_to_set:
+                    # Try to convert to appropriate type
+                    converted = self._convert_value_to_type(setting_key, value_to_set)
+                    settings.save_user_settings({setting_key: converted})
+                    reload_all()
+                    self.add_message("System", f"Updated {setting_key} to: {converted}", "system")
+                else:
+                    # Show current value
+                    value = getattr(settings, setting_key, None)
+                    if value is not None:
+                        self.add_message("System", f"{setting_key}: {value}", "system")
+                    else:
+                        self.add_message("System", f"Unknown setting: {setting_key}", "system")
+            except ValueError as e:
+                self.add_message("System", f"Error: {e}", "system")
+
     def handle_command(self, cmd_text: str):
         parts = cmd_text.split()
         cmd = parts[0].lower()
@@ -1277,6 +1738,12 @@ class InfinidevTUI(App):
                 "/models list         List available Ollama models\n"
                 "/models set <name>   Change model\n"
                 "/models manage       Pick a model interactively\n"
+                "/settings            Show current settings\n"
+                "/settings <key>      Show specific setting\n"
+                "/settings <key> <val> Change setting\n"
+                "/settings reset      Reset to defaults\n"
+                "/settings export     Export settings to file\n"
+                "/settings import     Import settings from file\n"
                 "/findings            Browse all findings\n"
                 "/knowledge           Browse project knowledge\n"
                 "/documentation       Browse cached library docs\n"
@@ -1284,6 +1751,8 @@ class InfinidevTUI(App):
                 "/exit, /quit         Exit",
                 "system",
             )
+        elif cmd == "/settings":
+            self._handle_settings(parts)
         elif cmd == "/models":
             from infinidev.config.settings import settings
             subcmd = parts[1].lower() if len(parts) > 1 else "info"
@@ -1321,6 +1790,12 @@ class InfinidevTUI(App):
             findings = [f for f in findings if f["finding_type"] == filter_type]
         title = "Project Knowledge" if filter_type == "project_context" else "All Findings"
         self.call_from_thread(self.push_screen, FindingsBrowserScreen(findings, title=title))
+
+    @work(thread=True)
+    def _browse_settings(self):
+        """Open the settings editor modal."""
+        from infinidev.config.settings import settings as global_settings
+        self.call_from_thread(self.push_screen, SettingsEditorScreen(global_settings))
 
     @work(thread=True)
     def _browse_documentation(self):
@@ -1415,7 +1890,7 @@ class InfinidevTUI(App):
             self.add_message("System", f"Model changed to: {new_model}", "system")
             self._update_status_bar()
             self.query_one("#chat-input", ChatInput).focus()
-        self.call_from_thread(self.push_screen, ModelPickerScreen(models, current_tag), callback=on_dismiss)
+        self.push_screen(ModelPickerScreen(models, current_tag), callback=on_dismiss)
 
 
 if __name__ == "__main__":

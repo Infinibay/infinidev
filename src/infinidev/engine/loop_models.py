@@ -119,3 +119,5 @@ class LoopState(BaseModel):
     iteration_count: int = 0
     total_tool_calls: int = 0
     total_tokens: int = 0
+    last_prompt_tokens: int = 0       # prompt_tokens from most recent LLM call
+    last_completion_tokens: int = 0   # completion_tokens from most recent LLM call

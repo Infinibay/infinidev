@@ -95,12 +95,132 @@ def handle_command(cmd_text: str):
         click.echo(click.style("Available commands:", bold=True))
         click.echo("  /models            - Show current model configuration")
         click.echo("  /models set <name> - Change Ollama model (e.g., /models set llama3)")
+        click.echo("  /settings          - Show current settings")
+        click.echo("  /settings <key>    - Show specific setting")
+        click.echo("  /settings <key> <val> - Change setting")
+        click.echo("  /settings reset    - Reset to defaults")
+        click.echo("  /settings export   - Export settings to file")
+        click.echo("  /settings import   - Import settings from file")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
         return True
     
+    elif cmd == "/settings":
+        handle_settings_command(parts)
+        return True
+
     click.echo(f"Unknown command: {cmd}")
     return True
+
+
+def handle_settings_command(parts: list[str]):
+    """Handle /settings command in classic CLI mode."""
+    from infinidev.config.settings import settings, SETTINGS_FILE, reload_all
+    import shutil
+    from pathlib import Path
+
+    subcmd = parts[1].lower() if len(parts) > 1 else "info"
+
+    if subcmd == "reset":
+        if SETTINGS_FILE.exists():
+            SETTINGS_FILE.unlink()
+        reload_all()
+        click.echo(click.style("Settings reset to defaults. Reloaded.", fg="green"))
+    elif subcmd == "export" and len(parts) > 2:
+        export_path = parts[2]
+        try:
+            shutil.copy(SETTINGS_FILE, export_path)
+            click.echo(click.style(f"Settings exported to: {export_path}", fg="green"))
+        except Exception as e:
+            click.echo(click.style(f"Export failed: {e}", fg="red"))
+    elif subcmd == "import" and len(parts) > 2:
+        import_path = parts[2]
+        try:
+            settings_file_path = SETTINGS_FILE if isinstance(SETTINGS_FILE, Path) else Path(SETTINGS_FILE)
+            if not settings_file_path.exists():
+                settings_file_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(import_path, settings_file_path)
+            reload_all()
+            click.echo(click.style(f"Settings imported from: {import_path}. Reloaded.", fg="green"))
+        except FileNotFoundError:
+            click.echo(click.style(f"Import failed: File not found: {import_path}", fg="red"))
+        except Exception as e:
+            click.echo(click.style(f"Import failed: {e}", fg="red"))
+    elif subcmd == "info" or subcmd == "" or len(parts) == 1:
+        # Show all settings in formatted table
+        click.echo(click.style("Infinidev Settings", bold=True))
+        click.echo(click.style(f"(from {SETTINGS_FILE})", dim=True))
+        click.echo("")
+        click.echo(click.style("LLM", bold=True))
+        click.echo(f"  {settings.LLM_MODEL:<50} (LLM_MODEL)")
+        click.echo(f"  {settings.LLM_BASE_URL:<50} (LLM_BASE_URL)")
+        click.echo("")
+        click.echo(click.style("Loop Engine", bold=True))
+        click.echo(f"  {settings.LOOP_MAX_ITERATIONS:<50} (LOOP_MAX_ITERATIONS)")
+        click.echo(f"  {settings.LOOP_MAX_TOTAL_TOOL_CALLS:<50} (LOOP_MAX_TOTAL_TOOL_CALLS)")
+        click.echo("")
+        click.echo(click.style("Code Interpreter", bold=True))
+        click.echo(f"  {settings.CODE_INTERPRETER_TIMEOUT:<50} (CODE_INTERPRETER_TIMEOUT)")
+        click.echo("")
+        click.echo(click.style("UI", bold=True))
+        log_level = settings.model_dump().get("LOG_LEVEL", "warning")
+        click.echo(f"  {log_level:<50} (LOG_LEVEL)")
+    else:
+        # Show or set specific setting
+        setting_key = subcmd.upper()
+        value_to_set = parts[2] if len(parts) > 2 else None
+
+        type_map = {
+            "LLM_MODEL": str,
+            "LLM_BASE_URL": str,
+            "DB_PATH": str,
+            "WORKSPACE_BASE_DIR": str,
+            "EMBEDDING_PROVIDER": str,
+            "EMBEDDING_MODEL": str,
+            "EMBEDDING_BASE_URL": str,
+            "FORGEJO_API_URL": str,
+            "FORGEJO_OWNER": str,
+            "LOOP_MAX_ITERATIONS": int,
+            "LOOP_MAX_TOOL_CALLS_PER_ACTION": int,
+            "LOOP_MAX_TOTAL_TOOL_CALLS": int,
+            "LOOP_HISTORY_WINDOW": int,
+            "MAX_RETRIES": int,
+            "RETRY_BASE_DELAY": float,
+            "COMMAND_TIMEOUT": int,
+            "WEB_TIMEOUT": int,
+            "GIT_PUSH_TIMEOUT": int,
+            "MAX_FILE_SIZE_BYTES": int,
+            "MAX_DIR_LISTING": int,
+            "WEB_CACHE_TTL_SECONDS": int,
+            "WEB_RPM_LIMIT": int,
+            "WEB_ROBOTS_CACHE_TTL": int,
+            "DEDUP_SIMILARITY_THRESHOLD": float,
+            "CODE_INTERPRETER_TIMEOUT": int,
+            "CODE_INTERPRETER_MAX_OUTPUT": int,
+            "SANDBOX_ENABLED": bool,
+        }
+
+        if value_to_set:
+            # Convert to appropriate type
+            type_class = type_map.get(setting_key, str)
+            try:
+                if type_class == bool:
+                    converted = value_to_set.lower() in ("true", "1", "yes")
+                else:
+                    converted = type_class(value_to_set)
+                settings.save_user_settings({setting_key: converted})
+                reload_all()
+                click.echo(click.style(f"Updated {setting_key} to: {converted}", fg="green"))
+            except ValueError as e:
+                click.echo(click.style(f"Error: {e}", fg="red"))
+        else:
+            # Show current value
+            value = getattr(settings, setting_key, None)
+            if value is not None:
+                click.echo(f"{setting_key}: {value}")
+            else:
+                click.echo(click.style(f"Unknown setting: {setting_key}", fg="yellow"))
+
 
 @click.command()
 @click.option("--no-tui", is_flag=True, help="Run in classic CLI mode instead of TUI.")

@@ -941,6 +941,8 @@ class LoopEngine(AgentEngine):
                 "tool_calls_step": 0,
                 "tool_calls_total": state.total_tool_calls,
                 "tokens_total": state.total_tokens,
+                "prompt_tokens": state.last_prompt_tokens,
+                "completion_tokens": state.last_completion_tokens,
             })
 
             # --- Inner loop (function calling within one step) ---
@@ -968,6 +970,8 @@ class LoopEngine(AgentEngine):
                     usage = getattr(response, "usage", None)
                     if usage:
                         state.total_tokens += getattr(usage, "total_tokens", 0)
+                        state.last_prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                        state.last_completion_tokens = getattr(usage, "completion_tokens", 0)
 
                     choice = response.choices[0]
                     message = choice.message
@@ -1061,6 +1065,8 @@ class LoopEngine(AgentEngine):
                     usage = getattr(response, "usage", None)
                     if usage:
                         state.total_tokens += getattr(usage, "total_tokens", 0)
+                        state.last_prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                        state.last_completion_tokens = getattr(usage, "completion_tokens", 0)
 
                     choice = response.choices[0]
                     message = choice.message
@@ -1178,6 +1184,9 @@ class LoopEngine(AgentEngine):
                                 "call_num": action_tool_calls,
                                 "total_calls": state.total_tool_calls,
                                 "iteration": iteration + 1,
+                                "tokens_total": state.total_tokens,
+                                "prompt_tokens": state.last_prompt_tokens,
+                                "completion_tokens": state.last_completion_tokens,
                             })
 
                         # Manual mode: send all tool results as a single user message
@@ -1409,6 +1418,8 @@ class LoopEngine(AgentEngine):
                 "tool_calls_step": action_tool_calls,
                 "tool_calls_total": state.total_tool_calls,
                 "tokens_total": state.total_tokens,
+                "prompt_tokens": state.last_prompt_tokens,
+                "completion_tokens": state.last_completion_tokens,
             })
 
             # Checkpoint for crash recovery
