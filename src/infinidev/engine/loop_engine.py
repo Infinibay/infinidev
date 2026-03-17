@@ -38,6 +38,38 @@ from infinidev.engine.loop_tools import (
 # Max consecutive calls to the same tool before forcing a step_complete nudge
 _MAX_SAME_TOOL_CONSECUTIVE = 3
 
+
+def _get_model_max_context(llm_params: dict[str, Any]) -> int:
+    """Fetch the model's max context window from Ollama /api/show.
+
+    Returns 0 if unknown (disables context budget in the prompt).
+    """
+    import httpx
+
+    model = llm_params.get("model", "")
+    base_url = llm_params.get("base_url", "http://localhost:11434")
+
+    bare_model = model
+    for prefix in ("ollama_chat/", "ollama/"):
+        if bare_model.startswith(prefix):
+            bare_model = bare_model[len(prefix):]
+            break
+
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/show",
+            json={"name": bare_model},
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            model_info = resp.json().get("model_info", {})
+            for key, val in model_info.items():
+                if key.endswith(".context_length") and isinstance(val, int):
+                    return val
+    except Exception:
+        pass
+    return 0
+
 # Max retries when LLM returns text instead of tool calls
 _MAX_TEXT_RETRIES = 3
 
@@ -691,6 +723,9 @@ class LoopEngine(AgentEngine):
         max_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION or max_total_calls
         history_window = settings.LOOP_HISTORY_WINDOW
 
+        # Fetch model's context window for budget awareness
+        max_context_tokens = _get_model_max_context(llm_params)
+
         # Resolve tools
         tools = task_tools if task_tools is not None else getattr(agent, "tools", [])
         if task_tools is not None:
@@ -776,6 +811,7 @@ class LoopEngine(AgentEngine):
             user_prompt = build_iteration_prompt(
                 desc, expected, effective_state,
                 project_knowledge=_project_knowledge if iteration == start_iteration else None,
+                max_context_tokens=max_context_tokens,
             )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},

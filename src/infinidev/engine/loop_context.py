@@ -179,6 +179,27 @@ Do NOT use this for questions about code, files, or anything that requires readi
 - Capture key facts: file paths, function names, decisions made, values found.
 - Be concise (~50 tokens). Raw tool output is discarded — only your summary survives.
 
+### Self Code Review (mandatory after writing code)
+When your task involved writing or editing code, you MUST add a self-review step before setting status="done". Skip this only if the task was purely informational (answering questions, reading files, research).
+
+After finishing all implementation steps, add a review step that checks:
+1. **Logic bugs**: Re-read every file you modified. Trace the logic end-to-end. Look for off-by-one errors, wrong conditions, missing edge cases, unhandled None/empty values.
+2. **Library/API correctness**: Verify that every function, method, class, and parameter you used actually exists in the version installed. Read imports and check signatures — do not assume from memory.
+3. **Alignment with the request**: Re-read the user's original instruction. Compare what was asked vs. what was implemented. Flag anything missing or divergent.
+4. **Security**: Check for injection (SQL, command, XSS), hardcoded secrets, unsafe deserialization, path traversal, and unvalidated user input.
+5. **Code quality**: Ensure clear naming, no dead code, no duplicated logic, consistent style with the existing codebase.
+6. **Tests pass**: Run the existing test suite (`pytest` or equivalent). If tests fail, fix them before completing.
+7. **New tests for new features**: If you added a new feature or fixed a bug, write tests that cover the new behavior. Do not skip this.
+
+If the review finds issues, fix them in additional steps before completing. In your final_answer, mention that a self-review was performed.
+
+### Context Budget Awareness
+Each iteration you receive a `<context-budget>` block showing tokens used vs. available.
+- **Below 70%**: Work normally.
+- **70-85%**: Context is running low. Finish the current step, then call step_complete with status="done". In your final_answer, summarize what was accomplished and list remaining work as follow-up steps the user can request in a new conversation.
+- **Above 85%**: CRITICAL. Stop all tool calls immediately. Call step_complete with status="done" and provide a final_answer that includes: (1) what was completed, (2) what was in progress, (3) concrete next steps the user should request to continue.
+- Never ignore the context budget. A crash from exceeding the context window loses ALL progress.
+
 ### Important
 - Do NOT repeat previous action summaries — they are already provided to you.
 - Focus only on the current step.
@@ -225,11 +246,13 @@ def build_iteration_prompt(
     state: LoopState,
     *,
     project_knowledge: list[dict] | None = None,
+    max_context_tokens: int = 0,
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
     Assembles <project-knowledge>, <task>, <plan>, <previous-actions>,
-    <current-action>, <next-actions>, and <expected-output> XML blocks.
+    <current-action>, <next-actions>, <expected-output>, and
+    <context-budget> XML blocks.
     """
     parts: list[str] = []
 
@@ -302,6 +325,37 @@ def build_iteration_prompt(
     # Expected output
     if expected_output:
         parts.append(f"<expected-output>\n{expected_output}\n</expected-output>")
+
+    # Context budget — inform the agent how much context remains
+    if max_context_tokens > 0 and state.total_tokens > 0:
+        used = state.total_tokens
+        remaining = max(0, max_context_tokens - used)
+        pct_used = min(100.0, (used / max_context_tokens) * 100)
+
+        budget_lines = [
+            f"Tokens used: {used} / {max_context_tokens} ({pct_used:.0f}%)",
+            f"Tokens remaining: {remaining}",
+        ]
+
+        if pct_used >= 85:
+            budget_lines.append(
+                "⚠ CRITICAL: Context window almost full. You MUST wrap up immediately. "
+                "Call step_complete with status=\"done\" and a final_answer summarizing "
+                "what was accomplished and what remains unfinished."
+            )
+        elif pct_used >= 70:
+            budget_lines.append(
+                "⚠ WARNING: Context window running low. Finish the current step, then "
+                "call step_complete with status=\"done\". In your final_answer, include "
+                "a summary of what was done and list any remaining work as follow-up steps "
+                "the user can request in a new conversation."
+            )
+
+        parts.append(
+            "<context-budget>\n"
+            + "\n".join(budget_lines)
+            + "\n</context-budget>"
+        )
 
     return "\n\n".join(parts)
 
