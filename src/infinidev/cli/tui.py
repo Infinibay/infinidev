@@ -13,6 +13,7 @@ from typing import Optional, Callable, Set
 from textual.widgets import (
     Header, Footer, Static, TextArea, Label, OptionList, Markdown,
     DirectoryTree, TabbedContent, TabPane, LoadingIndicator,
+    ProgressBar,
 )
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal, VerticalScroll
@@ -27,6 +28,7 @@ from infinidev.db.service import (
 )
 from infinidev.config.settings import reload_all
 from infinidev.cli.file_watcher import FileWatcher
+from infinidev.ui.widgets.context_widgets import QueuedMessageWidget, QueuedMessageStatus
 
 # ── Extension → language map for TextArea syntax highlighting ────────────
 _EXT_LANG = {
@@ -85,6 +87,9 @@ class SidebarPanel(Vertical):
         except Exception:
             plain = re.sub(r"\[/?[^\]]*\]", "", text)
             self.content_static.update(plain)
+
+
+
 
 
 class ChatInput(TextArea):
@@ -273,6 +278,60 @@ class InfinidevTUI(App):
     /* ── Layout ─────────────────────────────────────────── */
     #main-container { height: 100%; }
 
+    /* ── Context Panel ─────────────────────────────────── */
+    #context-panel {
+        width: 100%;
+        padding: 1 2;
+        background: $surface-darken-2;
+        border: solid $secondary;
+        margin-bottom: 1;
+    }
+    #context-panel.sidebar-title {
+        text-align: center;
+        margin-bottom: 1;
+        text-style: bold;
+    }
+    #context-model-row {
+        align: center middle;
+        margin-bottom: 0;
+    }
+    #context-model-label {
+        text-align: right;
+        padding-left: 1;
+    }
+    #chat-progress-row, #tasks-progress-row {
+        align: center middle;
+        margin: 0;
+    }
+    #chat-progress, #tasks-progress {
+        width: 1fr;
+        margin-left: 1;
+    }
+    .context-label {
+        width: auto;
+        padding-right: 1;
+    }
+    .context-separator {
+        height: 1;
+        border: solid $secondary;
+        margin: 1 0;
+        opacity: 0.3;
+    }
+    #queued-messages-label {
+        text-align: center;
+        color: $text-muted;
+        margin-top: 1;
+    }
+    .queued-message {
+        background: $surface-darken-1;
+        border: solid $warning;
+        padding: 0 1;
+        margin-top: 1;
+        opacity: 0.6;
+        text-style: dim;
+    }
+
+    /* ── Layout ─────────────────────────────────────────── */
     #explorer {
         width: 25;
         height: 100%;
@@ -329,6 +388,72 @@ class InfinidevTUI(App):
     #thinking-indicator { height: auto; margin: 1 0; color: #7b9fdf; align: center middle; }
     #thinking-indicator Static { text-align: center; width: 100%; }
     #thinking-indicator LoadingIndicator { height: 1; }
+
+    /* ── Context Windows ────────────────────────────────────── */
+    #context-panel {
+        width: 100%;
+        margin-bottom: 1;
+        padding: 1;
+        background: $surface-lighten-1;
+        border: solid $primary;
+    }
+    #context-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+        color: $primary;
+    }
+    .context-label {
+        width: auto;
+        text-style: bold;
+        color: $text;
+    }
+    .context-value {
+        width: auto;
+        color: $text-muted;
+    }
+    .context-usage {
+        width: 1fr;
+    }
+    .context-usage-text {
+        width: auto;
+        margin-left: 1;
+    }
+    .context-remaining {
+        width: auto;
+        color: $success;
+    }
+    .context-remaining.low {
+        color: $error;
+    }
+
+    /* Queued messages styling */
+    .queued-msg {
+        height: auto;
+        color: $text-muted;
+        margin-bottom: 1;
+        padding: 0 1;
+        border-left: tall $accent;
+        background: $surface-darken-2;
+        opacity: 0.6;
+    }
+    .queued-msg .message-content {
+        color: $text-muted;
+    }
+    .queued-msg .message-status {
+        color: $warning;
+        text-style: italic;
+    }
+    .queued-msg.reading {
+        opacity: 1.0;
+        border-left: tall $primary;
+        background: $surface;
+    }
+    .queued-msg.processed {
+        opacity: 1.0;
+        border-left: tall $success;
+        background: #0a1a0a;
+    }
     """
 
     BINDINGS = [
@@ -360,6 +485,8 @@ class InfinidevTUI(App):
 
             # Sidebar
             with Vertical(id="sidebar"):
+                # Context window panel
+                yield ContextPanel(id="context-panel")
                 yield SidebarPanel("PLANNING", id="plan-panel")
                 yield SidebarPanel("STEPS", id="steps-panel")
                 yield SidebarPanel("ACTIONS", id="actions-panel")
@@ -381,6 +508,12 @@ class InfinidevTUI(App):
 
         self.engine = LoopEngine()
         self.agent = InfinidevAgent(agent_id="tui_agent")
+        
+        # Initialize context window calculator
+        from infinidev.ui.context_calculator import calculator
+        self.context_calculator = calculator
+        self._init_context_display()
+        
         self._update_status_bar()
 
         from infinidev.config.tech_detection import detect_tech_hints
@@ -393,6 +526,40 @@ class InfinidevTUI(App):
         self._collapse_handlers: list[Callable] = []
         self._visible_paths: set[pathlib.Path] = set()
         self._start_file_watcher()
+
+    def _init_context_display(self) -> None:
+        """Initialize context window display widget and fetch model info."""
+        self._context_panel = self.query_one("#context-panel", ContextPanel)
+        self._fetch_model_context()
+
+    @work(thread=True)
+    def _fetch_model_context(self) -> None:
+        """Fetch model context size from Ollama in background."""
+        import asyncio
+        try:
+            asyncio.run(self.context_calculator.update_model_context())
+        except Exception:
+            pass
+        # Push initial status to the panel
+        status = self.context_calculator.get_context_status()
+        self.call_from_thread(self._context_panel.update_status, status)
+
+    def _refresh_context_panel(self, task_tokens: int = 0) -> None:
+        """Recalculate and refresh the context panel display."""
+        # Estimate chat tokens from message history
+        history = self.query_one("#chat-history")
+        chat_text = ""
+        for msg in history.query(Static):
+            content = str(msg._Static__content) if hasattr(msg, '_Static__content') else ""
+            chat_text += content
+        # Rough estimate: ~4 chars per token
+        chat_tokens = len(chat_text) // 4
+        self.context_calculator.calculate_usage(
+            chat_tokens=chat_tokens,
+            task_tokens=task_tokens,
+        )
+        status = self.context_calculator.get_context_status()
+        self._context_panel.update_status(status)
 
     # ── Focus actions ────────────────────────────────────
 
@@ -599,6 +766,10 @@ class InfinidevTUI(App):
                 plan_text += f"\n[{status}]"
             self.query_one("#plan-panel").update_content(plan_text)
 
+            # Update context window display with token usage from engine
+            task_tokens = data.get("tokens_total", 0)
+            self._refresh_context_panel(task_tokens=task_tokens)
+
         elif event_type == "loop_tool_call":
             tool_name = data.get("tool_name", "")
             tool_detail = data.get("tool_detail", "")
@@ -647,7 +818,16 @@ class InfinidevTUI(App):
             plain = re.sub(r"\[/?[^\]]*\]", "", content)
             return Static(plain)
 
-    def add_message(self, sender: str, text: str, type: str = "agent"):
+    def add_message(self, sender: str, text: str, type: str = "agent", queued: bool = False, queue_index: int | None = None):
+        """Add a message to the chat history.
+
+        Args:
+            sender: Message sender (e.g., "You", "Infinidev")
+            text: Message content
+            type: Message type ("user", "agent", "system")
+            queued: If True, render as a queued message (faded)
+            queue_index: Queue position if queued (1-based)
+        """
         history = self.query_one("#chat-history")
         msg_class = f"{type}-msg"
         color = self._SENDER_COLORS.get(type, "#cccccc")
@@ -659,10 +839,77 @@ class InfinidevTUI(App):
             body = Markdown(text)
         else:
             body = self._safe_static(text)
+
+        # Add queue indicator if queued
+        if queued:
+            queue_label = Static(
+                f"[dim]● Queued message #{queue_index} - Not yet processed[/dim]",
+                classes="queue-indicator"
+            )
+            container.mount(queue_label)
+
         history.mount(container)
         container.mount(header)
         container.mount(body)
         history.scroll_end(animate=False)
+
+        # Refresh context panel to reflect updated chat tokens
+        if hasattr(self, '_context_panel'):
+            self._refresh_context_panel()
+
+    def add_queued_message(self, sender: str, text: str, type: str = "agent") -> QueuedMessageWidget:
+        """Add a message to the queue (not yet processed).
+
+        Creates a queued message widget that is rendered with a faded appearance
+        until the model processes it.
+        """
+        from infinidev.ui.widgets.context_widgets import QueuedMessageWidget, QueuedMessageStatus
+
+        history = self.query_one("#chat-history")
+
+        # Track queued messages
+        if not hasattr(self, '_queued_messages'):
+            self._queued_messages: list[QueuedMessageWidget] = []
+
+        widget = QueuedMessageWidget(
+            sender=sender,
+            text=text,
+            sender_color=self._SENDER_COLORS.get(type, "#cccccc"),
+            queued_index=len(self._queued_messages) + 1
+        )
+
+        history.mount(widget)
+        self._queued_messages.append(widget)
+
+        # Mark this as a user message queuing up the agent
+        self._show_thinking()
+
+        return widget
+
+    def process_queued_message(self, widget: QueuedMessageWidget) -> None:
+        """Promote a queued message to a normal message and update its status."""
+        # Update widget status to processed
+        widget.update_status(QueuedMessageStatus.PROCESSED)
+
+        # Remove from queued list
+        if hasattr(self, '_queued_messages') and widget in self._queued_messages:
+            self._queued_messages.remove(widget)
+
+        # Scroll to show the newly processed message
+        history = self.query_one("#chat-history")
+        history.scroll_into_view(widget, animate=True)
+
+        # Auto-dismiss thinking indicator if this was the first queued message
+        if len(self._queued_messages) == 0:
+            self._hide_thinking()
+
+    def _hide_thinking(self) -> None:
+        """Hide the thinking indicator."""
+        try:
+            indicator = self.query_one("#thinking-indicator", Vertical)
+            indicator.remove()
+        except Exception:
+            pass
 
     # ── Submit / engine ──────────────────────────────────
 
