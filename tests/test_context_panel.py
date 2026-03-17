@@ -46,16 +46,12 @@ class TestContextPanel:
                     "remaining_tokens": 3596,
                     "usage_percentage": 0.122,
                 },
-                "remaining": 2596,
-                "total_used": 1500,
             }
             panel.update_status(status)
 
-            # Model name visible
             model_w = panel.query_one("#context-model-name", Static)
             assert "llama2" in str(model_w._Static__content)
 
-            # Chat details show used and available
             chat_w = panel.query_one("#chat-details", Static)
             content = str(chat_w._Static__content)
             assert "1000" in content
@@ -79,10 +75,7 @@ class TestContextPanel:
                     "remaining_tokens": 750,
                     "usage_percentage": 0.25,
                 },
-                "remaining": 250,
-                "total_used": 750,
             }
-            # Should not raise MarkupError
             panel.update_status(status)
             chat_bar = panel.query_one("#chat-bar", Static)
             assert "50.0%" in str(chat_bar._Static__content)
@@ -94,7 +87,8 @@ class TestContextWindowCalculatorIntegration:
     async def test_calculator_with_panel(self):
         """Test that calculator data works with panel display."""
         calculator = ContextWindowCalculator(model_name="test-model", max_context=8192)
-        calculator.calculate_usage(chat_tokens=2048, task_tokens=1024)
+        calculator.update_chat("Hello", ["summary1", "summary2"])
+        calculator.update_task(task_prompt_tokens=2048)
 
         status = calculator.get_context_status()
 
@@ -105,24 +99,19 @@ class TestContextWindowCalculatorIntegration:
 
             model_w = panel.query_one("#context-model-name", Static)
             assert "test-model" in str(model_w._Static__content)
-            assert status["remaining"] > 0
 
     def test_calculator_full_context(self):
         """Test calculator at full context capacity."""
         calculator = ContextWindowCalculator(max_context=4096)
-        calculator.calculate_usage(chat_tokens=2048, task_tokens=2048)
+        calculator.update_task(task_prompt_tokens=4096)
 
         status = calculator.get_context_status()
-        assert status["remaining"] == 0
-        assert status["chat"]["usage_percentage"] == 0.5
-        assert status["tasks"]["usage_percentage"] == 0.5
+        assert status["tasks"]["remaining_tokens"] == 0
+        assert status["tasks"]["usage_percentage"] == 1.0
 
     def test_calculator_zero_context(self):
         """Test calculator with zero tokens."""
         calculator = ContextWindowCalculator()
-        calculator.calculate_usage(chat_tokens=0, task_tokens=0)
-
         status = calculator.get_context_status()
         assert status["chat"]["remaining_tokens"] == 4096
         assert status["chat"]["usage_percentage"] == 0.0
-        assert status["remaining"] == 4096
