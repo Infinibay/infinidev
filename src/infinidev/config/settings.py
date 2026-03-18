@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     ALLOWED_BASE_DIRS: list[str] = ["/"]  # Allow all for local CLI
     ALLOWED_COMMANDS: list[str] = []      # Not used if SANDBOX_ENABLED=False
 
+    # Permissions
+    EXECUTE_COMMANDS_PERMISSION: str = "auto_approve"  # "auto_approve", "ask", "allowed_list"
+    ALLOWED_COMMANDS_LIST: list[str] = []  # List of allowed commands when permission is "allowed_list"
+    FILE_OPERATIONS_PERMISSION: str = "allow_all"  # "allow_all", "allowed_list", "allowed_paths"
+    ALLOWED_FILE_PATHS: list[str] = []  # List of allowed paths when permission is "allowed_paths"
+
     # File limits
     MAX_FILE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5MB
     MAX_DIR_LISTING: int = 1000

@@ -14,7 +14,7 @@ from typing import Optional, Callable, Set
 from textual.widgets import (
     Header, Footer, Static, TextArea, Label, OptionList, Markdown,
     DirectoryTree, TabbedContent, TabPane, LoadingIndicator,
-    ProgressBar, Button,
+    ProgressBar, Button, Select,
 )
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal, VerticalScroll
@@ -381,38 +381,80 @@ class SettingsEditorScreen(ModalScreen[None]):
         Binding("ctrl+enter", "save", "Save", show=True),
     ]
 
-    # Define all settings with their metadata
+    # Define all settings with their metadata.
+    # "type" controls the editor widget: "string"=text, "int"/"float"=text,
+    # "bool"=select(true/false), "select"=select from "choices", "list"=text(comma-sep).
     SETTINGS_INFO = {
-        "DB_PATH": {"section": "Database", "default": "~/.infinidev/infinidev.db", "type": "string"},
-        "MAX_RETRIES": {"section": "Database", "default": 5, "type": "int"},
-        "RETRY_BASE_DELAY": {"section": "Database", "default": 0.1, "type": "float"},
-        "COMMAND_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int"},
-        "WEB_TIMEOUT": {"section": "Timeouts", "default": 30, "type": "int"},
-        "GIT_PUSH_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int"},
-        "SANDBOX_ENABLED": {"section": "Sandbox", "default": False, "type": "bool"},
-        "ALLOWED_BASE_DIRS": {"section": "Sandbox", "default": ["/"]},
-        "ALLOWED_COMMANDS": {"section": "Sandbox", "default": []},
-        "MAX_FILE_SIZE_BYTES": {"section": "File Limits", "default": 5242880, "type": "int"},
-        "MAX_DIR_LISTING": {"section": "File Limits", "default": 1000, "type": "int"},
-        "LLM_MODEL": {"section": "LLM", "default": "ollama_chat/qwen2.5-coder:7b", "type": "string"},
-        "LLM_BASE_URL": {"section": "LLM", "default": "http://localhost:11434", "type": "string"},
-        "LLM_API_KEY": {"section": "LLM", "default": "ollama", "type": "string"},
-        "EMBEDDING_PROVIDER": {"section": "Embedding", "default": "ollama", "type": "string"},
-        "EMBEDDING_MODEL": {"section": "Embedding", "default": "nomic-embed-text", "type": "string"},
-        "EMBEDDING_BASE_URL": {"section": "Embedding", "default": "http://localhost:11434", "type": "string"},
-        "LOOP_MAX_ITERATIONS": {"section": "Loop Engine", "default": 50, "type": "int"},
-        "LOOP_MAX_TOOL_CALLS_PER_ACTION": {"section": "Loop Engine", "default": 0, "type": "int"},
-        "LOOP_MAX_TOTAL_TOOL_CALLS": {"section": "Loop Engine", "default": 200, "type": "int"},
-        "LOOP_HISTORY_WINDOW": {"section": "Loop Engine", "default": 0, "type": "int"},
-        "WEB_CACHE_TTL_SECONDS": {"section": "Web Tools", "default": 3600, "type": "int"},
-        "WEB_RPM_LIMIT": {"section": "Web Tools", "default": 20, "type": "int"},
-        "WEB_ROBOTS_CACHE_TTL": {"section": "Web Tools", "default": 3600, "type": "int"},
-        "DEDUP_SIMILARITY_THRESHOLD": {"section": "Deduplication", "default": 0.82, "type": "float"},
-        "WORKSPACE_BASE_DIR": {"section": "Workspace", "default": ".", "type": "string"},
-        "CODE_INTERPRETER_TIMEOUT": {"section": "Code Interpreter", "default": 120, "type": "int"},
-        "CODE_INTERPRETER_MAX_OUTPUT": {"section": "Code Interpreter", "default": 50000, "type": "int"},
-        "FORGEJO_API_URL": {"section": "Forgejo", "default": "", "type": "string"},
-        "FORGEJO_OWNER": {"section": "Forgejo", "default": "", "type": "string"},
+        "LLM_MODEL": {"section": "LLM", "default": "ollama_chat/qwen2.5-coder:7b", "type": "string",
+                       "desc": "LiteLLM model identifier. Format: provider/model (e.g. ollama_chat/qwen2.5-coder:7b)."},
+        "LLM_BASE_URL": {"section": "LLM", "default": "http://localhost:11434", "type": "string",
+                         "desc": "Base URL for the LLM provider (Ollama, OpenAI-compatible, etc)."},
+        "LLM_API_KEY": {"section": "LLM", "default": "ollama", "type": "string",
+                        "desc": "API key for the LLM provider. Use 'ollama' for local Ollama."},
+        "EMBEDDING_PROVIDER": {"section": "Embedding", "default": "ollama", "type": "string",
+                               "desc": "Provider for text embeddings used in semantic search."},
+        "EMBEDDING_MODEL": {"section": "Embedding", "default": "nomic-embed-text", "type": "string",
+                            "desc": "Embedding model name (must be available in the provider)."},
+        "EMBEDDING_BASE_URL": {"section": "Embedding", "default": "http://localhost:11434", "type": "string",
+                               "desc": "Base URL for the embedding provider."},
+        "LOOP_MAX_ITERATIONS": {"section": "Loop Engine", "default": 50, "type": "int",
+                                "desc": "Maximum plan-execute-summarize iterations per task."},
+        "LOOP_MAX_TOOL_CALLS_PER_ACTION": {"section": "Loop Engine", "default": 0, "type": "int",
+                                           "desc": "Max tool calls per step. 0 = unlimited (only global limit applies)."},
+        "LOOP_MAX_TOTAL_TOOL_CALLS": {"section": "Loop Engine", "default": 200, "type": "int",
+                                      "desc": "Hard limit on total tool calls per task across all steps."},
+        "LOOP_HISTORY_WINDOW": {"section": "Loop Engine", "default": 0, "type": "int",
+                                "desc": "Number of past action summaries to keep in context. 0 = keep all."},
+        "ANALYSIS_ENABLED": {"section": "Phases", "default": True, "type": "bool",
+                             "desc": "Enable the pre-development analyst phase that explores code and produces a spec."},
+        "REVIEW_ENABLED": {"section": "Phases", "default": True, "type": "bool",
+                           "desc": "Enable the post-development code review phase."},
+        "EXECUTE_COMMANDS_PERMISSION": {"section": "Permissions", "default": "auto_approve", "type": "select",
+                                        "choices": ["auto_approve", "ask", "allowed_list"],
+                                        "desc": "How to handle shell command execution. auto_approve=allow all, ask=prompt user, allowed_list=only commands in ALLOWED_COMMANDS_LIST."},
+        "ALLOWED_COMMANDS_LIST": {"section": "Permissions", "default": [], "type": "list",
+                                  "desc": "Commands allowed when EXECUTE_COMMANDS_PERMISSION=allowed_list. Comma-separated."},
+        "FILE_OPERATIONS_PERMISSION": {"section": "Permissions", "default": "allow_all", "type": "select",
+                                       "choices": ["allow_all", "allowed_list", "allowed_paths"],
+                                       "desc": "How to handle file write/edit/delete. allow_all=no restrictions, allowed_list=specific operations, allowed_paths=only within listed paths."},
+        "ALLOWED_FILE_PATHS": {"section": "Permissions", "default": [], "type": "list",
+                               "desc": "Paths allowed when FILE_OPERATIONS_PERMISSION=allowed_paths. Comma-separated."},
+        "SANDBOX_ENABLED": {"section": "Sandbox", "default": False, "type": "bool",
+                            "desc": "Enable sandbox mode. Restricts file access to ALLOWED_BASE_DIRS."},
+        "ALLOWED_BASE_DIRS": {"section": "Sandbox", "default": ["/"], "type": "list",
+                              "desc": "Directories the agent can access when sandbox is enabled. Comma-separated."},
+        "ALLOWED_COMMANDS": {"section": "Sandbox", "default": [], "type": "list",
+                             "desc": "Legacy: shell commands allowed in sandbox mode. Comma-separated."},
+        "COMMAND_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int",
+                            "desc": "Max seconds for a shell command before it is killed."},
+        "WEB_TIMEOUT": {"section": "Timeouts", "default": 30, "type": "int",
+                        "desc": "Max seconds for web fetch/search requests."},
+        "GIT_PUSH_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int",
+                             "desc": "Max seconds for git push operations."},
+        "MAX_FILE_SIZE_BYTES": {"section": "File Limits", "default": 5242880, "type": "int",
+                                "desc": "Max file size (bytes) the agent can read. Default 5 MB."},
+        "MAX_DIR_LISTING": {"section": "File Limits", "default": 1000, "type": "int",
+                            "desc": "Max entries returned by list_directory."},
+        "DB_PATH": {"section": "Database", "default": "~/.infinidev/infinidev.db", "type": "string",
+                    "desc": "Path to the SQLite database for projects, tasks, and findings."},
+        "MAX_RETRIES": {"section": "Database", "default": 5, "type": "int",
+                        "desc": "Max retries for database operations on WAL contention."},
+        "RETRY_BASE_DELAY": {"section": "Database", "default": 0.1, "type": "float",
+                             "desc": "Base delay (seconds) for exponential backoff on DB retries."},
+        "WEB_CACHE_TTL_SECONDS": {"section": "Web Tools", "default": 3600, "type": "int",
+                                  "desc": "Cache duration (seconds) for web search/fetch results."},
+        "WEB_RPM_LIMIT": {"section": "Web Tools", "default": 20, "type": "int",
+                          "desc": "Max web requests per minute (rate limiting)."},
+        "WEB_ROBOTS_CACHE_TTL": {"section": "Web Tools", "default": 3600, "type": "int",
+                                 "desc": "Cache duration (seconds) for robots.txt lookups."},
+        "DEDUP_SIMILARITY_THRESHOLD": {"section": "Knowledge", "default": 0.82, "type": "float",
+                                       "desc": "Cosine similarity threshold for deduplicating findings (0-1)."},
+        "WORKSPACE_BASE_DIR": {"section": "Workspace", "default": ".", "type": "string",
+                               "desc": "Base directory for the agent's workspace."},
+        "CODE_INTERPRETER_TIMEOUT": {"section": "Code Interpreter", "default": 120, "type": "int",
+                                     "desc": "Max seconds for code interpreter execution."},
+        "CODE_INTERPRETER_MAX_OUTPUT": {"section": "Code Interpreter", "default": 50000, "type": "int",
+                                        "desc": "Max characters of output captured from code interpreter."},
     }
 
     def __init__(self, settings: Settings):
@@ -489,15 +531,24 @@ class SettingsEditorScreen(ModalScreen[None]):
             self.action_cancel()
 
     def _show_setting_editor(self, setting_key: str) -> None:
+        info = self.SETTINGS_INFO.get(setting_key, {})
         current_value = getattr(self._settings, setting_key, None)
-        setting_type = self.SETTINGS_INFO.get(setting_key, {}).get("type", "string")
+        setting_type = info.get("type", "string")
+        description = info.get("desc", "")
+        choices = info.get("choices", None)
 
-        # Create a simple input screen
-        editor = SettingValueEditor(setting_key, current_value, setting_type)
+        editor = SettingValueEditor(
+            setting_key, current_value, setting_type,
+            description=description, choices=choices,
+        )
         self.app.push_screen(editor, lambda value: self._on_value_updated(setting_key, value))
 
     def _on_value_updated(self, key: str, value: str | None) -> None:
         if value is not None:
+            # Convert list-type settings from comma-separated string
+            setting_type = self.SETTINGS_INFO.get(key, {}).get("type", "string")
+            if setting_type == "list" and isinstance(value, str):
+                value = [item.strip() for item in value.split(",") if item.strip()]
             self._edited_values[key] = value
             # Update the option label to show edited value
             ol = self.query_one("#settings-list", OptionList)
@@ -544,20 +595,17 @@ class SettingsEditorScreen(ModalScreen[None]):
         """Cancel and discard changes."""
         self.dismiss(None)
 
-    @work(exclusive=True, thread=True)
     def add_message(self, sender: str, text: str, type: str = "agent") -> None:
-        """Add a temporary message to indicate save status."""
-        from textual.widgets import Static
-        from textual.containers import Vertical
-        
-        history = self.query_one("#settings-box", Vertical)
-        msg = Static(f"[bold {type}]{sender}:[/bold {type}] {text}", classes=f"{type}-msg")
-        history.mount(msg)
-        self.set_timer(3.0, lambda m=msg: m.remove())
+        """Show a transient notification for save status."""
+        self.notify(f"{sender}: {text}", timeout=3)
 
 
 class SettingValueEditor(ModalScreen[str | None]):
-    """Modal to edit a single setting value."""
+    """Modal to edit a single setting value.
+
+    Renders a Select widget for bool/select types, TextArea for everything else.
+    Shows a description of the setting above the input.
+    """
 
     CSS = """
     SettingValueEditor {
@@ -566,7 +614,7 @@ class SettingValueEditor(ModalScreen[str | None]):
     }
     #setting-editor-box {
         width: 60%;
-        max-height: 40%;
+        max-height: 50%;
         background: $surface;
         border: round $primary;
         padding: 0;
@@ -580,11 +628,20 @@ class SettingValueEditor(ModalScreen[str | None]):
         background: $surface-darken-2;
         border-bottom: solid $primary-darken-2;
     }
+    #setting-editor-desc {
+        width: 100%;
+        padding: 1 2;
+        color: $text-muted;
+    }
     #setting-editor-input {
         width: 100%;
         height: auto;
         max-height: 8;
-        margin: 1 2;
+        margin: 0 2 1 2;
+    }
+    #setting-editor-select {
+        width: 100%;
+        margin: 0 2 1 2;
     }
     #setting-editor-footer {
         width: 100%;
@@ -605,32 +662,57 @@ class SettingValueEditor(ModalScreen[str | None]):
     """
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", show=True),
-        Binding("enter", "save", "Save", show=True),
     ]
 
-    def __init__(self, key: str, current_value, value_type: str):
+    def __init__(self, key: str, current_value, value_type: str,
+                 description: str = "", choices: list[str] | None = None):
         super().__init__()
         self._key = key
         self._current_value = current_value
         self._value_type = value_type
+        self._description = description
+        self._choices = choices
         self._new_value = str(current_value)
 
     def compose(self) -> ComposeResult:
+        from textual.widgets import Select
         with Vertical(id="setting-editor-box"):
             yield Label(f"Edit: {self._key}", id="setting-editor-title")
-            yield TextArea(self._new_value, id="setting-editor-input")
+            if self._description:
+                yield Label(f"[dim]{self._description}[/dim]", id="setting-editor-desc")
+
+            if self._value_type == "bool":
+                options = [("true", "true"), ("false", "false")]
+                current = "true" if str(self._current_value).lower() in ("true", "1", "yes") else "false"
+                yield Select(options, value=current, id="setting-editor-select")
+            elif self._value_type == "select" and self._choices:
+                options = [(c, c) for c in self._choices]
+                current = str(self._current_value) if str(self._current_value) in self._choices else self._choices[0]
+                yield Select(options, value=current, id="setting-editor-select")
+            else:
+                yield TextArea(self._new_value, id="setting-editor-input")
+
             with Vertical(id="setting-editor-footer"):
                 with Horizontal():
                     yield Button("Save", variant="success", id="btn-editor-save")
                     yield Button("Cancel", variant="error", id="btn-editor-cancel")
 
     def on_mount(self) -> None:
-        self.query_one("#setting-editor-input", TextArea).focus()
-        self.query_one("#setting-editor-input", TextArea).select_all()
+        try:
+            ta = self.query_one("#setting-editor-input", TextArea)
+            ta.focus()
+            ta.select_all()
+        except Exception:
+            # Select widget — just focus it
+            try:
+                from textual.widgets import Select
+                self.query_one("#setting-editor-select", Select).focus()
+            except Exception:
+                pass
 
     @on(TextArea.Changed, "#setting-editor-input")
     def on_change(self, event: TextArea.Changed) -> None:
-        self._new_value = event.text
+        self._new_value = event.control.text
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-editor-save":
@@ -639,7 +721,16 @@ class SettingValueEditor(ModalScreen[str | None]):
             self.action_cancel()
 
     def action_save(self) -> None:
-        self.dismiss(self._new_value if self._new_value else self._current_value)
+        from textual.widgets import Select
+        # Read from Select if present
+        try:
+            sel = self.query_one("#setting-editor-select", Select)
+            value = str(sel.value) if sel.value is not None else str(self._current_value)
+            self.dismiss(value)
+            return
+        except Exception:
+            pass
+        self.dismiss(self._new_value if self._new_value else str(self._current_value))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -971,6 +1062,17 @@ class InfinidevTUI(App):
         border-left: tall $success;
         background: #0a1a0a;
     }
+
+    /* Permission buttons */
+    #perm-btn-row {
+        height: auto;
+        width: 100%;
+        padding: 1 0;
+    }
+    #perm-btn-row Button {
+        margin: 0 1;
+        min-width: 10;
+    }
     """
 
     BINDINGS = [
@@ -1031,6 +1133,16 @@ class InfinidevTUI(App):
         self._analysis_original_input = ""  # Original user input being analyzed
         self._analysis_event = None  # threading.Event for blocking run_engine
         self._analysis_answer = ""  # User's answer to analysis questions
+
+        # Permission request state (for execute_command "ask" mode)
+        self._permission_waiting = False
+        self._permission_event = None  # threading.Event
+        self._permission_approved = False
+
+        # Register the permission handler so tools can ask user
+        from infinidev.tools.permission import set_permission_handler
+        set_permission_handler(self._handle_permission_request)
+
         self.agent = InfinidevAgent(agent_id="tui_agent")
 
         # Initialize context window calculator
@@ -1556,6 +1668,74 @@ class InfinidevTUI(App):
         except Exception as e:
             self.add_message("Shell", f"Execution failed: {e}", "system")
 
+    def _handle_permission_request(self, tool_name: str, description: str, details: str) -> bool:
+        """Handle a permission request from a tool. Called from worker thread.
+
+        Shows the command in the ACTIONS side panel with Allow/Deny buttons.
+        Blocks the engine thread until the user clicks a button.
+        """
+        import threading
+
+        evt = threading.Event()
+        self._permission_event = evt
+        self._permission_waiting = True
+        self._permission_approved = False
+
+        # Schedule UI update on main thread
+        self.call_from_thread(self._show_permission_ui, description, details)
+
+        # Block the engine thread until user clicks a button
+        evt.wait()
+
+        approved = self._permission_approved
+        self._permission_event = None
+        self._permission_waiting = False
+
+        return approved
+
+    def _show_permission_ui(self, description: str, details: str) -> None:
+        """Show permission prompt + buttons inside the ACTIONS panel."""
+        panel = self.query_one("#actions-panel")
+        panel.update_content(
+            f"[bold yellow]Permission Required[/bold yellow]\n\n"
+            f"{description}\n\n"
+            f"[bold white]{details}[/bold white]"
+        )
+        # Mount buttons side by side inside the panel
+        btn_row = Horizontal(id="perm-btn-row")
+        panel.mount(btn_row, after=panel.content_static)
+        allow_btn = Button(" Allow ", variant="success", id="btn-perm-allow")
+        deny_btn = Button(" Deny ", variant="error", id="btn-perm-deny")
+        btn_row.mount(allow_btn)
+        btn_row.mount(deny_btn)
+        allow_btn.focus()
+
+    @on(Button.Pressed, "#btn-perm-allow")
+    def _on_perm_allow(self, event: Button.Pressed) -> None:
+        event.stop()
+        self._resolve_permission(True)
+
+    @on(Button.Pressed, "#btn-perm-deny")
+    def _on_perm_deny(self, event: Button.Pressed) -> None:
+        event.stop()
+        self._resolve_permission(False)
+
+    def _resolve_permission(self, approved: bool) -> None:
+        """Handle a permission button click."""
+        # Remove the button row
+        try:
+            self.query_one("#perm-btn-row").remove()
+        except Exception:
+            pass
+        self.query_one("#actions-panel").update_content(
+            "[green]Approved — continuing...[/green]" if approved else "[red]Denied[/red]"
+        )
+        # Unblock the engine thread
+        if self._permission_event is not None:
+            self._permission_approved = approved
+            self._permission_waiting = False
+            self._permission_event.set()
+
     @work(exclusive=True, thread=True)
     def run_engine(self, user_input: str):
         import threading
@@ -1759,6 +1939,12 @@ class InfinidevTUI(App):
             f"  {str(settings.ANALYSIS_ENABLED):<50} (ANALYSIS_ENABLED)",
             f"  {str(settings.REVIEW_ENABLED):<50} (REVIEW_ENABLED)",
             "",
+            "[bold]Permissions[/bold]",
+            f"  {settings.EXECUTE_COMMANDS_PERMISSION:<50} (EXECUTE_COMMANDS_PERMISSION)",
+            f"  {str(settings.ALLOWED_COMMANDS_LIST):<50} (ALLOWED_COMMANDS_LIST)",
+            f"  {settings.FILE_OPERATIONS_PERMISSION:<50} (FILE_OPERATIONS_PERMISSION)",
+            f"  {str(settings.ALLOWED_FILE_PATHS):<50} (ALLOWED_FILE_PATHS)",
+            "",
             "[bold]UI[/bold]",
             f"  {settings.model_dump().get('LOG_LEVEL', 'warning'):<50} (LOG_LEVEL)",
         ]
@@ -1796,10 +1982,17 @@ class InfinidevTUI(App):
             "SANDBOX_ENABLED": bool,
             "ANALYSIS_ENABLED": bool,
             "REVIEW_ENABLED": bool,
+            "EXECUTE_COMMANDS_PERMISSION": str,
+            "ALLOWED_COMMANDS_LIST": list,
+            "FILE_OPERATIONS_PERMISSION": str,
+            "ALLOWED_FILE_PATHS": list,
         }
         type_class = type_map.get(key, str)
         if type_class == bool:
             return value.lower() in ("true", "1", "yes")
+        if type_class == list:
+            # Split comma-separated string into list, strip whitespace
+            return [item.strip() for item in value.split(",") if item.strip()]
         try:
             return type_class(value)
         except ValueError:

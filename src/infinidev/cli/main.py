@@ -206,6 +206,10 @@ def handle_settings_command(parts: list[str]):
             "SANDBOX_ENABLED": bool,
             "ANALYSIS_ENABLED": bool,
             "REVIEW_ENABLED": bool,
+            "EXECUTE_COMMANDS_PERMISSION": str,
+            "ALLOWED_COMMANDS_LIST": list,
+            "FILE_OPERATIONS_PERMISSION": str,
+            "ALLOWED_FILE_PATHS": list,
         }
 
         if value_to_set:
@@ -214,6 +218,8 @@ def handle_settings_command(parts: list[str]):
             try:
                 if type_class == bool:
                     converted = value_to_set.lower() in ("true", "1", "yes")
+                elif type_class == list:
+                    converted = [item.strip() for item in value_to_set.split(",") if item.strip()]
                 else:
                     converted = type_class(value_to_set)
                 settings.save_user_settings({setting_key: converted})
@@ -259,6 +265,15 @@ def main(no_tui: bool, classic: bool):
     engine = LoopEngine()
     analyst = AnalysisEngine()
     reviewer = ReviewEngine()
+
+    # Register permission handler for classic CLI
+    def _classic_permission_handler(tool_name: str, description: str, details: str) -> bool:
+        click.echo(click.style(f"\n⚠ Permission required: {description}", fg="yellow", bold=True))
+        click.echo(click.style(f"  {details}", fg="yellow"))
+        return click.confirm("  Allow?", default=False)
+
+    from infinidev.tools.permission import set_permission_handler
+    set_permission_handler(_classic_permission_handler)
 
     while True:
         try:

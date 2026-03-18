@@ -31,6 +31,39 @@ class ExecuteCommandTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = ExecuteCommandInput
 
+    def _check_permission(self, command: str) -> str | None:
+        """Check command execution permission. Returns error string or None if allowed."""
+        mode = settings.EXECUTE_COMMANDS_PERMISSION
+
+        if mode == "auto_approve":
+            return None
+
+        if mode == "allowed_list":
+            allowed = settings.ALLOWED_COMMANDS_LIST
+            if not allowed:
+                return f"Command denied: no commands in allowed list"
+            # Check if the command's base executable is in the allowed list
+            try:
+                base_cmd = shlex.split(command)[0]
+            except ValueError:
+                base_cmd = command.split()[0] if command.split() else command
+            if base_cmd not in allowed and command not in allowed:
+                return f"Command denied: '{base_cmd}' not in allowed list"
+            return None
+
+        if mode == "ask":
+            from infinidev.tools.permission import request_permission
+            approved = request_permission(
+                tool_name="execute_command",
+                description=f"Execute shell command",
+                details=command,
+            )
+            if not approved:
+                return f"Command denied by user: {command}"
+            return None
+
+        return None  # Unknown mode — allow
+
     def _run(
         self,
         command: str,
@@ -40,6 +73,11 @@ class ExecuteCommandTool(InfinibayBaseTool):
     ) -> str:
         if not command or not command.strip():
             return self._error("Empty command")
+
+        # Check permissions
+        perm_error = self._check_permission(command)
+        if perm_error:
+            return self._error(perm_error)
 
         # Use shell=True to allow piping and other shell features,
         # since this is a local CLI for the user's own machine.
