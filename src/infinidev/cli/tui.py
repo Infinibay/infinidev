@@ -31,6 +31,7 @@ from infinidev.db.service import (
 )
 from infinidev.config.settings import reload_all, Settings
 from infinidev.cli.file_watcher import FileWatcher
+import infinidev.prompts.flows  # noqa: F401 — registers flows
 from infinidev.ui.widgets.context_widgets import QueuedMessageWidget, QueuedMessageStatus
 from infinidev.ui.widgets.file_diff_widget import FileChangeDiffWidget, colorize_diff
 
@@ -1190,6 +1191,10 @@ class InfinidevTUI(App):
         self._analysis_event = None  # threading.Event for blocking run_engine
         self._analysis_answer = ""  # User's answer to analysis questions
 
+        # Engine queue: process one message at a time
+        self._engine_running = False
+        self._pending_inputs: list[str] = []
+
         # Permission request state (for execute_command "ask" mode)
         self._permission_waiting = False
         self._permission_event = None  # threading.Event
@@ -1648,8 +1653,13 @@ class InfinidevTUI(App):
         elif user_text.startswith("/"):
             self.handle_command(user_text)
         else:
-            self._show_thinking()
-            self.run_engine(user_text)
+            if self._engine_running:
+                self._pending_inputs.append(user_text)
+                self.add_message("System", "Queued — waiting for current task to finish.", "system")
+            else:
+                self._engine_running = True
+                self._show_thinking()
+                self.run_engine(user_text)
 
     def _update_status_bar(self) -> None:
         from infinidev.config.settings import settings
@@ -1814,6 +1824,14 @@ class InfinidevTUI(App):
             self._permission_waiting = False
             self._permission_event.set()
 
+    def _drain_pending_inputs(self) -> None:
+        """Process the next queued input, if any."""
+        if self._pending_inputs:
+            next_input = self._pending_inputs.pop(0)
+            self._engine_running = True
+            self._show_thinking()
+            self.run_engine(next_input)
+
     @work(exclusive=True, thread=True)
     def run_engine(self, user_input: str):
         import threading
@@ -1879,7 +1897,24 @@ class InfinidevTUI(App):
                     )
 
                 # Build enriched task prompt
-                task_prompt = analysis.build_developer_prompt()
+                task_prompt = analysis.build_flow_prompt()
+
+                # Handle "done" pseudo-flow (greetings, simple questions)
+                if analysis.flow == "done":
+                    self.call_from_thread(self._hide_thinking)
+                    self.call_from_thread(
+                        self.add_message, "Infinidev",
+                        analysis.reason or analysis.original_input, "agent"
+                    )
+                    store_conversation_turn(
+                        self.session_id, 'assistant',
+                        analysis.reason or analysis.original_input,
+                        (analysis.reason or analysis.original_input)[:200],
+                    )
+                    self.call_from_thread(
+                        self.query_one("#actions-panel").update_content, "Idle"
+                    )
+                    return
 
                 if analysis.action == "proceed":
                     # Show spec and wait for user confirmation
@@ -1928,14 +1963,26 @@ class InfinidevTUI(App):
                         task_prompt = (desc, expected)
 
                     self.call_from_thread(self._show_thinking)
+
+                # Get flow config and configure agent
+                from infinidev.engine.flows import get_flow_config
+                flow_config = get_flow_config(analysis.flow)
+                self.agent._system_prompt_identity = flow_config.identity_prompt
+                self.agent.backstory = flow_config.backstory
+
+                # Override expected output with flow-specific template
+                desc, _ = task_prompt
+                task_prompt = (desc, flow_config.expected_output)
             else:
                 task_prompt = (user_input, "Complete the task and report findings.")
+                flow_config = None
             # --- End analysis phase ---
 
             # --- Development phase ---
+            flow_label = analysis.flow if _settings.ANALYSIS_ENABLED else "develop"
             self.call_from_thread(
                 self.query_one("#actions-panel").update_content,
-                "Developing..."
+                f"Running [{flow_label}]..."
             )
 
             self.agent.activate_context(session_id=self.session_id)
@@ -1951,7 +1998,8 @@ class InfinidevTUI(App):
                 self.agent.deactivate()
 
             # --- Code review phase (single pass, no retry loop) ---
-            if _settings.REVIEW_ENABLED and self.engine.has_file_changes():
+            run_review = flow_config.run_review if flow_config else True
+            if _settings.REVIEW_ENABLED and run_review and self.engine.has_file_changes():
                 self.call_from_thread(
                     self.query_one("#actions-panel").update_content,
                     "Code review..."
@@ -1990,6 +2038,9 @@ class InfinidevTUI(App):
             self._analysis_waiting = False
             self.call_from_thread(self._hide_thinking)
             self.call_from_thread(self.add_message, "Error", str(e), "system")
+        finally:
+            self._engine_running = False
+            self.call_from_thread(self._drain_pending_inputs)
 
     # ── Commands ─────────────────────────────────────────
 
@@ -2166,6 +2217,7 @@ class InfinidevTUI(App):
                 "/settings reset      Reset to defaults\n"
                 "/settings export     Export settings to file\n"
                 "/settings import     Import settings from file\n"
+                "/init                Explore and document the current project\n"
                 "/findings            Browse all findings\n"
                 "/knowledge           Browse project knowledge\n"
                 "/documentation       Browse cached library docs\n"
@@ -2199,10 +2251,57 @@ class InfinidevTUI(App):
             self._browse_findings(filter_type="project_context")
         elif cmd == "/documentation" or cmd == "/docs":
             self._browse_documentation()
+        elif cmd == "/init":
+            if self._engine_running:
+                self.add_message("System", "Cannot run /init while a task is running.", "system")
+            else:
+                self._engine_running = True
+                self.add_message("System", "Exploring and documenting project...", "system")
+                self._show_thinking()
+                self._run_init()
         else:
             self.add_message("System", f"Unknown command: {cmd}", "system")
 
     # ── Background workers ───────────────────────────────
+
+    @work(exclusive=True, thread=True)
+    def _run_init(self):
+        """Run /init — explore and document the current project."""
+        from infinidev.prompts.init_project import INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT
+        from infinidev.engine.flows import get_flow_config
+
+        reload_all()
+        self.call_from_thread(
+            self.query_one("#actions-panel").update_content,
+            "Running [init]..."
+        )
+
+        flow_config = get_flow_config("document")
+        self.agent._system_prompt_identity = flow_config.identity_prompt
+        self.agent.backstory = flow_config.backstory
+
+        self.agent.activate_context(session_id=self.session_id)
+        try:
+            result = self.engine.execute(
+                agent=self.agent,
+                task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
+                verbose=True,
+            )
+            if not result or not result.strip():
+                result = "Project initialization complete."
+        except Exception as e:
+            result = f"Init failed: {e}"
+        finally:
+            self.agent.deactivate()
+
+        self.call_from_thread(self._hide_thinking)
+        self.call_from_thread(self.add_message, "Infinidev", result, "agent")
+        store_conversation_turn(self.session_id, 'assistant', result, result[:200])
+        self.call_from_thread(
+            self.query_one("#actions-panel").update_content, "Idle"
+        )
+        self._engine_running = False
+        self.call_from_thread(self._drain_pending_inputs)
 
     @work(thread=True)
     def _browse_findings(self, filter_type: str | None):

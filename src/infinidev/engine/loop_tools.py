@@ -101,14 +101,39 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
 }
 
 
+ADD_NOTE_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "add_note",
+        "description": (
+            "Save a note to the task scratchpad. Notes persist across all steps "
+            "and are always visible in the <notes> block. Use for: key decisions, "
+            "file paths found, things to remember, warnings to yourself. "
+            "Notes are short (1-2 sentences each). Max 20 notes."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "description": "The note to save (1-2 sentences)",
+                },
+            },
+            "required": ["note"],
+        },
+    },
+}
+
+
 def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     """Convert a list of tools to OpenAI function-calling schemas.
 
-    Always appends the step_complete schema so the LLM can signal
-    step completion via tool calling.
+    Always appends the engine pseudo-tools (step_complete, add_note)
+    so the LLM can signal step completion and take notes.
     """
     schemas = [tool_to_openai_schema(t) for t in tools]
     schemas.append(STEP_COMPLETE_SCHEMA)
+    schemas.append(ADD_NOTE_SCHEMA)
     return schemas
 
 

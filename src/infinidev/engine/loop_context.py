@@ -188,6 +188,14 @@ If you added a new feature or fixed a bug, write tests that cover the new behavi
 Focus on getting the implementation right — the reviewer will catch quality
 issues. Do NOT add a self-review step.
 
+### Task Notes — the `add_note` tool
+Use `add_note` to save information you will need in later steps. Notes persist
+across all iterations and appear in the `<notes>` block of every prompt.
+- Use for: key file paths, decisions made, values found, warnings, constraints.
+- Keep each note short (1-2 sentences). Max 20 notes per task.
+- Notes are your scratchpad — they are NOT shown to the user.
+- Do NOT duplicate information that is already in your step summaries.
+
 ### Context Budget Awareness
 Each iteration you receive a `<context-budget>` block showing tokens used vs. available.
 - **Below 70%**: Work normally.
@@ -251,9 +259,9 @@ def build_iteration_prompt(
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
-    Assembles <project-knowledge>, <task>, <plan>, <previous-actions>,
-    <current-action>, <next-actions>, <expected-output>, and
-    <context-budget> XML blocks.
+    Assembles <project-knowledge>, <task>, <notes>, <plan>,
+    <previous-actions>, <current-action>, <next-actions>,
+    <expected-output>, and <context-budget> XML blocks.
     """
     parts: list[str] = []
 
@@ -280,6 +288,15 @@ def build_iteration_prompt(
 
     # Task description
     parts.append(f"<task>\n{description}\n</task>")
+
+    # Notes (persistent scratchpad across iterations)
+    if state.notes:
+        note_lines = [f"{i+1}. {n}" for i, n in enumerate(state.notes)]
+        parts.append(
+            "<notes>\nYour notes from previous steps:\n"
+            + "\n".join(note_lines)
+            + "\n</notes>"
+        )
 
     # Plan (if we have one)
     if state.plan.steps:

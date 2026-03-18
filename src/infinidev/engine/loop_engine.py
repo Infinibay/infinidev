@@ -30,6 +30,7 @@ from infinidev.engine.loop_models import (
 )
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.loop_tools import (
+    ADD_NOTE_SCHEMA,
     STEP_COMPLETE_SCHEMA,
     build_tool_dispatch,
     build_tool_schemas,
@@ -1109,14 +1110,28 @@ class LoopEngine(AgentEngine):
                 # ── Process tool calls (unified for both modes) ──────
                 if tool_calls:
                     _text_retries = 0  # Reset only when tool calls are present
-                    # Separate step_complete from regular tool calls
+                    # Separate engine pseudo-tools from regular tool calls
                     regular_calls = []
                     sc_call = None
+                    note_calls = []
                     for tc in tool_calls:
                         if tc.function.name == "step_complete":
                             sc_call = tc
+                        elif tc.function.name == "add_note":
+                            note_calls.append(tc)
                         else:
                             regular_calls.append(tc)
+
+                    # Process add_note calls (write to state.notes)
+                    _MAX_NOTES = 20
+                    for nc in note_calls:
+                        try:
+                            nc_args = json.loads(nc.function.arguments) if isinstance(nc.function.arguments, str) else (nc.function.arguments or {})
+                            note_text = nc_args.get("note", "").strip()
+                            if note_text and len(state.notes) < _MAX_NOTES:
+                                state.notes.append(note_text)
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
 
                     # Execute regular tool calls first
                     if regular_calls:
@@ -1141,14 +1156,14 @@ class LoopEngine(AgentEngine):
                                 }
                                 for tc in regular_calls
                             ]
-                            # Include step_complete in the message if present (needed for API)
-                            if sc_call:
+                            # Include engine pseudo-tools in the message (needed for API)
+                            for pseudo_tc in note_calls + ([sc_call] if sc_call else []):
                                 assistant_msg["tool_calls"].append({
-                                    "id": sc_call.id,
+                                    "id": pseudo_tc.id,
                                     "type": "function",
                                     "function": {
-                                        "name": sc_call.function.name,
-                                        "arguments": sc_call.function.arguments,
+                                        "name": pseudo_tc.function.name,
+                                        "arguments": pseudo_tc.function.arguments,
                                     },
                                 })
                             messages.append(assistant_msg)
@@ -1224,11 +1239,14 @@ class LoopEngine(AgentEngine):
                             })
 
                         # Manual mode: send all tool results as a single user message
-                        if manual_tc and tool_results_text:
-                            messages.append({
-                                "role": "user",
-                                "content": "\n\n".join(tool_results_text),
-                            })
+                        if manual_tc:
+                            for nc in note_calls:
+                                tool_results_text.append('[Tool: add_note] Result:\n{"status": "noted"}')
+                            if tool_results_text:
+                                messages.append({
+                                    "role": "user",
+                                    "content": "\n\n".join(tool_results_text),
+                                })
 
                         # Track consecutive identical tool calls (same name + args)
                         # to detect loops. Different args = legitimate usage.
@@ -1242,6 +1260,15 @@ class LoopEngine(AgentEngine):
                             same_tool_streak = 1
                             repetition_nudged = False
 
+                        # Provide add_note tool results
+                        if not manual_tc:
+                            for nc in note_calls:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": nc.id,
+                                    "content": '{"status": "noted"}',
+                                })
+
                         # Provide step_complete tool result if it was in this batch
                         if sc_call and not manual_tc:
                             messages.append({
@@ -1250,8 +1277,8 @@ class LoopEngine(AgentEngine):
                                 "content": '{"status": "acknowledged"}',
                             })
 
-                    elif sc_call:
-                        # Only step_complete, no regular tools
+                    elif sc_call or note_calls:
+                        # Only engine pseudo-tools, no regular tools
                         if manual_tc:
                             messages.append({
                                 "role": "assistant",
@@ -1259,20 +1286,31 @@ class LoopEngine(AgentEngine):
                             })
                         else:
                             assistant_msg = {"role": "assistant", "content": message.content or ""}
-                            assistant_msg["tool_calls"] = [{
-                                "id": sc_call.id,
-                                "type": "function",
-                                "function": {
-                                    "name": sc_call.function.name,
-                                    "arguments": sc_call.function.arguments,
-                                },
-                            }]
+                            pseudo_calls = note_calls + ([sc_call] if sc_call else [])
+                            assistant_msg["tool_calls"] = [
+                                {
+                                    "id": pc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": pc.function.name,
+                                        "arguments": pc.function.arguments,
+                                    },
+                                }
+                                for pc in pseudo_calls
+                            ]
                             messages.append(assistant_msg)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": sc_call.id,
-                                "content": '{"status": "acknowledged"}',
-                            })
+                            for nc in note_calls:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": nc.id,
+                                    "content": '{"status": "noted"}',
+                                })
+                            if sc_call:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": sc_call.id,
+                                    "content": '{"status": "acknowledged"}',
+                                })
 
                     # If step_complete was called, parse it and break
                     if sc_call:

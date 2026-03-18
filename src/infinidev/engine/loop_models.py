@@ -115,6 +115,7 @@ class LoopState(BaseModel):
 
     plan: LoopPlan = Field(default_factory=LoopPlan)
     history: list[ActionRecord] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)  # Scratchpad notes that persist across iterations
     current_step_index: int = 0
     iteration_count: int = 0
     total_tool_calls: int = 0

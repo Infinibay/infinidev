@@ -82,7 +82,18 @@ user did not explicitly mention.
 
 **Scope** — what is and isn't included in this request.
 
-### Step 5: Decide Action
+### Step 5: Classify Flow
+
+Based on the request type, select the execution flow:
+
+- **develop** — Writing, editing, or fixing code. Building features. Modifying the codebase.
+- **research** — Answering questions. Searching the web. Comparing technologies. General knowledge.
+- **document** — Reading external documentation. Writing docs. Updating the knowledge base with API info.
+- **sysadmin** — Installing software. Configuring services. System troubleshooting. Infrastructure tasks.
+
+Default to "develop" if unsure. The flow selects a specialized agent persona — all tools remain available.
+
+### Step 6: Decide Action
 
 **Return questions** ONLY if the answer would fundamentally change what gets
 built. The bar for asking is high:
@@ -151,6 +162,7 @@ Rules for research:
 ```json
 {
   "action": "proceed",
+  "flow": "develop",
   "specification": {
     "summary": "1-2 sentence executive summary of what will be done",
     "requirements": [

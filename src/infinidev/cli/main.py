@@ -15,6 +15,7 @@ from infinidev.engine.loop_engine import LoopEngine
 from infinidev.engine.analysis_engine import AnalysisEngine
 from infinidev.engine.review_engine import ReviewEngine
 from infinidev.cli.tui import InfinidevTUI
+import infinidev.prompts.flows  # noqa: F401 — registers flows
 
 # Configure logging (ensure base dir exists before creating file handler)
 DEFAULT_BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,6 +104,7 @@ def handle_command(cmd_text: str):
         click.echo("  /settings reset    - Reset to defaults")
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
+        click.echo("  /init              - Explore and document the current project")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
         return True
@@ -110,6 +112,9 @@ def handle_command(cmd_text: str):
     elif cmd == "/settings":
         handle_settings_command(parts)
         return True
+
+    elif cmd == "/init":
+        return "init"  # Signal to main loop to run init
 
     click.echo(f"Unknown command: {cmd}")
     return True
@@ -282,7 +287,32 @@ def main(no_tui: bool, classic: bool):
                 continue
 
             if user_input.startswith("/"):
-                handle_command(user_input)
+                cmd_result = handle_command(user_input)
+                if cmd_result == "init":
+                    # /init command — run project exploration
+                    from infinidev.prompts.init_project import INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT
+                    from infinidev.engine.flows import get_flow_config
+
+                    from infinidev.config.settings import reload_all
+                    reload_all()
+
+                    click.echo(click.style("[init] Exploring and documenting project...", fg="yellow"))
+                    flow_config = get_flow_config("document")
+                    agent._system_prompt_identity = flow_config.identity_prompt
+                    agent.backstory = flow_config.backstory
+                    agent.activate_context(session_id=session_id)
+                    try:
+                        result = engine.execute(
+                            agent=agent,
+                            task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
+                            verbose=True,
+                        )
+                        if not result or not result.strip():
+                            result = "Project initialization complete."
+                    finally:
+                        agent.deactivate()
+                    click.echo(click.style("\nInit Result:", fg="green", bold=True))
+                    click.echo(result)
                 continue
 
             from infinidev.config.settings import reload_all
@@ -310,7 +340,12 @@ def main(no_tui: bool, classic: bool):
                     )
 
                 # Build the task prompt from analysis result
-                task_prompt = analysis.build_developer_prompt()
+                task_prompt = analysis.build_flow_prompt()
+
+                # Handle "done" pseudo-flow (greetings, simple questions answered by analyst)
+                if analysis.flow == "done":
+                    click.echo(click.style("\n" + (analysis.reason or analysis.original_input), fg="green"))
+                    continue
 
                 if analysis.action == "proceed":
                     # Show spec and wait for user confirmation
@@ -340,11 +375,22 @@ def main(no_tui: bool, classic: bool):
                         desc, expected = task_prompt
                         desc += f"\n\n## Additional User Feedback\n{confirm}"
                         task_prompt = (desc, expected)
+
+                # Get flow config and configure agent
+                from infinidev.engine.flows import get_flow_config
+                flow_config = get_flow_config(analysis.flow)
+                agent._system_prompt_identity = flow_config.identity_prompt
+                agent.backstory = flow_config.backstory
+
+                # Override expected output with flow-specific template
+                desc, _ = task_prompt
+                task_prompt = (desc, flow_config.expected_output)
             else:
                 task_prompt = (user_input, "Complete the task and report findings.")
+                flow_config = None
             # --- End analysis phase ---
 
-            click.echo(click.style(f"Working on: {user_input}", fg="yellow"))
+            click.echo(click.style(f"[{analysis.flow if settings.ANALYSIS_ENABLED else 'develop'}] Working on: {user_input}", fg="yellow"))
 
             # --- Development phase ---
             agent.activate_context(session_id=session_id)
@@ -360,7 +406,8 @@ def main(no_tui: bool, classic: bool):
                 agent.deactivate()
 
             # --- Code review phase (single pass, no retry loop) ---
-            if settings.REVIEW_ENABLED and engine.has_file_changes():
+            run_review = flow_config.run_review if flow_config else True
+            if settings.REVIEW_ENABLED and run_review and engine.has_file_changes():
                 click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
                 reviewer.reset()
                 review = reviewer.review(

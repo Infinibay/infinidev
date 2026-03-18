@@ -41,10 +41,13 @@ class AnalysisResult:
     research_queries: list[str] = field(default_factory=list)
     research_reason: str = ""
 
+    # Flow to route to: "develop" | "research" | "document" | "sysadmin" | "done"
+    flow: str = "develop"
+
     # The enriched task prompt for the developer (built from specification)
     enriched_prompt: str = ""
 
-    def build_developer_prompt(self) -> tuple[str, str]:
+    def build_flow_prompt(self) -> tuple[str, str]:
         """Build the (description, expected_output) tuple for the developer loop.
 
         For passthrough: returns the original input as-is.
@@ -102,6 +105,9 @@ class AnalysisResult:
         expected = "Complete the task according to the specification above and report findings."
 
         return (description, expected)
+
+    # Backward-compatible alias
+    build_developer_prompt = build_flow_prompt
 
     def format_questions_for_user(self) -> str:
         """Format questions for display to the user."""
@@ -403,6 +409,7 @@ class AnalysisEngine:
                 action="passthrough",
                 original_input=original_input,
                 reason=data.get("reason", ""),
+                flow="done",
             )
 
         elif action == "ask":
@@ -422,10 +429,17 @@ class AnalysisEngine:
             )
 
         elif action == "proceed":
+            flow = data.get("flow", "develop")
+            # Validate flow against registry + "done"
+            valid_flows = {"develop", "research", "document", "sysadmin", "done"}
+            if flow not in valid_flows:
+                logger.warning("AnalysisEngine: invalid flow '%s', defaulting to 'develop'", flow)
+                flow = "develop"
             return AnalysisResult(
                 action="proceed",
                 original_input=original_input,
                 specification=data.get("specification", {}),
+                flow=flow,
             )
 
         else:
