@@ -298,80 +298,76 @@ def main(no_tui: bool, classic: bool):
                 task_prompt = analysis.build_developer_prompt()
 
                 if analysis.action == "proceed":
-                    click.echo(click.style(
-                        f"Analysis complete: {analysis.specification.get('summary', '')}",
-                        fg="cyan", dim=True,
-                    ))
+                    # Show spec and wait for user confirmation
+                    spec = analysis.specification
+                    click.echo(click.style("\n── Analysis Result ──", fg="cyan", bold=True))
+                    if spec.get("summary"):
+                        click.echo(click.style(f"Summary: {spec['summary']}", fg="cyan"))
+                    for key in ("requirements", "hidden_requirements", "assumptions", "out_of_scope"):
+                        items = spec.get(key, [])
+                        if items:
+                            click.echo(click.style(f"\n{key.replace('_', ' ').title()}:", fg="cyan", bold=True))
+                            for item in items:
+                                click.echo(f"  • {item}")
+                    if spec.get("technical_notes"):
+                        click.echo(click.style(f"\nTechnical Notes:", fg="cyan", bold=True))
+                        click.echo(f"  {spec['technical_notes']}")
+                    click.echo(click.style("─" * 40, fg="cyan"))
+
+                    confirm = session.prompt(
+                        "Proceed with implementation? [Y/n/feedback] "
+                    ).strip()
+                    if confirm.lower() in ("n", "no", "cancel"):
+                        click.echo(click.style("Skipped development.", dim=True))
+                        continue
+                    if confirm and confirm.lower() not in ("y", "yes", ""):
+                        # User gave extra feedback — append to the task prompt
+                        desc, expected = task_prompt
+                        desc += f"\n\n## Additional User Feedback\n{confirm}"
+                        task_prompt = (desc, expected)
             else:
                 task_prompt = (user_input, "Complete the task and report findings.")
             # --- End analysis phase ---
 
             click.echo(click.style(f"Working on: {user_input}", fg="yellow"))
 
-            # --- Development + Review loop ---
-            reviewer.reset()
-            review_feedback = ""
+            # --- Development phase ---
+            agent.activate_context(session_id=session_id)
+            try:
+                result = engine.execute(
+                    agent=agent,
+                    task_prompt=task_prompt,
+                    verbose=True
+                )
+                if not result or not result.strip():
+                    result = "Done. (no additional output)"
+            finally:
+                agent.deactivate()
 
-            while True:
-                # Build task prompt (with review feedback on retries)
-                if review_feedback:
-                    desc, expected = task_prompt
-                    desc = desc + "\n\n" + review_feedback
-                    current_prompt = (desc, expected)
-                else:
-                    current_prompt = task_prompt
-
-                agent.activate_context(session_id=session_id)
-                try:
-                    result = engine.execute(
-                        agent=agent,
-                        task_prompt=current_prompt,
-                        verbose=True
-                    )
-                    if not result or not result.strip():
-                        result = "Done. (no additional output)"
-                finally:
-                    agent.deactivate()
-
-                # --- Code review phase ---
-                if not settings.REVIEW_ENABLED or not engine.has_file_changes():
-                    # Review disabled or no code changes — skip review
-                    break
-
+            # --- Code review phase (single pass, no retry loop) ---
+            if settings.REVIEW_ENABLED and engine.has_file_changes():
                 click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
+                reviewer.reset()
                 review = reviewer.review(
                     task_description=task_prompt[0],
                     developer_result=result,
                     file_changes_summary=engine.get_changed_files_summary(),
-                    previous_feedback=review_feedback,
                 )
 
-                if review.is_approved or review.verdict == "SKIPPED":
-                    if review.is_approved:
-                        click.echo(click.style(
-                            f"Code review: APPROVED. {review.summary}",
-                            fg="green", dim=True,
-                        ))
-                    break
-
-                # Rejected — loop back to developer
-                if not reviewer.can_review_again:
+                if review.is_approved:
                     click.echo(click.style(
-                        f"Code review: REJECTED (max retries reached, proceeding). {review.summary}",
-                        fg="yellow",
+                        f"Code review: APPROVED. {review.summary}",
+                        fg="green", dim=True,
                     ))
-                    break
-
-                click.echo(click.style(
-                    f"Code review: REJECTED. {review.summary}",
-                    fg="red",
-                ))
-                click.echo(click.style(
-                    "Sending feedback to developer for fixes...",
-                    fg="yellow", dim=True,
-                ))
-                review_feedback = review.format_feedback_for_developer()
-            # --- End development + review loop ---
+                elif review.is_rejected:
+                    click.echo(click.style(
+                        f"Code review: REJECTED. {review.summary}",
+                        fg="red",
+                    ))
+                    feedback = review.format_feedback_for_developer()
+                    if feedback:
+                        click.echo(click.style(feedback, fg="red", dim=True))
+            # --- End code review phase ---
 
             click.echo(click.style("\nFinal Result:", fg="green", bold=True))
             click.echo(result)

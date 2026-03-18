@@ -100,6 +100,37 @@ class TestAnalysisResult:
         assert result.format_questions_for_user() == ""
 
 
+def _mock_loop_execute(return_json):
+    """Helper: patch _run_analyst_loop to return a specific JSON string."""
+    if isinstance(return_json, dict):
+        return_json = json.dumps(return_json)
+    return patch.object(
+        AnalysisEngine,
+        "_run_analyst_loop",
+        return_value=AnalysisResult(
+            **_parse_json_to_result_kwargs(return_json)
+        ),
+    )
+
+
+def _parse_json_to_result_kwargs(raw):
+    """Parse JSON into kwargs for AnalysisResult (mirrors _parse_response logic)."""
+    data = json.loads(raw)
+    action = data.get("action", "passthrough")
+    kwargs = {"action": action, "original_input": "test"}
+    if action == "passthrough":
+        kwargs["reason"] = data.get("reason", "")
+    elif action == "ask":
+        kwargs["questions"] = data.get("questions", [])
+        kwargs["context"] = data.get("context", "")
+    elif action == "research":
+        kwargs["research_queries"] = data.get("queries", [])
+        kwargs["research_reason"] = data.get("reason", "")
+    elif action == "proceed":
+        kwargs["specification"] = data.get("specification", {})
+    return kwargs
+
+
 class TestAnalysisEngine:
     """Test AnalysisEngine."""
 
@@ -131,111 +162,59 @@ class TestAnalysisEngine:
         result = engine.analyze("hello")
         assert result.action == "passthrough"
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_passthrough(self, mock_params, mock_completion):
+    def test_analyze_passthrough(self, mock_params):
         mock_params.return_value = {"model": "test"}
-        mock_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "passthrough",
-                    "reason": "Simple greeting",
-                })
-            ))]
+        passthrough_result = AnalysisResult(
+            action="passthrough",
+            original_input="hello",
+            reason="Simple greeting",
         )
-        engine = AnalysisEngine()
-        result = engine.analyze("hello")
+        with patch.object(AnalysisEngine, "_run_analyst_loop", return_value=passthrough_result):
+            engine = AnalysisEngine()
+            result = engine.analyze("hello")
         assert result.action == "passthrough"
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_proceed(self, mock_params, mock_completion):
+    def test_analyze_proceed(self, mock_params):
         mock_params.return_value = {"model": "test"}
-        mock_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "proceed",
-                    "specification": {
-                        "summary": "Add a login page",
-                        "requirements": ["Login form", "Session management"],
-                    },
-                })
-            ))]
+        proceed_result = AnalysisResult(
+            action="proceed",
+            original_input="add login to the app",
+            specification={
+                "summary": "Add a login page",
+                "requirements": ["Login form", "Session management"],
+            },
         )
-        engine = AnalysisEngine()
-        result = engine.analyze("add login to the app")
+        with patch.object(AnalysisEngine, "_run_analyst_loop", return_value=proceed_result):
+            engine = AnalysisEngine()
+            result = engine.analyze("add login to the app")
         assert result.action == "proceed"
         assert result.specification["summary"] == "Add a login page"
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_ask(self, mock_params, mock_completion):
+    def test_analyze_ask(self, mock_params):
         mock_params.return_value = {"model": "test"}
-        mock_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "ask",
-                    "questions": [{"question": "Web or mobile?", "why": "Stack choice", "options": ["Web", "Mobile"]}],
-                    "context": "You want an app",
-                })
-            ))]
+        ask_result = AnalysisResult(
+            action="ask",
+            original_input="build an app",
+            questions=[{"question": "Web or mobile?", "why": "Stack choice", "options": ["Web", "Mobile"]}],
+            context="You want an app",
         )
-        engine = AnalysisEngine()
-        result = engine.analyze("build an app")
+        with patch.object(AnalysisEngine, "_run_analyst_loop", return_value=ask_result):
+            engine = AnalysisEngine()
+            result = engine.analyze("build an app")
         assert result.action == "ask"
         assert len(result.questions) == 1
         assert "Web or mobile?" in result.questions[0]["question"]
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_json_in_markdown(self, mock_params, mock_completion):
-        """Should handle JSON wrapped in markdown code blocks."""
+    def test_analyze_loop_error_passthroughs(self, mock_params):
+        """Agent loop errors should result in passthrough."""
         mock_params.return_value = {"model": "test"}
-        mock_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content='```json\n{"action": "passthrough", "reason": "simple"}\n```'
-            ))]
-        )
-        engine = AnalysisEngine()
-        result = engine.analyze("hi")
-        assert result.action == "passthrough"
-
-    @patch("litellm.completion")
-    @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_json_with_preamble(self, mock_params, mock_completion):
-        """Should handle JSON with text before/after."""
-        mock_params.return_value = {"model": "test"}
-        mock_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content='Here is the analysis:\n{"action": "passthrough", "reason": "simple"}\nDone.'
-            ))]
-        )
-        engine = AnalysisEngine()
-        result = engine.analyze("hi")
-        assert result.action == "passthrough"
-
-    @patch("litellm.completion")
-    @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_llm_error_passthroughs(self, mock_params, mock_completion):
-        """LLM errors should result in passthrough."""
-        mock_params.return_value = {"model": "test"}
-        mock_completion.side_effect = Exception("LLM is down")
-        engine = AnalysisEngine()
-        result = engine.analyze("do something complex")
-        assert result.action == "passthrough"
-
-    @patch("litellm.completion")
-    @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_invalid_json_passthroughs(self, mock_params, mock_completion):
-        """Unparseable response should result in passthrough."""
-        mock_params.return_value = {"model": "test"}
-        mock_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content="I'm not sure what you want me to do."
-            ))]
-        )
-        engine = AnalysisEngine()
-        result = engine.analyze("do something")
+        with patch.object(AnalysisEngine, "_run_analyst_loop", side_effect=Exception("LLM is down")):
+            engine = AnalysisEngine()
+            result = engine.analyze("do something complex")
         assert result.action == "passthrough"
 
     def test_build_analysis_prompt_with_history(self):
@@ -260,22 +239,28 @@ class TestAnalysisEngine:
         assert "FINAL ROUND" in prompt
         assert "MUST produce a specification" in prompt
 
-    @patch("litellm.completion")
+    def test_build_analysis_prompt_has_instructions(self):
+        engine = AnalysisEngine()
+        engine._analysis_rounds = 1
+        prompt = engine._build_analysis_prompt("add auth", None)
+        assert "## Instructions" in prompt
+        assert "exploring the codebase" in prompt
+        assert "Do NOT write or modify" in prompt
+
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_event_callback_called(self, mock_params, mock_completion):
+    def test_event_callback_called(self, mock_params):
         """Event callback should be called on start and complete."""
         mock_params.return_value = {"model": "test"}
-        mock_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content='{"action": "passthrough", "reason": "simple"}'
-            ))]
+        passthrough_result = AnalysisResult(
+            action="passthrough", original_input="hello", reason="simple",
         )
         events = []
         def callback(event_type, *args):
             events.append(event_type)
 
-        engine = AnalysisEngine()
-        engine.analyze("hello", event_callback=callback)
+        with patch.object(AnalysisEngine, "_run_analyst_loop", return_value=passthrough_result):
+            engine = AnalysisEngine()
+            engine.analyze("hello", event_callback=callback)
         assert "analysis_start" in events
         assert "analysis_complete" in events
 
@@ -294,93 +279,142 @@ class TestAnalysisEngine:
         assert "Handle None" in desc
         assert "Hidden Requirements" not in desc  # empty list, not included
 
+    def test_parse_response_passthrough(self):
+        engine = AnalysisEngine()
+        result = engine._parse_response(
+            '{"action": "passthrough", "reason": "simple"}', "hello"
+        )
+        assert result.action == "passthrough"
+
+    def test_parse_response_json_in_markdown(self):
+        engine = AnalysisEngine()
+        result = engine._parse_response(
+            '```json\n{"action": "passthrough", "reason": "simple"}\n```', "hello"
+        )
+        assert result.action == "passthrough"
+
+    def test_parse_response_json_with_preamble(self):
+        engine = AnalysisEngine()
+        result = engine._parse_response(
+            'Here is the analysis:\n{"action": "passthrough", "reason": "simple"}\nDone.',
+            "hello",
+        )
+        assert result.action == "passthrough"
+
+    def test_parse_response_invalid_json(self):
+        engine = AnalysisEngine()
+        result = engine._parse_response(
+            "I'm not sure what you want me to do.", "do something"
+        )
+        assert result.action == "passthrough"
+
+    def test_parse_response_research(self):
+        engine = AnalysisEngine()
+        result = engine._parse_response(
+            json.dumps({"action": "research", "queries": ["q1"], "reason": "need info"}),
+            "test",
+        )
+        assert result.action == "research"
+        assert result.research_queries == ["q1"]
+
+    def test_parse_response_proceed(self):
+        engine = AnalysisEngine()
+        result = engine._parse_response(
+            json.dumps({"action": "proceed", "specification": {"summary": "Test"}}),
+            "test",
+        )
+        assert result.action == "proceed"
+        assert result.specification["summary"] == "Test"
+
 
 class TestAnalysisEngineResearch:
     """Test research functionality in AnalysisEngine."""
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_research_action(self, mock_params, mock_completion):
-        """Research action triggers web search, then second LLM call produces proceed."""
+    def test_analyze_research_action(self, mock_params):
+        """Research action triggers web search, then second loop produces proceed."""
         mock_params.return_value = {"model": "test"}
-        # First call returns research, second returns proceed
-        mock_completion.side_effect = [
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "research",
-                    "queries": ["Stripe webhook API v2"],
-                    "reason": "Need current Stripe API details",
-                })
-            ))]),
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "proceed",
-                    "specification": {
-                        "summary": "Integrate Stripe webhooks",
-                        "requirements": ["Verify webhook signatures"],
-                    },
-                })
-            ))]),
-        ]
-        with patch("infinidev.tools.web.backends.search_ddg", return_value=[
-            {"title": "Stripe Docs", "url": "https://stripe.com/docs", "snippet": "Webhook guide"},
-        ]), patch("infinidev.tools.web.backends.fetch_with_trafilatura", return_value="Stripe webhook content"):
+
+        research_result = AnalysisResult(
+            action="research",
+            original_input="integrate stripe webhooks",
+            research_queries=["Stripe webhook API v2"],
+            research_reason="Need current Stripe API details",
+        )
+        proceed_result = AnalysisResult(
+            action="proceed",
+            original_input="integrate stripe webhooks",
+            specification={
+                "summary": "Integrate Stripe webhooks",
+                "requirements": ["Verify webhook signatures"],
+            },
+        )
+
+        call_count = [0]
+        def mock_run_loop(user_input, session_summaries, event_callback):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return research_result
+            return proceed_result
+
+        with patch.object(AnalysisEngine, "_run_analyst_loop", side_effect=mock_run_loop), \
+             patch("infinidev.tools.web.backends.search_ddg", return_value=[
+                 {"title": "Stripe Docs", "url": "https://stripe.com/docs", "snippet": "Webhook guide"},
+             ]), \
+             patch("infinidev.tools.web.backends.fetch_with_trafilatura", return_value="Stripe webhook content"):
             engine = AnalysisEngine()
             result = engine.analyze("integrate stripe webhooks")
 
         assert result.action == "proceed"
         assert "Stripe webhooks" in result.specification["summary"]
-        assert mock_completion.call_count == 2
+        assert call_count[0] == 2
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_research_no_results(self, mock_params, mock_completion):
-        """Empty search results still produce a spec on second call."""
+    def test_analyze_research_no_results(self, mock_params):
+        """Empty search results still produce a spec on second loop."""
         mock_params.return_value = {"model": "test"}
-        mock_completion.side_effect = [
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "research",
-                    "queries": ["obscure API"],
-                    "reason": "Need info",
-                })
-            ))]),
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "proceed",
-                    "specification": {"summary": "Best effort spec"},
-                })
-            ))]),
-        ]
-        with patch("infinidev.tools.web.backends.search_ddg", return_value=[]), \
+
+        research_result = AnalysisResult(
+            action="research",
+            original_input="use obscure API",
+            research_queries=["obscure API"],
+            research_reason="Need info",
+        )
+        proceed_result = AnalysisResult(
+            action="proceed",
+            original_input="use obscure API",
+            specification={"summary": "Best effort spec"},
+        )
+
+        call_count = [0]
+        def mock_run_loop(user_input, session_summaries, event_callback):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return research_result
+            return proceed_result
+
+        with patch.object(AnalysisEngine, "_run_analyst_loop", side_effect=mock_run_loop), \
+             patch("infinidev.tools.web.backends.search_ddg", return_value=[]), \
              patch("infinidev.tools.web.backends.fetch_with_trafilatura", return_value=None):
             engine = AnalysisEngine()
             result = engine.analyze("use obscure API")
 
         assert result.action == "proceed"
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_research_prevents_loop(self, mock_params, mock_completion):
+    def test_analyze_research_prevents_loop(self, mock_params):
         """Two consecutive research actions → passthrough to prevent loop."""
         mock_params.return_value = {"model": "test"}
-        mock_completion.side_effect = [
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "research",
-                    "queries": ["query1"],
-                    "reason": "Need info",
-                })
-            ))]),
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "research",
-                    "queries": ["query2"],
-                    "reason": "Still need info",
-                })
-            ))]),
-        ]
-        with patch("infinidev.tools.web.backends.search_ddg", return_value=[]), \
+
+        research_result = AnalysisResult(
+            action="research",
+            original_input="complex request",
+            research_queries=["query1"],
+            research_reason="Need info",
+        )
+
+        with patch.object(AnalysisEngine, "_run_analyst_loop", return_value=research_result), \
+             patch("infinidev.tools.web.backends.search_ddg", return_value=[]), \
              patch("infinidev.tools.web.backends.fetch_with_trafilatura", return_value=None):
             engine = AnalysisEngine()
             result = engine.analyze("complex request")
@@ -388,33 +422,37 @@ class TestAnalysisEngineResearch:
         assert result.action == "passthrough"
         assert "loop" in result.reason.lower()
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_research_max_queries(self, mock_params, mock_completion):
+    def test_analyze_research_max_queries(self, mock_params):
         """Only first 3 queries are searched even if more are provided."""
         mock_params.return_value = {"model": "test"}
-        mock_completion.side_effect = [
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "research",
-                    "queries": ["q1", "q2", "q3", "q4", "q5"],
-                    "reason": "Need lots of info",
-                })
-            ))]),
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "proceed",
-                    "specification": {"summary": "Done"},
-                })
-            ))]),
-        ]
-        search_calls = []
 
+        research_result = AnalysisResult(
+            action="research",
+            original_input="big request",
+            research_queries=["q1", "q2", "q3", "q4", "q5"],
+            research_reason="Need lots of info",
+        )
+        proceed_result = AnalysisResult(
+            action="proceed",
+            original_input="big request",
+            specification={"summary": "Done"},
+        )
+
+        call_count = [0]
+        def mock_run_loop(user_input, session_summaries, event_callback):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return research_result
+            return proceed_result
+
+        search_calls = []
         def mock_search(query, num_results=3):
             search_calls.append(query)
             return []
 
-        with patch("infinidev.tools.web.backends.search_ddg", side_effect=mock_search), \
+        with patch.object(AnalysisEngine, "_run_analyst_loop", side_effect=mock_run_loop), \
+             patch("infinidev.tools.web.backends.search_ddg", side_effect=mock_search), \
              patch("infinidev.tools.web.backends.fetch_with_trafilatura", return_value=None):
             engine = AnalysisEngine()
             result = engine.analyze("big request")
@@ -422,29 +460,35 @@ class TestAnalysisEngineResearch:
         assert len(search_calls) == 3
         assert result.action == "proceed"
 
-    @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_analyze_research_fetch_failure(self, mock_params, mock_completion):
+    def test_analyze_research_fetch_failure(self, mock_params):
         """Fetch failure degrades gracefully without error."""
         mock_params.return_value = {"model": "test"}
-        mock_completion.side_effect = [
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "research",
-                    "queries": ["test query"],
-                    "reason": "Need info",
-                })
-            ))]),
-            MagicMock(choices=[MagicMock(message=MagicMock(
-                content=json.dumps({
-                    "action": "proceed",
-                    "specification": {"summary": "Spec without fetch"},
-                })
-            ))]),
-        ]
-        with patch("infinidev.tools.web.backends.search_ddg", return_value=[
-            {"title": "Result", "url": "https://example.com", "snippet": "A result"},
-        ]), patch("infinidev.tools.web.backends.fetch_with_trafilatura", side_effect=Exception("timeout")):
+
+        research_result = AnalysisResult(
+            action="research",
+            original_input="test request",
+            research_queries=["test query"],
+            research_reason="Need info",
+        )
+        proceed_result = AnalysisResult(
+            action="proceed",
+            original_input="test request",
+            specification={"summary": "Spec without fetch"},
+        )
+
+        call_count = [0]
+        def mock_run_loop(user_input, session_summaries, event_callback):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return research_result
+            return proceed_result
+
+        with patch.object(AnalysisEngine, "_run_analyst_loop", side_effect=mock_run_loop), \
+             patch("infinidev.tools.web.backends.search_ddg", return_value=[
+                 {"title": "Result", "url": "https://example.com", "snippet": "A result"},
+             ]), \
+             patch("infinidev.tools.web.backends.fetch_with_trafilatura", side_effect=Exception("timeout")):
             engine = AnalysisEngine()
             result = engine.analyze("test request")
 
@@ -466,3 +510,89 @@ class TestAnalysisEngineResearch:
         assert "The documentation" in result
         assert "Full page content here" in result
         assert "Blog Post" in result
+
+
+class TestAnalysisEngineRunLoop:
+    """Test _run_analyst_loop creates agent with correct config."""
+
+    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
+    def test_analyst_agent_has_identity_override(self, mock_agent_cls, mock_engine_cls):
+        """Analyst agent should have _system_prompt_identity set."""
+        from infinidev.prompts.analyst.system import ANALYST_SYSTEM_PROMPT
+
+        mock_agent = MagicMock()
+        mock_agent_cls.return_value = mock_agent
+        mock_engine = MagicMock()
+        mock_engine.execute.return_value = '{"action": "passthrough", "reason": "test"}'
+        mock_engine_cls.return_value = mock_engine
+
+        engine = AnalysisEngine()
+        engine._analysis_rounds = 1
+        result = engine._run_analyst_loop("test", None, None)
+
+        # Verify agent was created with analyst role
+        mock_agent_cls.assert_called_once()
+        call_kwargs = mock_agent_cls.call_args[1]
+        assert call_kwargs["role"] == "analyst"
+        assert call_kwargs["agent_id"] == "analyst"
+
+        # Verify identity override was set
+        assert mock_agent._system_prompt_identity == ANALYST_SYSTEM_PROMPT
+
+        # Verify loop engine was called
+        mock_engine.execute.assert_called_once()
+
+    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
+    def test_analyst_loop_parses_output(self, mock_agent_cls, mock_engine_cls):
+        """Loop engine output should be parsed into AnalysisResult."""
+        mock_agent = MagicMock()
+        mock_agent_cls.return_value = mock_agent
+        mock_engine = MagicMock()
+        mock_engine.execute.return_value = json.dumps({
+            "action": "proceed",
+            "specification": {"summary": "Built from codebase analysis"},
+        })
+        mock_engine_cls.return_value = mock_engine
+
+        engine = AnalysisEngine()
+        engine._analysis_rounds = 1
+        result = engine._run_analyst_loop("add feature", None, None)
+
+        assert result.action == "proceed"
+        assert result.specification["summary"] == "Built from codebase analysis"
+
+    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
+    def test_analyst_context_activated_and_deactivated(self, mock_agent_cls, mock_engine_cls):
+        """Agent context should be activated before and deactivated after loop."""
+        mock_agent = MagicMock()
+        mock_agent_cls.return_value = mock_agent
+        mock_engine = MagicMock()
+        mock_engine.execute.return_value = '{"action": "passthrough", "reason": "test"}'
+        mock_engine_cls.return_value = mock_engine
+
+        engine = AnalysisEngine()
+        engine._analysis_rounds = 1
+        engine._run_analyst_loop("test", None, None)
+
+        mock_agent.activate_context.assert_called_once()
+        mock_agent.deactivate.assert_called_once()
+
+    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
+    def test_analyst_deactivates_on_error(self, mock_agent_cls, mock_engine_cls):
+        """Agent should be deactivated even if loop engine raises."""
+        mock_agent = MagicMock()
+        mock_agent_cls.return_value = mock_agent
+        mock_engine = MagicMock()
+        mock_engine.execute.side_effect = RuntimeError("boom")
+        mock_engine_cls.return_value = mock_engine
+
+        engine = AnalysisEngine()
+        engine._analysis_rounds = 1
+        with pytest.raises(RuntimeError):
+            engine._run_analyst_loop("test", None, None)
+
+        mock_agent.deactivate.assert_called_once()

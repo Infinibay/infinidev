@@ -208,9 +208,15 @@ def build_system_prompt(
     *,
     tech_hints: list[str] | None = None,
     session_summaries: list[str] | None = None,
+    identity_override: str | None = None,
 ) -> str:
-    """Combine CLI identity, tech guidelines, session context, and loop protocol."""
-    parts: list[str] = [CLI_AGENT_IDENTITY]
+    """Combine CLI identity, tech guidelines, session context, and loop protocol.
+
+    Args:
+        identity_override: If provided, replaces CLI_AGENT_IDENTITY as the
+            base identity section (used by analyst and other non-developer agents).
+    """
+    parts: list[str] = [identity_override if identity_override else CLI_AGENT_IDENTITY]
 
     # Tech-specific guidelines
     if tech_hints:

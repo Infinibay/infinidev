@@ -872,6 +872,7 @@ class LoopEngine(AgentEngine):
             agent.backstory,
             tech_hints=getattr(agent, '_tech_hints', None),
             session_summaries=getattr(agent, '_session_summaries', None),
+            identity_override=getattr(agent, '_system_prompt_identity', None),
         )
 
         # For non-FC models, embed tool descriptions in the system prompt

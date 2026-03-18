@@ -1,9 +1,10 @@
 """Pre-development analysis engine.
 
-Runs a single LLM call to analyze the user's request before passing it
-to the developer loop. Handles:
+Runs the analyst as a full agent loop with tool access to explore the
+codebase before producing a specification. Handles:
 - Passthrough for simple requests (greetings, questions, quick tasks)
 - Clarifying questions for ambiguous/incomplete requests
+- Web research for external API/library references
 - Full specification generation for complex requests
 """
 
@@ -131,8 +132,8 @@ class AnalysisResult:
 class AnalysisEngine:
     """Pre-development analysis engine.
 
-    Runs a single LLM call to analyze the user's request and determine
-    whether to pass through, ask questions, or produce a specification.
+    Runs the analyst as a full agent loop with tool access so it can
+    explore the codebase before producing a specification.
     """
 
     def __init__(self) -> None:
@@ -159,7 +160,7 @@ class AnalysisEngine:
         session_summaries: list[str] | None = None,
         event_callback: Any | None = None,
     ) -> AnalysisResult:
-        """Analyze the user's request and return an AnalysisResult.
+        """Analyze the user's request using a full agent loop with tools.
 
         Args:
             user_input: The raw user input.
@@ -170,11 +171,9 @@ class AnalysisEngine:
             AnalysisResult with action type and relevant data.
         """
         from infinidev.config.llm import get_litellm_params
-        from infinidev.prompts.analyst.system import ANALYST_SYSTEM_PROMPT
 
         llm_params = get_litellm_params()
         if llm_params is None:
-            # No LLM configured — passthrough
             logger.warning("AnalysisEngine: no LLM params, passing through")
             return AnalysisResult(
                 action="passthrough",
@@ -184,9 +183,6 @@ class AnalysisEngine:
 
         self._analysis_rounds += 1
 
-        # Build the user prompt
-        user_prompt = self._build_analysis_prompt(user_input, session_summaries)
-
         # Emit analysis start event
         if event_callback:
             event_callback("analysis_start", 0, "", {
@@ -194,49 +190,27 @@ class AnalysisEngine:
                 "input": user_input[:200],
             })
 
-        messages = [
-            {"role": "system", "content": ANALYST_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        # Make the LLM call
         try:
-            import litellm
-            response = litellm.completion(
-                messages=messages,
-                **llm_params,
-                temperature=0.3,  # Lower temp for analysis
+            result = self._run_analyst_loop(user_input, session_summaries, event_callback)
+        except Exception as e:
+            logger.warning("AnalysisEngine: agent loop failed (%s), passing through", e)
+            result = AnalysisResult(
+                action="passthrough",
+                original_input=user_input,
+                reason=f"Analysis failed: {e}",
             )
 
-            raw_content = response.choices[0].message.content or ""
-            result = self._parse_response(raw_content, user_input)
-
-            # Handle research action
-            if result.action == "research":
-                if event_callback:
-                    event_callback("analysis_research", 0, "", {
-                        "queries": result.research_queries,
-                        "reason": result.research_reason,
-                    })
-
+        # Handle research action — perform web search and re-run
+        if result.action == "research":
+            if event_callback:
+                event_callback("analysis_research", 0, "", {
+                    "queries": result.research_queries,
+                    "reason": result.research_reason,
+                })
+            try:
                 research_results = self._perform_research(result.research_queries)
-
-                # Rebuild prompt with research results injected
-                research_prompt = self._build_analysis_prompt(user_input, session_summaries)
-                research_prompt += f"\n\n{research_results}"
-
-                messages_2 = [
-                    {"role": "system", "content": ANALYST_SYSTEM_PROMPT},
-                    {"role": "user", "content": research_prompt},
-                ]
-
-                response_2 = litellm.completion(
-                    messages=messages_2,
-                    **llm_params,
-                    temperature=0.3,
-                )
-                raw_2 = response_2.choices[0].message.content or ""
-                result = self._parse_response(raw_2, user_input)
+                enriched_input = user_input + "\n\n" + research_results
+                result = self._run_analyst_loop(enriched_input, session_summaries, event_callback)
 
                 # Prevent infinite research loops
                 if result.action == "research":
@@ -246,14 +220,15 @@ class AnalysisEngine:
                         original_input=user_input,
                         reason="Research loop prevented — passing through",
                     )
-
-        except Exception as e:
-            logger.warning("AnalysisEngine: LLM call failed (%s), passing through", e)
-            result = AnalysisResult(
-                action="passthrough",
-                original_input=user_input,
-                reason=f"Analysis failed: {e}",
-            )
+                # Restore original input in result
+                result.original_input = user_input
+            except Exception as e:
+                logger.warning("AnalysisEngine: research loop failed (%s), passing through", e)
+                result = AnalysisResult(
+                    action="passthrough",
+                    original_input=user_input,
+                    reason=f"Research failed: {e}",
+                )
 
         # Emit analysis complete event
         if event_callback:
@@ -264,12 +239,61 @@ class AnalysisEngine:
 
         return result
 
+    def _run_analyst_loop(
+        self,
+        user_input: str,
+        session_summaries: list[str] | None,
+        event_callback: Any | None,
+    ) -> AnalysisResult:
+        """Run the analyst as a full agent loop with tool access."""
+        from infinidev.agents.base import InfinidevAgent  # noqa: deferred to avoid circular
+        from infinidev.engine.loop_engine import LoopEngine  # noqa: deferred to avoid circular
+        from infinidev.prompts.analyst.system import (  # noqa
+            ANALYST_BACKSTORY,
+            ANALYST_GOAL,
+            ANALYST_SYSTEM_PROMPT,
+        )
+
+        # Create analyst agent with all tools but analyst identity
+        analyst_agent = InfinidevAgent(
+            agent_id="analyst",
+            role="analyst",
+            name="Analyst",
+            goal=ANALYST_GOAL,
+            backstory=ANALYST_BACKSTORY,
+        )
+        analyst_agent._session_summaries = session_summaries
+        analyst_agent._system_prompt_identity = ANALYST_SYSTEM_PROMPT
+
+        # Build task prompt for the analyst
+        task_description = self._build_analysis_prompt(user_input, session_summaries)
+        expected_output = (
+            "A JSON object with your analysis result. The JSON must have an "
+            '"action" field set to one of: "passthrough", "ask", "research", '
+            'or "proceed". See the system prompt for the exact format of each action type. '
+            "Output ONLY the JSON object as your final_answer."
+        )
+
+        # Run the loop engine
+        analyst_agent.activate_context()
+        engine = LoopEngine()
+        try:
+            raw_output = engine.execute(
+                agent=analyst_agent,
+                task_prompt=(task_description, expected_output),
+                verbose=True,
+            )
+        finally:
+            analyst_agent.deactivate()
+
+        return self._parse_response(raw_output or "", user_input)
+
     def _build_analysis_prompt(
         self,
         user_input: str,
         session_summaries: list[str] | None,
     ) -> str:
-        """Build the user prompt for the analysis LLM call."""
+        """Build the user prompt for the analysis agent loop."""
         parts = []
 
         # Session context
@@ -314,6 +338,17 @@ class AnalysisEngine:
 
         # The actual request
         parts.append(f"## User Request\n{user_input}")
+
+        # Instructions
+        parts.append(
+            "## Instructions\n"
+            "1. Start by exploring the codebase to understand the project structure "
+            "and the code relevant to this request. Use list_directory, read_file, "
+            "code_search, and glob tools.\n"
+            "2. Based on what you find, analyze the request and produce your "
+            "result as a JSON object in your final_answer.\n"
+            "3. Do NOT write or modify any files. You are only analyzing."
+        )
 
         return "\n\n".join(parts)
 

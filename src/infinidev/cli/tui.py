@@ -1624,62 +1624,86 @@ class InfinidevTUI(App):
                 task_prompt = analysis.build_developer_prompt()
 
                 if analysis.action == "proceed":
-                    summary = analysis.specification.get("summary", "")
-                    if summary:
+                    # Show spec and wait for user confirmation
+                    spec = analysis.specification
+                    spec_parts = []
+                    if spec.get("summary"):
+                        spec_parts.append(f"**Summary:** {spec['summary']}")
+                    for key in ("requirements", "hidden_requirements", "assumptions", "out_of_scope"):
+                        items = spec.get(key, [])
+                        if items:
+                            spec_parts.append(f"\n**{key.replace('_', ' ').title()}:**")
+                            for item in items:
+                                spec_parts.append(f"  • {item}")
+                    if spec.get("technical_notes"):
+                        spec_parts.append(f"\n**Technical Notes:** {spec['technical_notes']}")
+                    spec_parts.append("\n*Proceed with implementation? Type **y** to proceed, **n** to cancel, or add feedback.*")
+
+                    self.call_from_thread(self._hide_thinking)
+                    self.call_from_thread(
+                        self.add_message, "Analyst", "\n".join(spec_parts), "agent"
+                    )
+
+                    # Wait for user confirmation
+                    self._analysis_event = threading.Event()
+                    self._analysis_waiting = True
+                    self._analysis_answer = ""
+                    self._analysis_original_input = user_input
+                    self._analysis_event.wait()
+
+                    confirm = self._analysis_answer.strip()
+                    self._analysis_event = None
+
+                    if confirm.lower() in ("n", "no", "cancel"):
+                        self.call_from_thread(self._hide_thinking)
                         self.call_from_thread(
-                            self.add_message,
-                            "Analyst",
-                            f"Analysis complete: {summary}",
-                            "system",
+                            self.add_message, "System", "Development skipped.", "system"
                         )
+                        self.call_from_thread(
+                            self.query_one("#actions-panel").update_content, "Idle"
+                        )
+                        return
+                    if confirm and confirm.lower() not in ("y", "yes", ""):
+                        # User gave extra feedback — append to the task prompt
+                        desc, expected = task_prompt
+                        desc += f"\n\n## Additional User Feedback\n{confirm}"
+                        task_prompt = (desc, expected)
+
+                    self.call_from_thread(self._show_thinking)
             else:
                 task_prompt = (user_input, "Complete the task and report findings.")
             # --- End analysis phase ---
 
-            # --- Development + Review loop ---
-            self.reviewer.reset()
-            review_feedback = ""
+            # --- Development phase ---
+            self.call_from_thread(
+                self.query_one("#actions-panel").update_content,
+                "Developing..."
+            )
 
-            while True:
-                # Build task prompt (with review feedback on retries)
-                if review_feedback:
-                    desc, expected = task_prompt
-                    desc = desc + "\n\n" + review_feedback
-                    current_prompt = (desc, expected)
-                else:
-                    current_prompt = task_prompt
-
-                self.call_from_thread(
-                    self.query_one("#actions-panel").update_content,
-                    "Developing..." if not review_feedback else "Fixing review issues..."
+            self.agent.activate_context(session_id=self.session_id)
+            try:
+                result = self.engine.execute(
+                    agent=self.agent,
+                    task_prompt=task_prompt,
+                    verbose=True,
                 )
+                if not result or not result.strip():
+                    result = "Done. (no additional output)"
+            finally:
+                self.agent.deactivate()
 
-                self.agent.activate_context(session_id=self.session_id)
-                try:
-                    result = self.engine.execute(
-                        agent=self.agent,
-                        task_prompt=current_prompt,
-                        verbose=True,
-                    )
-                    if not result or not result.strip():
-                        result = "Done. (no additional output)"
-                finally:
-                    self.agent.deactivate()
-
-                # --- Code review phase ---
-                if not _settings.REVIEW_ENABLED or not self.engine.has_file_changes():
-                    break
-
+            # --- Code review phase (single pass, no retry loop) ---
+            if _settings.REVIEW_ENABLED and self.engine.has_file_changes():
                 self.call_from_thread(
                     self.query_one("#actions-panel").update_content,
                     "Code review..."
                 )
 
+                self.reviewer.reset()
                 review = self.reviewer.review(
                     task_description=task_prompt[0],
                     developer_result=result,
                     file_changes_summary=self.engine.get_changed_files_summary(),
-                    previous_feedback=review_feedback,
                     event_callback=self.on_loop_event if hasattr(self, 'on_loop_event') else None,
                 )
 
@@ -1690,29 +1714,14 @@ class InfinidevTUI(App):
                         f"Code review: APPROVED. {review.summary}",
                         "system",
                     )
-                    break
-
-                if review.verdict == "SKIPPED":
-                    break
-
-                # Rejected — loop back to developer
-                if not self.reviewer.can_review_again:
+                elif review.is_rejected:
                     self.call_from_thread(
                         self.add_message,
                         "Reviewer",
-                        f"Code review: REJECTED (max retries, proceeding). {review.summary}",
+                        review.format_for_user(),
                         "system",
                     )
-                    break
-
-                self.call_from_thread(
-                    self.add_message,
-                    "Reviewer",
-                    review.format_for_user(),
-                    "system",
-                )
-                review_feedback = review.format_feedback_for_developer()
-            # --- End development + review loop ---
+            # --- End code review phase ---
 
             self.call_from_thread(self._hide_thinking)
             self.call_from_thread(self.add_message, "Infinidev", result, "agent")
