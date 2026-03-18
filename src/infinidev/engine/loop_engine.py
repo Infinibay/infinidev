@@ -785,6 +785,39 @@ class LoopEngine(AgentEngine):
     discarded and replaced with a ~50-token summary.
     """
 
+    def __init__(self) -> None:
+        self._last_file_tracker: FileChangeTracker | None = None
+
+    def get_changed_files_summary(self) -> str:
+        """Return a summary of files changed in the last execution.
+
+        Used by the code review engine to review changes.
+        Returns empty string if no files were changed.
+        """
+        if self._last_file_tracker is None:
+            return ""
+
+        paths = self._last_file_tracker.get_all_paths()
+        if not paths:
+            return ""
+
+        parts = []
+        for path in paths:
+            action = self._last_file_tracker.get_action(path)
+            diff = self._last_file_tracker.get_diff(path)
+            if diff:
+                parts.append(f"### {path} ({action})\n```diff\n{diff}\n```")
+            else:
+                parts.append(f"### {path} ({action}, no diff)")
+
+        return "\n\n".join(parts)
+
+    def has_file_changes(self) -> bool:
+        """Whether the last execution modified any files."""
+        if self._last_file_tracker is None:
+            return False
+        return bool(self._last_file_tracker.get_all_paths())
+
     def execute(
         self,
         agent: Any,
@@ -827,6 +860,7 @@ class LoopEngine(AgentEngine):
 
         # File change tracker for this task
         file_tracker = FileChangeTracker()
+        self._last_file_tracker = file_tracker  # Expose for post-execution review
 
         # Check model capabilities for manual tool calling mode
         from infinidev.config.model_capabilities import get_model_capabilities

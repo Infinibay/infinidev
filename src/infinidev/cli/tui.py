@@ -24,6 +24,8 @@ from textual import on, events, work
 # Infinidev imports
 from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop_engine import LoopEngine, set_event_callback
+from infinidev.engine.analysis_engine import AnalysisEngine
+from infinidev.engine.review_engine import ReviewEngine
 from infinidev.db.service import (
     init_db, store_conversation_turn, get_recent_summaries,
 )
@@ -1023,8 +1025,14 @@ class InfinidevTUI(App):
         self._file_diff_widgets: dict[str, FileChangeDiffWidget] = {}  # path → widget
 
         self.engine = LoopEngine()
+        self.analyst = AnalysisEngine()
+        self.reviewer = ReviewEngine()
+        self._analysis_waiting = False  # True when waiting for user answer to analysis questions
+        self._analysis_original_input = ""  # Original user input being analyzed
+        self._analysis_event = None  # threading.Event for blocking run_engine
+        self._analysis_answer = ""  # User's answer to analysis questions
         self.agent = InfinidevAgent(agent_id="tui_agent")
-        
+
         # Initialize context window calculator
         from infinidev.ui.context_calculator import calculator
         self.context_calculator = calculator
@@ -1458,6 +1466,14 @@ class InfinidevTUI(App):
         self.query_one("#autocomplete-menu", OptionList).remove_class("-visible")
         user_text = event.value
         self.add_message("You", user_text, "user")
+
+        # If we're waiting for an analysis answer, feed it back
+        if self._analysis_waiting and self._analysis_event is not None:
+            self._analysis_answer = user_text
+            self._analysis_waiting = False
+            self._analysis_event.set()
+            return
+
         if user_text.startswith("!"):
             # Shell command: execute directly
             self._execute_shell_command(user_text[1:])  # Strip the '!' prefix
@@ -1542,13 +1558,14 @@ class InfinidevTUI(App):
 
     @work(exclusive=True, thread=True)
     def run_engine(self, user_input: str):
+        import threading
+
         self._file_diff_widgets = {}
         try:
             reload_all()
             store_conversation_turn(self.session_id, 'user', user_input)
             summaries = get_recent_summaries(self.session_id, limit=10)
             self.agent._session_summaries = summaries
-            self.agent.activate_context(session_id=self.session_id)
 
             # Update chat context usage
             self.context_calculator.update_chat(user_input, summaries)
@@ -1556,22 +1573,154 @@ class InfinidevTUI(App):
                 self._context_panel.update_status,
                 self.context_calculator.get_context_status(),
             )
-            try:
-                result = self.engine.execute(
-                    agent=self.agent,
-                    task_prompt=(user_input, "Complete the task and report findings."),
-                    verbose=True,
+
+            # --- Analysis phase ---
+            from infinidev.config.settings import settings as _settings
+            if _settings.ANALYSIS_ENABLED:
+                self.analyst.reset()
+                self.call_from_thread(
+                    self.query_one("#actions-panel").update_content,
+                    "Analyzing request..."
                 )
-                if not result or not result.strip():
-                    result = "Done. (no additional output)"
-                self.call_from_thread(self._hide_thinking)
-                self.call_from_thread(self.add_message, "Infinidev", result, "agent")
-                store_conversation_turn(self.session_id, 'assistant', result, result[:200])
-            finally:
-                self.agent.deactivate()
-                self.call_from_thread(self._hide_thinking)
-                self.call_from_thread(self.query_one("#actions-panel").update_content, "Idle")
+
+                analysis_input = user_input
+                analysis = self.analyst.analyze(
+                    analysis_input,
+                    session_summaries=summaries,
+                    event_callback=self.on_loop_event if hasattr(self, 'on_loop_event') else None,
+                )
+
+                # Handle question loop
+                while analysis.action == "ask" and self.analyst.can_ask_more:
+                    questions_text = analysis.format_questions_for_user()
+                    self.call_from_thread(self._hide_thinking)
+                    self.call_from_thread(
+                        self.add_message, "Analyst", questions_text, "agent"
+                    )
+
+                    # Wait for user to answer
+                    self._analysis_event = threading.Event()
+                    self._analysis_waiting = True
+                    self._analysis_answer = ""
+                    self._analysis_original_input = user_input
+
+                    self._analysis_event.wait()  # Blocks until user responds
+
+                    answer = self._analysis_answer
+                    self._analysis_event = None
+
+                    if not answer.strip():
+                        break
+
+                    self.analyst.add_answer(questions_text, answer)
+                    self.call_from_thread(self._show_thinking)
+                    analysis_input = user_input + "\n\nUser clarification: " + answer
+                    analysis = self.analyst.analyze(
+                        analysis_input,
+                        session_summaries=summaries,
+                    )
+
+                # Build enriched task prompt
+                task_prompt = analysis.build_developer_prompt()
+
+                if analysis.action == "proceed":
+                    summary = analysis.specification.get("summary", "")
+                    if summary:
+                        self.call_from_thread(
+                            self.add_message,
+                            "Analyst",
+                            f"Analysis complete: {summary}",
+                            "system",
+                        )
+            else:
+                task_prompt = (user_input, "Complete the task and report findings.")
+            # --- End analysis phase ---
+
+            # --- Development + Review loop ---
+            self.reviewer.reset()
+            review_feedback = ""
+
+            while True:
+                # Build task prompt (with review feedback on retries)
+                if review_feedback:
+                    desc, expected = task_prompt
+                    desc = desc + "\n\n" + review_feedback
+                    current_prompt = (desc, expected)
+                else:
+                    current_prompt = task_prompt
+
+                self.call_from_thread(
+                    self.query_one("#actions-panel").update_content,
+                    "Developing..." if not review_feedback else "Fixing review issues..."
+                )
+
+                self.agent.activate_context(session_id=self.session_id)
+                try:
+                    result = self.engine.execute(
+                        agent=self.agent,
+                        task_prompt=current_prompt,
+                        verbose=True,
+                    )
+                    if not result or not result.strip():
+                        result = "Done. (no additional output)"
+                finally:
+                    self.agent.deactivate()
+
+                # --- Code review phase ---
+                if not _settings.REVIEW_ENABLED or not self.engine.has_file_changes():
+                    break
+
+                self.call_from_thread(
+                    self.query_one("#actions-panel").update_content,
+                    "Code review..."
+                )
+
+                review = self.reviewer.review(
+                    task_description=task_prompt[0],
+                    developer_result=result,
+                    file_changes_summary=self.engine.get_changed_files_summary(),
+                    previous_feedback=review_feedback,
+                    event_callback=self.on_loop_event if hasattr(self, 'on_loop_event') else None,
+                )
+
+                if review.is_approved:
+                    self.call_from_thread(
+                        self.add_message,
+                        "Reviewer",
+                        f"Code review: APPROVED. {review.summary}",
+                        "system",
+                    )
+                    break
+
+                if review.verdict == "SKIPPED":
+                    break
+
+                # Rejected — loop back to developer
+                if not self.reviewer.can_review_again:
+                    self.call_from_thread(
+                        self.add_message,
+                        "Reviewer",
+                        f"Code review: REJECTED (max retries, proceeding). {review.summary}",
+                        "system",
+                    )
+                    break
+
+                self.call_from_thread(
+                    self.add_message,
+                    "Reviewer",
+                    review.format_for_user(),
+                    "system",
+                )
+                review_feedback = review.format_feedback_for_developer()
+            # --- End development + review loop ---
+
+            self.call_from_thread(self._hide_thinking)
+            self.call_from_thread(self.add_message, "Infinidev", result, "agent")
+            store_conversation_turn(self.session_id, 'assistant', result, result[:200])
+            self.call_from_thread(self._hide_thinking)
+            self.call_from_thread(self.query_one("#actions-panel").update_content, "Idle")
         except Exception as e:
+            self._analysis_waiting = False
             self.call_from_thread(self._hide_thinking)
             self.call_from_thread(self.add_message, "Error", str(e), "system")
 
@@ -1596,6 +1745,10 @@ class InfinidevTUI(App):
             "",
             "[bold]Code Interpreter[/bold]",
             f"  {settings.CODE_INTERPRETER_TIMEOUT:<50} (CODE_INTERPRETER_TIMEOUT)",
+            "",
+            "[bold]Phases[/bold]",
+            f"  {str(settings.ANALYSIS_ENABLED):<50} (ANALYSIS_ENABLED)",
+            f"  {str(settings.REVIEW_ENABLED):<50} (REVIEW_ENABLED)",
             "",
             "[bold]UI[/bold]",
             f"  {settings.model_dump().get('LOG_LEVEL', 'warning'):<50} (LOG_LEVEL)",
@@ -1632,6 +1785,8 @@ class InfinidevTUI(App):
             "CODE_INTERPRETER_TIMEOUT": int,
             "CODE_INTERPRETER_MAX_OUTPUT": int,
             "SANDBOX_ENABLED": bool,
+            "ANALYSIS_ENABLED": bool,
+            "REVIEW_ENABLED": bool,
         }
         type_class = type_map.get(key, str)
         if type_class == bool:

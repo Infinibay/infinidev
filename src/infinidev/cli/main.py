@@ -12,6 +12,8 @@ import uuid
 from infinidev.db.service import init_db
 from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop_engine import LoopEngine
+from infinidev.engine.analysis_engine import AnalysisEngine
+from infinidev.engine.review_engine import ReviewEngine
 from infinidev.cli.tui import InfinidevTUI
 
 # Configure logging (ensure base dir exists before creating file handler)
@@ -162,6 +164,10 @@ def handle_settings_command(parts: list[str]):
         click.echo(click.style("Code Interpreter", bold=True))
         click.echo(f"  {settings.CODE_INTERPRETER_TIMEOUT:<50} (CODE_INTERPRETER_TIMEOUT)")
         click.echo("")
+        click.echo(click.style("Phases", bold=True))
+        click.echo(f"  {str(settings.ANALYSIS_ENABLED):<50} (ANALYSIS_ENABLED)")
+        click.echo(f"  {str(settings.REVIEW_ENABLED):<50} (REVIEW_ENABLED)")
+        click.echo("")
         click.echo(click.style("UI", bold=True))
         log_level = settings.model_dump().get("LOG_LEVEL", "warning")
         click.echo(f"  {log_level:<50} (LOG_LEVEL)")
@@ -198,6 +204,8 @@ def handle_settings_command(parts: list[str]):
             "CODE_INTERPRETER_TIMEOUT": int,
             "CODE_INTERPRETER_MAX_OUTPUT": int,
             "SANDBOX_ENABLED": bool,
+            "ANALYSIS_ENABLED": bool,
+            "REVIEW_ENABLED": bool,
         }
 
         if value_to_set:
@@ -249,6 +257,8 @@ def main(no_tui: bool, classic: bool):
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())
     engine = LoopEngine()
+    analyst = AnalysisEngine()
+    reviewer = ReviewEngine()
 
     while True:
         try:
@@ -263,22 +273,109 @@ def main(no_tui: bool, classic: bool):
             from infinidev.config.settings import reload_all
             reload_all()
 
+            # --- Analysis phase ---
+            if settings.ANALYSIS_ENABLED:
+                analyst.reset()
+                click.echo(click.style("Analyzing request...", fg="cyan", dim=True))
+
+                analysis = analyst.analyze(user_input)
+
+                # Handle question loop
+                while analysis.action == "ask" and analyst.can_ask_more:
+                    questions_text = analysis.format_questions_for_user()
+                    click.echo(click.style("\n" + questions_text, fg="cyan"))
+
+                    answer = session.prompt("Your answer> ")
+                    if not answer.strip():
+                        # User skipped — force proceed with assumptions
+                        break
+                    analyst.add_answer(questions_text, answer)
+                    analysis = analyst.analyze(
+                        user_input + "\n\nUser clarification: " + answer
+                    )
+
+                # Build the task prompt from analysis result
+                task_prompt = analysis.build_developer_prompt()
+
+                if analysis.action == "proceed":
+                    click.echo(click.style(
+                        f"Analysis complete: {analysis.specification.get('summary', '')}",
+                        fg="cyan", dim=True,
+                    ))
+            else:
+                task_prompt = (user_input, "Complete the task and report findings.")
+            # --- End analysis phase ---
+
             click.echo(click.style(f"Working on: {user_input}", fg="yellow"))
 
-            agent.activate_context(session_id=session_id)
-            try:
-                result = engine.execute(
-                    agent=agent,
-                    task_prompt=(user_input, "Complete the task and report findings."),
-                    verbose=True
+            # --- Development + Review loop ---
+            reviewer.reset()
+            review_feedback = ""
+
+            while True:
+                # Build task prompt (with review feedback on retries)
+                if review_feedback:
+                    desc, expected = task_prompt
+                    desc = desc + "\n\n" + review_feedback
+                    current_prompt = (desc, expected)
+                else:
+                    current_prompt = task_prompt
+
+                agent.activate_context(session_id=session_id)
+                try:
+                    result = engine.execute(
+                        agent=agent,
+                        task_prompt=current_prompt,
+                        verbose=True
+                    )
+                    if not result or not result.strip():
+                        result = "Done. (no additional output)"
+                finally:
+                    agent.deactivate()
+
+                # --- Code review phase ---
+                if not settings.REVIEW_ENABLED or not engine.has_file_changes():
+                    # Review disabled or no code changes — skip review
+                    break
+
+                click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
+                review = reviewer.review(
+                    task_description=task_prompt[0],
+                    developer_result=result,
+                    file_changes_summary=engine.get_changed_files_summary(),
+                    previous_feedback=review_feedback,
                 )
-                if not result or not result.strip():
-                    result = "Done. (no additional output)"
-                click.echo(click.style("\nFinal Result:", fg="green", bold=True))
-                click.echo(result)
-            finally:
-                agent.deactivate()
-                
+
+                if review.is_approved or review.verdict == "SKIPPED":
+                    if review.is_approved:
+                        click.echo(click.style(
+                            f"Code review: APPROVED. {review.summary}",
+                            fg="green", dim=True,
+                        ))
+                    break
+
+                # Rejected — loop back to developer
+                if not reviewer.can_review_again:
+                    click.echo(click.style(
+                        f"Code review: REJECTED (max retries reached, proceeding). {review.summary}",
+                        fg="yellow",
+                    ))
+                    break
+
+                click.echo(click.style(
+                    f"Code review: REJECTED. {review.summary}",
+                    fg="red",
+                ))
+                click.echo(click.style(
+                    "Sending feedback to developer for fixes...",
+                    fg="yellow", dim=True,
+                ))
+                review_feedback = review.format_feedback_for_developer()
+            # --- End development + review loop ---
+
+            click.echo(click.style("\nFinal Result:", fg="green", bold=True))
+            click.echo(result)
+
         except KeyboardInterrupt:
             continue
         except EOFError:

@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     CODE_INTERPRETER_TIMEOUT: int = 120
     CODE_INTERPRETER_MAX_OUTPUT: int = 50000
 
+    # Phases
+    ANALYSIS_ENABLED: bool = True
+    REVIEW_ENABLED: bool = True
+
 
 
     model_config = {"env_prefix": "INFINIDEV_"}
