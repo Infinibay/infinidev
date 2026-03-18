@@ -39,12 +39,43 @@ class CodeInterpreterTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = CodeInterpreterInput
 
+    def _check_permission(self, code: str) -> str | None:
+        """Check code execution permission. Returns error string or None if allowed."""
+        mode = settings.EXECUTE_COMMANDS_PERMISSION
+
+        if mode == "auto_approve":
+            return None
+
+        if mode == "allowed_list":
+            # Code interpreter is never in an allowed_list — deny
+            return "Code interpreter denied: not in allowed commands list"
+
+        if mode == "ask":
+            from infinidev.tools.permission import request_permission
+            # Show first 200 chars as description, full code as details
+            preview = code[:200] + ("..." if len(code) > 200 else "")
+            approved = request_permission(
+                tool_name="code_interpreter",
+                description=f"Execute Python code ({len(code)} chars): {preview}",
+                details=code,
+            )
+            if not approved:
+                return "Code execution denied by user"
+            return None
+
+        return None  # Unknown mode — allow
+
     def _run(
         self,
         code: str,
         libraries_used: list[str] | None = None,
         timeout: int = 120,
     ) -> str:
+        # Check permissions first
+        perm_error = self._check_permission(code)
+        if perm_error:
+            return self._error(perm_error)
+
         timeout = min(timeout, settings.CODE_INTERPRETER_TIMEOUT)
         max_output = settings.CODE_INTERPRETER_MAX_OUTPUT
 

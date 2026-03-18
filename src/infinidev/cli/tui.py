@@ -600,6 +600,62 @@ class SettingsEditorScreen(ModalScreen[None]):
         self.notify(f"{sender}: {text}", timeout=3)
 
 
+class PermissionDetailScreen(ModalScreen[None]):
+    """Modal to view full permission details with syntax highlighting."""
+
+    CSS = """
+    PermissionDetailScreen {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.7);
+    }
+    #perm-detail-box {
+        width: 80%;
+        height: 80%;
+        background: $surface;
+        border: round $warning;
+        padding: 0;
+    }
+    #perm-detail-title {
+        width: 100%;
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        padding: 1 2;
+        background: $surface-darken-2;
+        border-bottom: solid $warning-darken-2;
+    }
+    #perm-detail-code {
+        height: 1fr;
+        margin: 1 2;
+    }
+    #perm-detail-hint {
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
+        padding: 1 2;
+        background: $surface-darken-2;
+        border-top: solid $warning-darken-2;
+    }
+    """
+    BINDINGS = [Binding("escape", "close", "Close", show=True)]
+
+    def __init__(self, content: str):
+        super().__init__()
+        self._content = content
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="perm-detail-box"):
+            yield Label("Permission Detail — Full Content", id="perm-detail-title")
+            yield TextArea(self._content, read_only=True, language="python", id="perm-detail-code")
+            yield Label("[dim]Esc to close[/dim]", id="perm-detail-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#perm-detail-code", TextArea).focus()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class SettingValueEditor(ModalScreen[str | None]):
     """Modal to edit a single setting value.
 
@@ -1694,18 +1750,32 @@ class InfinidevTUI(App):
         return approved
 
     def _show_permission_ui(self, description: str, details: str) -> None:
-        """Show permission prompt + buttons inside the ACTIONS panel."""
+        """Show permission prompt + buttons inside the ACTIONS panel.
+
+        Layout: title → buttons → preview (buttons always visible at top).
+        """
+        # Store full info for the "View" modal
+        self._permission_details = f"{description}\n\n{details}"
+
         panel = self.query_one("#actions-panel")
+
+        # Always show view button — keep panel text minimal so buttons fit
+        preview = details.split("\n")[0][:80]
+        if len(details) > len(preview):
+            preview += "..."
+
         panel.update_content(
-            f"[bold yellow]Permission Required[/bold yellow]\n\n"
-            f"{description}\n\n"
-            f"[bold white]{details}[/bold white]"
+            f"[bold yellow]Permission Required[/bold yellow]\n"
+            f"{preview}"
         )
-        # Mount buttons side by side inside the panel
+
+        # Mount buttons below the text
         btn_row = Horizontal(id="perm-btn-row")
         panel.mount(btn_row, after=panel.content_static)
-        allow_btn = Button(" Allow ", variant="success", id="btn-perm-allow")
-        deny_btn = Button(" Deny ", variant="error", id="btn-perm-deny")
+        view_btn = Button("View", variant="primary", id="btn-perm-view")
+        allow_btn = Button("Allow", variant="success", id="btn-perm-allow")
+        deny_btn = Button("Deny", variant="error", id="btn-perm-deny")
+        btn_row.mount(view_btn)
         btn_row.mount(allow_btn)
         btn_row.mount(deny_btn)
         allow_btn.focus()
@@ -1720,13 +1790,21 @@ class InfinidevTUI(App):
         event.stop()
         self._resolve_permission(False)
 
+    @on(Button.Pressed, "#btn-perm-view")
+    def _on_perm_view(self, event: Button.Pressed) -> None:
+        """Open modal to view full permission details with syntax highlighting."""
+        event.stop()
+        details = getattr(self, "_permission_details", "")
+        self.push_screen(PermissionDetailScreen(details))
+
     def _resolve_permission(self, approved: bool) -> None:
         """Handle a permission button click."""
-        # Remove the button row
-        try:
-            self.query_one("#perm-btn-row").remove()
-        except Exception:
-            pass
+        # Remove permission UI elements
+        for widget_id in ("#perm-btn-row", "#btn-perm-view"):
+            try:
+                self.query_one(widget_id).remove()
+            except Exception:
+                pass
         self.query_one("#actions-panel").update_content(
             "[green]Approved — continuing...[/green]" if approved else "[red]Denied[/red]"
         )
