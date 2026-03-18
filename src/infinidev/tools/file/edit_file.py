@@ -72,6 +72,12 @@ class EditFileTool(InfinibayBaseTool):
         if sandbox_err:
             return self._error(sandbox_err)
 
+        # Permission check
+        from infinidev.tools.base.permissions import check_file_permission
+        perm_err = check_file_permission("edit_file", path)
+        if perm_err:
+            return self._error(perm_err)
+
         if not os.path.exists(path):
             return self._error(f"File not found: {path}")
         if not os.path.isfile(path):

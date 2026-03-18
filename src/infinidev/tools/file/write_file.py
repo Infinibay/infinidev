@@ -42,6 +42,12 @@ class WriteFileTool(InfinibayBaseTool):
         if sandbox_err:
             return self._error(sandbox_err)
 
+        # Permission check
+        from infinidev.tools.base.permissions import check_file_permission
+        perm_err = check_file_permission("write_file", path)
+        if perm_err:
+            return self._error(perm_err)
+
         # Check content size before writing
         content_size = len(content.encode("utf-8"))
         existing_size = os.path.getsize(path) if os.path.exists(path) else 0

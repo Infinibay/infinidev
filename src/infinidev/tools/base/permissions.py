@@ -1,68 +1,58 @@
 """Permission checking utilities for Infinidev tools."""
 
-from typing import List, Optional
 from infinidev.config.settings import settings
 
 
 def check_command_permission(command: str) -> bool:
+    """Check if a command is allowed based on current permission settings.
+
+    Note: This is the legacy sandbox-based check. The active permission
+    system for execute_command lives in ExecuteCommandTool._check_permission()
+    and uses EXECUTE_COMMANDS_PERMISSION + request_permission().
     """
-    Check if a command is allowed based on current permission settings.
-    
-    Args:
-        command: The command to check
-        
-    Returns:
-        True if command is allowed, False if blocked
-    """
-    # If sandbox is disabled, we allow all commands (unless specific restrictions)
     if not settings.SANDBOX_ENABLED:
         return True
-    
-    # Check if we have a specific command permission setting
-    if hasattr(settings, 'COMMAND_PERMISSION') and settings.COMMAND_PERMISSION == 'ask':
-        # If permission is set to 'ask', check if command is in allowed list
-        if hasattr(settings, 'ALLOWED_COMMANDS') and settings.ALLOWED_COMMANDS:
-            # Check if command is in allowed list
-            command_name = command.split()[0] if command else ""
-            return command_name in settings.ALLOWED_COMMANDS
-        # If no allowed commands list, ask for permission (allow by default for now)
-        return True
-    elif hasattr(settings, 'COMMAND_PERMISSION') and settings.COMMAND_PERMISSION == 'auto_approve':
-        # Auto approve - always allow
-        return True
-    else:
-        # Default behavior - allow all commands
-        return True
+
+    if hasattr(settings, 'ALLOWED_COMMANDS') and settings.ALLOWED_COMMANDS:
+        command_name = command.split()[0] if command else ""
+        return command_name in settings.ALLOWED_COMMANDS
+
+    return True
 
 
-def check_file_permission(action: str, path: str) -> bool:
-    """
-    Check if a file operation is allowed based on current permission settings.
-    
+def check_file_permission(action: str, path: str) -> str | None:
+    """Check if a file write/edit operation is allowed.
+
     Args:
-        action: The action being performed (e.g., 'read', 'write', 'delete', 'create')
-        path: The path being accessed
-        
+        action: "write_file" or "edit_file"
+        path: The file path being modified
+
     Returns:
-        True if file operation is allowed, False if blocked
+        None if allowed, error string if denied.
     """
-    # If sandbox is disabled, we allow all file operations
-    if not settings.SANDBOX_ENABLED:
-        return True
-    
-    # Check file permission settings
-    if hasattr(settings, 'FILE_PERMISSION') and settings.FILE_PERMISSION == 'ask':
-        # If permission is set to 'ask', check if path is in allowed paths
-        if hasattr(settings, 'ALLOWED_FILE_PATHS') and settings.ALLOWED_FILE_PATHS:
-            # Check if path is in allowed list
-            for allowed_path in settings.ALLOWED_FILE_PATHS:
-                if path.startswith(allowed_path):
-                    return True
-        # If no allowed paths, ask for permission (allow by default for now)
-        return True
-    elif hasattr(settings, 'FILE_PERMISSION') and settings.FILE_PERMISSION == 'auto_approve':
-        # Auto approve - always allow
-        return True
-    else:
-        # Default behavior - allow all file operations
-        return True
+    mode = settings.FILE_OPERATIONS_PERMISSION
+
+    if mode == "auto_approve":
+        return None
+
+    if mode == "allowed_paths":
+        allowed = settings.ALLOWED_FILE_PATHS
+        if not allowed:
+            return f"File operation denied: no paths in allowed list"
+        for allowed_path in allowed:
+            if path.startswith(allowed_path):
+                return None
+        return f"File operation denied: '{path}' not in allowed paths"
+
+    if mode == "ask":
+        from infinidev.tools.permission import request_permission
+        approved = request_permission(
+            tool_name=action,
+            description=f"{'Write' if action == 'write_file' else 'Edit'} file",
+            details=path,
+        )
+        if not approved:
+            return f"File operation denied by user: {path}"
+        return None
+
+    return None  # Unknown mode — allow
