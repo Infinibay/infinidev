@@ -3,7 +3,9 @@
 Decomposes complex problems into sub-problems, explores them recursively
 with tools, propagates results upward, and synthesizes findings.
 
-Three phases: INIT (decompose) → EXPLORE (loop) → SYNTHESIZE (final).
+Two modes:
+- **explore**: analytical decomposition (INIT -> EXPLORE -> SYNTHESIZE)
+- **brainstorm**: creative ideation (ANTI-PATTERN -> DIVERGE -> EXPLORE -> CROSS -> CONVERGE)
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from infinidev.engine.tree_models import (
     Blocker,
     Fact,
     Question,
+    STATE_RANK,
     TreeNode,
     TreeState,
     propagate,
@@ -169,17 +172,14 @@ def _parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
 
 
 class TreeEngine(AgentEngine):
-    """Exploration tree engine.
-
-    Decomposes problems into sub-problems, explores them with tools,
-    propagates results, and synthesizes findings.
-    """
+    """Tree-based engine with two modes: explore (analytical) and brainstorm (creative)."""
 
     def execute(
         self,
         agent: Any,
         task_prompt: tuple[str, str],
         *,
+        mode: str = "explore",
         verbose: bool = True,
         guardrail: Any | None = None,
         guardrail_max_retries: int = 5,
@@ -188,37 +188,56 @@ class TreeEngine(AgentEngine):
         event_id: int | None = None,
         resume_state: dict | None = None,
     ) -> str:
-        """Execute the exploration tree engine."""
-        from infinidev.config.settings import settings
+        """Execute the tree engine in the given mode.
 
-        llm_params = get_litellm_params()
-        if llm_params is None:
-            raise RuntimeError("TreeEngine requires LiteLLM parameters.")
-
-        caps = get_model_capabilities()
-        manual_tc = not caps.supports_function_calling
-
-        desc, expected = task_prompt
-        project_id = getattr(agent, "project_id", 1)
-        agent_id = getattr(agent, "agent_id", "tree_agent")
-
-        # Resolve tools
-        tools = task_tools if task_tools is not None else getattr(agent, "tools", [])
-        tool_dispatch = build_tool_dispatch(tools) if tools else {}
-
-        # Build tool schemas for explore phase (regular tools + resolve_node)
-        regular_schemas = [tool_to_openai_schema(t) for t in tools] if tools else []
-
-        # System prompt
-        system_prompt = build_tree_system_prompt(
-            getattr(agent, "backstory", ""),
-            identity_override=getattr(agent, "_system_prompt_identity", None),
-            session_summaries=getattr(agent, "_session_summaries", None),
+        Args:
+            mode: "explore" for analytical decomposition, "brainstorm" for creative ideation.
+        """
+        if mode == "brainstorm":
+            return self._execute_brainstorm(
+                agent, task_prompt, task_tools=task_tools,
+            )
+        return self._execute_explore(
+            agent, task_prompt, task_tools=task_tools,
         )
 
-        # State
+    def explore_subproblem(self, agent: Any, problem: str) -> str:
+        """Convenience method for invoking explore mode from loop engine."""
+        return self.execute(
+            agent,
+            task_prompt=(problem, "Explore this sub-problem and synthesize findings."),
+            mode="explore",
+        )
+
+    def brainstorm_subproblem(self, agent: Any, problem: str) -> str:
+        """Convenience method for invoking brainstorm mode from other flows."""
+        return self.execute(
+            agent,
+            task_prompt=(problem, "Generate creative approaches."),
+            mode="brainstorm",
+        )
+
+    # ── Explore mode ─────────────────────────────────────────────────────
+
+    def _execute_explore(
+        self,
+        agent: Any,
+        task_prompt: tuple[str, str],
+        *,
+        task_tools: list | None = None,
+    ) -> str:
+        """Execute analytical exploration: INIT -> EXPLORE -> SYNTHESIZE."""
+        from infinidev.config.settings import settings
+
+        ctx = self._setup_context(agent, task_tools)
+        desc, _expected = task_prompt
+        llm_params, manual_tc = ctx["llm_params"], ctx["manual_tc"]
+        project_id, agent_id = ctx["project_id"], ctx["agent_id"]
+        tool_dispatch = ctx["tool_dispatch"]
+        regular_schemas = ctx["regular_schemas"]
+        system_prompt = ctx["system_prompt"]
+
         tree = TreeState()
-        _last_prompt_tokens = 0  # Tracks prompt_tokens of last LLM call (for TUI context panel)
 
         _log(f"\n{_BOLD}{_CYAN}🌳 Exploration Tree Engine{_RESET}")
         _log(f"{_DIM}   Problem: {desc[:120]}{_RESET}")
@@ -242,59 +261,336 @@ class TreeEngine(AgentEngine):
         if init_result is None:
             return "Failed to decompose the problem. The LLM did not produce a valid init_tree call."
 
-        # Build tree from init result
-        root_problem = init_result.get("root_problem", desc)
-        root_logic = init_result.get("logic", "AND")
-
-        root = TreeNode(
-            id="1",
-            problem_statement=root_problem,
-            logic=root_logic,
-            depth=0,
-        )
-
-        # Add initial facts
-        for f_data in init_result.get("facts", []):
-            root.facts.append(Fact(
-                content=f_data.get("content", ""),
-                source="initial",
-                evidence=f_data.get("evidence", ""),
-                confidence=f_data.get("confidence", "medium"),
-            ))
-
-        # Add initial questions
-        for q_data in init_result.get("questions", []):
-            root.questions.append(Question(
-                content=q_data.get("content", ""),
-                question_type=q_data.get("question_type", "informational"),
-            ))
-
-        # Add sub-problems as children
-        for sp_data in init_result.get("sub_problems", []):
-            sp_logic = sp_data.get("logic", "AND")
-            child = root.add_child(sp_data.get("problem", ""), logic=sp_logic)
-            # Add questions to child if provided
-            for q_data in sp_data.get("questions", []):
-                child.questions.append(Question(
-                    content=q_data.get("content", ""),
-                    question_type=q_data.get("question_type", "informational"),
-                ))
-
+        root = self._build_tree_from_init(init_result, desc)
         tree.root = root
-        num_children = len(root.children)
 
         _emit_tree_event("tree_init", project_id, agent_id, {
-            "root_problem": root_problem,
-            "num_children": num_children,
-            "logic": root_logic,
+            "root_problem": root.problem_statement,
+            "num_children": len(root.children),
+            "logic": root.logic,
             "total_tokens": tree.total_tokens,
             "total_llm_calls": tree.total_llm_calls,
-        }, f"🌳 Tree initialized: \"{root_problem[:80]}\" → {num_children} sub-problems ({root_logic})")
+        }, f"🌳 Tree initialized: \"{root.problem_statement[:80]}\" → {len(root.children)} sub-problems ({root.logic})")
 
         # ── PHASE 2: EXPLORE LOOP ────────────────────────────────────────
         _log(f"\n{_BOLD}Phase 2: Exploration{_RESET}")
 
         explore_schemas = regular_schemas + [RESOLVE_NODE_SCHEMA]
+        self._explore_loop(
+            tree, desc, system_prompt, explore_schemas,
+            llm_params, manual_tc, tool_dispatch,
+            project_id, agent_id, settings,
+            build_prompt_fn=lambda d, t, n: build_explore_prompt(d, t, n),
+        )
+
+        # ── PHASE 3: SYNTHESIZE ──────────────────────────────────────────
+        return self._synthesize_and_store(
+            tree, desc, system_prompt, llm_params, manual_tc,
+            project_id, agent_id, agent, mode="explore",
+        )
+
+    # ── Brainstorm mode ──────────────────────────────────────────────────
+
+    def _execute_brainstorm(
+        self,
+        agent: Any,
+        task_prompt: tuple[str, str],
+        *,
+        task_tools: list | None = None,
+    ) -> str:
+        """Execute creative brainstorm: ANTI-PATTERN -> DIVERGE -> EXPLORE -> CROSS -> CONVERGE."""
+        from infinidev.config.settings import settings
+        from infinidev.engine.brainstorm_context import (
+            ANTI_PATTERN_SCHEMA,
+            CONVERGE_SCHEMA,
+            CROSS_SCHEMA,
+            DIVERGE_SCHEMA,
+            build_anti_pattern_prompt,
+            build_brainstorm_explore_prompt,
+            build_converge_prompt,
+            build_cross_prompt,
+            build_diverge_prompt,
+            get_random_oblique,
+            select_perspectives,
+        )
+
+        ctx = self._setup_context(agent, task_tools, flow="brainstorm")
+        desc, _expected = task_prompt
+        llm_params, manual_tc = ctx["llm_params"], ctx["manual_tc"]
+        project_id, agent_id = ctx["project_id"], ctx["agent_id"]
+        tool_dispatch = ctx["tool_dispatch"]
+        regular_schemas = ctx["regular_schemas"]
+        system_prompt = ctx["system_prompt"]
+
+        tree = TreeState()
+
+        _log(f"\n{_BOLD}{_MAGENTA}🧠 Brainstorm Engine{_RESET}")
+        _log(f"{_DIM}   Problem: {desc[:120]}{_RESET}")
+        _log(f"{_DIM}{'─' * 60}{_RESET}")
+
+        # ── PHASE 0: ANTI-PATTERN ────────────────────────────────────────
+        _log(f"\n{_BOLD}Phase 0: Identifying Obvious Solutions{_RESET}")
+
+        anti_prompt = build_anti_pattern_prompt(desc)
+        anti_messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": anti_prompt},
+        ]
+        anti_result = self._call_with_schema(
+            llm_params, anti_messages, [ANTI_PATTERN_SCHEMA],
+            "identify_obvious", tree, manual_tc,
+        )
+        tree.total_llm_calls += 1
+
+        anti_patterns: list[dict] = []
+        assumptions: list[str] = []
+        if anti_result:
+            anti_patterns = anti_result.get("obvious_solutions", [])
+            assumptions = anti_result.get("assumptions", [])
+
+        banned_summary = ", ".join(
+            ap.get("approach", "")[:50] for ap in anti_patterns
+        )
+        _log(f"{_DIM}   Banned: {banned_summary}{_RESET}")
+
+        _emit_tree_event("brainstorm_anti_pattern", project_id, agent_id, {
+            "num_banned": len(anti_patterns),
+            "assumptions": assumptions,
+        }, f"🚫 Banned {len(anti_patterns)} obvious approaches, {len(assumptions)} assumptions identified")
+
+        # ── PHASE 1: DIVERGE ─────────────────────────────────────────────
+        _log(f"\n{_BOLD}Phase 1: Diverge (Forced Perspectives){_RESET}")
+
+        perspectives = select_perspectives(5)
+
+        # Create root with OR logic (any good idea wins)
+        root = TreeNode(
+            id="1",
+            problem_statement=desc,
+            logic="OR",
+            depth=0,
+        )
+        # Store anti-patterns as facts on root
+        for ap in anti_patterns:
+            root.facts.append(Fact(
+                content=f"BANNED: {ap.get('approach', '')}",
+                source="initial",
+                confidence="high",
+            ))
+
+        tree.root = root
+
+        # Generate one idea per perspective
+        for i, perspective in enumerate(perspectives, 1):
+            oblique = get_random_oblique()
+
+            diverge_prompt = build_diverge_prompt(
+                desc, perspective, anti_patterns, oblique,
+            )
+            diverge_messages: list[dict[str, Any]] = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": diverge_prompt},
+            ]
+
+            idea_result = self._call_with_schema(
+                llm_params, diverge_messages, [DIVERGE_SCHEMA],
+                "propose_idea", tree, manual_tc,
+            )
+            tree.total_llm_calls += 1
+
+            if idea_result:
+                idea_title = idea_result.get("idea_title", f"Idea {i}")
+                child = root.add_child(idea_title, logic="AND")
+                child.facts.append(Fact(
+                    content=f"Perspective: {idea_result.get('perspective_used', perspective['name'])}",
+                    source="initial",
+                    confidence="high",
+                ))
+                child.facts.append(Fact(
+                    content=f"Novelty: {idea_result.get('novelty_claim', '')}",
+                    source="initial",
+                    confidence="medium",
+                ))
+                if idea_result.get("description"):
+                    child.problem_reformulated = idea_result["description"]
+                for step in idea_result.get("verification_steps", []):
+                    child.questions.append(Question(
+                        content=step,
+                        question_type="informational",
+                    ))
+
+                _log(f"  {_CYAN}💡 [{child.id}] {idea_title} ({perspective['name']}){_RESET}")
+            else:
+                _log(f"  {_YELLOW}⚠ Perspective '{perspective['name']}' produced no idea{_RESET}")
+
+        _emit_tree_event("brainstorm_diverge", project_id, agent_id, {
+            "num_ideas": len(root.children),
+            "perspectives": [p["name"] for p in perspectives],
+        }, f"💡 Generated {len(root.children)} ideas from {len(perspectives)} perspectives")
+
+        if not root.children:
+            return "Brainstorm failed: no ideas were generated from any perspective."
+
+        # ── PHASE 2: EXPLORE ─────────────────────────────────────────────
+        _log(f"\n{_BOLD}Phase 2: Explore Ideas{_RESET}")
+
+        explore_schemas = regular_schemas + [RESOLVE_NODE_SCHEMA]
+        self._explore_loop(
+            tree, desc, system_prompt, explore_schemas,
+            llm_params, manual_tc, tool_dispatch,
+            project_id, agent_id, settings,
+            build_prompt_fn=lambda d, t, n: build_brainstorm_explore_prompt(
+                d, t, n, anti_patterns,
+            ),
+            stop_on_root_resolved=False,
+        )
+
+        # ── PHASE 3: CROSS ───────────────────────────────────────────────
+        _log(f"\n{_BOLD}Phase 3: Cross-Pollinate{_RESET}")
+
+        # Select top 2 explored ideas by state rank
+        explored_ideas = [
+            c for c in root.children
+            if c.id in tree.explored_node_ids and c.is_resolved()
+        ]
+        explored_ideas.sort(
+            key=lambda c: (
+                STATE_RANK.get(c.state, -1),
+                {"low": 0, "medium": 1, "high": 2}.get(c.confidence, 0),
+            ),
+            reverse=True,
+        )
+
+        if len(explored_ideas) >= 2:
+            idea_a = explored_ideas[0]
+            idea_b = explored_ideas[1]
+
+            _log(f"  {_MAGENTA}Crossing [{idea_a.id}] × [{idea_b.id}]{_RESET}")
+
+            cross_prompt = build_cross_prompt(desc, idea_a, idea_b, anti_patterns)
+            cross_messages: list[dict[str, Any]] = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": cross_prompt},
+            ]
+
+            cross_result = self._call_with_schema(
+                llm_params, cross_messages, [CROSS_SCHEMA],
+                "cross_ideas", tree, manual_tc,
+            )
+            tree.total_llm_calls += 1
+
+            if cross_result:
+                hybrid_title = cross_result.get("hybrid_title", "Hybrid idea")
+                hybrid = root.add_child(hybrid_title, logic="AND")
+                hybrid.facts.append(Fact(
+                    content=f"From [{idea_a.id}]: {cross_result.get('what_from_a', '')}",
+                    source="initial",
+                    confidence="medium",
+                ))
+                hybrid.facts.append(Fact(
+                    content=f"From [{idea_b.id}]: {cross_result.get('what_from_b', '')}",
+                    source="initial",
+                    confidence="medium",
+                ))
+                hybrid.facts.append(Fact(
+                    content=f"Why better: {cross_result.get('why_better', '')}",
+                    source="initial",
+                    confidence="medium",
+                ))
+                if cross_result.get("hybrid_description"):
+                    hybrid.problem_reformulated = cross_result["hybrid_description"]
+                for step in cross_result.get("verification_steps", []):
+                    hybrid.questions.append(Question(
+                        content=step,
+                        question_type="informational",
+                    ))
+
+                _log(f"  {_GREEN}🧬 [{hybrid.id}] {hybrid_title}{_RESET}")
+
+                _emit_tree_event("brainstorm_cross", project_id, agent_id, {
+                    "idea_a": idea_a.id,
+                    "idea_b": idea_b.id,
+                    "hybrid_id": hybrid.id,
+                }, f"🧬 Crossed [{idea_a.id}] × [{idea_b.id}] → [{hybrid.id}] {hybrid_title}")
+
+                # Explore the hybrid
+                _log(f"\n{_BOLD}Phase 3b: Explore Hybrid{_RESET}")
+                self._explore_loop(
+                    tree, desc, system_prompt, explore_schemas,
+                    llm_params, manual_tc, tool_dispatch,
+                    project_id, agent_id, settings,
+                    build_prompt_fn=lambda d, t, n: build_brainstorm_explore_prompt(
+                        d, t, n, anti_patterns,
+                    ),
+                )
+        else:
+            _log(f"  {_DIM}Not enough explored ideas to cross (need 2, have {len(explored_ideas)}){_RESET}")
+
+        # ── PHASE 4: CONVERGE ────────────────────────────────────────────
+        _log(f"\n{_BOLD}Phase 4: Converge{_RESET}")
+
+        converge_prompt = build_converge_prompt(desc, tree, anti_patterns)
+        converge_messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": converge_prompt},
+        ]
+
+        converge_result = self._call_with_schema(
+            llm_params, converge_messages, [CONVERGE_SCHEMA],
+            "rank_ideas", tree, manual_tc,
+        )
+        tree.total_llm_calls += 1
+
+        if converge_result:
+            tree.synthesis = self._format_brainstorm_synthesis(converge_result)
+        else:
+            tree.synthesis = self._fallback_synthesis(tree)
+
+        # Save to DB
+        self._store_tree(tree, desc, project_id, agent_id, agent, mode="brainstorm")
+
+        _emit_tree_event("brainstorm_finished", project_id, agent_id, {
+            "total_nodes": tree.count_nodes(),
+            "total_ideas": len(root.children),
+            "synthesis_preview": (tree.synthesis or "")[:200],
+        }, f"🏁 Brainstorm complete: {len(root.children)} ideas explored, {tree.count_nodes()} total nodes")
+
+        _log(f"\n{_DIM}{'─' * 60}{_RESET}")
+        _log(
+            f"✅ {_BOLD}Brainstorm complete{_RESET}  "
+            f"{_DIM}{tree.iteration_count} iterations · "
+            f"{tree.total_tool_calls} tools · "
+            f"{tree.total_llm_calls} LLM calls · "
+            f"{tree.total_tokens} tokens{_RESET}\n"
+        )
+
+        return tree.synthesis or "Brainstorm completed but no synthesis was produced."
+
+    # ── Shared mechanics ─────────────────────────────────────────────────
+
+    def _explore_loop(
+        self,
+        tree: TreeState,
+        desc: str,
+        system_prompt: str,
+        explore_schemas: list[dict],
+        llm_params: dict[str, Any],
+        manual_tc: bool,
+        tool_dispatch: dict,
+        project_id: int,
+        agent_id: str,
+        settings: Any,
+        *,
+        build_prompt_fn: Any,
+        stop_on_root_resolved: bool = True,
+    ) -> None:
+        """Shared explore loop used by both explore and brainstorm modes.
+
+        Iterates over pending nodes, calls LLM with tools, handles resolve_node.
+        The build_prompt_fn controls what prompt each node gets.
+        Set stop_on_root_resolved=False for brainstorm mode to explore all branches.
+        """
+        _last_prompt_tokens = 0
 
         while True:
             # Budget checks
@@ -309,11 +605,11 @@ class TreeEngine(AgentEngine):
                 break
 
             # Check if root already resolved
-            if tree.root and tree.root.is_resolved():
+            if stop_on_root_resolved and tree.root and tree.root.is_resolved():
                 _log(f"{_GREEN}Root resolved: {tree.root.state}{_RESET}")
                 break
 
-            # Select next node (skip already-explored nodes)
+            # Select next node
             node = select_next_node(tree)
             if node is None:
                 _log(f"{_GREEN}All nodes resolved.{_RESET}")
@@ -331,8 +627,8 @@ class TreeEngine(AgentEngine):
                 "prompt_tokens": _last_prompt_tokens,
             }, f"🔍 Exploring [{node.id}]: \"{node.problem_statement[:80]}\"")
 
-            # Build explore prompt
-            explore_prompt = build_explore_prompt(desc, tree, node)
+            # Build prompt via mode-specific function
+            explore_prompt = build_prompt_fn(desc, tree, node)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": explore_prompt},
@@ -396,7 +692,6 @@ class TreeEngine(AgentEngine):
                     tool_calls = getattr(message, "tool_calls", None)
 
                 if not tool_calls:
-                    # No tool calls — try to extract useful text
                     content = (message.content or "").strip()
                     if content:
                         messages.append({"role": "assistant", "content": content})
@@ -534,7 +829,20 @@ class TreeEngine(AgentEngine):
 
             tree.iteration_count += 1
 
-        # ── PHASE 3: SYNTHESIZE ──────────────────────────────────────────
+    def _synthesize_and_store(
+        self,
+        tree: TreeState,
+        desc: str,
+        system_prompt: str,
+        llm_params: dict[str, Any],
+        manual_tc: bool,
+        project_id: int,
+        agent_id: str,
+        agent: Any,
+        *,
+        mode: str = "explore",
+    ) -> str:
+        """Synthesize findings and store to DB (explore mode)."""
         _log(f"\n{_BOLD}Phase 3: Synthesis{_RESET}")
 
         total_nodes = tree.count_nodes()
@@ -560,7 +868,6 @@ class TreeEngine(AgentEngine):
             risks = synth_result.get("risks", [])
             unknowns = synth_result.get("unknowns", [])
 
-            # Build final output
             parts: list[str] = []
             if synthesis_text:
                 parts.append(f"## Synthesis\n\n{synthesis_text}")
@@ -575,22 +882,7 @@ class TreeEngine(AgentEngine):
         else:
             tree.synthesis = self._fallback_synthesis(tree)
 
-        # Save to DB
-        try:
-            store_exploration_tree(
-                project_id=project_id,
-                problem=desc,
-                tree_json=tree.model_dump_json(),
-                session_id=getattr(agent, "_session_id", None),
-                agent_id=agent_id,
-                synthesis=tree.synthesis,
-                status="completed" if tree.root and tree.root.is_resolved() else "exhausted",
-                total_nodes=tree.count_nodes(),
-                total_tool_calls=tree.total_tool_calls,
-                total_tokens=tree.total_tokens,
-            )
-        except Exception as exc:
-            logger.warning("Failed to store exploration tree: %s", exc)
+        self._store_tree(tree, desc, project_id, agent_id, agent, mode=mode)
 
         _emit_tree_event("tree_finished", project_id, agent_id, {
             "status": tree.root.state if tree.root else "unknown",
@@ -609,14 +901,115 @@ class TreeEngine(AgentEngine):
 
         return tree.synthesis or "Exploration completed but no synthesis was produced."
 
-    def explore_subproblem(self, agent: Any, problem: str) -> str:
-        """Convenience method for invoking from loop engine."""
-        return self.execute(
-            agent,
-            task_prompt=(problem, "Explore this sub-problem and synthesize findings."),
+    # ── Helpers ───────────────────────────────────────────────────────────
+
+    def _setup_context(
+        self,
+        agent: Any,
+        task_tools: list | None,
+        flow: str = "explore",
+    ) -> dict[str, Any]:
+        """Common setup for both modes."""
+        llm_params = get_litellm_params()
+        if llm_params is None:
+            raise RuntimeError("TreeEngine requires LiteLLM parameters.")
+
+        caps = get_model_capabilities()
+        manual_tc = not caps.supports_function_calling
+
+        tools = task_tools if task_tools is not None else getattr(agent, "tools", [])
+        tool_dispatch = build_tool_dispatch(tools) if tools else {}
+        regular_schemas = [tool_to_openai_schema(t) for t in tools] if tools else []
+
+        if flow == "brainstorm":
+            from infinidev.prompts.flows.brainstorm import BRAINSTORM_IDENTITY
+            identity = getattr(agent, "_system_prompt_identity", None) or BRAINSTORM_IDENTITY
+        else:
+            identity = getattr(agent, "_system_prompt_identity", None)
+
+        system_prompt = build_tree_system_prompt(
+            getattr(agent, "backstory", ""),
+            identity_override=identity,
+            session_summaries=getattr(agent, "_session_summaries", None),
         )
 
-    # ── Helpers ──────────────────────────────────────────────────────────
+        return {
+            "llm_params": llm_params,
+            "manual_tc": manual_tc,
+            "project_id": getattr(agent, "project_id", 1),
+            "agent_id": getattr(agent, "agent_id", "tree_agent"),
+            "tool_dispatch": tool_dispatch,
+            "regular_schemas": regular_schemas,
+            "system_prompt": system_prompt,
+        }
+
+    def _build_tree_from_init(
+        self,
+        init_result: dict[str, Any],
+        desc: str,
+    ) -> TreeNode:
+        """Build a TreeNode root from init_tree result."""
+        root_problem = init_result.get("root_problem", desc)
+        root_logic = init_result.get("logic", "AND")
+
+        root = TreeNode(
+            id="1",
+            problem_statement=root_problem,
+            logic=root_logic,
+            depth=0,
+        )
+
+        for f_data in init_result.get("facts", []):
+            root.facts.append(Fact(
+                content=f_data.get("content", ""),
+                source="initial",
+                evidence=f_data.get("evidence", ""),
+                confidence=f_data.get("confidence", "medium"),
+            ))
+
+        for q_data in init_result.get("questions", []):
+            root.questions.append(Question(
+                content=q_data.get("content", ""),
+                question_type=q_data.get("question_type", "informational"),
+            ))
+
+        for sp_data in init_result.get("sub_problems", []):
+            sp_logic = sp_data.get("logic", "AND")
+            child = root.add_child(sp_data.get("problem", ""), logic=sp_logic)
+            for q_data in sp_data.get("questions", []):
+                child.questions.append(Question(
+                    content=q_data.get("content", ""),
+                    question_type=q_data.get("question_type", "informational"),
+                ))
+
+        return root
+
+    def _store_tree(
+        self,
+        tree: TreeState,
+        desc: str,
+        project_id: int,
+        agent_id: str,
+        agent: Any,
+        *,
+        mode: str = "explore",
+    ) -> None:
+        """Store exploration tree to DB."""
+        try:
+            store_exploration_tree(
+                project_id=project_id,
+                problem=desc,
+                tree_json=tree.model_dump_json(),
+                session_id=getattr(agent, "_session_id", None),
+                agent_id=agent_id,
+                synthesis=tree.synthesis,
+                status="completed" if tree.root and tree.root.is_resolved() else "exhausted",
+                total_nodes=tree.count_nodes(),
+                total_tool_calls=tree.total_tool_calls,
+                total_tokens=tree.total_tokens,
+            )
+        except Exception as exc:
+            logger.warning("Failed to store exploration tree: %s", exc)
 
     def _call_with_schema(
         self,
@@ -739,6 +1132,13 @@ class TreeEngine(AgentEngine):
         if args.get("discard_reason"):
             node.discard_reason = args["discard_reason"]
 
+        # Hypothesis content
+        if "hypothesis_content" in args and args["hypothesis_content"]:
+            if node.state not in ("hypothesis",):
+                node.state = "hypothesis"
+            node.confidence = "low"
+            node.hypothesis_content = args["hypothesis_content"]
+
         # New sub-problems (further decomposition)
         for sp_data in args.get("new_sub_problems", []):
             if tree.count_nodes() >= settings.TREE_MAX_NODES:
@@ -758,6 +1158,45 @@ class TreeEngine(AgentEngine):
                     question_type=q_data.get("question_type", "informational"),
                 ))
 
+    def _format_brainstorm_synthesis(self, converge_result: dict[str, Any]) -> str:
+        """Format brainstorm convergence result into readable output."""
+        parts: list[str] = []
+
+        synthesis = converge_result.get("synthesis", "")
+        if synthesis:
+            parts.append(f"## Brainstorm Results\n\n{synthesis}")
+
+        ranked = converge_result.get("ranked_ideas", [])
+        if ranked:
+            idea_lines: list[str] = []
+            for idea in sorted(ranked, key=lambda x: x.get("rank", 99)):
+                rank = idea.get("rank", "?")
+                title = idea.get("idea_title", "Untitled")
+                novelty = idea.get("novelty_score", "?")
+                feasibility = idea.get("feasibility_score", "?")
+                completeness = idea.get("completeness_score", "?")
+                justification = idea.get("justification", "")
+                next_steps = idea.get("next_steps", [])
+
+                idea_lines.append(
+                    f"### #{rank}: {title}\n"
+                    f"- Novelty: {novelty}/5 | Feasibility: {feasibility}/5 | "
+                    f"Completeness: {completeness}/5\n"
+                    f"- {justification}"
+                )
+                if next_steps:
+                    idea_lines.append(
+                        "- Next steps:\n" + "\n".join(f"  - {s}" for s in next_steps)
+                    )
+
+            parts.append("## Ranked Ideas\n\n" + "\n\n".join(idea_lines))
+
+        surprise = converge_result.get("surprise_finding")
+        if surprise:
+            parts.append(f"## Surprise Finding\n\n{surprise}")
+
+        return "\n\n".join(parts)
+
     def _fallback_synthesis(self, tree: TreeState) -> str:
         """Produce a synthesis from tree state when LLM fails."""
         if tree.root is None:
@@ -769,7 +1208,6 @@ class TreeEngine(AgentEngine):
             f"Nodes explored: {len(tree.explored_node_ids)} / {tree.count_nodes()}",
         ]
 
-        # Collect key facts from all nodes
         facts: list[str] = []
         self._collect_all_facts(tree.root, facts)
         if facts:

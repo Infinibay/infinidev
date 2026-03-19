@@ -27,6 +27,11 @@ from infinidev.prompts.flows.explore import (
     EXPLORE_EXPECTED_OUTPUT,
     EXPLORE_IDENTITY,
 )
+from infinidev.prompts.flows.brainstorm import (
+    BRAINSTORM_BACKSTORY,
+    BRAINSTORM_EXPECTED_OUTPUT,
+    BRAINSTORM_IDENTITY,
+)
 
 register_flow(FlowConfig(
     name="develop",
@@ -62,4 +67,11 @@ register_flow(FlowConfig(
     identity_prompt=EXPLORE_IDENTITY,
     expected_output=EXPLORE_EXPECTED_OUTPUT,
     backstory=EXPLORE_BACKSTORY,
+))
+
+register_flow(FlowConfig(
+    name="brainstorm",
+    identity_prompt=BRAINSTORM_IDENTITY,
+    expected_output=BRAINSTORM_EXPECTED_OUTPUT,
+    backstory=BRAINSTORM_BACKSTORY,
 ))

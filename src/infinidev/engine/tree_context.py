@@ -25,6 +25,7 @@ You operate in an exploration tree engine. Follow these rules:
 - **needs_decision** — Requires human input, not more information
 - **needs_experiment** — Answer only obtainable by running code/tests
 - **discarded** — Dead branch (in OR logic, another path was chosen)
+- **hypothesis** — Speculative approach (used in brainstorm mode)
 
 ### Logic Modes
 - **AND** — All children must be resolved; parent gets WORST child state
@@ -128,6 +129,7 @@ RESOLVE_NODE_SCHEMA: dict = {
                     "enum": [
                         "solvable", "unsolvable", "mitigable",
                         "needs_decision", "needs_experiment",
+                        "hypothesis",
                     ],
                     "description": "New state for this node",
                 },
@@ -138,6 +140,10 @@ RESOLVE_NODE_SCHEMA: dict = {
                 "summary": {
                     "type": "string",
                     "description": "1-2 sentence summary of findings",
+                },
+                "hypothesis_content": {
+                    "type": "string",
+                    "description": "Speculative best-guess approach (for brainstorm mode)",
                 },
                 "new_facts": {
                     "type": "array",

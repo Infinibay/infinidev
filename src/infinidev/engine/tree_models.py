@@ -1,10 +1,46 @@
-"""Pydantic models for the exploration tree engine."""
+"""Pydantic models for the exploration tree engine.
+
+Decomposes complex problems into sub-problems, explores them recursively
+with tools, propagates results upward, and synthesizes findings.
+
+Three phases: INIT (decompose) -> EXPLORE (loop) -> SYNTHESIZE (final).
+
+Brainstorming Mode: for very short problem statements (< 100 chars),
+the engine enters a speculative exploration mode where hypotheses can be
+generated, factorized into subproblems, and explored through an
+intermediate factorization phase (Phase 2.5).
+"""
 
 from __future__ import annotations
 
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+class BrainstormingDetector:
+    """Detects when to enter brainstorming mode based on problem characteristics.
+
+    Triggers brainstorming mode when:
+    - Problem statement is very short (< 100 characters)
+    - Problem is empty or whitespace-only
+    """
+
+    BRAINSTORMING_THRESHOLD = 100  # Maximum problem length to trigger brainstorming
+
+    def should_brainstorm(self, problem: str) -> bool:
+        """Determine if the system should enter brainstorming mode.
+
+        Args:
+            problem: The problem statement from the user.
+
+        Returns:
+            True if brainstorming mode should be activated.
+        """
+        if not problem or not problem.strip():
+            return True
+
+        return len(problem) < self.BRAINSTORMING_THRESHOLD
 
 
 class Fact(BaseModel):
@@ -48,12 +84,14 @@ class TreeNode(BaseModel):
     state: Literal[
         "pending", "exploring", "solvable", "unsolvable",
         "mitigable", "needs_decision", "needs_experiment", "discarded",
+        "hypothesis",  # Speculative approach when facing information gaps
     ] = "pending"
     confidence: Literal["high", "medium", "low"] = "low"
     constraints: list[str] = Field(default_factory=list)
     external_blockers: list[Blocker] = Field(default_factory=list)
     discard_reason: str | None = None
     exploration_summary: str | None = None
+    hypothesis_content: str | None = None  # Speculative content for brainstorming mode
     tool_calls_count: int = 0
     depth: int = 0
 
@@ -72,7 +110,7 @@ class TreeNode(BaseModel):
 
     def is_resolved(self) -> bool:
         """Whether this node has reached a terminal state."""
-        return self.state in ("solvable", "unsolvable", "mitigable", "discarded")
+        return self.state in ("solvable", "unsolvable", "mitigable", "discarded", "hypothesis")
 
     def collect_inheritable_facts(self) -> list[Fact]:
         """Return discovered facts that can be inherited by siblings/parent."""
@@ -80,10 +118,11 @@ class TreeNode(BaseModel):
 
 
 # State ranking for propagation (higher = better)
-STATE_RANK: dict[str, int] = {
+STATE_RANK: dict[str, float] = {
     "unsolvable": 0,
     "needs_decision": 1,
     "needs_experiment": 2,
+    "hypothesis": 2.5,  # Speculative -- above needs_experiment, below mitigable
     "mitigable": 3,
     "solvable": 4,
     # Non-terminal states (should not appear in propagation of resolved nodes)
@@ -103,7 +142,7 @@ CONF_RANK: dict[str, int] = {
 def propagate(root: TreeNode) -> None:
     """Bottom-up propagation of state, confidence, constraints, and blockers.
 
-    Pure Python — no LLM calls. Modifies the tree in place.
+    Pure Python -- no LLM calls. Modifies the tree in place.
     """
     _propagate_node(root)
 
@@ -138,7 +177,7 @@ def _propagate_node(node: TreeNode) -> None:
             node.state = "exploring"
             return
 
-        # All resolved — worst state wins, lowest confidence wins
+        # All resolved -- worst state wins, lowest confidence wins
         worst = min(active, key=lambda c: STATE_RANK.get(c.state, -1))
         node.state = worst.state
         lowest_conf = min(active, key=lambda c: CONF_RANK.get(c.confidence, 0))
