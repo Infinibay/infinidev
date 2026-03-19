@@ -102,85 +102,53 @@ class SidebarPanel(Vertical):
 class ContextPanel(Vertical):
     """Widget showing per-window context usage: used, available, and %."""
 
-    CSS = """
-    ContextPanel {
-        width: 100%;
-        margin-bottom: 1;
-        padding: 1;
-        background: $surface-lighten-1;
-        border: solid $primary;
-    }
-    #context-model-name {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-        color: $primary;
-    }
-    .ctx-section-title {
-        text-style: bold;
-        margin-top: 1;
-        color: $text;
-    }
-    .ctx-detail {
-        margin-left: 2;
-        color: $text;
-    }
-    .ctx-bar {
-        margin-left: 2;
-    }
-    """
-
     def __init__(self, id: str = None):
         super().__init__(id=id)
+        self.styles.height = 5
+        self.styles.max_height = 5
         self._status: dict[str, Any] = {}
+        self._flow: str = ""
+
+    def set_flow(self, flow: str) -> None:
+        """Update the current flow indicator."""
+        self._flow = flow
+        self._refresh()
 
     def compose(self) -> ComposeResult:
-        yield Static("Loading...", id="context-model-name")
-        # Chat section — last prompt_tokens from LLM
-        yield Static("[bold]Chat Usage[/bold]", classes="ctx-section-title")
-        yield Static("", id="chat-details", classes="ctx-detail")
-        yield Static("", id="chat-bar", classes="ctx-bar")
-        # Task section — last prompt tokens during task execution
-        yield Static("[bold]Task Usage[/bold]", classes="ctx-section-title")
-        yield Static("", id="task-details", classes="ctx-detail")
-        yield Static("", id="task-bar", classes="ctx-bar")
+        yield Static("Loading...", id="ctx-model")
+        yield Static("", id="ctx-chat", classes="ctx-line")
+        yield Static("", id="ctx-task", classes="ctx-line")
+
+    def _refresh(self) -> None:
+        """Refresh all lines from current status."""
+        model = self._status.get("model", "unknown")
+        max_ctx = self._status.get("max_context", 4096)
+        flow_part = f"  [bold yellow]{self._flow}[/bold yellow]" if self._flow else ""
+        self.query_one("#ctx-model", Static).update(
+            f"[bold]{model}[/bold] [dim]({max_ctx} ctx)[/dim]{flow_part}"
+        )
+
+        chat = self._status.get("chat", {})
+        self._update_line("#ctx-chat", "Chat",
+                          chat.get("current_tokens", 0),
+                          chat.get("remaining_tokens", 0),
+                          chat.get("usage_percentage", 0.0))
+
+        tasks = self._status.get("tasks", {})
+        self._update_line("#ctx-task", "Task",
+                          tasks.get("current_tokens", 0),
+                          tasks.get("remaining_tokens", 0),
+                          tasks.get("usage_percentage", 0.0))
 
     def update_status(self, status: dict[str, Any]) -> None:
         """Update the panel with new status data."""
         self._status = status
-        max_ctx = status.get("max_context", 4096)
+        self._refresh()
 
-        # Model name
-        model = status.get("model", "unknown")
-        self.query_one("#context-model-name", Static).update(
-            f"[bold]{model}[/bold]  [dim]({max_ctx} ctx)[/dim]"
-        )
-
-        # Chat window - show last prompt tokens instead of cumulative
-        chat = status.get("chat", {})
-        self._update_section(
-            "#chat-details", "#chat-bar",
-            chat.get("current_tokens", 0),
-            chat.get("remaining_tokens", max_ctx),
-            chat.get("usage_percentage", 0.0),
-        )
-
-        # Task window - show cumulative tokens
-        tasks = status.get("tasks", {})
-        self._update_section(
-            "#task-details", "#task-bar",
-            tasks.get("current_tokens", 0),
-            tasks.get("remaining_tokens", max_ctx),
-            tasks.get("usage_percentage", 0.0),
-        )
-
-    def _update_section(self, details_id: str, bar_id: str,
-                        used: int, available: int, pct: float) -> None:
-        """Update one context section (chat or task)."""
+    def _update_line(self, line_id: str, label: str,
+                     used: int, available: int, pct: float) -> None:
+        """Render one compact context line: label used/avail bar pct."""
         pct_val = min(pct, 1.0)
-        pct_str = f"{pct_val * 100:.1f}%"
-
-        # Color based on usage
         if pct_val > 0.8:
             color = "red"
         elif pct_val > 0.5:
@@ -188,19 +156,12 @@ class ContextPanel(Vertical):
         else:
             color = "green"
 
-        self.query_one(details_id, Static).update(
-            f"Used: [bold]{used}[/bold]  "
-            f"Available: [bold {color}]{available}[/bold {color}]  "
-            f"({pct_str})"
-        )
-
-        # Progress bar
-        bar_width = 20
+        bar_width = 8
         filled = int(bar_width * pct_val)
         empty = bar_width - filled
-        bar = "\\[" + "█" * filled + "░" * empty + "\\]"
-        self.query_one(bar_id, Static).update(
-            f"[bold {color}]{bar}[/bold {color}] {pct_str}"
+        bar = "█" * filled + "░" * empty
+        self.query_one(line_id, Static).update(
+            f"[bold]{label}[/bold] {used}/{available} [{color}]{bar}[/{color}] {pct_val*100:.0f}%"
         )
 
 
@@ -277,13 +238,6 @@ class ChatInput(TextArea):
 class ModelPickerScreen(ModalScreen[str | None]):
     """Modal that lets the user pick an Ollama model with arrow keys."""
 
-    CSS = """
-    ModelPickerScreen { align: center middle; }
-    #model-picker-box { width: 60; max-height: 80%; background: $surface; border: tall $primary; padding: 1 2; }
-    #model-picker-title { text-align: center; text-style: bold; margin-bottom: 1; }
-    #model-picker-list { height: 1fr; max-height: 20; }
-    #model-picker-hint { text-align: center; color: $text-muted; margin-top: 1; }
-    """
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=True)]
 
     def __init__(self, models: list[dict], current_tag: str):
@@ -321,63 +275,6 @@ class ModelPickerScreen(ModalScreen[str | None]):
 class SettingsEditorScreen(ModalScreen[None]):
     """Modal to view and edit all Infinidev settings."""
 
-    CSS = """
-    SettingsEditorScreen {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.65);
-    }
-    #settings-box {
-        width: 80%;
-        height: 80%;
-        background: $surface;
-        border: round $primary;
-        padding: 0;
-    }
-    #settings-title {
-        width: 100%;
-        text-align: center;
-        text-style: bold;
-        color: $primary;
-        padding: 1 2;
-        background: $surface-darken-2;
-        border-bottom: solid $primary-darken-2;
-    }
-    #settings-list {
-        height: 1fr;
-        background: $surface;
-        padding: 0 1;
-        scrollbar-size-vertical: 1;
-        scrollbar-color: $primary-darken-2;
-        scrollbar-color-hover: $primary;
-        scrollbar-color-active: $primary;
-    }
-    #settings-list > .option-list--option-highlighted {
-        background: $primary 20%;
-    }
-    #settings-footer {
-        width: 100%;
-        height: auto;
-        align: center middle;
-        padding: 1 2;
-        background: $surface-darken-2;
-        border-top: solid $primary-darken-2;
-    }
-    #settings-footer Horizontal {
-        width: auto;
-        height: auto;
-        align: center middle;
-    }
-    #settings-footer Button {
-        margin: 0 1;
-    }
-    #settings-hint {
-        width: 100%;
-        text-align: center;
-        color: $text-muted;
-        margin-top: 1;
-        height: auto;
-    }
-    """
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", show=True),
         Binding("ctrl+enter", "save", "Save", show=True),
@@ -605,40 +502,6 @@ class SettingsEditorScreen(ModalScreen[None]):
 class PermissionDetailScreen(ModalScreen[None]):
     """Modal to view full permission details with syntax highlighting."""
 
-    CSS = """
-    PermissionDetailScreen {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.7);
-    }
-    #perm-detail-box {
-        width: 80%;
-        height: 80%;
-        background: $surface;
-        border: round $warning;
-        padding: 0;
-    }
-    #perm-detail-title {
-        width: 100%;
-        text-align: center;
-        text-style: bold;
-        color: $warning;
-        padding: 1 2;
-        background: $surface-darken-2;
-        border-bottom: solid $warning-darken-2;
-    }
-    #perm-detail-code {
-        height: 1fr;
-        margin: 1 2;
-    }
-    #perm-detail-hint {
-        width: 100%;
-        text-align: center;
-        color: $text-muted;
-        padding: 1 2;
-        background: $surface-darken-2;
-        border-top: solid $warning-darken-2;
-    }
-    """
     BINDINGS = [Binding("escape", "close", "Close", show=True)]
 
     def __init__(self, content: str):
@@ -665,59 +528,6 @@ class SettingValueEditor(ModalScreen[str | None]):
     Shows a description of the setting above the input.
     """
 
-    CSS = """
-    SettingValueEditor {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.7);
-    }
-    #setting-editor-box {
-        width: 60%;
-        max-height: 50%;
-        background: $surface;
-        border: round $primary;
-        padding: 0;
-    }
-    #setting-editor-title {
-        width: 100%;
-        text-align: center;
-        text-style: bold;
-        color: $primary;
-        padding: 1 2;
-        background: $surface-darken-2;
-        border-bottom: solid $primary-darken-2;
-    }
-    #setting-editor-desc {
-        width: 100%;
-        padding: 1 2;
-        color: $text-muted;
-    }
-    #setting-editor-input {
-        width: 100%;
-        height: auto;
-        max-height: 8;
-        margin: 0 2 1 2;
-    }
-    #setting-editor-select {
-        width: 100%;
-        margin: 0 2 1 2;
-    }
-    #setting-editor-footer {
-        width: 100%;
-        height: auto;
-        align: center middle;
-        padding: 1 2;
-        background: $surface-darken-2;
-        border-top: solid $primary-darken-2;
-    }
-    #setting-editor-footer Horizontal {
-        width: auto;
-        height: auto;
-        align: center middle;
-    }
-    #setting-editor-footer Button {
-        margin: 0 1;
-    }
-    """
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", show=True),
     ]
@@ -797,15 +607,6 @@ class SettingValueEditor(ModalScreen[str | None]):
 class FindingsBrowserScreen(ModalScreen[None]):
     """Modal to browse and read findings / knowledge base."""
 
-    CSS = """
-    FindingsBrowserScreen { align: center middle; }
-    #findings-box { width: 90%; height: 85%; background: $surface; border: tall $primary; padding: 1 2; }
-    #findings-title { text-align: center; text-style: bold; margin-bottom: 1; }
-    #findings-body { height: 1fr; }
-    #findings-list { width: 40%; height: 100%; }
-    #findings-detail { width: 60%; height: 100%; border-left: tall $primary; padding: 0 1; overflow-y: auto; }
-    #findings-hint { text-align: center; color: $text-muted; margin-top: 1; }
-    """
     BINDINGS = [Binding("escape", "close", "Close", show=True)]
 
     def __init__(self, findings: list[dict], title: str = "Findings"):
@@ -857,16 +658,6 @@ class FindingsBrowserScreen(ModalScreen[None]):
 class DocsBrowserScreen(ModalScreen[None]):
     """Modal to browse locally cached library documentation."""
 
-    CSS = """
-    DocsBrowserScreen { align: center middle; }
-    #docs-box { width: 90%; height: 85%; background: $surface; border: tall $primary; padding: 1 2; }
-    #docs-title { text-align: center; text-style: bold; margin-bottom: 1; }
-    #docs-body { height: 1fr; }
-    #docs-lib-list { width: 30%; height: 100%; }
-    #docs-section-list { width: 25%; height: 100%; border-left: tall $primary; }
-    #docs-content { width: 45%; height: 100%; border-left: tall $primary; padding: 0 1; overflow-y: auto; }
-    #docs-hint { text-align: center; color: $text-muted; margin-top: 1; }
-    """
     BINDINGS = [Binding("escape", "close", "Close", show=True)]
 
     def __init__(self, libraries: list[dict], sections: dict[str, list[dict]]):
@@ -934,204 +725,13 @@ class DocsBrowserScreen(ModalScreen[None]):
 # ── Main TUI ────────────────────────────────────────────────────────────
 
 
+_CSS_PATH = pathlib.Path(__file__).parent / "tui.tcss"
+
+
 class InfinidevTUI(App):
     """The main Infinidev TUI application."""
 
-    CSS = """
-    Screen { background: $surface; }
-
-    /* ── Layout ─────────────────────────────────────────── */
-    #main-container { height: 100%; }
-
-    /* ── Context Panel ─────────────────────────────────── */
-    #context-panel {
-        width: 100%;
-        padding: 1 2;
-        background: $surface-darken-2;
-        border: solid $secondary;
-        margin-bottom: 1;
-    }
-    #context-panel.sidebar-title {
-        text-align: center;
-        margin-bottom: 1;
-        text-style: bold;
-    }
-    #context-model-row {
-        align: center middle;
-        margin-bottom: 0;
-    }
-    #context-model-label {
-        text-align: right;
-        padding-left: 1;
-    }
-    #chat-progress-row, #tasks-progress-row {
-        align: center middle;
-        margin: 0;
-    }
-    #chat-progress, #tasks-progress {
-        width: 1fr;
-        margin-left: 1;
-    }
-    .context-label {
-        width: auto;
-        padding-right: 1;
-    }
-    .context-separator {
-        height: 1;
-        border: solid $secondary;
-        margin: 1 0;
-        opacity: 0.3;
-    }
-    #queued-messages-label {
-        text-align: center;
-        color: $text-muted;
-        margin-top: 1;
-    }
-    .queued-message {
-        background: $surface-darken-1;
-        border: solid $warning;
-        padding: 0 1;
-        margin-top: 1;
-        opacity: 0.6;
-        text-style: dim;
-    }
-
-    /* ── Layout ─────────────────────────────────────────── */
-    #explorer {
-        width: 25;
-        height: 100%;
-        display: none;
-        border-right: tall $primary;
-        background: $surface-darken-1;
-    }
-    #explorer.-visible { display: block; }
-    #explorer-title {
-        background: $primary; color: white; padding: 0 1; text-align: center;
-    }
-    #file-tree { height: 1fr; }
-
-    #content-area { width: 1fr; height: 100%; }
-
-    /* Tabs styling */
-    #content-tabs { height: 100%; }
-    TabbedContent > ContentSwitcher { height: 1fr; }
-    TabPane { height: 100%; }
-
-    /* Chat tab */
-    #chat-pane { height: 100%; }
-    #chat-history { height: 1fr; border-bottom: solid $primary; padding: 1; overflow-y: scroll; }
-    #autocomplete-menu { display: none; height: auto; max-height: 8; border-top: solid $accent; background: $surface-lighten-1; }
-    #autocomplete-menu.-visible { display: block; }
-    ChatInput { height: 4; border: solid $primary; }
-
-    /* File editor tab */
-    .file-editor { height: 100%; }
-
-    /* Sidebar */
-    #sidebar {
-        width: 30%;
-        height: 100%;
-        border-left: tall $primary;
-        background: $surface-darken-1;
-        padding: 1;
-    }
-    .sidebar-title { background: $primary; color: white; padding: 0 1; margin-bottom: 0; }
-    .sidebar-content { margin-bottom: 1; padding: 1; background: $surface-lighten-1; height: auto; max-height: 10; overflow-y: scroll; color: $text; }
-
-    /* ── Chat messages ───────────────────────────────── */
-    .user-msg { height: auto; color: #a8ffc8; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: tall #2df97f; }
-    .pending-msg { height: auto; color: #7aad7a; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: dashed #2a8a4f; opacity: 80%; }
-    .agent-msg { height: auto; color: #d0e4ff; margin-bottom: 1; background: #0a101a; padding: 0 1; border-left: tall #4da6ff; }
-    .agent-msg Markdown { margin: 0; padding: 0; background: transparent; }
-    .agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
-    .agent-msg MarkdownH1, .agent-msg MarkdownH2, .agent-msg MarkdownH3 { margin: 1 0 0 0; padding: 0; background: transparent; border: none; }
-    .system-msg { height: auto; color: #ffcc4d; text-style: italic; margin-bottom: 1; padding: 0 1; border-left: tall #ffaa00; background: #1a1500; }
-
-    /* Status bar */
-    #status-bar { height: 1; background: $surface-darken-1; color: $text-muted; padding: 0 2; dock: bottom; }
-
-    /* Thinking indicator */
-    .thinking-indicator { height: auto; margin: 1 0; color: #7b9fdf; align: center middle; }
-    .thinking-indicator Static { text-align: center; width: 100%; }
-    .thinking-indicator LoadingIndicator { height: 1; }
-
-    /* ── Context Windows ────────────────────────────────────── */
-    #context-panel {
-        width: 100%;
-        margin-bottom: 1;
-        padding: 1;
-        background: $surface-lighten-1;
-        border: solid $primary;
-    }
-    #context-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-        color: $primary;
-    }
-    .context-label {
-        width: auto;
-        text-style: bold;
-        color: $text;
-    }
-    .context-value {
-        width: auto;
-        color: $text-muted;
-    }
-    .context-usage {
-        width: 1fr;
-    }
-    .context-usage-text {
-        width: auto;
-        margin-left: 1;
-    }
-    .context-remaining {
-        width: auto;
-        color: $success;
-    }
-    .context-remaining.low {
-        color: $error;
-    }
-
-    /* Queued messages styling */
-    .queued-msg {
-        height: auto;
-        color: $text-muted;
-        margin-bottom: 1;
-        padding: 0 1;
-        border-left: tall $accent;
-        background: $surface-darken-2;
-        opacity: 0.6;
-    }
-    .queued-msg .message-content {
-        color: $text-muted;
-    }
-    .queued-msg .message-status {
-        color: $warning;
-        text-style: italic;
-    }
-    .queued-msg.reading {
-        opacity: 1.0;
-        border-left: tall $primary;
-        background: $surface;
-    }
-    .queued-msg.processed {
-        opacity: 1.0;
-        border-left: tall $success;
-        background: #0a1a0a;
-    }
-
-    /* Permission buttons */
-    #perm-btn-row {
-        height: auto;
-        width: 100%;
-        padding: 1 0;
-    }
-    #perm-btn-row Button {
-        margin: 0 1;
-        min-width: 10;
-    }
-    """
+    CSS_PATH = _CSS_PATH
 
     BINDINGS = [
         Binding("ctrl+c", "quit", "Exit", show=True),
@@ -1149,7 +749,9 @@ class InfinidevTUI(App):
         with Horizontal(id="main-container"):
             # File explorer (hidden by default)
             with Vertical(id="explorer"):
-                yield Label("EXPLORER", id="explorer-title")
+                with Horizontal(id="explorer-header"):
+                    yield Label("EXPLORER", id="explorer-title")
+                    yield Button("⟳", id="btn-sync-tree", variant="default")
                 yield DirectoryTree(os.getcwd(), id="file-tree")
 
             # Content area with tabs
@@ -1161,13 +763,14 @@ class InfinidevTUI(App):
                         yield ChatInput(id="chat-input")
 
             # Sidebar
-            with Vertical(id="sidebar"):
+            with VerticalScroll(id="sidebar"):
                 # Context window panel
                 yield ContextPanel(id="context-panel")
                 yield SidebarPanel("PLANNING", id="plan-panel")
                 yield SidebarPanel("STEPS", id="steps-panel")
                 yield SidebarPanel("ACTIONS", id="actions-panel")
                 yield SidebarPanel("LOGS", id="logs-panel")
+                yield Static("", id="sidebar-spacer")
         yield Static("", id="status-bar")
         yield Footer()
 
@@ -1345,6 +948,12 @@ class InfinidevTUI(App):
             logger.info("File watcher stopped on app exit")
 
     # ── File explorer events ─────────────────────────────
+
+    @on(Button.Pressed, "#btn-sync-tree")
+    def sync_file_tree(self, event: Button.Pressed) -> None:
+        """Reload the file tree from disk."""
+        tree = self.query_one("#file-tree", DirectoryTree)
+        tree.reload()
 
     @on(DirectoryTree.FileSelected)
     async def open_file(self, event: DirectoryTree.FileSelected) -> None:
@@ -1902,6 +1511,9 @@ class InfinidevTUI(App):
 
                 # Handle "done" pseudo-flow (greetings, simple questions)
                 if analysis.flow == "done":
+                    self.call_from_thread(
+                        self._context_panel.set_flow, "done"
+                    )
                     self.call_from_thread(self._hide_thinking)
                     self.call_from_thread(
                         self.add_message, "Infinidev",
@@ -1982,6 +1594,9 @@ class InfinidevTUI(App):
             # --- Development phase ---
             flow_label = analysis.flow if _settings.ANALYSIS_ENABLED else "develop"
             self.call_from_thread(
+                self._context_panel.set_flow, flow_label
+            )
+            self.call_from_thread(
                 self.query_one("#actions-panel").update_content,
                 f"Running [{flow_label}]..."
             )
@@ -2041,6 +1656,9 @@ class InfinidevTUI(App):
             self.call_from_thread(self.add_message, "Error", str(e), "system")
         finally:
             self._engine_running = False
+            self.call_from_thread(
+                self._context_panel.set_flow, ""
+            )
             self.call_from_thread(self._drain_pending_inputs)
 
     # ── Commands ─────────────────────────────────────────
@@ -2272,6 +1890,9 @@ class InfinidevTUI(App):
         from infinidev.engine.flows import get_flow_config
 
         reload_all()
+        self.call_from_thread(
+            self._context_panel.set_flow, "init"
+        )
         self.call_from_thread(
             self.query_one("#actions-panel").update_content,
             "Running [init]..."

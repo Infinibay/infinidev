@@ -1,0 +1,329 @@
+/* ══════════════════════════════════════════════════════════════
+   Infinidev TUI — Stylesheet
+   ══════════════════════════════════════════════════════════════ */
+
+Screen {
+    background: $surface;
+}
+
+* {
+    scrollbar-background: $surface-darken-1;
+    scrollbar-color: $primary;
+    scrollbar-color-hover: $primary-lighten-2;
+    scrollbar-color-active: $accent;
+    scrollbar-size-vertical: 1;
+}
+
+
+/* ── Context Panel (top of sidebar) ──────────────────────────── */
+
+ContextPanel {
+    width: 100%;
+    padding: 0 1;
+    background: $surface-lighten-1;
+    border: solid $primary;
+}
+.ctx-line { color: $text; }
+
+
+/* ── Model Picker Modal ──────────────────────────────────────── */
+
+ModelPickerScreen { align: center middle; }
+#model-picker-box { width: 60; max-height: 80%; background: $surface; border: tall $primary; padding: 1 2; }
+#model-picker-title { text-align: center; text-style: bold; margin-bottom: 1; }
+#model-picker-list { height: 1fr; max-height: 20; }
+#model-picker-hint { text-align: center; color: $text-muted; margin-top: 1; }
+
+
+/* ── Settings Editor Modal ───────────────────────────────────── */
+
+SettingsEditorScreen {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.65);
+}
+#settings-box {
+    width: 80%;
+    height: 80%;
+    background: $surface;
+    border: round $primary;
+    padding: 0;
+}
+#settings-title {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    color: $primary;
+    padding: 1 2;
+    background: $surface-darken-2;
+    border-bottom: solid $primary-darken-2;
+}
+#settings-list {
+    height: 1fr;
+    background: $surface;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $primary-darken-2;
+    scrollbar-color-hover: $primary;
+    scrollbar-color-active: $primary;
+}
+#settings-list > .option-list--option-highlighted {
+    background: $primary 20%;
+}
+#settings-footer {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding: 1 2;
+    background: $surface-darken-2;
+    border-top: solid $primary-darken-2;
+}
+#settings-footer Horizontal {
+    width: auto;
+    height: auto;
+    align: center middle;
+}
+#settings-footer Button {
+    margin: 0 1;
+}
+#settings-hint {
+    width: 100%;
+    text-align: center;
+    color: $text-muted;
+    margin-top: 1;
+    height: auto;
+}
+
+
+/* ── Permission Detail Modal ─────────────────────────────────── */
+
+PermissionDetailScreen {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.7);
+}
+#perm-detail-box {
+    width: 80%;
+    height: 80%;
+    background: $surface;
+    border: round $warning;
+    padding: 0;
+}
+#perm-detail-title {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    color: $warning;
+    padding: 1 2;
+    background: $surface-darken-2;
+    border-bottom: solid $warning-darken-2;
+}
+#perm-detail-code {
+    height: 1fr;
+    margin: 1 2;
+}
+#perm-detail-hint {
+    width: 100%;
+    text-align: center;
+    color: $text-muted;
+    padding: 1 2;
+    background: $surface-darken-2;
+    border-top: solid $warning-darken-2;
+}
+
+
+/* ── Setting Value Editor Modal ──────────────────────────────── */
+
+SettingValueEditor {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.7);
+}
+#setting-editor-box {
+    width: 60%;
+    max-height: 50%;
+    background: $surface;
+    border: round $primary;
+    padding: 0;
+}
+#setting-editor-title {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    color: $primary;
+    padding: 1 2;
+    background: $surface-darken-2;
+    border-bottom: solid $primary-darken-2;
+}
+#setting-editor-desc {
+    width: 100%;
+    padding: 1 2;
+    color: $text-muted;
+}
+#setting-editor-input {
+    width: 100%;
+    height: auto;
+    max-height: 8;
+    margin: 0 2 1 2;
+}
+#setting-editor-select {
+    width: 100%;
+    margin: 0 2 1 2;
+}
+#setting-editor-footer {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding: 1 2;
+    background: $surface-darken-2;
+    border-top: solid $primary-darken-2;
+}
+#setting-editor-footer Horizontal {
+    width: auto;
+    height: auto;
+    align: center middle;
+}
+#setting-editor-footer Button {
+    margin: 0 1;
+}
+
+
+/* ── Findings Browser Modal ──────────────────────────────────── */
+
+FindingsBrowserScreen { align: center middle; }
+#findings-box { width: 90%; height: 85%; background: $surface; border: tall $primary; padding: 1 2; }
+#findings-title { text-align: center; text-style: bold; margin-bottom: 1; }
+#findings-body { height: 1fr; }
+#findings-list { width: 40%; height: 100%; }
+#findings-detail { width: 60%; height: 100%; border-left: tall $primary; padding: 0 1; overflow-y: auto; }
+#findings-hint { text-align: center; color: $text-muted; margin-top: 1; }
+
+
+/* ── Docs Browser Modal ──────────────────────────────────────── */
+
+DocsBrowserScreen { align: center middle; }
+#docs-box { width: 90%; height: 85%; background: $surface; border: tall $primary; padding: 1 2; }
+#docs-title { text-align: center; text-style: bold; margin-bottom: 1; }
+#docs-body { height: 1fr; }
+#docs-lib-list { width: 30%; height: 100%; }
+#docs-section-list { width: 25%; height: 100%; border-left: tall $primary; }
+#docs-content { width: 45%; height: 100%; border-left: tall $primary; padding: 0 1; overflow-y: auto; }
+#docs-hint { text-align: center; color: $text-muted; margin-top: 1; }
+
+
+/* ── Main Layout ─────────────────────────────────────────────── */
+
+#main-container { height: 100%; }
+
+/* File explorer */
+#explorer {
+    width: 25;
+    height: 100%;
+    display: none;
+    border-right: tall $primary;
+    background: $surface-darken-1;
+}
+#explorer.-visible { display: block; }
+#explorer-header { height: 1; }
+#explorer-title {
+    background: $primary; color: white; padding: 0 1; width: 1fr;
+}
+#btn-sync-tree { min-width: 4; height: 1; background: $primary; color: white; border: none; padding: 0; }
+#btn-sync-tree:hover { background: $accent; }
+#file-tree { height: 1fr; }
+
+/* Content area */
+#content-area { width: 1fr; height: 100%; }
+
+/* Tabs */
+#content-tabs { height: 100%; }
+TabbedContent > ContentSwitcher { height: 1fr; }
+TabPane { height: 100%; }
+
+/* Chat tab */
+#chat-pane { height: 100%; }
+#chat-history { height: 1fr; border-bottom: solid $primary; padding: 1; overflow-y: scroll; scrollbar-color: $primary-darken-2; scrollbar-color-hover: $primary; scrollbar-color-active: $primary; }
+#autocomplete-menu { display: none; height: auto; max-height: 8; border-top: solid $accent; background: $surface-lighten-1; }
+#autocomplete-menu.-visible { display: block; }
+ChatInput { height: 4; border: solid $primary; }
+
+/* File editor tab */
+.file-editor { height: 100%; }
+
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+
+#sidebar {
+    width: 30%;
+    height: 100%;
+    border-left: tall $primary;
+    background: $surface-darken-1;
+    padding: 0;
+}
+SidebarPanel { height: auto; margin: 0 0 1 0; padding: 0; max-height: 50%; }
+#sidebar-spacer { height: 1fr; }
+.sidebar-title { background: $primary; color: white; padding: 0 1; margin: 0; }
+.sidebar-content { margin: 0; padding: 1; background: $surface-lighten-1; height: auto; min-height: 3; max-height: 8; overflow-y: scroll; color: $text; }
+
+
+/* ── Chat Messages ───────────────────────────────────────────── */
+
+.user-msg { height: auto; color: #a8ffc8; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: tall #2df97f; }
+.pending-msg { height: auto; color: #7aad7a; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: dashed #2a8a4f; opacity: 80%; }
+.agent-msg { height: auto; color: #d0e4ff; margin-bottom: 1; background: #0a101a; padding: 0 1; border-left: tall #4da6ff; }
+.agent-msg Markdown { margin: 0; padding: 0; background: transparent; }
+.agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
+.agent-msg MarkdownH1, .agent-msg MarkdownH2, .agent-msg MarkdownH3 { margin: 1 0 0 0; padding: 0; background: transparent; border: none; }
+.system-msg { height: auto; color: #ffcc4d; text-style: italic; margin-bottom: 1; padding: 0 1; border-left: tall #ffaa00; background: #1a1500; }
+
+
+/* ── Status Bar ──────────────────────────────────────────────── */
+
+#status-bar { height: 1; background: $surface-darken-1; color: $text-muted; padding: 0 2; dock: bottom; }
+
+
+/* ── Thinking Indicator ──────────────────────────────────────── */
+
+.thinking-indicator { height: auto; margin: 1 0; color: #7b9fdf; align: center middle; }
+.thinking-indicator Static { text-align: center; width: 100%; }
+.thinking-indicator LoadingIndicator { height: 1; }
+
+
+/* ── Queued Messages ─────────────────────────────────────────── */
+
+#queued-messages-label {
+    text-align: center;
+    color: $text-muted;
+    margin-top: 1;
+}
+.queued-message {
+    background: $surface-darken-1;
+    border: solid $warning;
+    padding: 0 1;
+    margin-top: 1;
+    opacity: 0.6;
+    text-style: dim;
+}
+.queued-msg {
+    height: auto;
+    color: $text-muted;
+    margin-bottom: 1;
+    padding: 0 1;
+    border-left: tall $accent;
+    background: $surface-darken-2;
+    opacity: 0.6;
+}
+.queued-msg .message-content { color: $text-muted; }
+.queued-msg .message-status { color: $warning; text-style: italic; }
+.queued-msg.reading { opacity: 1.0; border-left: tall $primary; background: $surface; }
+.queued-msg.processed { opacity: 1.0; border-left: tall $success; background: #0a1a0a; }
+
+
+/* ── Permission Buttons ──────────────────────────────────────── */
+
+#perm-btn-row {
+    height: auto;
+    width: 100%;
+    padding: 1 0;
+}
+#perm-btn-row Button {
+    margin: 0 1;
+    min-width: 10;
+}

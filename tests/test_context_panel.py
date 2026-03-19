@@ -22,11 +22,9 @@ class TestContextPanel:
         app = ContextPanelTestApp()
         async with app.run_test():
             panel = app.query_one(ContextPanel)
-            assert panel.query_one("#context-model-name", Static)
-            assert panel.query_one("#chat-details", Static)
-            assert panel.query_one("#chat-bar", Static)
-            assert panel.query_one("#task-details", Static)
-            assert panel.query_one("#task-bar", Static)
+            assert panel.query_one("#ctx-model", Static)
+            assert panel.query_one("#ctx-chat", Static)
+            assert panel.query_one("#ctx-task", Static)
 
     async def test_context_panel_update_status(self):
         """Test updating context panel with status data."""
@@ -49,13 +47,12 @@ class TestContextPanel:
             }
             panel.update_status(status)
 
-            model_w = panel.query_one("#context-model-name", Static)
+            model_w = panel.query_one("#ctx-model", Static)
             assert "llama2" in str(model_w._Static__content)
 
-            chat_w = panel.query_one("#chat-details", Static)
+            chat_w = panel.query_one("#ctx-chat", Static)
             content = str(chat_w._Static__content)
-            assert "1000" in content
-            assert "3096" in content
+            assert "Chat" in content
 
     async def test_context_panel_no_markup_errors(self):
         """Test that progress bars render without markup errors."""
@@ -77,8 +74,24 @@ class TestContextPanel:
                 },
             }
             panel.update_status(status)
-            chat_bar = panel.query_one("#chat-bar", Static)
-            assert "50.0%" in str(chat_bar._Static__content)
+            chat_w = panel.query_one("#ctx-chat", Static)
+            assert "50%" in str(chat_w._Static__content)
+
+    async def test_context_panel_flow(self):
+        """Test flow indicator in model line."""
+        app = ContextPanelTestApp()
+        async with app.run_test():
+            panel = app.query_one(ContextPanel)
+            panel.update_status({"model": "test", "max_context": 4096,
+                                 "chat": {"usage_percentage": 0},
+                                 "tasks": {"usage_percentage": 0}})
+            panel.set_flow("research")
+            model_w = panel.query_one("#ctx-model", Static)
+            assert "research" in str(model_w._Static__content)
+
+            panel.set_flow("")
+            model_w = panel.query_one("#ctx-model", Static)
+            assert "research" not in str(model_w._Static__content)
 
 
 class TestContextWindowCalculatorIntegration:
@@ -97,7 +110,7 @@ class TestContextWindowCalculatorIntegration:
             panel = app.query_one(ContextPanel)
             panel.update_status(status)
 
-            model_w = panel.query_one("#context-model-name", Static)
+            model_w = panel.query_one("#ctx-model", Static)
             assert "test-model" in str(model_w._Static__content)
 
     def test_calculator_full_context(self):
