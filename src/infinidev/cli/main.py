@@ -112,6 +112,7 @@ def handle_command(cmd_text: str):
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
+        click.echo("  /brainstorm <problem> - Creative ideation with forced perspectives")
         click.echo("  /init              - Explore and document the current project")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
@@ -130,6 +131,13 @@ def handle_command(cmd_text: str):
             click.echo("Usage: /explore <problem description>")
             return True
         return ("explore", problem)
+
+    elif cmd == "/brainstorm":
+        problem = " ".join(parts[1:]) if len(parts) > 1 else ""
+        if not problem:
+            click.echo("Usage: /brainstorm <problem description>")
+            return True
+        return ("brainstorm", problem)
 
     click.echo(f"Unknown command: {cmd}")
     return True
@@ -256,11 +264,79 @@ def handle_settings_command(parts: list[str]):
                 click.echo(click.style(f"Unknown setting: {setting_key}", fg="yellow"))
 
 
+def _run_single_prompt(prompt_text: str) -> None:
+    """Run a single prompt non-interactively and exit.
+
+    Supports /explore and /brainstorm prefixes, otherwise runs as develop flow.
+    """
+    init_db()
+    agent = InfinidevAgent(agent_id="cli_agent")
+    session_id = str(uuid.uuid4())
+
+    # Determine mode from prompt prefix
+    if prompt_text.startswith("/explore "):
+        mode = "explore"
+        problem = prompt_text[len("/explore "):]
+    elif prompt_text.startswith("/brainstorm "):
+        mode = "brainstorm"
+        problem = prompt_text[len("/brainstorm "):]
+    else:
+        mode = "develop"
+        problem = prompt_text
+
+    from infinidev.engine.flows import get_flow_config
+    from infinidev.engine.tree_engine import TreeEngine
+
+    if mode in ("explore", "brainstorm"):
+        flow_config = get_flow_config(mode)
+        agent._system_prompt_identity = flow_config.identity_prompt
+        agent.backstory = flow_config.backstory
+        agent.activate_context(session_id=session_id)
+        try:
+            tree_engine = TreeEngine()
+            result = tree_engine.execute(
+                agent=agent,
+                task_prompt=(problem, flow_config.expected_output),
+                mode=mode,
+            )
+        finally:
+            agent.deactivate()
+    else:
+        flow_config = get_flow_config("develop")
+        agent._system_prompt_identity = flow_config.identity_prompt
+        agent.backstory = flow_config.backstory
+        agent.activate_context(session_id=session_id)
+        try:
+            engine = LoopEngine()
+            result = engine.execute(
+                agent=agent,
+                task_prompt=(problem, flow_config.expected_output),
+                verbose=True,
+            )
+        finally:
+            agent.deactivate()
+
+    click.echo(result or "Done.")
+
+
 @click.command()
 @click.option("--no-tui", is_flag=True, help="Run in classic CLI mode instead of TUI.")
 @click.option("--classic", is_flag=True, hidden=True, help="Alias for --no-tui.")
-def main(no_tui: bool, classic: bool):
+@click.option("--prompt", "-p", default=None, help="Run a single prompt non-interactively and exit.")
+@click.option("--model", "-m", default=None, help="Override LLM model for this run (e.g., ollama_chat/qwen3:32b).")
+def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
     """Main entry point for Infinidev CLI."""
+    # Apply model override in-memory (does NOT persist to settings.json)
+    if model:
+        if "/" not in model:
+            model = f"ollama_chat/{model}"
+        settings.LLM_MODEL = model
+
+    # Non-interactive --prompt mode
+    if prompt:
+        _run_single_prompt(prompt)
+        return
+
     if not (no_tui or classic):
         # TUI mode: remove the stderr handler so log output doesn't corrupt
         # the Textual terminal.  File logging is preserved.
@@ -329,6 +405,34 @@ def main(no_tui: bool, classic: bool):
                     finally:
                         agent.deactivate()
                     click.echo(click.style("\nExploration Result:", fg="green", bold=True))
+                    click.echo(result)
+                    continue
+                elif isinstance(cmd_result, tuple) and cmd_result[0] == "brainstorm":
+                    # /brainstorm command — run brainstorm tree engine
+                    problem = cmd_result[1]
+                    from infinidev.config.settings import reload_all
+                    reload_all()
+
+                    from infinidev.engine.tree_engine import TreeEngine
+                    from infinidev.engine.flows import get_flow_config
+
+                    click.echo(click.style(f"[brainstorm] Brainstorming: {problem}", fg="magenta"))
+                    flow_config = get_flow_config("brainstorm")
+                    agent._system_prompt_identity = flow_config.identity_prompt
+                    agent.backstory = flow_config.backstory
+                    agent.activate_context(session_id=session_id)
+                    try:
+                        tree_engine = TreeEngine()
+                        result = tree_engine.execute(
+                            agent=agent,
+                            task_prompt=(problem, flow_config.expected_output),
+                            mode="brainstorm",
+                        )
+                        if not result or not result.strip():
+                            result = "Brainstorm complete (no synthesis produced)."
+                    finally:
+                        agent.deactivate()
+                    click.echo(click.style("\nBrainstorm Result:", fg="magenta", bold=True))
                     click.echo(result)
                     continue
                 elif cmd_result == "init":
@@ -439,13 +543,13 @@ def main(no_tui: bool, classic: bool):
             # --- Development/Exploration phase ---
             agent.activate_context(session_id=session_id)
             try:
-                if current_flow == "explore":
+                if current_flow in ("explore", "brainstorm"):
                     from infinidev.engine.tree_engine import TreeEngine
                     tree_engine = TreeEngine()
                     result = tree_engine.execute(
                         agent=agent,
                         task_prompt=task_prompt,
-                        verbose=True,
+                        mode=current_flow,
                     )
                 else:
                     result = engine.execute(
