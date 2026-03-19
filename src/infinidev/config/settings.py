@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     TREE_MAX_TOOL_CALLS_PER_NODE: int = 100
     TREE_INNER_LOOP_MAX: int = 50
 
+    # Brainstorm-specific limits (wide & shallow exploration)
+    TREE_BRAINSTORM_MAX_DEPTH: int = 2          # ideas + 1 level max
+    TREE_BRAINSTORM_INNER_LOOP_MAX: int = 6     # quick validation per idea
+    TREE_BRAINSTORM_TOOL_CALLS_PER_NODE: int = 5  # few lookups, not exhaustive
+
     # Phases
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True

@@ -64,6 +64,7 @@ COMMANDS = [
     ("/settings", "Show or edit settings configuration"),
     ("/settings browse", "Open settings editor modal"),
     ("/explore", "Decompose and explore a complex problem"),
+    ("/brainstorm", "Brainstorm ideas and solutions for a problem"),
     ("/init", "Explore and document the current project"),
     ("/findings", "Browse all findings"),
     ("/knowledge", "Browse project knowledge"),
@@ -2006,6 +2007,17 @@ class InfinidevTUI(App):
                 self.add_message("System", f"Exploring: {problem}", "system")
                 self._show_thinking()
                 self._run_explore(problem)
+        elif cmd == "/brainstorm":
+            problem = " ".join(parts[1:]) if len(parts) > 1 else ""
+            if not problem:
+                self.add_message("System", "Usage: /brainstorm <problem description>", "system")
+            elif self._engine_running:
+                self.add_message("System", "Cannot run /brainstorm while a task is running.", "system")
+            else:
+                self._engine_running = True
+                self.add_message("System", f"Brainstorming: {problem}", "system")
+                self._show_thinking()
+                self._run_brainstorm(problem)
         elif cmd == "/init":
             if self._engine_running:
                 self.add_message("System", "Cannot run /init while a task is running.", "system")
@@ -2092,6 +2104,49 @@ class InfinidevTUI(App):
                 result = "Exploration complete (no synthesis produced)."
         except Exception as e:
             result = f"Exploration failed: {e}"
+        finally:
+            self.agent.deactivate()
+
+        self.call_from_thread(self._hide_thinking)
+        self.call_from_thread(self.add_message, "Infinidev", result, "agent")
+        store_conversation_turn(self.session_id, 'assistant', result, result[:200])
+        self.call_from_thread(
+            self.query_one("#actions-panel").update_content, "Idle"
+        )
+        self._engine_running = False
+        self.call_from_thread(self._drain_pending_inputs)
+
+    @work(exclusive=True, thread=True)
+    def _run_brainstorm(self, problem: str):
+        """Run /brainstorm — brainstorm ideas and solutions for a problem."""
+        from infinidev.engine.tree_engine import TreeEngine
+        from infinidev.engine.flows import get_flow_config
+
+        reload_all()
+        self.call_from_thread(
+            self._context_panel.set_flow, "brainstorm"
+        )
+        self.call_from_thread(
+            self.query_one("#actions-panel").update_content,
+            "Running [brainstorm]..."
+        )
+
+        flow_config = get_flow_config("brainstorm")
+        self.agent._system_prompt_identity = flow_config.identity_prompt
+        self.agent.backstory = flow_config.backstory
+
+        self.agent.activate_context(session_id=self.session_id)
+        try:
+            tree_engine = TreeEngine()
+            result = tree_engine.execute(
+                agent=self.agent,
+                task_prompt=(problem, flow_config.expected_output),
+                verbose=True,
+            )
+            if not result or not result.strip():
+                result = "Brainstorm complete (no synthesis produced)."
+        except Exception as e:
+            result = f"Brainstorm failed: {e}"
         finally:
             self.agent.deactivate()
 

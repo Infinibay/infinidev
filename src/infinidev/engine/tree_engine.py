@@ -443,6 +443,7 @@ class TreeEngine(AgentEngine):
                 d, t, n, anti_patterns,
             ),
             stop_on_root_resolved=False,
+            brainstorm=True,
         )
 
         # ── PHASE 3: CROSS ───────────────────────────────────────────────
@@ -522,6 +523,7 @@ class TreeEngine(AgentEngine):
                     build_prompt_fn=lambda d, t, n: build_brainstorm_explore_prompt(
                         d, t, n, anti_patterns,
                     ),
+                    brainstorm=True,
                 )
         else:
             _log(f"  {_DIM}Not enough explored ideas to cross (need 2, have {len(explored_ideas)}){_RESET}")
@@ -583,14 +585,30 @@ class TreeEngine(AgentEngine):
         *,
         build_prompt_fn: Any,
         stop_on_root_resolved: bool = True,
+        brainstorm: bool = False,
     ) -> None:
         """Shared explore loop used by both explore and brainstorm modes.
 
         Iterates over pending nodes, calls LLM with tools, handles resolve_node.
         The build_prompt_fn controls what prompt each node gets.
         Set stop_on_root_resolved=False for brainstorm mode to explore all branches.
+        Set brainstorm=True to use reduced per-node budgets for wide exploration.
         """
         _last_prompt_tokens = 0
+
+        # Per-node limits: brainstorm uses tighter budgets for breadth
+        inner_loop_max = (
+            settings.TREE_BRAINSTORM_INNER_LOOP_MAX if brainstorm
+            else settings.TREE_INNER_LOOP_MAX
+        )
+        tool_calls_per_node = (
+            settings.TREE_BRAINSTORM_TOOL_CALLS_PER_NODE if brainstorm
+            else settings.TREE_MAX_TOOL_CALLS_PER_NODE
+        )
+        max_depth = (
+            settings.TREE_BRAINSTORM_MAX_DEPTH if brainstorm
+            else settings.TREE_MAX_DEPTH
+        )
 
         while True:
             # Budget checks
@@ -614,6 +632,16 @@ class TreeEngine(AgentEngine):
             if node is None:
                 _log(f"{_GREEN}All nodes resolved.{_RESET}")
                 break
+
+            # Depth limit: skip nodes that are too deep
+            if node.depth > max_depth:
+                node.state = "hypothesis"
+                node.confidence = "low"
+                node.exploration_summary = "Skipped: exceeds depth limit for this mode."
+                tree.explored_node_ids.append(node.id)
+                propagate(tree.root)
+                _log(f"  {_YELLOW}⚠ [{node.id}] skipped (depth {node.depth} > max {max_depth}){_RESET}")
+                continue
 
             node.state = "exploring"
             tree.current_node_id = node.id
@@ -640,8 +668,8 @@ class TreeEngine(AgentEngine):
             resolved = False
 
             while (
-                inner_iterations < settings.TREE_INNER_LOOP_MAX
-                and node_tool_calls < settings.TREE_MAX_TOOL_CALLS_PER_NODE
+                inner_iterations < inner_loop_max
+                and node_tool_calls < tool_calls_per_node
                 and tree.total_tool_calls < settings.TREE_MAX_TOOL_CALLS
                 and tree.total_llm_calls < settings.TREE_MAX_LLM_CALLS
             ):
