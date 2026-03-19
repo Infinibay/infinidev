@@ -1,5 +1,12 @@
 """Main entry point for Infinidev CLI."""
 
+# Pre-load dotenv before crewai imports to avoid find_dotenv() stack frame assertion
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 import sys
 import os
 import logging
@@ -104,6 +111,7 @@ def handle_command(cmd_text: str):
         click.echo("  /settings reset    - Reset to defaults")
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
+        click.echo("  /explore <problem> - Decompose and explore a complex problem")
         click.echo("  /init              - Explore and document the current project")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
@@ -115,6 +123,13 @@ def handle_command(cmd_text: str):
 
     elif cmd == "/init":
         return "init"  # Signal to main loop to run init
+
+    elif cmd == "/explore":
+        problem = " ".join(parts[1:]) if len(parts) > 1 else ""
+        if not problem:
+            click.echo("Usage: /explore <problem description>")
+            return True
+        return ("explore", problem)
 
     click.echo(f"Unknown command: {cmd}")
     return True
@@ -288,7 +303,35 @@ def main(no_tui: bool, classic: bool):
 
             if user_input.startswith("/"):
                 cmd_result = handle_command(user_input)
-                if cmd_result == "init":
+                if isinstance(cmd_result, tuple) and cmd_result[0] == "explore":
+                    # /explore command — run exploration tree engine
+                    problem = cmd_result[1]
+                    from infinidev.config.settings import reload_all
+                    reload_all()
+
+                    from infinidev.engine.tree_engine import TreeEngine
+                    from infinidev.engine.flows import get_flow_config
+
+                    click.echo(click.style(f"[explore] Exploring: {problem}", fg="yellow"))
+                    flow_config = get_flow_config("explore")
+                    agent._system_prompt_identity = flow_config.identity_prompt
+                    agent.backstory = flow_config.backstory
+                    agent.activate_context(session_id=session_id)
+                    try:
+                        tree_engine = TreeEngine()
+                        result = tree_engine.execute(
+                            agent=agent,
+                            task_prompt=(problem, flow_config.expected_output),
+                            verbose=True,
+                        )
+                        if not result or not result.strip():
+                            result = "Exploration complete (no synthesis produced)."
+                    finally:
+                        agent.deactivate()
+                    click.echo(click.style("\nExploration Result:", fg="green", bold=True))
+                    click.echo(result)
+                    continue
+                elif cmd_result == "init":
                     # /init command — run project exploration
                     from infinidev.prompts.init_project import INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT
                     from infinidev.engine.flows import get_flow_config
@@ -390,16 +433,26 @@ def main(no_tui: bool, classic: bool):
                 flow_config = None
             # --- End analysis phase ---
 
-            click.echo(click.style(f"[{analysis.flow if settings.ANALYSIS_ENABLED else 'develop'}] Working on: {user_input}", fg="yellow"))
+            current_flow = analysis.flow if settings.ANALYSIS_ENABLED else "develop"
+            click.echo(click.style(f"[{current_flow}] Working on: {user_input}", fg="yellow"))
 
-            # --- Development phase ---
+            # --- Development/Exploration phase ---
             agent.activate_context(session_id=session_id)
             try:
-                result = engine.execute(
-                    agent=agent,
-                    task_prompt=task_prompt,
-                    verbose=True
-                )
+                if current_flow == "explore":
+                    from infinidev.engine.tree_engine import TreeEngine
+                    tree_engine = TreeEngine()
+                    result = tree_engine.execute(
+                        agent=agent,
+                        task_prompt=task_prompt,
+                        verbose=True,
+                    )
+                else:
+                    result = engine.execute(
+                        agent=agent,
+                        task_prompt=task_prompt,
+                        verbose=True
+                    )
                 if not result or not result.strip():
                     result = "Done. (no additional output)"
             finally:
@@ -407,7 +460,7 @@ def main(no_tui: bool, classic: bool):
 
             # --- Code review phase (single pass, no retry loop) ---
             run_review = flow_config.run_review if flow_config else True
-            if settings.REVIEW_ENABLED and run_review and engine.has_file_changes():
+            if settings.REVIEW_ENABLED and run_review and current_flow != "explore" and engine.has_file_changes():
                 click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
                 reviewer.reset()
                 review = reviewer.review(

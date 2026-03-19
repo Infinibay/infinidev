@@ -106,7 +106,7 @@ class StepResult(BaseModel):
 
     summary: str
     next_steps: list[StepOperation] = Field(default_factory=list)
-    status: Literal["continue", "done", "blocked"] = "continue"
+    status: Literal["continue", "done", "blocked", "explore"] = "continue"
     final_answer: str | None = None
 
 

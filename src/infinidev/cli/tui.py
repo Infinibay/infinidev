@@ -24,6 +24,7 @@ from textual import on, events, work
 # Infinidev imports
 from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop_engine import LoopEngine, set_event_callback
+from infinidev.engine.tree_engine import set_tree_event_callback
 from infinidev.engine.analysis_engine import AnalysisEngine
 from infinidev.engine.review_engine import ReviewEngine
 from infinidev.db.service import (
@@ -62,6 +63,7 @@ COMMANDS = [
     ("/models manage", "Pick a model interactively"),
     ("/settings", "Show or edit settings configuration"),
     ("/settings browse", "Open settings editor modal"),
+    ("/explore", "Decompose and explore a complex problem"),
     ("/init", "Explore and document the current project"),
     ("/findings", "Browse all findings"),
     ("/knowledge", "Browse project knowledge"),
@@ -779,6 +781,7 @@ class InfinidevTUI(App):
     def on_mount(self) -> None:
         init_db()
         set_event_callback(self.on_loop_event)
+        set_tree_event_callback(self.on_loop_event)
         self.query_one("#chat-input").focus()
         self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
 
@@ -1117,6 +1120,118 @@ class InfinidevTUI(App):
             self._log_lines = self._log_lines[-10:]
             self.query_one("#logs-panel").update_content("\n".join(self._log_lines))
             self.set_timer(10.0, lambda l=line: self._expire_log_line(l))
+
+        # ── Tree engine events ───────────────────────────────
+        elif event_type == "tree_init":
+            root = data.get("root_problem", "")
+            n = data.get("num_children", 0)
+            logic = data.get("logic", "AND")
+            tree_text = f"🌳 {root[:80]}\n   {logic} → {n} sub-problems"
+            self.query_one("#plan-panel").update_content(tree_text)
+            self.query_one("#steps-panel").update_content("Initializing tree...")
+            self.query_one("#actions-panel").update_content("Tree decomposed")
+
+        elif event_type == "tree_node_exploring":
+            node_id = data.get("node_id", "")
+            problem = data.get("problem", "")
+            depth = data.get("depth", 0)
+            indent = "  " * depth
+            step_text = f"🔍 [{node_id}]\n{indent}{problem[:100]}"
+            self.query_one("#steps-panel").update_content(step_text)
+            self.query_one("#actions-panel").update_content(f"Exploring [{node_id}]...")
+            self._refresh_context_panel(prompt_tokens=data.get("prompt_tokens", 0))
+
+        elif event_type == "tree_tool_call":
+            node_id = data.get("node_id", "")
+            tool = data.get("tool_name", "")
+            args = data.get("args_preview", "")
+            action_text = f"⚙️ [{node_id}] {tool}"
+            if args:
+                action_text += f"\n   {args[:60]}"
+            self.query_one("#actions-panel").update_content(action_text)
+            self._refresh_context_panel(prompt_tokens=data.get("prompt_tokens", 0))
+
+        elif event_type == "tree_node_resolved":
+            node_id = data.get("node_id", "")
+            state = data.get("state", "")
+            conf = data.get("confidence", "")
+            summary = data.get("summary", "")
+            state_icon = {"solvable": "✅", "unsolvable": "❌", "mitigable": "⚠️",
+                          "needs_decision": "❓", "needs_experiment": "🧪"}.get(state, "●")
+            short_line = f"{state_icon} [{node_id}] {state} ({conf})"
+            # Accumulate for plan panel tree view
+            if not hasattr(self, '_tree_resolved_lines'):
+                self._tree_resolved_lines: list[str] = []
+            self._tree_resolved_lines.append(short_line)
+            # Also show in steps panel with summary
+            step_text = short_line
+            if summary:
+                step_text += f"\n   {summary[:80]}"
+            self.query_one("#steps-panel").update_content(step_text)
+            # Log it
+            log_line = short_line
+            if summary:
+                log_line += f" — {summary[:60]}"
+            self._log_lines.append(log_line)
+            self._log_lines = self._log_lines[-15:]
+            self.query_one("#logs-panel").update_content("\n".join(self._log_lines))
+            self._refresh_context_panel(prompt_tokens=data.get("prompt_tokens", 0))
+
+        elif event_type == "tree_propagation":
+            root_state = data.get("root_state", "?")
+            total = data.get("total_nodes", 0)
+            resolved = data.get("resolved_nodes", 0)
+            if not hasattr(self, '_tree_resolved_lines'):
+                self._tree_resolved_lines: list[str] = []
+            # Update the plan panel with tree progress
+            pct = (resolved / total * 100) if total > 0 else 0
+            bar_len = 20
+            filled = int(bar_len * resolved / total) if total > 0 else 0
+            bar = "█" * filled + "░" * (bar_len - filled)
+            tree_text = (
+                f"🌳 Root: {root_state}\n"
+                f"   {bar} {resolved}/{total} ({pct:.0f}%)"
+            )
+            # Add resolved nodes as tree lines
+            if self._tree_resolved_lines:
+                tree_text += "\n" + "\n".join(self._tree_resolved_lines[-8:])
+            self.query_one("#plan-panel").update_content(tree_text)
+
+        elif event_type == "tree_fact_discovered":
+            node_id = data.get("node_id", "")
+            fact = data.get("fact_content", "")
+            tool = data.get("source_tool", "")
+            line = f"💡 [{node_id}] {fact[:60]}"
+            if tool:
+                line += f" (via {tool})"
+            self._log_lines.append(line)
+            self._log_lines = self._log_lines[-15:]
+            self.query_one("#logs-panel").update_content("\n".join(self._log_lines))
+
+        elif event_type == "tree_synthesizing":
+            total = data.get("total_nodes", 0)
+            self.query_one("#steps-panel").update_content(f"📝 Synthesizing {total} nodes...")
+            self.query_one("#actions-panel").update_content("Generating synthesis...")
+
+        elif event_type == "tree_budget_warning":
+            used = data.get("used", 0)
+            limit = data.get("limit", 0)
+            btype = data.get("type", "")
+            line = f"⚠ Budget {btype}: {used}/{limit}"
+            self._log_lines.append(line)
+            self._log_lines = self._log_lines[-15:]
+            self.query_one("#logs-panel").update_content("\n".join(self._log_lines))
+
+        elif event_type == "tree_finished":
+            status = data.get("status", "?")
+            total = data.get("total_nodes", 0)
+            self.query_one("#steps-panel").update_content(
+                f"🏁 Complete: {total} nodes\n   Root: {status}"
+            )
+            self.query_one("#actions-panel").update_content("Idle")
+            # Clean up accumulated tree state
+            if hasattr(self, '_tree_resolved_lines'):
+                del self._tree_resolved_lines
 
     def _expire_log_line(self, line: str) -> None:
         try:
@@ -1603,11 +1718,20 @@ class InfinidevTUI(App):
 
             self.agent.activate_context(session_id=self.session_id)
             try:
-                result = self.engine.execute(
-                    agent=self.agent,
-                    task_prompt=task_prompt,
-                    verbose=True,
-                )
+                if flow_label == "explore":
+                    from infinidev.engine.tree_engine import TreeEngine
+                    tree_engine = TreeEngine()
+                    result = tree_engine.execute(
+                        agent=self.agent,
+                        task_prompt=task_prompt,
+                        verbose=True,
+                    )
+                else:
+                    result = self.engine.execute(
+                        agent=self.agent,
+                        task_prompt=task_prompt,
+                        verbose=True,
+                    )
                 if not result or not result.strip():
                     result = "Done. (no additional output)"
             finally:
@@ -1615,7 +1739,7 @@ class InfinidevTUI(App):
 
             # --- Code review phase (single pass, no retry loop) ---
             run_review = flow_config.run_review if flow_config else True
-            if _settings.REVIEW_ENABLED and run_review and self.engine.has_file_changes():
+            if _settings.REVIEW_ENABLED and run_review and flow_label != "explore" and self.engine.has_file_changes():
                 self.call_from_thread(
                     self.query_one("#actions-panel").update_content,
                     "Code review..."
@@ -1836,6 +1960,7 @@ class InfinidevTUI(App):
                 "/settings reset      Reset to defaults\n"
                 "/settings export     Export settings to file\n"
                 "/settings import     Import settings from file\n"
+                "/explore <problem>   Decompose and explore a complex problem\n"
                 "/init                Explore and document the current project\n"
                 "/findings            Browse all findings\n"
                 "/knowledge           Browse project knowledge\n"
@@ -1870,6 +1995,17 @@ class InfinidevTUI(App):
             self._browse_findings(filter_type="project_context")
         elif cmd == "/documentation" or cmd == "/docs":
             self._browse_documentation()
+        elif cmd == "/explore":
+            problem = " ".join(parts[1:]) if len(parts) > 1 else ""
+            if not problem:
+                self.add_message("System", "Usage: /explore <problem description>", "system")
+            elif self._engine_running:
+                self.add_message("System", "Cannot run /explore while a task is running.", "system")
+            else:
+                self._engine_running = True
+                self.add_message("System", f"Exploring: {problem}", "system")
+                self._show_thinking()
+                self._run_explore(problem)
         elif cmd == "/init":
             if self._engine_running:
                 self.add_message("System", "Cannot run /init while a task is running.", "system")
@@ -1913,6 +2049,49 @@ class InfinidevTUI(App):
                 result = "Project initialization complete."
         except Exception as e:
             result = f"Init failed: {e}"
+        finally:
+            self.agent.deactivate()
+
+        self.call_from_thread(self._hide_thinking)
+        self.call_from_thread(self.add_message, "Infinidev", result, "agent")
+        store_conversation_turn(self.session_id, 'assistant', result, result[:200])
+        self.call_from_thread(
+            self.query_one("#actions-panel").update_content, "Idle"
+        )
+        self._engine_running = False
+        self.call_from_thread(self._drain_pending_inputs)
+
+    @work(exclusive=True, thread=True)
+    def _run_explore(self, problem: str):
+        """Run /explore — decompose and explore a complex problem."""
+        from infinidev.engine.tree_engine import TreeEngine
+        from infinidev.engine.flows import get_flow_config
+
+        reload_all()
+        self.call_from_thread(
+            self._context_panel.set_flow, "explore"
+        )
+        self.call_from_thread(
+            self.query_one("#actions-panel").update_content,
+            "Running [explore]..."
+        )
+
+        flow_config = get_flow_config("explore")
+        self.agent._system_prompt_identity = flow_config.identity_prompt
+        self.agent.backstory = flow_config.backstory
+
+        self.agent.activate_context(session_id=self.session_id)
+        try:
+            tree_engine = TreeEngine()
+            result = tree_engine.execute(
+                agent=self.agent,
+                task_prompt=(problem, flow_config.expected_output),
+                verbose=True,
+            )
+            if not result or not result.strip():
+                result = "Exploration complete (no synthesis produced)."
+        except Exception as e:
+            result = f"Exploration failed: {e}"
         finally:
             self.agent.deactivate()
 

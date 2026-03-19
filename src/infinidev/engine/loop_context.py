@@ -160,6 +160,7 @@ Example step_complete call:
 - **continue**: More work to do. Ensure there are pending steps in the plan.
 - **done**: Task is FULLY complete. You MUST provide the complete user-facing answer in `final_answer`.
 - **blocked**: Cannot proceed due to a technical issue. Explain why in the summary.
+- **explore**: The current problem needs deeper decomposition. Describe the sub-problem in `summary`. An exploration tree engine will analyze it and return findings as a note.
 
 ### CRITICAL: When to use status="done"
 - ONLY set status="done" when you have **fully completed the task** and have a **complete answer**.

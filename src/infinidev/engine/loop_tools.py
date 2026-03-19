@@ -71,8 +71,8 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["continue", "done", "blocked"],
-                    "description": "continue = more work to do, done = task complete, blocked = cannot proceed",
+                    "enum": ["continue", "done", "blocked", "explore"],
+                    "description": "continue = more work to do, done = task complete, blocked = cannot proceed, explore = delegate sub-problem to exploration tree",
                 },
                 "next_steps": {
                     "type": "array",

@@ -203,6 +203,24 @@ def init_db():
             END
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS exploration_trees (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id       INTEGER NOT NULL REFERENCES projects(id),
+                session_id       TEXT,
+                agent_id         TEXT,
+                problem          TEXT NOT NULL,
+                tree_json        TEXT NOT NULL,
+                synthesis        TEXT,
+                status           TEXT DEFAULT 'running',
+                total_nodes      INTEGER DEFAULT 0,
+                total_tool_calls INTEGER DEFAULT 0,
+                total_tokens     INTEGER DEFAULT 0,
+                created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+                completed_at     DATETIME
+            )
+        """)
+
         # Migrate existing databases: add columns that may be missing
         _migrate_add_column(conn, "findings", "session_id", "TEXT")
         _migrate_add_column(conn, "findings", "validation_method", "TEXT")
@@ -336,6 +354,75 @@ def get_project_knowledge(project_id: int = 1, limit: int = 15) -> list[dict]:
             })
         return results
 
+    try:
+        return execute_with_retry(_query) or []
+    except Exception:
+        return []
+
+
+# ── Exploration Trees ─────────────────────────────────────────────────────────
+
+
+def store_exploration_tree(
+    project_id: int,
+    problem: str,
+    tree_json: str,
+    *,
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    synthesis: str | None = None,
+    status: str = "running",
+    total_nodes: int = 0,
+    total_tool_calls: int = 0,
+    total_tokens: int = 0,
+) -> int:
+    """Store an exploration tree. Returns the row ID."""
+    def _insert(conn):
+        cursor = conn.execute(
+            """\
+            INSERT INTO exploration_trees
+                (project_id, session_id, agent_id, problem, tree_json,
+                 synthesis, status, total_nodes, total_tool_calls, total_tokens,
+                 completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    CASE WHEN ? IN ('completed', 'exhausted', 'error') THEN CURRENT_TIMESTAMP ELSE NULL END)
+            """,
+            (project_id, session_id, agent_id, problem, tree_json,
+             synthesis, status, total_nodes, total_tool_calls, total_tokens,
+             status),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    return execute_with_retry(_insert)
+
+
+def get_exploration_tree(tree_id: int) -> dict | None:
+    """Retrieve an exploration tree by ID."""
+    def _query(conn):
+        row = conn.execute(
+            "SELECT * FROM exploration_trees WHERE id = ?", (tree_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+    return execute_with_retry(_query)
+
+
+def get_recent_explorations(project_id: int = 1, limit: int = 10) -> list[dict]:
+    """Return recent exploration trees for a project."""
+    def _query(conn):
+        rows = conn.execute(
+            """\
+            SELECT id, problem, status, total_nodes, total_tool_calls,
+                   total_tokens, created_at, completed_at
+            FROM exploration_trees
+            WHERE project_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (project_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
     try:
         return execute_with_retry(_query) or []
     except Exception:

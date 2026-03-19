@@ -1499,6 +1499,34 @@ class LoopEngine(AgentEngine):
                 self._checkpoint(event_id, state)
 
             # --- Check termination ---
+            if step_result.status == "explore":
+                # Delegate sub-problem to TreeEngine
+                _emit_log(
+                    "warning",
+                    f"{_YELLOW}🌳 Delegating to exploration tree: {step_result.summary[:120]}{_RESET}",
+                    project_id=agent.project_id, agent_id=agent.agent_id,
+                )
+                try:
+                    from infinidev.engine.tree_engine import TreeEngine
+                    tree_engine = TreeEngine()
+                    explore_result = tree_engine.explore_subproblem(agent, step_result.summary)
+                    # Add exploration result as a note for context in subsequent steps
+                    if len(state.notes) < 20:
+                        state.notes.append(f"Exploration result: {explore_result[:500]}")
+                    # Record as an action
+                    state.history.append(ActionRecord(
+                        step_index=step_index,
+                        summary=f"Explored via tree: {explore_result[:200]}",
+                        tool_calls_count=0,
+                    ))
+                except Exception as exc:
+                    logger.warning("TreeEngine exploration failed: %s", exc)
+                    if len(state.notes) < 20:
+                        state.notes.append(f"Exploration failed: {exc}")
+                # Continue the loop after exploration
+                consecutive_all_done = 0
+                continue
+
             if step_result.status == "done":
                 # Guard: if the LLM said "done" but gave no final_answer
                 # (only a short summary), it likely finished too early.

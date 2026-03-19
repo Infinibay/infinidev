@@ -41,7 +41,7 @@ class AnalysisResult:
     research_queries: list[str] = field(default_factory=list)
     research_reason: str = ""
 
-    # Flow to route to: "develop" | "research" | "document" | "sysadmin" | "done"
+    # Flow to route to: "develop" | "research" | "document" | "sysadmin" | "explore" | "done"
     flow: str = "develop"
 
     # The enriched task prompt for the developer (built from specification)

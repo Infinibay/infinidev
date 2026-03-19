@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     CODE_INTERPRETER_TIMEOUT: int = 120
     CODE_INTERPRETER_MAX_OUTPUT: int = 50000
 
+    # Tree Exploration Engine
+    TREE_MAX_NODES: int = 100
+    TREE_MAX_DEPTH: int = 10
+    TREE_MAX_CHILDREN: int = 20
+    TREE_MAX_LLM_CALLS: int = 1000
+    TREE_MAX_TOOL_CALLS: int = 1000
+    TREE_MAX_TOOL_CALLS_PER_NODE: int = 100
+    TREE_INNER_LOOP_MAX: int = 50
+
     # Phases
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True

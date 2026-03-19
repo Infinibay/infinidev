@@ -16,7 +16,7 @@ if ! command -v uv &> /dev/null; then
 fi
 
 echo "==> Installing Infinidev..."
-uv tool install --force "$SCRIPT_DIR"
+uv tool install --force --reinstall "$SCRIPT_DIR"
 
 echo ""
 echo "==> Done! Run 'infinidev' from any directory."

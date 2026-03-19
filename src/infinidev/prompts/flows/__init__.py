@@ -22,6 +22,11 @@ from infinidev.prompts.flows.sysadmin import (
     SYSADMIN_EXPECTED_OUTPUT,
     SYSADMIN_IDENTITY,
 )
+from infinidev.prompts.flows.explore import (
+    EXPLORE_BACKSTORY,
+    EXPLORE_EXPECTED_OUTPUT,
+    EXPLORE_IDENTITY,
+)
 
 register_flow(FlowConfig(
     name="develop",
@@ -50,4 +55,11 @@ register_flow(FlowConfig(
     identity_prompt=SYSADMIN_IDENTITY,
     expected_output=SYSADMIN_EXPECTED_OUTPUT,
     backstory=SYSADMIN_BACKSTORY,
+))
+
+register_flow(FlowConfig(
+    name="explore",
+    identity_prompt=EXPLORE_IDENTITY,
+    expected_output=EXPLORE_EXPECTED_OUTPUT,
+    backstory=EXPLORE_BACKSTORY,
 ))
