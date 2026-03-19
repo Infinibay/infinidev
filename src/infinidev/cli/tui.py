@@ -36,6 +36,7 @@ from infinidev.cli.file_watcher import FileWatcher
 import infinidev.prompts.flows  # noqa: F401 — registers flows
 from infinidev.ui.widgets.context_widgets import QueuedMessageWidget, QueuedMessageStatus
 from infinidev.ui.widgets.file_diff_widget import FileChangeDiffWidget, colorize_diff
+from infinidev.ui.widgets.image_viewer import ImageViewer, is_image_file
 
 # ── Extension → language map for TextArea syntax highlighting ────────────
 _EXT_LANG = {
@@ -1603,13 +1604,33 @@ class InfinidevTUI(App):
 
     @on(DirectoryTree.FileSelected)
     async def open_file(self, event: DirectoryTree.FileSelected) -> None:
-        """Open a file in a new editor tab."""
+        """Open a file in a new editor tab (or image viewer for images)."""
         file_path = str(event.path)
         tab_id = f"file-{hash(file_path) & 0xFFFFFFFF:08x}"
 
         # If already open, just switch to it
         if tab_id in self._open_files:
             self.query_one("#content-tabs", TabbedContent).active = tab_id
+            return
+
+        # Truncate display name
+        rel = os.path.relpath(file_path)
+        tab_name = rel if len(rel) < 30 else f".../{pathlib.Path(file_path).name}"
+        tabs = self.query_one("#content-tabs", TabbedContent)
+
+        # Image files → open in image viewer
+        if is_image_file(file_path):
+            viewer = ImageViewer(
+                file_path,
+                id=f"imgview-{tab_id}",
+                classes="image-viewer",
+            )
+            pane = TabPane(tab_name, viewer, id=tab_id)
+            await tabs.add_pane(pane)
+            self._open_files[tab_id] = file_path
+            self._tab_names[tab_id] = tab_name
+            tabs.active = tab_id
+            viewer.focus()
             return
 
         # Read file content
@@ -1623,12 +1644,7 @@ class InfinidevTUI(App):
         ext = pathlib.Path(file_path).suffix.lower()
         language = _EXT_LANG.get(ext)
 
-        # Truncate display name
-        rel = os.path.relpath(file_path)
-        tab_name = rel if len(rel) < 30 else f".../{pathlib.Path(file_path).name}"
-
         # Create the tab and wait for it to be mounted
-        tabs = self.query_one("#content-tabs", TabbedContent)
         editor = TextArea(
             content,
             language=language,

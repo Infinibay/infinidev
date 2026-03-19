@@ -92,9 +92,52 @@ Text-only mode for minimal terminals or piping.
 
 | Key | Action |
 |-----|--------|
+| `Ctrl+S` | Save current file |
+| `Ctrl+F` | Find in current file |
+| `Ctrl+Shift+F` | Search across project |
 | `Ctrl+E` | Toggle file explorer |
 | `Ctrl+W` | Close active file tab |
 | `F2` / `F3` / `F4` | Focus: Chat / Explorer / Sidebar |
+
+### File Editor
+
+The built-in editor tracks unsaved changes with a visual indicator (`●`) on the tab and in the file explorer (highlighted in yellow). Closing a modified file prompts a Save/Discard/Cancel dialog.
+
+### Image Viewer
+
+Opening an image file (PNG, JPG, GIF, BMP, WebP, etc.) from the explorer renders it directly in the terminal using Unicode half-block characters (`▀`). Each character cell represents 2 vertical pixels with 24-bit color.
+
+Controls when viewing an image:
+
+| Key | Action |
+|-----|--------|
+| `+` / `-` | Zoom in / out |
+| `0` | Reset zoom to 100% |
+| `F` | Fit image to viewport |
+
+The info bar shows filename, dimensions, format, file size, current zoom level, and the active rendering backend (`numpy` or `cuda`).
+
+#### GPU-accelerated rendering
+
+By default, images are processed with NumPy on CPU. If you have an NVIDIA GPU, you can enable CUDA acceleration for faster rendering of large images:
+
+```bash
+# Install with CUDA support
+uv sync --extra cuda
+
+# Or add cupy manually
+uv pip install cupy-cuda12x
+```
+
+The backend is auto-detected at startup — no configuration needed. The info bar in the image viewer shows `[cuda]` or `[numpy]` so you know which one is active.
+
+### Project Search
+
+`Ctrl+Shift+F` opens a project-wide search modal with:
+- Real-time results with highlighted matches
+- Preview pane with context (2 lines before/after)
+- **Skip junk** toggle (on by default) — excludes `node_modules`, `.git`, `__pycache__`, `.venv`, binary files, lock files, and other common non-source files
+- Click a result to open the file at the matching line
 
 ## Configuration
 

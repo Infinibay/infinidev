@@ -12,12 +12,12 @@ dependencies = [
     "ollama>=0.6.0",
     "chromadb>=1.1.0",
     "numpy>=2.0.0",
+    "Pillow>=10.0.0",
     "prompt-toolkit>=3.0.43",
     "click>=8.1.7",
     "httpx>=0.28.0",
     "duckduckgo-search>=8.1.0",
     "trafilatura>=2.0.0",
-    "numpy>=2.0.0",
     "pypdf>=5.0.0",
     "pytest>=9.0.0",
     "textual>=8.1.1",
@@ -51,6 +51,9 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[project.optional-dependencies]
+cuda = ["cupy-cuda12x>=13.0.0"]
 
 [dependency-groups]
 dev = [

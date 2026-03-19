@@ -267,6 +267,15 @@ ChatInput { height: 4; border: solid $primary; }
 /* File editor tab */
 .file-editor { height: 100%; }
 
+/* Image viewer tab */
+.image-viewer {
+    height: 100%;
+    width: 100%;
+    background: #111111;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
 
 /* ── Sidebar ─────────────────────────────────────────────────── */
 
