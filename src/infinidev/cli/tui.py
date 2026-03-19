@@ -3,6 +3,7 @@
 import logging
 import os
 import pathlib
+import re
 import uuid
 from typing import Any
 
@@ -14,7 +15,7 @@ from typing import Optional, Callable, Set
 from textual.widgets import (
     Header, Footer, Static, TextArea, Label, OptionList, Markdown,
     DirectoryTree, TabbedContent, TabPane, LoadingIndicator,
-    ProgressBar, Button, Select,
+    ProgressBar, Button, Select, Input, Checkbox,
 )
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal, VerticalScroll
@@ -725,6 +726,561 @@ class DocsBrowserScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+# ── Unsaved Changes Modal ────────────────────────────────────────────────
+
+
+class UnsavedChangesScreen(ModalScreen[str]):
+    """Modal asking to save/discard/cancel when closing a modified file."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=True),
+    ]
+
+    def __init__(self, filename: str):
+        super().__init__()
+        self._filename = filename
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="unsaved-box"):
+            yield Label(f"Unsaved changes in [bold]{self._filename}[/bold]", id="unsaved-title")
+            yield Label("Do you want to save before closing?", id="unsaved-desc")
+            with Horizontal(id="unsaved-buttons"):
+                yield Button("Save", id="btn-unsaved-save", variant="success")
+                yield Button("Discard", id="btn-unsaved-discard", variant="error")
+                yield Button("Cancel", id="btn-unsaved-cancel", variant="default")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-unsaved-save").focus()
+
+    @on(Button.Pressed, "#btn-unsaved-save")
+    def _save(self, event: Button.Pressed) -> None:
+        self.dismiss("save")
+
+    @on(Button.Pressed, "#btn-unsaved-discard")
+    def _discard(self, event: Button.Pressed) -> None:
+        self.dismiss("discard")
+
+    @on(Button.Pressed, "#btn-unsaved-cancel")
+    def _cancel_btn(self, event: Button.Pressed) -> None:
+        self.dismiss("cancel")
+
+    def action_cancel(self) -> None:
+        self.dismiss("cancel")
+
+
+# ── Search Bar Widget ────────────────────────────────────────────────────
+
+
+class SearchBar(Horizontal):
+    """Inline search bar for finding text in the active file editor."""
+
+    class Dismissed(events.Message):
+        """Fired when the search bar is closed."""
+
+    def __init__(self, editor: TextArea, **kwargs):
+        super().__init__(id="search-bar", **kwargs)
+        self._editor = editor
+        self._matches: list[tuple[int, int, int]] = []  # (row, col_start, col_end)
+        self._current_idx = 0
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="Search...", id="search-input")
+        yield Label("0/0", id="search-match-count")
+        yield Button("Prev", id="btn-search-prev", variant="default")
+        yield Button("Next", id="btn-search-next", variant="default")
+        yield Button("X", id="btn-search-close", variant="default")
+
+    def on_mount(self) -> None:
+        self.query_one("#search-input", Input).focus()
+
+    @on(Input.Changed, "#search-input")
+    def _on_search_changed(self, event: Input.Changed) -> None:
+        self._do_search(event.value)
+
+    def _do_search(self, query: str) -> None:
+        self._matches.clear()
+        self._current_idx = 0
+        if not query:
+            self.query_one("#search-match-count", Label).update("0/0")
+            return
+        text = self._editor.text
+        lines = text.split("\n")
+        try:
+            pattern = re.compile(re.escape(query), re.IGNORECASE)
+        except re.error:
+            return
+        for row_idx, line in enumerate(lines):
+            for m in pattern.finditer(line):
+                self._matches.append((row_idx, m.start(), m.end()))
+        total = len(self._matches)
+        if total > 0:
+            self._current_idx = 0
+            self._goto_match()
+        self.query_one("#search-match-count", Label).update(
+            f"{self._current_idx + 1 if total else 0}/{total}"
+        )
+
+    def _goto_match(self) -> None:
+        if not self._matches:
+            return
+        row, col_start, col_end = self._matches[self._current_idx]
+        self._editor.select_line(row)
+        from textual.widgets.text_area import Selection, Location
+        self._editor.selection = Selection(
+            start=(row, col_start), end=(row, col_end)
+        )
+        self._editor.scroll_cursor_visible()
+
+    @on(Button.Pressed, "#btn-search-next")
+    def _next_match(self, event: Button.Pressed) -> None:
+        if self._matches:
+            self._current_idx = (self._current_idx + 1) % len(self._matches)
+            self._goto_match()
+            self._update_counter()
+
+    @on(Button.Pressed, "#btn-search-prev")
+    def _prev_match(self, event: Button.Pressed) -> None:
+        if self._matches:
+            self._current_idx = (self._current_idx - 1) % len(self._matches)
+            self._goto_match()
+            self._update_counter()
+
+    def _update_counter(self) -> None:
+        total = len(self._matches)
+        self.query_one("#search-match-count", Label).update(
+            f"{self._current_idx + 1 if total else 0}/{total}"
+        )
+
+    @on(Button.Pressed, "#btn-search-close")
+    def _close(self, event: Button.Pressed) -> None:
+        self.post_message(self.Dismissed())
+        self.remove()
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.Dismissed())
+            self.remove()
+        elif event.key == "enter":
+            event.prevent_default()
+            event.stop()
+            if self._matches:
+                self._current_idx = (self._current_idx + 1) % len(self._matches)
+                self._goto_match()
+                self._update_counter()
+
+
+# ── Project Search Modal ─────────────────────────────────────────────────
+
+# Directories and patterns to skip during project search
+_IGNORED_DIRS = {
+    "node_modules", "__pycache__", ".git", ".hg", ".svn",
+    ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "dist", "build", ".eggs",
+    ".venv", "venv", "env",
+    ".next", ".nuxt", ".cache", "coverage",
+    ".DS_Store", "Thumbs.db",
+    ".idea", ".vscode",
+}
+
+_IGNORED_EXTENSIONS = {
+    ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe",
+    ".min.js", ".min.css", ".map",
+    ".lock", ".egg", ".whl",
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp", ".svg",
+    ".woff", ".woff2", ".ttf", ".eot",
+    ".zip", ".tar", ".gz", ".bz2", ".xz",
+    ".pdf", ".doc", ".docx",
+}
+
+
+class ProjectSearchScreen(ModalScreen[None]):
+    """Modal for searching text across all project files."""
+
+    BINDINGS = [Binding("escape", "close", "Close", show=True)]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="project-search-box"):
+            yield Label("Search in Project", id="project-search-title")
+            with Horizontal(id="project-search-input-row"):
+                yield Input(placeholder="Search query...", id="project-search-input")
+                yield Checkbox("Skip junk", value=True, id="project-search-skip-junk")
+            yield Label("", id="project-search-status")
+            with Horizontal(id="project-search-body"):
+                yield OptionList(id="project-search-results")
+                yield TextArea("", read_only=True, id="project-search-preview",
+                               theme="monokai", show_line_numbers=True)
+            yield Label("Enter = Open file  |  Esc = Close", id="project-search-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#project-search-input", Input).focus()
+        self._result_entries: list[dict] = []  # {path, line_no, text, context}
+        self._search_id = 0
+
+    @on(Input.Changed, "#project-search-input")
+    def _on_query_change(self, event: Input.Changed) -> None:
+        query = event.value.strip()
+        if len(query) < 2:
+            self.query_one("#project-search-results", OptionList).clear_options()
+            self.query_one("#project-search-status", Label).update("")
+            self._result_entries.clear()
+            return
+        self._search_id += 1
+        skip_junk = True
+        try:
+            skip_junk = self.query_one("#project-search-skip-junk", Checkbox).value
+        except Exception:
+            pass
+        self._run_search(query, self._search_id, skip_junk)
+
+    @work(thread=True)
+    def _run_search(self, query: str, search_id: int, skip_junk: bool = True) -> None:
+        results: list[dict] = []
+        try:
+            pattern = re.compile(re.escape(query), re.IGNORECASE)
+        except re.error:
+            return
+        root = pathlib.Path(os.getcwd())
+        file_count = 0
+        match_count = 0
+        for fpath in root.rglob("*"):
+            if self._search_id != search_id:
+                return  # cancelled
+            if not fpath.is_file():
+                continue
+            # Check skip patterns
+            if skip_junk:
+                parts = fpath.relative_to(root).parts
+                if any(p in _IGNORED_DIRS for p in parts):
+                    continue
+                if fpath.suffix.lower() in _IGNORED_EXTENSIONS:
+                    continue
+                if any(p.endswith(".egg-info") for p in parts):
+                    continue
+            # Skip large files
+            try:
+                if fpath.stat().st_size > 1_000_000:
+                    continue
+            except OSError:
+                continue
+            # Read and search
+            try:
+                text = fpath.read_text(errors="replace")
+            except Exception:
+                continue
+            lines = text.split("\n")
+            for line_no, line in enumerate(lines, 1):
+                if pattern.search(line):
+                    # Gather context (2 lines before/after)
+                    ctx_start = max(0, line_no - 3)
+                    ctx_end = min(len(lines), line_no + 2)
+                    context = "\n".join(lines[ctx_start:ctx_end])
+                    rel = str(fpath.relative_to(root))
+                    results.append({
+                        "path": str(fpath),
+                        "rel": rel,
+                        "line_no": line_no,
+                        "text": line.strip()[:120],
+                        "context": context,
+                    })
+                    match_count += 1
+                    if match_count >= 500:
+                        break
+            file_count += 1
+            if match_count >= 500:
+                break
+        if self._search_id != search_id:
+            return
+        self.app.call_from_thread(self._show_results, results, file_count, match_count, query)
+
+    def _show_results(self, results: list[dict], file_count: int, match_count: int, query: str) -> None:
+        self._result_entries = results
+        ol = self.query_one("#project-search-results", OptionList)
+        ol.clear_options()
+        highlight_re = re.compile(re.escape(query), re.IGNORECASE)
+        for r in results:
+            prefix = f"{r['rel']}:{r['line_no']}  "
+            line_text = r['text']
+            full = prefix + line_text
+            if len(full) > 100:
+                full = full[:97] + "..."
+                line_text = full[len(prefix):]
+            label = Text(full)
+            # Highlight the file:line prefix in dim
+            label.stylize("dim", 0, len(prefix))
+            # Highlight all query matches in bold yellow
+            for m in highlight_re.finditer(full):
+                label.stylize("bold yellow", m.start(), m.end())
+            ol.add_option(Option(label))
+        status = f"{match_count} matches in {file_count} files"
+        if match_count >= 500:
+            status += " (limited)"
+        self.query_one("#project-search-status", Label).update(status)
+
+    @on(OptionList.OptionHighlighted, "#project-search-results")
+    def _on_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option_index is not None and event.option_index < len(self._result_entries):
+            entry = self._result_entries[event.option_index]
+            preview = self.query_one("#project-search-preview", TextArea)
+            preview.text = entry.get("context", "")
+
+    @on(OptionList.OptionSelected, "#project-search-results")
+    def _on_select(self, event: OptionList.OptionSelected) -> None:
+        if event.option_index is not None and event.option_index < len(self._result_entries):
+            entry = self._result_entries[event.option_index]
+            self.dismiss(None)
+            self.app.open_file_at_line(entry["path"], entry["line_no"])
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+# ── Custom DirectoryTree with dirty indicators ──────────────────────────
+
+
+# File extension → icon mapping for the explorer
+_FILE_ICONS: dict[str, str] = {
+    # Python
+    ".py": "\U0001f40d ",     # snake
+    ".pyw": "\U0001f40d ",
+    ".pyx": "\U0001f40d ",
+    ".pyi": "\U0001f40d ",
+    # JavaScript / TypeScript
+    ".js": "\u26a1 ",         # lightning
+    ".mjs": "\u26a1 ",
+    ".cjs": "\u26a1 ",
+    ".ts": "\U0001f4d8 ",     # blue book
+    ".tsx": "\U0001f4d8 ",
+    ".jsx": "\u26a1 ",
+    # Web
+    ".html": "\U0001f310 ",   # globe
+    ".htm": "\U0001f310 ",
+    ".css": "\U0001f3a8 ",    # palette
+    ".scss": "\U0001f3a8 ",
+    ".sass": "\U0001f3a8 ",
+    ".less": "\U0001f3a8 ",
+    ".svg": "\U0001f3a8 ",
+    # Data / Config
+    ".json": "\U0001f4cb ",   # clipboard
+    ".toml": "\u2699\ufe0f ",  # gear
+    ".yaml": "\u2699\ufe0f ",
+    ".yml": "\u2699\ufe0f ",
+    ".xml": "\U0001f4c3 ",    # page with curl
+    ".ini": "\u2699\ufe0f ",
+    ".cfg": "\u2699\ufe0f ",
+    ".conf": "\u2699\ufe0f ",
+    ".env": "\U0001f512 ",    # lock
+    ".properties": "\u2699\ufe0f ",
+    # Documentation
+    ".md": "\U0001f4d6 ",     # open book
+    ".mdx": "\U0001f4d6 ",
+    ".rst": "\U0001f4d6 ",
+    ".txt": "\U0001f4c4 ",    # page
+    ".log": "\U0001f4dc ",    # scroll
+    ".csv": "\U0001f4ca ",    # bar chart
+    # Shell / Scripts
+    ".sh": "\U0001f4bb ",     # laptop
+    ".bash": "\U0001f4bb ",
+    ".zsh": "\U0001f4bb ",
+    ".fish": "\U0001f4bb ",
+    ".bat": "\U0001f4bb ",
+    ".cmd": "\U0001f4bb ",
+    ".ps1": "\U0001f4bb ",
+    # Compiled / Systems
+    ".rs": "\U0001f980 ",     # crab (Rust)
+    ".go": "\U0001f439 ",     # hamster (Go gopher-ish)
+    ".java": "\u2615 ",       # coffee
+    ".kt": "\U0001f4a0 ",     # diamond shape (Kotlin)
+    ".scala": "\U0001f534 ",  # red circle
+    ".c": "\U0001f527 ",      # wrench
+    ".h": "\U0001f527 ",
+    ".cpp": "\U0001f527 ",
+    ".hpp": "\U0001f527 ",
+    ".cs": "\U0001f7e3 ",     # purple circle (C#)
+    ".swift": "\U0001f3af ",  # dart (Swift)
+    ".rb": "\U0001f48e ",     # gem (Ruby)
+    ".php": "\U0001f418 ",    # elephant (PHP)
+    ".lua": "\U0001f319 ",    # crescent moon
+    ".r": "\U0001f4c8 ",      # chart up
+    ".R": "\U0001f4c8 ",
+    ".jl": "\U0001f7e2 ",     # green circle (Julia)
+    ".ex": "\U0001f7e3 ",     # purple (Elixir)
+    ".exs": "\U0001f7e3 ",
+    ".erl": "\U0001f7e0 ",    # orange (Erlang)
+    ".hs": "\U0001f7e3 ",     # Haskell
+    ".ml": "\U0001f7e0 ",     # OCaml
+    # Database
+    ".sql": "\U0001f5c3 ",    # card file box
+    ".db": "\U0001f5c3 ",
+    ".sqlite": "\U0001f5c3 ",
+    # Docker / Infra
+    "Dockerfile": "\U0001f433 ",   # whale
+    ".dockerfile": "\U0001f433 ",
+    "docker-compose.yml": "\U0001f433 ",
+    "docker-compose.yaml": "\U0001f433 ",
+    # Images
+    ".png": "\U0001f5bc\ufe0f ",   # frame
+    ".jpg": "\U0001f5bc\ufe0f ",
+    ".jpeg": "\U0001f5bc\ufe0f ",
+    ".gif": "\U0001f5bc\ufe0f ",
+    ".ico": "\U0001f5bc\ufe0f ",
+    ".webp": "\U0001f5bc\ufe0f ",
+    ".bmp": "\U0001f5bc\ufe0f ",
+    # Audio / Video
+    ".mp3": "\U0001f3b5 ",    # musical note
+    ".wav": "\U0001f3b5 ",
+    ".ogg": "\U0001f3b5 ",
+    ".flac": "\U0001f3b5 ",
+    ".mp4": "\U0001f3ac ",    # clapper board
+    ".avi": "\U0001f3ac ",
+    ".mkv": "\U0001f3ac ",
+    ".mov": "\U0001f3ac ",
+    ".webm": "\U0001f3ac ",
+    # Archives
+    ".zip": "\U0001f4e6 ",    # package
+    ".tar": "\U0001f4e6 ",
+    ".gz": "\U0001f4e6 ",
+    ".bz2": "\U0001f4e6 ",
+    ".xz": "\U0001f4e6 ",
+    ".7z": "\U0001f4e6 ",
+    ".rar": "\U0001f4e6 ",
+    # Documents
+    ".pdf": "\U0001f4d5 ",    # closed book
+    ".doc": "\U0001f4d5 ",
+    ".docx": "\U0001f4d5 ",
+    ".xls": "\U0001f4ca ",    # bar chart
+    ".xlsx": "\U0001f4ca ",
+    ".ppt": "\U0001f4ca ",
+    ".pptx": "\U0001f4ca ",
+    # Fonts
+    ".woff": "\U0001f520 ",   # ABCD
+    ".woff2": "\U0001f520 ",
+    ".ttf": "\U0001f520 ",
+    ".otf": "\U0001f520 ",
+    ".eot": "\U0001f520 ",
+    # Security / Keys
+    ".pem": "\U0001f511 ",    # key
+    ".key": "\U0001f511 ",
+    ".crt": "\U0001f511 ",
+    ".cer": "\U0001f511 ",
+    ".p12": "\U0001f511 ",
+    # Lock files
+    ".lock": "\U0001f512 ",   # lock
+}
+
+# Special filenames that get their own icon regardless of extension
+_SPECIAL_FILE_ICONS: dict[str, str] = {
+    "Dockerfile": "\U0001f433 ",         # whale (Docker)
+    "docker-compose.yml": "\U0001f433 ",
+    "docker-compose.yaml": "\U0001f433 ",
+    "Makefile": "\U0001f3d7\ufe0f ",     # construction
+    "CMakeLists.txt": "\U0001f3d7\ufe0f ",
+    "Rakefile": "\U0001f48e ",           # gem (Ruby)
+    "Gemfile": "\U0001f48e ",
+    "Gemfile.lock": "\U0001f48e ",
+    "Cargo.toml": "\U0001f980 ",         # crab (Rust)
+    "Cargo.lock": "\U0001f980 ",
+    "go.mod": "\U0001f439 ",             # hamster (Go)
+    "go.sum": "\U0001f439 ",
+    "package.json": "\U0001f4e6 ",       # package (Node)
+    "package-lock.json": "\U0001f4e6 ",
+    "yarn.lock": "\U0001f4e6 ",
+    "pnpm-lock.yaml": "\U0001f4e6 ",
+    "tsconfig.json": "\U0001f4d8 ",      # blue book (TS)
+    "requirements.txt": "\U0001f40d ",   # snake (Python)
+    "setup.py": "\U0001f40d ",
+    "setup.cfg": "\U0001f40d ",
+    "pyproject.toml": "\U0001f40d ",
+    "Pipfile": "\U0001f40d ",
+    "Pipfile.lock": "\U0001f40d ",
+    "LICENSE": "\U0001f4dc ",            # scroll
+    "LICENSE.md": "\U0001f4dc ",
+    "LICENSE.txt": "\U0001f4dc ",
+    ".gitignore": "\U0001f500 ",         # git
+    ".gitmodules": "\U0001f500 ",
+    ".gitattributes": "\U0001f500 ",
+    ".dockerignore": "\U0001f433 ",
+    ".eslintrc.js": "\U0001f9f9 ",       # broom (linter)
+    ".eslintrc.json": "\U0001f9f9 ",
+    ".prettierrc": "\U0001f9f9 ",
+    ".editorconfig": "\u2699\ufe0f ",    # gear
+    "CLAUDE.md": "\U0001f916 ",          # robot
+}
+
+
+class InfinidevDirectoryTree(DirectoryTree):
+    """DirectoryTree with file-type icons and unsaved-modification highlighting."""
+
+    ICON_NODE = "\U0001f4c1 "       # closed folder
+    ICON_NODE_EXPANDED = "\U0001f4c2 "  # open folder
+    ICON_FILE = "\U0001f4c4 "       # page
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._dirty_paths: set[str] = set()
+
+    def set_dirty_paths(self, paths: set[str]) -> None:
+        """Update which file paths should show as modified."""
+        if paths != self._dirty_paths:
+            self._dirty_paths = paths.copy()
+            self.refresh()
+
+    def render_label(self, node, base_style, style):
+        node_label = node._label.copy()
+        node_label.stylize(style)
+
+        if not self.is_mounted:
+            return node_label
+
+        is_dirty = False
+        node_path = ""
+        if node.data and hasattr(node.data, 'path'):
+            node_path = str(node.data.path)
+            is_dirty = node_path in self._dirty_paths
+
+        if node._allow_expand:
+            # Directory — always use standard folder icons
+            icon = self.ICON_NODE_EXPANDED if node.is_expanded else self.ICON_NODE
+            from rich.style import Style as RichStyle
+            prefix = (icon, base_style + RichStyle(bold=True))
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--folder", partial=True)
+            )
+        else:
+            # File — pick icon by special filename first, then extension
+            fname = node_label.plain.strip()
+            ext = pathlib.Path(fname).suffix.lower()
+            icon = _SPECIAL_FILE_ICONS.get(fname,
+                _FILE_ICONS.get(ext, self.ICON_FILE)
+            )
+            prefix = (icon, base_style)
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--file", partial=True),
+            )
+            node_label.highlight_regex(
+                r"\..+$",
+                self.get_component_rich_style(
+                    "directory-tree--extension", partial=True
+                ),
+            )
+
+        if node_label.plain.startswith("."):
+            node_label.stylize_before(
+                self.get_component_rich_style("directory-tree--hidden", partial=True)
+            )
+
+        # Dirty indicator
+        if is_dirty:
+            dirty_marker = Text("\u25cf ", style="bold yellow")
+            node_label.stylize("yellow")
+            text = Text.assemble(prefix, dirty_marker, node_label)
+        else:
+            text = Text.assemble(prefix, node_label)
+
+        return text
+
+
 # ── Main TUI ────────────────────────────────────────────────────────────
 
 
@@ -740,6 +1296,9 @@ class InfinidevTUI(App):
         Binding("ctrl+c", "quit", "Exit", show=True),
         Binding("ctrl+e", "toggle_explorer", "Explorer", show=True, priority=True),
         Binding("ctrl+w", "close_tab", "Close tab", show=True, priority=True),
+        Binding("ctrl+s", "save_file", "Save", show=True, priority=True),
+        Binding("ctrl+f", "find_in_file", "Find", show=True, priority=True),
+        Binding("ctrl+shift+f", "find_in_project", "Search project", show=True, priority=True),
         Binding("f2", "focus_chat", "Chat", show=True),
         Binding("f3", "focus_explorer", "Files", show=True),
         Binding("f4", "focus_sidebar", "Sidebar", show=True),
@@ -755,7 +1314,7 @@ class InfinidevTUI(App):
                 with Horizontal(id="explorer-header"):
                     yield Label("EXPLORER", id="explorer-title")
                     yield Button("⟳", id="btn-sync-tree", variant="default")
-                yield DirectoryTree(os.getcwd(), id="file-tree")
+                yield InfinidevDirectoryTree(os.getcwd(), id="file-tree")
 
             # Content area with tabs
             with Vertical(id="content-area"):
@@ -789,6 +1348,9 @@ class InfinidevTUI(App):
         self.session_id = str(uuid.uuid4())
         self._log_lines: list[str] = []
         self._open_files: dict[str, str] = {}  # tab_id → file_path
+        self._original_content: dict[str, str] = {}  # tab_id → original content
+        self._dirty_files: set[str] = set()  # set of dirty tab_ids
+        self._tab_names: dict[str, str] = {}  # tab_id → display name
         self._file_diff_widgets: dict[str, FileChangeDiffWidget] = {}  # path → widget
 
         self.engine = LoopEngine()
@@ -856,6 +1418,40 @@ class InfinidevTUI(App):
         self.context_calculator.update_task(task_prompt_tokens=prompt_tokens)
         self._context_panel.update_status(self.context_calculator.get_context_status())
 
+    # ── Quit with unsaved check ─────────────────────────
+
+    def action_quit(self) -> None:
+        """Override quit to warn about unsaved files."""
+        if self._dirty_files:
+            dirty_names = []
+            for tid in self._dirty_files:
+                fp = self._open_files.get(tid, "")
+                dirty_names.append(pathlib.Path(fp).name if fp else "unknown")
+            names_str = ", ".join(dirty_names)
+            self.push_screen(
+                UnsavedChangesScreen(names_str),
+                callback=self._handle_quit_unsaved,
+            )
+        else:
+            self.exit()
+
+    def _handle_quit_unsaved(self, result: str) -> None:
+        """Handle the unsaved changes modal when quitting."""
+        if result == "save":
+            # Save all dirty files, then exit
+            for tid in list(self._dirty_files):
+                fp = self._open_files.get(tid, "")
+                if fp:
+                    try:
+                        editor = self.query_one(f"#editor-{tid}", TextArea)
+                        pathlib.Path(fp).write_text(editor.text)
+                    except Exception:
+                        pass
+            self.exit()
+        elif result == "discard":
+            self.exit()
+        # "cancel" → stay
+
     # ── Focus actions ────────────────────────────────────
 
     def action_toggle_explorer(self) -> None:
@@ -888,10 +1484,56 @@ class InfinidevTUI(App):
         active = tabs.active
         if active == "chat-pane":
             return  # never close the chat tab
-        if active in self._open_files:
-            del self._open_files[active]
+        # Check for unsaved changes
+        if active in self._dirty_files:
+            file_path = self._open_files.get(active, "unknown")
+            filename = pathlib.Path(file_path).name
+            self.push_screen(
+                UnsavedChangesScreen(filename),
+                callback=lambda result: self.call_later(
+                    self._handle_unsaved_close, active, result
+                ),
+            )
+            return
+        await self._do_close_tab(active)
+
+    async def _handle_unsaved_close(self, tab_id: str, result: str) -> None:
+        """Handle the result of the unsaved changes modal."""
+        if result == "save":
+            # Save first, then close
+            file_path = self._open_files.get(tab_id, "")
+            try:
+                editor = self.query_one(f"#editor-{tab_id}", TextArea)
+                content = editor.text
+                pathlib.Path(file_path).write_text(content)
+                self._original_content[tab_id] = content
+                self._dirty_files.discard(tab_id)
+                self.notify(f"Saved {pathlib.Path(file_path).name}")
+            except Exception as e:
+                self.notify(f"Error saving: {e}", severity="error")
+                return
+            await self._do_close_tab(tab_id)
+        elif result == "discard":
+            self._dirty_files.discard(tab_id)
+            await self._do_close_tab(tab_id)
+        # "cancel" → do nothing
+
+    async def _do_close_tab(self, tab_id: str) -> None:
+        """Actually remove a tab and clean up state."""
+        self._open_files.pop(tab_id, None)
+        self._original_content.pop(tab_id, None)
+        self._dirty_files.discard(tab_id)
+        self._tab_names.pop(tab_id, None)
+        # Remove search bar if present
         try:
-            await tabs.remove_pane(active)
+            pane = self.query_one(f"#{tab_id}", TabPane)
+            for sb in pane.query("#search-bar"):
+                sb.remove()
+        except Exception:
+            pass
+        tabs = self.query_one("#content-tabs", TabbedContent)
+        try:
+            await tabs.remove_pane(tab_id)
         except Exception:
             pass
         tabs.active = "chat-pane"
@@ -998,8 +1640,151 @@ class InfinidevTUI(App):
         pane = TabPane(tab_name, editor, id=tab_id)
         await tabs.add_pane(pane)
         self._open_files[tab_id] = file_path
+        self._original_content[tab_id] = content
+        self._tab_names[tab_id] = tab_name
         tabs.active = tab_id
         editor.focus()
+
+    # ── Dirty state tracking ─────────────────────────────
+
+    @on(TextArea.Changed)
+    def _on_editor_changed(self, event: TextArea.Changed) -> None:
+        """Track dirty state when a file editor is modified."""
+        editor = event.text_area
+        if not editor.has_class("file-editor"):
+            return
+        # Find the tab_id from the editor id (editor-{tab_id})
+        editor_id = editor.id or ""
+        if not editor_id.startswith("editor-"):
+            return
+        tab_id = editor_id[len("editor-"):]
+        if tab_id not in self._open_files:
+            return
+        is_dirty = editor.text != self._original_content.get(tab_id, "")
+        was_dirty = tab_id in self._dirty_files
+        if is_dirty and not was_dirty:
+            self._dirty_files.add(tab_id)
+            self._update_tab_label(tab_id, dirty=True)
+        elif not is_dirty and was_dirty:
+            self._dirty_files.discard(tab_id)
+            self._update_tab_label(tab_id, dirty=False)
+
+    def _update_tab_label(self, tab_id: str, dirty: bool) -> None:
+        """Update the tab label to show/hide the dirty indicator."""
+        base_name = self._tab_names.get(tab_id, "")
+        new_label = f"\u25cf {base_name}" if dirty else base_name
+        try:
+            tabs = self.query_one("#content-tabs", TabbedContent)
+            tab = tabs.get_tab(tab_id)
+            tab.label = new_label
+        except Exception:
+            pass
+        self._refresh_explorer_dirty()
+
+    def _get_dirty_paths(self) -> dict[str, str]:
+        """Return {tab_id: file_path} for all dirty files."""
+        return {tid: self._open_files[tid] for tid in self._dirty_files if tid in self._open_files}
+
+    def _refresh_explorer_dirty(self) -> None:
+        """Update the file explorer to highlight dirty files."""
+        try:
+            tree = self.query_one("#file-tree", InfinidevDirectoryTree)
+            dirty_paths = {self._open_files[tid] for tid in self._dirty_files if tid in self._open_files}
+            tree.set_dirty_paths(dirty_paths)
+        except Exception:
+            pass
+
+    # ── Save file ─────────────────────────────────────────
+
+    async def action_save_file(self) -> None:
+        """Save the active file editor tab to disk (Ctrl+S)."""
+        tabs = self.query_one("#content-tabs", TabbedContent)
+        active = tabs.active
+        if active == "chat-pane" or active not in self._open_files:
+            return
+        file_path = self._open_files[active]
+        try:
+            editor = self.query_one(f"#editor-{active}", TextArea)
+        except Exception:
+            return
+        content = editor.text
+        try:
+            pathlib.Path(file_path).write_text(content)
+        except Exception as e:
+            self.notify(f"Error saving: {e}", severity="error")
+            return
+        self._original_content[active] = content
+        self._dirty_files.discard(active)
+        self._update_tab_label(active, dirty=False)
+        filename = pathlib.Path(file_path).name
+        self.notify(f"Saved {filename}")
+
+    # ── Find in file ──────────────────────────────────────
+
+    async def action_find_in_file(self) -> None:
+        """Open search bar for the active file editor (Ctrl+F)."""
+        tabs = self.query_one("#content-tabs", TabbedContent)
+        active = tabs.active
+        if active == "chat-pane" or active not in self._open_files:
+            return
+        # Don't open a second search bar
+        existing = self.query("#search-bar")
+        if existing:
+            existing.first().query_one("#search-input", Input).focus()
+            return
+        try:
+            editor = self.query_one(f"#editor-{active}", TextArea)
+        except Exception:
+            return
+        pane = self.query_one(f"#{active}", TabPane)
+        search_bar = SearchBar(editor)
+        await pane.mount(search_bar, before=editor)
+
+    # ── Find in project ───────────────────────────────────
+
+    def action_find_in_project(self) -> None:
+        """Open project-wide search modal (Ctrl+Shift+F)."""
+        self.push_screen(ProjectSearchScreen())
+
+    def open_file_at_line(self, file_path: str, line_no: int) -> None:
+        """Open a file and scroll to a specific line (used by project search)."""
+        tab_id = f"file-{hash(file_path) & 0xFFFFFFFF:08x}"
+        # Schedule via call_later to allow modal dismiss to complete
+        self.call_later(self._open_file_at_line_async, file_path, tab_id, line_no)
+
+    async def _open_file_at_line_async(self, file_path: str, tab_id: str, line_no: int) -> None:
+        """Internal: open file and jump to line."""
+        tabs = self.query_one("#content-tabs", TabbedContent)
+        if tab_id not in self._open_files:
+            # Read and open the file
+            try:
+                content = pathlib.Path(file_path).read_text(errors="replace")
+            except Exception as e:
+                self.add_message("System", f"Cannot open file: {e}", "system")
+                return
+            ext = pathlib.Path(file_path).suffix.lower()
+            language = _EXT_LANG.get(ext)
+            rel = os.path.relpath(file_path)
+            tab_name = rel if len(rel) < 30 else f".../{pathlib.Path(file_path).name}"
+            editor = TextArea(
+                content, language=language, theme="monokai",
+                show_line_numbers=True, id=f"editor-{tab_id}", classes="file-editor",
+            )
+            pane = TabPane(tab_name, editor, id=tab_id)
+            await tabs.add_pane(pane)
+            self._open_files[tab_id] = file_path
+            self._original_content[tab_id] = content
+            self._tab_names[tab_id] = tab_name
+        tabs.active = tab_id
+        # Jump to line
+        try:
+            editor = self.query_one(f"#editor-{tab_id}", TextArea)
+            editor.focus()
+            target_line = max(0, line_no - 1)
+            editor.move_cursor((target_line, 0))
+            editor.scroll_cursor_visible()
+        except Exception:
+            pass
 
     # ── Autocomplete ─────────────────────────────────────
 
