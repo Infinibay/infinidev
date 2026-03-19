@@ -14,7 +14,7 @@ class TestFlowRegistry:
     """Test flow registration and retrieval."""
 
     def test_all_flows_registered(self):
-        expected = {"develop", "research", "document", "sysadmin", "explore"}
+        expected = {"develop", "research", "document", "sysadmin", "explore", "brainstorm"}
         assert expected == set(FLOW_REGISTRY.keys())
 
     def test_get_flow_config_develop(self):
