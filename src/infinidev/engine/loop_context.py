@@ -123,6 +123,7 @@ You operate in a plan-execute-summarize loop. Follow these rules:
 - You are given one step at a time from your plan.
 - Use tools to complete each step (aim for 1-4 tool calls per step).
 - When finished with a step, call the `step_complete` tool.
+- Do NOT re-read files you already read in this step — the content is still in your context. Only re-read if you need to verify changes you just made.
 
 ### Completing Steps — the `step_complete` tool
 
@@ -287,6 +288,18 @@ def build_iteration_prompt(
             + "\n</project-knowledge>"
         )
 
+    # Workspace context — tell the LLM where it is working
+    from infinidev.tools.base.context import get_current_workspace_path
+    workspace = get_current_workspace_path() or ""
+    if not workspace:
+        import os
+        workspace = os.getcwd()
+    if workspace:
+        parts.append(
+            f"<workspace>\nCurrent working directory: {workspace}\n"
+            "All relative file paths are resolved against this directory.\n</workspace>"
+        )
+
     # Task description
     parts.append(f"<task>\n{description}\n</task>")
 
@@ -403,7 +416,7 @@ def build_tools_prompt_section(tool_schemas: list[dict[str, Any]]) -> str:
         "You may call multiple tools in one response:",
         '```json',
         '{"tool_calls": [',
-        '  {"name": "read_file", "arguments": {"file_path": "src/main.py"}},',
+        '  {"name": "read_file", "arguments": {"path": "src/main.py"}},',
         '  {"name": "step_complete", "arguments": {"summary": "Read the file", "status": "continue"}}',
         ']}',
         '```',

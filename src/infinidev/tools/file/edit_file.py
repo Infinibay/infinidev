@@ -1,5 +1,6 @@
 """Tool for surgical file edits using search-and-replace."""
 
+import difflib
 import hashlib
 import json
 import os
@@ -102,10 +103,26 @@ class EditFileTool(InfinibayBaseTool):
         # Validate old_string exists
         count = content.count(old_string)
         if count == 0:
+            # Find the most similar line(s) to help the LLM correct its attempt
+            hint = ""
+            old_lines = old_string.strip().splitlines()
+            if old_lines:
+                file_lines = content.splitlines()
+                first_old = old_lines[0].strip()
+                if first_old:
+                    close = difflib.get_close_matches(
+                        first_old, [l.strip() for l in file_lines], n=1, cutoff=0.5
+                    )
+                    if close:
+                        # Find the actual line (with original indentation)
+                        for fl in file_lines:
+                            if fl.strip() == close[0]:
+                                hint = f' Closest match found: "{fl}"'
+                                break
             return self._error(
                 f"old_string not found in {path}. "
-                "Ensure the text matches exactly, including indentation and whitespace. "
-                "Use code_search or read_file to verify the exact content."
+                "Ensure the text matches exactly, including indentation and whitespace."
+                f"{hint}"
             )
 
         if count > 1 and not replace_all:
