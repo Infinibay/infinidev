@@ -1,0 +1,3 @@
+# SWE-bench harness dependencies (install separately from main project)
+datasets>=2.14.0
+swebench>=1.0.0

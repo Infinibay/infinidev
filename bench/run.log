@@ -1,0 +1,239 @@
+2026-03-21 14:17:11,621 [INFO] SWE-bench Infinidev Harness
+2026-03-21 14:17:11,621 [INFO] Model: ollama_chat/qwen3.5:27b
+2026-03-21 14:17:11,622 [INFO] Dataset: princeton-nlp/SWE-bench_Lite [test]
+2026-03-21 14:17:11,622 [INFO] Output: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 14:17:12,615 [INFO] Loading dataset princeton-nlp/SWE-bench_Lite (split=test)...
+2026-03-21 14:17:15,204 [INFO] Limited to 1 instance(s)
+2026-03-21 14:17:15,205 [INFO] [1/1] Processing astropy__astropy-12907
+2026-03-21 14:17:15,205 [INFO] === Running instance: astropy__astropy-12907 ===
+2026-03-21 14:17:15,205 [INFO] Repo: astropy/astropy | Base commit: d16bfe05a744
+2026-03-21 14:17:15,205 [INFO] Cloning astropy/astropy into cache...
+2026-03-21 14:17:26,759 [INFO] Instance astropy__astropy-12907 ready at /home/andres/forcloude/swebench-run/astropy__astropy-12907
+2026-03-21 14:23:19,711 [INFO] Finished astropy__astropy-12907 in 353.0s (exit=0)
+2026-03-21 14:23:19,862 [INFO] Patch for astropy__astropy-12907: 13 lines
+2026-03-21 14:23:19,942 [INFO] [1/1] astropy__astropy-12907: PATCH
+2026-03-21 14:23:19,942 [INFO] === Complete: 1 done, 0 skipped, 1 total ===
+2026-03-21 14:23:19,942 [INFO] Predictions saved to: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 14:25:13,775 [INFO] SWE-bench Infinidev Harness
+2026-03-21 14:25:13,775 [INFO] Model: ollama_chat/qwen3.5:27b
+2026-03-21 14:25:13,775 [INFO] Dataset: princeton-nlp/SWE-bench_Lite [test]
+2026-03-21 14:25:13,775 [INFO] Output: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 14:25:14,774 [INFO] Loading dataset princeton-nlp/SWE-bench_Lite (split=test)...
+2026-03-21 14:25:17,560 [INFO] Limited to 10 instance(s)
+2026-03-21 14:25:17,560 [INFO] Resuming: 1 instances already completed
+2026-03-21 14:25:17,561 [INFO] [1/10] Skipping astropy__astropy-12907 (already done)
+2026-03-21 14:25:17,561 [INFO] [2/10] Processing astropy__astropy-14182
+2026-03-21 14:25:17,561 [INFO] === Running instance: astropy__astropy-14182 ===
+2026-03-21 14:25:17,561 [INFO] Repo: astropy/astropy | Base commit: a5917978be39
+2026-03-21 14:25:17,561 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 14:25:18,968 [INFO] Instance astropy__astropy-14182 ready at /home/andres/forcloude/swebench-run/astropy__astropy-14182
+2026-03-21 14:35:19,085 [ERROR] TIMEOUT on astropy__astropy-14182 after 600s
+2026-03-21 14:35:19,175 [INFO] [2/10] astropy__astropy-14182: NO PATCH
+2026-03-21 14:35:19,176 [INFO] [3/10] Processing astropy__astropy-14365
+2026-03-21 14:35:19,176 [INFO] === Running instance: astropy__astropy-14365 ===
+2026-03-21 14:35:19,176 [INFO] Repo: astropy/astropy | Base commit: 7269fa3e33e8
+2026-03-21 14:35:19,176 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 14:35:20,682 [INFO] Instance astropy__astropy-14365 ready at /home/andres/forcloude/swebench-run/astropy__astropy-14365
+2026-03-21 14:43:51,558 [INFO] Finished astropy__astropy-14365 in 510.9s (exit=0)
+2026-03-21 14:43:51,691 [INFO] Patch for astropy__astropy-14365: 13 lines
+2026-03-21 14:43:51,773 [INFO] [3/10] astropy__astropy-14365: PATCH
+2026-03-21 14:43:51,773 [INFO] [4/10] Processing astropy__astropy-14995
+2026-03-21 14:43:51,773 [INFO] === Running instance: astropy__astropy-14995 ===
+2026-03-21 14:43:51,773 [INFO] Repo: astropy/astropy | Base commit: b16c7d12ccbc
+2026-03-21 14:43:51,773 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 14:43:53,355 [INFO] Instance astropy__astropy-14995 ready at /home/andres/forcloude/swebench-run/astropy__astropy-14995
+2026-03-21 14:53:53,405 [ERROR] TIMEOUT on astropy__astropy-14995 after 600s
+2026-03-21 14:53:53,495 [INFO] [4/10] astropy__astropy-14995: NO PATCH
+2026-03-21 14:53:53,495 [INFO] [5/10] Processing astropy__astropy-6938
+2026-03-21 14:53:53,495 [INFO] === Running instance: astropy__astropy-6938 ===
+2026-03-21 14:53:53,495 [INFO] Repo: astropy/astropy | Base commit: c76af9ed6bb8
+2026-03-21 14:53:53,495 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 14:53:54,960 [INFO] Instance astropy__astropy-6938 ready at /home/andres/forcloude/swebench-run/astropy__astropy-6938
+2026-03-21 14:56:31,001 [INFO] SWE-bench Infinidev Harness
+2026-03-21 14:56:31,001 [INFO] Model: ollama_chat/qwen3.5:27b
+2026-03-21 14:56:31,001 [INFO] Dataset: princeton-nlp/SWE-bench_Lite [test]
+2026-03-21 14:56:31,001 [INFO] Output: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 14:56:31,992 [INFO] Loading dataset princeton-nlp/SWE-bench_Lite (split=test)...
+2026-03-21 14:56:34,878 [INFO] Limited to 10 instance(s)
+2026-03-21 14:56:34,879 [INFO] Resuming: 4 instances already completed
+2026-03-21 14:56:34,879 [INFO] [1/10] Skipping astropy__astropy-12907 (already done)
+2026-03-21 14:56:34,879 [INFO] [2/10] Skipping astropy__astropy-14182 (already done)
+2026-03-21 14:56:34,879 [INFO] [3/10] Skipping astropy__astropy-14365 (already done)
+2026-03-21 14:56:34,879 [INFO] [4/10] Skipping astropy__astropy-14995 (already done)
+2026-03-21 14:56:34,879 [INFO] [5/10] Processing astropy__astropy-6938
+2026-03-21 14:56:34,879 [INFO] === Running instance: astropy__astropy-6938 ===
+2026-03-21 14:56:34,879 [INFO] Repo: astropy/astropy | Base commit: c76af9ed6bb8
+2026-03-21 14:56:34,879 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 14:56:36,438 [INFO] Instance astropy__astropy-6938 ready at /home/andres/forcloude/swebench-run/astropy__astropy-6938
+2026-03-21 15:00:41,887 [INFO] Finished astropy__astropy-6938 in 245.4s (exit=0)
+2026-03-21 15:00:42,022 [INFO] Patch for astropy__astropy-6938: 13 lines
+2026-03-21 15:00:42,110 [INFO] [5/10] astropy__astropy-6938: PATCH
+2026-03-21 15:00:42,110 [INFO] [6/10] Processing astropy__astropy-7746
+2026-03-21 15:00:42,110 [INFO] === Running instance: astropy__astropy-7746 ===
+2026-03-21 15:00:42,110 [INFO] Repo: astropy/astropy | Base commit: d5bd3f68bb6d
+2026-03-21 15:00:42,110 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 15:00:43,695 [INFO] Instance astropy__astropy-7746 ready at /home/andres/forcloude/swebench-run/astropy__astropy-7746
+2026-03-21 15:08:52,548 [INFO] Finished astropy__astropy-7746 in 488.9s (exit=0)
+2026-03-21 15:08:52,685 [INFO] Patch for astropy__astropy-7746: 23 lines
+2026-03-21 15:08:52,764 [INFO] [6/10] astropy__astropy-7746: PATCH
+2026-03-21 15:08:52,764 [INFO] [7/10] Processing django__django-10914
+2026-03-21 15:08:52,764 [INFO] === Running instance: django__django-10914 ===
+2026-03-21 15:08:52,764 [INFO] Repo: django/django | Base commit: e7fd69d051ea
+2026-03-21 15:08:52,765 [INFO] Cloning django/django into cache...
+2026-03-21 15:09:09,165 [INFO] Instance django__django-10914 ready at /home/andres/forcloude/swebench-run/django__django-10914
+2026-03-21 15:15:23,796 [INFO] Finished django__django-10914 in 374.6s (exit=0)
+2026-03-21 15:15:23,870 [INFO] Patch for django__django-10914: 95 lines
+2026-03-21 15:15:24,137 [INFO] [7/10] django__django-10914: PATCH
+2026-03-21 15:15:24,137 [INFO] [8/10] Processing django__django-10924
+2026-03-21 15:15:24,137 [INFO] === Running instance: django__django-10924 ===
+2026-03-21 15:15:24,137 [INFO] Repo: django/django | Base commit: bceadd2788dc
+2026-03-21 15:15:24,137 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 15:15:26,000 [INFO] Instance django__django-10924 ready at /home/andres/forcloude/swebench-run/django__django-10924
+2026-03-21 15:23:44,555 [INFO] Finished django__django-10924 in 498.6s (exit=0)
+2026-03-21 15:23:44,752 [INFO] Patch for django__django-10924: 43 lines
+2026-03-21 15:23:45,021 [INFO] [8/10] django__django-10924: PATCH
+2026-03-21 15:23:45,021 [INFO] [9/10] Processing django__django-11001
+2026-03-21 15:23:45,021 [INFO] === Running instance: django__django-11001 ===
+2026-03-21 15:23:45,021 [INFO] Repo: django/django | Base commit: ef082ebb84f0
+2026-03-21 15:23:45,021 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 15:23:47,007 [INFO] Instance django__django-11001 ready at /home/andres/forcloude/swebench-run/django__django-11001
+2026-03-21 15:31:42,943 [INFO] Finished django__django-11001 in 475.9s (exit=0)
+2026-03-21 15:31:42,961 [INFO] Patch for django__django-11001: 40 lines
+2026-03-21 15:31:43,248 [INFO] [9/10] django__django-11001: PATCH
+2026-03-21 15:31:43,249 [INFO] [10/10] Processing django__django-11019
+2026-03-21 15:31:43,249 [INFO] === Running instance: django__django-11019 ===
+2026-03-21 15:31:43,249 [INFO] Repo: django/django | Base commit: 93e892bb645b
+2026-03-21 15:31:43,249 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 15:31:45,524 [INFO] Instance django__django-11019 ready at /home/andres/forcloude/swebench-run/django__django-11019
+2026-03-21 15:37:24,108 [INFO] Finished django__django-11019 in 338.6s (exit=0)
+2026-03-21 15:37:24,308 [INFO] Patch for django__django-11019: 43 lines
+2026-03-21 15:37:24,594 [INFO] [10/10] django__django-11019: PATCH
+2026-03-21 15:37:24,594 [INFO] === Complete: 6 done, 4 skipped, 10 total ===
+2026-03-21 15:37:24,594 [INFO] Predictions saved to: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 15:42:23,162 [INFO] SWE-bench Infinidev Harness
+2026-03-21 15:42:23,162 [INFO] Model: ollama_chat/qwen3.5:27b
+2026-03-21 15:42:23,162 [INFO] Dataset: princeton-nlp/SWE-bench_Lite [test]
+2026-03-21 15:42:23,162 [INFO] Output: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 15:42:24,175 [INFO] Loading dataset princeton-nlp/SWE-bench_Lite (split=test)...
+2026-03-21 15:42:27,044 [INFO] Filtered to 2 instance(s)
+2026-03-21 15:42:27,044 [INFO] Resuming: 8 instances already completed
+2026-03-21 15:42:27,044 [INFO] [1/2] Processing astropy__astropy-14182
+2026-03-21 15:42:27,045 [INFO] === Running instance: astropy__astropy-14182 ===
+2026-03-21 15:42:27,045 [INFO] Repo: astropy/astropy | Base commit: a5917978be39
+2026-03-21 15:42:27,045 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 15:42:28,495 [INFO] Instance astropy__astropy-14182 ready at /home/andres/forcloude/swebench-run/astropy__astropy-14182
+2026-03-21 15:51:43,975 [INFO] Finished astropy__astropy-14182 in 555.5s (exit=0)
+2026-03-21 15:51:43,985 [INFO] Patch for astropy__astropy-14182: 15 lines
+2026-03-21 15:51:44,071 [INFO] [1/2] astropy__astropy-14182: PATCH
+2026-03-21 15:51:44,071 [INFO] [2/2] Processing astropy__astropy-14995
+2026-03-21 15:51:44,071 [INFO] === Running instance: astropy__astropy-14995 ===
+2026-03-21 15:51:44,071 [INFO] Repo: astropy/astropy | Base commit: b16c7d12ccbc
+2026-03-21 15:51:44,071 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/astropy__astropy
+2026-03-21 15:51:45,530 [INFO] Instance astropy__astropy-14995 ready at /home/andres/forcloude/swebench-run/astropy__astropy-14995
+2026-03-21 15:57:02,823 [INFO] Finished astropy__astropy-14995 in 317.3s (exit=0)
+2026-03-21 15:57:02,836 [INFO] Patch for astropy__astropy-14995: 55 lines
+2026-03-21 15:57:02,917 [INFO] [2/2] astropy__astropy-14995: PATCH
+2026-03-21 15:57:02,918 [INFO] === Complete: 2 done, 0 skipped, 2 total ===
+2026-03-21 15:57:02,918 [INFO] Predictions saved to: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 16:04:51,481 [INFO] SWE-bench Infinidev Harness
+2026-03-21 16:04:51,481 [INFO] Model: ollama_chat/qwen3.5:27b
+2026-03-21 16:04:51,481 [INFO] Dataset: princeton-nlp/SWE-bench_Lite [test]
+2026-03-21 16:04:51,482 [INFO] Output: /home/andres/forcloude/swebench-run/predictions.jsonl
+2026-03-21 16:04:52,491 [INFO] Loading dataset princeton-nlp/SWE-bench_Lite (split=test)...
+2026-03-21 16:04:55,305 [INFO] Limited to 30 instance(s)
+2026-03-21 16:04:55,306 [INFO] Resuming: 10 instances already completed
+2026-03-21 16:04:55,306 [INFO] [1/30] Skipping astropy__astropy-12907 (already done)
+2026-03-21 16:04:55,306 [INFO] [2/30] Skipping astropy__astropy-14182 (already done)
+2026-03-21 16:04:55,306 [INFO] [3/30] Skipping astropy__astropy-14365 (already done)
+2026-03-21 16:04:55,306 [INFO] [4/30] Skipping astropy__astropy-14995 (already done)
+2026-03-21 16:04:55,306 [INFO] [5/30] Skipping astropy__astropy-6938 (already done)
+2026-03-21 16:04:55,306 [INFO] [6/30] Skipping astropy__astropy-7746 (already done)
+2026-03-21 16:04:55,306 [INFO] [7/30] Skipping django__django-10914 (already done)
+2026-03-21 16:04:55,306 [INFO] [8/30] Skipping django__django-10924 (already done)
+2026-03-21 16:04:55,306 [INFO] [9/30] Skipping django__django-11001 (already done)
+2026-03-21 16:04:55,306 [INFO] [10/30] Skipping django__django-11019 (already done)
+2026-03-21 16:04:55,306 [INFO] [11/30] Processing django__django-11039
+2026-03-21 16:04:55,306 [INFO] === Running instance: django__django-11039 ===
+2026-03-21 16:04:55,306 [INFO] Repo: django/django | Base commit: d5276398046c
+2026-03-21 16:04:55,306 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:04:57,167 [INFO] Instance django__django-11039 ready at /home/andres/forcloude/swebench-run/django__django-11039
+2026-03-21 16:13:13,753 [INFO] Finished django__django-11039 in 496.6s (exit=0)
+2026-03-21 16:13:13,828 [INFO] Patch for django__django-11039: 38 lines
+2026-03-21 16:13:14,104 [INFO] [11/30] django__django-11039: PATCH
+2026-03-21 16:13:14,104 [INFO] [12/30] Processing django__django-11049
+2026-03-21 16:13:14,104 [INFO] === Running instance: django__django-11049 ===
+2026-03-21 16:13:14,104 [INFO] Repo: django/django | Base commit: 17455e924e24
+2026-03-21 16:13:14,104 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:13:16,028 [INFO] Instance django__django-11049 ready at /home/andres/forcloude/swebench-run/django__django-11049
+2026-03-21 16:21:49,512 [INFO] Finished django__django-11049 in 513.5s (exit=0)
+2026-03-21 16:21:49,529 [INFO] Patch for django__django-11049: 26 lines
+2026-03-21 16:21:49,804 [INFO] [12/30] django__django-11049: PATCH
+2026-03-21 16:21:49,804 [INFO] [13/30] Processing django__django-11099
+2026-03-21 16:21:49,804 [INFO] === Running instance: django__django-11099 ===
+2026-03-21 16:21:49,804 [INFO] Repo: django/django | Base commit: d26b2424437d
+2026-03-21 16:21:49,804 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:21:51,826 [INFO] Instance django__django-11099 ready at /home/andres/forcloude/swebench-run/django__django-11099
+2026-03-21 16:25:15,379 [INFO] Finished django__django-11099 in 203.6s (exit=0)
+2026-03-21 16:25:15,576 [INFO] Patch for django__django-11099: 22 lines
+2026-03-21 16:25:15,852 [INFO] [13/30] django__django-11099: PATCH
+2026-03-21 16:25:15,852 [INFO] [14/30] Processing django__django-11133
+2026-03-21 16:25:15,852 [INFO] === Running instance: django__django-11133 ===
+2026-03-21 16:25:15,852 [INFO] Repo: django/django | Base commit: 879cc3da6249
+2026-03-21 16:25:15,852 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:25:17,812 [INFO] Instance django__django-11133 ready at /home/andres/forcloude/swebench-run/django__django-11133
+2026-03-21 16:30:34,143 [INFO] Finished django__django-11133 in 316.3s (exit=1)
+2026-03-21 16:30:34,347 [INFO] Patch for django__django-11133: 13 lines
+2026-03-21 16:30:34,618 [INFO] [14/30] django__django-11133: PATCH
+2026-03-21 16:30:34,618 [INFO] [15/30] Processing django__django-11179
+2026-03-21 16:30:34,618 [INFO] === Running instance: django__django-11179 ===
+2026-03-21 16:30:34,618 [INFO] Repo: django/django | Base commit: 19fc6376ce67
+2026-03-21 16:30:34,618 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:30:36,541 [INFO] Instance django__django-11179 ready at /home/andres/forcloude/swebench-run/django__django-11179
+2026-03-21 16:34:26,689 [INFO] Finished django__django-11179 in 230.1s (exit=0)
+2026-03-21 16:34:26,888 [INFO] Patch for django__django-11179: 12 lines
+2026-03-21 16:34:27,164 [INFO] [15/30] django__django-11179: PATCH
+2026-03-21 16:34:27,164 [INFO] [16/30] Processing django__django-11283
+2026-03-21 16:34:27,164 [INFO] === Running instance: django__django-11283 ===
+2026-03-21 16:34:27,164 [INFO] Repo: django/django | Base commit: 08a4ee06510a
+2026-03-21 16:34:27,164 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:34:29,289 [INFO] Instance django__django-11283 ready at /home/andres/forcloude/swebench-run/django__django-11283
+2026-03-21 16:43:19,594 [INFO] Finished django__django-11283 in 530.3s (exit=0)
+2026-03-21 16:43:19,712 [INFO] Patch for django__django-11283: 17 lines
+2026-03-21 16:43:19,985 [INFO] [16/30] django__django-11283: PATCH
+2026-03-21 16:43:19,986 [INFO] [17/30] Processing django__django-11422
+2026-03-21 16:43:19,986 [INFO] === Running instance: django__django-11422 ===
+2026-03-21 16:43:19,986 [INFO] Repo: django/django | Base commit: df46b329e090
+2026-03-21 16:43:19,986 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:43:21,903 [INFO] Instance django__django-11422 ready at /home/andres/forcloude/swebench-run/django__django-11422
+2026-03-21 16:49:07,003 [INFO] Finished django__django-11422 in 345.1s (exit=0)
+2026-03-21 16:49:07,201 [INFO] Patch for django__django-11422: 18 lines
+2026-03-21 16:49:07,473 [INFO] [17/30] django__django-11422: PATCH
+2026-03-21 16:49:07,473 [INFO] [18/30] Processing django__django-11564
+2026-03-21 16:49:07,473 [INFO] === Running instance: django__django-11564 ===
+2026-03-21 16:49:07,474 [INFO] Repo: django/django | Base commit: 580e644f24f1
+2026-03-21 16:49:07,474 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 16:49:09,447 [INFO] Instance django__django-11564 ready at /home/andres/forcloude/swebench-run/django__django-11564
+2026-03-21 17:01:48,983 [INFO] Finished django__django-11564 in 759.5s (exit=0)
+2026-03-21 17:01:49,168 [INFO] Patch for django__django-11564: 53 lines
+2026-03-21 17:01:49,474 [INFO] [18/30] django__django-11564: PATCH
+2026-03-21 17:01:49,474 [INFO] [19/30] Processing django__django-11583
+2026-03-21 17:01:49,474 [INFO] === Running instance: django__django-11583 ===
+2026-03-21 17:01:49,474 [INFO] Repo: django/django | Base commit: 60dc957a8252
+2026-03-21 17:01:49,474 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 17:01:51,332 [INFO] Instance django__django-11583 ready at /home/andres/forcloude/swebench-run/django__django-11583
+2026-03-21 17:08:45,214 [INFO] Finished django__django-11583 in 413.9s (exit=0)
+2026-03-21 17:08:45,345 [INFO] Patch for django__django-11583: 52 lines
+2026-03-21 17:08:45,613 [INFO] [19/30] django__django-11583: PATCH
+2026-03-21 17:08:45,613 [INFO] [20/30] Processing django__django-11620
+2026-03-21 17:08:45,613 [INFO] === Running instance: django__django-11620 ===
+2026-03-21 17:08:45,613 [INFO] Repo: django/django | Base commit: 514efa312979
+2026-03-21 17:08:45,613 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 17:08:47,608 [INFO] Instance django__django-11620 ready at /home/andres/forcloude/swebench-run/django__django-11620
+2026-03-21 17:12:41,028 [INFO] Finished django__django-11620 in 233.4s (exit=0)
+2026-03-21 17:12:41,234 [INFO] Patch for django__django-11620: 22 lines
+2026-03-21 17:12:41,507 [INFO] [20/30] django__django-11620: PATCH
+2026-03-21 17:12:41,507 [INFO] [21/30] Processing django__django-11630
+2026-03-21 17:12:41,507 [INFO] === Running instance: django__django-11630 ===
+2026-03-21 17:12:41,507 [INFO] Repo: django/django | Base commit: 65e86948b802
+2026-03-21 17:12:41,508 [INFO] Using cached repo: /tmp/infinidev-bench/.cache/django__django
+2026-03-21 17:12:43,411 [INFO] Instance django__django-11630 ready at /home/andres/forcloude/swebench-run/django__django-11630
