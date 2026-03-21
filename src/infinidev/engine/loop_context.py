@@ -48,13 +48,18 @@ knowledge base of findings.
 
 ## Tool Usage
 
-- **read_file** / **list_directory** / **glob** / **code_search**: Explore the codebase before modifying.
-- **write_file**: Create new files only. Never overwrite existing files — use edit_file instead.
-- **edit_file**: Modify existing files with targeted changes.
+- **read_file**(path): Read a file. Use offset/limit for large files.
+- **list_directory** / **glob** / **code_search**: Explore the codebase before modifying.
+- **write_file**(path, content): Create new files only. Never overwrite existing files — use edit_file instead.
+- **edit_file**(path, old_string, new_string): Modify existing files with surgical changes.
+  The `old_string` must match EXACTLY (including indentation and whitespace).
+  Always read_file first, then copy the exact text. If edit_file fails 3+ times,
+  fall back to write_file to rewrite the entire file.
 - **execute_command**: Run shell commands (build, test, install, etc.).
 - **git_branch** / **git_commit** / **git_diff** / **git_status**: Manage version control.
 - **web_search** / **web_fetch**: Research documentation, APIs, or error messages online.
-- **record_finding** / **search_findings** / **read_findings**: Manage the knowledge base.
+- **record_finding**(title, content): Record to the knowledge base. Optional: finding_type, confidence, tags.
+- **search_findings** / **read_findings**: Search or list knowledge base entries.
 - **update_finding** / **delete_finding**: Keep findings accurate and up to date.
 - **send_message**: Send a message to the user WITHOUT ending the task. Use for progress updates, intermediate results, or questions while you keep working.
 
@@ -124,6 +129,9 @@ You operate in a plan-execute-summarize loop. Follow these rules:
 - Use tools to complete each step (aim for 1-4 tool calls per step).
 - When finished with a step, call the `step_complete` tool.
 - Do NOT re-read files you already read in this step — the content is still in your context. Only re-read if you need to verify changes you just made.
+- When you need to reason through a problem (analyze errors, plan approach, debug),
+  use the `think` tool instead of just calling the next tool. This helps you
+  avoid mistakes and the user can see your reasoning.
 
 ### Completing Steps — the `step_complete` tool
 
@@ -190,13 +198,18 @@ If you added a new feature or fixed a bug, write tests that cover the new behavi
 Focus on getting the implementation right — the reviewer will catch quality
 issues. Do NOT add a self-review step.
 
-### Task Notes — the `add_note` tool
-Use `add_note` to save information you will need in later steps. Notes persist
-across all iterations and appear in the `<notes>` block of every prompt.
-- Use for: key file paths, decisions made, values found, warnings, constraints.
+### Task Notes — the `add_note` tool (CRITICAL for memory between steps)
+Your context is rebuilt from scratch each step. Step summaries are only ~50 tokens
+and cannot capture details. Use `add_note` to preserve anything you will need later:
+- File paths and function names you discovered
+- Key values, error messages, or patterns you found
+- Decisions you made and why (so you don't reconsider them)
+- Exact text you plan to edit (so you don't need to re-read the file)
+Notes persist across ALL steps and appear in the `<notes>` block every time.
 - Keep each note short (1-2 sentences). Max 20 notes per task.
 - Notes are your scratchpad — they are NOT shown to the user.
-- Do NOT duplicate information that is already in your step summaries.
+- **After reading a file you plan to modify, ALWAYS add_note the key lines/structure.**
+- **After discovering a path or fixing a bug, ALWAYS add_note it.**
 
 ### Context Budget Awareness
 Each iteration you receive a `<context-budget>` block showing tokens used vs. available.
@@ -303,6 +316,21 @@ def build_iteration_prompt(
     # Task description
     parts.append(f"<task>\n{description}\n</task>")
 
+    # Opened files cache — files the agent has read or written recently.
+    # This avoids redundant read_file calls between steps.
+    if state.opened_files:
+        file_sections = []
+        for path, of in state.opened_files.items():
+            file_sections.append(
+                f"### {path} (expires in {of.ttl} tool calls)\n```\n{of.content}\n```"
+            )
+        parts.append(
+            "<opened-files>\n"
+            "Files you recently read or wrote (still in cache — do NOT re-read these):\n\n"
+            + "\n\n".join(file_sections)
+            + "\n</opened-files>"
+        )
+
     # Notes (persistent scratchpad across iterations)
     if state.notes:
         note_lines = [f"{i+1}. {n}" for i, n in enumerate(state.notes)]
@@ -310,6 +338,15 @@ def build_iteration_prompt(
             "<notes>\nYour notes from previous steps:\n"
             + "\n".join(note_lines)
             + "\n</notes>"
+        )
+    # Gentle nudge if the agent hasn't taken notes in a while
+    elif state.tool_calls_since_last_note >= 10 and state.total_tool_calls >= 10:
+        parts.append(
+            "<note-reminder>\n"
+            "You have made 10+ tool calls without using add_note. Consider saving "
+            "key facts (file paths, function names, decisions) so you don't lose them "
+            "between steps. This is optional but recommended.\n"
+            "</note-reminder>"
         )
 
     # Plan (if we have one)

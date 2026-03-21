@@ -125,15 +125,40 @@ ADD_NOTE_SCHEMA: dict[str, Any] = {
 }
 
 
+THINK_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "think",
+        "description": (
+            "Think through a problem before acting. Use this when you need to "
+            "reason about what to do next, analyze an error, or plan your approach. "
+            "Your reasoning is shown to the user as a progress update. "
+            "This does NOT count as a tool call — use it freely."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reasoning": {
+                    "type": "string",
+                    "description": "Your reasoning, analysis, or plan",
+                },
+            },
+            "required": ["reasoning"],
+        },
+    },
+}
+
+
 def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     """Convert a list of tools to OpenAI function-calling schemas.
 
-    Always appends the engine pseudo-tools (step_complete, add_note)
-    so the LLM can signal step completion and take notes.
+    Always appends the engine pseudo-tools (step_complete, add_note, think)
+    so the LLM can signal step completion, take notes, and reason.
     """
     schemas = [tool_to_openai_schema(t) for t in tools]
     schemas.append(STEP_COMPLETE_SCHEMA)
     schemas.append(ADD_NOTE_SCHEMA)
+    schemas.append(THINK_SCHEMA)
     return schemas
 
 
@@ -191,6 +216,27 @@ def execute_tool_call(
                 })
     except (ValueError, TypeError):
         pass  # Can't inspect, pass all args
+
+    # Check for missing required parameters before calling
+    try:
+        sig = inspect.signature(tool._run)
+        required_params = {
+            p_name for p_name, p in sig.parameters.items()
+            if p.default is inspect.Parameter.empty
+            and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        }
+        missing = required_params - set(args.keys())
+        if missing:
+            return json.dumps({
+                "error": (
+                    f"Tool '{name}' is missing required parameter(s): "
+                    f"{', '.join(sorted(missing))}. "
+                    f"Valid parameters are: {', '.join(sorted(sig.parameters.keys()))}. "
+                    f"Re-call the tool with all required parameters."
+                ),
+            })
+    except (ValueError, TypeError):
+        pass
 
     # Execute
     try:

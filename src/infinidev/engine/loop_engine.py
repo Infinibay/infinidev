@@ -72,8 +72,10 @@ def _get_model_max_context(llm_params: dict[str, Any]) -> int:
         pass
     return 0
 
-# Max retries when LLM returns text instead of tool calls
-_MAX_TEXT_RETRIES = 3
+# Max times the LLM can respond with text instead of tool calls before
+# forcing a step_complete.  Text responses are kept as context (the model
+# may be reasoning), so a higher limit is fine.
+_MAX_TEXT_RETRIES = 5
 
 logger = logging.getLogger(__name__)
 
@@ -144,9 +146,9 @@ def _emit_log(level: str, text: str, *, project_id: int = 0, agent_id: str = "")
 # Maps tool name → list of arg keys to show in UI (in priority order).
 # Only the first matching key is shown, truncated to keep it short.
 _TOOL_DETAIL_KEYS: dict[str, list[str]] = {
-    "read_file": ["file_path", "path"],
-    "write_file": ["file_path", "path"],
-    "edit_file": ["file_path", "path"],
+    "read_file": ["path", "file_path"],
+    "write_file": ["path", "file_path"],
+    "edit_file": ["path", "file_path"],
     "list_directory": ["path", "directory"],
     "code_search": ["query", "pattern", "search_query"],
     "glob": ["pattern", "glob_pattern"],
@@ -226,6 +228,76 @@ def _extract_tool_error(result: str) -> str:
     except (json.JSONDecodeError, TypeError):
         pass
     return ""
+
+
+# ── Opened files cache helper ──────────────────────────────────────────────
+
+def _update_opened_files_cache(
+    state: LoopState,
+    tool_name: str,
+    arguments: str | dict,
+    result: str,
+) -> None:
+    """Update the opened files cache based on tool calls.
+
+    - read_file: cache the returned content
+    - write_file: cache the written content (from arguments)
+    - edit_file: re-read the file and update cache
+    """
+    import os as _os
+
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(args, dict):
+        return
+
+    path = args.get("path")
+    if not path:
+        return
+
+    # Resolve to absolute path for consistent cache keys
+    from infinidev.tools.base.context import get_current_workspace_path
+    ws = get_current_workspace_path() or _os.getcwd()
+    if not _os.path.isabs(path):
+        path = _os.path.normpath(_os.path.join(ws, path))
+
+    if tool_name == "read_file":
+        # result is the file content (or JSON error)
+        if result and not result.strip().startswith('{"error'):
+            state.cache_file(path, result)
+
+    elif tool_name == "write_file":
+        # Content was in the arguments
+        content = args.get("content", "")
+        if content:
+            state.refresh_file(path, content)
+
+    elif tool_name == "edit_file":
+        # After a successful edit, re-read the file to get updated content
+        try:
+            if _os.path.isfile(path):
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                state.refresh_file(path, content)
+        except Exception:
+            pass
+
+    elif tool_name == "list_directory":
+        # Cache directory listing so the model doesn't re-list
+        if result and not result.strip().startswith('{"error'):
+            state.cache_file(f"[dir] {path}", result)
+
+    elif tool_name == "glob":
+        pattern = args.get("pattern", "")
+        if pattern and result and not result.strip().startswith('{"error'):
+            state.cache_file(f"[glob] {pattern}", result)
+
+    elif tool_name == "code_search":
+        query = args.get("query") or args.get("pattern") or args.get("search_query", "")
+        if query and result and not result.strip().startswith('{"error'):
+            state.cache_file(f"[search] {query}", result)
 
 
 # ── File change tracking helpers ────────────────────────────────────────────
@@ -585,7 +657,60 @@ def _parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
                         pass
                     continue  # try next brace pair in the candidate
 
+    # ── 9. SEARCH/REPLACE blocks (Aider-style diffs) ────────────────
+    # Models trained on code editing often produce:
+    #   <<<<<<< SEARCH
+    #   old code
+    #   =======
+    #   new code
+    #   >>>>>>> REPLACE
+    # Optionally with a file path before the block or in the SEARCH line.
+    sr_calls = _parse_search_replace_blocks(cleaned)
+    if sr_calls:
+        return sr_calls
+
     return None
+
+
+def _parse_search_replace_blocks(text: str) -> list[dict[str, Any]] | None:
+    """Parse SEARCH/REPLACE blocks into edit_file tool calls.
+
+    Supports formats:
+    - ``<<<<<<< SEARCH`` ... ``=======`` ... ``>>>>>>> REPLACE``
+    - ``<<<<<<< SEARCH@path`` or ``<<<<<<< SEARCH path``
+    - File path on the line before the block
+    """
+    import re
+
+    # Match SEARCH/REPLACE blocks
+    pattern = re.compile(
+        r"(?:^([^\n<>]+\.[\w]+)\n)?"            # optional file path on preceding line
+        r"<{4,}\s*SEARCH"                         # <<<<<<< SEARCH
+        r"(?:[@\s]+([^\n]*\.[\w]+))?"             # optional @path or path after SEARCH
+        r"(?:[@\s]*(\d+)(?:-\d+)?)?\s*\n"        # optional @linenum or @start-end
+        r"(.*?)\n"                                # old code (captured)
+        r"={4,}\s*\n"                             # =======
+        r"(.*?)\n"                                # new code (captured)
+        r">{4,}\s*REPLACE",                       # >>>>>>> REPLACE
+        re.DOTALL | re.MULTILINE,
+    )
+
+    calls: list[dict[str, Any]] = []
+    for m in pattern.finditer(text):
+        path = m.group(1) or m.group(2) or ""
+        old_string = m.group(4)
+        new_string = m.group(5)
+
+        if old_string is not None and new_string is not None:
+            args: dict[str, Any] = {
+                "old_string": old_string,
+                "new_string": new_string,
+            }
+            if path:
+                args["path"] = path.strip()
+            calls.append({"name": "edit_file", "arguments": args})
+
+    return calls if calls else None
 
 
 def _extract_calls_from_fragments(fragments: list[str]) -> list[dict[str, Any]] | None:
@@ -995,6 +1120,8 @@ class LoopEngine(AgentEngine):
             _malformed_retries = 0
             _MAX_MALFORMED_RETRIES = 2
             _text_retries = 0
+            _consecutive_tool_errors = 0  # Track consecutive tool failures
+            _MAX_CONSECUTIVE_ERRORS = 4  # Force step_complete after this many
 
             while action_tool_calls < max_per_action and state.total_tool_calls < max_total_calls:
                 # ── LLM call: FC mode vs manual mode ─────────────────
@@ -1114,13 +1241,30 @@ class LoopEngine(AgentEngine):
                     regular_calls = []
                     sc_call = None
                     note_calls = []
+                    think_calls = []
                     for tc in tool_calls:
                         if tc.function.name == "step_complete":
                             sc_call = tc
                         elif tc.function.name == "add_note":
                             note_calls.append(tc)
+                        elif tc.function.name == "think":
+                            think_calls.append(tc)
                         else:
                             regular_calls.append(tc)
+
+                    # Process think calls (emit reasoning to chat, don't count as tool call)
+                    for tk in think_calls:
+                        try:
+                            tk_args = json.loads(tk.function.arguments) if isinstance(tk.function.arguments, str) else (tk.function.arguments or {})
+                            reasoning = tk_args.get("reasoning", "").strip()
+                            if reasoning:
+                                if verbose:
+                                    _log(f"  {_DIM}💭 {reasoning[:200]}{_RESET}")
+                                _emit_loop_event("loop_think", agent.project_id, agent.agent_id, {
+                                    "reasoning": reasoning,
+                                })
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
 
                     # Process add_note calls (write to state.notes)
                     _MAX_NOTES = 20
@@ -1130,6 +1274,7 @@ class LoopEngine(AgentEngine):
                             note_text = nc_args.get("note", "").strip()
                             if note_text and len(state.notes) < _MAX_NOTES:
                                 state.notes.append(note_text)
+                                state.tool_calls_since_last_note = 0  # Reset nudge counter
                         except (json.JSONDecodeError, AttributeError):
                             pass
 
@@ -1157,7 +1302,7 @@ class LoopEngine(AgentEngine):
                                 for tc in regular_calls
                             ]
                             # Include engine pseudo-tools in the message (needed for API)
-                            for pseudo_tc in note_calls + ([sc_call] if sc_call else []):
+                            for pseudo_tc in think_calls + note_calls + ([sc_call] if sc_call else []):
                                 assistant_msg["tool_calls"].append({
                                     "id": pseudo_tc.id,
                                     "type": "function",
@@ -1202,6 +1347,19 @@ class LoopEngine(AgentEngine):
                             # Detect errors / hallucinated tools and log visibly
                             _tool_error = _extract_tool_error(result)
 
+                            # Track consecutive tool errors for circuit breaker
+                            if _tool_error:
+                                _consecutive_tool_errors += 1
+                            else:
+                                _consecutive_tool_errors = 0
+
+                            # --- Opened files cache ---
+                            # Cache file content so the LLM doesn't need to re-read
+                            if not _tool_error:
+                                _update_opened_files_cache(
+                                    state, tc.function.name, tc.function.arguments, result,
+                                )
+
                             if manual_tc:
                                 tool_results_text.append(
                                     f"[Tool: {tc.function.name}] Result:\n{result}"
@@ -1214,6 +1372,10 @@ class LoopEngine(AgentEngine):
                                 })
                             action_tool_calls += 1
                             state.total_tool_calls += 1
+                            state.tool_calls_since_last_note += 1
+
+                            # Tick opened files cache TTL
+                            state.tick_opened_files(1)
 
                             tool_detail = _extract_tool_detail(tc.function.name, tc.function.arguments)
 
@@ -1242,6 +1404,8 @@ class LoopEngine(AgentEngine):
                         if manual_tc:
                             for nc in note_calls:
                                 tool_results_text.append('[Tool: add_note] Result:\n{"status": "noted"}')
+                            for tk in think_calls:
+                                tool_results_text.append('[Tool: think] Result:\n{"status": "acknowledged"}')
                             if tool_results_text:
                                 messages.append({
                                     "role": "user",
@@ -1260,8 +1424,14 @@ class LoopEngine(AgentEngine):
                             same_tool_streak = 1
                             repetition_nudged = False
 
-                        # Provide add_note tool results
+                        # Provide think + add_note tool results
                         if not manual_tc:
+                            for tk in think_calls:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tk.id,
+                                    "content": '{"status": "acknowledged"}',
+                                })
                             for nc in note_calls:
                                 messages.append({
                                     "role": "tool",
@@ -1277,7 +1447,7 @@ class LoopEngine(AgentEngine):
                                 "content": '{"status": "acknowledged"}',
                             })
 
-                    elif sc_call or note_calls:
+                    elif sc_call or note_calls or think_calls:
                         # Only engine pseudo-tools, no regular tools
                         if manual_tc:
                             messages.append({
@@ -1286,7 +1456,7 @@ class LoopEngine(AgentEngine):
                             })
                         else:
                             assistant_msg = {"role": "assistant", "content": message.content or ""}
-                            pseudo_calls = note_calls + ([sc_call] if sc_call else [])
+                            pseudo_calls = think_calls + note_calls + ([sc_call] if sc_call else [])
                             assistant_msg["tool_calls"] = [
                                 {
                                     "id": pc.id,
@@ -1299,6 +1469,12 @@ class LoopEngine(AgentEngine):
                                 for pc in pseudo_calls
                             ]
                             messages.append(assistant_msg)
+                            for tk in think_calls:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tk.id,
+                                    "content": '{"status": "acknowledged"}',
+                                })
                             for nc in note_calls:
                                 messages.append({
                                     "role": "tool",
@@ -1355,59 +1531,77 @@ class LoopEngine(AgentEngine):
                         )
                         break
 
-                else:
-                    # LLM responded with text despite tool_choice="required".
-                    # Retry with a corrective nudge before giving up.
-                    content = (message.content or "").strip()
-                    _text_retries += 1
-                    logger.warning(
-                        "LoopEngine [%s]: LLM returned text instead of tool call "
-                        "(attempt %d/%d): %s",
-                        agent.agent_id, _text_retries, _MAX_TEXT_RETRIES,
-                        content[:200],
-                    )
-
-                    if _text_retries < _MAX_TEXT_RETRIES:
+                    # Circuit breaker: too many consecutive tool errors
+                    # (e.g. edit_file failing repeatedly with different args)
+                    if _consecutive_tool_errors >= _MAX_CONSECUTIVE_ERRORS:
                         _emit_log(
                             "warning",
-                            f"{_YELLOW}⚠ LLM returned text instead of tool call "
-                            f"(retry {_text_retries}/{_MAX_TEXT_RETRIES}){_RESET}",
+                            f"{_YELLOW}⚠ {_consecutive_tool_errors} consecutive tool errors "
+                            f"— nudging model to try a different approach{_RESET}",
                             project_id=agent.project_id, agent_id=agent.agent_id,
                         )
-                        # Append assistant text + corrective nudge so the model
-                        # sees what it did wrong and tries again with a tool call.
-                        truncated = content[:500] + ("..." if len(content) > 500 else "")
+                        _consecutive_tool_errors = 0  # Reset after nudge
+                        nudge_msg = (
+                            f"WARNING: Your last {_MAX_CONSECUTIVE_ERRORS} tool calls all failed. "
+                            "You are stuck in a failing pattern. Change your approach:\n"
+                            "- If edit_file keeps failing, use write_file to rewrite the entire file.\n"
+                            "- If read_file keeps failing on a path, use list_directory to find the correct path.\n"
+                            "- If nothing works, call step_complete to move on and revisit later."
+                        )
+                        if manual_tc:
+                            messages.append({"role": "user", "content": nudge_msg})
+                        else:
+                            messages.append({"role": "user", "content": nudge_msg})
+
+                else:
+                    # LLM responded with text instead of a tool call.
+                    # This is often the model reasoning/thinking — treat it as
+                    # useful context, keep it in the conversation, and gently
+                    # remind it to call a tool next.
+                    content = (message.content or "").strip()
+                    _text_retries += 1
+
+                    if _text_retries < _MAX_TEXT_RETRIES:
+                        # Show the reasoning to the user (like a think call)
+                        if content:
+                            preview = content[:200] + ("..." if len(content) > 200 else "")
+                            if verbose:
+                                _log(f"  {_DIM}💭 {preview}{_RESET}")
+                            _emit_loop_event("loop_think", agent.project_id, agent.agent_id, {
+                                "reasoning": content,
+                            })
+
+                        # Keep the full text as assistant message in context
+                        # (the model may need its own reasoning for the next call)
                         messages.append({"role": "assistant", "content": content})
+
+                        # Gentle nudge — not aggressive, just a reminder
                         if manual_tc:
                             nudge = (
-                                "Your response could not be parsed as a tool call. "
-                                "You MUST respond with a JSON object containing a "
-                                '"tool_calls" array. Example:\n'
-                                '{"tool_calls": [{"name": "step_complete", '
-                                '"arguments": {"summary": "...", "status": "continue"}}]}\n\n'
-                                f"Your response was: {truncated}"
+                                "Good reasoning. Now execute it by responding with a "
+                                "JSON tool call. Example:\n"
+                                '{"tool_calls": [{"name": "tool_name", '
+                                '"arguments": {"param": "value"}}]}'
                             )
                         else:
                             nudge = (
-                                "You responded with text but you MUST call a tool. "
-                                f"Your response was: {truncated}\n\n"
-                                "Call the appropriate tool to proceed, or call "
-                                "step_complete if you are done with this step."
+                                "Good reasoning. Now call the appropriate tool to "
+                                "execute your plan, or call step_complete if done."
                             )
                         messages.append({"role": "user", "content": nudge})
                         continue  # Retry the inner loop
 
                     # Exhausted retries — fall back to StepResult
                     _emit_log(
-                        "error",
-                        f"{_RED}⚠ LLM returned text {_text_retries}x despite "
-                        f"tool_choice=required — forcing step completion{_RESET}",
+                        "warning",
+                        f"{_YELLOW}⚠ LLM returned text {_text_retries}x without "
+                        f"calling a tool — moving to next step{_RESET}",
                         project_id=agent.project_id, agent_id=agent.agent_id,
                     )
                     if len(content) > 200:
                         content = content[:197] + "..."
                     step_result = StepResult(
-                        summary=content or "Step completed (provider ignored tool_choice=required).",
+                        summary=content or "Step completed (model reasoned but did not call tools).",
                         status="continue",
                     )
                     break

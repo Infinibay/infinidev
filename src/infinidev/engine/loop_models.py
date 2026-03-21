@@ -110,15 +110,73 @@ class StepResult(BaseModel):
     final_answer: str | None = None
 
 
+class OpenedFile(BaseModel):
+    """A file cached in the prompt so the LLM doesn't need to re-read it."""
+
+    path: str
+    content: str
+    ttl: int = 8  # Remaining tool calls before expiry
+
+    def tick(self, n: int = 1) -> None:
+        """Decrement TTL by *n* tool calls."""
+        self.ttl = max(0, self.ttl - n)
+
+    @property
+    def expired(self) -> bool:
+        return self.ttl <= 0
+
+
+# Default TTL for opened files (in tool calls)
+OPENED_FILE_TTL = 20
+# Max number of files to keep in the cache (to avoid prompt bloat)
+MAX_OPENED_FILES = 10
+# Max file content size to cache (larger files are not cached)
+MAX_CACHE_CONTENT_SIZE = 8000  # ~2K tokens
+
+
 class LoopState(BaseModel):
     """Full state of the loop engine across iterations."""
 
     plan: LoopPlan = Field(default_factory=LoopPlan)
     history: list[ActionRecord] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)  # Scratchpad notes that persist across iterations
+    opened_files: dict[str, OpenedFile] = Field(default_factory=dict)  # File content cache
     current_step_index: int = 0
     iteration_count: int = 0
     total_tool_calls: int = 0
     total_tokens: int = 0
     last_prompt_tokens: int = 0       # prompt_tokens from most recent LLM call
     last_completion_tokens: int = 0   # completion_tokens from most recent LLM call
+    tool_calls_since_last_note: int = 0  # For gentle note-taking nudge
+
+    def cache_file(self, path: str, content: str) -> None:
+        """Add or update a file in the opened files cache."""
+        if len(content) > MAX_CACHE_CONTENT_SIZE:
+            # Too large to cache — skip
+            return
+        self.opened_files[path] = OpenedFile(
+            path=path, content=content, ttl=OPENED_FILE_TTL,
+        )
+        # Evict oldest (lowest TTL) if over limit
+        while len(self.opened_files) > MAX_OPENED_FILES:
+            oldest = min(self.opened_files, key=lambda k: self.opened_files[k].ttl)
+            del self.opened_files[oldest]
+
+    def refresh_file(self, path: str, content: str) -> None:
+        """Update content and reset TTL for a file already in cache, or add it."""
+        if len(content) > MAX_CACHE_CONTENT_SIZE:
+            self.opened_files.pop(path, None)
+            return
+        if path in self.opened_files:
+            self.opened_files[path].content = content
+            self.opened_files[path].ttl = OPENED_FILE_TTL
+        else:
+            self.cache_file(path, content)
+
+    def tick_opened_files(self, tool_calls: int = 1) -> None:
+        """Age all cached files and remove expired ones."""
+        for f in self.opened_files.values():
+            f.tick(tool_calls)
+        self.opened_files = {
+            k: v for k, v in self.opened_files.items() if not v.expired
+        }
