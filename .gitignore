@@ -6,7 +6,10 @@ dist/
 build/
 *.egg
 *.spec
+
+# Logs
 *.log
+logs/
 
 # Virtual environments
 .venv/
