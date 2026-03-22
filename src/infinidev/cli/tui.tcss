@@ -301,6 +301,7 @@ SidebarPanel { height: auto; margin: 0 0 1 0; padding: 0; max-height: 50%; }
 .agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
 .agent-msg MarkdownH1, .agent-msg MarkdownH2, .agent-msg MarkdownH3 { margin: 1 0 0 0; padding: 0; background: transparent; border: none; }
 .system-msg { height: auto; color: #ffcc4d; text-style: italic; margin-bottom: 1; padding: 0 1; border-left: tall #ffaa00; background: #1a1500; }
+.think-msg { height: auto; color: #c0b8e0; margin-bottom: 1; background: #12101a; padding: 0 1; border-left: tall #8a70c8; text-style: italic; }
 
 
 /* ── Status Bar ──────────────────────────────────────────────── */

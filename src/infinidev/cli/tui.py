@@ -1844,6 +1844,21 @@ class InfinidevTUI(App):
         self.call_from_thread(self.process_event, event_type, data)
 
     def process_event(self, event_type: str, data: dict[str, Any]):
+        try:
+            self._process_event_inner(event_type, data)
+        except Exception:
+            import traceback
+            tb = traceback.format_exc()
+            try:
+                self._log_lines.append(f"✗ UI event error: {event_type}")
+                self._log_lines = self._log_lines[-10:]
+                self.query_one("#logs-panel").update_content("\n".join(self._log_lines))
+            except Exception:
+                pass
+            import logging
+            logging.getLogger("infinidev.tui").debug("process_event(%s) failed:\n%s", event_type, tb)
+
+    def _process_event_inner(self, event_type: str, data: dict[str, Any]):
         if event_type == "loop_step_update":
             steps = data.get("plan_steps", [])
             if steps:
@@ -1911,6 +1926,22 @@ class InfinidevTUI(App):
                     history.mount(widget, before=thinking.first())
                 else:
                     history.mount(widget)
+                history.scroll_end(animate=False)
+
+        elif event_type == "loop_think":
+            reasoning = data.get("reasoning", "").strip()
+            if reasoning:
+                history = self.query_one("#chat-history")
+                container = Vertical(classes="think-msg")
+                header = self._safe_static("[bold #b0a0d8]💭 Thinking:[/bold #b0a0d8]")
+                body = self._safe_static(f"[dim #c0b8e0]{reasoning}[/dim #c0b8e0]")
+                thinking_widgets = self.query(".thinking-indicator")
+                if thinking_widgets:
+                    history.mount(container, before=thinking_widgets.first())
+                else:
+                    history.mount(container)
+                container.mount(header)
+                container.mount(body)
                 history.scroll_end(animate=False)
 
         elif event_type == "loop_log":
