@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}All Posts{% endblock %}
+
+{% block content %}
+<div class="index-container">
+    <h1>All Posts</h1>
+    {% if posts %}
+    <ul class="posts-list">
+        {% for post in posts %}
+        <li class="post-item">
+            <a href="{{ post.path }}" class="post-link">
+                <h2 class="post-title">{{ post.title }}</h2>
+                <div class="post-meta">
+                    <time class="post-date">{{ post.date }}</time>
+                    {% if post.tags %}
+                    <div class="post-tags">
+                        {% for tag in post.tags %}
+                        <span class="tag">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No posts found.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -193,6 +193,21 @@ def execute_tool_call(
     if not isinstance(args, dict):
         return json.dumps({"error": f"Expected dict arguments, got {type(args).__name__}"})
 
+    # Auto-correct common parameter name aliases that LLMs frequently use.
+    # Maps (tool_name, wrong_param) -> correct_param.
+    _PARAM_ALIASES = {
+        "old_str": "old_string",
+        "new_str": "new_string",
+        "file_path": "path",
+        "filepath": "path",
+        "file": "path",
+        "filename": "path",
+        "directory": "path",
+        "dir": "path",
+        "dir_path": "path",
+        "content": "new_string",
+    }
+
     # Validate kwargs against _run() signature — reject unknown parameters
     # so the LLM learns the correct schema instead of silently losing data.
     try:
@@ -203,6 +218,16 @@ def execute_tool_call(
         )
         if not accepts_var_kw:
             allowed = set(sig.parameters.keys())
+            # Try to fix unknown params via aliases before rejecting
+            fixed = {}
+            for key, value in list(args.items()):
+                if key not in allowed and key in _PARAM_ALIASES:
+                    correct = _PARAM_ALIASES[key]
+                    if correct in allowed and correct not in args:
+                        logger.info("Tool %s: auto-corrected param '%s' -> '%s'", name, key, correct)
+                        fixed[correct] = value
+                        del args[key]
+            args.update(fixed)
             extra = set(args.keys()) - allowed
             if extra:
                 logger.warning("Tool %s: unexpected kwargs %s", name, extra)
