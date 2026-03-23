@@ -28,6 +28,71 @@ class ReadFileInput(BaseModel):
     )
 
 
+# Bytes considered "text-safe": printable ASCII, common whitespace, and high
+# bytes (≥0x80) which appear in UTF-8 / Latin-1 text.  Control bytes 0x00-0x08,
+# 0x0E-0x1F (excluding \t \n \r) and 0x7F are strong binary indicators.
+_TEXT_SAFE = frozenset(
+    set(range(0x20, 0x7F))        # printable ASCII
+    | {0x09, 0x0A, 0x0D}          # tab, newline, carriage return
+    | set(range(0x80, 0x100))     # high bytes (UTF-8 continuations, Latin-1)
+)
+
+
+def _is_binary_file(path: str, sample_size: int = 8192) -> bool:
+    """Detect whether *path* is a binary file by content heuristics.
+
+    Reads the first *sample_size* bytes and checks:
+    1. Well-known binary magic signatures (ELF, PNG, JPEG, PDF, Zip, etc.).
+    2. Proportion of non-text bytes — if more than 10 % of the sample consists
+       of control characters (outside normal whitespace and UTF-8 high-bytes),
+       the file is treated as binary.
+
+    Returns ``True`` for binary, ``False`` for text.  On read errors, returns
+    ``False`` (let the caller handle the error).
+    """
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(sample_size)
+    except Exception:
+        return False
+
+    if not chunk:
+        return False  # empty file is text
+
+    # 1. Magic signature check (covers the most common binary formats)
+    _MAGIC = (
+        b"\x7fELF",              # ELF executables
+        b"\x89PNG\r\n\x1a\n",    # PNG
+        b"\xff\xd8\xff",          # JPEG
+        b"GIF87a", b"GIF89a",    # GIF
+        b"PK\x03\x04",           # ZIP / XLSX / DOCX / JAR
+        b"PK\x05\x06",           # ZIP (empty)
+        b"\x1f\x8b",             # gzip
+        b"BZh",                  # bzip2
+        b"\xfd7zXZ\x00",         # xz
+        b"\x50\x4b\x03\x04",    # ZIP
+        b"%PDF",                  # PDF
+        b"\xd0\xcf\x11\xe0",    # MS OLE2 (DOC, XLS, PPT)
+        b"RIFF",                 # RIFF container (WAV, AVI, WebP)
+        b"\x00\x00\x01\x00",    # ICO
+        b"\x00\x00\x02\x00",    # CUR
+        b"MZ",                   # DOS/PE executables (EXE, DLL)
+        b"\xca\xfe\xba\xbe",    # Mach-O / Java class (universal)
+        b"\xcf\xfa\xed\xfe",    # Mach-O (little-endian)
+        b"\xce\xfa\xed\xfe",    # Mach-O (32-bit LE)
+        b"SQLite format 3",     # SQLite
+        b"\x04\x22\x4d\x18",   # LZ4
+        b"\x28\xb5\x2f\xfd",   # Zstandard
+    )
+    for sig in _MAGIC:
+        if chunk.startswith(sig):
+            return True
+
+    # 2. Byte-distribution heuristic — count non-text control bytes
+    non_text = sum(1 for b in chunk if b not in _TEXT_SAFE)
+    return (non_text / len(chunk)) > 0.10
+
+
 class ReadFileTool(InfinibayBaseTool):
     name: str = "read_file"
     description: str = (
@@ -59,6 +124,13 @@ class ReadFileTool(InfinibayBaseTool):
             return self._error(f"File not found: {path}")
         if not os.path.isfile(path):
             return self._error(f"Not a file: {path}")
+
+        # Check if file is binary (non-text) by content analysis
+        if _is_binary_file(path):
+            return self._error(
+                f"Cannot read '{path}': file appears to be binary (not a text file). "
+                "Use a specialised tool or command to inspect binary files."
+            )
 
         file_size = os.path.getsize(path)
         if file_size > settings.MAX_FILE_SIZE_BYTES:

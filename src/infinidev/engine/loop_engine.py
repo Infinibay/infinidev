@@ -1215,6 +1215,7 @@ class LoopEngine(AgentEngine):
                                 agent.backstory,
                                 tech_hints=getattr(agent, '_tech_hints', None),
                                 session_summaries=getattr(agent, '_session_summaries', None),
+                                identity_override=getattr(agent, '_system_prompt_identity', None),
                             )
                             system_prompt = f"{system_prompt}\n\n{tools_section}"
                             messages[0] = {"role": "system", "content": system_prompt}

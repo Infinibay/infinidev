@@ -48,7 +48,9 @@ def colorize_diff(diff_text: str) -> str:
 
 def _escape_markup(text: str) -> str:
     """Escape Rich markup characters in text."""
-    return re.sub(r"(\[)", r"\\\1", text)
+    text = text.replace("[", "\\[")
+    text = text.replace("]", "\\]")
+    return text
 
 
 class FileChangeDiffWidget(Collapsible):

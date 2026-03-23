@@ -221,6 +221,44 @@ def init_db():
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS artifact_changes (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id    INTEGER NOT NULL REFERENCES projects(id),
+                agent_run_id  TEXT,
+                file_path     TEXT NOT NULL,
+                action        TEXT NOT NULL DEFAULT 'modified',
+                before_hash   TEXT,
+                after_hash    TEXT,
+                size_bytes    INTEGER,
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS status_updates (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id    INTEGER NOT NULL REFERENCES projects(id),
+                agent_id      TEXT,
+                agent_run_id  TEXT,
+                message       TEXT,
+                progress      REAL,
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS branches (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id    INTEGER NOT NULL REFERENCES projects(id),
+                task_id       TEXT,
+                repo_name     TEXT,
+                branch_name   TEXT NOT NULL,
+                base_branch   TEXT,
+                status        TEXT DEFAULT 'active',
+                created_by    TEXT,
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # Migrate existing databases: add columns that may be missing
         _migrate_add_column(conn, "findings", "session_id", "TEXT")
         _migrate_add_column(conn, "findings", "validation_method", "TEXT")

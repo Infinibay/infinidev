@@ -535,9 +535,10 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
             else:
                 task_prompt = (user_input, "Complete the task and report findings.")
                 flow_config = None
+                analysis = None
             # --- End analysis phase ---
 
-            current_flow = analysis.flow if settings.ANALYSIS_ENABLED else "develop"
+            current_flow = analysis.flow if analysis is not None else "develop"
             click.echo(click.style(f"[{current_flow}] Working on: {user_input}", fg="yellow"))
 
             # --- Development/Exploration phase ---

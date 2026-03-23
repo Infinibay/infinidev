@@ -11,7 +11,7 @@ from threading import Thread, Event
 import logging
 
 try:
-    from watchfiles import awatch, stop
+    from watchfiles import watch
     WATCHFILES_AVAILABLE = True
 except ImportError:
     WATCHFILES_AVAILABLE = False
@@ -110,13 +110,11 @@ class FileWatcher:
         logger.info(f"Starting file watcher for {self.workspace}")
         
         try:
-            # Use synchronous watch for simplicity
-            for changes in awatch(
+            for changes in watch(
                 str(self.workspace),
                 stop_event=self._stop_event,
                 watch_filter=None,
-                watch_filter_dirs=True,
-                debounce=500  # 500ms debounce to batch rapid changes
+                debounce=500,  # 500ms debounce to batch rapid changes
             ):
                 if self._stop_event.is_set():
                     break

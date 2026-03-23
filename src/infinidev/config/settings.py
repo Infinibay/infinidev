@@ -69,18 +69,18 @@ class Settings(BaseSettings):
     CODE_INTERPRETER_MAX_OUTPUT: int = 50000
 
     # Tree Exploration Engine
-    TREE_MAX_NODES: int = 100
-    TREE_MAX_DEPTH: int = 10
-    TREE_MAX_CHILDREN: int = 20
-    TREE_MAX_LLM_CALLS: int = 1000
-    TREE_MAX_TOOL_CALLS: int = 1000
-    TREE_MAX_TOOL_CALLS_PER_NODE: int = 100
-    TREE_INNER_LOOP_MAX: int = 50
+    TREE_MAX_NODES: int = 20
+    TREE_MAX_DEPTH: int = 4
+    TREE_MAX_CHILDREN: int = 4
+    TREE_MAX_LLM_CALLS: int = 200
+    TREE_MAX_TOOL_CALLS: int = 200
+    TREE_MAX_TOOL_CALLS_PER_NODE: int = 20
+    TREE_INNER_LOOP_MAX: int = 8
 
     # Brainstorm-specific limits (wide & shallow exploration)
     TREE_BRAINSTORM_MAX_DEPTH: int = 2          # ideas + 1 level max
-    TREE_BRAINSTORM_INNER_LOOP_MAX: int = 6     # quick validation per idea
-    TREE_BRAINSTORM_TOOL_CALLS_PER_NODE: int = 5  # few lookups, not exhaustive
+    TREE_BRAINSTORM_INNER_LOOP_MAX: int = 4     # quick validation per idea
+    TREE_BRAINSTORM_TOOL_CALLS_PER_NODE: int = 3  # few lookups, not exhaustive
 
     # Phases
     ANALYSIS_ENABLED: bool = True

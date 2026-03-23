@@ -111,19 +111,27 @@ class StepResult(BaseModel):
 
 
 class OpenedFile(BaseModel):
-    """A file cached in the prompt so the LLM doesn't need to re-read it."""
+    """A file cached in the prompt so the LLM doesn't need to re-read it.
+
+    Files that were **written or edited** by the agent are marked as
+    ``pinned=True``.  Pinned files never expire and are not evicted by
+    the LRU policy — they stay in the prompt for the entire task so the
+    model can always refer back to what it wrote.
+    """
 
     path: str
     content: str
     ttl: int = 8  # Remaining tool calls before expiry
+    pinned: bool = False  # True for files the agent wrote/edited
 
     def tick(self, n: int = 1) -> None:
-        """Decrement TTL by *n* tool calls."""
-        self.ttl = max(0, self.ttl - n)
+        """Decrement TTL by *n* tool calls (no-op for pinned files)."""
+        if not self.pinned:
+            self.ttl = max(0, self.ttl - n)
 
     @property
     def expired(self) -> bool:
-        return self.ttl <= 0
+        return not self.pinned and self.ttl <= 0
 
 
 # Default TTL for opened files (in tool calls)
@@ -149,29 +157,37 @@ class LoopState(BaseModel):
     last_completion_tokens: int = 0   # completion_tokens from most recent LLM call
     tool_calls_since_last_note: int = 0  # For gentle note-taking nudge
 
-    def cache_file(self, path: str, content: str) -> None:
+    def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""
         if len(content) > MAX_CACHE_CONTENT_SIZE:
             # Too large to cache — skip
             return
         self.opened_files[path] = OpenedFile(
-            path=path, content=content, ttl=OPENED_FILE_TTL,
+            path=path, content=content, ttl=OPENED_FILE_TTL, pinned=pinned,
         )
-        # Evict oldest (lowest TTL) if over limit
+        # Evict oldest *unpinned* file if over limit
         while len(self.opened_files) > MAX_OPENED_FILES:
-            oldest = min(self.opened_files, key=lambda k: self.opened_files[k].ttl)
+            unpinned = {k: v for k, v in self.opened_files.items() if not v.pinned}
+            if not unpinned:
+                break  # all files are pinned — don't evict
+            oldest = min(unpinned, key=lambda k: unpinned[k].ttl)
             del self.opened_files[oldest]
 
     def refresh_file(self, path: str, content: str) -> None:
-        """Update content and reset TTL for a file already in cache, or add it."""
+        """Update content for a file the agent wrote/edited.
+
+        Marks the file as **pinned** so it stays in the prompt for the
+        entire task — the model should always be able to see what it wrote.
+        """
         if len(content) > MAX_CACHE_CONTENT_SIZE:
             self.opened_files.pop(path, None)
             return
         if path in self.opened_files:
             self.opened_files[path].content = content
             self.opened_files[path].ttl = OPENED_FILE_TTL
+            self.opened_files[path].pinned = True
         else:
-            self.cache_file(path, content)
+            self.cache_file(path, content, pinned=True)
 
     def tick_opened_files(self, tool_calls: int = 1) -> None:
         """Age all cached files and remove expired ones."""

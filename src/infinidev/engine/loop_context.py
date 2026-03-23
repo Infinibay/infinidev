@@ -321,9 +321,11 @@ def build_iteration_prompt(
     if state.opened_files:
         file_sections = []
         for path, of in state.opened_files.items():
-            file_sections.append(
-                f"### {path} (expires in {of.ttl} tool calls)\n```\n{of.content}\n```"
-            )
+            if of.pinned:
+                label = f"### {path} (written by you — pinned)\n```\n{of.content}\n```"
+            else:
+                label = f"### {path} (expires in {of.ttl} tool calls)\n```\n{of.content}\n```"
+            file_sections.append(label)
         parts.append(
             "<opened-files>\n"
             "Files you recently read or wrote (still in cache — do NOT re-read these):\n\n"

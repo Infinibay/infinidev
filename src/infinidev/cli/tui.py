@@ -1353,6 +1353,8 @@ class InfinidevTUI(App):
         self._dirty_files: set[str] = set()  # set of dirty tab_ids
         self._tab_names: dict[str, str] = {}  # tab_id → display name
         self._file_diff_widgets: dict[str, FileChangeDiffWidget] = {}  # path → widget
+        self._queued_messages: list = []  # queued message widgets
+        self._tree_resolved_lines: list[str] = []  # accumulated tree resolution lines
 
         self.engine = LoopEngine()
         self.analyst = AnalysisEngine()
@@ -1533,12 +1535,30 @@ class InfinidevTUI(App):
         except Exception:
             pass
         tabs = self.query_one("#content-tabs", TabbedContent)
+
+        # Find the nearest neighbour tab before removing
+        tab_ids = [str(t.id) for t in tabs.query("TabPane")]
+        next_tab = "chat-pane"
+        if tab_id in tab_ids:
+            idx = tab_ids.index(tab_id)
+            # Prefer the next file tab, then previous, then chat
+            remaining = [t for t in tab_ids if t != tab_id and t != "chat-pane"]
+            if remaining:
+                # Pick the tab that was adjacent: try same index, else last
+                file_idx = [tab_ids.index(t) for t in remaining]
+                # Closest after current, or closest before
+                after = [t for t in remaining if tab_ids.index(t) > idx]
+                before = [t for t in remaining if tab_ids.index(t) < idx]
+                next_tab = after[0] if after else before[-1]
+
         try:
             await tabs.remove_pane(tab_id)
         except Exception:
             pass
-        tabs.active = "chat-pane"
-        self.query_one("#chat-input", ChatInput).focus()
+
+        tabs.active = next_tab
+        if next_tab == "chat-pane":
+            self.query_one("#chat-input", ChatInput).focus()
 
     # ── File watcher integration ────────────────────────
 
@@ -1928,6 +1948,7 @@ class InfinidevTUI(App):
                     history.mount(widget)
                 history.scroll_end(animate=False)
 
+
         elif event_type == "loop_think":
             reasoning = data.get("reasoning", "").strip()
             if reasoning:
@@ -1993,8 +2014,6 @@ class InfinidevTUI(App):
                           "needs_decision": "❓", "needs_experiment": "🧪"}.get(state, "●")
             short_line = f"{state_icon} [{node_id}] {state} ({conf})"
             # Accumulate for plan panel tree view
-            if not hasattr(self, '_tree_resolved_lines'):
-                self._tree_resolved_lines: list[str] = []
             self._tree_resolved_lines.append(short_line)
             # Also show in steps panel with summary
             step_text = short_line
@@ -2014,8 +2033,6 @@ class InfinidevTUI(App):
             root_state = data.get("root_state", "?")
             total = data.get("total_nodes", 0)
             resolved = data.get("resolved_nodes", 0)
-            if not hasattr(self, '_tree_resolved_lines'):
-                self._tree_resolved_lines: list[str] = []
             # Update the plan panel with tree progress
             pct = (resolved / total * 100) if total > 0 else 0
             bar_len = 20
@@ -2063,8 +2080,7 @@ class InfinidevTUI(App):
             )
             self.query_one("#actions-panel").update_content("Idle")
             # Clean up accumulated tree state
-            if hasattr(self, '_tree_resolved_lines'):
-                del self._tree_resolved_lines
+            self._tree_resolved_lines.clear()
 
     def _expire_log_line(self, line: str) -> None:
         try:
@@ -2154,14 +2170,9 @@ class InfinidevTUI(App):
 
         history = self.query_one("#chat-history")
 
-        # Track queued messages
-        if not hasattr(self, '_queued_messages'):
-            self._queued_messages: list[QueuedMessageWidget] = []
-
         widget = QueuedMessageWidget(
-            sender=sender,
-            text=text,
-            sender_color=self._SENDER_COLORS.get(type, "#cccccc"),
+            content=text,
+            user=sender,
             queued_index=len(self._queued_messages) + 1
         )
 
@@ -2179,7 +2190,7 @@ class InfinidevTUI(App):
         widget.update_status(QueuedMessageStatus.PROCESSED)
 
         # Remove from queued list
-        if hasattr(self, '_queued_messages') and widget in self._queued_messages:
+        if widget in self._queued_messages:
             self._queued_messages.remove(widget)
 
         # Scroll to show the newly processed message
