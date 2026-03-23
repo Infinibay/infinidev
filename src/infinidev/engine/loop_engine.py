@@ -342,6 +342,17 @@ def _capture_pre_content(
         return None
 
 
+def _extract_reason_from_args(arguments: str | dict) -> str:
+    """Extract the reason/description from tool call arguments."""
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(args, dict):
+        return ""
+    return args.get("reason") or args.get("description") or ""
+
+
 def _maybe_emit_file_change(
     tool_name: str,
     arguments: str | dict,
@@ -364,6 +375,11 @@ def _maybe_emit_file_change(
     if not file_path:
         return
     file_path = _os.path.abspath(_os.path.expanduser(file_path))
+
+    # Record reason if provided
+    reason = _extract_reason_from_args(arguments)
+    if reason:
+        tracker.record_reason(file_path, reason)
 
     # Read current content after the mutation
     try:
@@ -943,6 +959,32 @@ class LoopEngine(AgentEngine):
         if self._last_file_tracker is None:
             return False
         return bool(self._last_file_tracker.get_all_paths())
+
+    def get_file_change_reasons(self) -> dict[str, list[str]]:
+        """Return path → list of reasons for each changed file."""
+        if self._last_file_tracker is None:
+            return {}
+        result = {}
+        for path in self._last_file_tracker.get_all_paths():
+            reasons = self._last_file_tracker.get_reasons(path)
+            if reasons:
+                result[path] = reasons
+        return result
+
+    def get_file_contents(self) -> dict[str, str]:
+        """Return path → current content for each changed file."""
+        import os as _os
+        if self._last_file_tracker is None:
+            return {}
+        result = {}
+        for path in self._last_file_tracker.get_all_paths():
+            try:
+                if _os.path.isfile(path) and _os.path.getsize(path) <= _MAX_TRACK_FILE_SIZE:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        result[path] = f.read()
+            except Exception:
+                pass
+        return result
 
     def execute(
         self,

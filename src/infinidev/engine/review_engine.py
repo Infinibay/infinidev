@@ -113,6 +113,9 @@ class ReviewEngine:
         developer_result: str,
         file_changes_summary: str,
         *,
+        file_reasons: dict[str, list[str]] | None = None,
+        file_contents: dict[str, str] | None = None,
+        recent_messages: list[str] | None = None,
         previous_feedback: str = "",
         event_callback: Any | None = None,
     ) -> ReviewResult:
@@ -122,15 +125,18 @@ class ReviewEngine:
             task_description: The original task given to the developer.
             developer_result: The developer's final answer.
             file_changes_summary: Unified diffs of all changed files.
+            file_reasons: path → list of reasons for each changed file.
+            file_contents: path → current content for each changed file.
+            recent_messages: Last few conversation messages for context.
             previous_feedback: Feedback from a previous review round (for re-reviews).
             event_callback: Optional callback for emitting review events.
 
         Returns:
             ReviewResult with verdict and feedback.
         """
-        # Skip review if no code changes
-        if not file_changes_summary.strip():
-            logger.info("ReviewEngine: no file changes, skipping review")
+        # Skip review if no code changes AND no files provided directly
+        if not file_changes_summary.strip() and not file_contents:
+            logger.info("ReviewEngine: no file changes and no files provided, skipping review")
             return ReviewResult(
                 verdict="SKIPPED",
                 summary="No file changes to review",
@@ -158,6 +164,9 @@ class ReviewEngine:
         user_prompt = self._build_review_prompt(
             task_description, developer_result,
             file_changes_summary, previous_feedback,
+            file_reasons=file_reasons or {},
+            file_contents=file_contents or {},
+            recent_messages=recent_messages or [],
         )
 
         messages = [
@@ -176,9 +185,9 @@ class ReviewEngine:
             result = self._parse_response(raw_content)
 
         except Exception as e:
-            logger.warning("ReviewEngine: LLM call failed (%s), approving by default", e)
+            logger.warning("ReviewEngine: LLM call failed (%s), skipping review", e)
             result = ReviewResult(
-                verdict="APPROVED",
+                verdict="SKIPPED",
                 summary=f"Review skipped due to error: {e}",
             )
 
@@ -198,9 +207,22 @@ class ReviewEngine:
         developer_result: str,
         file_changes_summary: str,
         previous_feedback: str,
+        *,
+        file_reasons: dict[str, list[str]] | None = None,
+        file_contents: dict[str, str] | None = None,
+        recent_messages: list[str] | None = None,
     ) -> str:
         """Build the user prompt for the review LLM call."""
         parts = []
+
+        # Conversation context (last few messages, highlight the latest)
+        if recent_messages:
+            parts.append("## Conversation Context")
+            for i, msg in enumerate(recent_messages):
+                if i == len(recent_messages) - 1:
+                    parts.append(f">>> CURRENT REQUEST <<<\n{msg}")
+                else:
+                    parts.append(msg)
 
         # Task context
         parts.append(f"## Original Task\n{task_description}")
@@ -216,8 +238,29 @@ class ReviewEngine:
                 f"{previous_feedback}"
             )
 
+        # Files changed with reasons and current content
+        if file_contents or file_reasons:
+            parts.append("## Files Changed")
+            all_paths = set(list((file_contents or {}).keys()) + list((file_reasons or {}).keys()))
+            for path in sorted(all_paths):
+                file_part = [f"### `{path}`"]
+                reasons = (file_reasons or {}).get(path, [])
+                if reasons:
+                    file_part.append("**Reasons for changes:**")
+                    for reason in reasons:
+                        file_part.append(f"- {reason}")
+                content = (file_contents or {}).get(path)
+                if content is not None:
+                    # Truncate very large files
+                    max_chars = 50_000
+                    if len(content) > max_chars:
+                        content = content[:max_chars] + f"\n... (truncated, {len(content)} total chars)"
+                    ext = path.rsplit(".", 1)[-1] if "." in path else ""
+                    file_part.append(f"**Current content:**\n```{ext}\n{content}\n```")
+                parts.append("\n".join(file_part))
+
         # The actual diffs to review
-        parts.append(f"## Code Changes to Review\n{file_changes_summary}")
+        parts.append(f"## Diffs\n{file_changes_summary}")
 
         return "\n\n".join(parts)
 
@@ -252,13 +295,13 @@ class ReviewEngine:
                 except json.JSONDecodeError:
                     logger.warning("ReviewEngine: could not parse response")
                     return ReviewResult(
-                        verdict="APPROVED",
-                        summary="Could not parse review response — approving by default",
+                        verdict="SKIPPED",
+                        summary="Could not parse review response",
                     )
             else:
                 return ReviewResult(
-                    verdict="APPROVED",
-                    summary="No JSON in review response — approving by default",
+                    verdict="SKIPPED",
+                    summary="No JSON in review response",
                 )
 
         verdict = data.get("verdict", "APPROVED").upper()

@@ -16,7 +16,7 @@ from prompt_toolkit.history import FileHistory
 from infinidev.config.settings import settings, DEFAULT_BASE_DIR
 from infinidev.config.llm import get_litellm_params
 import uuid
-from infinidev.db.service import init_db
+from infinidev.db.service import init_db, get_recent_summaries
 from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop_engine import LoopEngine
 from infinidev.engine.analysis_engine import AnalysisEngine
@@ -316,6 +316,32 @@ def _run_single_prompt(prompt_text: str) -> None:
         finally:
             agent.deactivate()
 
+        # Code review phase for single-prompt mode
+        if settings.REVIEW_ENABLED and engine.has_file_changes():
+            click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
+            reviewer = ReviewEngine()
+            review = reviewer.review(
+                task_description=problem,
+                developer_result=result or "",
+                file_changes_summary=engine.get_changed_files_summary(),
+                file_reasons=engine.get_file_change_reasons(),
+                file_contents=engine.get_file_contents(),
+                recent_messages=get_recent_summaries(session_id, limit=5),
+            )
+            if review.is_approved:
+                click.echo(click.style(
+                    f"Code review: APPROVED. {review.summary}",
+                    fg="green", dim=True,
+                ))
+            elif review.is_rejected:
+                click.echo(click.style(
+                    f"Code review: REJECTED. {review.summary}",
+                    fg="red",
+                ))
+                feedback = review.format_feedback_for_developer()
+                if feedback:
+                    click.echo(click.style(feedback, fg="red", dim=True))
+
     click.echo(result or "Done.")
 
 
@@ -572,6 +598,9 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
                     task_description=task_prompt[0],
                     developer_result=result,
                     file_changes_summary=engine.get_changed_files_summary(),
+                    file_reasons=engine.get_file_change_reasons(),
+                    file_contents=engine.get_file_contents(),
+                    recent_messages=get_recent_summaries(session_id, limit=5),
                 )
 
                 if review.is_approved:

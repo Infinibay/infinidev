@@ -16,10 +16,20 @@ from infinidev.tools.base.db import execute_with_retry
 
 
 class WriteFileInput(BaseModel):
+    model_config = {"populate_by_name": True}
+
     path: str = Field(..., description="Path to the file to write")
     content: str = Field(..., description="Content to write to the file")
     mode: Literal["w", "a"] = Field(
         default="w", description="Write mode: 'w' to overwrite, 'a' to append"
+    )
+    reason: str = Field(
+        default="",
+        alias="description",
+        description=(
+            "Brief explanation of WHY this file is being created/written. "
+            "Used by the code reviewer to understand intent."
+        ),
     )
 
 
@@ -31,7 +41,7 @@ class WriteFileTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = WriteFileInput
 
-    def _run(self, path: str, content: str, mode: str = "w") -> str:
+    def _run(self, path: str, content: str, mode: str = "w", reason: str = "") -> str:
         path = self._resolve_path(os.path.expanduser(path))
 
         if self._is_pod_mode():
@@ -124,11 +134,14 @@ class WriteFileTool(InfinibayBaseTool):
             pass  # Don't fail the write if audit logging fails
 
         self._log_tool_usage(f"Wrote {path} ({size_bytes} bytes, {action})")
-        return self._success({
+        result = {
             "path": path,
             "action": action,
             "size_bytes": size_bytes,
-        })
+        }
+        if reason:
+            result["reason"] = reason
+        return self._success(result)
 
     def _run_in_pod(self, path: str, content: str, mode: str) -> str:
         """Write file via infinibay-file-helper inside the pod."""

@@ -220,7 +220,7 @@ class TestReviewEngine:
 
     @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_review_llm_error_approves(self, mock_params, mock_completion):
+    def test_review_llm_error_skips(self, mock_params, mock_completion):
         mock_params.return_value = {"model": "test"}
         mock_completion.side_effect = Exception("LLM down")
         engine = ReviewEngine()
@@ -229,11 +229,11 @@ class TestReviewEngine:
             developer_result="y",
             file_changes_summary="diff here",
         )
-        assert result.is_approved  # Fails gracefully
+        assert result.verdict == "SKIPPED"  # Don't auto-approve on errors
 
     @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_review_invalid_json_approves(self, mock_params, mock_completion):
+    def test_review_invalid_json_skips(self, mock_params, mock_completion):
         mock_params.return_value = {"model": "test"}
         mock_completion.return_value = MagicMock(
             choices=[MagicMock(message=MagicMock(
@@ -246,7 +246,7 @@ class TestReviewEngine:
             developer_result="y",
             file_changes_summary="diff here",
         )
-        assert result.is_approved
+        assert result.verdict == "SKIPPED"  # Don't auto-approve unparseable responses
 
     @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
@@ -308,7 +308,7 @@ class TestReviewEngine:
         assert "Add auth" in prompt
         assert "## Developer's Report" in prompt
         assert "Added JWT auth" in prompt
-        assert "## Code Changes to Review" in prompt
+        assert "## Diffs" in prompt
 
     def test_build_review_prompt_with_feedback(self):
         engine = ReviewEngine()
@@ -322,6 +322,137 @@ class TestReviewEngine:
         assert "## Previous Review Feedback" in prompt
         assert "Fix the SQL injection" in prompt
         assert "Round 2" in prompt
+
+    def test_build_review_prompt_with_conversation_context(self):
+        engine = ReviewEngine()
+        prompt = engine._build_review_prompt(
+            task_description="Add auth",
+            developer_result="Done",
+            file_changes_summary="diff",
+            previous_feedback="",
+            recent_messages=[
+                "[user] Set up the project structure",
+                "[assistant] Created base files",
+                "[user] Now add JWT authentication",
+            ],
+        )
+        assert "## Conversation Context" in prompt
+        assert "Set up the project structure" in prompt
+        assert ">>> CURRENT REQUEST <<<" in prompt
+        assert "Now add JWT authentication" in prompt
+
+    def test_build_review_prompt_with_file_reasons_and_contents(self):
+        engine = ReviewEngine()
+        prompt = engine._build_review_prompt(
+            task_description="Add auth",
+            developer_result="Done",
+            file_changes_summary="diff",
+            previous_feedback="",
+            file_reasons={
+                "/home/user/project/auth.py": ["Added JWT token generation"],
+                "/home/user/project/config.py": ["Added JWT secret config"],
+            },
+            file_contents={
+                "/home/user/project/auth.py": "import jwt\n\ndef generate_token():\n    pass\n",
+                "/home/user/project/config.py": "JWT_SECRET = 'changeme'\n",
+            },
+        )
+        assert "## Files Changed" in prompt
+        assert "auth.py" in prompt
+        assert "config.py" in prompt
+        assert "Added JWT token generation" in prompt
+        assert "Added JWT secret config" in prompt
+        assert "import jwt" in prompt
+        assert "JWT_SECRET" in prompt
+
+    @patch("litellm.completion")
+    @patch("infinidev.config.llm.get_litellm_params")
+    def test_review_passes_enriched_context(self, mock_params, mock_completion):
+        """Verify that file_reasons, file_contents, and recent_messages reach the prompt."""
+        mock_params.return_value = {"model": "test"}
+        mock_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content='{"verdict": "APPROVED", "summary": "ok"}'
+            ))]
+        )
+        engine = ReviewEngine()
+        engine.review(
+            task_description="Add auth",
+            developer_result="Done",
+            file_changes_summary="diff here",
+            file_reasons={"/tmp/auth.py": ["JWT implementation"]},
+            file_contents={"/tmp/auth.py": "import jwt\n"},
+            recent_messages=["[user] Add auth"],
+        )
+        call_args = mock_completion.call_args
+        messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+        user_msg = messages[1]["content"]
+        assert "JWT implementation" in user_msg
+        assert "import jwt" in user_msg
+        assert "Conversation Context" in user_msg
+        assert "[user] Add auth" in user_msg
+
+    @patch("litellm.completion")
+    @patch("infinidev.config.llm.get_litellm_params")
+    def test_review_no_diffs_but_file_contents_proceeds(self, mock_params, mock_completion):
+        """Review should proceed when file_contents is provided even without diffs."""
+        mock_params.return_value = {"model": "test"}
+        mock_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content='{"verdict": "REJECTED", "summary": "Found issues", "issues": [{"severity": "blocking", "file": "app.py", "description": "SQL injection", "why": "unsafe", "fix": "use params"}]}'
+            ))]
+        )
+        engine = ReviewEngine()
+        result = engine.review(
+            task_description="Review the app",
+            developer_result="Reviewing",
+            file_changes_summary="",
+            file_contents={"/tmp/app.py": "import sqlite3\nconn.execute(f'SELECT * FROM users WHERE id={user_id}')"},
+        )
+        assert result.verdict != "SKIPPED"
+        assert result.is_rejected
+
+    def test_review_no_diffs_no_contents_skips(self):
+        """Review should skip when neither diffs nor file_contents are provided."""
+        engine = ReviewEngine()
+        result = engine.review(
+            task_description="Review the app",
+            developer_result="Reviewing",
+            file_changes_summary="",
+        )
+        assert result.verdict == "SKIPPED"
+
+
+class TestFileChangeTrackerReasons:
+    """Test reason tracking in FileChangeTracker."""
+
+    def test_record_and_get_reasons(self):
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        tracker = FileChangeTracker()
+        tracker.record_reason("/tmp/foo.py", "Fix off-by-one error")
+        tracker.record_reason("/tmp/foo.py", "Also fix edge case")
+        tracker.record_reason("/tmp/bar.py", "New utility module")
+
+        assert tracker.get_reasons("/tmp/foo.py") == [
+            "Fix off-by-one error",
+            "Also fix edge case",
+        ]
+        assert tracker.get_reasons("/tmp/bar.py") == ["New utility module"]
+        assert tracker.get_reasons("/tmp/unknown.py") == []
+
+    def test_empty_reason_ignored(self):
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        tracker = FileChangeTracker()
+        tracker.record_reason("/tmp/foo.py", "")
+        tracker.record_reason("/tmp/foo.py", "   ")
+        assert tracker.get_reasons("/tmp/foo.py") == []
+
+    def test_reset_clears_reasons(self):
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        tracker = FileChangeTracker()
+        tracker.record_reason("/tmp/foo.py", "some reason")
+        tracker.reset()
+        assert tracker.get_reasons("/tmp/foo.py") == []
 
 
 class TestPhaseSettings:

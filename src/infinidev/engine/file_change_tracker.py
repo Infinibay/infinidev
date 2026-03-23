@@ -18,6 +18,7 @@ class FileChangeTracker:
         self._originals: dict[str, str] = {}   # path → content before first edit
         self._current: dict[str, str] = {}      # path → content after latest edit
         self._change_counts: dict[str, int] = {}
+        self._reasons: dict[str, list[str]] = {}  # path → list of reasons for changes
         self._active: bool = True
 
     @property
@@ -85,6 +86,16 @@ class FileChangeTracker:
         path = os.path.abspath(path)
         return "created" if not self._originals.get(path, "") else "modified"
 
+    def record_reason(self, path: str, reason: str) -> None:
+        """Record a reason/description for why a file was changed."""
+        path = os.path.abspath(path)
+        if reason and reason.strip():
+            self._reasons.setdefault(path, []).append(reason.strip())
+
+    def get_reasons(self, path: str) -> list[str]:
+        """Return all recorded reasons for a file's changes."""
+        return self._reasons.get(os.path.abspath(path), [])
+
     def get_all_paths(self) -> list[str]:
         return list(self._current.keys())
 
@@ -95,4 +106,5 @@ class FileChangeTracker:
         self._originals.clear()
         self._current.clear()
         self._change_counts.clear()
+        self._reasons.clear()
         self._active = True

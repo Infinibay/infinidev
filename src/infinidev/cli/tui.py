@@ -2594,6 +2594,9 @@ class InfinidevTUI(App):
                     task_description=task_prompt[0],
                     developer_result=result,
                     file_changes_summary=self.engine.get_changed_files_summary(),
+                    file_reasons=self.engine.get_file_change_reasons(),
+                    file_contents=self.engine.get_file_contents(),
+                    recent_messages=get_recent_summaries(self.session_id, limit=5),
                     event_callback=self.on_loop_event if hasattr(self, 'on_loop_event') else None,
                 )
 

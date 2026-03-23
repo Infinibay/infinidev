@@ -17,6 +17,8 @@ from infinidev.tools.base.db import execute_with_retry
 
 
 class EditFileInput(BaseModel):
+    model_config = {"populate_by_name": True}
+
     path: str = Field(..., description="Path to the file to edit")
     old_string: str = Field(
         ...,
@@ -36,6 +38,14 @@ class EditFileInput(BaseModel):
         description=(
             "If true, replace ALL occurrences of old_string in the file. "
             "Useful for renaming variables or updating repeated patterns."
+        ),
+    )
+    reason: str = Field(
+        default="",
+        alias="description",
+        description=(
+            "Brief explanation of WHY this edit is being made. "
+            "Used by the code reviewer to understand intent."
         ),
     )
 
@@ -59,6 +69,7 @@ class EditFileTool(InfinibayBaseTool):
         old_string: str,
         new_string: str,
         replace_all: bool = False,
+        reason: str = "",
     ) -> str:
         if old_string == new_string:
             return self._error("old_string and new_string are identical — nothing to change.")
@@ -194,12 +205,15 @@ class EditFileTool(InfinibayBaseTool):
         self._log_tool_usage(
             f"Edited {path} ({replacements} replacement{'s' if replacements > 1 else ''}, {new_size} bytes)"
         )
-        return self._success({
+        result = {
             "path": path,
             "action": "modified",
             "replacements": replacements,
             "size_bytes": new_size,
-        })
+        }
+        if reason:
+            result["reason"] = reason
+        return self._success(result)
 
     def _run_in_pod(
         self, path: str, old_string: str, new_string: str, replace_all: bool,
