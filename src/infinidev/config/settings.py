@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     LOOP_MAX_TOOL_CALLS_PER_ACTION: int = 0  # 0 = unlimited (only global limit applies)
     LOOP_MAX_TOTAL_TOOL_CALLS: int = 200
     LOOP_HISTORY_WINDOW: int = 0  # 0 = keep all
+    LOOP_STEP_NUDGE_THRESHOLD: int = 6  # Nudge agent to call step_complete after N tool calls
+    LOOP_SUMMARIZER_ENABLED: bool = True  # Use dedicated LLM call for step summaries
+    LOOP_SUMMARIZER_MAX_INPUT_TOKENS: int = 4000  # Max tokens from step messages to feed summarizer
+
+    # Gather phase (pre-implementation info collection)
+    GATHER_ENABLED: bool = True
+    GATHER_MAX_TOOL_CALLS_PER_QUESTION: int = 30
+    GATHER_QUESTION_TIMEOUT: int = 120
+    GATHER_MAX_DYNAMIC_QUESTIONS: int = 10
 
     # Web tools
     WEB_CACHE_TTL_SECONDS: int = 3600

@@ -67,7 +67,7 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "1-2 sentence summary of what you did and key facts discovered",
+                    "description": "Structured summary (~150 tokens): Read: files+findings | Changed: files+edits | Remaining: next work | Decisions: key choices. Skip empty categories.",
                 },
                 "status": {
                     "type": "string",
@@ -206,6 +206,8 @@ def execute_tool_call(
         "dir": "path",
         "dir_path": "path",
         "content": "new_string",
+        "query": "pattern",
+        "search_query": "pattern",
     }
 
     # Validate kwargs against _run() signature — reject unknown parameters
@@ -228,6 +230,12 @@ def execute_tool_call(
                         fixed[correct] = value
                         del args[key]
             args.update(fixed)
+            # Silently strip metadata params that LLMs commonly add
+            _METADATA_PARAMS = {"description", "reason", "explanation", "language"}
+            for meta in _METADATA_PARAMS:
+                if meta in args and meta not in allowed:
+                    logger.debug("Tool %s: stripping metadata param '%s'", name, meta)
+                    del args[meta]
             extra = set(args.keys()) - allowed
             if extra:
                 logger.warning("Tool %s: unexpected kwargs %s", name, extra)

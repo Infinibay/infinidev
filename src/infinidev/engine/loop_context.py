@@ -117,8 +117,16 @@ You operate in a plan-execute-summarize loop. Follow these rules:
 - BAD: Planning 8 steps upfront with vague descriptions like "Implement the feature"
 - GOOD: Planning 2-3 specific steps, executing them, then adding more based on findings
 
+### Exploration-First Principle
+- Your first 1-2 steps MUST be read-only: read_file, code_search, glob, list_directory,
+  execute_command (for reading only, e.g. running tests or checking output).
+- Do NOT call edit_file, write_file, or multi_edit_file until you have read ALL relevant
+  files and understand the full scope of changes needed.
+- Editing before understanding leads to incomplete patches. Most bugs require changes in
+  MULTIPLE locations — you must find them all before editing any of them.
+
 ### Step Granularity
-- Each step = 1-4 tool calls. If a step needs more, split it.
+- Each step = 1-8 tool calls. If a step needs more, split it.
 - Steps must name specific files, functions, or commands.
 - BAD: "Set up authentication" / "Write the code" / "Test everything"
 - GOOD: "Read src/auth.py to find verify_token()" / "Add JWT check to handle_request() in api.py"
@@ -126,12 +134,18 @@ You operate in a plan-execute-summarize loop. Follow these rules:
 
 ### Step Execution
 - You are given one step at a time from your plan.
-- Use tools to complete each step (aim for 1-4 tool calls per step).
+- Use tools to complete each step (aim for 1-8 tool calls per step).
 - When finished with a step, call the `step_complete` tool.
 - Do NOT re-read files you already read in this step — the content is still in your context. Only re-read if you need to verify changes you just made.
 - When you need to reason through a problem (analyze errors, plan approach, debug),
   use the `think` tool instead of just calling the next tool. This helps you
   avoid mistakes and the user can see your reasoning.
+
+### Step Discipline
+- Each step has a specific scope defined in <current-action>. Stay within that scope.
+- Do NOT jump ahead to future steps. If you discover needed work, add it to the plan via step_complete.
+- You will see a tool call counter (e.g. [Tool call 3/8]) after each tool result. After the nudge threshold, you MUST call step_complete — use status='continue' with next_steps if not finished.
+- Exploration steps should ONLY explore. Editing steps should ONLY edit what was planned.
 
 ### Completing Steps — the `step_complete` tool
 
@@ -174,7 +188,7 @@ Example step_complete call:
 ### CRITICAL: When to use status="done"
 - ONLY set status="done" when you have **fully completed the task** and have a **complete answer**.
 - If the user asked a question (e.g. "What does install.sh do?"), you MUST read/analyze first with status="continue", then give the full answer with status="done" + final_answer.
-- **summary** is an internal note for your own memory (~50 tokens). The USER NEVER SEES IT.
+- **summary** is an internal note for your own memory (~150 tokens). The USER NEVER SEES IT.
 - **final_answer** is what the user sees. It must be complete, helpful, and well-written.
 - NEVER set status="done" without a substantive `final_answer`. If you only have a summary, use status="continue".
 
@@ -186,8 +200,12 @@ Do NOT use this for questions about code, files, or anything that requires readi
 
 ### Summary Guidelines
 - **summary** = internal note for YOUR context in future steps. The user never sees this.
-- Capture key facts: file paths, function names, decisions made, values found.
-- Be concise (~50 tokens). Raw tool output is discarded — only your summary survives.
+- Raw tool output is discarded — only your summary survives. Make it count (~150 tokens).
+- Structure your summary with these categories (skip empty ones):
+  - **Read**: files read + key findings (e.g. "read src/auth.py — verify_token() at L42, uses JWT with HS256")
+  - **Changed**: files modified + what changed (e.g. "edited qdp.py — added re.IGNORECASE to _line_type_re")
+  - **Remaining**: what still needs to be done (e.g. "still need to fix v=='NO' comparison in _get_tables_from_qdp_file")
+  - **Decisions**: key decisions made and why (e.g. "chose to fix at regex level, not at caller level")
 
 ### Tests (mandatory after writing code)
 When your task involved writing or editing code, run the existing test suite
@@ -199,8 +217,8 @@ Focus on getting the implementation right — the reviewer will catch quality
 issues. Do NOT add a self-review step.
 
 ### Task Notes — the `add_note` tool (CRITICAL for memory between steps)
-Your context is rebuilt from scratch each step. Step summaries are only ~50 tokens
-and cannot capture details. Use `add_note` to preserve anything you will need later:
+Your context is rebuilt from scratch each step. Step summaries are ~150 tokens
+and cannot capture all details. Use `add_note` to preserve anything you will need later:
 - File paths and function names you discovered
 - Key values, error messages, or patterns you found
 - Decisions you made and why (so you don't reconsider them)
@@ -360,18 +378,45 @@ def build_iteration_prompt(
             "with next_steps operations. You will add more steps as you discover what's needed.\n</plan>"
         )
 
-    # Previous action summaries
+    # Previous action summaries (rich format if available)
     if state.history:
         summaries = []
         for record in state.history:
-            summaries.append(f"- [{record.step_index}] {record.summary}")
+            lines = [f"### Step {record.step_index}: {record.summary}"]
+            if record.changes_made:
+                lines.append(f"  Changes: {record.changes_made}")
+            if record.discovered_context:
+                lines.append(f"  Context: {record.discovered_context}")
+            if record.pending_items:
+                lines.append(f"  Pending: {record.pending_items}")
+            summaries.append("\n".join(lines))
         parts.append(f"<previous-actions>\n{chr(10).join(summaries)}\n</previous-actions>")
+
+        # Consolidated anti-patterns from all steps
+        all_anti = [r.anti_patterns for r in state.history if r.anti_patterns]
+        if all_anti:
+            avoid_lines = [f"- {ap}" for ap in all_anti]
+            parts.append(
+                f"<avoid>\nDo NOT repeat these patterns from previous steps:\n"
+                f"{chr(10).join(avoid_lines)}\n</avoid>"
+            )
 
     # Current action
     active = state.plan.active_step
     if active:
+        scope_warning = ""
+        next_pending = [s for s in state.plan.steps if s.status == "pending"]
+        if next_pending:
+            off_limits = ", ".join(f'"{s.description}"' for s in next_pending[:3])
+            scope_warning = (
+                f"\n\nSCOPE CONSTRAINT: This step is ONLY about: {active.description}\n"
+                f"Do NOT work on future steps: {off_limits}\n"
+                f"If you discover that this step requires work from future steps, "
+                f"call step_complete with status='continue' and add new steps."
+            )
         parts.append(
-            f"<current-action>\nStep {active.index}: {active.description}\n</current-action>"
+            f"<current-action>\nStep {active.index}: {active.description}"
+            f"{scope_warning}\n</current-action>"
         )
     elif state.plan.steps:
         # All planned steps are done — prompt to continue or finish

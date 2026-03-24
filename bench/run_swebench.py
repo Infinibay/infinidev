@@ -136,13 +136,8 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
         env = os.environ.copy()
         env["INFINIDEV_WORKSPACE"] = str(instance_dir)
 
-        # Use the installed `infinidev` entry point
-        # Falls back to `python -m infinidev.cli.main` if not installed
-        infinidev_cmd = shutil.which("infinidev")
-        if infinidev_cmd:
-            cmd = [infinidev_cmd]
-        else:
-            cmd = [sys.executable, "-m", "infinidev.cli.main"]
+        # Always use the project's source via python -m to ensure latest code
+        cmd = [sys.executable, "-m", "infinidev.cli.main"]
 
         proc = subprocess.run(
             cmd + [
@@ -151,7 +146,8 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
                 "--no-tui",
             ],
             cwd=str(instance_dir),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=None,  # Let stderr flow through to terminal
             text=True,
             timeout=config.timeout or None,
             env=env,
@@ -159,9 +155,6 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
 
         elapsed = time.time() - start
         log.info("Finished %s in %.1fs (exit=%d)", instance_id, elapsed, proc.returncode)
-
-        if proc.stderr:
-            log.debug("stderr: %s", proc.stderr[-500:])
 
         # Collect the patch
         patch = get_patch(instance_dir)

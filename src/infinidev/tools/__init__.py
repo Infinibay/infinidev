@@ -1,15 +1,15 @@
 """Infinidev Tool Registry."""
 
 from infinidev.tools.file import (
-    ReadFileTool, WriteFileTool, EditFileTool,
-    ListDirectoryTool, CodeSearchTool, GlobTool,
+    ReadFileTool, WriteFileTool, EditFileTool, MultiEditFileTool,
+    ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool,
 )
 from infinidev.tools.git import (
     GitBranchTool, GitCommitTool,
     GitDiffTool, GitStatusTool,
 )
 from infinidev.tools.shell import ExecuteCommandTool, CodeInterpreterTool
-from infinidev.tools.web import WebSearchTool, WebFetchTool
+from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
 from infinidev.tools.knowledge import (
     RecordFindingTool, ReadFindingsTool, SearchFindingsTool,
     ValidateFindingTool, RejectFindingTool, UpdateFindingTool, DeleteFindingTool,
@@ -19,10 +19,10 @@ from infinidev.tools.knowledge import (
 from infinidev.tools.chat import SendMessageTool
 from infinidev.tools.docs import DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool
 
-FILE_TOOLS = [ReadFileTool, WriteFileTool, EditFileTool, ListDirectoryTool, CodeSearchTool, GlobTool]
+FILE_TOOLS = [ReadFileTool, WriteFileTool, EditFileTool, MultiEditFileTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
-WEB_TOOLS = [WebSearchTool, WebFetchTool]
+WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
 KNOWLEDGE_TOOLS = [
     RecordFindingTool, ReadFindingsTool, SearchFindingsTool,
     ValidateFindingTool, RejectFindingTool, UpdateFindingTool, DeleteFindingTool,

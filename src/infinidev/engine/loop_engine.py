@@ -149,6 +149,8 @@ _TOOL_DETAIL_KEYS: dict[str, list[str]] = {
     "read_file": ["path", "file_path"],
     "write_file": ["path", "file_path"],
     "edit_file": ["path", "file_path"],
+    "multi_edit_file": ["path", "file_path"],
+    "apply_patch": ["patch"],
     "list_directory": ["path", "directory"],
     "code_search": ["query", "pattern", "search_query"],
     "glob": ["pattern", "glob_pattern"],
@@ -161,6 +163,7 @@ _TOOL_DETAIL_KEYS: dict[str, list[str]] = {
 
     "web_search": ["query"],
     "web_fetch": ["url"],
+    "code_search_web": ["query"],
     "search_knowledge": ["query"],
     "record_finding": ["title"],
     "search_findings": ["query"],
@@ -274,13 +277,27 @@ def _update_opened_files_cache(
         if content:
             state.refresh_file(path, content)
 
-    elif tool_name == "edit_file":
+    elif tool_name in ("edit_file", "multi_edit_file"):
         # After a successful edit, re-read the file to get updated content
         try:
             if _os.path.isfile(path):
                 with open(path, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
                 state.refresh_file(path, content)
+        except Exception:
+            pass
+
+    elif tool_name == "apply_patch":
+        # After applying a patch, re-read all modified files into cache
+        try:
+            res = json.loads(result) if isinstance(result, str) else result
+            if isinstance(res, dict) and "files_modified" in res:
+                ws = get_current_workspace_path() or _os.getcwd()
+                for fpath in res["files_modified"]:
+                    abs_path = _os.path.join(ws, fpath) if not _os.path.isabs(fpath) else fpath
+                    if _os.path.isfile(abs_path):
+                        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                            state.refresh_file(abs_path, f.read())
         except Exception:
             pass
 
@@ -302,7 +319,92 @@ def _update_opened_files_cache(
 
 # ── File change tracking helpers ────────────────────────────────────────────
 
-_FILE_CHANGE_TOOLS = {"edit_file", "write_file"}
+_FILE_CHANGE_TOOLS = {"edit_file", "write_file", "multi_edit_file", "apply_patch"}
+
+# Tools that modify state — these act as barriers in parallel execution.
+# All read-only tools before a write are executed in parallel, then the write runs alone.
+_WRITE_TOOLS = {
+    "edit_file", "write_file", "multi_edit_file", "apply_patch",
+    "git_commit", "git_branch", "git_push",
+    "execute_command",  # Commands can have side effects
+    "record_finding", "update_finding", "delete_finding",
+    "write_report", "delete_report",
+    "update_documentation", "delete_documentation",
+    "send_message",
+}
+
+
+def _batch_tool_calls(calls: list) -> list[list]:
+    """Group tool calls into batches for parallel/sequential execution.
+
+    Consecutive read-only tools are grouped together (run in parallel).
+    Write tools each get their own single-item batch (run sequentially).
+
+    Example: [r, r, r, w, r, r, w, w, r, r]
+    → [[r, r, r], [w], [r, r], [w], [w], [r, r]]
+    """
+    batches: list[list] = []
+    current_reads: list = []
+
+    for tc in calls:
+        name = tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name", "")
+        if name in _WRITE_TOOLS:
+            # Flush accumulated reads as a parallel batch
+            if current_reads:
+                batches.append(current_reads)
+                current_reads = []
+            # Write is its own batch (sequential)
+            batches.append([tc])
+        else:
+            current_reads.append(tc)
+
+    # Flush remaining reads
+    if current_reads:
+        batches.append(current_reads)
+
+    return batches
+
+
+def _execute_tool_calls_parallel(
+    batch: list,
+    tool_dispatch: dict,
+) -> list[tuple]:
+    """Execute a batch of read-only tool calls in parallel.
+
+    Returns list of (tc, result) tuples in original order.
+    """
+    if len(batch) <= 1:
+        # No parallelism needed
+        results = []
+        for tc in batch:
+            result = execute_tool_call(
+                tool_dispatch, tc.function.name, tc.function.arguments,
+            )
+            results.append((tc, result))
+        return results
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _exec(tc):
+        result = execute_tool_call(
+            tool_dispatch, tc.function.name, tc.function.arguments,
+        )
+        return (tc, result)
+
+    results = []
+    with ThreadPoolExecutor(max_workers=min(len(batch), 8)) as pool:
+        futures = {pool.submit(_exec, tc): i for i, tc in enumerate(batch)}
+        indexed_results = [None] * len(batch)
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                indexed_results[idx] = future.result()
+            except Exception as exc:
+                tc = batch[idx]
+                indexed_results[idx] = (tc, json.dumps({"error": f"Parallel execution failed: {exc}"}))
+        results = [r for r in indexed_results if r is not None]
+
+    return results
 _MAX_TRACK_FILE_SIZE = 1_000_000  # 1 MB — skip tracking larger files
 
 
@@ -848,11 +950,16 @@ def _parse_step_complete_args(arguments: str | dict[str, Any]) -> StepResult:
                 except Exception:
                     pass
 
+    # Coerce final_answer to string (model may pass dict/list instead of string)
+    raw_answer = args.get("final_answer")
+    if raw_answer is not None and not isinstance(raw_answer, str):
+        raw_answer = json.dumps(raw_answer)
+
     return StepResult(
         summary=args.get("summary", "Step completed (no summary provided)"),
         status=args.get("status", "continue"),
         next_steps=next_steps,
-        final_answer=args.get("final_answer"),
+        final_answer=raw_answer,
     )
 
 
@@ -905,6 +1012,172 @@ def _call_llm(
             )
             time.sleep(delay)
     raise last_exc  # type: ignore[misc]
+
+
+_SUMMARIZER_SYSTEM_PROMPT = """\
+You are a step summarizer for a coding agent. Analyze the raw step data and produce a structured JSON summary.
+The summary helps the agent remember what happened and plan the next step effectively.
+
+Output EXACTLY this JSON format (no markdown, no code fences, just JSON):
+{
+  "files_to_preload": ["path1", "path2"],
+  "changes_made": "Files modified: what changed and why. Include brief diffs if possible.",
+  "discovered": "Relevant classes, files, function signatures, architecture patterns, web content, command results found.",
+  "pending": "What still needs doing: code to fix/implement, problems found, things to investigate.",
+  "anti_patterns": "What went wrong or was wasteful. Failed approaches, dead ends, repeated errors that should NOT be repeated.",
+  "summary": "1-2 sentences: what was done, how, and why."
+}
+
+Rules:
+- files_to_preload: ONLY files the NEXT step will need to read/edit. Max 5 paths.
+- Keep each text field under 150 tokens. Focus on FACTS, not narration.
+- anti_patterns: Look for repeated failed tool calls, re-reading same files, loops without progress.
+- If no anti-patterns were observed, set it to empty string.
+"""
+
+
+def _summarize_step(
+    messages: list[dict],
+    task_description: str,
+    state: LoopState,
+    step_result: "StepResult",
+    llm_params: dict,
+) -> dict:
+    """Make a dedicated LLM call to produce a structured step summary.
+
+    Returns a dict with keys: summary, files_to_preload, changes_made,
+    discovered, pending, anti_patterns. Falls back to step_result.summary
+    on any error.
+    """
+    fallback = {
+        "summary": step_result.summary,
+        "files_to_preload": [],
+        "changes_made": "",
+        "discovered": "",
+        "pending": "",
+        "anti_patterns": "",
+    }
+
+    # Build the user prompt with raw step data
+    parts = [f"<task>\n{task_description}\n</task>"]
+
+    # Current plan state
+    plan_text = state.plan.render() if state.plan.steps else "No plan yet."
+    parts.append(f"<plan>\n{plan_text}\n</plan>")
+
+    # Next pending steps
+    next_pending = [s for s in state.plan.steps if s.status == "pending"]
+    if next_pending:
+        next_lines = [f"- {s.description}" for s in next_pending[:5]]
+        parts.append(f"<next-steps>\n{chr(10).join(next_lines)}\n</next-steps>")
+
+    # Previous summaries for context
+    if state.history:
+        prev = [f"- Step {r.step_index}: {r.summary}" for r in state.history[-3:]]
+        parts.append(f"<previous-summaries>\n{chr(10).join(prev)}\n</previous-summaries>")
+
+    # Raw step messages (truncated)
+    max_input = settings.LOOP_SUMMARIZER_MAX_INPUT_TOKENS
+    step_msgs_text = _truncate_step_messages(messages, max_input)
+    parts.append(f"<step-messages>\n{step_msgs_text}\n</step-messages>")
+
+    user_prompt = "\n\n".join(parts)
+
+    # Make the summarizer LLM call (no tools)
+    summarizer_messages = [
+        {"role": "system", "content": _SUMMARIZER_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    try:
+        import litellm
+        summarizer_params = {k: v for k, v in llm_params.items() if k != "tool_choice"}
+        summarizer_params.pop("tools", None)
+        response = litellm.completion(
+            **summarizer_params,
+            messages=summarizer_messages,
+            max_tokens=500,
+        )
+        content = response.choices[0].message.content or ""
+
+        # Try to parse as JSON
+        import json as _json
+        # Strip markdown code fences if present
+        clean = content.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+            if clean.endswith("```"):
+                clean = clean[:-3]
+            clean = clean.strip()
+        if clean.startswith("json"):
+            clean = clean[4:].strip()
+
+        parsed = _json.loads(clean)
+        if isinstance(parsed, dict):
+            return {
+                "summary": str(parsed.get("summary", step_result.summary))[:500],
+                "files_to_preload": list(parsed.get("files_to_preload", []))[:5],
+                "changes_made": str(parsed.get("changes_made", ""))[:500],
+                "discovered": str(parsed.get("discovered", ""))[:500],
+                "pending": str(parsed.get("pending", ""))[:500],
+                "anti_patterns": str(parsed.get("anti_patterns", ""))[:500],
+            }
+    except Exception as exc:
+        logger.debug("Summarizer call failed, using fallback: %s", str(exc)[:200])
+
+    return fallback
+
+
+def _truncate_step_messages(messages: list[dict], max_tokens: int) -> str:
+    """Truncate step messages to fit within a token budget.
+
+    Keeps tool call names and arguments, truncates tool results.
+    Rough estimate: 1 token ≈ 4 chars.
+    """
+    max_chars = max_tokens * 4
+    parts = []
+    total_chars = 0
+
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+
+        if role == "system":
+            continue  # Skip system prompt (already in summarizer context)
+
+        if role == "tool":
+            # Truncate tool results to 500 chars each
+            tool_id = msg.get("tool_call_id", "")
+            truncated = content[:500] + ("..." if len(content) > 500 else "")
+            line = f"[Tool result {tool_id}]: {truncated}"
+        elif role == "assistant":
+            # Keep tool call info
+            tool_calls = msg.get("tool_calls", [])
+            if tool_calls:
+                tc_lines = []
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    args = str(fn.get("arguments", ""))[:300]
+                    tc_lines.append(f"  → {name}({args})")
+                line = "Assistant tool calls:\n" + "\n".join(tc_lines)
+            else:
+                line = f"Assistant: {content[:500]}"
+        elif role == "user":
+            line = f"User: {content[:500]}"
+        else:
+            line = f"{role}: {content[:300]}"
+
+        line_len = len(line)
+        if total_chars + line_len > max_chars:
+            remaining = max_chars - total_chars
+            if remaining > 100:
+                parts.append(line[:remaining] + "...[truncated]")
+            break
+        parts.append(line)
+        total_chars += line_len
+
+    return "\n".join(parts)
 
 
 def _synthesize_final(state: LoopState) -> str:
@@ -1029,6 +1302,7 @@ class LoopEngine(AgentEngine):
         # File change tracker for this task
         file_tracker = FileChangeTracker()
         self._last_file_tracker = file_tracker  # Expose for post-execution review
+        self._last_total_tool_calls = 0  # Expose for gather phase
 
         # Check model capabilities for manual tool calling mode
         from infinidev.config.model_capabilities import get_model_capabilities
@@ -1357,77 +1631,110 @@ class LoopEngine(AgentEngine):
                             messages.append(assistant_msg)
 
                         # Collect tool results for both modes
+                        # Batch tool calls: consecutive reads run in parallel, writes are barriers
                         tool_results_text: list[str] = []  # For manual mode
-                        for tc in regular_calls:
-                            # Pre-hook: capture file content before edit/write
-                            _pre_content = _capture_pre_content(
-                                tc.function.name, tc.function.arguments, file_tracker,
-                            )
+                        batches = _batch_tool_calls(regular_calls)
 
-                            result = execute_tool_call(
-                                tool_dispatch,
-                                tc.function.name,
-                                tc.function.arguments,
-                            )
+                        for batch in batches:
+                            is_parallel = len(batch) > 1 and batch[0].function.name not in _WRITE_TOOLS
 
-                            # Post-hook: record file change and emit diff event
-                            _maybe_emit_file_change(
-                                tc.function.name, tc.function.arguments, result,
-                                _pre_content, file_tracker,
-                                agent.project_id, agent.agent_id,
-                            )
-
-                            # Intercept send_message: emit to TUI chat
-                            if tc.function.name == "send_message":
-                                try:
-                                    _msg_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
-                                    _emit_loop_event("loop_user_message", agent.project_id, agent.agent_id, {
-                                        "message": _msg_args.get("message", ""),
-                                    })
-                                except Exception:
-                                    pass
-
-                            # Detect errors / hallucinated tools and log visibly
-                            _tool_error = _extract_tool_error(result)
-
-                            # Track consecutive tool errors for circuit breaker
-                            if _tool_error:
-                                _consecutive_tool_errors += 1
+                            if is_parallel:
+                                # Execute read-only batch in parallel
+                                batch_results = _execute_tool_calls_parallel(batch, tool_dispatch)
                             else:
-                                _consecutive_tool_errors = 0
+                                # Sequential execution (single tool or write)
+                                batch_results = []
+                                for tc in batch:
+                                    # Pre-hook BEFORE execution for file changes
+                                    _pre = _capture_pre_content(
+                                        tc.function.name, tc.function.arguments, file_tracker,
+                                    )
+                                    result = execute_tool_call(
+                                        tool_dispatch, tc.function.name, tc.function.arguments,
+                                    )
+                                    # Post-hook AFTER execution
+                                    _maybe_emit_file_change(
+                                        tc.function.name, tc.function.arguments, result,
+                                        _pre, file_tracker,
+                                        agent.project_id, agent.agent_id,
+                                    )
+                                    batch_results.append((tc, result))
 
-                            # --- Opened files cache ---
-                            # Cache file content so the LLM doesn't need to re-read
-                            if not _tool_error:
-                                _update_opened_files_cache(
-                                    state, tc.function.name, tc.function.arguments, result,
-                                )
+                            # Process results from the batch
+                            for tc, result in batch_results:
+                                # Intercept send_message: emit to TUI chat
+                                if tc.function.name == "send_message":
+                                    try:
+                                        _msg_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                                        _emit_loop_event("loop_user_message", agent.project_id, agent.agent_id, {
+                                            "message": _msg_args.get("message", ""),
+                                        })
+                                    except Exception:
+                                        pass
 
-                            if manual_tc:
-                                tool_results_text.append(
-                                    f"[Tool: {tc.function.name}] Result:\n{result}"
-                                )
-                            else:
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tc.id,
-                                    "content": result,
-                                })
-                            action_tool_calls += 1
-                            state.total_tool_calls += 1
-                            state.tool_calls_since_last_note += 1
+                                # Detect errors / hallucinated tools and log visibly
+                                _tool_error = _extract_tool_error(result)
 
-                            # Tick opened files cache TTL
-                            state.tick_opened_files(1)
-
-                            tool_detail = _extract_tool_detail(tc.function.name, tc.function.arguments)
-
-                            if verbose:
-                                _log_tool(agent_name, iteration + 1, tc.function.name, action_tool_calls, state.total_tool_calls)
-                                if tool_detail:
-                                    _log(f"{_BLUE}│{_RESET}     {_DIM}{tool_detail}{_RESET}")
+                                # Track consecutive tool errors for circuit breaker
                                 if _tool_error:
-                                    _log(f"{_BLUE}│{_RESET}     {_RED}✗ {_tool_error}{_RESET}")
+                                    _consecutive_tool_errors += 1
+                                else:
+                                    _consecutive_tool_errors = 0
+
+                                # --- Opened files cache ---
+                                if not _tool_error:
+                                    _update_opened_files_cache(
+                                        state, tc.function.name, tc.function.arguments, result,
+                                    )
+
+                                # Append tool call counter to result
+                                counter_tag = f"\n[Tool call {action_tool_calls + 1}/{max_per_action} for this step]"
+                                if is_parallel:
+                                    counter_tag += " (parallel)"
+                                result_with_counter = result + counter_tag
+
+                                if manual_tc:
+                                    tool_results_text.append(
+                                        f"[Tool: {tc.function.name}] Result:\n{result_with_counter}"
+                                    )
+                                else:
+                                    messages.append({
+                                        "role": "tool",
+                                        "tool_call_id": tc.id,
+                                        "content": result_with_counter,
+                                    })
+                                action_tool_calls += 1
+                                state.total_tool_calls += 1
+                                state.tool_calls_since_last_note += 1
+
+                                # Nudge at threshold
+                                _nudge_threshold = settings.LOOP_STEP_NUDGE_THRESHOLD
+                                if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
+                                    _active_desc = ""
+                                    if state.plan.active_step:
+                                        _active_desc = state.plan.active_step.description
+                                    _nudge_msg = (
+                                        f"You have used {action_tool_calls}/{max_per_action} tool calls for this step. "
+                                        f"Step scope: \"{_active_desc}\". "
+                                        f"Call step_complete now. If the step is not finished, set status='continue' "
+                                        f"and add/modify next_steps to capture the remaining work."
+                                    )
+                                    if manual_tc:
+                                        tool_results_text.append(f"\n⚠ STEP BUDGET: {_nudge_msg}")
+                                    else:
+                                        messages.append({"role": "user", "content": _nudge_msg})
+
+                                # Tick opened files cache TTL
+                                state.tick_opened_files(1)
+
+                                tool_detail = _extract_tool_detail(tc.function.name, tc.function.arguments)
+
+                                if verbose:
+                                    _log_tool(agent_name, iteration + 1, tc.function.name, action_tool_calls, state.total_tool_calls)
+                                    if tool_detail:
+                                        _log(f"{_BLUE}│{_RESET}     {_DIM}{tool_detail}{_RESET}")
+                                    if _tool_error:
+                                        _log(f"{_BLUE}│{_RESET}     {_RED}✗ {_tool_error}{_RESET}")
 
                             _emit_loop_event("loop_tool_call", agent.project_id, agent.agent_id, {
                                 "agent_id": agent.agent_id,
@@ -1669,6 +1976,17 @@ class LoopEngine(AgentEngine):
             if step_result is None:
                 step_result = StepResult(summary="Step completed.", status="continue")
 
+            # --- Auto-split: prevent premature "done" ---
+            if step_result.status == "done" and not step_result.final_answer:
+                pending_count = sum(1 for s in state.plan.steps if s.status == "pending")
+                if pending_count > 0:
+                    step_result.status = "continue"
+                    _emit_log(
+                        "warning",
+                        f"{_YELLOW}⚠ Override: status='done' but {pending_count} steps pending → continue{_RESET}",
+                        project_id=agent.project_id, agent_id=agent.agent_id,
+                    )
+
             # --- Plan management ---
             # If we don't have a plan yet, use next_steps from step_result to create one
             if not state.plan.steps:
@@ -1693,11 +2011,45 @@ class LoopEngine(AgentEngine):
             if done_steps:
                 step_index = done_steps[-1].index
 
-            state.history.append(ActionRecord(
-                step_index=step_index,
-                summary=step_result.summary,
-                tool_calls_count=action_tool_calls,
-            ))
+            # --- Step summarization ---
+            if settings.LOOP_SUMMARIZER_ENABLED:
+                try:
+                    structured = _summarize_step(
+                        messages, desc, state, step_result, llm_params,
+                    )
+                    record = ActionRecord(
+                        step_index=step_index,
+                        summary=structured.get("summary", step_result.summary),
+                        tool_calls_count=action_tool_calls,
+                        files_to_preload=structured.get("files_to_preload", []),
+                        changes_made=structured.get("changes_made", ""),
+                        discovered_context=structured.get("discovered", ""),
+                        pending_items=structured.get("pending", ""),
+                        anti_patterns=structured.get("anti_patterns", ""),
+                    )
+                except Exception:
+                    record = ActionRecord(
+                        step_index=step_index,
+                        summary=step_result.summary,
+                        tool_calls_count=action_tool_calls,
+                    )
+            else:
+                record = ActionRecord(
+                    step_index=step_index,
+                    summary=step_result.summary,
+                    tool_calls_count=action_tool_calls,
+                )
+            state.history.append(record)
+
+            # Pre-load files recommended by summarizer
+            if record.files_to_preload:
+                for fpath in record.files_to_preload:
+                    if fpath not in state.opened_files and _os.path.isfile(fpath):
+                        try:
+                            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                                state.cache_file(fpath, f.read())
+                        except Exception:
+                            pass
 
             state.current_step_index = step_index
 
@@ -1790,6 +2142,7 @@ class LoopEngine(AgentEngine):
                         "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
                     })
                     result = step_result.final_answer or step_result.summary
+                    self._store_stats(state)
                     return self._apply_guardrail(
                         result, guardrail, guardrail_max_retries,
                         llm_params, system_prompt, desc, expected, state, tool_schemas, tool_dispatch,
@@ -1804,6 +2157,7 @@ class LoopEngine(AgentEngine):
                     "status": "blocked", "iterations": iteration + 1,
                     "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
                 })
+                self._store_stats(state)
                 return step_result.summary
 
             # Safety: if all steps done and LLM didn't add new ones, allow
@@ -1821,6 +2175,7 @@ class LoopEngine(AgentEngine):
                         "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
                     })
                     result = step_result.summary
+                    self._store_stats(state)
                     return self._apply_guardrail(
                         result, guardrail, guardrail_max_retries,
                         llm_params, system_prompt, desc, expected, state, tool_schemas, tool_dispatch,
@@ -1837,11 +2192,16 @@ class LoopEngine(AgentEngine):
             "status": "exhausted", "iterations": max_iterations,
             "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
         })
+        self._store_stats(state)
         return _synthesize_final(state)
 
     def _checkpoint(self, event_id: int, state: LoopState) -> None:
         """No-op in CLI mode."""
         pass
+
+    def _store_stats(self, state: LoopState) -> None:
+        """Store execution stats for external access."""
+        self._last_total_tool_calls = state.total_tool_calls
 
     def _apply_guardrail(
         self,

@@ -94,11 +94,16 @@ class LoopPlan(BaseModel):
 
 
 class ActionRecord(BaseModel):
-    """Compact summary of a completed step."""
+    """Structured summary of a completed step."""
 
     step_index: int
     summary: str
     tool_calls_count: int = 0
+    files_to_preload: list[str] = Field(default_factory=list)
+    changes_made: str = ""
+    discovered_context: str = ""
+    pending_items: str = ""
+    anti_patterns: str = ""
 
 
 class StepResult(BaseModel):

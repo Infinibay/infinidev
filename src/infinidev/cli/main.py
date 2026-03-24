@@ -306,11 +306,25 @@ def _run_single_prompt(prompt_text: str) -> None:
         agent._system_prompt_identity = flow_config.identity_prompt
         agent.backstory = flow_config.backstory
         agent.activate_context(session_id=session_id)
+
+        # Gather phase for single-prompt mode
+        task_prompt_sp = (problem, flow_config.expected_output)
+        if settings.GATHER_ENABLED:
+            try:
+                from infinidev.gather import run_gather
+                click.echo(click.style("Gathering context...", fg="cyan", dim=True))
+                brief = run_gather(problem, [], None, agent)
+                desc, expected = task_prompt_sp
+                task_prompt_sp = (brief.render() + "\n\n" + desc, expected)
+                click.echo(click.style(f"  {brief.summary()}", fg="cyan", dim=True))
+            except Exception as exc:
+                click.echo(click.style(f"  Gather failed: {exc}", fg="yellow", dim=True))
+
         try:
             engine = LoopEngine()
             result = engine.execute(
                 agent=agent,
-                task_prompt=(problem, flow_config.expected_output),
+                task_prompt=task_prompt_sp,
                 verbose=True,
             )
         finally:
@@ -565,6 +579,26 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
             # --- End analysis phase ---
 
             current_flow = analysis.flow if analysis is not None else "develop"
+
+            # --- Gather phase ---
+            if settings.GATHER_ENABLED and current_flow == "develop":
+                try:
+                    from infinidev.gather import run_gather
+                    agent.activate_context(session_id=session_id)
+                    click.echo(click.style("Gathering context...", fg="cyan", dim=True))
+                    chat_history = [
+                        {"role": "user" if "[user]" in s.lower() else "assistant", "content": s}
+                        for s in get_recent_summaries(session_id, limit=10)
+                    ]
+                    brief = run_gather(user_input, chat_history, analysis, agent)
+                    desc, expected = task_prompt
+                    desc = brief.render() + "\n\n" + desc
+                    task_prompt = (desc, expected)
+                    click.echo(click.style(f"  {brief.summary()}", fg="cyan", dim=True))
+                except Exception as exc:
+                    click.echo(click.style(f"  Gather failed (proceeding without): {exc}", fg="yellow", dim=True))
+            # --- End gather phase ---
+
             click.echo(click.style(f"[{current_flow}] Working on: {user_input}", fg="yellow"))
 
             # --- Development/Exploration phase ---

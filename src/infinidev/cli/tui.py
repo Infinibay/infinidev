@@ -1954,8 +1954,9 @@ class InfinidevTUI(App):
             if reasoning:
                 history = self.query_one("#chat-history")
                 container = Vertical(classes="think-msg")
+                from rich.markup import escape as _escape_markup
                 header = self._safe_static("[bold #b0a0d8]💭 Thinking:[/bold #b0a0d8]")
-                body = self._safe_static(f"[dim #c0b8e0]{reasoning}[/dim #c0b8e0]")
+                body = self._safe_static(f"[dim #c0b8e0]{_escape_markup(reasoning)}[/dim #c0b8e0]")
                 thinking_widgets = self.query(".thinking-indicator")
                 if thinking_widgets:
                     history.mount(container, before=thinking_widgets.first())
@@ -2105,7 +2106,7 @@ class InfinidevTUI(App):
         except Exception:
             # Strip all Rich markup tags and show plain text
             plain = re.sub(r"\[/?[^\]]*\]", "", content)
-            return Static(plain)
+            return Static(plain, markup=False)
 
     def _is_thinking(self) -> bool:
         """Return True if the thinking indicator is currently visible."""
@@ -2550,8 +2551,34 @@ class InfinidevTUI(App):
                 flow_config = None
             # --- End analysis phase ---
 
-            # --- Development phase ---
+            # --- Gather phase ---
             flow_label = analysis.flow if _settings.ANALYSIS_ENABLED else "develop"
+            if _settings.GATHER_ENABLED and flow_label == "develop":
+                try:
+                    from infinidev.gather import run_gather
+                    self.call_from_thread(
+                        self.query_one("#actions-panel").update_content,
+                        "Gathering context..."
+                    )
+                    chat_history = [
+                        {"role": "user" if "[user]" in s.lower() else "assistant", "content": s}
+                        for s in get_recent_summaries(self.session_id, limit=10)
+                    ]
+                    brief = run_gather(user_input, chat_history, analysis, self.agent)
+                    desc, expected = task_prompt
+                    task_prompt = (brief.render() + "\n\n" + desc, expected)
+                    self.call_from_thread(
+                        self.query_one("#actions-panel").update_content,
+                        f"Gathered: {brief.summary()}"
+                    )
+                except Exception as exc:
+                    self.call_from_thread(
+                        self.query_one("#actions-panel").update_content,
+                        f"Gather skipped: {exc}"
+                    )
+            # --- End gather phase ---
+
+            # --- Development phase ---
             self.call_from_thread(
                 self._context_panel.set_flow, flow_label
             )

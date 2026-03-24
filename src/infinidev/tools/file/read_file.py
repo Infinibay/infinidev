@@ -109,7 +109,29 @@ class ReadFileTool(InfinibayBaseTool):
         path: str,
         offset: int | None = None,
         limit: int | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        line_range: str | None = None,
     ) -> str:
+        # Parse line_range (e.g. "10-50", "10:50", "10,50")
+        if line_range is not None and offset is None:
+            import re
+            m = re.match(r"(\d+)\s*[-:,]\s*(\d+)", str(line_range))
+            if m:
+                start_line = int(m.group(1))
+                end_line = int(m.group(2))
+            else:
+                # Single number
+                try:
+                    start_line = int(line_range)
+                except (ValueError, TypeError):
+                    pass
+
+        # Accept start_line/end_line as aliases for offset/limit
+        if start_line is not None and offset is None:
+            offset = start_line
+        if end_line is not None and offset is not None and limit is None:
+            limit = max(1, end_line - (offset or 1) + 1)
         path = self._resolve_path(os.path.expanduser(path))
 
         if self._is_pod_mode():

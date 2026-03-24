@@ -45,7 +45,7 @@ class CodeSearchTool(InfinibayBaseTool):
 
     def _run(
         self,
-        pattern: str,
+        pattern: str = "",
         path: str = ".",
         file_extensions: list[str] | None = None,
         case_sensitive: bool = True,
