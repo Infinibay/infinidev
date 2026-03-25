@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     GATHER_QUESTION_TIMEOUT: int = 120
     GATHER_MAX_DYNAMIC_QUESTIONS: int = 10
 
+    # Code Intelligence (tree-sitter indexing)
+    CODE_INTEL_ENABLED: bool = True
+    CODE_INTEL_MAX_FILE_SIZE: int = 1_000_000
+    CODE_INTEL_AUTO_INDEX: bool = True
+
     # Web tools
     WEB_CACHE_TTL_SECONDS: int = 3600
     WEB_RPM_LIMIT: int = 20

@@ -32,7 +32,7 @@ class TestQuestion:
     def test_create_question(self):
         q = Question(id="test", question="What?", context_prompt="Find {ticket_description}")
         assert q.id == "test"
-        assert q.max_tool_calls == 30
+        assert q.max_tool_calls == 15
         assert q.timeout_seconds == 120
 
     def test_context_prompt_formatting(self):

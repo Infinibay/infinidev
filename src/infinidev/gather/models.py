@@ -24,7 +24,7 @@ class Question:
     id: str
     question: str
     context_prompt: str  # Expanded prompt with {ticket_description} placeholder
-    max_tool_calls: int = 30
+    max_tool_calls: int = 15
     timeout_seconds: int = 120
 
 

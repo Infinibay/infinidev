@@ -185,6 +185,29 @@ def run_gather(
     falls back gracefully on any error.
     """
 
+    # Step -1: Index the project for code intelligence
+    try:
+        from infinidev.config.settings import settings as _s
+        if _s.CODE_INTEL_ENABLED:
+            import os
+            from infinidev.tools.base.context import get_current_workspace_path
+            workspace = get_current_workspace_path() or os.environ.get("INFINIDEV_WORKSPACE") or os.getcwd()
+            from infinidev.code_intel.indexer import index_directory
+            from infinidev.code_intel.index import clear_project
+            from infinidev.code_intel.query import get_index_stats
+            logger.info("Gather: indexing %s for code intelligence...", workspace)
+            # Clear old index to avoid stale data from other projects
+            clear_project(1)
+            stats = index_directory(1, workspace)
+            db_stats = get_index_stats(1)
+            logger.info(
+                "Gather: indexed %d files, %d symbols, %d references in %dms",
+                stats["files_indexed"], stats["symbols_total"],
+                db_stats.get("references", 0), stats["elapsed_ms"],
+            )
+    except Exception as exc:
+        logger.warning("Gather: code intel indexing failed: %s", str(exc)[:200])
+
     # Step 0: Synthesize ticket description
     logger.info("Gather: synthesizing ticket description...")
     analyst_spec = None
@@ -205,16 +228,19 @@ def run_gather(
         classification.reasoning[:80],
     )
 
-    # Step 2: Fixed questions
+    # Step 2: Fixed questions — use shared session for state persistence
+    from infinidev.gather.mini_agent import GatherSession
+
     questions = get_questions_for_type(classification.ticket_type)
     logger.info("Gather: %d fixed questions for type %s", len(questions), classification.ticket_type.value)
 
+    session = GatherSession()  # Shared state: opened_files, history, notes persist between questions
     fixed_answers: list[QuestionResult] = []
     for i, q in enumerate(questions):
         logger.info("Gather: [%d/%d] %s", i + 1, len(questions), q.question[:80])
         try:
             result = answer_question(
-                q, ticket_description, fixed_answers, agent,
+                q, ticket_description, fixed_answers, agent, session=session,
             )
             result.phase = "fixed"
             fixed_answers.append(result)
@@ -222,7 +248,6 @@ def run_gather(
                 "Gather: [%d/%d] answered (%d tool calls, %d chars)",
                 i + 1, len(questions), result.tool_calls_used, len(result.answer),
             )
-            # Log answer preview
             preview = result.answer[:300].replace("\n", " ")
             logger.info("Gather: [%d/%d] answer: %s", i + 1, len(questions), preview)
         except Exception as exc:
@@ -234,7 +259,7 @@ def run_gather(
                 phase="fixed",
             ))
 
-    # Step 3: Dynamic questions
+    # Step 3: Dynamic questions — same session continues
     logger.info("Gather: generating dynamic questions...")
     dynamic_questions = _generate_dynamic_questions(
         ticket_description, classification, fixed_answers, agent,
@@ -242,12 +267,12 @@ def run_gather(
     logger.info("Gather: %d dynamic questions generated", len(dynamic_questions))
 
     dynamic_answers: list[QuestionResult] = []
-    all_prior = fixed_answers  # Dynamic questions see fixed answers as context
+    all_prior = fixed_answers
     for i, q in enumerate(dynamic_questions):
         logger.info("Gather: [dynamic %d/%d] %s", i + 1, len(dynamic_questions), q.question[:80])
         try:
             result = answer_question(
-                q, ticket_description, all_prior + dynamic_answers, agent,
+                q, ticket_description, all_prior + dynamic_answers, agent, session=session,
             )
             result.phase = "dynamic"
             dynamic_answers.append(result)

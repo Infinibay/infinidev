@@ -59,7 +59,8 @@ class InfinidevAgent:
         """Set execution context for tools."""
         import os
         self._session_id = session_id
-        workspace_path = os.getcwd()
+        # INFINIDEV_WORKSPACE env var takes priority (set by bench runner and external tools)
+        workspace_path = os.environ.get("INFINIDEV_WORKSPACE") or os.getcwd()
         set_context(
             project_id=self.project_id,
             agent_id=self.agent_id,

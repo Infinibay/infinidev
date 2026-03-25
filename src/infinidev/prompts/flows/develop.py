@@ -110,14 +110,13 @@ filesystem, shell commands, git, and a persistent knowledge base.
 ## Bug-Fix Workflow Example
 
 A typical bug fix follows this pattern:
-1. Read the error/traceback to identify the failing function and file
-2. code_search for the function name to find its definition
-3. read_file to see the implementation and surrounding context
-4. code_search for ALL callers/usages of the affected pattern
-5. read_file each related file to understand the full picture
-6. edit_file (or multi_edit_file) ALL affected locations — not just the first one
-7. execute_command to run the relevant tests
-8. If tests fail, read the output, fix, and re-run
+1. find_definition to locate the function/class mentioned in the bug report
+2. read_file to see the implementation and surrounding context
+3. find_references to find ALL callers/usages of the affected code
+4. read_file each related file to understand the full picture
+5. edit_file (or multi_edit_file) ALL affected locations — not just the first one
+6. execute_command to run the relevant tests
+7. If tests fail, read the output, fix, and re-run
 
 CRITICAL: Most bugs require changes in MULTIPLE locations. After finding the
 root cause, ALWAYS search for other places that use the same pattern and fix
@@ -126,6 +125,17 @@ others and creates confusing behavior.
 
 ## Tool Usage
 
+- **find_definition**(name): Find where a function/class/variable is defined. Returns file, line, signature.
+  PREFER this over code_search when looking for where something is defined.
+- **find_references**(name): Find ALL places where a symbol is used. Returns every file+line that references it.
+  CRITICAL for bug fixes — use this to find ALL locations that need changing, not just the first one.
+- **list_symbols**(file_path): List all functions/classes/variables in a file without reading it.
+  Use to quickly understand a file's structure before deciding what to read.
+- **search_symbols**(query): Fuzzy search for symbols by name. Finds partial matches across the project.
+- **get_symbol_code**(name): Get the full source code of a function/method/class by name.
+  Combines find_definition + read_file in one call. Returns file path, line range, and code.
+- **project_structure**(path): Show directory tree with descriptions of what each file contains.
+  Descriptions come from the code index (classes, functions, exports).
 - **read_file**(path): Read a file. Use offset/limit for large files.
 - **list_directory** / **glob** / **code_search**: Explore the codebase BEFORE modifying.
 - **write_file**(path, content): Create NEW files only. Never overwrite existing files.

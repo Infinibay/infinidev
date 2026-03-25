@@ -28,11 +28,10 @@ QUESTIONS = [
         id="related_files",
         question="What files, classes, and functions are directly involved in this bug?",
         context_prompt=(
-            "Search for ALL files related to this bug. For each file found:\n"
-            "- Read it to understand its role\n"
-            "- Identify the specific functions/classes involved\n"
-            "- Note line numbers of relevant code\n"
-            "- Check imports to find connected modules\n"
+            "Start with project_structure() to understand the project layout.\n"
+            "Then use find_definition and find_references to trace the code involved.\n"
+            "For each relevant file, use list_symbols to see its contents.\n"
+            "Use get_symbol_code to read specific functions/methods.\n"
             "Be thorough — most bugs require changes in MULTIPLE locations.\n\n"
             "Bug report:\n{ticket_description}"
         ),

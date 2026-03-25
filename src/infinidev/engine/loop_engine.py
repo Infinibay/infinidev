@@ -164,6 +164,12 @@ _TOOL_DETAIL_KEYS: dict[str, list[str]] = {
     "web_search": ["query"],
     "web_fetch": ["url"],
     "code_search_web": ["query"],
+    "find_definition": ["name"],
+    "find_references": ["name"],
+    "list_symbols": ["file_path", "path"],
+    "search_symbols": ["query"],
+    "get_symbol_code": ["name"],
+    "project_structure": ["path", "directory", "dir", "folder", "subdir"],
     "search_knowledge": ["query"],
     "record_finding": ["title"],
     "search_findings": ["query"],
@@ -235,6 +241,17 @@ def _extract_tool_error(result: str) -> str:
 
 # ── Opened files cache helper ──────────────────────────────────────────────
 
+def _reindex_if_enabled(file_path: str) -> None:
+    """Trigger incremental reindex of a file after it's been modified."""
+    try:
+        from infinidev.config.settings import settings
+        if settings.CODE_INTEL_ENABLED and settings.CODE_INTEL_AUTO_INDEX:
+            from infinidev.code_intel.indexer import reindex_file
+            reindex_file(1, file_path)  # project_id=1 (default)
+    except Exception:
+        pass  # Never block the main loop for indexing
+
+
 def _update_opened_files_cache(
     state: LoopState,
     tool_name: str,
@@ -276,6 +293,7 @@ def _update_opened_files_cache(
         content = args.get("content", "")
         if content:
             state.refresh_file(path, content)
+        _reindex_if_enabled(path)
 
     elif tool_name in ("edit_file", "multi_edit_file"):
         # After a successful edit, re-read the file to get updated content
@@ -286,6 +304,7 @@ def _update_opened_files_cache(
                 state.refresh_file(path, content)
         except Exception:
             pass
+        _reindex_if_enabled(path)
 
     elif tool_name == "apply_patch":
         # After applying a patch, re-read all modified files into cache
@@ -1303,6 +1322,7 @@ class LoopEngine(AgentEngine):
         file_tracker = FileChangeTracker()
         self._last_file_tracker = file_tracker  # Expose for post-execution review
         self._last_total_tool_calls = 0  # Expose for gather phase
+        self._last_state = None  # Expose LoopState for chaining (gather phase)
 
         # Check model capabilities for manual tool calling mode
         from infinidev.config.model_capabilities import get_model_capabilities
@@ -2202,6 +2222,7 @@ class LoopEngine(AgentEngine):
     def _store_stats(self, state: LoopState) -> None:
         """Store execution stats for external access."""
         self._last_total_tool_calls = state.total_tool_calls
+        self._last_state = state
 
     def _apply_guardrail(
         self,

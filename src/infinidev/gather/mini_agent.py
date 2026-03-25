@@ -1,10 +1,10 @@
-"""Answer a single investigation question using the LoopEngine.
+"""Answer investigation questions using the LoopEngine with shared state.
 
-Reuses the full LoopEngine infrastructure (FC detection, manual mode,
-tool dispatch, retries, step_complete protocol) but with:
+Reuses the full LoopEngine infrastructure but with:
 - Read-only tools only
 - A lightweight identity prompt
-- Lower iteration/tool limits
+- Shared LoopState between questions (opened_files, history, notes persist)
+- Prior answers included in full (not truncated)
 """
 
 from __future__ import annotations
@@ -23,118 +23,176 @@ READ_ONLY_TOOL_NAMES = {
     "search_findings", "read_findings",
     "web_search", "web_fetch", "code_search_web",
     "find_documentation",
+    "find_definition", "find_references", "list_symbols",
+    "search_symbols", "get_symbol_code", "project_structure",
 }
 
 _INVESTIGATOR_IDENTITY = """\
 ## Identity
 
-You are a codebase investigator answering a specific question about a project.
-Use tools to explore the codebase and find the answer. Be thorough but efficient.
+You are a codebase investigator. You ONLY gather information — you do NOT plan fixes,
+write code, or suggest solutions. Just find facts and report them.
 
 ## Rules
 
-- Read the files that matter, skip the ones that don't.
-- Your answer should be factual and specific: file paths, line numbers, function names, class names.
-- Do NOT modify any files. You are only investigating.
-- When you have enough information, call step_complete with status="done" and put your full answer in final_answer.
+- ONLY INVESTIGATE. Do NOT plan implementation steps, do NOT propose fixes, do NOT write code.
+- Your job is to answer ONE specific question with facts from the codebase.
+- PREFER semantic tools: find_definition, find_references, get_symbol_code, search_symbols, list_symbols, project_structure.
+  These are faster and more precise than code_search or grep.
+- Use find_definition(name) to locate where a function/class is defined.
+- Use find_references(name) to find ALL usages of a symbol.
+- Use get_symbol_code(name) to read the full source code of a function/method/class.
+- Use list_symbols(file_path) to see what's in a file without reading it entirely.
+- Use project_structure(path) to see directory contents with descriptions.
+- Use project_structure(path) FIRST to understand the project layout before diving into files.
+- Use code_search only for text patterns that aren't symbol names (error messages, strings).
+- Be EFFICIENT: 5-10 tool calls should be enough. Don't keep searching if you have the answer.
+- Files from previous questions are already cached — do NOT re-read them.
+- This is a SINGLE STEP task. Do NOT create a plan with multiple steps.
+  Use tools to investigate, then call step_complete with status="done" and final_answer.
+- Do NOT use step_complete with status="continue". Always use status="done".
+- Your answer must be factual: file paths, line numbers, function names, class names, code snippets.
 """
 
 
+class GatherSession:
+    """Manages shared state across multiple investigation questions.
+
+    Keeps opened_files, history, and notes persistent between questions
+    so the agent doesn't re-read files or lose context.
+    """
+
+    def __init__(self):
+        self._last_state_dict: dict | None = None
+        self._engine = None
+
+    def answer_question(
+        self,
+        question: Question,
+        ticket_description: str,
+        prior_answers: list[QuestionResult],
+        agent: Any,
+    ) -> QuestionResult:
+        """Answer a single question, sharing state with previous questions."""
+        from infinidev.config.settings import settings
+        from infinidev.engine.loop_engine import LoopEngine
+
+        # Filter to read-only tools
+        read_only_tools = [t for t in agent.tools if t.name in READ_ONLY_TOOL_NAMES]
+        if not read_only_tools:
+            return QuestionResult(
+                question_id=question.id,
+                question_text=question.question,
+                answer="No read-only tools available for investigation.",
+            )
+
+        # Build focused task prompt
+        prompt_parts = [
+            f"Answer this question: {question.question}",
+            "",
+            question.context_prompt.format(ticket_description=ticket_description),
+        ]
+
+        # Add ALL prior answers in full (not truncated)
+        if prior_answers:
+            prompt_parts.append("\n## Previously Gathered Information")
+            prompt_parts.append("(These questions have already been answered — do NOT re-investigate them.)\n")
+            for pa in prior_answers:
+                prompt_parts.append(f"### Q: {pa.question_text}")
+                prompt_parts.append(pa.answer)
+                prompt_parts.append("")
+
+        task_description = "\n".join(prompt_parts)
+        expected_output = (
+            "Provide a thorough, factual answer to the question. "
+            "Include specific file paths, line numbers, function/class names, "
+            "and code patterns found."
+        )
+
+        # Save and override agent settings
+        original_identity = getattr(agent, "_system_prompt_identity", None)
+        original_backstory = agent.backstory
+        original_max_iter = settings.LOOP_MAX_ITERATIONS
+        original_max_tools = settings.LOOP_MAX_TOTAL_TOOL_CALLS
+        original_max_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION
+        original_nudge = settings.LOOP_STEP_NUDGE_THRESHOLD
+        original_summarizer = settings.LOOP_SUMMARIZER_ENABLED
+        original_gather = settings.GATHER_ENABLED
+
+        try:
+            agent._system_prompt_identity = _INVESTIGATOR_IDENTITY
+            agent.backstory = "Codebase investigator. Reads code, answers questions."
+            settings.LOOP_MAX_ITERATIONS = 1
+            settings.LOOP_MAX_TOTAL_TOOL_CALLS = question.max_tool_calls
+            settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = question.max_tool_calls
+            settings.LOOP_STEP_NUDGE_THRESHOLD = 0
+            settings.LOOP_SUMMARIZER_ENABLED = True  # Enable summarizer for context between steps
+            settings.GATHER_ENABLED = False
+
+            engine = LoopEngine()
+
+            # Build resume_state from previous session state
+            resume = None
+            if self._last_state_dict:
+                resume = self._last_state_dict.copy()
+                # Reset iteration/tool counters but keep opened_files, history, notes
+                resume["iteration_count"] = 0
+                resume["total_tool_calls"] = 0
+                resume["current_step_index"] = 0
+                resume["last_prompt_tokens"] = 0
+                resume["last_completion_tokens"] = 0
+                resume["tool_calls_since_last_note"] = 0
+                # Clear plan (new question = new plan)
+                resume["plan"] = {"steps": []}
+
+            result = engine.execute(
+                agent=agent,
+                task_prompt=(task_description, expected_output),
+                verbose=True,
+                task_tools=read_only_tools,
+                resume_state=resume,
+            )
+
+            # Save state for next question
+            if engine._last_state:
+                self._last_state_dict = engine._last_state.model_dump()
+
+            return QuestionResult(
+                question_id=question.id,
+                question_text=question.question,
+                answer=(result or "No answer produced.").strip(),
+                tool_calls_used=engine._last_total_tool_calls,
+            )
+
+        except Exception as exc:
+            logger.warning("Question %s failed: %s", question.id, str(exc)[:200])
+            return QuestionResult(
+                question_id=question.id,
+                question_text=question.question,
+                answer=f"Investigation failed: {exc}",
+            )
+
+        finally:
+            agent._system_prompt_identity = original_identity
+            agent.backstory = original_backstory
+            settings.LOOP_MAX_ITERATIONS = original_max_iter
+            settings.LOOP_MAX_TOTAL_TOOL_CALLS = original_max_tools
+            settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = original_max_per_action
+            settings.LOOP_STEP_NUDGE_THRESHOLD = original_nudge
+            settings.LOOP_SUMMARIZER_ENABLED = original_summarizer
+            settings.GATHER_ENABLED = original_gather
+
+
+# Backward-compatible function interface
 def answer_question(
     question: Question,
     ticket_description: str,
     prior_answers: list[QuestionResult],
     agent: Any,
+    *,
+    session: GatherSession | None = None,
 ) -> QuestionResult:
-    """Answer a single question using LoopEngine with read-only tools.
-
-    Creates a temporary agent configuration and runs LoopEngine.execute()
-    with filtered tools and a focused prompt.
-    """
-    from infinidev.config.settings import settings
-    from infinidev.engine.loop_engine import LoopEngine
-
-    # Filter to read-only tools
-    read_only_tools = [t for t in agent.tools if t.name in READ_ONLY_TOOL_NAMES]
-    if not read_only_tools:
-        return QuestionResult(
-            question_id=question.id,
-            question_text=question.question,
-            answer="No read-only tools available for investigation.",
-        )
-
-    # Build focused task prompt
-    prompt_parts = [
-        f"Answer this question: {question.question}",
-        "",
-        question.context_prompt.format(ticket_description=ticket_description),
-    ]
-
-    # Add prior answers as context (truncated)
-    if prior_answers:
-        prompt_parts.append("\n## Previously Gathered Information")
-        for pa in prior_answers:
-            summary = pa.answer[:200] + ("..." if len(pa.answer) > 200 else "")
-            prompt_parts.append(f"- {pa.question_text}: {summary}")
-
-    task_description = "\n".join(prompt_parts)
-    expected_output = (
-        "Provide a thorough, factual answer to the question. "
-        "Include specific file paths, line numbers, function/class names, "
-        "and code patterns found."
-    )
-
-    # Save and override agent settings for the investigation
-    original_identity = getattr(agent, "_system_prompt_identity", None)
-    original_backstory = agent.backstory
-    original_max_iter = settings.LOOP_MAX_ITERATIONS
-    original_max_tools = settings.LOOP_MAX_TOTAL_TOOL_CALLS
-    original_max_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION
-    original_nudge = settings.LOOP_STEP_NUDGE_THRESHOLD
-    original_summarizer = settings.LOOP_SUMMARIZER_ENABLED
-    original_gather = settings.GATHER_ENABLED
-
-    try:
-        # Configure for lightweight investigation — generous tool limits
-        agent._system_prompt_identity = _INVESTIGATOR_IDENTITY
-        agent.backstory = "Codebase investigator. Reads code, answers questions."
-        settings.LOOP_MAX_ITERATIONS = 8
-        settings.LOOP_MAX_TOTAL_TOOL_CALLS = question.max_tool_calls
-        settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = question.max_tool_calls  # No per-step limit
-        settings.LOOP_STEP_NUDGE_THRESHOLD = 0  # No nudge during gathering
-        settings.LOOP_SUMMARIZER_ENABLED = False  # No summarizer for sub-questions
-        settings.GATHER_ENABLED = False  # No nested gather
-
-        engine = LoopEngine()
-        result = engine.execute(
-            agent=agent,
-            task_prompt=(task_description, expected_output),
-            verbose=True,
-            task_tools=read_only_tools,
-        )
-
-        return QuestionResult(
-            question_id=question.id,
-            question_text=question.question,
-            answer=(result or "No answer produced.").strip(),
-            tool_calls_used=getattr(engine, "_last_total_tool_calls", 0),
-        )
-
-    except Exception as exc:
-        logger.warning("Question %s failed: %s", question.id, str(exc)[:200])
-        return QuestionResult(
-            question_id=question.id,
-            question_text=question.question,
-            answer=f"Investigation failed: {exc}",
-        )
-
-    finally:
-        # Restore original settings
-        agent._system_prompt_identity = original_identity
-        agent.backstory = original_backstory
-        settings.LOOP_MAX_ITERATIONS = original_max_iter
-        settings.LOOP_MAX_TOTAL_TOOL_CALLS = original_max_tools
-        settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = original_max_per_action
-        settings.LOOP_STEP_NUDGE_THRESHOLD = original_nudge
-        settings.LOOP_SUMMARIZER_ENABLED = original_summarizer
-        settings.GATHER_ENABLED = original_gather
+    """Answer a single question. Optionally pass a GatherSession for state sharing."""
+    if session is None:
+        session = GatherSession()
+    return session.answer_question(question, ticket_description, prior_answers, agent)

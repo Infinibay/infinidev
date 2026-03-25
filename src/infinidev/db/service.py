@@ -267,6 +267,106 @@ def init_db():
         _migrate_add_column(conn, "artifacts", "session_id", "TEXT")
         _migrate_add_column(conn, "artifacts", "type", "TEXT DEFAULT 'artifact'")
 
+        # ── Code Intelligence tables ──────────────────────────────────────
+
+        conn.execute("""\
+            CREATE TABLE IF NOT EXISTS ci_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                language TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                symbol_count INTEGER DEFAULT 0,
+                indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, file_path)
+            )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_files_path ON ci_files(project_id, file_path)")
+
+        conn.execute("""\
+            CREATE TABLE IF NOT EXISTS ci_symbols (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                qualified_name TEXT DEFAULT '',
+                kind TEXT NOT NULL,
+                line_start INTEGER NOT NULL,
+                line_end INTEGER,
+                column_start INTEGER DEFAULT 0,
+                signature TEXT DEFAULT '',
+                type_annotation TEXT DEFAULT '',
+                docstring TEXT DEFAULT '',
+                parent_symbol TEXT DEFAULT '',
+                visibility TEXT DEFAULT 'public',
+                is_async BOOLEAN DEFAULT FALSE,
+                is_static BOOLEAN DEFAULT FALSE,
+                is_abstract BOOLEAN DEFAULT FALSE,
+                language TEXT NOT NULL
+            )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_name ON ci_symbols(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_kind ON ci_symbols(kind, name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_file ON ci_symbols(project_id, file_path)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_qualified ON ci_symbols(qualified_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_parent ON ci_symbols(parent_symbol)")
+
+        conn.execute("""\
+            CREATE VIRTUAL TABLE IF NOT EXISTS ci_symbols_fts USING fts5(
+                name, qualified_name, signature, docstring,
+                content=ci_symbols, content_rowid=id
+            )""")
+
+        # FTS triggers for ci_symbols
+        conn.executescript("""\
+            CREATE TRIGGER IF NOT EXISTS ci_symbols_ai AFTER INSERT ON ci_symbols BEGIN
+                INSERT INTO ci_symbols_fts(rowid, name, qualified_name, signature, docstring)
+                VALUES (new.id, new.name, new.qualified_name, new.signature, new.docstring);
+            END;
+            CREATE TRIGGER IF NOT EXISTS ci_symbols_ad AFTER DELETE ON ci_symbols BEGIN
+                INSERT INTO ci_symbols_fts(ci_symbols_fts, rowid, name, qualified_name, signature, docstring)
+                VALUES ('delete', old.id, old.name, old.qualified_name, old.signature, old.docstring);
+            END;
+            CREATE TRIGGER IF NOT EXISTS ci_symbols_au AFTER UPDATE ON ci_symbols BEGIN
+                INSERT INTO ci_symbols_fts(ci_symbols_fts, rowid, name, qualified_name, signature, docstring)
+                VALUES ('delete', old.id, old.name, old.qualified_name, old.signature, old.docstring);
+                INSERT INTO ci_symbols_fts(rowid, name, qualified_name, signature, docstring)
+                VALUES (new.id, new.name, new.qualified_name, new.signature, new.docstring);
+            END;
+        """)
+
+        conn.execute("""\
+            CREATE TABLE IF NOT EXISTS ci_references (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                column_num INTEGER DEFAULT 0,
+                context TEXT DEFAULT '',
+                ref_kind TEXT DEFAULT 'usage',
+                resolved_file TEXT DEFAULT '',
+                resolved_line INTEGER,
+                language TEXT NOT NULL
+            )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_refs_name ON ci_references(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_refs_file ON ci_references(project_id, file_path)")
+
+        conn.execute("""\
+            CREATE TABLE IF NOT EXISTS ci_imports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                source TEXT NOT NULL,
+                name TEXT NOT NULL,
+                alias TEXT DEFAULT '',
+                line INTEGER NOT NULL,
+                is_wildcard BOOLEAN DEFAULT FALSE,
+                resolved_file TEXT DEFAULT '',
+                language TEXT NOT NULL
+            )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_file ON ci_imports(project_id, file_path)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_name ON ci_imports(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_source ON ci_imports(source)")
+
         # Create a default project if none exists
         row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
         if not row:
