@@ -333,20 +333,23 @@ class PhaseEngine:
             task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
             verbose=verbose,
             task_tools=plan_tools,
-            max_iterations=8,
-            max_total_tool_calls=20,
-            nudge_threshold=6,
+            max_iterations=50,
+            max_total_tool_calls=1000,
+            max_tool_calls_per_action=0,  # unlimited per step
+            nudge_threshold=0,  # don't nudge during planning
             summarizer_enabled=False,
         )
 
-        # Extract the plan from the engine's state
+        # Extract ALL plan steps (pending + done) from the engine's state.
+        # The engine "executes" plan steps but in PLAN phase that just means
+        # the model added them. We collect everything as our execution plan.
         steps = []
         if engine._last_state and engine._last_state.plan.steps:
             for s in engine._last_state.plan.steps:
                 steps.append({
                     "step": s.index,
                     "description": s.description,
-                    "files": [],  # engine plan steps don't track files
+                    "files": [],
                 })
 
         if verbose:
