@@ -346,10 +346,10 @@ class PhaseEngine:
             task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
             verbose=verbose,
             task_tools=plan_tools,
-            max_iterations=50,
-            max_total_tool_calls=1000,
-            max_tool_calls_per_action=0,  # unlimited per step
-            nudge_threshold=0,  # don't nudge during planning
+            max_iterations=5,  # 3-5 iterations to build the plan, not execute it
+            max_total_tool_calls=30,
+            max_tool_calls_per_action=15,
+            nudge_threshold=8,
             summarizer_enabled=False,
             identity_override=strategy.plan_identity or _PLANNER_IDENTITY,
         )
