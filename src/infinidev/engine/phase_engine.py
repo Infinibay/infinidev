@@ -280,6 +280,7 @@ class PhaseEngine:
                 max_tool_calls_per_action=strategy.investigate_max_tool_calls,
                 nudge_threshold=strategy.investigate_max_tool_calls - 2,
                 summarizer_enabled=False,
+                identity_override=strategy.investigate_identity or None,
             )
 
             # Collect ALL notes from the engine
@@ -379,7 +380,7 @@ class PhaseEngine:
             max_tool_calls_per_action=0,  # unlimited per step
             nudge_threshold=0,  # don't nudge during planning
             summarizer_enabled=False,
-            identity_override=_PLANNER_IDENTITY,
+            identity_override=strategy.plan_identity or _PLANNER_IDENTITY,
         )
 
         # Extract ALL plan steps (pending + done) from the engine's state.
@@ -478,6 +479,7 @@ class PhaseEngine:
                 max_tool_calls_per_action=strategy.execute_max_tool_calls_per_step,
                 nudge_threshold=strategy.execute_max_tool_calls_per_step - 3,
                 summarizer_enabled=True,
+                identity_override=strategy.execute_identity or None,
             )
 
             self._last_engine = engine

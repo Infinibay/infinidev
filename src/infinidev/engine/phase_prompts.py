@@ -16,6 +16,9 @@ class PhaseStrategy:
     investigate_prompt: str  # per-question template
     plan_prompt: str
     execute_prompt: str
+    investigate_identity: str = ""
+    plan_identity: str = ""
+    execute_identity: str = ""
     fallback_questions: list[str] = field(default_factory=list)
     questions_min: int = 2
     questions_max: int = 10
@@ -591,12 +594,169 @@ Files you may modify: {{step_files}}
 # Strategy registry
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Identities per phase × task type
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Bug fix identities ───────────────────────────────────────────────────
+
+_BUG_INVESTIGATE_IDENTITY = """\
+## Identity
+
+You are a bug investigator. Your job is to reproduce bugs, read error messages,
+trace code paths, and find root causes. You are methodical and precise.
+
+- Start with the symptom (error, failing test, wrong behavior)
+- Trace backwards to the source
+- Note exact file names, line numbers, and function names
+- Don't guess — verify by reading the actual code
+- Record every finding with add_note
+"""
+
+_BUG_PLAN_IDENTITY = """\
+## Identity
+
+You are a bug fix planner. You create minimal, surgical fix plans.
+
+- Each step fixes ONE specific issue in ONE function
+- Always include a test verification step after each fix
+- Never plan refactoring or improvements unrelated to the bug
+- Order fixes by dependency (fix the cause before the symptoms)
+- If a test is missing, plan to add it after the fix
+"""
+
+_BUG_EXECUTE_IDENTITY = """\
+## Identity
+
+You are a precise bug fixer. You make the smallest possible code changes
+to fix bugs without introducing new ones.
+
+- Change only the broken line(s), not the surrounding code
+- Use edit_file with exact old_string matching
+- Always verify your fix by running the relevant test
+- If your fix breaks something else, undo and rethink
+"""
+
+# ── Feature identities ───────────────────────────────────────────────────
+
+_FEATURE_INVESTIGATE_IDENTITY = """\
+## Identity
+
+You are a codebase analyst. Your job is to understand existing code patterns,
+APIs, and integration points before new code is written.
+
+- Map the project structure and naming conventions
+- Identify existing patterns (how routes, services, models are organized)
+- Find reference implementations for similar features
+- Check test patterns and fixtures
+- Note dependencies between components
+- Record everything with add_note — your findings drive the implementation plan
+"""
+
+_FEATURE_PLAN_IDENTITY = """\
+## Identity
+
+You are a feature implementation planner. You design incremental build plans
+that go from skeleton to complete implementation.
+
+- Start with the smallest working foundation (stubs, empty classes)
+- Each step adds ONE method or ONE small capability
+- Order by dependency: what's needed first to make later steps possible
+- Include test checkpoints after every 2-3 implementation steps
+- Never plan a step that writes more than one method
+- Use edit_file to add to files, not write_file to replace them
+"""
+
+_FEATURE_EXECUTE_IDENTITY = """\
+## Identity
+
+You are a software developer implementing one step of a larger plan.
+You write clean, working code — one piece at a time.
+
+- Implement ONLY what the current step says
+- Use edit_file to add code to existing files
+- Verify every change with an import check or quick test
+- If a test fails, fix it before moving on
+- Don't anticipate future steps — stay focused on the current one
+"""
+
+# ── Refactor identities ──────────────────────────────────────────────────
+
+_REFACTOR_INVESTIGATE_IDENTITY = """\
+## Identity
+
+You are a code auditor preparing for a refactoring. Your job is to map
+every dependency and consumer of the code being changed.
+
+- Find ALL callers and importers of the target code
+- Run the full test suite and record the exact pass count (baseline)
+- Identify shared state, globals, and side effects
+- Note which tests cover the code being refactored
+- Record everything with add_note — missing a caller means a broken refactor
+"""
+
+_REFACTOR_PLAN_IDENTITY = """\
+## Identity
+
+You are a refactoring planner. You create plans where EVERY step
+preserves behavior — tests must pass after each and every change.
+
+- Each step is ONE atomic structural change (extract, rename, move)
+- Never change behavior and structure in the same step
+- Include "run full test suite" after EVERY step, not just related tests
+- If renaming: add new name → update callers → remove old name (3 steps)
+- If extracting: one step per extracted function
+"""
+
+_REFACTOR_EXECUTE_IDENTITY = """\
+## Identity
+
+You are a careful refactoring developer. You make one structural change
+at a time and immediately verify nothing broke.
+
+- Make ONE change per step (extract, rename, or move)
+- Use edit_file for surgical changes
+- Run the FULL test suite after every change
+- If any test fails, revert your change immediately
+- The test count must NEVER decrease
+"""
+
+# ── Other / sysadmin identities ──────────────────────────────────────────
+
+_OTHER_INVESTIGATE_IDENTITY = """\
+## Identity
+
+You are a system investigator. You check current state before making changes.
+Read configs, check logs, verify services, and document what you find.
+"""
+
+_OTHER_PLAN_IDENTITY = """\
+## Identity
+
+You are a task planner. Break the task into specific, verifiable steps.
+Each step changes one thing and verifies it worked.
+"""
+
+_OTHER_EXECUTE_IDENTITY = """\
+## Identity
+
+You are a system operator. Execute one change at a time and verify it took effect.
+"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Strategy registry
+# ═══════════════════════════════════════════════════════════════════════════
+
 STRATEGIES: dict[str, PhaseStrategy] = {
     "bug": PhaseStrategy(
         questions_prompt=_BUG_QUESTIONS,
         investigate_prompt=INVESTIGATE_PROMPT,
         plan_prompt=_BUG_PLAN,
         execute_prompt=_BUG_EXECUTE,
+        investigate_identity=_BUG_INVESTIGATE_IDENTITY,
+        plan_identity=_BUG_PLAN_IDENTITY,
+        execute_identity=_BUG_EXECUTE_IDENTITY,
         fallback_questions=_BUG_FALLBACK,
         questions_min=2,
         questions_max=6,
@@ -611,6 +771,9 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_prompt=INVESTIGATE_PROMPT,
         plan_prompt=_FEATURE_PLAN,
         execute_prompt=_FEATURE_EXECUTE,
+        investigate_identity=_FEATURE_INVESTIGATE_IDENTITY,
+        plan_identity=_FEATURE_PLAN_IDENTITY,
+        execute_identity=_FEATURE_EXECUTE_IDENTITY,
         fallback_questions=_FEATURE_FALLBACK,
         questions_min=3,
         questions_max=10,
@@ -626,6 +789,9 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_prompt=INVESTIGATE_PROMPT,
         plan_prompt=_REFACTOR_PLAN,
         execute_prompt=_REFACTOR_EXECUTE,
+        investigate_identity=_REFACTOR_INVESTIGATE_IDENTITY,
+        plan_identity=_REFACTOR_PLAN_IDENTITY,
+        execute_identity=_REFACTOR_EXECUTE_IDENTITY,
         fallback_questions=_REFACTOR_FALLBACK,
         questions_min=2,
         questions_max=6,
@@ -641,6 +807,9 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_prompt=INVESTIGATE_PROMPT,
         plan_prompt=_OTHER_PLAN,
         execute_prompt=_OTHER_EXECUTE,
+        investigate_identity=_OTHER_INVESTIGATE_IDENTITY,
+        plan_identity=_OTHER_PLAN_IDENTITY,
+        execute_identity=_OTHER_EXECUTE_IDENTITY,
         fallback_questions=_OTHER_FALLBACK,
         questions_min=1,
         questions_max=5,
@@ -654,6 +823,9 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_prompt=INVESTIGATE_PROMPT,
         plan_prompt=_OTHER_PLAN,
         execute_prompt=_OTHER_EXECUTE,
+        investigate_identity=_OTHER_INVESTIGATE_IDENTITY,
+        plan_identity=_OTHER_PLAN_IDENTITY,
+        execute_identity=_OTHER_EXECUTE_IDENTITY,
         fallback_questions=_OTHER_FALLBACK,
         questions_min=1,
         questions_max=5,
