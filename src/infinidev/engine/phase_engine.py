@@ -36,6 +36,38 @@ _READ_ONLY_TOOLS = {
     "web_search", "web_fetch", "execute_command",
 }
 
+# Identity override for the PLAN phase — the agent acts as a planner, not a developer
+_PLANNER_IDENTITY = """\
+## Identity
+
+You are a software engineering planner. Your job is to create detailed,
+granular implementation plans — NOT to write code.
+
+You read code and tests to understand the problem, then break it down
+into small, concrete steps that a developer can execute one at a time.
+
+## How You Work
+
+1. Read the task description and investigation notes
+2. Use read-only tools (read_file, code_search, glob) if you need to check something
+3. Use step_complete with next_steps to ADD steps to the plan
+4. Each step_complete call should add 2-5 new steps
+5. When the plan covers the full task, call step_complete with status='done'
+
+## What Makes a Good Plan Step
+
+GOOD: "Implement _parse_where() method in query.py — handle =, !=, >, < operators"
+GOOD: "Run pytest tests/test_query.py to verify WHERE clause works"
+BAD: "Implement the query engine" (too vague — which method? which file?)
+BAD: "Fix everything" (not a step)
+
+## Rules
+- You are a PLANNER, not a DEVELOPER. Do NOT write or edit code.
+- Each step should be doable in 5-10 tool calls by a developer
+- Include test/verification steps after every 2-3 implementation steps
+- Order by dependency: foundations first, complex features last
+"""
+
 
 class PhaseEngine:
     """Four-phase execution: QUESTIONS → INVESTIGATE → PLAN → EXECUTE."""
@@ -336,22 +368,31 @@ class PhaseEngine:
                 if getattr(t, 'name', '') in _READ_ONLY_TOOLS
             ] if agent_tools else []
 
-        engine = LoopEngine()
-        engine.execute(
-            agent=agent,
-            task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
-            verbose=verbose,
-            task_tools=plan_tools,
-            max_iterations=50,
-            max_total_tool_calls=1000,
-            max_tool_calls_per_action=0,  # unlimited per step
-            nudge_threshold=0,  # don't nudge during planning
-            summarizer_enabled=False,
-        )
+        # Override agent identity for planning — it's a planner, not a developer
+        original_identity = getattr(agent, '_system_prompt_identity', None)
+        original_backstory = agent.backstory
+        agent._system_prompt_identity = _PLANNER_IDENTITY
+        agent.backstory = "Software engineering planner. Creates granular implementation plans."
+
+        try:
+            engine = LoopEngine()
+            engine.execute(
+                agent=agent,
+                task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
+                verbose=verbose,
+                task_tools=plan_tools,
+                max_iterations=50,
+                max_total_tool_calls=1000,
+                max_tool_calls_per_action=0,  # unlimited per step
+                nudge_threshold=0,  # don't nudge during planning
+                summarizer_enabled=False,
+            )
+        finally:
+            # Restore original agent identity
+            agent._system_prompt_identity = original_identity
+            agent.backstory = original_backstory
 
         # Extract ALL plan steps (pending + done) from the engine's state.
-        # The engine "executes" plan steps but in PLAN phase that just means
-        # the model added them. We collect everything as our execution plan.
         steps = []
         if engine._last_state and engine._last_state.plan.steps:
             for s in engine._last_state.plan.steps:
