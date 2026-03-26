@@ -384,6 +384,7 @@ class LoopEngine(AgentEngine):
         summarizer_enabled: bool | None = None,
         identity_override: str | None = None,
         done_means_done: bool = False,
+        allow_only_add_steps: bool = False,
     ) -> str:
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
@@ -1128,10 +1129,15 @@ class LoopEngine(AgentEngine):
                     )
 
             # --- Plan management ---
+            # Filter next_steps if restricted to add-only
+            _next_steps = step_result.next_steps
+            if allow_only_add_steps and _next_steps:
+                _next_steps = [op for op in _next_steps if op.op == "add"]
+
             # If we don't have a plan yet, use next_steps from step_result to create one
             if not state.plan.steps:
-                if step_result.next_steps:
-                    state.plan.apply_operations(step_result.next_steps)
+                if _next_steps:
+                    state.plan.apply_operations(_next_steps)
                 # Activate the first step if we got a plan
                 if state.plan.steps:
                     for s in state.plan.steps:
@@ -1141,8 +1147,8 @@ class LoopEngine(AgentEngine):
             else:
                 # Existing plan: mark current step done, apply changes, activate next
                 state.plan.mark_active_done()
-                if step_result.next_steps:
-                    state.plan.apply_operations(step_result.next_steps)
+                if _next_steps:
+                    state.plan.apply_operations(_next_steps)
                 state.plan.activate_next()
 
             step_index = state.plan.active_step.index if state.plan.active_step else iteration + 1

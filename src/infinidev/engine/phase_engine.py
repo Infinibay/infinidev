@@ -107,20 +107,49 @@ class PhaseEngine:
                 files_str = ", ".join(s.get("files", [])) or "(verify)"
                 _log(f"    {DIM}{s['step']}. {s['description'][:70]} [{files_str}]{RESET}")
 
-        # ── Phase 4: EXECUTE ──────────────────────────────────────────
-        if verbose:
-            _log(f"\n{BOLD}🔨 Phase 4: EXECUTE{RESET}")
+        # ── Phase 4: EXECUTE (with re-plan loop) ─────────────────────
+        max_plan_rounds = 3  # max times to re-plan after incomplete execution
 
-        result = self._execute_plan(
-            agent, description, expected_output, answers, all_notes,
-            plan_steps, strategy, task_tools, verbose,
-        )
+        for plan_round in range(max_plan_rounds):
+            if verbose:
+                round_label = f" (round {plan_round + 1})" if plan_round > 0 else ""
+                _log(f"\n{BOLD}🔨 Phase 4: EXECUTE{round_label}{RESET}")
 
-        # Final test run
-        if strategy.auto_test and self._test_checkpoint:
-            passed, total = self._test_checkpoint.run()
-            if verbose and total > 0:
-                _log(f"\n  {BOLD}Final: {self._test_checkpoint.progress_str()}{RESET}")
+            result = self._execute_plan(
+                agent, description, expected_output, answers, all_notes,
+                plan_steps, strategy, task_tools, verbose,
+            )
+
+            # Check test progress
+            if strategy.auto_test and self._test_checkpoint:
+                passed, total = self._test_checkpoint.run()
+                if verbose and total > 0:
+                    _log(f"\n  {BOLD}{self._test_checkpoint.progress_str()}{RESET}")
+
+                # If all tests pass or no tests exist, we're done
+                if total == 0 or passed == total:
+                    break
+
+                # If not all passing and we have re-plan budget, loop back
+                if plan_round < max_plan_rounds - 1:
+                    if verbose:
+                        _log(f"\n{BOLD}📋 Re-planning: {passed}/{total} tests passing, generating fix steps...{RESET}")
+
+                    # Update notes with current progress
+                    all_notes.append(f"PROGRESS: {passed}/{total} tests passing after plan round {plan_round + 1}")
+
+                    plan_steps = self._generate_plan(
+                        agent, description, answers, all_notes, strategy, task_tools, verbose,
+                    )
+                    if not plan_steps:
+                        break  # can't re-plan, stop
+
+                    if verbose:
+                        _log(f"  {DIM}Re-plan: {len(plan_steps)} new steps{RESET}")
+                        for s in plan_steps:
+                            _log(f"    {DIM}{s['step']}. {s['description'][:70]}{RESET}")
+            else:
+                break  # no auto_test, run once
 
         return result
 
@@ -501,6 +530,7 @@ class PhaseEngine:
                 nudge_threshold=0,
                 summarizer_enabled=True,
                 identity_override=strategy.execute_identity or None,
+                allow_only_add_steps=True,  # can add steps but not modify/remove plan
             )
 
             self._last_engine = engine
