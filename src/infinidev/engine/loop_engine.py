@@ -51,6 +51,7 @@ from infinidev.engine.tool_executor import (
     execute_tool_calls_parallel as _execute_tool_calls_parallel,
     capture_pre_content as _capture_pre_content,
     maybe_emit_file_change as _maybe_emit_file_change,
+    WRITE_TOOLS as _WRITE_TOOLS,
 )
 from infinidev.engine.loop_context import (
     build_iteration_prompt,
