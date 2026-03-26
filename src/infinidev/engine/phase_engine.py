@@ -145,6 +145,8 @@ class PhaseEngine:
             f"Generate {strategy.questions_min}-{strategy.questions_max} questions."
         )
 
+        prompt = "/no_think\n" + prompt
+
         llm_params = get_litellm_params()
         system_prompt = build_system_prompt(
             agent.backstory,
@@ -308,6 +310,9 @@ class PhaseEngine:
             'Example format: [{"step": 1, "description": "...", "files": ["..."]}, '
             '{"step": 2, "description": "...", "files": []}, ...]'
         )
+
+        # Prepend /no_think to suppress thinking tags that eat output tokens
+        prompt = "/no_think\n" + prompt
 
         llm_params = get_litellm_params()
         # Minimal system prompt for PLAN phase — the full LOOP_PROTOCOL
