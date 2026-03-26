@@ -17,6 +17,31 @@ from typing import Any
 # json_repair is now used via tool_call_parser.safe_json_loads
 
 from infinidev.engine.base import AgentEngine
+from infinidev.engine.engine_logging import (
+    emit_loop_event as _emit_loop_event,
+    log as _log,
+    emit_log as _emit_log,
+    extract_tool_detail as _extract_tool_detail,
+    extract_tool_error as _extract_tool_error,
+    log_start as _log_start,
+    log_step_start as _log_step_start,
+    log_tool as _log_tool,
+    log_step_done as _log_step_done,
+    log_plan as _log_plan,
+    log_prompt as _log_prompt,
+    log_finish as _log_finish,
+    # ANSI codes used inline in execute()
+    DIM as _DIM,
+    BOLD as _BOLD,
+    RESET as _RESET,
+    CYAN as _CYAN,
+    GREEN as _GREEN,
+    YELLOW as _YELLOW,
+    RED as _RED,
+    MAGENTA as _MAGENTA,
+    BLUE as _BLUE,
+    TOOL_DETAIL_KEYS as _TOOL_DETAIL_KEYS,
+)
 from infinidev.engine.tool_call_parser import (
     safe_json_loads as _safe_json_loads,
     ManualToolCall as _ManualToolCall,
@@ -101,156 +126,10 @@ logger = logging.getLogger(__name__)
 
 
 # -- Event handling via centralized EventBus --
-from infinidev.flows.event_listeners import event_bus
+# event_bus access is now via engine_logging module
 
-def _emit_loop_event(
-    event_type: str,
-    project_id: int,
-    agent_id: str,
-    data: dict[str, Any],
-) -> None:
-    """Emit event to all subscribers via the EventBus."""
-    event_bus.emit(event_type, project_id, agent_id, data)
-
-
-# ── Pretty stdout logging ────────────────────────────────────────────────────
-
-_DIM = "\033[2m"
-_BOLD = "\033[1m"
-_RESET = "\033[0m"
-_CYAN = "\033[36m"
-_GREEN = "\033[32m"
-_YELLOW = "\033[33m"
-_RED = "\033[31m"
-_MAGENTA = "\033[35m"
-_BLUE = "\033[34m"
-
-_STATUS_ICON = {
-    "continue": f"{_CYAN}→{_RESET}",
-    "done": f"{_GREEN}✓{_RESET}",
-    "blocked": f"{_RED}✗{_RESET}",
-}
-
-
-def _log(msg: str) -> None:
-    """Print to stderr in classic CLI mode.  Silent when a TUI/event callback
-    is registered (the TUI owns the terminal, so raw prints would corrupt it).
-    """
-    if not event_bus.has_subscribers:
-        print(msg, file=sys.stderr, flush=True)
-
-
-def _emit_log(level: str, text: str, *, project_id: int = 0, agent_id: str = "") -> None:
-    """Emit a log entry through the event system for TUI display.
-
-    *level* is ``"warning"`` or ``"error"``.  When no event callback is
-    registered, the message is also printed via ``_log`` as a fallback.
-    """
-    import re
-    clean = re.sub(r"\033\[[0-9;]*m", "", text)  # strip ANSI for the TUI
-    _emit_loop_event("loop_log", project_id, agent_id, {
-        "level": level,
-        "message": clean,
-    })
-    _log(text)  # no-op in TUI mode, shows in classic mode
-
-
-# ── Tool detail extraction for UI visibility ─────────────────────────────────
-
-# Maps tool name → list of arg keys to show in UI (in priority order).
-# Only the first matching key is shown, truncated to keep it short.
-_TOOL_DETAIL_KEYS: dict[str, list[str]] = {
-    "read_file": ["path", "file_path"],
-    "write_file": ["path", "file_path"],
-    "edit_file": ["path", "file_path"],
-    "multi_edit_file": ["path", "file_path"],
-    "apply_patch": ["patch"],
-    "list_directory": ["path", "directory"],
-    "code_search": ["query", "pattern", "search_query"],
-    "glob": ["pattern", "glob_pattern"],
-    "execute_command": ["command", "cmd"],
-    "git_branch": ["branch_name", "name"],
-    "git_commit": ["message"],
-    "git_push": ["branch"],
-    "git_diff": ["branch", "file_path"],
-    "git_status": [],
-
-    "web_search": ["query"],
-    "web_fetch": ["url"],
-    "code_search_web": ["query"],
-    "find_definition": ["name"],
-    "find_references": ["name"],
-    "list_symbols": ["file_path", "path"],
-    "search_symbols": ["query"],
-    "get_symbol_code": ["name"],
-    "project_structure": ["path", "directory", "dir", "folder", "subdir"],
-    "search_knowledge": ["query"],
-    "record_finding": ["title"],
-    "search_findings": ["query"],
-    "read_findings": ["query"],
-    "update_finding": ["finding_id"],
-    "delete_finding": ["finding_id"],
-}
-
-
-def _extract_tool_detail(tool_name: str, arguments: str) -> str:
-    """Extract a short human-readable detail from tool call arguments.
-
-    Returns e.g. "src/auth.py" for read_file, "gradient optimizer" for code_search.
-    Returns empty string if no useful detail can be extracted.
-    """
-    keys = _TOOL_DETAIL_KEYS.get(tool_name)
-    if keys is None:
-        # Unknown tool — try common keys
-        keys = ["path", "file_path", "query", "title", "name"]
-    if not keys:
-        return ""
-
-    try:
-        args = json.loads(arguments) if isinstance(arguments, str) and arguments.strip() else {}
-    except (json.JSONDecodeError, TypeError):
-        return ""
-
-    if not isinstance(args, dict):
-        return ""
-
-    for key in keys:
-        val = args.get(key)
-        if val is not None:
-            s = str(val).strip()
-            # Truncate long values (file contents, long commands)
-            if len(s) > 80:
-                s = s[:77] + "..."
-            return s
-    return ""
-
-
-def _extract_tool_error(result: str) -> str:
-    """Extract error message from a tool result, if any.
-
-    Returns a short error string for display, or empty string if no error.
-    Detects both JSON {"error": "..."} and "Unknown tool:" patterns.
-    """
-    if not result:
-        return ""
-    # Fast path: most results don't start with {"error
-    stripped = result.strip()
-    if not stripped.startswith("{"):
-        return ""
-    try:
-        parsed = json.loads(stripped)
-        if isinstance(parsed, dict) and "error" in parsed:
-            err = str(parsed["error"])
-            if "Unknown tool:" in err:
-                tool_name = err.split("Unknown tool:", 1)[1].strip()
-                return f"hallucinated tool '{tool_name}'"
-            # Truncate long errors
-            if len(err) > 120:
-                err = err[:117] + "..."
-            return err
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return ""
+# Logging, event emission, ANSI codes, and tool detail/error extraction
+# are all imported from engine_logging.py at top of file
 
 
 # ── Opened files cache helper ──────────────────────────────────────────────
@@ -541,79 +420,8 @@ def _maybe_emit_file_change(
     })
 
 
-def _log_start(agent_id: str, agent_name: str, role: str, desc: str, tool_count: int) -> None:
-    _log(f"\n{_BOLD}{_CYAN}✨ Infinidev{_RESET}  {_DIM}•{_RESET}  {_BOLD}{agent_name}{_RESET} {_DIM}({role}){_RESET}")
-    _log(f"{_DIM}   {desc[:120]}{'…' if len(desc) > 120 else ''}{_RESET}")
-    _log(f"{_DIM}   {tool_count} tools ready{_RESET}")
-    _log(f"{_DIM}{'─' * 60}{_RESET}")
-
-
-def _log_step_start(iteration: int, step_desc: str | None) -> None:
-    label = step_desc or "Planning..."
-    _log(f"\n{_BOLD}{_BLUE}󰄵 Step {iteration}{_RESET} {label}")
-
-
-def _log_tool(agent_name: str, iteration: int, tool_name: str, call_num: int, total: int) -> None:
-    _log(f"  {_MAGENTA}⚙️  {tool_name}{_RESET}")
-
-
-def _log_step_done(iteration: int, status: str, summary: str, tool_calls: int, tokens: int) -> None:
-    # Use generic icon if specific one not found
-    icon = "✔" if status == "done" else "➜"
-    color = _GREEN if status == "done" else _YELLOW
-    _log(f"  {color}{icon} {status.title()}{_RESET}  {_DIM}({tool_calls} calls · {tokens} tokens){_RESET}")
-    if summary:
-        _log(f"    {_DIM}{summary[:150]}{_RESET}")
-
-
-def _log_plan(plan: LoopPlan) -> None:
-    if not plan.steps:
-        return
-    _log(f"\n  {_DIM}Proposed plan:{_RESET}")
-    for s in plan.steps:
-        if s.status == "done":
-            icon, color = "●", _GREEN
-        elif s.status == "active":
-            icon, color = "○", _CYAN
-        elif s.status == "skipped":
-            icon, color = "◌", _DIM
-        else:
-            icon, color = "◌", _DIM
-        _log(f"    {color}{icon} {s.description[:80]}{_RESET}")
-
-
-def _log_prompt(user_prompt: str, max_section: int = 300) -> None:
-    """Log the XML-structured prompt sent to the LLM, truncating each section."""
-    import re
-    sections = re.findall(r"<(\w[\w-]*)>\n?(.*?)\n?</\1>", user_prompt, re.DOTALL)
-    if not sections:
-        _log(f"{_DIM}   Prompt: {user_prompt[:max_section]}{_RESET}")
-        return
-    _log(f"{_DIM}   Prompt:{_RESET}")
-    for tag, content in sections:
-        preview = content.strip().replace("\n", " ↵ ")
-        if len(preview) > max_section:
-            preview = preview[:max_section] + "…"
-        _log(f"   {_DIM}<{tag}>{_RESET} {preview}")
-
-
-def _log_finish(agent_name: str, status: str, iterations: int, total_tools: int, total_tokens: int) -> None:
-    icon = "✅" if status == "done" else "🏁"
-    _log(f"\n{_DIM}{'─' * 60}{_RESET}")
-    _log(
-        f"{icon} {_BOLD}Completed{_RESET}  "
-        f"{_DIM}{iterations} steps · {total_tools} tools · {total_tokens} tokens{_RESET}\n"
-    )
-
-# Error classification constants and functions are in llm_client.py
-# Imported at top: _is_transient, _is_malformed_tool_call, _PERMANENT_ERRORS, etc.
-
-
-# _ManualToolCall imported from tool_call_parser at top of file
-
-
-# Tool call parsers, ManualToolCall, safe_json_loads, and parse_step_complete_args
-# are all imported from tool_call_parser.py at top of file
+# All _log_* functions, error classification, and tool call parsers
+# are imported from engine_logging.py, llm_client.py, and tool_call_parser.py
 
 
 _SUMMARIZER_SYSTEM_PROMPT = """\
