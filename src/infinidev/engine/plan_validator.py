@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any
 
-from infinidev.engine.phase_prompts import PhaseStrategy
+from infinidev.prompts.phases import PhaseStrategy
 
 logger = logging.getLogger(__name__)
 

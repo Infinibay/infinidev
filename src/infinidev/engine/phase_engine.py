@@ -15,10 +15,11 @@ from typing import Any
 
 from infinidev.engine.loop_engine import LoopEngine
 from infinidev.engine.llm_client import call_llm
-from infinidev.engine.phase_prompts import get_strategy, PhaseStrategy
+from infinidev.prompts.phases import get_strategy, PhaseStrategy
 from infinidev.engine.plan_validator import (
     validate_questions, format_rejection,
 )
+from infinidev.prompts.phases.plan import PLANNER_IDENTITY as _PLANNER_IDENTITY
 from infinidev.engine.test_checkpoint import TestCheckpoint
 from infinidev.engine.engine_logging import (
     log as _log,
@@ -36,37 +37,7 @@ _READ_ONLY_TOOLS = {
     "web_search", "web_fetch", "execute_command",
 }
 
-# Identity override for the PLAN phase — the agent acts as a planner, not a developer
-_PLANNER_IDENTITY = """\
-## Identity
-
-You are a software engineering planner. Your job is to create detailed,
-granular implementation plans — NOT to write code.
-
-You read code and tests to understand the problem, then break it down
-into small, concrete steps that a developer can execute one at a time.
-
-## How You Work
-
-1. Read the task description and investigation notes
-2. Use read-only tools (read_file, code_search, glob) if you need to check something
-3. Use step_complete with next_steps to ADD steps to the plan
-4. Each step_complete call should add 2-5 new steps
-5. When the plan covers the full task, call step_complete with status='done'
-
-## What Makes a Good Plan Step
-
-GOOD: "Implement _parse_where() method in query.py — handle =, !=, >, < operators"
-GOOD: "Run pytest tests/test_query.py to verify WHERE clause works"
-BAD: "Implement the query engine" (too vague — which method? which file?)
-BAD: "Fix everything" (not a step)
-
-## Rules
-- You are a PLANNER, not a DEVELOPER. Do NOT write or edit code.
-- Each step should be doable in 5-10 tool calls by a developer
-- Include test/verification steps after every 2-3 implementation steps
-- Order by dependency: foundations first, complex features last
-"""
+# _PLANNER_IDENTITY imported from prompts.phases.plan
 
 
 class PhaseEngine:
