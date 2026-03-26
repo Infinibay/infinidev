@@ -85,14 +85,14 @@ class PhaseEngine:
         )
 
         if verbose:
-            _log(f"  {DIM}{len(answers)} answers collected{RESET}")
+            _log(f"  {DIM}{len(answers)} answers, {len(all_notes)} total notes{RESET}")
 
         # ── Phase 3: PLAN ─────────────────────────────────────────────
         if verbose:
             _log(f"\n{BOLD}📋 Phase 3: PLAN{RESET}")
 
         plan_steps = self._generate_plan(
-            agent, description, answers, strategy, verbose,
+            agent, description, answers, all_notes, strategy, verbose,
         )
 
         if not plan_steps:
@@ -109,7 +109,7 @@ class PhaseEngine:
             _log(f"\n{BOLD}🔨 Phase 4: EXECUTE{RESET}")
 
         result = self._execute_plan(
-            agent, description, expected_output, answers,
+            agent, description, expected_output, answers, all_notes,
             plan_steps, strategy, task_tools, verbose,
         )
 
@@ -204,6 +204,7 @@ class PhaseEngine:
             read_tools = None
 
         answers: list[dict[str, str]] = []
+        all_notes: list[str] = []  # ALL notes across ALL questions
         previous_text = ""
 
         for i, q in enumerate(questions):
@@ -243,19 +244,25 @@ class PhaseEngine:
                 summarizer_enabled=False,
             )
 
-            # Collect notes from the engine
+            # Collect ALL notes from the engine
+            if engine._last_state and engine._last_state.notes:
+                for note in engine._last_state.notes:
+                    if note not in all_notes:
+                        all_notes.append(note)
+
+            # Use all notes from this question as the answer summary
             answer_text = result or "No answer found."
             if engine._last_state and engine._last_state.notes:
-                # Use the last note as the answer (most recent finding)
-                answer_text = engine._last_state.notes[-1]
+                answer_text = " | ".join(engine._last_state.notes)
 
             answers.append({
                 "question": q_text,
-                "answer": answer_text[:500],
+                "answer": answer_text[:800],
             })
 
             if verbose:
-                _log(f"    {DIM}→ {answer_text[:100]}{RESET}")
+                note_count = len(engine._last_state.notes) if engine._last_state else 0
+                _log(f"    {DIM}→ {note_count} notes: {answer_text[:100]}{RESET}")
 
         return answers
 
@@ -266,17 +273,22 @@ class PhaseEngine:
         agent: Any,
         description: str,
         answers: list[dict[str, str]],
+        all_notes: list[str],
         strategy: PhaseStrategy,
         verbose: bool,
     ) -> list[dict[str, Any]]:
-        """Direct LLM call to generate a validated plan from Q&A."""
+        """Direct LLM call to generate a validated plan from Q&A + notes."""
         from infinidev.config.llm import get_litellm_params
-        from infinidev.engine.loop_context import build_system_prompt
 
         answers_text = "\n".join(
             f"  Q: {a['question']}\n  A: {a['answer']}"
             for a in answers
         )
+
+        notes_text = ""
+        if all_notes:
+            notes_lines = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(all_notes))
+            notes_text = f"\n## DETAILED NOTES FROM INVESTIGATION\n{notes_lines}\n"
 
         baseline_str = ""
         if strategy.auto_test and self._test_checkpoint:
@@ -288,6 +300,7 @@ class PhaseEngine:
             f"{strategy.plan_prompt}\n\n"
             f"## YOUR TASK\n{description}\n\n"
             f"## YOUR INVESTIGATION RESULTS\n{answers_text}\n"
+            f"{notes_text}"
             f"{baseline_str}\n"
             f"You have NO tools. Do NOT call any tools.\n"
             f"Output ONLY a JSON ARRAY (starting with [ and ending with ]) "
@@ -355,6 +368,7 @@ class PhaseEngine:
         description: str,
         expected_output: str,
         answers: list[dict[str, str]],
+        all_notes: list[str],
         plan_steps: list[dict[str, Any]],
         strategy: PhaseStrategy,
         all_tools: list | None,
@@ -364,6 +378,9 @@ class PhaseEngine:
             f"  Q: {a['question']}\n  A: {a['answer']}"
             for a in answers
         )
+        notes_text = ""
+        if all_notes:
+            notes_text = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(all_notes))
         completed: list[str] = []
         last_result = ""
 
@@ -396,8 +413,10 @@ class PhaseEngine:
                 "{{step_files}}", files_str
             )
 
+            notes_section = f"## NOTES\n{notes_text}\n\n" if notes_text else ""
             full_prompt = (
                 f"{step_prompt}\n\n"
+                f"{notes_section}"
                 f"## INVESTIGATION RESULTS\n{answers_text}\n\n"
                 f"## COMPLETED STEPS\n{completed_str}\n"
                 f"{progress_str}{regression_warning}"
