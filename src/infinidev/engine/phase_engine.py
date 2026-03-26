@@ -236,9 +236,10 @@ class PhaseEngine:
                 task_prompt=(inv_prompt, "Answer the question with add_note."),
                 verbose=verbose,
                 task_tools=read_tools,
-                max_iterations=2,
+                max_iterations=3,
                 max_total_tool_calls=strategy.investigate_max_tool_calls,
-                nudge_threshold=strategy.investigate_max_tool_calls - 1,
+                max_tool_calls_per_action=strategy.investigate_max_tool_calls,
+                nudge_threshold=strategy.investigate_max_tool_calls - 2,
                 summarizer_enabled=False,
             )
 
