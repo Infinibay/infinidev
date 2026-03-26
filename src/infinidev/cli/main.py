@@ -268,7 +268,7 @@ def handle_settings_command(parts: list[str]):
                 click.echo(click.style(f"Unknown setting: {setting_key}", fg="yellow"))
 
 
-def _run_single_prompt(prompt_text: str) -> None:
+def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
 
     Supports /explore and /brainstorm prefixes, otherwise runs as develop flow.
@@ -325,12 +325,23 @@ def _run_single_prompt(prompt_text: str) -> None:
                 click.echo(click.style(f"  Gather failed: {exc}", fg="yellow", dim=True))
 
         try:
-            engine = LoopEngine()
-            result = engine.execute(
-                agent=agent,
-                task_prompt=task_prompt_sp,
-                verbose=True,
-            )
+            if use_phase_engine:
+                from infinidev.engine.phase_engine import PhaseEngine
+                phase_eng = PhaseEngine()
+                result = phase_eng.execute(
+                    agent=agent,
+                    task_prompt=task_prompt_sp,
+                    task_type="feature",
+                    verbose=True,
+                )
+                engine = phase_eng  # for has_file_changes() check below
+            else:
+                engine = LoopEngine()
+                result = engine.execute(
+                    agent=agent,
+                    task_prompt=task_prompt_sp,
+                    verbose=True,
+                )
         finally:
             agent.deactivate()
 
@@ -368,7 +379,8 @@ def _run_single_prompt(prompt_text: str) -> None:
 @click.option("--classic", is_flag=True, hidden=True, help="Alias for --no-tui.")
 @click.option("--prompt", "-p", default=None, help="Run a single prompt non-interactively and exit.")
 @click.option("--model", "-m", default=None, help="Override LLM model for this run (e.g., ollama_chat/qwen3:32b).")
-def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
+@click.option("--think", is_flag=True, help="Use phase engine (ANALYZE → PLAN → EXECUTE) for deeper reasoning.")
+def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, think: bool):
     """Main entry point for Infinidev CLI."""
     # Apply model override in-memory (does NOT persist to settings.json)
     if model:
@@ -378,7 +390,7 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
 
     # Non-interactive --prompt mode
     if prompt:
-        _run_single_prompt(prompt)
+        _run_single_prompt(prompt, use_phase_engine=think)
         return
 
     if not (no_tui or classic):
@@ -406,6 +418,7 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
     analyst = AnalysisEngine()
     reviewer = ReviewEngine()
     _gather_next_task = False
+    _use_phase_engine = False
 
     # Register permission handler for classic CLI
     def _classic_permission_handler(tool_name: str, description: str, details: str) -> bool:
@@ -507,7 +520,8 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
                     click.echo(result)
                 elif cmd_result == "think":
                     _gather_next_task = True
-                    click.echo(click.style("Gather mode enabled for the next task. Send your prompt and infinidev will deeply analyze the codebase before acting.", fg="cyan"))
+                    _use_phase_engine = True
+                    click.echo(click.style("Phase mode enabled: ANALYZE → PLAN → EXECUTE. Send your task.", fg="cyan"))
                 continue
 
             from infinidev.config.settings import reload_all
@@ -621,6 +635,20 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
                         agent=agent,
                         task_prompt=task_prompt,
                         mode=current_flow,
+                    )
+                elif _use_phase_engine:
+                    _use_phase_engine = False  # Reset after use
+                    from infinidev.engine.phase_engine import PhaseEngine
+                    # Determine task type from analysis or default to feature
+                    _task_type = "feature"
+                    if analysis and hasattr(analysis, 'specification'):
+                        _task_type = analysis.specification.get("task_type", "feature")
+                    phase_eng = PhaseEngine()
+                    result = phase_eng.execute(
+                        agent=agent,
+                        task_prompt=task_prompt,
+                        task_type=_task_type,
+                        verbose=True,
                     )
                 else:
                     result = engine.execute(
