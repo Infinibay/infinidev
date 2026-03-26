@@ -297,9 +297,13 @@ class PhaseEngine:
         )
 
         llm_params = get_litellm_params()
-        system_prompt = build_system_prompt(
-            agent.backstory,
-            identity_override=getattr(agent, '_system_prompt_identity', None),
+        # Minimal system prompt for PLAN phase — the full LOOP_PROTOCOL
+        # confuses the model (it tries to call step_complete or use tools
+        # instead of outputting a JSON plan)
+        system_prompt = (
+            "You are a software engineering planner. Your ONLY job is to output "
+            "a JSON array of implementation steps. No tool calls, no explanations, "
+            "no markdown — just a JSON array starting with [ and ending with ]."
         )
         messages = [
             {"role": "system", "content": system_prompt},
