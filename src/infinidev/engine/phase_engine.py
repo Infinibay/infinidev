@@ -189,10 +189,12 @@ class PhaseEngine:
             {"role": "user", "content": prompt},
         ]
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 response = call_llm(llm_params, messages)
                 content = self._clean_llm_text(response)
+                if verbose:
+                    _log(f"  {DIM}Q attempt {attempt+1}: {content[:150]}...{RESET}")
 
                 is_valid, questions, errors = validate_questions(
                     content, strategy.questions_min, strategy.questions_max,
