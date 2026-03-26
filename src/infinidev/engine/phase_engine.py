@@ -290,7 +290,10 @@ class PhaseEngine:
             f"## YOUR INVESTIGATION RESULTS\n{answers_text}\n"
             f"{baseline_str}\n"
             f"You have NO tools. Do NOT call any tools.\n"
-            f"Output ONLY a JSON array of steps. No other text."
+            f"Output ONLY a JSON ARRAY (starting with [ and ending with ]) "
+            f"containing ALL steps. NOT a single object — an ARRAY of objects.\n"
+            f"Example format: [{{{{"step": 1, "description": "...", "files": ["..."]}}}}, "
+            f"{{{{"step": 2, "description": "...", "files": []}}}}, ...]"
         )
 
         llm_params = get_litellm_params()

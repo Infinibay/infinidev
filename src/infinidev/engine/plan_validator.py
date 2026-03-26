@@ -42,7 +42,10 @@ def validate_plan(
     else:
         steps = plan_json
 
-    if not isinstance(steps, list):
+    # If model returned a single step object instead of array, wrap it
+    if isinstance(steps, dict) and ("step" in steps or "description" in steps):
+        steps = [steps]
+    elif not isinstance(steps, list):
         return False, [], ["Plan must be a JSON array of step objects."]
 
     errors: list[str] = []
