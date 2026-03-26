@@ -430,9 +430,10 @@ class PhaseEngine:
                 task_prompt=(full_prompt, expected_output),
                 verbose=verbose,
                 task_tools=all_tools,
-                max_iterations=3,
+                max_iterations=5,
                 max_total_tool_calls=strategy.execute_max_tool_calls_per_step,
-                nudge_threshold=strategy.execute_max_tool_calls_per_step - 2,
+                max_tool_calls_per_action=strategy.execute_max_tool_calls_per_step,
+                nudge_threshold=strategy.execute_max_tool_calls_per_step - 3,
                 summarizer_enabled=True,
             )
 

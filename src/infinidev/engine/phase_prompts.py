@@ -455,49 +455,85 @@ Files you may modify: {{step_files}}
 
 ## RULES
 - ONLY implement what this step describes — nothing more
-- If creating a new file: use write_file (keep it short, just this step's code)
-- If modifying existing file: use edit_file (old_string → new_string)
-- Do NOT rewrite entire files to add a function — use edit_file to insert
-- After editing, verify: run a quick import check or the relevant tests
-- Call step_complete with a summary of what you added/changed
+- If creating a new file: use write_file (focused on this step only)
+- If modifying existing file: use edit_file with path, old_string, new_string
+- Do NOT rewrite entire files — use edit_file to add/modify specific sections
+- After EVERY edit, verify with: python -c "import module_name"
+- Call step_complete with a summary of what you changed
 
-## EXAMPLES OF GOOD EXECUTION
+## HOW TO USE edit_file
 
-Example — Creating a file skeleton:
-  1. write_file: path="src/cache.py", content="class Cache:\\n    def __init__(self):\\n        self._store = {{}}\\n\\n    def get(self, key):\\n        pass  # TODO\\n\\n    def set(self, key, value):\\n        pass  # TODO\\n"
-  2. execute_command: "python -c 'from src.cache import Cache; c = Cache(); print(type(c))'"
-     → <class 'src.cache.Cache'>
-  3. step_complete: "Created Cache class skeleton with get/set stubs"
+edit_file needs 3 params: path, old_string (EXACT text in file), new_string.
+If old_string doesn't match → read_file first to see the exact current text.
+To INSERT code before a function:
+  old_string="def existing():" new_string="def new_thing():\\n    ...\\n\\ndef existing():"
 
-Example — Adding a method to existing file:
-  1. read_file: "src/cache.py" (last 5 lines to find insertion point)
-  2. edit_file: path="src/cache.py",
-     old_string="    def set(self, key, value):\\n        pass  # TODO",
-     new_string="    def set(self, key, value, ttl=None):\\n        self._store[key] = {{'value': value, 'expires': time.time() + ttl if ttl else None}}\\n\\n    def get(self, key):\\n        entry = self._store.get(key)\\n        if not entry: return None\\n        if entry['expires'] and time.time() > entry['expires']:\\n            del self._store[key]\\n            return None\\n        return entry['value']"
-  3. execute_command: "python -c 'from src.cache import Cache; c = Cache(); c.set(\"k\", 42); print(c.get(\"k\"))'"
-     → 42
-  4. step_complete: "Implemented get/set with TTL expiration"
+## EXAMPLES OF GOOD STEP EXECUTION
 
-Example — Running tests (verification step):
-  1. execute_command: "pytest tests/test_cache.py --tb=short -q 2>&1 | tail -10"
-     → "8 passed, 4 failed"
-  2. step_complete: "Progress: 8/12 tests passing (up from 3)"
+Example 1 — Creating a new file:
+  1. write_file: path="validator.py", content=(class skeleton with stubs, 30-80 lines)
+  2. execute_command: "python -c 'from validator import Validator; print(type(Validator()))'"
+     → <class 'validator.Validator'>
+  3. step_complete: summary="Created Validator skeleton with validate() and add_rule() stubs"
 
-## EXAMPLES OF BAD EXECUTION (DO NOT DO THIS)
+Example 2 — Adding a method to existing file:
+  1. read_file: path="validator.py", offset=5, limit=3
+     Shows: "    def validate(self, data):\\n        pass"
+  2. edit_file: path="validator.py",
+     old_string="    def validate(self, data):\\n        pass",
+     new_string="    def validate(self, data):\\n        errors = []\\n        for rule in self.rules:\\n            if not rule(data):\\n                errors.append(rule.__name__)\\n        return errors"
+  3. execute_command: "python -c 'from validator import Validator; print(Validator().validate({}))'"
+     → []
+  4. step_complete: summary="Implemented validate() — iterates rules, collects errors"
 
-Bad — Rewriting entire file:
-  Step says "Add TTL support to Cache.set()"
-  write_file: path="src/cache.py", content="(entire 300-line file)"
-  WHY BAD: Overwrites everything. Previous working code might break. Use edit_file.
+Example 3 — When edit_file fails (old_string mismatch):
+  1. edit_file: old_string="def process(data):" → ERROR: not found
+  2. read_file: path="handler.py", offset=20, limit=5
+     Shows: "    def process(self, data):"  (has self param and indentation!)
+  3. edit_file: path="handler.py",
+     old_string="    def process(self, data):",
+     new_string="    def process(self, data, strict=True):"
+  4. step_complete: summary="Added strict parameter"
 
-Bad — Going beyond the step:
-  Step says "Add set() method" but you also add delete(), clear(), stats()
-  WHY BAD: One step = one thing. Other methods go in their own steps.
+Example 4 — Running tests to check progress:
+  1. execute_command: "python -m pytest tests/ --tb=no -q 2>&1 | tail -5"
+     → "23 passed, 15 failed"
+  2. step_complete: summary="Progress: 23/38 tests passing (up from 15)"
 
-Bad — No verification:
-  1. edit_file: (changes code)
+Example 5 — Fixing a test failure:
+  1. execute_command: "pytest tests/test_validator.py::test_empty -v --tb=short"
+     → FAILED: got None, expected []
+  2. read_file: path="validator.py", offset=8, limit=5
+  3. edit_file: path="validator.py",
+     old_string="        if not data:\\n            return None",
+     new_string="        if not data:\\n            return []"
+  4. execute_command: "pytest tests/test_validator.py::test_empty -v"
+     → PASSED
+  5. step_complete: summary="Fixed empty input — return [] not None"
+
+## BAD EXECUTION (DO NOT DO THIS)
+
+Bad 1 — Rewriting entire file to add one method:
+  write_file: path="validator.py", content="(entire 400-line file)"
+  WHY BAD: Overwrites working code. Use edit_file to modify specific sections.
+
+Bad 2 — Going beyond the step scope:
+  Step says "Add validate()" but you also add add_rule(), remove_rule(), export()
+  WHY BAD: One step = one feature. Other methods go in their own steps.
+
+Bad 3 — No verification:
+  1. edit_file: (changes)
   2. step_complete: "Done"
-  WHY BAD: Didn't verify. Always check for syntax errors or run a quick test.
+  WHY BAD: Always verify: python -c "import module_name"
+
+Bad 4 — Reading same file multiple times without acting:
+  1. read_file: "validator.py"
+  2. read_file: "validator.py" (same file again!)
+  WHY BAD: Read once, then act. Don't waste tool calls.
+
+Bad 5 — Wrong edit_file params:
+  edit_file: path="x.py", new_string="code" (MISSING old_string!)
+  WHY BAD: edit_file needs ALL THREE: path, old_string, new_string.
 """
 
 
@@ -567,7 +603,7 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_max_tool_calls=12,
         plan_min_steps=2,
         plan_max_step_files=2,
-        execute_max_tool_calls_per_step=6,
+        execute_max_tool_calls_per_step=12,
         auto_test=True,
     ),
     "feature": PhaseStrategy(
@@ -581,7 +617,7 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_max_tool_calls=12,
         plan_min_steps=4,
         plan_max_step_files=2,
-        execute_max_tool_calls_per_step=8,
+        execute_max_tool_calls_per_step=15,
         auto_test=True,
         anti_rewrite=True,
     ),
@@ -596,7 +632,7 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_max_tool_calls=12,
         plan_min_steps=3,
         plan_max_step_files=3,
-        execute_max_tool_calls_per_step=8,
+        execute_max_tool_calls_per_step=15,
         auto_test=True,
         anti_rewrite=True,
     ),
@@ -611,7 +647,7 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_max_tool_calls=12,
         plan_min_steps=1,
         plan_max_step_files=3,
-        execute_max_tool_calls_per_step=8,
+        execute_max_tool_calls_per_step=15,
     ),
     "sysadmin": PhaseStrategy(
         questions_prompt=_OTHER_QUESTIONS,
@@ -624,7 +660,7 @@ STRATEGIES: dict[str, PhaseStrategy] = {
         investigate_max_tool_calls=12,
         plan_min_steps=1,
         plan_max_step_files=3,
-        execute_max_tool_calls_per_step=8,
+        execute_max_tool_calls_per_step=15,
     ),
 }
 
