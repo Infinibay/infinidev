@@ -1,55 +1,47 @@
-"""Phase-based execution engine: ANALYZE → PLAN → EXECUTE.
+"""Phase-based execution: QUESTIONS → INVESTIGATE → PLAN → EXECUTE.
 
-Orchestrates three phases using the LoopEngine internally:
-1. ANALYZE: Read-only exploration, mandatory note-taking
-2. PLAN: Generate granular plan, engine-validated
-3. EXECUTE: Step-by-step implementation with test verification
-
-Each phase uses task-type-specific prompts with concrete examples.
+1. QUESTIONS: Model generates questions about the task (direct LLM call)
+2. INVESTIGATE: Engine creates 1 step per question (read-only LoopEngine)
+3. PLAN: Model generates granular plan from answers (direct LLM call)
+4. EXECUTE: Step-by-step implementation with test verification (LoopEngine)
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from infinidev.engine.loop_engine import LoopEngine
-from infinidev.engine.loop_models import LoopState
+from infinidev.engine.llm_client import call_llm
 from infinidev.engine.phase_prompts import get_strategy, PhaseStrategy
-from infinidev.engine.plan_validator import validate_plan, format_rejection
+from infinidev.engine.plan_validator import (
+    validate_plan, validate_questions, format_rejection,
+)
 from infinidev.engine.test_checkpoint import TestCheckpoint
 from infinidev.engine.engine_logging import (
     log as _log,
-    emit_log as _emit_log,
-    emit_loop_event as _emit_loop_event,
     DIM, BOLD, RESET, CYAN, GREEN, YELLOW, RED,
 )
 
 logger = logging.getLogger(__name__)
 
-# Tools that are read-only (allowed in ANALYZE phase)
+# Tools allowed during INVESTIGATE phase (read-only)
 _READ_ONLY_TOOLS = {
     "read_file", "list_directory", "glob", "code_search",
     "project_structure", "find_definition", "find_references",
     "list_symbols", "search_symbols", "get_symbol_code",
     "search_knowledge", "read_findings", "search_findings",
-    "web_search", "web_fetch",
+    "web_search", "web_fetch", "execute_command",
 }
-
-# execute_command is allowed in ANALYZE but only for read operations
-# The engine allows it but the prompt says "read-only commands only"
-_ANALYZE_TOOLS = _READ_ONLY_TOOLS | {"execute_command"}
 
 
 class PhaseEngine:
-    """Three-phase execution: ANALYZE → PLAN → EXECUTE.
-
-    Uses LoopEngine internally for each phase with different configs.
-    """
+    """Four-phase execution: QUESTIONS → INVESTIGATE → PLAN → EXECUTE."""
 
     def __init__(self) -> None:
-        self._last_file_tracker = None
+        self._last_engine: LoopEngine | None = None
         self._test_checkpoint: TestCheckpoint | None = None
 
     def execute(
@@ -62,49 +54,49 @@ class PhaseEngine:
         task_tools: list | None = None,
         test_command: str | None = None,
     ) -> str:
-        """Run the full three-phase execution.
-
-        Args:
-            agent: InfinidevAgent instance
-            task_prompt: (description, expected_output) tuple
-            task_type: One of "bug", "feature", "refactor", "other", "sysadmin"
-            verbose: Enable logging
-            task_tools: Tools available to the agent
-            test_command: Override test command (auto-detected if None)
-
-        Returns:
-            Final result string
-        """
         strategy = get_strategy(task_type)
         description, expected_output = task_prompt
-        all_tools = task_tools
 
         if verbose:
             _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — strategy: {task_type}")
 
-        # Initialize test checkpoint
+        # Init test checkpoint
         from infinidev.tools.base.context import get_current_workspace_path
         workdir = get_current_workspace_path()
         self._test_checkpoint = TestCheckpoint(test_command, workdir)
 
-        # ── Phase 1: ANALYZE ──────────────────────────────────────────
+        # ── Phase 1: QUESTIONS ────────────────────────────────────────
         if verbose:
-            _log(f"\n{BOLD}📖 Phase 1: ANALYZE{RESET}")
+            _log(f"\n{BOLD}❓ Phase 1: QUESTIONS{RESET}")
 
-        analyze_notes = self._run_analyze(
-            agent, description, strategy, all_tools, verbose,
+        questions = self._generate_questions(agent, description, strategy, verbose)
+
+        if verbose:
+            _log(f"  {DIM}{len(questions)} questions generated{RESET}")
+            for i, q in enumerate(questions):
+                _log(f"    {DIM}{i+1}. {q['question'][:80]}{RESET}")
+
+        # ── Phase 2: INVESTIGATE ──────────────────────────────────────
+        if verbose:
+            _log(f"\n{BOLD}🔍 Phase 2: INVESTIGATE{RESET}")
+
+        answers = self._investigate(
+            agent, questions, strategy, task_tools, verbose,
         )
 
-        # ── Phase 2: PLAN ─────────────────────────────────────────────
         if verbose:
-            _log(f"\n{BOLD}📋 Phase 2: PLAN{RESET}")
+            _log(f"  {DIM}{len(answers)} answers collected{RESET}")
 
-        plan_steps = self._run_plan(
-            agent, description, analyze_notes, strategy, verbose,
+        # ── Phase 3: PLAN ─────────────────────────────────────────────
+        if verbose:
+            _log(f"\n{BOLD}📋 Phase 3: PLAN{RESET}")
+
+        plan_steps = self._generate_plan(
+            agent, description, answers, strategy, verbose,
         )
 
         if not plan_steps:
-            return "Failed to generate a valid plan. Try with /think for deeper analysis."
+            return "Failed to generate a valid plan."
 
         if verbose:
             _log(f"  {DIM}Plan: {len(plan_steps)} steps{RESET}")
@@ -112,111 +104,45 @@ class PhaseEngine:
                 files_str = ", ".join(s.get("files", [])) or "(verify)"
                 _log(f"    {DIM}{s['step']}. {s['description'][:70]} [{files_str}]{RESET}")
 
-        # ── Phase 3: EXECUTE ──────────────────────────────────────────
+        # ── Phase 4: EXECUTE ──────────────────────────────────────────
         if verbose:
-            _log(f"\n{BOLD}🔨 Phase 3: EXECUTE{RESET}")
+            _log(f"\n{BOLD}🔨 Phase 4: EXECUTE{RESET}")
 
-        result = self._run_execute(
-            agent, description, expected_output, analyze_notes,
-            plan_steps, strategy, all_tools, verbose,
+        result = self._execute_plan(
+            agent, description, expected_output, answers,
+            plan_steps, strategy, task_tools, verbose,
         )
 
         # Final test run
         if strategy.auto_test and self._test_checkpoint:
             passed, total = self._test_checkpoint.run()
-            if verbose:
-                progress = self._test_checkpoint.progress_str()
-                _log(f"\n  {BOLD}Final: {progress}{RESET}")
+            if verbose and total > 0:
+                _log(f"\n  {BOLD}Final: {self._test_checkpoint.progress_str()}{RESET}")
 
-        self._last_file_tracker = getattr(self, '_last_engine', None)
         return result
 
-    def _run_analyze(
+    # ── Phase 1: Generate questions ───────────────────────────────────
+
+    def _generate_questions(
         self,
         agent: Any,
         description: str,
-        strategy: PhaseStrategy,
-        all_tools: list | None,
-        verbose: bool,
-    ) -> list[str]:
-        """Phase 1: Read-only analysis with mandatory note-taking.
-
-        Returns the list of notes collected.
-        """
-        # Filter tools to read-only
-        if all_tools:
-            analyze_tools = [
-                t for t in all_tools
-                if getattr(t, 'name', '') in _ANALYZE_TOOLS
-            ]
-        else:
-            analyze_tools = None  # Let the engine use agent's tools
-
-        # Build analyze prompt
-        analyze_prompt = (
-            f"{strategy.analyze_prompt}\n\n"
-            f"## YOUR TASK\n{description}\n\n"
-            f"When done analyzing, call step_complete with status='done' "
-            f"and a summary of your findings."
-        )
-
-        engine = LoopEngine()
-        engine.execute(
-            agent=agent,
-            task_prompt=(analyze_prompt, "Complete analysis with notes."),
-            verbose=verbose,
-            task_tools=analyze_tools,
-            max_iterations=5,
-            max_total_tool_calls=strategy.analyze_max_tool_calls,
-            nudge_threshold=0,  # Don't nudge in analyze — let it explore
-            summarizer_enabled=False,
-        )
-
-        # Extract notes from engine state
-        notes = []
-        if engine._last_state:
-            notes = list(engine._last_state.notes)
-
-        if verbose:
-            _log(f"  {DIM}Analysis complete: {len(notes)} notes collected{RESET}")
-
-        return notes
-
-    def _run_plan(
-        self,
-        agent: Any,
-        description: str,
-        notes: list[str],
         strategy: PhaseStrategy,
         verbose: bool,
     ) -> list[dict[str, Any]]:
-        """Phase 2: Generate and validate a granular plan.
-
-        Uses a direct LLM call (no tools, no loop) — the model just outputs
-        a JSON plan based on the analysis notes.
-
-        Returns validated list of step dicts, or empty list on failure.
-        """
-        from infinidev.engine.llm_client import call_llm
+        """Direct LLM call to generate investigation questions."""
         from infinidev.config.llm import get_litellm_params
         from infinidev.engine.loop_context import build_system_prompt
 
-        notes_text = "\n".join(f"  {i + 1}. {n}" for i, n in enumerate(notes))
-
-        # Test baseline if auto_test enabled
-        baseline_str = ""
-        if strategy.auto_test and self._test_checkpoint:
-            passed, total = self._test_checkpoint.run()
-            if total > 0:
-                baseline_str = f"\nTest baseline: {passed}/{total} passing\n"
-
-        plan_prompt = (
-            f"{strategy.plan_prompt}\n\n"
-            f"## YOUR TASK\n{description}\n\n"
-            f"## YOUR ANALYSIS NOTES\n{notes_text}\n"
-            f"{baseline_str}\n"
-            f"You have NO tools available. Do NOT call any tools.\n"
-            f"Output ONLY a JSON array of steps. No other text, no markdown fences."
+        prompt = (
+            f"You are preparing to work on a task. Before starting, generate "
+            f"questions that will give you everything you need to create a "
+            f"detailed implementation plan.\n\n"
+            f"Task: {description}\n\n"
+            f"{strategy.questions_prompt}\n\n"
+            f"Output ONLY a JSON array of questions. No other text.\n"
+            f"Each question: {{\"question\": \"...\", \"intent\": \"...\"}}\n"
+            f"Generate {strategy.questions_min}-{strategy.questions_max} questions."
         )
 
         llm_params = get_litellm_params()
@@ -224,34 +150,164 @@ class PhaseEngine:
             agent.backstory,
             identity_override=getattr(agent, '_system_prompt_identity', None),
         )
-
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": plan_prompt},
+            {"role": "user", "content": prompt},
         ]
 
-        max_attempts = 2
-        for attempt in range(max_attempts):
+        for attempt in range(2):
             try:
                 response = call_llm(llm_params, messages)
-                content = response.choices[0].message.content or ""
-                content = content.strip()
+                content = self._clean_llm_text(response)
 
-                # Strip markdown code fences if present
-                if content.startswith("```"):
-                    content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-                    if content.endswith("```"):
-                        content = content[:-3]
-                    content = content.strip()
-                if content.startswith("json"):
-                    content = content[4:].strip()
+                is_valid, questions, errors = validate_questions(
+                    content, strategy.questions_min, strategy.questions_max,
+                )
+                if is_valid:
+                    return questions
 
-                if not content:
-                    continue
+                if verbose:
+                    for err in errors:
+                        _log(f"  {YELLOW}⚠ {err}{RESET}")
 
-                # Validate the plan
+                if attempt == 0:
+                    rejection = format_rejection(errors)
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": rejection})
+
+            except Exception as exc:
+                logger.warning("Question generation failed: %s", str(exc)[:200])
+
+        # Fallback to default questions
+        if verbose:
+            _log(f"  {YELLOW}Using fallback questions{RESET}")
+        return [{"question": q, "intent": "fallback"} for q in strategy.fallback_questions]
+
+    # ── Phase 2: Investigate each question ────────────────────────────
+
+    def _investigate(
+        self,
+        agent: Any,
+        questions: list[dict[str, Any]],
+        strategy: PhaseStrategy,
+        all_tools: list | None,
+        verbose: bool,
+    ) -> list[dict[str, str]]:
+        """Run one mini-LoopEngine per question with read-only tools."""
+        # Filter to read-only tools
+        if all_tools:
+            read_tools = [
+                t for t in all_tools
+                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
+            ]
+        else:
+            read_tools = None
+
+        answers: list[dict[str, str]] = []
+        previous_text = ""
+
+        for i, q in enumerate(questions):
+            q_text = q["question"]
+            if verbose:
+                _log(f"  {CYAN}Q{i+1}/{len(questions)}: {q_text[:80]}{RESET}")
+
+            # Build previous answers context
+            if answers:
+                prev_lines = "\n".join(
+                    f"  Q: {a['question']}\n  A: {a['answer']}"
+                    for a in answers
+                )
+                previous_text = f"## PREVIOUS ANSWERS\n{prev_lines}"
+
+            # Format the investigate prompt
+            inv_prompt = strategy.investigate_prompt.replace(
+                "{{q_num}}", str(i + 1)
+            ).replace(
+                "{{q_total}}", str(len(questions))
+            ).replace(
+                "{{question}}", q_text
+            ).replace(
+                "{{previous_answers}}", previous_text
+            )
+
+            engine = LoopEngine()
+            result = engine.execute(
+                agent=agent,
+                task_prompt=(inv_prompt, "Answer the question with add_note."),
+                verbose=verbose,
+                task_tools=read_tools,
+                max_iterations=2,
+                max_total_tool_calls=strategy.investigate_max_tool_calls,
+                nudge_threshold=strategy.investigate_max_tool_calls - 1,
+                summarizer_enabled=False,
+            )
+
+            # Collect notes from the engine
+            answer_text = result or "No answer found."
+            if engine._last_state and engine._last_state.notes:
+                # Use the last note as the answer (most recent finding)
+                answer_text = engine._last_state.notes[-1]
+
+            answers.append({
+                "question": q_text,
+                "answer": answer_text[:500],
+            })
+
+            if verbose:
+                _log(f"    {DIM}→ {answer_text[:100]}{RESET}")
+
+        return answers
+
+    # ── Phase 3: Generate plan ────────────────────────────────────────
+
+    def _generate_plan(
+        self,
+        agent: Any,
+        description: str,
+        answers: list[dict[str, str]],
+        strategy: PhaseStrategy,
+        verbose: bool,
+    ) -> list[dict[str, Any]]:
+        """Direct LLM call to generate a validated plan from Q&A."""
+        from infinidev.config.llm import get_litellm_params
+        from infinidev.engine.loop_context import build_system_prompt
+
+        answers_text = "\n".join(
+            f"  Q: {a['question']}\n  A: {a['answer']}"
+            for a in answers
+        )
+
+        baseline_str = ""
+        if strategy.auto_test and self._test_checkpoint:
+            passed, total = self._test_checkpoint.run()
+            if total > 0:
+                baseline_str = f"\nTest baseline: {passed}/{total} passing\n"
+
+        prompt = (
+            f"{strategy.plan_prompt}\n\n"
+            f"## YOUR TASK\n{description}\n\n"
+            f"## YOUR INVESTIGATION RESULTS\n{answers_text}\n"
+            f"{baseline_str}\n"
+            f"You have NO tools. Do NOT call any tools.\n"
+            f"Output ONLY a JSON array of steps. No other text."
+        )
+
+        llm_params = get_litellm_params()
+        system_prompt = build_system_prompt(
+            agent.backstory,
+            identity_override=getattr(agent, '_system_prompt_identity', None),
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+
+        for attempt in range(2):
+            try:
+                response = call_llm(llm_params, messages)
+                content = self._clean_llm_text(response)
+
                 is_valid, steps, errors = validate_plan(content, strategy)
-
                 if is_valid:
                     return steps
 
@@ -259,66 +315,61 @@ class PhaseEngine:
                     for err in errors:
                         _log(f"  {YELLOW}⚠ {err}{RESET}")
 
-                if attempt < max_attempts - 1:
+                if attempt == 0:
                     rejection = format_rejection(errors)
                     messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": rejection})
                     if verbose:
-                        _log(f"  {DIM}Re-prompting with validation feedback...{RESET}")
+                        _log(f"  {DIM}Re-prompting...{RESET}")
 
             except Exception as exc:
-                logger.warning("Plan generation failed (attempt %d): %s", attempt + 1, str(exc)[:200])
-                if verbose:
-                    _log(f"  {RED}⚠ Plan generation error: {str(exc)[:100]}{RESET}")
+                logger.warning("Plan generation failed: %s", str(exc)[:200])
 
-        logger.warning("Plan validation failed after %d attempts", max_attempts)
         return []
 
-    def _run_execute(
+    # ── Phase 4: Execute plan ─────────────────────────────────────────
+
+    def _execute_plan(
         self,
         agent: Any,
         description: str,
         expected_output: str,
-        notes: list[str],
+        answers: list[dict[str, str]],
         plan_steps: list[dict[str, Any]],
         strategy: PhaseStrategy,
         all_tools: list | None,
         verbose: bool,
     ) -> str:
-        """Phase 3: Execute the plan step by step with verification.
-
-        Returns the final result string.
-        """
-        notes_text = "\n".join(f"  {i + 1}. {n}" for i, n in enumerate(notes))
-        completed_summaries: list[str] = []
+        answers_text = "\n".join(
+            f"  Q: {a['question']}\n  A: {a['answer']}"
+            for a in answers
+        )
+        completed: list[str] = []
         last_result = ""
 
         for step in plan_steps:
             step_num = step["step"]
             step_desc = step["description"]
             step_files = step.get("files", [])
-            total_steps = len(plan_steps)
+            total = len(plan_steps)
 
-            # Build per-step prompt
-            files_str = ", ".join(step_files) if step_files else "(no files — verification step)"
+            files_str = ", ".join(step_files) if step_files else "(verification step)"
             completed_str = "\n".join(
-                f"  ✓ Step {i + 1}: {s}" for i, s in enumerate(completed_summaries)
-            ) if completed_summaries else "  (none yet)"
+                f"  ✓ {s}" for s in completed
+            ) if completed else "  (none yet)"
 
-            # Progress info from test checkpoint
             progress_str = ""
             regression_warning = ""
             if self._test_checkpoint and self._test_checkpoint.total > 0:
                 progress_str = f"\n{self._test_checkpoint.progress_str()}\n"
-                regression_warning = self._test_checkpoint.regression_warning()
-                if regression_warning:
-                    regression_warning = f"\n{regression_warning}\n"
+                rw = self._test_checkpoint.regression_warning()
+                if rw:
+                    regression_warning = f"\n{rw}\n"
 
-            # Format execute prompt with step details
             step_prompt = strategy.execute_prompt.replace(
                 "{{step_num}}", str(step_num)
             ).replace(
-                "{{total_steps}}", str(total_steps)
+                "{{total_steps}}", str(total)
             ).replace(
                 "{{step_description}}", step_desc
             ).replace(
@@ -327,16 +378,14 @@ class PhaseEngine:
 
             full_prompt = (
                 f"{step_prompt}\n\n"
-                f"## ANALYSIS NOTES\n{notes_text}\n\n"
+                f"## INVESTIGATION RESULTS\n{answers_text}\n\n"
                 f"## COMPLETED STEPS\n{completed_str}\n"
-                f"{progress_str}"
-                f"{regression_warning}"
+                f"{progress_str}{regression_warning}"
             )
 
             if verbose:
-                _log(f"\n  {CYAN}Step {step_num}/{total_steps}: {step_desc[:80]}{RESET}")
+                _log(f"\n  {CYAN}Step {step_num}/{total}: {step_desc[:80]}{RESET}")
 
-            # Run the step
             engine = LoopEngine()
             result = engine.execute(
                 agent=agent,
@@ -349,30 +398,49 @@ class PhaseEngine:
                 summarizer_enabled=True,
             )
 
-            # Store last engine for file tracker access
             self._last_engine = engine
-
             last_result = result or step_desc
-            completed_summaries.append(f"{step_desc}: {(result or 'done')[:100]}")
+            completed.append(f"Step {step_num}: {step_desc}: {(result or 'done')[:80]}")
 
-            # Auto-run tests after code-modifying steps
+            # Auto-test after code-modifying steps
             if strategy.auto_test and step_files and self._test_checkpoint:
-                passed, total = self._test_checkpoint.run()
-                if verbose:
+                passed, total_tests = self._test_checkpoint.run()
+                if verbose and total_tests > 0:
                     progress = self._test_checkpoint.progress_str()
                     color = RED if self._test_checkpoint.has_regression() else GREEN
                     _log(f"    {color}{progress}{RESET}")
 
         return last_result
 
-    # ── Public accessors (match LoopEngine interface) ─────────────────
+    # ── Helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _clean_llm_text(response: Any) -> str:
+        """Extract and clean text from LLM response."""
+        content = response.choices[0].message.content or ""
+        content = content.strip()
+        # Strip <think> blocks
+        content = re.sub(
+            r"<(?:think|thinking)>.*?</(?:think|thinking)>",
+            "", content, flags=re.DOTALL | re.IGNORECASE,
+        )
+        content = content.strip()
+        # Strip markdown code fences
+        if content.startswith("```"):
+            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+        if content.startswith("json"):
+            content = content[4:].strip()
+        return content
 
     def get_changed_files_summary(self) -> str:
-        if hasattr(self, '_last_engine') and self._last_engine:
+        if self._last_engine:
             return self._last_engine.get_changed_files_summary()
         return ""
 
     def has_file_changes(self) -> bool:
-        if hasattr(self, '_last_engine') and self._last_engine:
+        if self._last_engine:
             return self._last_engine.has_file_changes()
         return False

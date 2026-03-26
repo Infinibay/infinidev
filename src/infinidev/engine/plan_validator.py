@@ -1,7 +1,8 @@
-"""Validate model-generated plans against strategy constraints.
+"""Validate model-generated plans and questions against strategy constraints.
 
 Checks that plans are granular enough, have specific file references,
 include test verification steps, and aren't too vague.
+Also validates question lists from the QUESTIONS phase.
 """
 
 from __future__ import annotations
@@ -139,6 +140,66 @@ def _extract_json_array(text: str) -> list | None:
                 except json.JSONDecodeError:
                     return None
     return None
+
+
+def validate_questions(
+    questions_json: str | list[dict],
+    min_count: int = 2,
+    max_count: int = 10,
+) -> tuple[bool, list[dict[str, Any]], list[str]]:
+    """Validate model-generated questions.
+
+    Returns (is_valid, parsed_questions, error_messages).
+    """
+    if isinstance(questions_json, str):
+        try:
+            questions = json.loads(questions_json)
+        except json.JSONDecodeError:
+            questions = _extract_json_array(questions_json)
+            if questions is None:
+                return False, [], ["Could not parse questions as JSON. Output a JSON array."]
+    else:
+        questions = questions_json
+
+    if not isinstance(questions, list):
+        return False, [], ["Questions must be a JSON array."]
+
+    errors: list[str] = []
+
+    if len(questions) < min_count:
+        errors.append(f"Too few questions ({len(questions)}). Generate at least {min_count}.")
+
+    if len(questions) > max_count:
+        errors.append(f"Too many questions ({len(questions)}). Maximum is {max_count}.")
+        questions = questions[:max_count]
+
+    vague_patterns = [
+        "what is this project", "what language", "how does everything",
+        "can you explain", "what should i do", "tell me about",
+    ]
+
+    validated = []
+    for i, q in enumerate(questions):
+        if not isinstance(q, dict):
+            errors.append(f"Question {i + 1}: must be a JSON object with 'question' key.")
+            continue
+
+        text = q.get("question", "")
+        if not text or len(text) < 15:
+            errors.append(f"Question {i + 1}: too short or empty. Be specific.")
+            continue
+
+        if any(p in text.lower() for p in vague_patterns):
+            errors.append(f"Question {i + 1}: too vague: \"{text}\". Ask about something specific.")
+            continue
+
+        validated.append({
+            "question": text,
+            "intent": q.get("intent", "general"),
+        })
+
+    is_valid = len(errors) == 0 and len(validated) >= min_count
+    return is_valid, validated, errors
 
 
 def format_rejection(errors: list[str]) -> str:
