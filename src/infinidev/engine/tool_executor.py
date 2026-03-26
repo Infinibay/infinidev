@@ -225,7 +225,10 @@ def capture_pre_content(
     file_path = extract_file_path_from_args(tool_name, arguments)
     if not file_path:
         return None
-    file_path = _os.path.abspath(_os.path.expanduser(file_path))
+    try:
+        file_path = _os.path.abspath(_os.path.expanduser(file_path))
+    except (OSError, ValueError):
+        return None
     if not _os.path.isfile(file_path):
         return None  # new file — original is empty
     try:
@@ -269,7 +272,10 @@ def maybe_emit_file_change(
     file_path = extract_file_path_from_args(tool_name, arguments)
     if not file_path:
         return
-    file_path = _os.path.abspath(_os.path.expanduser(file_path))
+    try:
+        file_path = _os.path.abspath(_os.path.expanduser(file_path))
+    except (OSError, ValueError):
+        return
 
     reason = extract_reason_from_args(arguments)
     if reason:
