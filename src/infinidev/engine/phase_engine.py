@@ -192,8 +192,15 @@ class PhaseEngine:
     ) -> list[dict[str, Any]]:
         """Phase 2: Generate and validate a granular plan.
 
+        Uses a direct LLM call (no tools, no loop) — the model just outputs
+        a JSON plan based on the analysis notes.
+
         Returns validated list of step dicts, or empty list on failure.
         """
+        from infinidev.engine.llm_client import call_llm
+        from infinidev.config.llm import get_litellm_params
+        from infinidev.engine.loop_context import build_system_prompt
+
         notes_text = "\n".join(f"  {i + 1}. {n}" for i, n in enumerate(notes))
 
         # Test baseline if auto_test enabled
@@ -208,42 +215,61 @@ class PhaseEngine:
             f"## YOUR TASK\n{description}\n\n"
             f"## YOUR ANALYSIS NOTES\n{notes_text}\n"
             f"{baseline_str}\n"
-            f"Output ONLY a JSON array of steps. No other text."
+            f"You have NO tools available. Do NOT call any tools.\n"
+            f"Output ONLY a JSON array of steps. No other text, no markdown fences."
         )
+
+        llm_params = get_litellm_params()
+        system_prompt = build_system_prompt(
+            agent.backstory,
+            identity_override=getattr(agent, '_system_prompt_identity', None),
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": plan_prompt},
+        ]
 
         max_attempts = 2
         for attempt in range(max_attempts):
-            engine = LoopEngine()
-            result = engine.execute(
-                agent=agent,
-                task_prompt=(plan_prompt, "Output a JSON array of steps."),
-                verbose=verbose,
-                task_tools=[],  # No tools in plan phase
-                max_iterations=2,
-                max_total_tool_calls=2,
-                nudge_threshold=0,
-                summarizer_enabled=False,
-            )
+            try:
+                response = call_llm(llm_params, messages)
+                content = response.choices[0].message.content or ""
+                content = content.strip()
 
-            if not result:
-                continue
+                # Strip markdown code fences if present
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+                    if content.endswith("```"):
+                        content = content[:-3]
+                    content = content.strip()
+                if content.startswith("json"):
+                    content = content[4:].strip()
 
-            # Validate the plan
-            is_valid, steps, errors = validate_plan(result, strategy)
+                if not content:
+                    continue
 
-            if is_valid:
-                return steps
+                # Validate the plan
+                is_valid, steps, errors = validate_plan(content, strategy)
 
-            if verbose:
-                for err in errors:
-                    _log(f"  {YELLOW}⚠ {err}{RESET}")
+                if is_valid:
+                    return steps
 
-            if attempt < max_attempts - 1:
-                # Re-prompt with rejection reasons
-                rejection = format_rejection(errors)
-                plan_prompt = f"{plan_prompt}\n\n{rejection}"
                 if verbose:
-                    _log(f"  {DIM}Re-prompting with validation feedback...{RESET}")
+                    for err in errors:
+                        _log(f"  {YELLOW}⚠ {err}{RESET}")
+
+                if attempt < max_attempts - 1:
+                    rejection = format_rejection(errors)
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": rejection})
+                    if verbose:
+                        _log(f"  {DIM}Re-prompting with validation feedback...{RESET}")
+
+            except Exception as exc:
+                logger.warning("Plan generation failed (attempt %d): %s", attempt + 1, str(exc)[:200])
+                if verbose:
+                    _log(f"  {RED}⚠ Plan generation error: {str(exc)[:100]}{RESET}")
 
         logger.warning("Plan validation failed after %d attempts", max_attempts)
         return []
