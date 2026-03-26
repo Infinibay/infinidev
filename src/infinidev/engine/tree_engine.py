@@ -48,15 +48,9 @@ from infinidev.db.service import store_exploration_tree
 
 logger = logging.getLogger(__name__)
 
-# ── Event handling ───────────────────────────────────────────────────────────
+# ── Event handling via centralized EventBus ─────────────────────────────────
 
-_event_callback = None
-
-
-def set_tree_event_callback(callback):
-    """Set a callback function to receive tree engine events."""
-    global _event_callback
-    _event_callback = callback
+from infinidev.flows.event_listeners import event_bus
 
 
 def _emit_tree_event(
@@ -68,10 +62,9 @@ def _emit_tree_event(
 ) -> None:
     """Emit event with human-readable message for TUI/classic mode."""
     data["user_message"] = user_message
-    if _event_callback:
-        _event_callback(event_type, project_id, agent_id, data)
-    # Also print in classic mode (no TUI callback)
-    else:
+    event_bus.emit(event_type, project_id, agent_id, data)
+    # Also print in classic mode (no TUI subscriber)
+    if not event_bus.has_subscribers:
         print(user_message, file=sys.stderr, flush=True)
 
 
@@ -88,7 +81,7 @@ _MAGENTA = "\033[35m"
 
 
 def _log(msg: str) -> None:
-    if _event_callback is None:
+    if not event_bus.has_subscribers:
         print(msg, file=sys.stderr, flush=True)
 
 

@@ -248,8 +248,8 @@ class TestAnalysisEngine:
         assert "Do NOT write or modify" in prompt
 
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_event_callback_called(self, mock_params):
-        """Event callback should be called on start and complete."""
+    def test_events_emitted_to_bus(self, mock_params):
+        """Analysis events should be emitted to the EventBus."""
         mock_params.return_value = {"model": "test"}
         passthrough_result = AnalysisResult(
             action="passthrough", original_input="hello", reason="simple",
@@ -258,11 +258,16 @@ class TestAnalysisEngine:
         def callback(event_type, *args):
             events.append(event_type)
 
-        with patch.object(AnalysisEngine, "_run_analyst_loop", return_value=passthrough_result):
-            engine = AnalysisEngine()
-            engine.analyze("hello", event_callback=callback)
-        assert "analysis_start" in events
-        assert "analysis_complete" in events
+        from infinidev.flows.event_listeners import event_bus
+        event_bus.subscribe(callback)
+        try:
+            with patch.object(AnalysisEngine, "_run_analyst_loop", return_value=passthrough_result):
+                engine = AnalysisEngine()
+                engine.analyze("hello")
+            assert "analysis_start" in events
+            assert "analysis_complete" in events
+        finally:
+            event_bus.unsubscribe(callback)
 
     def test_proceed_with_partial_spec(self):
         """Specification with only some fields should work."""
@@ -351,7 +356,7 @@ class TestAnalysisEngineResearch:
         )
 
         call_count = [0]
-        def mock_run_loop(user_input, session_summaries, event_callback):
+        def mock_run_loop(user_input, session_summaries):
             call_count[0] += 1
             if call_count[0] == 1:
                 return research_result
@@ -387,7 +392,7 @@ class TestAnalysisEngineResearch:
         )
 
         call_count = [0]
-        def mock_run_loop(user_input, session_summaries, event_callback):
+        def mock_run_loop(user_input, session_summaries):
             call_count[0] += 1
             if call_count[0] == 1:
                 return research_result
@@ -440,7 +445,7 @@ class TestAnalysisEngineResearch:
         )
 
         call_count = [0]
-        def mock_run_loop(user_input, session_summaries, event_callback):
+        def mock_run_loop(user_input, session_summaries):
             call_count[0] += 1
             if call_count[0] == 1:
                 return research_result
@@ -478,7 +483,7 @@ class TestAnalysisEngineResearch:
         )
 
         call_count = [0]
-        def mock_run_loop(user_input, session_summaries, event_callback):
+        def mock_run_loop(user_input, session_summaries):
             call_count[0] += 1
             if call_count[0] == 1:
                 return research_result
@@ -529,7 +534,7 @@ class TestAnalysisEngineRunLoop:
 
         engine = AnalysisEngine()
         engine._analysis_rounds = 1
-        result = engine._run_analyst_loop("test", None, None)
+        result = engine._run_analyst_loop("test", None)
 
         # Verify agent was created with analyst role
         mock_agent_cls.assert_called_once()
@@ -558,7 +563,7 @@ class TestAnalysisEngineRunLoop:
 
         engine = AnalysisEngine()
         engine._analysis_rounds = 1
-        result = engine._run_analyst_loop("add feature", None, None)
+        result = engine._run_analyst_loop("add feature", None)
 
         assert result.action == "proceed"
         assert result.specification["summary"] == "Built from codebase analysis"
@@ -575,7 +580,7 @@ class TestAnalysisEngineRunLoop:
 
         engine = AnalysisEngine()
         engine._analysis_rounds = 1
-        engine._run_analyst_loop("test", None, None)
+        engine._run_analyst_loop("test", None)
 
         mock_agent.activate_context.assert_called_once()
         mock_agent.deactivate.assert_called_once()
@@ -593,6 +598,6 @@ class TestAnalysisEngineRunLoop:
         engine = AnalysisEngine()
         engine._analysis_rounds = 1
         with pytest.raises(RuntimeError):
-            engine._run_analyst_loop("test", None, None)
+            engine._run_analyst_loop("test", None)
 
         mock_agent.deactivate.assert_called_once()

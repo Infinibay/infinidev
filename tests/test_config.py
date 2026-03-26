@@ -19,7 +19,7 @@ class TestSettings:
         """Key defaults match expected values."""
         s = Settings()
         assert s.LOOP_MAX_ITERATIONS == 50
-        assert s.LOOP_MAX_TOTAL_TOOL_CALLS == 200
+        assert s.LOOP_MAX_TOTAL_TOOL_CALLS == 1000
         assert s.MAX_FILE_SIZE_BYTES == 5 * 1024 * 1024
         assert s.SANDBOX_ENABLED is False
         assert s.DEDUP_SIMILARITY_THRESHOLD == 0.82

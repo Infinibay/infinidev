@@ -112,21 +112,11 @@ class GatherSession:
         # Save and override agent settings
         original_identity = getattr(agent, "_system_prompt_identity", None)
         original_backstory = agent.backstory
-        original_max_iter = settings.LOOP_MAX_ITERATIONS
-        original_max_tools = settings.LOOP_MAX_TOTAL_TOOL_CALLS
-        original_max_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION
-        original_nudge = settings.LOOP_STEP_NUDGE_THRESHOLD
-        original_summarizer = settings.LOOP_SUMMARIZER_ENABLED
         original_gather = settings.GATHER_ENABLED
 
         try:
             agent._system_prompt_identity = _INVESTIGATOR_IDENTITY
             agent.backstory = "Codebase investigator. Reads code, answers questions."
-            settings.LOOP_MAX_ITERATIONS = 1
-            settings.LOOP_MAX_TOTAL_TOOL_CALLS = question.max_tool_calls
-            settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = question.max_tool_calls
-            settings.LOOP_STEP_NUDGE_THRESHOLD = 0
-            settings.LOOP_SUMMARIZER_ENABLED = True  # Enable summarizer for context between steps
             settings.GATHER_ENABLED = False
 
             engine = LoopEngine()
@@ -151,6 +141,11 @@ class GatherSession:
                 verbose=True,
                 task_tools=read_only_tools,
                 resume_state=resume,
+                max_iterations=1,
+                max_total_tool_calls=question.max_tool_calls,
+                max_tool_calls_per_action=question.max_tool_calls,
+                nudge_threshold=0,
+                summarizer_enabled=True,
             )
 
             # Save state for next question
@@ -175,11 +170,6 @@ class GatherSession:
         finally:
             agent._system_prompt_identity = original_identity
             agent.backstory = original_backstory
-            settings.LOOP_MAX_ITERATIONS = original_max_iter
-            settings.LOOP_MAX_TOTAL_TOOL_CALLS = original_max_tools
-            settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = original_max_per_action
-            settings.LOOP_STEP_NUDGE_THRESHOLD = original_nudge
-            settings.LOOP_SUMMARIZER_ENABLED = original_summarizer
             settings.GATHER_ENABLED = original_gather
 
 

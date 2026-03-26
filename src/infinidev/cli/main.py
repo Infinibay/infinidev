@@ -111,6 +111,7 @@ def handle_command(cmd_text: str):
         click.echo("  /settings reset    - Reset to defaults")
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
+        click.echo("  /think             - Enable deep analysis for the next task")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
         click.echo("  /brainstorm <problem> - Creative ideation with forced perspectives")
         click.echo("  /init              - Explore and document the current project")
@@ -121,6 +122,9 @@ def handle_command(cmd_text: str):
     elif cmd == "/settings":
         handle_settings_command(parts)
         return True
+
+    elif cmd == "/think":
+        return "think"
 
     elif cmd == "/init":
         return "init"  # Signal to main loop to run init
@@ -401,6 +405,7 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
     engine = LoopEngine()
     analyst = AnalysisEngine()
     reviewer = ReviewEngine()
+    _gather_next_task = False
 
     # Register permission handler for classic CLI
     def _classic_permission_handler(tool_name: str, description: str, details: str) -> bool:
@@ -500,6 +505,9 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
                         agent.deactivate()
                     click.echo(click.style("\nInit Result:", fg="green", bold=True))
                     click.echo(result)
+                elif cmd_result == "think":
+                    _gather_next_task = True
+                    click.echo(click.style("Gather mode enabled for the next task. Send your prompt and infinidev will deeply analyze the codebase before acting.", fg="cyan"))
                 continue
 
             from infinidev.config.settings import reload_all
@@ -581,7 +589,9 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None):
             current_flow = analysis.flow if analysis is not None else "develop"
 
             # --- Gather phase ---
-            if settings.GATHER_ENABLED and current_flow == "develop":
+            _do_gather = settings.GATHER_ENABLED or _gather_next_task
+            _gather_next_task = False  # Reset after use
+            if _do_gather and current_flow == "develop":
                 try:
                     from infinidev.gather import run_gather
                     agent.activate_context(session_id=session_id)

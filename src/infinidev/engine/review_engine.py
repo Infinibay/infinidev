@@ -117,7 +117,6 @@ class ReviewEngine:
         file_contents: dict[str, str] | None = None,
         recent_messages: list[str] | None = None,
         previous_feedback: str = "",
-        event_callback: Any | None = None,
     ) -> ReviewResult:
         """Review code changes and return a ReviewResult.
 
@@ -129,11 +128,12 @@ class ReviewEngine:
             file_contents: path → current content for each changed file.
             recent_messages: Last few conversation messages for context.
             previous_feedback: Feedback from a previous review round (for re-reviews).
-            event_callback: Optional callback for emitting review events.
 
         Returns:
             ReviewResult with verdict and feedback.
         """
+        from infinidev.flows.event_listeners import event_bus
+
         # Skip review if no code changes AND no files provided directly
         if not file_changes_summary.strip() and not file_contents:
             logger.info("ReviewEngine: no file changes and no files provided, skipping review")
@@ -155,11 +155,9 @@ class ReviewEngine:
 
         self._review_count += 1
 
-        # Emit review start event
-        if event_callback:
-            event_callback("review_start", 0, "", {
-                "round": self._review_count,
-            })
+        event_bus.emit("review_start", 0, "", {
+            "round": self._review_count,
+        })
 
         user_prompt = self._build_review_prompt(
             task_description, developer_result,
@@ -191,13 +189,11 @@ class ReviewEngine:
                 summary=f"Review skipped due to error: {e}",
             )
 
-        # Emit review complete event
-        if event_callback:
-            event_callback("review_complete", 0, "", {
-                "verdict": result.verdict,
-                "round": self._review_count,
-                "issue_count": len(result.issues),
-            })
+        event_bus.emit("review_complete", 0, "", {
+            "verdict": result.verdict,
+            "round": self._review_count,
+            "issue_count": len(result.issues),
+        })
 
         return result
 

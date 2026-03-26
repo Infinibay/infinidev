@@ -40,4 +40,7 @@ def get_litellm_params() -> dict[str, Any]:
     if settings.LLM_BASE_URL and not _is_native_provider(model):
         params["api_base"] = settings.LLM_BASE_URL
 
+    if settings.LLM_TIMEOUT:
+        params["timeout"] = float(settings.LLM_TIMEOUT)
+
     return params

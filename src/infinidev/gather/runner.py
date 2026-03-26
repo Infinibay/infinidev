@@ -173,6 +173,12 @@ _DYNAMIC_QUESTIONS_TOOL_SCHEMA = {
 }
 
 
+def _emit_gather_status(text: str) -> None:
+    """Emit a gather progress event to the EventBus."""
+    from infinidev.flows.event_listeners import event_bus
+    event_bus.emit("gather_status", 0, "", {"text": text})
+
+
 def run_gather(
     user_input: str,
     chat_history: list[dict],
@@ -180,6 +186,8 @@ def run_gather(
     agent: Any,
 ) -> GatherBrief:
     """Run the complete information gathering phase.
+
+    Progress updates are emitted as ``gather_status`` events via the EventBus.
 
     Returns a GatherBrief with all gathered context. Never raises —
     falls back gracefully on any error.
@@ -195,11 +203,16 @@ def run_gather(
             from infinidev.code_intel.indexer import index_directory
             from infinidev.code_intel.index import clear_project
             from infinidev.code_intel.query import get_index_stats
+            _emit_gather_status("Indexing workspace for code intelligence...")
             logger.info("Gather: indexing %s for code intelligence...", workspace)
             # Clear old index to avoid stale data from other projects
             clear_project(1)
             stats = index_directory(1, workspace)
             db_stats = get_index_stats(1)
+            _emit_gather_status(
+                f"Indexed {stats['files_indexed']} files, "
+                f"{stats['symbols_total']} symbols"
+            )
             logger.info(
                 "Gather: indexed %d files, %d symbols, %d references in %dms",
                 stats["files_indexed"], stats["symbols_total"],
@@ -209,6 +222,7 @@ def run_gather(
         logger.warning("Gather: code intel indexing failed: %s", str(exc)[:200])
 
     # Step 0: Synthesize ticket description
+    _emit_gather_status("Synthesizing ticket description...")
     logger.info("Gather: synthesizing ticket description...")
     analyst_spec = None
     if analyst_result and hasattr(analyst_result, "specification"):
@@ -220,8 +234,10 @@ def run_gather(
     logger.info("Gather: ticket synthesized (%d chars)", len(ticket_description))
 
     # Step 1: Classify
+    _emit_gather_status("Classifying ticket...")
     logger.info("Gather: classifying ticket...")
     classification = classify_ticket(ticket_description, analyst_spec, agent=agent)
+    _emit_gather_status(f"Classified as [bold]{classification.ticket_type.value}[/bold]")
     logger.info(
         "Gather: classified as %s (%s)",
         classification.ticket_type.value,
@@ -233,10 +249,12 @@ def run_gather(
 
     questions = get_questions_for_type(classification.ticket_type)
     logger.info("Gather: %d fixed questions for type %s", len(questions), classification.ticket_type.value)
+    total_questions = len(questions)
 
     session = GatherSession()  # Shared state: opened_files, history, notes persist between questions
     fixed_answers: list[QuestionResult] = []
     for i, q in enumerate(questions):
+        _emit_gather_status(f"Investigating [{i + 1}/{total_questions}]: {q.question[:60]}")
         logger.info("Gather: [%d/%d] %s", i + 1, len(questions), q.question[:80])
         try:
             result = answer_question(
@@ -244,6 +262,10 @@ def run_gather(
             )
             result.phase = "fixed"
             fixed_answers.append(result)
+            _emit_gather_status(
+                f"Answered [{i + 1}/{total_questions}] "
+                f"({result.tool_calls_used} tool calls)"
+            )
             logger.info(
                 "Gather: [%d/%d] answered (%d tool calls, %d chars)",
                 i + 1, len(questions), result.tool_calls_used, len(result.answer),
@@ -260,6 +282,7 @@ def run_gather(
             ))
 
     # Step 3: Dynamic questions — same session continues
+    _emit_gather_status("Generating follow-up questions...")
     logger.info("Gather: generating dynamic questions...")
     dynamic_questions = _generate_dynamic_questions(
         ticket_description, classification, fixed_answers, agent,
@@ -268,7 +291,9 @@ def run_gather(
 
     dynamic_answers: list[QuestionResult] = []
     all_prior = fixed_answers
+    total_dynamic = len(dynamic_questions)
     for i, q in enumerate(dynamic_questions):
+        _emit_gather_status(f"Follow-up [{i + 1}/{total_dynamic}]: {q.question[:60]}")
         logger.info("Gather: [dynamic %d/%d] %s", i + 1, len(dynamic_questions), q.question[:80])
         try:
             result = answer_question(
@@ -276,6 +301,10 @@ def run_gather(
             )
             result.phase = "dynamic"
             dynamic_answers.append(result)
+            _emit_gather_status(
+                f"Follow-up [{i + 1}/{total_dynamic}] answered "
+                f"({result.tool_calls_used} tool calls)"
+            )
             logger.info(
                 "Gather: [dynamic %d/%d] answered (%d tool calls)",
                 i + 1, len(dynamic_questions), result.tool_calls_used,
@@ -292,6 +321,7 @@ def run_gather(
             ))
 
     # Step 4: Compile
+    _emit_gather_status("Compiling brief...")
     brief = compile_brief(ticket_description, classification, fixed_answers, dynamic_answers)
     logger.info("Gather: complete. %s", brief.summary())
     return brief
@@ -323,21 +353,11 @@ def _synthesize_ticket(
 
     original_identity = getattr(agent, "_system_prompt_identity", None)
     original_backstory = agent.backstory
-    original_max_iter = settings.LOOP_MAX_ITERATIONS
-    original_max_tools = settings.LOOP_MAX_TOTAL_TOOL_CALLS
-    original_max_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION
-    original_nudge = settings.LOOP_STEP_NUDGE_THRESHOLD
-    original_summarizer = settings.LOOP_SUMMARIZER_ENABLED
     original_gather = settings.GATHER_ENABLED
 
     try:
         agent._system_prompt_identity = _SYNTHESIZER_SYSTEM_PROMPT
         agent.backstory = "Ticket synthesizer."
-        settings.LOOP_MAX_ITERATIONS = 2
-        settings.LOOP_MAX_TOTAL_TOOL_CALLS = 10
-        settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = 10
-        settings.LOOP_STEP_NUDGE_THRESHOLD = 0
-        settings.LOOP_SUMMARIZER_ENABLED = False
         settings.GATHER_ENABLED = False
 
         engine = LoopEngine()
@@ -346,6 +366,11 @@ def _synthesize_ticket(
             task_prompt=("\n\n".join(parts), "Output ONLY the self-contained task description."),
             verbose=False,
             task_tools=[],
+            max_iterations=2,
+            max_total_tool_calls=10,
+            max_tool_calls_per_action=10,
+            nudge_threshold=0,
+            summarizer_enabled=False,
         )
         if result and result.strip():
             return result.strip()
@@ -356,11 +381,6 @@ def _synthesize_ticket(
     finally:
         agent._system_prompt_identity = original_identity
         agent.backstory = original_backstory
-        settings.LOOP_MAX_ITERATIONS = original_max_iter
-        settings.LOOP_MAX_TOTAL_TOOL_CALLS = original_max_tools
-        settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = original_max_per_action
-        settings.LOOP_STEP_NUDGE_THRESHOLD = original_nudge
-        settings.LOOP_SUMMARIZER_ENABLED = original_summarizer
         settings.GATHER_ENABLED = original_gather
 
     # Fallback
@@ -394,21 +414,11 @@ def _generate_dynamic_questions(
 
     original_identity = getattr(agent, "_system_prompt_identity", None)
     original_backstory = agent.backstory
-    original_max_iter = _settings.LOOP_MAX_ITERATIONS
-    original_max_tools = _settings.LOOP_MAX_TOTAL_TOOL_CALLS
-    original_max_per_action = _settings.LOOP_MAX_TOOL_CALLS_PER_ACTION
-    original_nudge = _settings.LOOP_STEP_NUDGE_THRESHOLD
-    original_summarizer = _settings.LOOP_SUMMARIZER_ENABLED
     original_gather = _settings.GATHER_ENABLED
 
     try:
         agent._system_prompt_identity = _DYNAMIC_QUESTIONS_SYSTEM_PROMPT
         agent.backstory = "Question generator."
-        _settings.LOOP_MAX_ITERATIONS = 2
-        _settings.LOOP_MAX_TOTAL_TOOL_CALLS = 10
-        _settings.LOOP_MAX_TOOL_CALLS_PER_ACTION = 10
-        _settings.LOOP_STEP_NUDGE_THRESHOLD = 0
-        _settings.LOOP_SUMMARIZER_ENABLED = False
         _settings.GATHER_ENABLED = False
 
         engine = LoopEngine()
@@ -417,6 +427,11 @@ def _generate_dynamic_questions(
             task_prompt=("\n".join(context_parts), "Output a JSON array of questions."),
             verbose=False,
             task_tools=[],
+            max_iterations=2,
+            max_total_tool_calls=10,
+            max_tool_calls_per_action=10,
+            nudge_threshold=0,
+            summarizer_enabled=False,
         )
 
         logger.info("Dynamic questions result: %s", (result or "")[:300])
@@ -428,3 +443,8 @@ def _generate_dynamic_questions(
     except Exception as exc:
         logger.warning("Dynamic question generation failed: %s", str(exc)[:200])
         return []
+
+    finally:
+        agent._system_prompt_identity = original_identity
+        agent.backstory = original_backstory
+        _settings.GATHER_ENABLED = original_gather

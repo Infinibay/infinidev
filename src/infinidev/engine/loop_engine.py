@@ -14,6 +14,11 @@ import sys
 import time
 from typing import Any
 
+try:
+    from json_repair import repair_json as _repair_json
+except ImportError:
+    _repair_json = None
+
 from infinidev.engine.base import AgentEngine
 from infinidev.engine.loop_context import (
     build_iteration_prompt,
@@ -39,6 +44,26 @@ from infinidev.engine.loop_tools import (
 
 # Max consecutive calls to the same tool before forcing a step_complete nudge
 _MAX_SAME_TOOL_CONSECUTIVE = 3
+
+
+def _safe_json_loads(text: str) -> Any:
+    """Parse JSON with automatic repair for malformed model output.
+
+    Tries standard json.loads first, then falls back to json_repair
+    if available. This handles common LLM JSON issues like trailing
+    commas, unquoted keys, truncated strings, etc.
+    """
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        if _repair_json is not None:
+            try:
+                repaired = _repair_json(text, return_objects=True)
+                if repaired is not None:
+                    return repaired
+            except Exception:
+                pass
+        raise
 
 
 def _get_model_max_context(llm_params: dict[str, Any]) -> int:
@@ -80,13 +105,8 @@ _MAX_TEXT_RETRIES = 5
 logger = logging.getLogger(__name__)
 
 
-# -- Event handling for TUI/WebSocket integration --
-_event_callback = None
-
-def set_event_callback(callback):
-    """Set a callback function to receive loop events."""
-    global _event_callback
-    _event_callback = callback
+# -- Event handling via centralized EventBus --
+from infinidev.flows.event_listeners import event_bus
 
 def _emit_loop_event(
     event_type: str,
@@ -94,9 +114,8 @@ def _emit_loop_event(
     agent_id: str,
     data: dict[str, Any],
 ) -> None:
-    """Emit event to registered callback or WebSocket."""
-    if _event_callback:
-        _event_callback(event_type, project_id, agent_id, data)
+    """Emit event to all subscribers via the EventBus."""
+    event_bus.emit(event_type, project_id, agent_id, data)
 
 
 # ── Pretty stdout logging ────────────────────────────────────────────────────
@@ -122,7 +141,7 @@ def _log(msg: str) -> None:
     """Print to stderr in classic CLI mode.  Silent when a TUI/event callback
     is registered (the TUI owns the terminal, so raw prints would corrupt it).
     """
-    if _event_callback is None:
+    if not event_bus.has_subscribers:
         print(msg, file=sys.stderr, flush=True)
 
 
@@ -615,8 +634,8 @@ _PERMANENT_ERRORS = (
     "not found",        # Ollama: {"error":"tool 'X' not found"}
 )
 
-_LLM_RETRIES = 3
-_LLM_RETRY_DELAY = 5.0
+_LLM_RETRIES = 5
+_LLM_RETRY_DELAY = 3.0
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -624,6 +643,12 @@ def _is_transient(exc: Exception) -> bool:
     # Check permanent exclusions first — these are capability errors
     # wrapped in APIConnectionError, not actual network issues
     if any(p in msg for p in _PERMANENT_ERRORS):
+        return False
+    # Malformed tool call errors (Ollama returns 500 for these) should NOT
+    # be retried at the LLM call level — the same context will produce the
+    # same malformed output.  Let the loop-level malformed handler deal with
+    # these instead (it can force a step completion or switch to manual mode).
+    if _is_malformed_tool_call(exc):
         return False
     return any(p in msg for p in _TRANSIENT_ERRORS)
 
@@ -634,6 +659,12 @@ _MALFORMED_TOOL_PATTERNS = (
     "error parsing tool call",
     "invalid character",
     "looking for beginning of value",
+    "unexpected end of json",
+    "failed to parse json",
+    "unexpected token",
+    "unterminated string",
+    "after top-level value",
+    "after object key:value pair",
 )
 
 
@@ -778,7 +809,7 @@ def _parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
                 if depth == 0:
                     json_str = candidate[brace_start : i + 1]
                     try:
-                        parsed = json.loads(json_str)
+                        parsed = _safe_json_loads(json_str)
                         if isinstance(parsed, dict):
                             # {"tool_calls": [...]} wrapper
                             if "tool_calls" in parsed:
@@ -863,7 +894,7 @@ def _extract_calls_from_fragments(fragments: list[str]) -> list[dict[str, Any]] 
             continue
         parsed = None
         try:
-            parsed = json.loads(frag)
+            parsed = _safe_json_loads(frag)
         except (json.JSONDecodeError, TypeError):
             # Try to extract first JSON object from fragment
             brace = frag.find("{")
@@ -877,7 +908,7 @@ def _extract_calls_from_fragments(fragments: list[str]) -> list[dict[str, Any]] 
                     depth -= 1
                     if depth == 0:
                         try:
-                            parsed = json.loads(frag[brace : i + 1])
+                            parsed = _safe_json_loads(frag[brace : i + 1])
                         except (json.JSONDecodeError, TypeError):
                             pass
                         break
@@ -897,7 +928,7 @@ def _extract_calls_from_fragments(fragments: list[str]) -> list[dict[str, Any]] 
 def _extract_calls_from_array(text: str) -> list[dict[str, Any]] | None:
     """Parse a JSON array of tool call objects."""
     try:
-        arr = json.loads(text)
+        arr = _safe_json_loads(text)
     except (json.JSONDecodeError, TypeError):
         return None
     if not isinstance(arr, list):
@@ -948,8 +979,8 @@ def _parse_step_complete_args(arguments: str | dict[str, Any]) -> StepResult:
     """Parse step_complete tool call arguments into a StepResult."""
     if isinstance(arguments, str):
         try:
-            args = json.loads(arguments) if arguments.strip() else {}
-        except json.JSONDecodeError:
+            args = _safe_json_loads(arguments) if arguments.strip() else {}
+        except (json.JSONDecodeError, TypeError):
             args = {}
     else:
         args = arguments or {}
@@ -1007,6 +1038,17 @@ def _call_llm(
             kwargs["tool_choice"] = "auto"
         else:
             kwargs["tool_choice"] = tool_choice
+        # Suppress thinking tags for models that emit <think> in FC mode
+        # (e.g. Qwen 3.x). Ollama can't parse <think> mixed with tool call
+        # JSON, causing "invalid character '<'" errors on every request.
+        if caps.has_thinking_sections:
+            msgs = kwargs["messages"]
+            for i in range(len(msgs) - 1, -1, -1):
+                if msgs[i].get("role") == "user":
+                    content = msgs[i].get("content", "")
+                    if "/no_think" not in content:
+                        msgs[i] = {**msgs[i], "content": "/no_think\n" + content}
+                    break
     # Force JSON output — prevents models (especially Ollama) from mixing
     # natural language text into tool call arguments.
     # NOTE: Do NOT set response_format when tools are present — for llama-server
@@ -1131,7 +1173,7 @@ def _summarize_step(
         if clean.startswith("json"):
             clean = clean[4:].strip()
 
-        parsed = _json.loads(clean)
+        parsed = _safe_json_loads(clean)
         if isinstance(parsed, dict):
             return {
                 "summary": str(parsed.get("summary", step_result.summary))[:500],
@@ -1221,6 +1263,8 @@ class LoopEngine(AgentEngine):
 
     def __init__(self) -> None:
         self._last_file_tracker: FileChangeTracker | None = None
+        self._nudge_threshold_override: int | None = None
+        self._summarizer_override: bool | None = None
 
     def get_changed_files_summary(self) -> str:
         """Return a summary of files changed in the last execution.
@@ -1290,6 +1334,12 @@ class LoopEngine(AgentEngine):
         task_tools: list | None = None,
         event_id: int | None = None,
         resume_state: dict | None = None,
+        # Override loop limits without mutating global settings
+        max_iterations: int | None = None,
+        max_total_tool_calls: int | None = None,
+        max_tool_calls_per_action: int | None = None,
+        nudge_threshold: int | None = None,
+        summarizer_enabled: bool | None = None,
     ) -> str:
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
@@ -1301,10 +1351,12 @@ class LoopEngine(AgentEngine):
                 "Ensure INFINIDEV_LLM_MODEL is set."
             )
 
-        max_iterations = settings.LOOP_MAX_ITERATIONS
-        max_total_calls = settings.LOOP_MAX_TOTAL_TOOL_CALLS
-        max_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION or max_total_calls
+        max_iterations = max_iterations if max_iterations is not None else settings.LOOP_MAX_ITERATIONS
+        max_total_calls = max_total_tool_calls if max_total_tool_calls is not None else settings.LOOP_MAX_TOTAL_TOOL_CALLS
+        max_per_action = (max_tool_calls_per_action if max_tool_calls_per_action is not None else settings.LOOP_MAX_TOOL_CALLS_PER_ACTION) or max_total_calls
         history_window = settings.LOOP_HISTORY_WINDOW
+        self._nudge_threshold_override = nudge_threshold
+        self._summarizer_override = summarizer_enabled
 
         # Fetch model's context window for budget awareness
         max_context_tokens = _get_model_max_context(llm_params)
@@ -1454,7 +1506,7 @@ class LoopEngine(AgentEngine):
             planning_schemas = [STEP_COMPLETE_SCHEMA]
 
             _malformed_retries = 0
-            _MAX_MALFORMED_RETRIES = 2
+            _MAX_MALFORMED_RETRIES = 4
             _text_retries = 0
             _consecutive_tool_errors = 0  # Track consecutive tool failures
             _MAX_CONSECUTIVE_ERRORS = 4  # Force step_complete after this many
@@ -1571,6 +1623,27 @@ class LoopEngine(AgentEngine):
                     message = choice.message
                     tool_calls = getattr(message, "tool_calls", None)
 
+                    # FC mode fallback: some models (e.g. LFM2) return tool
+                    # calls as <tool_call> tags in content instead of native
+                    # tool_calls.  Parse text as a last resort before giving up.
+                    if not tool_calls:
+                        raw_content = (getattr(message, "content", None) or "").strip()
+                        if raw_content:
+                            parsed_calls = _parse_text_tool_calls(raw_content)
+                            if parsed_calls:
+                                tool_calls = []
+                                for i, pc in enumerate(parsed_calls):
+                                    tc_obj = _ManualToolCall(
+                                        id=f"fc_fallback_{action_tool_calls + i}",
+                                        name=pc["name"],
+                                        arguments=(
+                                            json.dumps(pc["arguments"])
+                                            if isinstance(pc["arguments"], dict)
+                                            else str(pc["arguments"])
+                                        ),
+                                    )
+                                    tool_calls.append(tc_obj)
+
                 # ── Process tool calls (unified for both modes) ──────
                 if tool_calls:
                     _text_retries = 0  # Reset only when tool calls are present
@@ -1592,7 +1665,7 @@ class LoopEngine(AgentEngine):
                     # Process think calls (emit reasoning to chat, don't count as tool call)
                     for tk in think_calls:
                         try:
-                            tk_args = json.loads(tk.function.arguments) if isinstance(tk.function.arguments, str) else (tk.function.arguments or {})
+                            tk_args = _safe_json_loads(tk.function.arguments) if isinstance(tk.function.arguments, str) else (tk.function.arguments or {})
                             reasoning = tk_args.get("reasoning", "").strip()
                             if reasoning:
                                 if verbose:
@@ -1607,7 +1680,7 @@ class LoopEngine(AgentEngine):
                     _MAX_NOTES = 20
                     for nc in note_calls:
                         try:
-                            nc_args = json.loads(nc.function.arguments) if isinstance(nc.function.arguments, str) else (nc.function.arguments or {})
+                            nc_args = _safe_json_loads(nc.function.arguments) if isinstance(nc.function.arguments, str) else (nc.function.arguments or {})
                             note_text = nc_args.get("note", "").strip()
                             if note_text and len(state.notes) < _MAX_NOTES:
                                 state.notes.append(note_text)
@@ -1685,7 +1758,7 @@ class LoopEngine(AgentEngine):
                                 # Intercept send_message: emit to TUI chat
                                 if tc.function.name == "send_message":
                                     try:
-                                        _msg_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                                        _msg_args = _safe_json_loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
                                         _emit_loop_event("loop_user_message", agent.project_id, agent.agent_id, {
                                             "message": _msg_args.get("message", ""),
                                         })
@@ -1728,7 +1801,7 @@ class LoopEngine(AgentEngine):
                                 state.tool_calls_since_last_note += 1
 
                                 # Nudge at threshold
-                                _nudge_threshold = settings.LOOP_STEP_NUDGE_THRESHOLD
+                                _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else settings.LOOP_STEP_NUDGE_THRESHOLD
                                 if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
                                     _active_desc = ""
                                     if state.plan.active_step:
@@ -2032,7 +2105,8 @@ class LoopEngine(AgentEngine):
                 step_index = done_steps[-1].index
 
             # --- Step summarization ---
-            if settings.LOOP_SUMMARIZER_ENABLED:
+            _summarizer_on = self._summarizer_override if self._summarizer_override is not None else settings.LOOP_SUMMARIZER_ENABLED
+            if _summarizer_on:
                 try:
                     structured = _summarize_step(
                         messages, desc, state, step_result, llm_params,
@@ -2166,6 +2240,7 @@ class LoopEngine(AgentEngine):
                     return self._apply_guardrail(
                         result, guardrail, guardrail_max_retries,
                         llm_params, system_prompt, desc, expected, state, tool_schemas, tool_dispatch,
+                        max_per_action=max_per_action,
                     )
 
             if step_result.status == "blocked":
@@ -2199,6 +2274,7 @@ class LoopEngine(AgentEngine):
                     return self._apply_guardrail(
                         result, guardrail, guardrail_max_retries,
                         llm_params, system_prompt, desc, expected, state, tool_schemas, tool_dispatch,
+                        max_per_action=max_per_action,
                     )
             else:
                 consecutive_all_done = 0
@@ -2236,14 +2312,11 @@ class LoopEngine(AgentEngine):
         state: LoopState,
         tool_schemas: list[dict[str, Any]],
         tool_dispatch: dict[str, Any],
+        max_per_action: int = 0,
     ) -> str:
         """Validate result with guardrail; retry with feedback if it fails."""
         if guardrail is None:
             return result
-
-        from infinidev.config.settings import settings
-
-        max_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION
 
         for attempt in range(max_retries):
             try:

@@ -164,19 +164,18 @@ class AnalysisEngine:
         user_input: str,
         *,
         session_summaries: list[str] | None = None,
-        event_callback: Any | None = None,
     ) -> AnalysisResult:
         """Analyze the user's request using a full agent loop with tools.
 
         Args:
             user_input: The raw user input.
             session_summaries: Previous conversation summaries for context.
-            event_callback: Optional callback for emitting analysis events.
 
         Returns:
             AnalysisResult with action type and relevant data.
         """
         from infinidev.config.llm import get_litellm_params
+        from infinidev.flows.event_listeners import event_bus
 
         llm_params = get_litellm_params()
         if llm_params is None:
@@ -189,15 +188,13 @@ class AnalysisEngine:
 
         self._analysis_rounds += 1
 
-        # Emit analysis start event
-        if event_callback:
-            event_callback("analysis_start", 0, "", {
-                "round": self._analysis_rounds,
-                "input": user_input[:200],
-            })
+        event_bus.emit("analysis_start", 0, "", {
+            "round": self._analysis_rounds,
+            "input": user_input[:200],
+        })
 
         try:
-            result = self._run_analyst_loop(user_input, session_summaries, event_callback)
+            result = self._run_analyst_loop(user_input, session_summaries)
         except Exception as e:
             logger.warning("AnalysisEngine: agent loop failed (%s), passing through", e)
             result = AnalysisResult(
@@ -208,15 +205,14 @@ class AnalysisEngine:
 
         # Handle research action — perform web search and re-run
         if result.action == "research":
-            if event_callback:
-                event_callback("analysis_research", 0, "", {
-                    "queries": result.research_queries,
-                    "reason": result.research_reason,
-                })
+            event_bus.emit("analysis_research", 0, "", {
+                "queries": result.research_queries,
+                "reason": result.research_reason,
+            })
             try:
                 research_results = self._perform_research(result.research_queries)
                 enriched_input = user_input + "\n\n" + research_results
-                result = self._run_analyst_loop(enriched_input, session_summaries, event_callback)
+                result = self._run_analyst_loop(enriched_input, session_summaries)
 
                 # Prevent infinite research loops
                 if result.action == "research":
@@ -236,12 +232,10 @@ class AnalysisEngine:
                     reason=f"Research failed: {e}",
                 )
 
-        # Emit analysis complete event
-        if event_callback:
-            event_callback("analysis_complete", 0, "", {
-                "action": result.action,
-                "round": self._analysis_rounds,
-            })
+        event_bus.emit("analysis_complete", 0, "", {
+            "action": result.action,
+            "round": self._analysis_rounds,
+        })
 
         return result
 
@@ -249,7 +243,6 @@ class AnalysisEngine:
         self,
         user_input: str,
         session_summaries: list[str] | None,
-        event_callback: Any | None,
     ) -> AnalysisResult:
         """Run the analyst as a full agent loop with tool access."""
         from infinidev.agents.base import InfinidevAgent  # noqa: deferred to avoid circular

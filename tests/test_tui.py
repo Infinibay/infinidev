@@ -10,7 +10,6 @@ from textual.widgets.option_list import Option
 # Patch heavy imports before loading tui module
 # ---------------------------------------------------------------------------
 with patch("infinidev.db.service.init_db"), \
-     patch("infinidev.engine.loop_engine.set_event_callback"), \
      patch("infinidev.engine.loop_engine.LoopEngine"), \
      patch("infinidev.agents.base.InfinidevAgent"):
     from infinidev.cli.tui import ChatInput, InfinidevTUI, COMMANDS

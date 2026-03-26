@@ -24,8 +24,8 @@ from textual import on, events, work
 
 # Infinidev imports
 from infinidev.agents.base import InfinidevAgent
-from infinidev.engine.loop_engine import LoopEngine, set_event_callback
-from infinidev.engine.tree_engine import set_tree_event_callback
+from infinidev.engine.loop_engine import LoopEngine
+from infinidev.flows.event_listeners import event_bus
 from infinidev.engine.analysis_engine import AnalysisEngine
 from infinidev.engine.review_engine import ReviewEngine
 from infinidev.db.service import (
@@ -65,6 +65,7 @@ COMMANDS = [
     ("/models manage", "Pick a model interactively"),
     ("/settings", "Show or edit settings configuration"),
     ("/settings browse", "Open settings editor modal"),
+    ("/think", "Gather context deeply before next task (enables gather phase)"),
     ("/explore", "Decompose and explore a complex problem"),
     ("/brainstorm", "Brainstorm ideas and solutions for a problem"),
     ("/init", "Explore and document the current project"),
@@ -278,86 +279,101 @@ class ModelPickerScreen(ModalScreen[str | None]):
 
 
 class SettingsEditorScreen(ModalScreen[None]):
-    """Modal to view and edit all Infinidev settings."""
+    """Modal to view and edit all Infinidev settings with two-panel layout."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel", show=True),
-        Binding("ctrl+enter", "save", "Save", show=True),
+        Binding("ctrl+s", "save", "Save", show=True),
     ]
 
-    # Define all settings with their metadata.
-    # "type" controls the editor widget: "string"=text, "int"/"float"=text,
-    # "bool"=select(true/false), "select"=select from "choices", "list"=text(comma-sep).
+    # Section icons and ordering for the left panel
+    SECTION_ORDER = [
+        ("LLM", "Model"),
+        ("Embedding", "Embeddings"),
+        ("Loop Engine", "Loop Engine"),
+        ("Phases", "Phases"),
+        ("Permissions", "Permissions"),
+        ("Sandbox", "Sandbox"),
+        ("Timeouts", "Timeouts"),
+        ("File Limits", "File Limits"),
+        ("Database", "Database"),
+        ("Web Tools", "Web Tools"),
+        ("Knowledge", "Knowledge"),
+        ("Workspace", "Workspace"),
+        ("Code Interpreter", "Code Interpreter"),
+    ]
+
+    # Human-readable labels for settings
     SETTINGS_INFO = {
-        "LLM_MODEL": {"section": "LLM", "default": "ollama_chat/qwen2.5-coder:7b", "type": "string",
+        "LLM_MODEL": {"section": "LLM", "label": "Model", "default": "ollama_chat/qwen2.5-coder:7b", "type": "string",
                        "desc": "LiteLLM model identifier. Format: provider/model (e.g. ollama_chat/qwen2.5-coder:7b)."},
-        "LLM_BASE_URL": {"section": "LLM", "default": "http://localhost:11434", "type": "string",
+        "LLM_BASE_URL": {"section": "LLM", "label": "Base URL", "default": "http://localhost:11434", "type": "string",
                          "desc": "Base URL for the LLM provider (Ollama, OpenAI-compatible, etc)."},
-        "LLM_API_KEY": {"section": "LLM", "default": "ollama", "type": "string",
+        "LLM_API_KEY": {"section": "LLM", "label": "API Key", "default": "ollama", "type": "string",
                         "desc": "API key for the LLM provider. Use 'ollama' for local Ollama."},
-        "EMBEDDING_PROVIDER": {"section": "Embedding", "default": "ollama", "type": "string",
+        "EMBEDDING_PROVIDER": {"section": "Embedding", "label": "Provider", "default": "ollama", "type": "string",
                                "desc": "Provider for text embeddings used in semantic search."},
-        "EMBEDDING_MODEL": {"section": "Embedding", "default": "nomic-embed-text", "type": "string",
+        "EMBEDDING_MODEL": {"section": "Embedding", "label": "Model", "default": "nomic-embed-text", "type": "string",
                             "desc": "Embedding model name (must be available in the provider)."},
-        "EMBEDDING_BASE_URL": {"section": "Embedding", "default": "http://localhost:11434", "type": "string",
+        "EMBEDDING_BASE_URL": {"section": "Embedding", "label": "Base URL", "default": "http://localhost:11434", "type": "string",
                                "desc": "Base URL for the embedding provider."},
-        "LOOP_MAX_ITERATIONS": {"section": "Loop Engine", "default": 50, "type": "int",
+        "LOOP_MAX_ITERATIONS": {"section": "Loop Engine", "label": "Max Iterations", "default": 50, "type": "int",
                                 "desc": "Maximum plan-execute-summarize iterations per task."},
-        "LOOP_MAX_TOOL_CALLS_PER_ACTION": {"section": "Loop Engine", "default": 0, "type": "int",
+        "LOOP_MAX_TOOL_CALLS_PER_ACTION": {"section": "Loop Engine", "label": "Tool Calls / Step", "default": 0, "type": "int",
                                            "desc": "Max tool calls per step. 0 = unlimited (only global limit applies)."},
-        "LOOP_MAX_TOTAL_TOOL_CALLS": {"section": "Loop Engine", "default": 200, "type": "int",
+        "LOOP_MAX_TOTAL_TOOL_CALLS": {"section": "Loop Engine", "label": "Total Tool Calls", "default": 1000, "type": "int",
                                       "desc": "Hard limit on total tool calls per task across all steps."},
-        "LOOP_HISTORY_WINDOW": {"section": "Loop Engine", "default": 0, "type": "int",
+        "LOOP_HISTORY_WINDOW": {"section": "Loop Engine", "label": "History Window", "default": 0, "type": "int",
                                 "desc": "Number of past action summaries to keep in context. 0 = keep all."},
-        "ANALYSIS_ENABLED": {"section": "Phases", "default": True, "type": "bool",
+        "ANALYSIS_ENABLED": {"section": "Phases", "label": "Analysis Phase", "default": True, "type": "bool",
                              "desc": "Enable the pre-development analyst phase that explores code and produces a spec."},
-        "REVIEW_ENABLED": {"section": "Phases", "default": True, "type": "bool",
+        "REVIEW_ENABLED": {"section": "Phases", "label": "Review Phase", "default": True, "type": "bool",
                            "desc": "Enable the post-development code review phase."},
-        "EXECUTE_COMMANDS_PERMISSION": {"section": "Permissions", "default": "auto_approve", "type": "select",
+        "EXECUTE_COMMANDS_PERMISSION": {"section": "Permissions", "label": "Shell Commands", "default": "auto_approve", "type": "select",
                                         "choices": ["auto_approve", "ask", "allowed_list"],
                                         "desc": "How to handle shell command execution. auto_approve=allow all, ask=prompt user, allowed_list=only commands in ALLOWED_COMMANDS_LIST."},
-        "ALLOWED_COMMANDS_LIST": {"section": "Permissions", "default": [], "type": "list",
-                                  "desc": "Commands allowed when EXECUTE_COMMANDS_PERMISSION=allowed_list. Comma-separated."},
-        "FILE_OPERATIONS_PERMISSION": {"section": "Permissions", "default": "ask", "type": "select",
+        "ALLOWED_COMMANDS_LIST": {"section": "Permissions", "label": "Allowed Commands", "default": [], "type": "list",
+                                  "desc": "Commands allowed when shell permission is 'allowed_list'. Comma-separated."},
+        "FILE_OPERATIONS_PERMISSION": {"section": "Permissions", "label": "File Operations", "default": "ask", "type": "select",
                                        "choices": ["ask", "auto_approve", "allowed_paths"],
                                        "desc": "How to handle file write/edit. ask=prompt user, auto_approve=allow all, allowed_paths=only within listed paths."},
-        "ALLOWED_FILE_PATHS": {"section": "Permissions", "default": [], "type": "list",
-                               "desc": "Paths allowed when FILE_OPERATIONS_PERMISSION=allowed_paths. Comma-separated."},
-        "SANDBOX_ENABLED": {"section": "Sandbox", "default": False, "type": "bool",
-                            "desc": "Enable sandbox mode. Restricts file access to ALLOWED_BASE_DIRS."},
-        "ALLOWED_BASE_DIRS": {"section": "Sandbox", "default": ["/"], "type": "list",
+        "ALLOWED_FILE_PATHS": {"section": "Permissions", "label": "Allowed File Paths", "default": [], "type": "list",
+                               "desc": "Paths allowed when file permission is 'allowed_paths'. Comma-separated."},
+        "SANDBOX_ENABLED": {"section": "Sandbox", "label": "Enabled", "default": False, "type": "bool",
+                            "desc": "Enable sandbox mode. Restricts file access to allowed base directories."},
+        "ALLOWED_BASE_DIRS": {"section": "Sandbox", "label": "Allowed Directories", "default": ["/"], "type": "list",
                               "desc": "Directories the agent can access when sandbox is enabled. Comma-separated."},
-        "ALLOWED_COMMANDS": {"section": "Sandbox", "default": [], "type": "list",
+        "ALLOWED_COMMANDS": {"section": "Sandbox", "label": "Allowed Commands", "default": [], "type": "list",
                              "desc": "Legacy: shell commands allowed in sandbox mode. Comma-separated."},
-        "COMMAND_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int",
+        "COMMAND_TIMEOUT": {"section": "Timeouts", "label": "Shell Command", "default": 120, "type": "int",
                             "desc": "Max seconds for a shell command before it is killed."},
-        "WEB_TIMEOUT": {"section": "Timeouts", "default": 30, "type": "int",
+        "WEB_TIMEOUT": {"section": "Timeouts", "label": "Web Requests", "default": 30, "type": "int",
                         "desc": "Max seconds for web fetch/search requests."},
-        "GIT_PUSH_TIMEOUT": {"section": "Timeouts", "default": 120, "type": "int",
+        "GIT_PUSH_TIMEOUT": {"section": "Timeouts", "label": "Git Push", "default": 120, "type": "int",
                              "desc": "Max seconds for git push operations."},
-        "MAX_FILE_SIZE_BYTES": {"section": "File Limits", "default": 5242880, "type": "int",
+        "MAX_FILE_SIZE_BYTES": {"section": "File Limits", "label": "Max File Size (bytes)", "default": 5242880, "type": "int",
                                 "desc": "Max file size (bytes) the agent can read. Default 5 MB."},
-        "MAX_DIR_LISTING": {"section": "File Limits", "default": 1000, "type": "int",
+        "MAX_DIR_LISTING": {"section": "File Limits", "label": "Max Directory Entries", "default": 1000, "type": "int",
                             "desc": "Max entries returned by list_directory."},
-        "DB_PATH": {"section": "Database", "default": "~/.infinidev/infinidev.db", "type": "string",
+        "DB_PATH": {"section": "Database", "label": "Database Path", "default": "~/.infinidev/infinidev.db", "type": "string",
                     "desc": "Path to the SQLite database for projects, tasks, and findings."},
-        "MAX_RETRIES": {"section": "Database", "default": 5, "type": "int",
+        "MAX_RETRIES": {"section": "Database", "label": "Max Retries", "default": 5, "type": "int",
                         "desc": "Max retries for database operations on WAL contention."},
-        "RETRY_BASE_DELAY": {"section": "Database", "default": 0.1, "type": "float",
+        "RETRY_BASE_DELAY": {"section": "Database", "label": "Retry Base Delay (s)", "default": 0.1, "type": "float",
                              "desc": "Base delay (seconds) for exponential backoff on DB retries."},
-        "WEB_CACHE_TTL_SECONDS": {"section": "Web Tools", "default": 3600, "type": "int",
+        "WEB_CACHE_TTL_SECONDS": {"section": "Web Tools", "label": "Cache TTL (s)", "default": 3600, "type": "int",
                                   "desc": "Cache duration (seconds) for web search/fetch results."},
-        "WEB_RPM_LIMIT": {"section": "Web Tools", "default": 20, "type": "int",
+        "WEB_RPM_LIMIT": {"section": "Web Tools", "label": "Rate Limit (rpm)", "default": 20, "type": "int",
                           "desc": "Max web requests per minute (rate limiting)."},
-        "WEB_ROBOTS_CACHE_TTL": {"section": "Web Tools", "default": 3600, "type": "int",
+        "WEB_ROBOTS_CACHE_TTL": {"section": "Web Tools", "label": "Robots.txt Cache (s)", "default": 3600, "type": "int",
                                  "desc": "Cache duration (seconds) for robots.txt lookups."},
-        "DEDUP_SIMILARITY_THRESHOLD": {"section": "Knowledge", "default": 0.82, "type": "float",
+        "DEDUP_SIMILARITY_THRESHOLD": {"section": "Knowledge", "label": "Dedup Threshold", "default": 0.82, "type": "float",
                                        "desc": "Cosine similarity threshold for deduplicating findings (0-1)."},
-        "WORKSPACE_BASE_DIR": {"section": "Workspace", "default": ".", "type": "string",
+        "WORKSPACE_BASE_DIR": {"section": "Workspace", "label": "Base Directory", "default": ".", "type": "string",
                                "desc": "Base directory for the agent's workspace."},
-        "CODE_INTERPRETER_TIMEOUT": {"section": "Code Interpreter", "default": 120, "type": "int",
+        "CODE_INTERPRETER_TIMEOUT": {"section": "Code Interpreter", "label": "Timeout (s)", "default": 120, "type": "int",
                                      "desc": "Max seconds for code interpreter execution."},
-        "CODE_INTERPRETER_MAX_OUTPUT": {"section": "Code Interpreter", "default": 50000, "type": "int",
+        "CODE_INTERPRETER_MAX_OUTPUT": {"section": "Code Interpreter", "label": "Max Output (chars)", "default": 50000, "type": "int",
                                         "desc": "Max characters of output captured from code interpreter."},
     }
 
@@ -365,68 +381,93 @@ class SettingsEditorScreen(ModalScreen[None]):
         super().__init__()
         self._settings = settings
         self._edited_values: dict[str, str] = {}
+        self._current_section: str = self.SECTION_ORDER[0][0]
+        # Build section -> keys mapping preserving definition order
+        self._sections: dict[str, list[str]] = {}
+        for key, info in self.SETTINGS_INFO.items():
+            sec = info["section"]
+            if sec not in self._sections:
+                self._sections[sec] = []
+            self._sections[sec].append(key)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-box"):
             yield Label("Settings", id="settings-title")
-            yield OptionList(id="settings-list")
-            with Vertical(id="settings-footer"):
-                with Horizontal():
+            with Horizontal(id="settings-body"):
+                yield OptionList(id="settings-sections")
+                with Vertical(id="settings-right"):
+                    yield OptionList(id="settings-list")
+                    yield Label("", id="settings-desc")
+            with Horizontal(id="settings-footer"):
+                yield Label("[dim]Ctrl+S save   Esc cancel[/dim]", id="settings-hint")
+                with Horizontal(id="settings-buttons"):
                     yield Button("Save", variant="success", id="btn-save")
-                    yield Button("Cancel", variant="error", id="btn-cancel")
-                yield Label("[dim]↑↓ navigate   Enter edit[/dim]", id="settings-hint")
+                    yield Button("Cancel", variant="default", id="btn-cancel")
 
     def on_mount(self) -> None:
+        # Populate sections list
+        sections_ol = self.query_one("#settings-sections", OptionList)
+        for section_key, section_label in self.SECTION_ORDER:
+            if section_key in self._sections:
+                sections_ol.add_option(Option(section_label, id=section_key))
+        # Highlight first section
+        if sections_ol.option_count > 0:
+            sections_ol.highlighted = 0
+        self._populate_settings(self._current_section)
+        sections_ol.focus()
+
+    def _populate_settings(self, section: str) -> None:
+        """Fill the right panel with settings for the given section."""
+        self._current_section = section
         ol = self.query_one("#settings-list", OptionList)
+        ol.clear_options()
 
-        # Group settings by section
-        sections: dict[str, list[tuple[str, dict]]] = {}
-        for key, info in self.SETTINGS_INFO.items():
-            section = info["section"]
-            if section not in sections:
-                sections[section] = []
-            sections[section].append((key, info))
-
-        # Add section headers and settings
-        first = True
-        for section_name in sorted(sections.keys()):
-            # Blank line separator between sections (except before first)
-            if not first:
-                ol.add_option(Option("", id=f"__blank__{section_name}"))
-            first = False
-            # Section header with line decoration
-            header = f"[bold cyan]── {section_name} ──[/bold cyan]"
-            ol.add_option(Option(header, id=f"__section__{section_name}"))
-
-            for key, info in sorted(sections[section_name], key=lambda x: x[0]):
+        keys = self._sections.get(section, [])
+        for key in keys:
+            info = self.SETTINGS_INFO[key]
+            label = info.get("label", key)
+            # Show edited value if available, otherwise current
+            if key in self._edited_values:
+                val = self._edited_values[key]
+                display_val = str(val) if not isinstance(val, list) else ", ".join(val)
+                line = f"[bold]{label}[/bold]  [bold green]{display_val}[/bold green] [dim italic]*[/dim italic]"
+            else:
                 current_value = getattr(self._settings, key, info.get("default", ""))
-                display = str(current_value) if current_value not in (None, "", []) else "[italic dim]not set[/italic dim]"
-                value_markup = f"[dim]{display}[/dim]" if current_value not in (None, "", []) else display
-                ol.add_option(
-                    Option(
-                        f"  [bold]{key}[/bold]  {value_markup}",
-                        id=key,
-                    )
-                )
+                display = str(current_value) if current_value not in (None, "", []) else "[dim]not set[/dim]"
+                line = f"[bold]{label}[/bold]  [dim]{display}[/dim]"
+            ol.add_option(Option(line, id=key))
 
-        ol.focus()
+        # Update description for first item
+        if keys:
+            desc = self.SETTINGS_INFO[keys[0]].get("desc", "")
+            self.query_one("#settings-desc", Label).update(f"[dim]{desc}[/dim]")
+        else:
+            self.query_one("#settings-desc", Label).update("")
 
-    def _is_non_setting(self, option_id: str | None) -> bool:
-        """Check if an option is a section header or blank separator."""
-        if not option_id:
-            return True
-        return option_id.startswith("__section__") or option_id.startswith("__blank__")
+    @on(OptionList.OptionHighlighted, "#settings-sections")
+    def on_section_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option and event.option.id:
+            self._populate_settings(event.option.id)
+
+    @on(OptionList.OptionSelected, "#settings-sections")
+    def on_section_select(self, event: OptionList.OptionSelected) -> None:
+        """When a section is selected (Enter), move focus to the settings list."""
+        self.query_one("#settings-list", OptionList).focus()
 
     @on(OptionList.OptionHighlighted, "#settings-list")
-    def on_highlight(self, event: OptionList.OptionHighlighted) -> None:
-        if self._is_non_setting(event.option.id):
-            return
+    def on_setting_highlight(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option and event.option.id:
+            info = self.SETTINGS_INFO.get(event.option.id, {})
+            desc = info.get("desc", "")
+            key_name = event.option.id
+            self.query_one("#settings-desc", Label).update(
+                f"[dim italic]{key_name}[/dim italic]\n[dim]{desc}[/dim]"
+            )
 
     @on(OptionList.OptionSelected, "#settings-list")
-    def on_select(self, event: OptionList.OptionSelected) -> None:
-        if self._is_non_setting(event.option.id):
-            return
-        self._show_setting_editor(event.option.id)
+    def on_setting_select(self, event: OptionList.OptionSelected) -> None:
+        if event.option and event.option.id:
+            self._show_setting_editor(event.option.id)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-save":
@@ -436,7 +477,7 @@ class SettingsEditorScreen(ModalScreen[None]):
 
     def _show_setting_editor(self, setting_key: str) -> None:
         info = self.SETTINGS_INFO.get(setting_key, {})
-        current_value = getattr(self._settings, setting_key, None)
+        current_value = self._edited_values.get(setting_key, getattr(self._settings, setting_key, None))
         setting_type = info.get("type", "string")
         description = info.get("desc", "")
         choices = info.get("choices", None)
@@ -444,64 +485,39 @@ class SettingsEditorScreen(ModalScreen[None]):
         editor = SettingValueEditor(
             setting_key, current_value, setting_type,
             description=description, choices=choices,
+            label=info.get("label", setting_key),
         )
         self.app.push_screen(editor, lambda value: self._on_value_updated(setting_key, value))
 
     def _on_value_updated(self, key: str, value: str | None) -> None:
         if value is not None:
-            # Convert list-type settings from comma-separated string
             setting_type = self.SETTINGS_INFO.get(key, {}).get("type", "string")
             if setting_type == "list" and isinstance(value, str):
                 value = [item.strip() for item in value.split(",") if item.strip()]
             self._edited_values[key] = value
-            # Update the option label to show edited value
-            ol = self.query_one("#settings-list", OptionList)
-            display_value = self._format_value(value, self.SETTINGS_INFO.get(key, {}).get("type", "string"))
-            for i in range(ol.option_count):
-                opt = ol.get_option_at_index(i)
-                if opt.id == key:
-                    ol.replace_option_prompt(opt.id, f"  [bold white]{key}[/bold white]  [bold green]{display_value}[/bold green] [dim italic](edited)[/dim italic]")
-                    break
+            # Refresh the current section to show the edit
+            self._populate_settings(self._current_section)
         self.query_one("#settings-list", OptionList).focus()
-
-    def _format_value(self, value: str, value_type: str) -> str:
-        """Format value for display based on its type."""
-        try:
-            if value_type == "int":
-                return str(int(value))
-            elif value_type == "float":
-                return str(float(value))
-            elif value_type == "bool":
-                return "true" if value.lower() in ("true", "1", "yes") else "false"
-            return value
-        except (ValueError, AttributeError):
-            return value
 
     def action_save(self) -> None:
         """Save all edited settings."""
         if not self._edited_values:
             self.dismiss(None)
             return
-        
-        self.query_one("#settings-list", OptionList).blur()
-        
+
         from infinidev.config.settings import reload_all
         try:
             self._settings.save_user_settings(self._edited_values)
             reload_all()
-            self.add_message("System", f"Saved {len(self._edited_values)} settings. Reloaded.", "system")
+            self.notify(f"Saved {len(self._edited_values)} setting(s).", timeout=3)
             self.dismiss(None)
         except Exception as e:
-            self.add_message("System", f"Failed to save settings: {e}", "system")
+            self.notify(f"Failed to save: {e}", severity="error", timeout=5)
             self.dismiss(None)
 
     def action_cancel(self) -> None:
         """Cancel and discard changes."""
         self.dismiss(None)
-
-    def add_message(self, sender: str, text: str, type: str = "agent") -> None:
-        """Show a transient notification for save status."""
-        self.notify(f"{sender}: {text}", timeout=3)
 
 
 class PermissionDetailScreen(ModalScreen[None]):
@@ -538,9 +554,11 @@ class SettingValueEditor(ModalScreen[str | None]):
     ]
 
     def __init__(self, key: str, current_value, value_type: str,
-                 description: str = "", choices: list[str] | None = None):
+                 description: str = "", choices: list[str] | None = None,
+                 label: str = ""):
         super().__init__()
         self._key = key
+        self._label = label or key
         self._current_value = current_value
         self._value_type = value_type
         self._description = description
@@ -550,7 +568,7 @@ class SettingValueEditor(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         from textual.widgets import Select
         with Vertical(id="setting-editor-box"):
-            yield Label(f"Edit: {self._key}", id="setting-editor-title")
+            yield Label(self._label, id="setting-editor-title")
             if self._description:
                 yield Label(f"[dim]{self._description}[/dim]", id="setting-editor-desc")
 
@@ -1341,8 +1359,7 @@ class InfinidevTUI(App):
 
     def on_mount(self) -> None:
         init_db()
-        set_event_callback(self.on_loop_event)
-        set_tree_event_callback(self.on_loop_event)
+        event_bus.subscribe(self.on_loop_event)
         self.query_one("#chat-input").focus()
         self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
 
@@ -1367,6 +1384,7 @@ class InfinidevTUI(App):
         # Engine queue: process one message at a time
         self._engine_running = False
         self._pending_inputs: list[str] = []
+        self._gather_next_task = False  # /think enables gather for next task only
 
         # Permission request state (for execute_command "ask" mode)
         self._permission_waiting = False
@@ -1425,6 +1443,7 @@ class InfinidevTUI(App):
 
     def action_quit(self) -> None:
         """Override quit to warn about unsaved files."""
+        event_bus.unsubscribe(self.on_loop_event)
         if self._dirty_files:
             dirty_names = []
             for tid in self._dirty_files:
@@ -2083,6 +2102,47 @@ class InfinidevTUI(App):
             # Clean up accumulated tree state
             self._tree_resolved_lines.clear()
 
+        # ── Analysis events ───────────────────────────────
+        elif event_type == "analysis_start":
+            round_num = data.get("round", 1)
+            self.query_one("#actions-panel").update_content(
+                f"Analyzing request... (round {round_num})"
+            )
+
+        elif event_type == "analysis_research":
+            queries = data.get("queries", [])
+            preview = ", ".join(q[:30] for q in queries[:2])
+            self.query_one("#actions-panel").update_content(
+                f"Researching: {preview}"
+            )
+
+        elif event_type == "analysis_complete":
+            action = data.get("action", "")
+            self.query_one("#actions-panel").update_content(
+                f"Analysis: {action}"
+            )
+
+        # ── Review events ─────────────────────────────────
+        elif event_type == "review_start":
+            self.query_one("#actions-panel").update_content("Code review...")
+
+        elif event_type == "review_complete":
+            verdict = data.get("verdict", "")
+            issues = data.get("issue_count", 0)
+            text = f"Review: {verdict}"
+            if issues:
+                text += f" ({issues} issues)"
+            self.query_one("#actions-panel").update_content(text)
+
+        # ── Gather events ─────────────────────────────────
+        elif event_type == "gather_status":
+            text = data.get("text", "")
+            self.query_one("#actions-panel").update_content(text)
+
+        elif event_type == "gather_error":
+            msg = data.get("message", "")
+            self.query_one("#actions-panel").update_content(f"Gather skipped: {msg}")
+
     def _expire_log_line(self, line: str) -> None:
         try:
             self._log_lines.remove(line)
@@ -2424,16 +2484,11 @@ class InfinidevTUI(App):
             from infinidev.config.settings import settings as _settings
             if _settings.ANALYSIS_ENABLED:
                 self.analyst.reset()
-                self.call_from_thread(
-                    self.query_one("#actions-panel").update_content,
-                    "Analyzing request..."
-                )
 
                 analysis_input = user_input
                 analysis = self.analyst.analyze(
                     analysis_input,
                     session_summaries=summaries,
-                    event_callback=self.on_loop_event if hasattr(self, 'on_loop_event') else None,
                 )
 
                 # Handle question loop
@@ -2553,13 +2608,12 @@ class InfinidevTUI(App):
 
             # --- Gather phase ---
             flow_label = analysis.flow if _settings.ANALYSIS_ENABLED else "develop"
-            if _settings.GATHER_ENABLED and flow_label == "develop":
+            _do_gather = _settings.GATHER_ENABLED or self._gather_next_task
+            self._gather_next_task = False  # Reset after use
+            if _do_gather and flow_label == "develop":
                 try:
                     from infinidev.gather import run_gather
-                    self.call_from_thread(
-                        self.query_one("#actions-panel").update_content,
-                        "Gathering context..."
-                    )
+
                     chat_history = [
                         {"role": "user" if "[user]" in s.lower() else "assistant", "content": s}
                         for s in get_recent_summaries(self.session_id, limit=10)
@@ -2567,15 +2621,11 @@ class InfinidevTUI(App):
                     brief = run_gather(user_input, chat_history, analysis, self.agent)
                     desc, expected = task_prompt
                     task_prompt = (brief.render() + "\n\n" + desc, expected)
-                    self.call_from_thread(
-                        self.query_one("#actions-panel").update_content,
-                        f"Gathered: {brief.summary()}"
-                    )
+                    from infinidev.flows.event_listeners import event_bus as _eb
+                    _eb.emit("gather_status", 0, "", {"text": f"Gathered: {brief.summary()}"})
                 except Exception as exc:
-                    self.call_from_thread(
-                        self.query_one("#actions-panel").update_content,
-                        f"Gather skipped: {exc}"
-                    )
+                    from infinidev.flows.event_listeners import event_bus as _eb
+                    _eb.emit("gather_error", 0, "", {"message": str(exc)})
             # --- End gather phase ---
 
             # --- Development phase ---
@@ -2611,11 +2661,6 @@ class InfinidevTUI(App):
             # --- Code review phase (single pass, no retry loop) ---
             run_review = flow_config.run_review if flow_config else True
             if _settings.REVIEW_ENABLED and run_review and flow_label != "explore" and self.engine.has_file_changes():
-                self.call_from_thread(
-                    self.query_one("#actions-panel").update_content,
-                    "Code review..."
-                )
-
                 self.reviewer.reset()
                 review = self.reviewer.review(
                     task_description=task_prompt[0],
@@ -2624,7 +2669,6 @@ class InfinidevTUI(App):
                     file_reasons=self.engine.get_file_change_reasons(),
                     file_contents=self.engine.get_file_contents(),
                     recent_messages=get_recent_summaries(self.session_id, limit=5),
-                    event_callback=self.on_loop_event if hasattr(self, 'on_loop_event') else None,
                 )
 
                 if review.is_approved:
@@ -2891,6 +2935,9 @@ class InfinidevTUI(App):
                 self.add_message("System", f"Brainstorming: {problem}", "system")
                 self._show_thinking()
                 self._run_brainstorm(problem)
+        elif cmd == "/think":
+            self._gather_next_task = True
+            self.add_message("System", "Gather mode enabled for the next task. Send your prompt and infinidev will deeply analyze the codebase before acting.", "system")
         elif cmd == "/init":
             if self._engine_running:
                 self.add_message("System", "Cannot run /init while a task is running.", "system")

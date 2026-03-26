@@ -42,7 +42,7 @@ SettingsEditorScreen {
     background: rgba(0, 0, 0, 0.65);
 }
 #settings-box {
-    width: 80%;
+    width: 85%;
     height: 80%;
     background: $surface;
     border: round $primary;
@@ -57,6 +57,25 @@ SettingsEditorScreen {
     background: $surface-darken-2;
     border-bottom: solid $primary-darken-2;
 }
+#settings-body {
+    height: 1fr;
+}
+#settings-sections {
+    width: 22;
+    height: 100%;
+    background: $surface-darken-1;
+    border-right: solid $primary-darken-3;
+    padding: 0;
+    scrollbar-size-vertical: 1;
+}
+#settings-sections > .option-list--option-highlighted {
+    background: $primary 30%;
+    text-style: bold;
+}
+#settings-right {
+    width: 1fr;
+    height: 100%;
+}
 #settings-list {
     height: 1fr;
     background: $surface;
@@ -69,28 +88,36 @@ SettingsEditorScreen {
 #settings-list > .option-list--option-highlighted {
     background: $primary 20%;
 }
+#settings-desc {
+    width: 100%;
+    height: auto;
+    min-height: 3;
+    max-height: 4;
+    padding: 1 2;
+    background: $surface-darken-1;
+    border-top: solid $primary-darken-3;
+    color: $text-muted;
+}
 #settings-footer {
     width: 100%;
     height: auto;
-    align: center middle;
-    padding: 1 2;
+    padding: 0 2;
     background: $surface-darken-2;
     border-top: solid $primary-darken-2;
 }
-#settings-footer Horizontal {
+#settings-hint {
+    width: 1fr;
+    color: $text-muted;
+    padding: 1 0;
+    height: auto;
+}
+#settings-buttons {
     width: auto;
     height: auto;
-    align: center middle;
+    align: right middle;
 }
-#settings-footer Button {
-    margin: 0 1;
-}
-#settings-hint {
-    width: 100%;
-    text-align: center;
-    color: $text-muted;
-    margin-top: 1;
-    height: auto;
+#settings-buttons Button {
+    margin: 0 0 0 1;
 }
 
 

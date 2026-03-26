@@ -275,7 +275,7 @@ class TestReviewEngine:
 
     @patch("litellm.completion")
     @patch("infinidev.config.llm.get_litellm_params")
-    def test_event_callback_called(self, mock_params, mock_completion):
+    def test_events_emitted_to_bus(self, mock_params, mock_completion):
         mock_params.return_value = {"model": "test"}
         mock_completion.return_value = MagicMock(
             choices=[MagicMock(message=MagicMock(
@@ -286,15 +286,19 @@ class TestReviewEngine:
         def callback(event_type, *args):
             events.append(event_type)
 
-        engine = ReviewEngine()
-        engine.review(
-            task_description="x",
-            developer_result="y",
-            file_changes_summary="diff here",
-            event_callback=callback,
-        )
-        assert "review_start" in events
-        assert "review_complete" in events
+        from infinidev.flows.event_listeners import event_bus
+        event_bus.subscribe(callback)
+        try:
+            engine = ReviewEngine()
+            engine.review(
+                task_description="x",
+                developer_result="y",
+                file_changes_summary="diff here",
+            )
+            assert "review_start" in events
+            assert "review_complete" in events
+        finally:
+            event_bus.unsubscribe(callback)
 
     def test_build_review_prompt_structure(self):
         engine = ReviewEngine()
