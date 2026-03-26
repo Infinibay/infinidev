@@ -17,7 +17,7 @@ from infinidev.engine.loop_engine import LoopEngine
 from infinidev.engine.llm_client import call_llm
 from infinidev.engine.phase_prompts import get_strategy, PhaseStrategy
 from infinidev.engine.plan_validator import (
-    validate_plan, validate_questions, format_rejection,
+    validate_questions, format_rejection,
 )
 from infinidev.engine.test_checkpoint import TestCheckpoint
 from infinidev.engine.engine_logging import (
@@ -92,7 +92,7 @@ class PhaseEngine:
             _log(f"\n{BOLD}📋 Phase 3: PLAN{RESET}")
 
         plan_steps = self._generate_plan(
-            agent, description, answers, all_notes, strategy, verbose,
+            agent, description, answers, all_notes, strategy, task_tools, verbose,
         )
 
         if not plan_steps:
@@ -277,11 +277,17 @@ class PhaseEngine:
         answers: list[dict[str, str]],
         all_notes: list[str],
         strategy: PhaseStrategy,
+        all_tools: list | None,
         verbose: bool,
     ) -> list[dict[str, Any]]:
-        """Direct LLM call to generate a validated plan from Q&A + notes."""
-        from infinidev.config.llm import get_litellm_params
+        """Use LoopEngine to build the plan incrementally.
 
+        The model uses step_complete(next_steps=[...]) to add steps to the
+        plan one at a time. When it says "done", the accumulated plan steps
+        become our execution plan.
+
+        Read-only tools are available so the model can re-check files.
+        """
         answers_text = "\n".join(
             f"  Q: {a['question']}\n  A: {a['answer']}"
             for a in answers
@@ -299,71 +305,59 @@ class PhaseEngine:
                 baseline_str = f"\nTest baseline: {passed}/{total} passing\n"
 
         prompt = (
+            f"You are creating an implementation plan. Use step_complete with "
+            f"next_steps to ADD steps to the plan. Each step_complete call should "
+            f"add 2-4 new steps. Keep going until the plan covers the full task, "
+            f"then call step_complete with status='done'.\n\n"
+            f"You can use read-only tools (read_file, glob, code_search) if you "
+            f"need to check something while planning.\n\n"
             f"{strategy.plan_prompt}\n\n"
             f"## YOUR TASK\n{description}\n\n"
             f"## YOUR INVESTIGATION RESULTS\n{answers_text}\n"
             f"{notes_text}"
-            f"{baseline_str}\n"
-            f"You have NO tools. Do NOT call any tools.\n"
-            f"Output ONLY a JSON ARRAY (starting with [ and ending with ]) "
-            f"containing ALL steps. NOT a single object — an ARRAY of objects.\n"
-            'Example format: [{"step": 1, "description": "...", "files": ["..."]}, '
-            '{"step": 2, "description": "...", "files": []}, ...]'
+            f"{baseline_str}"
         )
 
-        # Prepend /no_think to suppress thinking tags that eat output tokens
-        prompt = "/no_think\n" + prompt
+        # Filter to read-only tools
+        if all_tools:
+            plan_tools = [
+                t for t in all_tools
+                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
+            ]
+        else:
+            plan_tools = None
 
-        llm_params = get_litellm_params()
-        # Minimal system prompt for PLAN phase — the full LOOP_PROTOCOL
-        # confuses the model (it tries to call step_complete or use tools
-        # instead of outputting a JSON plan)
-        system_prompt = (
-            "You are a software engineering planner. Your ONLY job is to output "
-            "a JSON array of implementation steps. No tool calls, no explanations, "
-            "no markdown — just a JSON array starting with [ and ending with ]."
+        engine = LoopEngine()
+        engine.execute(
+            agent=agent,
+            task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
+            verbose=verbose,
+            task_tools=plan_tools,
+            max_iterations=8,
+            max_total_tool_calls=20,
+            nudge_threshold=6,
+            summarizer_enabled=False,
         )
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
 
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                response = call_llm(llm_params, messages)
-                content = self._clean_llm_text(response)
+        # Extract the plan from the engine's state
+        steps = []
+        if engine._last_state and engine._last_state.plan.steps:
+            for s in engine._last_state.plan.steps:
+                steps.append({
+                    "step": s.index,
+                    "description": s.description,
+                    "files": [],  # engine plan steps don't track files
+                })
 
-                if verbose:
-                    preview = content[:200].replace("\n", " ")
-                    _log(f"  {DIM}LLM returned ({len(content)} chars): {preview}...{RESET}")
+        if verbose:
+            _log(f"  {DIM}Plan generated: {len(steps)} steps{RESET}")
 
-                if not content:
-                    if verbose:
-                        _log(f"  {YELLOW}⚠ Empty response from LLM{RESET}")
-                    continue
+        if len(steps) < strategy.plan_min_steps:
+            if verbose:
+                _log(f"  {YELLOW}⚠ Only {len(steps)} steps (need {strategy.plan_min_steps}){RESET}")
+            return []
 
-                is_valid, steps, errors = validate_plan(content, strategy)
-                if is_valid:
-                    return steps
-
-                if verbose:
-                    for err in errors:
-                        _log(f"  {YELLOW}⚠ {err}{RESET}")
-
-                if attempt < max_attempts - 1:
-                    rejection = format_rejection(errors)
-                    messages.append({"role": "assistant", "content": content})
-                    messages.append({"role": "user", "content": rejection})
-                    if verbose:
-                        _log(f"  {DIM}Re-prompting (attempt {attempt + 2}/{max_attempts})...{RESET}")
-
-            except Exception as exc:
-                logger.warning("Plan generation failed (attempt %d): %s", attempt + 1, str(exc)[:200])
-                if verbose:
-                    _log(f"  {RED}⚠ LLM error: {str(exc)[:100]}{RESET}")
-
-        return []
+        return steps
 
     # ── Phase 4: Execute plan ─────────────────────────────────────────
 
