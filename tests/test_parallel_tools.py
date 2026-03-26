@@ -113,7 +113,7 @@ class TestParallelExecution:
 
         # The execute_tool_call function is used directly, mock it
         from unittest.mock import patch
-        with patch("infinidev.engine.loop_engine.execute_tool_call", return_value="file contents"):
+        with patch("infinidev.engine.tool_executor.execute_tool_call", return_value="file contents"):
             results = _execute_tool_calls_parallel([tc], dispatch)
 
         assert len(results) == 1
@@ -132,7 +132,7 @@ class TestParallelExecution:
             return f"content_{idx}"
 
         from unittest.mock import patch
-        with patch("infinidev.engine.loop_engine.execute_tool_call", side_effect=mock_execute):
+        with patch("infinidev.engine.tool_executor.execute_tool_call", side_effect=mock_execute):
             results = _execute_tool_calls_parallel(tcs, {})
 
         assert len(results) == 5
@@ -151,14 +151,14 @@ class TestParallelExecution:
 
         # Sequential
         start = time.time()
-        with patch("infinidev.engine.loop_engine.execute_tool_call", side_effect=slow_execute):
+        with patch("infinidev.engine.tool_executor.execute_tool_call", side_effect=slow_execute):
             for tc in tcs:
                 slow_execute({}, tc.function.name, tc.function.arguments)
         sequential_time = time.time() - start
 
         # Parallel
         start = time.time()
-        with patch("infinidev.engine.loop_engine.execute_tool_call", side_effect=slow_execute):
+        with patch("infinidev.engine.tool_executor.execute_tool_call", side_effect=slow_execute):
             _execute_tool_calls_parallel(tcs, {})
         parallel_time = time.time() - start
 
@@ -183,7 +183,7 @@ class TestParallelExecution:
             return "content"
 
         from unittest.mock import patch
-        with patch("infinidev.engine.loop_engine.execute_tool_call", side_effect=failing_execute):
+        with patch("infinidev.engine.tool_executor.execute_tool_call", side_effect=failing_execute):
             results = _execute_tool_calls_parallel(tcs, {})
 
         assert len(results) == 3
