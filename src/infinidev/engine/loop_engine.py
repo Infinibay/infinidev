@@ -383,6 +383,7 @@ class LoopEngine(AgentEngine):
         nudge_threshold: int | None = None,
         summarizer_enabled: bool | None = None,
         identity_override: str | None = None,
+        done_means_done: bool = False,
     ) -> str:
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
@@ -1114,7 +1115,9 @@ class LoopEngine(AgentEngine):
                 step_result = StepResult(summary="Step completed.", status="continue")
 
             # --- Auto-split: prevent premature "done" ---
-            if step_result.status == "done" and not step_result.final_answer:
+            # When done_means_done=True (e.g. PLAN phase), pending steps are
+            # the OUTPUT, not unfinished work — respect the model's "done".
+            if step_result.status == "done" and not step_result.final_answer and not done_means_done:
                 pending_count = sum(1 for s in state.plan.steps if s.status == "pending")
                 if pending_count > 0:
                     step_result.status = "continue"
