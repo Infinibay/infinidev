@@ -20,6 +20,15 @@ except ImportError:
     _repair_json = None
 
 from infinidev.engine.base import AgentEngine
+from infinidev.engine.llm_client import (
+    call_llm as _call_llm,
+    is_malformed_tool_call as _is_malformed_tool_call,
+    is_transient as _is_transient,
+    LLM_RETRIES as _LLM_RETRIES,
+    LLM_RETRY_DELAY as _LLM_RETRY_DELAY,
+    MALFORMED_TOOL_PATTERNS as _MALFORMED_TOOL_PATTERNS,
+    PERMANENT_ERRORS as _PERMANENT_ERRORS,
+)
 from infinidev.engine.loop_context import (
     build_iteration_prompt,
     build_system_prompt,
@@ -610,68 +619,8 @@ def _log_finish(agent_name: str, status: str, iterations: int, total_tools: int,
         f"{_DIM}{iterations} steps · {total_tools} tools · {total_tokens} tokens{_RESET}\n"
     )
 
-# Transient LLM errors that should be retried
-_TRANSIENT_ERRORS = (
-    "connection error",
-    "connectionerror",
-    "disconnected",
-    "rate limit",
-    "timeout",
-    "503",
-    "502",
-    "429",
-    "overloaded",
-    "internal server error",
-)
-
-# Permanent errors that look transient but aren't (substrings that
-# override a _TRANSIENT_ERRORS match when present)
-_PERMANENT_ERRORS = (
-    "does not support tools",
-    "does not support function",
-    "tool_choice is not supported",
-    "tools is not supported",
-    "not found",        # Ollama: {"error":"tool 'X' not found"}
-)
-
-_LLM_RETRIES = 5
-_LLM_RETRY_DELAY = 3.0
-
-
-def _is_transient(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    # Check permanent exclusions first — these are capability errors
-    # wrapped in APIConnectionError, not actual network issues
-    if any(p in msg for p in _PERMANENT_ERRORS):
-        return False
-    # Malformed tool call errors (Ollama returns 500 for these) should NOT
-    # be retried at the LLM call level — the same context will produce the
-    # same malformed output.  Let the loop-level malformed handler deal with
-    # these instead (it can force a step completion or switch to manual mode).
-    if _is_malformed_tool_call(exc):
-        return False
-    return any(p in msg for p in _TRANSIENT_ERRORS)
-
-
-# Patterns that indicate the LLM produced a malformed tool call
-# (e.g. Ollama mixing natural language text with JSON arguments)
-_MALFORMED_TOOL_PATTERNS = (
-    "error parsing tool call",
-    "invalid character",
-    "looking for beginning of value",
-    "unexpected end of json",
-    "failed to parse json",
-    "unexpected token",
-    "unterminated string",
-    "after top-level value",
-    "after object key:value pair",
-)
-
-
-def _is_malformed_tool_call(exc: Exception) -> bool:
-    """Check if an LLM error is due to a malformed tool call response."""
-    msg = str(exc).lower()
-    return any(p in msg for p in _MALFORMED_TOOL_PATTERNS)
+# Error classification constants and functions are in llm_client.py
+# Imported at top: _is_transient, _is_malformed_tool_call, _PERMANENT_ERRORS, etc.
 
 
 class _ManualToolCall:
@@ -1013,66 +962,7 @@ def _parse_step_complete_args(arguments: str | dict[str, Any]) -> StepResult:
     )
 
 
-def _call_llm(
-    params: dict[str, Any],
-    messages: list[dict[str, Any]],
-    tools: list[dict[str, Any]] | None = None,
-    tool_choice: str | dict[str, Any] = "auto",
-) -> Any:
-    """Call litellm.completion with retry for transient errors.
-
-    Adapts request parameters based on probed model capabilities:
-    - Downgrades tool_choice="required" → "auto" if unsupported
-    - Skips response_format=json_object if unsupported
-    """
-    import litellm
-    from infinidev.config.model_capabilities import get_model_capabilities
-
-    caps = get_model_capabilities()
-
-    kwargs: dict[str, Any] = {**params, "messages": messages}
-    if tools:
-        kwargs["tools"] = tools
-        # Downgrade tool_choice if model doesn't support "required"
-        if tool_choice == "required" and not caps.supports_tool_choice_required:
-            kwargs["tool_choice"] = "auto"
-        else:
-            kwargs["tool_choice"] = tool_choice
-        # Suppress thinking tags for models that emit <think> in FC mode
-        # (e.g. Qwen 3.x). Ollama can't parse <think> mixed with tool call
-        # JSON, causing "invalid character '<'" errors on every request.
-        if caps.has_thinking_sections:
-            msgs = kwargs["messages"]
-            for i in range(len(msgs) - 1, -1, -1):
-                if msgs[i].get("role") == "user":
-                    content = msgs[i].get("content", "")
-                    if "/no_think" not in content:
-                        msgs[i] = {**msgs[i], "content": "/no_think\n" + content}
-                    break
-    # Force JSON output — prevents models (especially Ollama) from mixing
-    # natural language text into tool call arguments.
-    # NOTE: Do NOT set response_format when tools are present — for llama-server
-    # and similar backends, the JSON grammar constraint conflicts with the
-    # function calling grammar, causing the model to intermittently return
-    # JSON text instead of tool calls.
-    if caps.supports_json_mode and not tools:
-        kwargs["response_format"] = {"type": "json_object"}
-
-    last_exc: Exception | None = None
-    for attempt in range(1, _LLM_RETRIES + 1):
-        try:
-            return litellm.completion(**kwargs)
-        except Exception as exc:
-            last_exc = exc
-            if not _is_transient(exc) or attempt == _LLM_RETRIES:
-                raise
-            delay = _LLM_RETRY_DELAY * (2 ** (attempt - 1))
-            logger.warning(
-                "Transient LLM error (attempt %d/%d), retrying in %.1fs: %s",
-                attempt, _LLM_RETRIES, delay, str(exc)[:200],
-            )
-            time.sleep(delay)
-    raise last_exc  # type: ignore[misc]
+# _call_llm is imported from llm_client.py at top of file
 
 
 _SUMMARIZER_SYSTEM_PROMPT = """\
