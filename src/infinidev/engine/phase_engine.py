@@ -80,7 +80,7 @@ class PhaseEngine:
         if verbose:
             _log(f"\n{BOLD}🔍 Phase 2: INVESTIGATE{RESET}")
 
-        answers = self._investigate(
+        answers, all_notes = self._investigate(
             agent, questions, strategy, task_tools, verbose,
         )
 
@@ -266,7 +266,7 @@ class PhaseEngine:
                 note_count = len(engine._last_state.notes) if engine._last_state else 0
                 _log(f"    {DIM}→ {note_count} notes: {answer_text[:100]}{RESET}")
 
-        return answers
+        return answers, all_notes
 
     # ── Phase 3: Generate plan ────────────────────────────────────────
 
