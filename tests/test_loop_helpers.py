@@ -4,12 +4,16 @@ import json
 
 import pytest
 
-from infinidev.engine.loop_engine import (
-    _extract_tool_detail,
-    _extract_tool_error,
-    _is_malformed_tool_call,
-    _is_transient,
-    _parse_text_tool_calls,
+from infinidev.engine.llm_client import (
+    is_transient as _is_transient,
+    is_malformed_tool_call as _is_malformed_tool_call,
+)
+from infinidev.engine.engine_logging import (
+    extract_tool_detail as _extract_tool_detail,
+    extract_tool_error as _extract_tool_error,
+)
+from infinidev.engine.tool_call_parser import (
+    parse_text_tool_calls as _parse_text_tool_calls,
 )
 
 

@@ -10,21 +10,20 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 import time
 from typing import Any
 
-# json_repair is now used via tool_call_parser.safe_json_loads
-
 from infinidev.engine.base import AgentEngine
-from infinidev.engine.tool_executor import (
-    update_opened_files_cache as _update_opened_files_cache,
-    batch_tool_calls as _batch_tool_calls,
-    execute_tool_calls_parallel as _execute_tool_calls_parallel,
-    capture_pre_content as _capture_pre_content,
-    maybe_emit_file_change as _maybe_emit_file_change,
-    FILE_CHANGE_TOOLS as _FILE_CHANGE_TOOLS,
-    WRITE_TOOLS as _WRITE_TOOLS,
+from infinidev.engine.llm_client import (
+    call_llm as _call_llm,
+    is_malformed_tool_call as _is_malformed_tool_call,
+    PERMANENT_ERRORS as _PERMANENT_ERRORS,
+)
+from infinidev.engine.tool_call_parser import (
+    safe_json_loads as _safe_json_loads,
+    ManualToolCall as _ManualToolCall,
+    parse_text_tool_calls as _parse_text_tool_calls,
+    parse_step_complete_args as _parse_step_complete_args,
 )
 from infinidev.engine.engine_logging import (
     emit_loop_event as _emit_loop_event,
@@ -37,9 +36,7 @@ from infinidev.engine.engine_logging import (
     log_tool as _log_tool,
     log_step_done as _log_step_done,
     log_plan as _log_plan,
-    log_prompt as _log_prompt,
     log_finish as _log_finish,
-    # ANSI codes used inline in execute()
     DIM as _DIM,
     BOLD as _BOLD,
     RESET as _RESET,
@@ -47,24 +44,13 @@ from infinidev.engine.engine_logging import (
     GREEN as _GREEN,
     YELLOW as _YELLOW,
     RED as _RED,
-    MAGENTA as _MAGENTA,
-    BLUE as _BLUE,
-    TOOL_DETAIL_KEYS as _TOOL_DETAIL_KEYS,
 )
-from infinidev.engine.tool_call_parser import (
-    safe_json_loads as _safe_json_loads,
-    ManualToolCall as _ManualToolCall,
-    parse_text_tool_calls as _parse_text_tool_calls,
-    parse_step_complete_args as _parse_step_complete_args,
-)
-from infinidev.engine.llm_client import (
-    call_llm as _call_llm,
-    is_malformed_tool_call as _is_malformed_tool_call,
-    is_transient as _is_transient,
-    LLM_RETRIES as _LLM_RETRIES,
-    LLM_RETRY_DELAY as _LLM_RETRY_DELAY,
-    MALFORMED_TOOL_PATTERNS as _MALFORMED_TOOL_PATTERNS,
-    PERMANENT_ERRORS as _PERMANENT_ERRORS,
+from infinidev.engine.tool_executor import (
+    update_opened_files_cache as _update_opened_files_cache,
+    batch_tool_calls as _batch_tool_calls,
+    execute_tool_calls_parallel as _execute_tool_calls_parallel,
+    capture_pre_content as _capture_pre_content,
+    maybe_emit_file_change as _maybe_emit_file_change,
 )
 from infinidev.engine.loop_context import (
     build_iteration_prompt,
@@ -75,8 +61,6 @@ from infinidev.engine.loop_models import (
     ActionRecord,
     LoopPlan,
     LoopState,
-    PlanStep,
-    StepOperation,
     StepResult,
 )
 from infinidev.engine.file_change_tracker import FileChangeTracker
@@ -90,9 +74,6 @@ from infinidev.engine.loop_tools import (
 
 # Max consecutive calls to the same tool before forcing a step_complete nudge
 _MAX_SAME_TOOL_CONSECUTIVE = 3
-
-
-# _safe_json_loads imported from tool_call_parser at top of file
 
 
 def _get_model_max_context(llm_params: dict[str, Any]) -> int:
@@ -132,13 +113,6 @@ def _get_model_max_context(llm_params: dict[str, Any]) -> int:
 _MAX_TEXT_RETRIES = 5
 
 logger = logging.getLogger(__name__)
-
-
-# -- Event handling via centralized EventBus --
-# event_bus access is now via engine_logging module
-
-# Tool execution, batching, file tracking, and cache management
-# are imported from tool_executor.py at top of file
 
 
 _SUMMARIZER_SYSTEM_PROMPT = """\

@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from infinidev.engine.loop_engine import (
-    _batch_tool_calls,
-    _execute_tool_calls_parallel,
-    _WRITE_TOOLS,
+from infinidev.engine.tool_executor import (
+    batch_tool_calls as _batch_tool_calls,
+    execute_tool_calls_parallel as _execute_tool_calls_parallel,
+    WRITE_TOOLS as _WRITE_TOOLS,
 )
 
 
