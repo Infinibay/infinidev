@@ -196,14 +196,18 @@ class PhaseEngine:
         verbose: bool,
     ) -> list[dict[str, str]]:
         """Run one mini-LoopEngine per question with read-only tools."""
-        # Filter to read-only tools
+        # Filter to read-only tools — INVESTIGATE must NOT modify files
         if all_tools:
             read_tools = [
                 t for t in all_tools
                 if getattr(t, 'name', '') in _READ_ONLY_TOOLS
             ]
         else:
-            read_tools = None
+            agent_tools = getattr(agent, 'tools', []) or []
+            read_tools = [
+                t for t in agent_tools
+                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
+            ] if agent_tools else []
 
         answers: list[dict[str, str]] = []
         all_notes: list[str] = []  # ALL notes across ALL questions
@@ -318,14 +322,19 @@ class PhaseEngine:
             f"{baseline_str}"
         )
 
-        # Filter to read-only tools
+        # Filter to read-only tools — PLAN phase must NOT modify files
         if all_tools:
             plan_tools = [
                 t for t in all_tools
                 if getattr(t, 'name', '') in _READ_ONLY_TOOLS
             ]
         else:
-            plan_tools = None
+            # No explicit tools passed — get agent's tools and filter
+            agent_tools = getattr(agent, 'tools', []) or []
+            plan_tools = [
+                t for t in agent_tools
+                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
+            ] if agent_tools else []
 
         engine = LoopEngine()
         engine.execute(
