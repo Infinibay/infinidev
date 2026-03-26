@@ -294,8 +294,16 @@ class PhaseEngine:
         plan one at a time. When it says "done", the accumulated plan steps
         become our execution plan.
 
-        Read-only tools are available so the model can re-check files.
+        Custom mini-loop: calls LLM repeatedly, collects next_steps from
+        step_complete, but NEVER activates/executes them. Stops when model
+        says done or max rounds reached.
         """
+        from infinidev.engine.llm_client import call_llm
+        from infinidev.config.llm import get_litellm_params
+        from infinidev.engine.loop_context import build_system_prompt
+        from infinidev.engine.loop_tools import STEP_COMPLETE_SCHEMA, build_tool_schemas
+        from infinidev.engine.tool_call_parser import parse_step_complete_args
+
         answers_text = "\n".join(
             f"  Q: {a['question']}\n  A: {a['answer']}"
             for a in answers
@@ -312,13 +320,7 @@ class PhaseEngine:
             if total > 0:
                 baseline_str = f"\nTest baseline: {passed}/{total} passing\n"
 
-        prompt = (
-            f"You are creating an implementation plan. Use step_complete with "
-            f"next_steps to ADD steps to the plan. Each step_complete call should "
-            f"add 2-4 new steps. Keep going until the plan covers the full task, "
-            f"then call step_complete with status='done'.\n\n"
-            f"You can use read-only tools (read_file, glob, code_search) if you "
-            f"need to check something while planning.\n\n"
+        user_prompt = (
             f"{strategy.plan_prompt}\n\n"
             f"## YOUR TASK\n{description}\n\n"
             f"## YOUR INVESTIGATION RESULTS\n{answers_text}\n"
@@ -326,54 +328,101 @@ class PhaseEngine:
             f"{baseline_str}"
         )
 
-        # Filter to read-only tools — PLAN phase must NOT modify files
-        if all_tools:
-            plan_tools = [
-                t for t in all_tools
-                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
-            ]
-        else:
-            # No explicit tools passed — get agent's tools and filter
-            agent_tools = getattr(agent, 'tools', []) or []
-            plan_tools = [
-                t for t in agent_tools
-                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
-            ] if agent_tools else []
-
-        engine = LoopEngine()
-        engine.execute(
-            agent=agent,
-            task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
-            verbose=verbose,
-            task_tools=plan_tools,
-            max_iterations=10,
-            max_total_tool_calls=50,
-            max_tool_calls_per_action=20,
-            nudge_threshold=8,
-            done_means_done=True,  # pending steps = the plan output, not unfinished work
-            summarizer_enabled=False,
-            identity_override=strategy.plan_identity or _PLANNER_IDENTITY,
+        llm_params = get_litellm_params()
+        identity = strategy.plan_identity or _PLANNER_IDENTITY
+        system_prompt = build_system_prompt(
+            "Software engineering planner.",
+            identity_override=identity,
         )
 
-        # Extract ALL plan steps (pending + done) from the engine's state.
-        steps = []
-        if engine._last_state and engine._last_state.plan.steps:
-            for s in engine._last_state.plan.steps:
-                steps.append({
-                    "step": s.index,
-                    "description": s.description,
-                    "files": [],
-                })
+        # Only offer step_complete as a tool — no read/write tools
+        tools = [STEP_COMPLETE_SCHEMA]
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        collected_steps: list[dict[str, Any]] = []
+        max_rounds = 5
+
+        for round_num in range(max_rounds):
+            try:
+                response = call_llm(llm_params, messages, tools=tools, tool_choice="required")
+            except Exception as exc:
+                logger.warning("Plan LLM call failed (round %d): %s", round_num + 1, str(exc)[:200])
+                if verbose:
+                    _log(f"  {RED}⚠ LLM error: {str(exc)[:80]}{RESET}")
+                break
+
+            choice = response.choices[0]
+            message = choice.message
+            tool_calls = getattr(message, "tool_calls", None)
+
+            if not tool_calls:
+                # Model returned text instead of tool call — try to parse
+                content = (getattr(message, "content", None) or "").strip()
+                if content:
+                    from infinidev.engine.tool_call_parser import parse_text_tool_calls, ManualToolCall
+                    import json as _json
+                    parsed = parse_text_tool_calls(content)
+                    if parsed:
+                        tool_calls = [
+                            ManualToolCall(id=f"plan_{round_num}", name=pc["name"],
+                                          arguments=_json.dumps(pc["arguments"]) if isinstance(pc["arguments"], dict) else str(pc["arguments"]))
+                            for pc in parsed
+                        ]
+
+            if not tool_calls:
+                if verbose:
+                    _log(f"  {DIM}Round {round_num + 1}: no tool calls, stopping{RESET}")
+                break
+
+            # Process step_complete calls — collect next_steps, don't execute them
+            for tc in tool_calls:
+                if tc.function.name == "step_complete":
+                    result = parse_step_complete_args(tc.function.arguments)
+
+                    # Collect new steps
+                    for op in result.next_steps:
+                        if op.op == "add":
+                            collected_steps.append({
+                                "step": len(collected_steps) + 1,
+                                "description": op.description,
+                                "files": [],
+                            })
+
+                    if verbose:
+                        new_count = len(result.next_steps)
+                        _log(f"  {DIM}Round {round_num + 1}: +{new_count} steps (total: {len(collected_steps)}){RESET}")
+
+                    # Add tool response to conversation
+                    messages.append({"role": "assistant", "tool_calls": [
+                        {"id": tc.id if hasattr(tc, "id") else f"plan_{round_num}",
+                         "type": "function",
+                         "function": {"name": "step_complete", "arguments": tc.function.arguments}}
+                    ]})
+                    messages.append({"role": "tool", "tool_call_id": tc.id if hasattr(tc, "id") else f"plan_{round_num}",
+                                     "content": f"Plan updated. {len(collected_steps)} steps so far. Call step_complete again to add more, or with status='done' to finish."})
+
+                    # If model said done, stop
+                    if result.status == "done":
+                        if verbose:
+                            _log(f"  {DIM}Plan complete: {len(collected_steps)} steps{RESET}")
+                        break
+            else:
+                continue  # no break in inner loop → continue outer
+            break  # inner loop broke (done) → break outer too
 
         if verbose:
-            _log(f"  {DIM}Plan generated: {len(steps)} steps{RESET}")
+            _log(f"  {DIM}Plan generated: {len(collected_steps)} steps{RESET}")
 
-        if len(steps) < strategy.plan_min_steps:
+        if len(collected_steps) < strategy.plan_min_steps:
             if verbose:
-                _log(f"  {YELLOW}⚠ Only {len(steps)} steps (need {strategy.plan_min_steps}){RESET}")
+                _log(f"  {YELLOW}⚠ Only {len(collected_steps)} steps (need {strategy.plan_min_steps}){RESET}")
             return []
 
-        return steps
+        return collected_steps
 
     # ── Phase 4: Execute plan ─────────────────────────────────────────
 
