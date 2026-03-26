@@ -382,6 +382,7 @@ class LoopEngine(AgentEngine):
         max_tool_calls_per_action: int | None = None,
         nudge_threshold: int | None = None,
         summarizer_enabled: bool | None = None,
+        identity_override: str | None = None,
     ) -> str:
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
@@ -423,12 +424,13 @@ class LoopEngine(AgentEngine):
         caps = get_model_capabilities()
         manual_tc = not caps.supports_function_calling
 
-        # Build system prompt
+        # Build system prompt (identity_override param takes precedence over agent attribute)
+        _identity = identity_override or getattr(agent, '_system_prompt_identity', None)
         system_prompt = build_system_prompt(
             agent.backstory,
             tech_hints=getattr(agent, '_tech_hints', None),
             session_summaries=getattr(agent, '_session_summaries', None),
-            identity_override=getattr(agent, '_system_prompt_identity', None),
+            identity_override=_identity,
         )
 
         # For non-FC models, embed tool descriptions in the system prompt

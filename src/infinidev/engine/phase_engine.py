@@ -368,29 +368,19 @@ class PhaseEngine:
                 if getattr(t, 'name', '') in _READ_ONLY_TOOLS
             ] if agent_tools else []
 
-        # Override agent identity for planning — it's a planner, not a developer
-        original_identity = getattr(agent, '_system_prompt_identity', None)
-        original_backstory = agent.backstory
-        agent._system_prompt_identity = _PLANNER_IDENTITY
-        agent.backstory = "Software engineering planner. Creates granular implementation plans."
-
-        try:
-            engine = LoopEngine()
-            engine.execute(
-                agent=agent,
-                task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
-                verbose=verbose,
-                task_tools=plan_tools,
-                max_iterations=50,
-                max_total_tool_calls=1000,
-                max_tool_calls_per_action=0,  # unlimited per step
-                nudge_threshold=0,  # don't nudge during planning
-                summarizer_enabled=False,
-            )
-        finally:
-            # Restore original agent identity
-            agent._system_prompt_identity = original_identity
-            agent.backstory = original_backstory
+        engine = LoopEngine()
+        engine.execute(
+            agent=agent,
+            task_prompt=(prompt, "Build a complete implementation plan using step_complete(next_steps=[...])."),
+            verbose=verbose,
+            task_tools=plan_tools,
+            max_iterations=50,
+            max_total_tool_calls=1000,
+            max_tool_calls_per_action=0,  # unlimited per step
+            nudge_threshold=0,  # don't nudge during planning
+            summarizer_enabled=False,
+            identity_override=_PLANNER_IDENTITY,
+        )
 
         # Extract ALL plan steps (pending + done) from the engine's state.
         steps = []
