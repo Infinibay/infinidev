@@ -303,10 +303,20 @@ class PhaseEngine:
             {"role": "user", "content": prompt},
         ]
 
-        for attempt in range(2):
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
                 response = call_llm(llm_params, messages)
                 content = self._clean_llm_text(response)
+
+                if verbose:
+                    preview = content[:200].replace("\n", " ")
+                    _log(f"  {DIM}LLM returned ({len(content)} chars): {preview}...{RESET}")
+
+                if not content:
+                    if verbose:
+                        _log(f"  {YELLOW}⚠ Empty response from LLM{RESET}")
+                    continue
 
                 is_valid, steps, errors = validate_plan(content, strategy)
                 if is_valid:
@@ -316,15 +326,17 @@ class PhaseEngine:
                     for err in errors:
                         _log(f"  {YELLOW}⚠ {err}{RESET}")
 
-                if attempt == 0:
+                if attempt < max_attempts - 1:
                     rejection = format_rejection(errors)
                     messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": rejection})
                     if verbose:
-                        _log(f"  {DIM}Re-prompting...{RESET}")
+                        _log(f"  {DIM}Re-prompting (attempt {attempt + 2}/{max_attempts})...{RESET}")
 
             except Exception as exc:
-                logger.warning("Plan generation failed: %s", str(exc)[:200])
+                logger.warning("Plan generation failed (attempt %d): %s", attempt + 1, str(exc)[:200])
+                if verbose:
+                    _log(f"  {RED}⚠ LLM error: {str(exc)[:100]}{RESET}")
 
         return []
 

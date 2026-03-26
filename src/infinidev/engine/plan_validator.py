@@ -32,9 +32,10 @@ def validate_plan(
     # Parse JSON if needed
     if isinstance(plan_json, str):
         try:
-            steps = json.loads(plan_json)
-        except json.JSONDecodeError:
-            # Try to extract JSON array from text
+            from infinidev.engine.tool_call_parser import safe_json_loads
+            steps = safe_json_loads(plan_json)
+        except (json.JSONDecodeError, TypeError):
+            # Try to extract JSON array from text with surrounding content
             steps = _extract_json_array(plan_json)
             if steps is None:
                 return False, [], ["Could not parse plan as JSON. Output a JSON array of steps."]
@@ -153,8 +154,9 @@ def validate_questions(
     """
     if isinstance(questions_json, str):
         try:
-            questions = json.loads(questions_json)
-        except json.JSONDecodeError:
+            from infinidev.engine.tool_call_parser import safe_json_loads
+            questions = safe_json_loads(questions_json)
+        except (json.JSONDecodeError, TypeError):
             questions = _extract_json_array(questions_json)
             if questions is None:
                 return False, [], ["Could not parse questions as JSON. Output a JSON array."]
