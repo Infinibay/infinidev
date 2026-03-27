@@ -21,7 +21,7 @@ class HelpInput(BaseModel):
 _CATEGORY_INDEX = {
     "file": ["read_file", "partial_read", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "list_directory", "glob", "code_search"],
     "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure", "analyze_code"],
-    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line"],
+    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "rename_symbol", "move_symbol"],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
     "shell": ["execute_command", "code_interpreter"],
     "knowledge": ["record_finding", "read_findings", "search_findings", "search_knowledge"],
@@ -94,6 +94,10 @@ TWO APPROACHES:
 3. INSERT (add new content without removing):
    add_content_after_line(file_path, line_number, content)
    add_content_before_line(file_path, line_number, content)
+
+4. REFACTORING (project-wide operations):
+   rename_symbol(symbol, new_name)  — Rename everywhere: definition + all references + imports
+   move_symbol(symbol, target_file) — Move to another file/class, update imports
 
 WORKFLOW:
   1. read_file("src/foo.py")           → see the code with line numbers
@@ -384,6 +388,55 @@ EXAMPLES:
 
   # Add imports before the first function definition
   add_content_before_line(file_path="src/utils.py", line_number=5, content="from typing import Optional\\n")""",
+
+    "rename_symbol": """\
+rename_symbol(symbol, new_name, file_path?)
+
+Rename a symbol and update ALL references and imports across the entire project.
+
+PARAMS:
+  symbol (str, required)     — Qualified name: "ClassName.method_name" or "function_name"
+  new_name (str, required)   — New name (just the name, not qualified)
+  file_path (str, optional)  — File hint if symbol name is ambiguous
+
+EXAMPLES:
+  rename_symbol(symbol="verify_token", new_name="validate_token")
+  rename_symbol(symbol="AuthService.check", new_name="authenticate", file_path="src/auth.py")
+  rename_symbol(symbol="UserModel", new_name="User")
+
+WHAT IT DOES:
+  1. Renames the definition (def/class line)
+  2. Updates all references in every file (calls, usages)
+  3. Updates all import statements
+  4. Re-indexes all modified files""",
+
+    "move_symbol": """\
+move_symbol(symbol, target_file, target_class?, after_line?)
+
+Move a function, method, or class to another file or into a class. Updates imports project-wide.
+
+PARAMS:
+  symbol (str, required)       — What to move: "ClassName.method", "function_name", or "ClassName"
+  target_file (str, required)  — Destination file path
+  target_class (str, optional) — Class to move into. Empty = top-level in file.
+  after_line (int, optional)   — Insert after this line (1-based). 0 = end of file/class.
+
+EXAMPLES:
+  # Move function to another file (at the end)
+  move_symbol(symbol="validate_input", target_file="src/validators.py")
+
+  # Move method into a class
+  move_symbol(symbol="helper_func", target_file="src/service.py", target_class="UserService")
+
+  # Move class to new file, insert after line 10
+  move_symbol(symbol="UserModel", target_file="src/models/user.py", after_line=10)
+
+WHAT IT DOES:
+  1. Extracts the symbol's source code from the original file
+  2. Removes it from the source (cleans up blank lines)
+  3. Inserts into the target (with correct indentation if target_class)
+  4. Updates import statements in all files that referenced the symbol
+  5. Re-indexes both source and target files""",
 
     "analyze_code": """\
 analyze_code(file_path?, checks?)
