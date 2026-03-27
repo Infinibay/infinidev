@@ -9,6 +9,7 @@ from infinidev.tools.code_intel.project_structure import ProjectStructureTool
 from infinidev.tools.code_intel.edit_method import EditSymbolTool
 from infinidev.tools.code_intel.add_method import AddSymbolTool
 from infinidev.tools.code_intel.remove_method import RemoveSymbolTool
+from infinidev.tools.code_intel.analyze_code import AnalyzeCodeTool
 
 # Backward-compat aliases
 EditMethodTool = EditSymbolTool
@@ -21,4 +22,5 @@ __all__ = [
     "ProjectStructureTool",
     "EditSymbolTool", "AddSymbolTool", "RemoveSymbolTool",
     "EditMethodTool", "AddMethodTool", "RemoveMethodTool",  # aliases
+    "AnalyzeCodeTool",
 ]

@@ -14,8 +14,10 @@ NEVER change the remote URL.
 - Do NOT skip this step. Do NOT commit directly to main.
 
 ### WRITE CODE
-**edit_symbol** or **replace_lines** for existing files, **create_file** for new files only.
-create_file fails if the file already exists — use replace_lines or edit_symbol to modify.
+**The editing tools work differently from what you may expect. Call help("edit") to learn the correct workflow.**
+- **edit_symbol** or **replace_lines** for existing files, **create_file** for new files only.
+- **add_content_after_line** / **add_content_before_line** to insert new lines.
+- create_file fails if the file already exists — use replace_lines or edit_symbol to modify.
 
 ### COMMIT
 **git_commit**(message="<imperative verb> <what changed> — task {task_id}")

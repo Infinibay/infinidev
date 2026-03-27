@@ -19,9 +19,9 @@ class HelpInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 _CATEGORY_INDEX = {
-    "file": ["read_file", "partial_read", "create_file", "replace_lines", "list_directory", "glob", "code_search"],
-    "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure"],
-    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines"],
+    "file": ["read_file", "partial_read", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "list_directory", "glob", "code_search"],
+    "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure", "analyze_code"],
+    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line"],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
     "shell": ["execute_command", "code_interpreter"],
     "knowledge": ["record_finding", "read_findings", "search_findings", "search_knowledge"],
@@ -58,6 +58,12 @@ FILE TOOLS — Reading and creating files
   replace_lines(file_path, content, start_line, end_line)
     Replace a range of lines with new content. See help("replace_lines") for details.
 
+  add_content_after_line(file_path, line_number, content)
+    Insert content after a specific line. See help("add_content_after_line").
+
+  add_content_before_line(file_path, line_number, content)
+    Insert content before a specific line. See help("add_content_before_line").
+
   list_directory(path)
     List files and directories at a path.
 
@@ -84,6 +90,10 @@ TWO APPROACHES:
    replace_lines(file_path, content, start_line, end_line)
    — Deterministic: specify exact line range, no text matching needed
    — Use read_file first to see line numbers
+
+3. INSERT (add new content without removing):
+   add_content_after_line(file_path, line_number, content)
+   add_content_before_line(file_path, line_number, content)
 
 WORKFLOW:
   1. read_file("src/foo.py")           → see the code with line numbers
@@ -335,6 +345,67 @@ PARAMS:
 EXAMPLES:
   find_references(name="verify_token")
   find_references(name="AuthService", kind="import")""",
+
+    "add_content_after_line": """\
+add_content_after_line(file_path, line_number, content)
+
+Insert content AFTER a specific line. The existing line is not modified.
+Always read_file first to see line numbers.
+
+PARAMS:
+  file_path (str, required)   — Path to the file
+  line_number (int, required) — Line to insert after (1-based). Use 0 to insert at the very beginning.
+  content (str, required)     — Content to insert
+
+EXAMPLES:
+  # Add an import after line 2
+  add_content_after_line(file_path="src/main.py", line_number=2, content="import os\\n")
+
+  # Add a method after line 50
+  add_content_after_line(file_path="src/auth.py", line_number=50, content="    def logout(self):\\n        self.token = None\\n")
+
+  # Insert at the very beginning of the file
+  add_content_after_line(file_path="src/main.py", line_number=0, content="#!/usr/bin/env python\\n")""",
+
+    "add_content_before_line": """\
+add_content_before_line(file_path, line_number, content)
+
+Insert content BEFORE a specific line. The existing line is pushed down.
+Always read_file first to see line numbers.
+
+PARAMS:
+  file_path (str, required)   — Path to the file
+  line_number (int, required) — Line to insert before (1-based)
+  content (str, required)     — Content to insert
+
+EXAMPLES:
+  # Add a comment before line 10
+  add_content_before_line(file_path="src/auth.py", line_number=10, content="# TODO: refactor this\\n")
+
+  # Add imports before the first function definition
+  add_content_before_line(file_path="src/utils.py", line_number=5, content="from typing import Optional\\n")""",
+
+    "analyze_code": """\
+analyze_code(file_path?, checks?)
+
+Run heuristic analysis to detect code errors using indexed data. Very fast — no re-parsing.
+
+PARAMS:
+  file_path (str, optional)  — File to analyze. Empty = whole project.
+  checks (str, optional)     — Comma-separated: broken_imports, undefined_symbols, unused_imports, unused_definitions. Empty = all.
+
+CHECKS:
+  broken_imports      — Imports that can't be resolved (error severity)
+  undefined_symbols   — References to symbols with no definition (warning)
+  unused_imports      — Imports never referenced in the same file (warning)
+  unused_definitions  — Symbols defined but never referenced anywhere (hint)
+
+EXAMPLES:
+  analyze_code(file_path="src/auth.py")
+  analyze_code(checks="broken_imports,unused_imports")
+  analyze_code()  # full project scan
+
+RETURNS: JSON with errors, warnings, hints grouped by severity.""",
 }
 
 

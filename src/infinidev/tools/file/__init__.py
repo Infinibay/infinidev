@@ -9,9 +9,11 @@ from .glob_tool import GlobTool
 from .create_file import CreateFileTool
 from .replace_lines import ReplaceLinesTool
 from .partial_read import PartialReadTool
+from .insert_lines import AddContentAfterLineTool, AddContentBeforeLineTool
 
 __all__ = [
     "ReadFileTool", "WriteFileTool", "EditFileTool", "MultiEditFileTool",
     "ApplyPatchTool", "ListDirectoryTool", "CodeSearchTool", "GlobTool",
     "CreateFileTool", "ReplaceLinesTool", "PartialReadTool",
+    "AddContentAfterLineTool", "AddContentBeforeLineTool",
 ]

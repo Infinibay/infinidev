@@ -48,6 +48,20 @@ def index_file(project_id: int, file_path: str) -> int:
     if not language:
         return 0
 
+    # Config files: track hash for change detection, no symbol parsing
+    if language == "config":
+        try:
+            with open(file_path, "rb") as f:
+                content = f.read()
+            content_hash = _file_hash(content)
+            existing_hash = ci_index.get_file_hash(project_id, file_path)
+            if existing_hash == content_hash:
+                return 0
+            ci_index.mark_file_indexed(project_id, file_path, language, content_hash, 0)
+            return 0
+        except (PermissionError, OSError):
+            return 0
+
     parser = get_parser(language)
     if parser is None:
         return 0

@@ -405,7 +405,19 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, thi
 
     # Classic mode (the original while True loop)
     init_db()
-    
+
+    # Start background file watcher + indexing queue
+    from infinidev.cli.index_queue import IndexQueue
+    from infinidev.cli.file_watcher import FileWatcher as _FileWatcher
+    _index_queue = IndexQueue(project_id=1)
+    _index_queue.start()
+    _classic_watcher = _FileWatcher(
+        workspace=os.getcwd(),
+        callback=lambda p: None,  # no visual callback in classic mode
+        index_callback=_index_queue.enqueue,
+    )
+    _classic_watcher.start()
+
     click.echo(click.style("Welcome to Infinidev CLI (Classic Mode)!", fg="cyan", bold=True))
     click.echo("Type your instructions or /help for commands.")
     
@@ -709,6 +721,10 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, thi
         except Exception as e:
             click.echo(click.style(f"Error: {e}", fg="red"))
             logging.exception("Error in main loop")
+
+    # Cleanup background services
+    _classic_watcher.stop()
+    _index_queue.stop()
 
 if __name__ == "__main__":
     main()

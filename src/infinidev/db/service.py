@@ -367,6 +367,22 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_name ON ci_imports(name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_source ON ci_imports(source)")
 
+        # Code intelligence: diagnostics from heuristic analysis
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ci_diagnostics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                severity TEXT NOT NULL,
+                check_name TEXT NOT NULL,
+                message TEXT NOT NULL,
+                fix_suggestion TEXT DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_diag_file ON ci_diagnostics(project_id, file_path)")
+
         # Create a default project if none exists
         row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
         if not row:

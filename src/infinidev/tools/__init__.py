@@ -4,6 +4,7 @@ from infinidev.tools.file import (
     ReadFileTool, WriteFileTool, EditFileTool, MultiEditFileTool,
     ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool,
     CreateFileTool, ReplaceLinesTool, PartialReadTool,
+    AddContentAfterLineTool, AddContentBeforeLineTool,
 )
 from infinidev.tools.meta import HelpTool
 from infinidev.tools.git import (
@@ -25,9 +26,10 @@ from infinidev.tools.code_intel import (
     GetSymbolCodeTool, ProjectStructureTool,
     EditSymbolTool, AddSymbolTool, RemoveSymbolTool,
     EditMethodTool, AddMethodTool, RemoveMethodTool,  # backward-compat aliases
+    AnalyzeCodeTool,
 )
 
-FILE_TOOLS = [ReadFileTool, PartialReadTool, CreateFileTool, ReplaceLinesTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
+FILE_TOOLS = [ReadFileTool, PartialReadTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
 META_TOOLS = [HelpTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
@@ -40,7 +42,7 @@ KNOWLEDGE_TOOLS = [
 ]
 CHAT_TOOLS = [SendMessageTool]
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
-CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool]
+CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool]
 
 def get_tools_for_role(role: str) -> list:
     """Simplified tool selection for the CLI."""

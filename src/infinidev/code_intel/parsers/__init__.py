@@ -23,6 +23,13 @@ EXTENSIONS: dict[str, str] = {
     ".cs": "csharp",
     ".go": "go",
     ".java": "java",
+    # Config files — tracked for change detection, no symbol parsing
+    ".toml": "config",
+    ".json": "config",
+    ".yaml": "config",
+    ".yml": "config",
+    ".cfg": "config",
+    ".ini": "config",
 }
 
 

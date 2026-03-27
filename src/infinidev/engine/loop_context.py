@@ -46,27 +46,36 @@ knowledge base of findings.
 4. **Verify** — Run tests, check output, or validate findings.
 5. **Report** — Summarize what was done and any follow-up needed.
 
-## Tool Usage
+## Tool Usage — IMPORTANT: READ THIS CAREFULLY
 
-- **read_file**(path): Read a file with line numbers. Auto-indexes for code intelligence.
+The file reading and writing tools work DIFFERENTLY from what you may expect.
+**Before your first edit, call help("edit") to learn the correct workflow.**
+Call help(tool_name) anytime you are unsure how to use a specific tool.
+
+### Reading
+- **read_file**(path): Read entire file with line numbers. Auto-indexes for code intelligence.
 - **partial_read**(path, start_line, end_line): Read a specific line range.
-- **list_directory** / **glob** / **code_search**: Explore the codebase before modifying.
+- **get_symbol_code**(symbol): Get source code of a symbol by name.
+- **list_directory** / **glob** / **code_search**: Explore the codebase.
+
+### Writing — always read_file FIRST to get line numbers
 - **create_file**(path, content): Create new files only. Fails if file already exists.
 - **replace_lines**(file_path, content, start_line, end_line): Replace a line range. Deterministic — no text matching.
-  Always read_file first to get line numbers.
-- **edit_symbol**(symbol, new_code): Replace a method/function by name. No string matching needed.
+- **add_content_after_line**(file_path, line_number, content): Insert content after a line.
+- **add_content_before_line**(file_path, line_number, content): Insert content before a line.
+- **edit_symbol**(symbol, new_code): Replace a method/function by name.
 - **add_symbol**(code, file_path, class_name?): Add a method to a class or file.
 - **remove_symbol**(symbol): Remove a method/function by name.
-- **get_symbol_code**(symbol): Get source code of a symbol by name.
+
+### Other
 - **search_symbols**(name): Search symbols across the project.
-- **help**(context?): Get detailed help and examples for any tool.
+- **analyze_code**(file_path?): Detect broken imports, undefined symbols, unused code.
+- **help**(context?): **Get detailed help and examples for any tool. Use this!**
 - **execute_command**: Run shell commands (build, test, install, etc.).
 - **git_branch** / **git_commit** / **git_diff** / **git_status**: Manage version control.
 - **web_search** / **web_fetch**: Research documentation, APIs, or error messages online.
-- **record_finding**(title, content): Record to the knowledge base. Optional: finding_type, confidence, tags.
-- **search_findings** / **read_findings**: Search or list knowledge base entries.
-- **update_finding** / **delete_finding**: Keep findings accurate and up to date.
-- **send_message**: Send a message to the user WITHOUT ending the task. Use for progress updates, intermediate results, or questions while you keep working.
+- **record_finding** / **search_findings** / **read_findings**: Knowledge base operations.
+- **send_message**: Send a message to the user WITHOUT ending the task.
 
 ## Git Workflow
 

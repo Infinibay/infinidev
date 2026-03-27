@@ -33,6 +33,7 @@ from infinidev.db.service import (
 )
 from infinidev.config.settings import reload_all, Settings
 from infinidev.cli.file_watcher import FileWatcher
+from infinidev.cli.index_queue import IndexQueue
 import infinidev.prompts.flows  # noqa: F401 — registers flows
 from infinidev.ui.widgets.context_widgets import QueuedMessageWidget, QueuedMessageStatus
 from infinidev.ui.widgets.file_diff_widget import FileChangeDiffWidget, colorize_diff
@@ -1407,8 +1408,9 @@ class InfinidevTUI(App):
         from infinidev.config.tech_detection import detect_tech_hints
         self.agent._tech_hints = detect_tech_hints(os.getcwd())
 
-        # Initialize file watcher
+        # Initialize file watcher and background indexer
         self._file_watcher: Optional[FileWatcher] = None
+        self._index_queue: Optional[IndexQueue] = None
         self._watcher_started = False
         self._expand_handlers: list[Callable] = []
         self._collapse_handlers: list[Callable] = []
@@ -1582,12 +1584,19 @@ class InfinidevTUI(App):
     # ── File watcher integration ────────────────────────
 
     def _start_file_watcher(self):
-        """Initialize and start the file watcher."""
+        """Initialize and start the file watcher with background indexing."""
         workspace = os.getcwd()
+
+        # Start background indexing queue
+        project_id = getattr(self, '_project_id', None) or 1
+        self._index_queue = IndexQueue(project_id=project_id)
+        self._index_queue.start()
+
         self._file_watcher = FileWatcher(
             workspace=workspace,
             callback=self._on_file_change,
-            visible_paths_callback=self._get_visible_paths
+            visible_paths_callback=self._get_visible_paths,
+            index_callback=self._index_queue.enqueue,
         )
         self._watcher_started = self._file_watcher.start()
         if self._watcher_started:
@@ -1627,11 +1636,13 @@ class InfinidevTUI(App):
         return visible_paths
 
     def on_exit_app(self) -> None:
-        """Clean up file watcher on app exit."""
+        """Clean up file watcher and index queue on app exit."""
         if self._file_watcher and self._file_watcher.is_running():
             self._file_watcher.stop()
-            logger = logging.getLogger(__name__)
-            logger.info("File watcher stopped on app exit")
+        if self._index_queue and self._index_queue.is_running():
+            self._index_queue.stop()
+        logger = logging.getLogger(__name__)
+        logger.info("File watcher and index queue stopped on app exit")
 
     # ── File explorer events ─────────────────────────────
 

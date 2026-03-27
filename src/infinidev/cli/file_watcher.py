@@ -36,18 +36,22 @@ class FileWatcher:
         self,
         workspace: str,
         callback: Callable[[str], None],
-        visible_paths_callback: Optional[Callable[[], Set[str]]] = None
+        visible_paths_callback: Optional[Callable[[], Set[str]]] = None,
+        index_callback: Optional[Callable[[str], None]] = None,
     ):
         """Initialize the file watcher.
-        
+
         Args:
             workspace: Path to the workspace directory to monitor.
-            callback: Function to call with the changed file path.
-            visible_paths_callback: Optional function returning set of 
+            callback: Function to call with the changed file path (visibility-gated).
+            visible_paths_callback: Optional function returning set of
                 currently visible/expanded paths.
+            index_callback: Optional function called for ALL changed files
+                regardless of visibility. Used for background indexing.
         """
         self.workspace = pathlib.Path(workspace).resolve()
         self.callback = callback
+        self.index_callback = index_callback
         self.visible_paths_callback = visible_paths_callback or (lambda: set())
         
         self._running = False
@@ -126,13 +130,22 @@ class FileWatcher:
                         
                     try:
                         fp = pathlib.Path(file_path).resolve()
-                        
+                        fp_str = str(fp)
+
+                        # Visual callback: only for visible paths
                         if self._should_refresh(fp):
                             logger.debug(f"Change detected in visible path: {file_path}")
-                            self.callback(str(fp))
+                            self.callback(fp_str)
                         else:
                             logger.debug(f"Change detected in hidden path: {file_path}")
-                            
+
+                        # Index callback: for ALL changed files (background indexing)
+                        if self.index_callback is not None:
+                            try:
+                                self.index_callback(fp_str)
+                            except Exception as ie:
+                                logger.debug(f"Index callback error for {fp_str}: {ie}")
+
                     except Exception as e:
                         logger.error(f"Error processing change {file_path}: {e}")
                         
