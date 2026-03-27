@@ -31,20 +31,20 @@ Types:
 
 ## IMPORTANT: Also classify analysis DEPTH
 
-Pick ONE depth based on this table:
+Pick ONE depth. Each level controls how much the system helps you:
 
-| Depth    | When to pick                                       | Examples                                |
-|----------|----------------------------------------------------|-----------------------------------------|
-| minimal  | Fix is obvious from description. 1-2 files. No     | Fix typo. Change config value. Update   |
-|          | unknowns at all.                                   | a string. Add missing import.           |
-| light    | You mostly know what to do. Need to check 1-2      | Fix a clear bug where file is named.    |
-|          | things. Small scope.                                | Add field to existing model. Rename.    |
-| standard | Need to understand codebase first. Multiple files.  | Implement new feature. Fix bug with     |
-|          | Some unknowns to resolve.                           | unknown cause. Add new API endpoint.    |
-| deep     | Large scope. Many files. Complex interactions.      | Major refactor. Build new subsystem.    |
-|          | Architecture decisions needed.                      | Feature touching 10+ files.             |
+| Depth    | What happens                                        | When to pick                            |
+|----------|-----------------------------------------------------|-----------------------------------------|
+| minimal  | You work alone. No analysis, no plan validation.    | Fix is obvious. 1-2 files. No unknowns. |
+|          | Single free run — you decide everything.            | Ex: Fix typo. Change config value.      |
+| light    | You skip investigation but get a plan to follow.    | You mostly know what to do. Small scope.|
+|          | Light guidance, you still have freedom.             | Ex: Clear bug fix. Add a field.         |
+| standard | Full analysis: questions, investigation, then plan. | Need to understand codebase first.      |
+|          | System validates your plan and checks your work.    | Ex: New feature. Bug with unknown cause.|
+| deep     | Maximum guidance. Strict rules enforced:            | Large scope. Many files. Complex.       |
+|          | mandatory tests, no file overwrites, step-by-step.  | Ex: Build new subsystem. Major refactor.|
 
-KEY RULE: When unsure between two depths, ALWAYS pick the deeper one.
+KEY RULE: When unsure, pick the DEEPER one. More guidance is safer than less.
 
 Include "depth" and "depth_reasoning" in your JSON output:
 {"ticket_type": "...", "reasoning": "...", "keywords": [...], "depth": "minimal|light|standard|deep", "depth_reasoning": "1 sentence"}
