@@ -34,7 +34,7 @@ Bad 2 — Vague note:
 
 Bad 3 — Editing files:
   1. read_file: "src/handler.py"
-  2. edit_file: "src/handler.py" ← WRONG
+  2. replace_lines: "src/handler.py" ← WRONG
   WHY BAD: Investigation is read-only. Do NOT modify files.
 
 Bad 4 — Reading everything without purpose:

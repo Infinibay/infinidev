@@ -34,11 +34,7 @@ class ApplyPatchInput(BaseModel):
 
 class ApplyPatchTool(InfinibayBaseTool):
     name: str = "apply_patch"
-    description: str = (
-        "Apply a unified diff patch to one or more files. More efficient than "
-        "multiple edit_file calls for multi-file changes. The patch must be in "
-        "unified diff format (like `git diff` output). Files are modified atomically."
-    )
+    description: str = "Apply a unified diff patch to files."
     args_schema: Type[BaseModel] = ApplyPatchInput
 
     def _run(self, patch: str, strip: int = 1) -> str:

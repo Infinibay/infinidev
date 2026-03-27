@@ -16,11 +16,7 @@ class SearchSymbolsInput(BaseModel):
 
 class SearchSymbolsTool(InfinibayBaseTool):
     name: str = "search_symbols"
-    description: str = (
-        "Search for symbols by name across the entire codebase. "
-        "Supports partial matching — 'token' finds 'verify_token', 'token_expiry', etc. "
-        "Faster and more structured than code_search for finding named entities."
-    )
+    description: str = "Search symbols by name across the project. Supports partial matching."
     args_schema: Type[BaseModel] = SearchSymbolsInput
 
     def _run(self, query: str, kind: str = "") -> str:

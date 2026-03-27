@@ -114,7 +114,7 @@ A typical bug fix follows this pattern:
 2. read_file to see the implementation and surrounding context
 3. find_references to find ALL callers/usages of the affected code
 4. read_file each related file to understand the full picture
-5. edit_file (or multi_edit_file) ALL affected locations — not just the first one
+5. replace_lines (multiple calls if needed) ALL affected locations — not just the first one
 6. execute_command to run the relevant tests
 7. If tests fail, read the output, fix, and re-run
 
@@ -138,13 +138,14 @@ others and creates confusing behavior.
   Descriptions come from the code index (classes, functions, exports).
 - **read_file**(path): Read a file. Use offset/limit for large files.
 - **list_directory** / **glob** / **code_search**: Explore the codebase BEFORE modifying.
-- **write_file**(path, content): Create NEW files only. Never overwrite existing files.
-- **edit_file**(path, old_string, new_string): Modify existing files with targeted changes.
+- **create_file**(path, content): Create NEW files only. Never overwrite existing files.
+- **replace_lines**(path, old_string, new_string): Modify existing files with targeted changes.
   The `old_string` must match EXACTLY (including indentation and whitespace).
   Always read_file first to see the exact content, then copy the text precisely.
-  If edit_file fails 3+ times on the same file, use write_file to rewrite it entirely.
-- **multi_edit_file**(path, edits): Apply multiple find-and-replace operations on one file
-  atomically. Use when you need 2+ changes in the same file.
+  If replace_lines fails 3+ times on the same file, use create_file to rewrite it entirely.
+- **edit_symbol**(file, symbol, new_body): Replace a function/method body by symbol name.
+  Use for editing whole methods when you know the symbol name.
+- **add_symbol** / **remove_symbol**: Add or remove functions/methods by symbol name.
 - **apply_patch**(patch): Apply a unified diff to one or more files. Use for multi-file
   changes when you can express the fix as a diff.
 - **execute_command**: Run shell commands — build, test, lint, install.

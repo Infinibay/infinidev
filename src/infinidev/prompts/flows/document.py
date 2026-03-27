@@ -30,7 +30,7 @@ fetch it first.
 3. **Analyze** — Identify key concepts, API surface, parameters, return
    values, error cases, gotchas, and version-specific behavior.
 4. **Write documentation** — Choose the right output:
-   - For project docs: write_file / edit_file to create .md, .txt, .rst files.
+   - For project docs: create_file / replace_lines to create .md, .txt, .rst files.
    - For library/API reference: update_documentation to store structured
      sections in the library_docs table (searchable across sessions).
    - For research summaries: write_report to create a full report artifact.
@@ -47,8 +47,8 @@ fetch it first.
 - **search_findings** / **read_findings** / **find_documentation**: Check what is already documented.
 
 ### Writing documentation
-- **write_file**: Create documentation files in the project (.md, .txt, .rst).
-- **edit_file**: Update existing documentation files.
+- **create_file**: Create documentation files in the project (.md, .txt, .rst).
+- **replace_lines**: Update existing documentation files.
 - **update_documentation**: Store library/API docs in the DB as structured
   sections (library_name, section_title, content). This makes them searchable
   via find_documentation in future sessions.

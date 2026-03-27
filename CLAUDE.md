@@ -51,9 +51,17 @@ Every iteration builds an XML-structured prompt: `<task>`, `<plan>`, `<previous-
 
 All tools inherit from `InfinibayBaseTool` (extends CrewAI's `BaseTool`). Tools are bound to agents via `bind_tools_to_agent()` and resolve context (project_id, task_id, workspace_path) from a process-global dict.
 
-Categories: **file** (read, write, edit, list_directory, code_search, glob), **git** (branch, commit, push, diff, status), **shell** (execute_command), **knowledge** (record_finding, read_findings, search_findings with semantic dedup).
+Categories:
+- **file**: `read_file`, `partial_read`, `create_file`, `replace_lines`, `list_directory`, `code_search`, `glob`
+- **code_intel**: `get_symbol_code`, `list_symbols`, `search_symbols`, `find_references`, `edit_symbol`, `add_symbol`, `remove_symbol`, `project_structure`
+- **git**: `git_branch`, `git_commit`, `git_diff`, `git_status`
+- **shell**: `execute_command`, `code_interpreter`
+- **knowledge**: `record_finding`, `read_findings`, `search_findings` (with semantic dedup)
+- **meta**: `help` (dynamic tool documentation)
 
-Tool schemas are validated at runtime — hallucinated parameters are rejected before execution.
+Key tool design: `read_file` auto-indexes files via tree-sitter for code intelligence. `replace_lines` uses deterministic line-range replacement (no text matching). Symbol tools (`edit_symbol`, `add_symbol`, `remove_symbol`) use the code index to locate symbols by qualified name.
+
+Tool schemas are validated at runtime — hallucinated parameters are rejected before execution. Old tool names (`edit_method`, `add_method`, `remove_method`, `write_file`, `find_definition`) are aliased to new names in `engine/loop_tools.py`.
 
 ### Agent (`agents/base.py`)
 

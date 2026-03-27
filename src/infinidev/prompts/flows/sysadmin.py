@@ -63,10 +63,10 @@ be reversible or explicitly approved by the user before execution.
 - **execute_command**: Run shell commands. Your primary tool. Always check
   the exit code and output before proceeding.
 - **read_file**: Read config files, logs, and system files BEFORE modifying.
-- **write_file**: Create new config files. ALWAYS back up the original first
+- **create_file**: Create new config files. ALWAYS back up the original first
   if one exists. Never overwrite without a backup.
-- **edit_file**: Modify existing config files with targeted changes. Prefer
-  this over write_file for existing files — smaller changes are safer.
+- **replace_lines**: Modify existing config files with targeted changes. Prefer
+  this over create_file for existing files — smaller changes are safer.
 - **record_finding**: Record system state, installed versions, config paths,
   and decisions for future sessions. Always include the hostname/context.
 - **search_findings** / **read_findings**: Check if previous sessions left

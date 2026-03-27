@@ -21,12 +21,7 @@ class ListDirectoryInput(BaseModel):
 
 class ListDirectoryTool(InfinibayBaseTool):
     name: str = "list_directory"
-    description: str = (
-        "List files and directories in a given path. "
-        "Supports recursive listing and glob pattern filtering. "
-        "Automatically excludes .git, __pycache__, node_modules, .venv, "
-        ".tox, and hidden files/directories."
-    )
+    description: str = "List files and directories at a path."
     args_schema: Type[BaseModel] = ListDirectoryInput
 
     def _run(

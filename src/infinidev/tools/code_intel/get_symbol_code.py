@@ -13,25 +13,35 @@ class GetSymbolCodeInput(BaseModel):
         default="",
         description="Optional: 'function', 'method', 'class' to narrow results",
     )
+    file_path: str = Field(
+        default="",
+        description="Optional: file path to narrow search and ensure indexing",
+    )
 
 
 class GetSymbolCodeTool(InfinibayBaseTool):
     name: str = "get_symbol_code"
-    description: str = (
-        "Get the full source code of a function, method, or class by name. "
-        "Returns the file path, line range, and the complete source code. "
-        "Combines find_definition + read_file in one call — much faster."
-    )
+    description: str = "Get source code of a symbol by name."
     args_schema: Type[BaseModel] = GetSymbolCodeInput
 
-    def _run(self, name: str, kind: str = "") -> str:
+    def _run(self, name: str, kind: str = "", file_path: str = "") -> str:
         from infinidev.code_intel.query import find_definition
         from infinidev.code_intel.indexer import index_directory
 
         project_id = self.project_id
         workspace = self.workspace_path
 
-        results = find_definition(project_id, name, kind=kind or None)
+        # Auto-index specific file if provided
+        if file_path:
+            resolved = self._resolve_path(file_path)
+            if os.path.isfile(resolved):
+                try:
+                    from infinidev.code_intel.smart_index import ensure_indexed
+                    ensure_indexed(project_id, resolved)
+                except Exception:
+                    pass
+
+        results = find_definition(project_id, name, kind=kind or None, file_hint=file_path or None)
         if not results and workspace:
             index_directory(project_id, workspace)
             results = find_definition(project_id, name, kind=kind or None)

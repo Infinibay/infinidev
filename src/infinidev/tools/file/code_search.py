@@ -35,12 +35,7 @@ class CodeSearchInput(BaseModel):
 
 class CodeSearchTool(InfinibayBaseTool):
     name: str = "code_search"
-    description: str = (
-        "Search source code files for a text pattern or regex. Returns matching "
-        "lines with file paths and line numbers. Use this to find usages of "
-        "functions, classes, variables, imports, or any text pattern across "
-        "the codebase."
-    )
+    description: str = "Search code files for a text pattern or regex."
     args_schema: Type[BaseModel] = CodeSearchInput
 
     def _run(

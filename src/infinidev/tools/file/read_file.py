@@ -95,13 +95,7 @@ def _is_binary_file(path: str, sample_size: int = 8192) -> bool:
 
 class ReadFileTool(InfinibayBaseTool):
     name: str = "read_file"
-    description: str = (
-        "Read the contents of a file. Returns the file content as numbered "
-        "lines. Use `offset` and `limit` to read a specific range of lines "
-        "instead of the entire file — this is strongly recommended for large "
-        "files. Combine with code_search to find the relevant line numbers "
-        "first, then read only the region you need."
-    )
+    description: str = "Read file contents with line numbers. Auto-indexes for code intelligence."
     args_schema: Type[BaseModel] = ReadFileInput
 
     def _run(
@@ -191,6 +185,16 @@ class ReadFileTool(InfinibayBaseTool):
             desc = f"{total_lines} lines"
 
         self._log_tool_usage(f"Read {path} ({desc})")
+
+        # Auto-index the file for code intelligence (best-effort)
+        try:
+            from infinidev.code_intel.smart_index import ensure_indexed
+            project_id = self.project_id
+            if project_id:
+                ensure_indexed(project_id, path)
+        except Exception:
+            pass  # Never fail a read because of indexing
+
         return content
 
     def _run_in_pod(

@@ -49,13 +49,7 @@ class GlobInput(BaseModel):
 
 class GlobTool(InfinibayBaseTool):
     name: str = "glob"
-    description: str = (
-        "Find files by name pattern (glob) with optional content filtering. "
-        "Use this to discover files in the project: find all Python files, "
-        "locate test files, find configs, etc. Supports ** for recursive "
-        "directory matching. Optionally filter results to only files whose "
-        "content matches a regex pattern."
-    )
+    description: str = "Find files by glob pattern with optional content filtering."
     args_schema: Type[BaseModel] = GlobInput
 
     # Directories to always skip

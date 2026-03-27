@@ -24,13 +24,9 @@ class AddMethodInput(BaseModel):
     )
 
 
-class AddMethodTool(InfinibayBaseTool):
-    name: str = "add_method"
-    description: str = (
-        "Add a new method or function to a file. If class_name is provided, "
-        "inserts at the end of that class with correct indentation. "
-        "If no class_name, appends to the end of the file."
-    )
+class AddSymbolTool(InfinibayBaseTool):
+    name: str = "add_symbol"
+    description: str = "Add a method or function to a file or class."
     args_schema: Type[BaseModel] = AddMethodInput
 
     def _run(self, file_path: str, code: str, class_name: str = "") -> str:
@@ -130,7 +126,7 @@ class AddMethodTool(InfinibayBaseTool):
         # Reindex
         ensure_indexed(project_id, resolved_path)
 
-        self._log_tool_usage(f"add_method: added to {class_name or 'file'} in {resolved_path}")
+        self._log_tool_usage(f"add_symbol: added to {class_name or 'file'} in {resolved_path}")
 
         return self._success({
             "path": resolved_path,

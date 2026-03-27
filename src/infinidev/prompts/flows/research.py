@@ -77,7 +77,7 @@ knowledge base for future sessions.
 ## Important Rules
 
 - Do NOT modify source code files. You are researching, not developing.
-- Do NOT use write_file, edit_file, or git commands to change the codebase.
+- Do NOT use create_file, replace_lines, or git commands to change the codebase.
 - If you cannot find reliable information, say so clearly rather than
   inventing an answer. Partial answers with honest gaps are better than
   confident-sounding fabrications.

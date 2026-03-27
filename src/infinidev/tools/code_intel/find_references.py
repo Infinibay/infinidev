@@ -16,11 +16,7 @@ class FindReferencesInput(BaseModel):
 
 class FindReferencesTool(InfinibayBaseTool):
     name: str = "find_references"
-    description: str = (
-        "Find all places where a function, class, or variable is used in the codebase. "
-        "Returns file paths, line numbers, and the source line for each usage. "
-        "Use this to understand impact before making changes — find ALL callers."
-    )
+    description: str = "Find all references to a symbol in the codebase."
     args_schema: Type[BaseModel] = FindReferencesInput
 
     def _run(self, name: str, ref_kind: str = "") -> str:

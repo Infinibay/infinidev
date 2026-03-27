@@ -25,13 +25,9 @@ class RemoveMethodInput(BaseModel):
     )
 
 
-class RemoveMethodTool(InfinibayBaseTool):
-    name: str = "remove_method"
-    description: str = (
-        "Remove a method or function from a file. Uses the code index "
-        "to find the symbol by name. "
-        "Example: remove_method(symbol='Database._old_helper')"
-    )
+class RemoveSymbolTool(InfinibayBaseTool):
+    name: str = "remove_symbol"
+    description: str = "Remove a method or function by symbol name."
     args_schema: Type[BaseModel] = RemoveMethodInput
 
     def _run(self, symbol: str, file_path: str = "") -> str:
@@ -128,7 +124,7 @@ class RemoveMethodTool(InfinibayBaseTool):
         # Reindex
         ensure_indexed(project_id, target_path)
 
-        self._log_tool_usage(f"remove_method: {symbol} from {target_path} ({lines_removed} lines)")
+        self._log_tool_usage(f"remove_symbol: {symbol} from {target_path} ({lines_removed} lines)")
 
         return self._success({
             "path": target_path,

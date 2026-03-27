@@ -30,14 +30,9 @@ class EditMethodInput(BaseModel):
     )
 
 
-class EditMethodTool(InfinibayBaseTool):
-    name: str = "edit_method"
-    description: str = (
-        "Replace an entire method or function with new code. Uses the code index "
-        "to find the symbol by name — no need to match exact old text. "
-        "Provide the complete method including the def line. "
-        "Example: edit_method(symbol='Database.execute', new_code='def execute(self, sql):\\n    ...')"
-    )
+class EditSymbolTool(InfinibayBaseTool):
+    name: str = "edit_symbol"
+    description: str = "Replace a method or function by symbol name."
     args_schema: Type[BaseModel] = EditMethodInput
 
     def _run(self, symbol: str, new_code: str, file_path: str = "") -> str:
@@ -155,7 +150,7 @@ class EditMethodTool(InfinibayBaseTool):
         ensure_indexed(project_id, target_path)
 
         lines_replaced = end - start
-        self._log_tool_usage(f"edit_method: {symbol} in {target_path} ({lines_replaced} lines replaced)")
+        self._log_tool_usage(f"edit_symbol: {symbol} in {target_path} ({lines_replaced} lines replaced)")
 
         return self._success({
             "path": target_path,

@@ -201,6 +201,16 @@ def build_tool_dispatch(tools: list[Any]) -> dict[str, Any]:
     return {t.name: t for t in tools}
 
 
+# Tool name aliases for backward compatibility
+_TOOL_ALIASES: dict[str, str] = {
+    "edit_method": "edit_symbol",
+    "add_method": "add_symbol",
+    "remove_method": "remove_symbol",
+    "write_file": "create_file",
+    "find_definition": "search_symbols",
+}
+
+
 def execute_tool_call(
     dispatch: dict[str, Any],
     name: str,
@@ -211,6 +221,12 @@ def execute_tool_call(
     Calls ``tool._run()`` directly (bypassing CrewAI's ``BaseTool.run()``)
     with kwargs filtering to strip hallucinated parameters.
     """
+    # Resolve tool name aliases
+    if name in _TOOL_ALIASES:
+        canonical = _TOOL_ALIASES[name]
+        logger.info("Tool alias: '%s' -> '%s'", name, canonical)
+        name = canonical
+
     tool = dispatch.get(name)
     if tool is None:
         return json.dumps({"error": f"Unknown tool: {name}"})
@@ -239,7 +255,7 @@ def execute_tool_call(
         "directory": "path",
         "dir": "path",
         "dir_path": "path",
-        "content": "new_string",
+        # "content" is a valid param in create_file, replace_lines — no longer alias to new_string
         "query": "pattern",
         "search_query": "pattern",
     }

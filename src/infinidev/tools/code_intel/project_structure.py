@@ -20,11 +20,7 @@ class ProjectStructureInput(BaseModel):
 
 class ProjectStructureTool(InfinibayBaseTool):
     name: str = "project_structure"
-    description: str = (
-        "Show the project directory structure with descriptions of what each file/folder contains. "
-        "Descriptions come from the code index (functions, classes, exports). "
-        "Use this to quickly understand what a project or subdirectory does without reading files."
-    )
+    description: str = "Show project directory tree with file descriptions."
     args_schema: Type[BaseModel] = ProjectStructureInput
 
     def _run(

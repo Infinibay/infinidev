@@ -16,11 +16,7 @@ class ListSymbolsInput(BaseModel):
 
 class ListSymbolsTool(InfinibayBaseTool):
     name: str = "list_symbols"
-    description: str = (
-        "List all functions, classes, methods, and variables defined in a file. "
-        "Returns a structured overview without reading the entire file. "
-        "Use to quickly understand a file's contents and structure."
-    )
+    description: str = "List symbols defined in a file, optionally filtered by kind."
     args_schema: Type[BaseModel] = ListSymbolsInput
 
     def _run(self, file_path: str, kind: str = "") -> str:

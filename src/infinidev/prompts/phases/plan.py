@@ -82,7 +82,7 @@ Example 2 — Bug with missing test:
 
 Bad 1 — Writing code instead of planning:
   1. read_file: "auth.py"
-  2. edit_file: "auth.py"  ← WRONG — you are a planner, not a developer!
+  2. replace_lines: "auth.py"  ← WRONG — you are a planner, not a developer!
   WHY BAD: Plan phase is for creating the plan. Do NOT write code.
 
 Bad 2 — Vague steps:
@@ -183,7 +183,7 @@ Example 2 — Planning a from-scratch implementation:
 ## EXAMPLES OF BAD PLANNING (DO NOT DO THIS)
 
 Bad 1 — Writing code instead of planning:
-  1. write_file: "reports.py"  ← WRONG
+  1. create_file: "reports.py"  ← WRONG
   WHY BAD: You are a planner. Create plan steps, don't write code.
 
 Bad 2 — One giant step:
