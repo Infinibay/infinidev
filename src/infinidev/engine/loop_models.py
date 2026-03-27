@@ -144,7 +144,7 @@ OPENED_FILE_TTL = 20
 # Max number of files to keep in the cache (to avoid prompt bloat)
 MAX_OPENED_FILES = 10
 # Max file content size to cache (larger files are not cached)
-MAX_CACHE_CONTENT_SIZE = 8000  # ~2K tokens
+MAX_CACHE_CONTENT_SIZE = 32000  # ~8K tokens — enough for most source files
 
 
 class LoopState(BaseModel):

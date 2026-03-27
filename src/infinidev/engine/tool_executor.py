@@ -22,11 +22,21 @@ from infinidev.engine.loop_tools import execute_tool_call
 # ── Constants ─────────────────────────────────────────────────────────────
 
 # Tools that modify files — tracked for diff generation
-FILE_CHANGE_TOOLS = {"edit_file", "write_file", "multi_edit_file", "apply_patch"}
+FILE_CHANGE_TOOLS = {
+    "edit_file", "write_file", "multi_edit_file", "apply_patch",
+    "create_file", "replace_lines",
+    "add_content_after_line", "add_content_before_line",
+    "edit_symbol", "add_symbol", "remove_symbol",
+    "rename_symbol", "move_symbol",
+}
 
 # Tools with side effects — act as barriers in parallel execution.
 WRITE_TOOLS = {
     "edit_file", "write_file", "multi_edit_file", "apply_patch",
+    "create_file", "replace_lines",
+    "add_content_after_line", "add_content_before_line",
+    "edit_symbol", "add_symbol", "remove_symbol",
+    "rename_symbol", "move_symbol",
     "git_commit", "git_branch", "git_push",
     "execute_command",  # Commands can have side effects
     "record_finding", "update_finding", "delete_finding",
@@ -52,6 +62,32 @@ def reindex_if_enabled(file_path: str) -> None:
 
 
 # ── Opened files cache management ─────────────────────────────────────────
+
+
+def _reread_and_cache(state: LoopState, path: str) -> None:
+    """Re-read a file from disk and refresh the opened files cache."""
+    import os as _os
+    try:
+        if _os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            # Format with line numbers like read_file does
+            lines = content.split("\n")
+            numbered = "\n".join(f"{i+1:>6}\t{line}" for i, line in enumerate(lines))
+            state.refresh_file(path, numbered)
+    except Exception:
+        pass
+
+
+def _extract_path_from_result(result: str) -> str | None:
+    """Extract file path from a tool result JSON."""
+    try:
+        res = json.loads(result) if isinstance(result, str) else result
+        if isinstance(res, dict):
+            return res.get("path") or res.get("file_path")
+    except Exception:
+        pass
+    return None
 
 def update_opened_files_cache(
     state: LoopState,
@@ -84,39 +120,73 @@ def update_opened_files_cache(
     if not _os.path.isabs(path):
         path = _os.path.normpath(_os.path.join(ws, path))
 
-    if tool_name == "read_file":
+    # ── Read tools: cache the returned content ──
+    if tool_name in ("read_file", "partial_read"):
         if result and not result.strip().startswith('{"error'):
             state.cache_file(path, result)
 
-    elif tool_name == "write_file":
+    # ── Write/create tools: cache the written content ──
+    elif tool_name in ("write_file", "create_file"):
         content = args.get("content", "")
         if content:
             state.refresh_file(path, content)
         reindex_if_enabled(path)
 
+    # ── Edit tools (old-style): re-read and cache ──
     elif tool_name in ("edit_file", "multi_edit_file"):
+        _reread_and_cache(state, path)
+        reindex_if_enabled(path)
+
+    # ── Line-based edit tools: re-read and cache ──
+    elif tool_name in ("replace_lines", "add_content_after_line", "add_content_before_line"):
+        file_path_arg = args.get("file_path") or path
+        if file_path_arg:
+            if not _os.path.isabs(file_path_arg):
+                file_path_arg = _os.path.normpath(_os.path.join(ws, file_path_arg))
+            _reread_and_cache(state, file_path_arg)
+            reindex_if_enabled(file_path_arg)
+
+    # ── Symbol tools: extract path from result, re-read and cache ──
+    elif tool_name in ("edit_symbol", "add_symbol", "remove_symbol"):
+        affected_path = _extract_path_from_result(result)
+        if affected_path:
+            _reread_and_cache(state, affected_path)
+            reindex_if_enabled(affected_path)
+
+    # ── Refactoring tools: may touch multiple files ──
+    elif tool_name == "rename_symbol":
         try:
-            if _os.path.isfile(path):
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
-                state.refresh_file(path, content)
+            res = json.loads(result) if isinstance(result, str) else result
+            if isinstance(res, dict):
+                for fpath in res.get("files_modified", []):
+                    _reread_and_cache(state, fpath)
+                    reindex_if_enabled(fpath)
         except Exception:
             pass
-        reindex_if_enabled(path)
+
+    elif tool_name == "move_symbol":
+        try:
+            res = json.loads(result) if isinstance(result, str) else result
+            if isinstance(res, dict):
+                for key in ("source_file", "target_file"):
+                    fpath = res.get(key)
+                    if fpath:
+                        _reread_and_cache(state, fpath)
+                        reindex_if_enabled(fpath)
+        except Exception:
+            pass
 
     elif tool_name == "apply_patch":
         try:
             res = json.loads(result) if isinstance(result, str) else result
             if isinstance(res, dict) and "files_modified" in res:
-                ws = get_current_workspace_path() or _os.getcwd()
                 for fpath in res["files_modified"]:
                     abs_path = _os.path.join(ws, fpath) if not _os.path.isabs(fpath) else fpath
-                    if _os.path.isfile(abs_path):
-                        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-                            state.refresh_file(abs_path, f.read())
+                    _reread_and_cache(state, abs_path)
         except Exception:
             pass
 
+    # ── Exploration tools: cache search results ──
     elif tool_name == "list_directory":
         if result and not result.strip().startswith('{"error'):
             state.cache_file(f"[dir] {path}", result)
@@ -203,14 +273,14 @@ def execute_tool_calls_parallel(
 # ── File change tracking helpers ──────────────────────────────────────────
 
 def extract_file_path_from_args(tool_name: str, arguments: str | dict) -> str | None:
-    """Extract the file path from edit_file / write_file arguments."""
+    """Extract the file path from tool arguments (checks 'path' and 'file_path')."""
     try:
         args = json.loads(arguments) if isinstance(arguments, str) else arguments
     except (json.JSONDecodeError, TypeError):
         return None
     if not isinstance(args, dict):
         return None
-    return args.get("path")
+    return args.get("path") or args.get("file_path")
 
 
 def capture_pre_content(

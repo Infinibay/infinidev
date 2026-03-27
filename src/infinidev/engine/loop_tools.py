@@ -252,6 +252,7 @@ def execute_tool_call(
         "filepath": "path",
         "file": "path",
         "filename": "path",
+        "name": "path",  # safe: only applies when tool has "path" but not "name" (line 277-279 guards this)
         "directory": "path",
         "dir": "path",
         "dir_path": "path",

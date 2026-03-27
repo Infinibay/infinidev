@@ -360,7 +360,9 @@ def build_iteration_prompt(
             file_sections.append(label)
         parts.append(
             "<opened-files>\n"
-            "Files you recently read or wrote (still in cache — do NOT re-read these):\n\n"
+            "IMPORTANT: These files are already loaded and up-to-date. "
+            "Do NOT call read_file on them — the content below IS the current file content. "
+            "After you edit a file, it is automatically refreshed here.\n\n"
             + "\n\n".join(file_sections)
             + "\n</opened-files>"
         )
