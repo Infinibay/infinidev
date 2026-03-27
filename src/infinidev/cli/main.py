@@ -643,12 +643,21 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, thi
                     _task_type = "feature"
                     if analysis and hasattr(analysis, 'specification'):
                         _task_type = analysis.specification.get("task_type", "feature")
+                    # Extract depth config from gather brief if available
+                    _depth_config = None
+                    if hasattr(agent, '_gather_brief') and agent._gather_brief:
+                        try:
+                            from infinidev.gather.models import DEPTH_CONFIGS
+                            _depth_config = DEPTH_CONFIGS.get(agent._gather_brief.classification.depth)
+                        except Exception:
+                            pass
                     phase_eng = PhaseEngine()
                     result = phase_eng.execute(
                         agent=agent,
                         task_prompt=task_prompt,
                         task_type=_task_type,
                         verbose=True,
+                        depth_config=_depth_config,
                     )
                 else:
                     result = engine.execute(

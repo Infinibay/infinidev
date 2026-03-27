@@ -56,43 +56,75 @@ class PhaseEngine:
         verbose: bool = True,
         task_tools: list | None = None,
         test_command: str | None = None,
+        depth_config: Any | None = None,
     ) -> str:
-        strategy = get_strategy(task_type)
-        description, expected_output = task_prompt
+        from infinidev.gather.models import DepthLevel, DepthConfig, DEPTH_CONFIGS
 
-        if verbose:
-            _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — strategy: {task_type}")
+        description, expected_output = task_prompt
 
         # Init test checkpoint
         from infinidev.tools.base.context import get_current_workspace_path
         workdir = get_current_workspace_path()
         self._test_checkpoint = TestCheckpoint(test_command, workdir)
 
-        # ── Phase 1: QUESTIONS ────────────────────────────────────────
-        if verbose:
-            _log(f"\n{BOLD}❓ Phase 1: QUESTIONS{RESET}")
+        # ── Step 0: CLASSIFY (if no depth provided) ──────────────────
+        if depth_config is None:
+            classification = self._classify(agent, description, verbose)
+            task_type = classification.ticket_type.value
+            depth_config = DEPTH_CONFIGS.get(classification.depth, DEPTH_CONFIGS[DepthLevel.standard])
+            if verbose:
+                _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — type: {task_type}, depth: {classification.depth.value}")
+                if classification.depth_reasoning:
+                    _log(f"  {DIM}{classification.depth_reasoning}{RESET}")
+        else:
+            if verbose:
+                _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — type: {task_type}, depth: (provided)")
 
-        questions = self._generate_questions(agent, description, strategy, verbose)
+        strategy = get_strategy(task_type)
 
-        if verbose:
-            _log(f"  {DIM}{len(questions)} questions generated{RESET}")
-            for i, q in enumerate(questions):
-                _log(f"    {DIM}{i+1}. {q['question'][:80]}{RESET}")
+        # ── MINIMAL: single free LoopEngine run ──────────────────────
+        if depth_config.skip_questions and depth_config.skip_investigate and depth_config.plan_min_steps <= 1:
+            return self._execute_minimal(agent, description, expected_output, strategy, task_tools, depth_config, verbose)
 
-        # ── Phase 2: INVESTIGATE ──────────────────────────────────────
-        if verbose:
-            _log(f"\n{BOLD}🔍 Phase 2: INVESTIGATE{RESET}")
+        # ── LIGHT: skip questions/investigate, go straight to plan+execute
+        answers: list[dict[str, str]] = []
+        all_notes: list[str] = []
 
-        answers, all_notes = self._investigate(
-            agent, questions, strategy, task_tools, verbose,
-        )
+        if not depth_config.skip_questions:
+            # ── Phase 1: QUESTIONS ────────────────────────────────────
+            if verbose:
+                _log(f"\n{BOLD}❓ Phase 1: QUESTIONS{RESET}")
 
-        if verbose:
-            _log(f"  {DIM}{len(answers)} answers, {len(all_notes)} total notes{RESET}")
+            questions = self._generate_questions(
+                agent, description, strategy, verbose,
+                max_questions=depth_config.questions_max,
+            )
+
+            if verbose:
+                _log(f"  {DIM}{len(questions)} questions generated{RESET}")
+                for i, q in enumerate(questions):
+                    _log(f"    {DIM}{i+1}. {q['question'][:80]}{RESET}")
+
+            if not depth_config.skip_investigate and questions:
+                # ── Phase 2: INVESTIGATE ──────────────────────────────
+                if verbose:
+                    _log(f"\n{BOLD}🔍 Phase 2: INVESTIGATE{RESET}")
+
+                # Override investigate budget from depth config
+                strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
+
+                answers, all_notes = self._investigate(
+                    agent, questions, strategy, task_tools, verbose,
+                )
+
+                if verbose:
+                    _log(f"  {DIM}{len(answers)} answers, {len(all_notes)} total notes{RESET}")
 
         # ── Phase 3: PLAN ─────────────────────────────────────────────
         if verbose:
             _log(f"\n{BOLD}📋 Phase 3: PLAN{RESET}")
+
+        strategy.plan_min_steps = depth_config.plan_min_steps
 
         plan_steps = self._generate_plan(
             agent, description, answers, all_notes, strategy, task_tools, verbose,
@@ -108,16 +140,14 @@ class PhaseEngine:
                 _log(f"    {DIM}{s['step']}. {s['description'][:70]} [{files_str}]{RESET}")
 
         # ── Phase 4: EXECUTE (with re-plan loop) ─────────────────────
-        max_plan_rounds = 3  # max times to re-plan after incomplete execution
-
-        for plan_round in range(max_plan_rounds):
+        for plan_round in range(depth_config.replan_max_rounds):
             if verbose:
                 round_label = f" (round {plan_round + 1})" if plan_round > 0 else ""
                 _log(f"\n{BOLD}🔨 Phase 4: EXECUTE{round_label}{RESET}")
 
             result = self._execute_plan(
                 agent, description, expected_output, answers, all_notes,
-                plan_steps, strategy, task_tools, verbose,
+                plan_steps, strategy, task_tools, depth_config, verbose,
             )
 
             # Check test progress
@@ -126,32 +156,86 @@ class PhaseEngine:
                 if verbose and total > 0:
                     _log(f"\n  {BOLD}{self._test_checkpoint.progress_str()}{RESET}")
 
-                # If all tests pass or no tests exist, we're done
                 if total == 0 or passed == total:
                     break
 
-                # If not all passing and we have re-plan budget, loop back
-                if plan_round < max_plan_rounds - 1:
+                if plan_round < depth_config.replan_max_rounds - 1:
                     if verbose:
-                        _log(f"\n{BOLD}📋 Re-planning: {passed}/{total} tests passing, generating fix steps...{RESET}")
+                        _log(f"\n{BOLD}📋 Re-planning: {passed}/{total} tests passing...{RESET}")
 
-                    # Update notes with current progress
-                    all_notes.append(f"PROGRESS: {passed}/{total} tests passing after plan round {plan_round + 1}")
+                    all_notes.append(f"PROGRESS: {passed}/{total} tests passing after round {plan_round + 1}")
 
                     plan_steps = self._generate_plan(
                         agent, description, answers, all_notes, strategy, task_tools, verbose,
                     )
                     if not plan_steps:
-                        break  # can't re-plan, stop
+                        break
 
                     if verbose:
                         _log(f"  {DIM}Re-plan: {len(plan_steps)} new steps{RESET}")
                         for s in plan_steps:
                             _log(f"    {DIM}{s['step']}. {s['description'][:70]}{RESET}")
             else:
-                break  # no auto_test, run once
+                break
 
         return result
+
+    # ── Step 0: Classify ──────────────────────────────────────────────
+
+    def _classify(self, agent: Any, description: str, verbose: bool) -> Any:
+        """Run ticket classification to determine task_type and depth."""
+        from infinidev.gather.classifier import classify_ticket
+        from infinidev.gather.models import ClassificationResult, DepthLevel
+
+        if verbose:
+            _log(f"\n{BOLD}🏷️  Step 0: CLASSIFY{RESET}")
+
+        result = classify_ticket(description, agent=agent)
+
+        if verbose:
+            _log(f"  {DIM}Type: {result.ticket_type.value} — {result.reasoning}{RESET}")
+            _log(f"  {DIM}Depth: {result.depth.value} — {result.depth_reasoning}{RESET}")
+
+        return result
+
+    # ── Minimal mode: single free LoopEngine run ─────────────────────
+
+    def _execute_minimal(
+        self,
+        agent: Any,
+        description: str,
+        expected_output: str,
+        strategy: PhaseStrategy,
+        task_tools: list | None,
+        depth_config: Any,
+        verbose: bool,
+    ) -> str:
+        """Minimal depth: single LoopEngine run with no phase separation."""
+        if verbose:
+            _log(f"\n{BOLD}🔨 EXECUTE (minimal — single run){RESET}")
+
+        engine = LoopEngine()
+        result = engine.execute(
+            agent=agent,
+            task_prompt=(description, expected_output),
+            verbose=verbose,
+            task_tools=task_tools,
+            max_iterations=50,
+            max_total_tool_calls=1000,
+            max_tool_calls_per_action=0,
+            nudge_threshold=0,
+            summarizer_enabled=True,
+            identity_override=strategy.execute_identity or None,
+        )
+
+        self._last_engine = engine
+
+        if strategy.auto_test and self._test_checkpoint:
+            passed, total = self._test_checkpoint.run()
+            if verbose and total > 0:
+                _log(f"\n  {BOLD}{self._test_checkpoint.progress_str()}{RESET}")
+
+        return result or ""
 
     # ── Phase 1: Generate questions ───────────────────────────────────
 
@@ -161,63 +245,117 @@ class PhaseEngine:
         description: str,
         strategy: PhaseStrategy,
         verbose: bool,
+        max_questions: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Direct LLM call to generate investigation questions."""
+        """Generate questions using generate_question tool in a mini-loop.
+
+        Same pattern as _generate_plan: model calls generate_question once
+        per question, then step_complete(done) when finished.
+        """
         from infinidev.config.llm import get_litellm_params
         from infinidev.engine.loop_context import build_system_prompt
+        from infinidev.engine.loop_tools import (
+            STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
+        )
+        from infinidev.engine.tool_call_parser import parse_step_complete_args
 
-        prompt = (
-            f"You are preparing to work on a task. Before starting, generate "
-            f"questions that will give you everything you need to create a "
-            f"detailed implementation plan.\n\n"
+        q_max = max_questions or strategy.questions_max
+        q_min = strategy.questions_min
+
+        user_prompt = (
+            f"You are preparing to work on a task. Generate investigation "
+            f"questions that will help you understand the codebase and create "
+            f"an implementation plan.\n\n"
             f"Task: {description}\n\n"
             f"{strategy.questions_prompt}\n\n"
-            f"Output ONLY a JSON array of questions. No other text.\n"
-            f"Each question: {{\"question\": \"...\", \"intent\": \"...\"}}\n"
-            f"Generate {strategy.questions_min}-{strategy.questions_max} questions."
+            f"Call generate_question once per question ({q_min}-{q_max} questions).\n"
+            f"Call step_complete with status='done' when finished."
         )
-
-        prompt = "/no_think\n" + prompt
 
         llm_params = get_litellm_params()
         system_prompt = build_system_prompt(
             agent.backstory,
             identity_override=getattr(agent, '_system_prompt_identity', None),
         )
+
+        tools = [GENERATE_QUESTION_SCHEMA, STEP_COMPLETE_SCHEMA]
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": user_prompt},
         ]
 
-        for attempt in range(3):
+        collected: list[dict[str, Any]] = []
+        max_rounds = q_max + 3  # headroom for retries
+
+        for round_num in range(max_rounds):
             try:
-                response = call_llm(llm_params, messages)
-                content = self._clean_llm_text(response)
-                if verbose:
-                    _log(f"  {DIM}Q attempt {attempt+1}: {content[:150]}...{RESET}")
-
-                is_valid, questions, errors = validate_questions(
-                    content, strategy.questions_min, strategy.questions_max,
-                )
-                if is_valid:
-                    return questions
-
-                if verbose:
-                    for err in errors:
-                        _log(f"  {YELLOW}⚠ {err}{RESET}")
-
-                if attempt == 0:
-                    rejection = format_rejection(errors)
-                    messages.append({"role": "assistant", "content": content})
-                    messages.append({"role": "user", "content": rejection})
-
+                response = call_llm(llm_params, messages, tools=tools, tool_choice="auto")
             except Exception as exc:
-                logger.warning("Question generation failed: %s", str(exc)[:200])
+                logger.warning("Question generation failed (round %d): %s", round_num + 1, str(exc)[:200])
+                break
 
-        # Fallback to default questions
-        if verbose:
-            _log(f"  {YELLOW}Using fallback questions{RESET}")
-        return [{"question": q, "intent": "fallback"} for q in strategy.fallback_questions]
+            choice = response.choices[0]
+            message = choice.message
+            tool_calls = getattr(message, "tool_calls", None)
+
+            if not tool_calls:
+                if verbose:
+                    _log(f"  {DIM}Round {round_num + 1}: no tool calls, stopping{RESET}")
+                break
+
+            done = False
+            for tc in tool_calls:
+                fn_name = tc.function.name
+                if fn_name == "generate_question":
+                    try:
+                        args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+
+                    q_text = args.get("question", "")
+                    q_intent = args.get("intent", "general")
+
+                    if q_text and len(q_text) >= 10:
+                        collected.append({"question": q_text, "intent": q_intent})
+                        if verbose:
+                            _log(f"  {DIM}Q{len(collected)}: {q_text[:80]}{RESET}")
+
+                    # Feed back confirmation
+                    messages.append({"role": "assistant", "tool_calls": [
+                        {"id": getattr(tc, "id", f"q_{round_num}"),
+                         "type": "function",
+                         "function": {"name": "generate_question", "arguments": tc.function.arguments}}
+                    ]})
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": getattr(tc, "id", f"q_{round_num}"),
+                        "content": f"Question #{len(collected)} recorded. "
+                                   f"Generate more or call step_complete(status='done').",
+                    })
+
+                elif fn_name == "step_complete":
+                    done = True
+                    messages.append({"role": "assistant", "tool_calls": [
+                        {"id": getattr(tc, "id", f"sc_{round_num}"),
+                         "type": "function",
+                         "function": {"name": "step_complete", "arguments": tc.function.arguments}}
+                    ]})
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": getattr(tc, "id", f"sc_{round_num}"),
+                        "content": "Questions phase complete.",
+                    })
+                    break
+
+            if done or len(collected) >= q_max:
+                break
+
+        if len(collected) < q_min:
+            if verbose:
+                _log(f"  {YELLOW}Using fallback questions ({len(collected)} < {q_min}){RESET}")
+            return [{"question": q, "intent": "fallback"} for q in strategy.fallback_questions]
+
+        return collected
 
     # ── Phase 2: Investigate each question ────────────────────────────
 
@@ -467,6 +605,7 @@ class PhaseEngine:
         plan_steps: list[dict[str, Any]],
         strategy: PhaseStrategy,
         all_tools: list | None,
+        depth_config: Any,
         verbose: bool,
     ) -> str:
         answers_text = "\n".join(
@@ -509,12 +648,14 @@ class PhaseEngine:
             )
 
             notes_section = f"## NOTES\n{notes_text}\n\n" if notes_text else ""
+            depth_suffix = depth_config.prompt_suffix if depth_config else ""
             full_prompt = (
                 f"{step_prompt}\n\n"
                 f"{notes_section}"
                 f"## INVESTIGATION RESULTS\n{answers_text}\n\n"
                 f"## COMPLETED STEPS\n{completed_str}\n"
                 f"{progress_str}{regression_warning}"
+                f"{depth_suffix}"
             )
 
             if verbose:
@@ -530,9 +671,11 @@ class PhaseEngine:
                 max_total_tool_calls=1000,
                 max_tool_calls_per_action=0,
                 nudge_threshold=0,
-                summarizer_enabled=True,
+                summarizer_enabled=not (depth_config and depth_config.aggressive_summarizer),
                 identity_override=strategy.execute_identity or None,
-                allow_only_add_steps=True,  # can add steps but not modify/remove plan
+                allow_only_add_steps=depth_config.allow_only_add_steps if depth_config else True,
+                reject_write_on_existing=depth_config.reject_write_on_existing if depth_config else False,
+                require_test_before_complete=depth_config.require_test_before_complete if depth_config else False,
             )
 
             self._last_engine = engine

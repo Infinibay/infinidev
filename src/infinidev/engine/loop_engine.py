@@ -385,6 +385,8 @@ class LoopEngine(AgentEngine):
         identity_override: str | None = None,
         done_means_done: bool = False,
         allow_only_add_steps: bool = False,
+        reject_write_on_existing: bool = False,
+        require_test_before_complete: bool = False,
     ) -> str:
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
@@ -784,6 +786,19 @@ class LoopEngine(AgentEngine):
                                 # Sequential execution (single tool or write)
                                 batch_results = []
                                 for tc in batch:
+                                    # Deep mode guardrail: reject write_file on existing files
+                                    if reject_write_on_existing and tc.function.name == "write_file":
+                                        try:
+                                            import os as _os
+                                            _wf_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                                            _wf_path = _wf_args.get("path", "")
+                                            if _wf_path and _os.path.isfile(_os.path.abspath(_wf_path)):
+                                                result = json.dumps({"error": "write_file rejected: file already exists. Use edit_method or edit_file instead."})
+                                                batch_results.append((tc, result))
+                                                continue
+                                        except Exception:
+                                            pass
+
                                     # Pre-hook BEFORE execution for file changes
                                     _pre = _capture_pre_content(
                                         tc.function.name, tc.function.arguments, file_tracker,
@@ -1114,6 +1129,23 @@ class LoopEngine(AgentEngine):
             # Fallback if step_result is still None (shouldn't happen but be safe)
             if step_result is None:
                 step_result = StepResult(summary="Step completed.", status="continue")
+
+            # --- Deep mode guardrail: require test before step_complete ---
+            if require_test_before_complete and step_result.status == "done":
+                # Check if any execute_command in this iteration contained a test
+                _had_test = any(
+                    tc.function.name == "execute_command"
+                    and any(kw in (tc.function.arguments or "") for kw in ["pytest", "test", "unittest"])
+                    for tc in (regular_calls if regular_calls else [])
+                )
+                if not _had_test:
+                    step_result.status = "continue"
+                    step_result.summary += " [BLOCKED: run tests before completing step]"
+                    _emit_log(
+                        "warning",
+                        f"{_YELLOW}⚠ Deep mode: step_complete blocked — run tests first{_RESET}",
+                        project_id=agent.project_id, agent_id=agent.agent_id,
+                    )
 
             # --- Auto-split: prevent premature "done" ---
             # When done_means_done=True (e.g. PLAN phase), pending steps are

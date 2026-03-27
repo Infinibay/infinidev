@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from infinidev.gather.models import ClassificationResult, TicketType
+from infinidev.gather.models import ClassificationResult, TicketType, DepthLevel
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,26 @@ Types:
 - Call step_complete with status="done" immediately.
 - In final_answer, output ONLY this JSON: {"ticket_type": "bug|feature|refactor|sysadmin|other", "reasoning": "1 sentence why", "keywords": ["key", "terms"]}
 - Do NOT use any tools. Just classify and respond.
+
+## IMPORTANT: Also classify analysis DEPTH
+
+Pick ONE depth based on this table:
+
+| Depth    | When to pick                                       | Examples                                |
+|----------|----------------------------------------------------|-----------------------------------------|
+| minimal  | Fix is obvious from description. 1-2 files. No     | Fix typo. Change config value. Update   |
+|          | unknowns at all.                                   | a string. Add missing import.           |
+| light    | You mostly know what to do. Need to check 1-2      | Fix a clear bug where file is named.    |
+|          | things. Small scope.                                | Add field to existing model. Rename.    |
+| standard | Need to understand codebase first. Multiple files.  | Implement new feature. Fix bug with     |
+|          | Some unknowns to resolve.                           | unknown cause. Add new API endpoint.    |
+| deep     | Large scope. Many files. Complex interactions.      | Major refactor. Build new subsystem.    |
+|          | Architecture decisions needed.                      | Feature touching 10+ files.             |
+
+KEY RULE: When unsure between two depths, ALWAYS pick the deeper one.
+
+Include "depth" and "depth_reasoning" in your JSON output:
+{"ticket_type": "...", "reasoning": "...", "keywords": [...], "depth": "minimal|light|standard|deep", "depth_reasoning": "1 sentence"}
 """
 
 
@@ -43,6 +63,8 @@ def classify_ticket(
     fallback = ClassificationResult(
         ticket_type=TicketType.other,
         reasoning="Classification failed — using default.",
+        depth=DepthLevel.standard,
+        depth_reasoning="Classification failed — defaulting to standard.",
     )
 
     if agent is None:
@@ -83,10 +105,18 @@ def classify_ticket(
         if result:
             parsed = _extract_json(result)
             if parsed:
+                # Parse depth with safe fallback
+                depth_str = parsed.get("depth", "standard")
+                try:
+                    depth = DepthLevel(depth_str)
+                except ValueError:
+                    depth = DepthLevel.standard
                 return ClassificationResult(
                     ticket_type=TicketType(parsed.get("ticket_type", "other")),
                     reasoning=str(parsed.get("reasoning", ""))[:300],
                     keywords=list(parsed.get("keywords", []))[:10],
+                    depth=depth,
+                    depth_reasoning=str(parsed.get("depth_reasoning", ""))[:300],
                 )
 
             # Try to detect type from text

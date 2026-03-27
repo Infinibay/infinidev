@@ -149,6 +149,40 @@ THINK_SCHEMA: dict[str, Any] = {
 }
 
 
+GENERATE_QUESTION_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "generate_question",
+        "description": (
+            "Generate one investigation question about the task. "
+            "Call this once per question. When you have generated enough "
+            "questions, call step_complete with status='done'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "A specific investigation question answerable by reading "
+                        "code, running tests, or searching the project."
+                    ),
+                },
+                "intent": {
+                    "type": "string",
+                    "description": (
+                        "What you hope to learn: find_code, find_patterns, "
+                        "check_tests, find_config, find_dependents, reproduce, "
+                        "baseline, understand_spec"
+                    ),
+                },
+            },
+            "required": ["question", "intent"],
+        },
+    },
+}
+
+
 def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     """Convert a list of tools to OpenAI function-calling schemas.
 
