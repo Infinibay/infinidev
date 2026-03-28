@@ -306,13 +306,37 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         finally:
             agent.deactivate()
     else:
-        flow_config = get_flow_config("develop")
+        # Analysis phase for single-prompt mode (non-interactive)
+        detected_flow = "develop"
+        task_type = "feature"
+        analysis_prompt = None
+        if settings.ANALYSIS_ENABLED:
+            try:
+                from infinidev.engine.analysis_engine import AnalysisEngine
+                analyst_sp = AnalysisEngine()
+                click.echo(click.style("Analyzing request...", fg="cyan", dim=True))
+                analysis = analyst_sp.analyze(problem)
+                if analysis.flow and analysis.flow != "done":
+                    detected_flow = analysis.flow
+                if hasattr(analysis, 'specification'):
+                    task_type = analysis.specification.get("task_type", "feature")
+                analysis_prompt = analysis.build_flow_prompt()
+                click.echo(click.style(f"  Flow: {detected_flow}, Type: {task_type}", fg="cyan", dim=True))
+            except Exception as exc:
+                click.echo(click.style(f"  Analysis failed: {exc}", fg="yellow", dim=True))
+
+        flow_config = get_flow_config(detected_flow)
         agent._system_prompt_identity = flow_config.identity_prompt
         agent.backstory = flow_config.backstory
         agent.activate_context(session_id=session_id)
 
+        # Use analysis-enhanced prompt if available
+        if analysis_prompt:
+            task_prompt_sp = analysis_prompt
+        else:
+            task_prompt_sp = (problem, flow_config.expected_output)
+
         # Gather phase for single-prompt mode
-        task_prompt_sp = (problem, flow_config.expected_output)
         if settings.GATHER_ENABLED:
             try:
                 from infinidev.gather import run_gather
@@ -331,7 +355,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
                 result = phase_eng.execute(
                     agent=agent,
                     task_prompt=task_prompt_sp,
-                    task_type="feature",
+                    task_type=task_type,
                     verbose=True,
                 )
                 engine = phase_eng  # for has_file_changes() check below
