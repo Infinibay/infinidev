@@ -274,6 +274,14 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
     Supports /explore and /brainstorm prefixes, otherwise runs as develop flow.
     """
     init_db()
+
+    # Index workspace before LLM starts so code intelligence is available
+    from infinidev.cli.initial_index import run_initial_index
+    run_initial_index(
+        project_id=1,
+        on_progress=lambda msg: click.echo(click.style(f"  {msg}", dim=True)),
+    )
+
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())
 
@@ -429,6 +437,13 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, thi
 
     # Classic mode (the original while True loop)
     init_db()
+
+    # Index workspace before LLM starts so code intelligence is available
+    from infinidev.cli.initial_index import run_initial_index
+    run_initial_index(
+        project_id=1,
+        on_progress=lambda msg: click.echo(click.style(f"  {msg}", dim=True)),
+    )
 
     # Start background file watcher + indexing queue
     from infinidev.cli.index_queue import IndexQueue

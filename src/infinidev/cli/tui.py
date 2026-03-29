@@ -1415,7 +1415,9 @@ class InfinidevTUI(App):
         self._expand_handlers: list[Callable] = []
         self._collapse_handlers: list[Callable] = []
         self._visible_paths: set[pathlib.Path] = set()
+        self._initial_index_done = False
         self._start_file_watcher()
+        self._run_initial_index()
 
     def _init_context_display(self) -> None:
         """Initialize context window display widget and fetch model info."""
@@ -1582,6 +1584,29 @@ class InfinidevTUI(App):
             self.query_one("#chat-input", ChatInput).focus()
 
     # ── File watcher integration ────────────────────────
+
+    def _run_initial_index(self):
+        """Index the workspace before the LLM starts so code intel is ready."""
+        def _index_worker() -> dict:
+            from infinidev.cli.initial_index import run_initial_index
+            return run_initial_index(project_id=getattr(self, '_project_id', 1) or 1)
+
+        def _on_index_done(worker) -> None:
+            self._initial_index_done = True
+            if worker.result:
+                stats = worker.result
+                files = stats.get("files_indexed", 0)
+                symbols = stats.get("symbols_total", 0)
+                elapsed = stats.get("elapsed_ms", 0)
+                if files > 0:
+                    self.add_message(
+                        "System",
+                        f"Index ready: {files} files, {symbols} symbols ({elapsed}ms)",
+                        "system",
+                    )
+
+        worker = self.run_worker(_index_worker, thread=True)
+        worker.on_complete = _on_index_done
 
     def _start_file_watcher(self):
         """Initialize and start the file watcher with background indexing."""

@@ -14,10 +14,13 @@ from infinidev.code_intel.parsers import detect_language, get_parser
 logger = logging.getLogger(__name__)
 
 SKIP_DIRS = {
-    ".git", "node_modules", "__pycache__", ".venv", "venv",
+    ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
     "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
     "target", "bin", "obj", ".dart_tool", "vendor",
     ".next", ".nuxt", "coverage", ".cache", ".infinidev",
+    ".eggs", ".ruff_cache", ".hypothesis", ".nox",
+    "site-packages", ".cargo", "bower_components",
+    "unsloth_compiled_cache",
 }
 
 SKIP_EXTENSIONS = {
@@ -140,8 +143,17 @@ def index_directory(
     dir_path = os.path.abspath(dir_path)
 
     for root, dirs, files in os.walk(dir_path):
-        # Skip ignored directories
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        # Skip ignored directories and nested git repos (not the root)
+        filtered = []
+        for d in dirs:
+            if d in SKIP_DIRS or d.startswith("."):
+                continue
+            # Skip subdirectories that are independent git repos
+            sub = os.path.join(root, d)
+            if sub != dir_path and os.path.isdir(os.path.join(sub, ".git")):
+                continue
+            filtered.append(d)
+        dirs[:] = filtered
 
         for fname in files:
             _, ext = os.path.splitext(fname)

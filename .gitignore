@@ -39,3 +39,13 @@ uv.lock
 
 # Claude code
 .claude/
+
+# Fine-tuning data (large repos + model weights)
+finetune/repos/
+finetune/output/checkpoints*/
+finetune/output/merged*/
+finetune/output/model*/
+finetune/output/finetune.db
+finetune/output/training_log*.txt
+finetune/__pycache__/
+unsloth_compiled_cache/
