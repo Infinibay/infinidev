@@ -44,7 +44,25 @@ CHAT_TOOLS = [SendMessageTool]
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
 CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool]
 
-def get_tools_for_role(role: str) -> list:
+# Curated subset for small models (<25B) — 15 tools with simple schemas
+SMALL_MODEL_TOOLS = [
+    # File I/O (6)
+    ReadFileTool, CreateFileTool, ReplaceLinesTool,
+    ListDirectoryTool, CodeSearchTool, GlobTool,
+    # Git (3)
+    GitCommitTool, GitDiffTool, GitStatusTool,
+    # Shell (1)
+    ExecuteCommandTool,
+    # Knowledge (2)
+    RecordFindingTool, SearchFindingsTool,
+    # Code intelligence (3)
+    SearchSymbolsTool, GetSymbolCodeTool, EditSymbolTool,
+]
+
+
+def get_tools_for_role(role: str, *, small_model: bool = False) -> list:
     """Simplified tool selection for the CLI."""
+    if small_model:
+        return [cls() for cls in SMALL_MODEL_TOOLS]
     tool_classes = FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS + DOCS_TOOLS + CODE_INTEL_TOOLS + META_TOOLS
     return [cls() for cls in tool_classes]

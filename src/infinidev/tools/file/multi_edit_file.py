@@ -27,7 +27,7 @@ class EditOperation(BaseModel):
 
 
 class MultiEditFileInput(BaseModel):
-    path: str = Field(..., description="Path to the file to edit")
+    file_path: str = Field(..., description="Path to the file to edit")
     edits: list[EditOperation] = Field(
         ...,
         description=(
@@ -54,7 +54,7 @@ class MultiEditFileTool(InfinibayBaseTool):
 
     def _run(
         self,
-        path: str,
+        file_path: str,
         edits: list[dict] | list[EditOperation],
         reason: str = "",
     ) -> str:
@@ -69,25 +69,25 @@ class MultiEditFileTool(InfinibayBaseTool):
         if not edit_list:
             return self._error("No edits provided.")
 
-        path = self._resolve_path(os.path.expanduser(path))
+        file_path = self._resolve_path(os.path.expanduser(file_path))
 
         # Sandbox check
-        sandbox_err = self._validate_sandbox_path(path)
+        sandbox_err = self._validate_sandbox_path(file_path)
         if sandbox_err:
             return self._error(sandbox_err)
 
         # Permission check
         from infinidev.tools.base.permissions import check_file_permission
-        perm_err = check_file_permission("edit_file", path)
+        perm_err = check_file_permission("edit_file", file_path)
         if perm_err:
             return self._error(perm_err)
 
-        if not os.path.exists(path):
-            return self._error(f"File not found: {path}")
-        if not os.path.isfile(path):
-            return self._error(f"Not a file: {path}")
+        if not os.path.exists(file_path):
+            return self._error(f"File not found: {file_path}")
+        if not os.path.isfile(file_path):
+            return self._error(f"Not a file: {file_path}")
 
-        file_size = os.path.getsize(path)
+        file_size = os.path.getsize(file_path)
         if file_size > settings.MAX_FILE_SIZE_BYTES:
             return self._error(
                 f"File too large: {file_size} bytes "
@@ -96,10 +96,10 @@ class MultiEditFileTool(InfinibayBaseTool):
 
         # Read existing content
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except PermissionError:
-            return self._error(f"Permission denied: {path}")
+            return self._error(f"Permission denied: {file_path}")
         except Exception as e:
             return self._error(f"Error reading file: {e}")
 
@@ -114,13 +114,13 @@ class MultiEditFileTool(InfinibayBaseTool):
             count = content.count(old_s)
             if count == 0:
                 return self._error(
-                    f"Edit {i}: old_string not found in {path}. "
+                    f"Edit {i}: old_string not found in {file_path}. "
                     "None of the edits were applied. "
                     "Ensure text matches exactly including indentation."
                 )
             if count > 1:
                 return self._error(
-                    f"Edit {i}: old_string appears {count} times in {path}. "
+                    f"Edit {i}: old_string appears {count} times in {file_path}. "
                     "Provide more surrounding context to make it unique. "
                     "None of the edits were applied."
                 )
@@ -164,20 +164,20 @@ class MultiEditFileTool(InfinibayBaseTool):
 
         # Atomic write
         try:
-            dir_name = os.path.dirname(path)
-            original_mode = os.stat(path).st_mode if os.path.exists(path) else None
+            dir_name = os.path.dirname(file_path)
+            original_mode = os.stat(file_path).st_mode if os.path.exists(file_path) else None
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".infinibay_")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write(new_content)
                 if original_mode is not None:
                     os.chmod(tmp_path, stat.S_IMODE(original_mode))
-                os.replace(tmp_path, path)
+                os.replace(tmp_path, file_path)
             except Exception:
                 os.unlink(tmp_path)
                 raise
         except PermissionError:
-            return self._error(f"Permission denied: {path}")
+            return self._error(f"Permission denied: {file_path}")
         except Exception as e:
             return self._error(f"Error writing file: {e}")
 
@@ -192,7 +192,7 @@ class MultiEditFileTool(InfinibayBaseTool):
                 """INSERT INTO artifact_changes
                    (project_id, agent_run_id, file_path, action, before_hash, after_hash, size_bytes)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (project_id, agent_run_id, path, "modified", before_hash, after_hash, new_size),
+                (project_id, agent_run_id, file_path, "modified", before_hash, after_hash, new_size),
             )
             conn.commit()
 
@@ -203,10 +203,10 @@ class MultiEditFileTool(InfinibayBaseTool):
 
         num_edits = len(edit_list)
         self._log_tool_usage(
-            f"Multi-edited {path} ({num_edits} edit{'s' if num_edits > 1 else ''}, {new_size} bytes)"
+            f"Multi-edited {file_path} ({num_edits} edit{'s' if num_edits > 1 else ''}, {new_size} bytes)"
         )
         result = {
-            "path": path,
+            "file_path": file_path,
             "action": "modified",
             "edits_applied": num_edits,
             "size_bytes": new_size,

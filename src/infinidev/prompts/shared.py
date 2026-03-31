@@ -1,37 +1,6 @@
 """Shared task prompts used across multiple roles."""
 
-GIT_WORKFLOW_INSTRUCTIONS = """
-## Git + Forgejo Workflow — MANDATORY RULES
-
-Remote `origin` points to Forgejo (e.g. http://localhost:3000/{owner}/{repo}.git).
-If not configured, report to the Team Lead — do NOT configure it yourself.
-NEVER change the remote URL.
-
-### CREATE BRANCH
-**git_branch**(branch_name=`task-{task_id}-<slug>`, create=true, base_branch="main")
-→ `git fetch origin main && git checkout -b task-{task_id}-<slug> origin/main`
-- Slug: lowercase, letters/digits/hyphens only. Example: `task-42-add-auth-endpoint`
-- Do NOT skip this step. Do NOT commit directly to main.
-
-### WRITE CODE
-**The editing tools work differently from what you may expect. Call help("edit") to learn the correct workflow.**
-- **edit_symbol** or **replace_lines** for existing files, **create_file** for new files only.
-- **add_content_after_line** / **add_content_before_line** to insert new lines.
-- create_file fails if the file already exists — use replace_lines or edit_symbol to modify.
-
-### COMMIT
-**git_commit**(message="<imperative verb> <what changed> — task {task_id}")
-→ `git add -A && git commit -m "..."`
-Example: "Add JWT validation middleware — task 42"
-- Run all tests BEFORE committing. Do NOT commit if any test fails.
-
-### PUSH
-**git_push**(branch="<branch name>", force=false) → `git push -u origin <branch>`
-- If rejected ("remote has new commits"): run `git pull origin main --rebase`, then retry.
-- Do NOT use force=true unless the Team Lead explicitly instructs it.
-
-
-"""
+GIT_WORKFLOW_INSTRUCTIONS = ""  # Deprecated — kept for import compatibility
 
 
 def brainstorm_round(

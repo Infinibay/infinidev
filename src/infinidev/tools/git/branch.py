@@ -51,9 +51,8 @@ class GitBranchTool(InfinibayBaseTool):
                 )
                 if check.returncode != 0:
                     return self._error(
-                        "No remote 'origin' configured. The repository has no "
-                        "connection to Forgejo. Report this issue to the Team Lead "
-                        "— do NOT attempt to configure it yourself."
+                        "No remote 'origin' configured. Cannot fetch from remote. "
+                        "Will use local branch as base instead."
                     )
                 # Fetch latest; fall back to local ref if fetch fails
                 fetch = subprocess.run(

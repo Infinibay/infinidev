@@ -167,12 +167,20 @@ def _parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
 class TreeEngine(AgentEngine):
     """Tree-based engine with two modes: explore (analytical) and brainstorm (creative)."""
 
+    # Thoroughness presets: (max_depth, max_children)
+    _THOROUGHNESS = {
+        "quick": (2, 2),
+        "medium": (3, 3),
+        "thorough": (4, 4),
+    }
+
     def execute(
         self,
         agent: Any,
         task_prompt: tuple[str, str],
         *,
         mode: str = "explore",
+        thoroughness: str | None = None,
         verbose: bool = True,
         guardrail: Any | None = None,
         guardrail_max_retries: int = 5,
@@ -185,7 +193,19 @@ class TreeEngine(AgentEngine):
 
         Args:
             mode: "explore" for analytical decomposition, "brainstorm" for creative ideation.
+            thoroughness: "quick" (depth 2), "medium" (depth 3), or "thorough" (depth 4).
+                Defaults to settings if not specified.
         """
+        # Apply thoroughness overrides
+        if thoroughness and thoroughness in self._THOROUGHNESS:
+            depth, children = self._THOROUGHNESS[thoroughness]
+            from infinidev.config.settings import settings
+            self._depth_override = depth
+            self._children_override = children
+        else:
+            self._depth_override = None
+            self._children_override = None
+
         if mode == "brainstorm":
             return self._execute_brainstorm(
                 agent, task_prompt, task_tools=task_tools,
@@ -600,7 +620,7 @@ class TreeEngine(AgentEngine):
         )
         max_depth = (
             settings.TREE_BRAINSTORM_MAX_DEPTH if brainstorm
-            else settings.TREE_MAX_DEPTH
+            else (getattr(self, '_depth_override', None) or settings.TREE_MAX_DEPTH)
         )
 
         while True:
@@ -1164,9 +1184,11 @@ class TreeEngine(AgentEngine):
         for sp_data in args.get("new_sub_problems", []):
             if tree.count_nodes() >= settings.TREE_MAX_NODES:
                 break
-            if node.depth >= settings.TREE_MAX_DEPTH - 1:
+            _eff_depth = getattr(self, '_depth_override', None) or settings.TREE_MAX_DEPTH
+            if node.depth >= _eff_depth - 1:
                 break
-            if len(node.children) >= settings.TREE_MAX_CHILDREN:
+            _eff_children = getattr(self, '_children_override', None) or settings.TREE_MAX_CHILDREN
+            if len(node.children) >= _eff_children:
                 break
 
             child = node.add_child(

@@ -14,7 +14,7 @@ class TestPartialRead:
         """Reads the specified line range."""
         tool = bound_tool(PartialReadTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"), start_line=2, end_line=4,
+            file_path=str(workspace_dir / "sample.txt"), start_line=2, end_line=4,
         )
         assert "line two" in result
         assert "line three" in result
@@ -26,7 +26,7 @@ class TestPartialRead:
         """Reads a single line."""
         tool = bound_tool(PartialReadTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"), start_line=3, end_line=3,
+            file_path=str(workspace_dir / "sample.txt"), start_line=3, end_line=3,
         )
         assert "line three" in result
         assert "line two" not in result
@@ -36,7 +36,7 @@ class TestPartialRead:
         """Reads the first line only."""
         tool = bound_tool(PartialReadTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"), start_line=1, end_line=1,
+            file_path=str(workspace_dir / "sample.txt"), start_line=1, end_line=1,
         )
         assert "line one" in result
         assert "line two" not in result
@@ -45,7 +45,7 @@ class TestPartialRead:
         """Rejects start_line < 1."""
         tool = bound_tool(PartialReadTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"), start_line=0, end_line=3,
+            file_path=str(workspace_dir / "sample.txt"), start_line=0, end_line=3,
         )
         data = json.loads(result)
         assert "error" in data
@@ -54,7 +54,7 @@ class TestPartialRead:
         """Rejects end_line < start_line."""
         tool = bound_tool(PartialReadTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"), start_line=3, end_line=1,
+            file_path=str(workspace_dir / "sample.txt"), start_line=3, end_line=1,
         )
         data = json.loads(result)
         assert "error" in data
@@ -62,6 +62,6 @@ class TestPartialRead:
     def test_file_not_found(self, bound_tool):
         """Returns error for missing file."""
         tool = bound_tool(PartialReadTool)
-        result = tool._run(path="/nonexistent.txt", start_line=1, end_line=1)
+        result = tool._run(file_path="/nonexistent.txt", start_line=1, end_line=1)
         data = json.loads(result)
         assert "error" in data

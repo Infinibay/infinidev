@@ -12,7 +12,7 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 
 
 class ListDirectoryInput(BaseModel):
-    path: str = Field(default=".", description="Directory path to list")
+    file_path: str = Field(default=".", description="Directory file_path to list")
     recursive: bool = Field(default=False, description="Whether to list recursively")
     pattern: str | None = Field(
         default=None, description="Glob pattern to filter files (e.g. '*.py')"
@@ -25,26 +25,26 @@ class ListDirectoryTool(InfinibayBaseTool):
     args_schema: Type[BaseModel] = ListDirectoryInput
 
     def _run(
-        self, path: str = ".", recursive: bool = False, pattern: str | None = None
+        self, file_path: str = ".", recursive: bool = False, pattern: str | None = None
     ) -> str:
         # Normalise — LLMs sometimes pass "None" as a string instead of null
         if pattern is not None and pattern.lower() in ("none", "null", ""):
             pattern = None
 
-        path = self._resolve_path(os.path.expanduser(path))
+        file_path = self._resolve_path(os.path.expanduser(file_path))
 
         if self._is_pod_mode():
-            return self._run_in_pod(path, recursive, pattern)
+            return self._run_in_pod(file_path, recursive, pattern)
 
         # Sandbox check (resolves symlinks, enforces directory boundaries)
-        sandbox_err = self._validate_sandbox_path(path)
+        sandbox_err = self._validate_sandbox_path(file_path)
         if sandbox_err:
             return self._error(sandbox_err)
 
-        if not os.path.exists(path):
-            return self._error(f"Directory not found: {path}")
-        if not os.path.isdir(path):
-            return self._error(f"Not a directory: {path}")
+        if not os.path.exists(file_path):
+            return self._error(f"Directory not found: {file_path}")
+        if not os.path.isdir(file_path):
+            return self._error(f"Not a directory: {file_path}")
 
         entries = []
         count = 0
@@ -55,7 +55,7 @@ class ListDirectoryTool(InfinibayBaseTool):
 
         try:
             if recursive:
-                for root, dirs, files in os.walk(path):
+                for root, dirs, files in os.walk(file_path):
                     # Prune hidden/skip dirs
                     dirs[:] = [
                         d for d in dirs
@@ -65,62 +65,62 @@ class ListDirectoryTool(InfinibayBaseTool):
                         if count >= max_entries:
                             break
                         full = os.path.join(root, name)
-                        rel = os.path.relpath(full, path)
+                        rel = os.path.relpath(full, file_path)
                         if pattern and not fnmatch.fnmatch(name, pattern):
                             continue
                         try:
                             stat = os.stat(full)
                             entries.append({
-                                "path": rel,
+                                "file_path": rel,
                                 "size": stat.st_size,
                                 "mtime": stat.st_mtime,
                                 "type": "file",
                             })
                         except OSError:
-                            entries.append({"path": rel, "type": "file"})
+                            entries.append({"file_path": rel, "type": "file"})
                         count += 1
                     if count >= max_entries:
                         break
             else:
-                for name in sorted(os.listdir(path)):
+                for name in sorted(os.listdir(file_path)):
                     if count >= max_entries:
                         break
                     if name in skip_dirs or name.startswith("."):
                         continue
-                    full = os.path.join(path, name)
+                    full = os.path.join(file_path, name)
                     if pattern and not fnmatch.fnmatch(name, pattern):
                         continue
                     is_dir = os.path.isdir(full)
                     try:
                         stat = os.stat(full)
                         entries.append({
-                            "path": name,
+                            "file_path": name,
                             "size": stat.st_size if not is_dir else None,
                             "mtime": stat.st_mtime,
                             "type": "directory" if is_dir else "file",
                         })
                     except OSError:
                         entries.append({
-                            "path": name,
+                            "file_path": name,
                             "type": "directory" if is_dir else "file",
                         })
                     count += 1
         except PermissionError:
-            return self._error(f"Permission denied: {path}")
+            return self._error(f"Permission denied: {file_path}")
 
         truncated = count >= max_entries
         return self._success({
-            "path": path,
+            "file_path": file_path,
             "entries": entries,
             "total": len(entries),
             "truncated": truncated,
         })
 
     def _run_in_pod(
-        self, path: str, recursive: bool, pattern: str | None,
+        self, file_path: str, recursive: bool, pattern: str | None,
     ) -> str:
         """List directory via infinibay-file-helper inside the pod."""
-        req = {"op": "list", "path": path, "recursive": recursive}
+        req = {"op": "list", "file_path": file_path, "recursive": recursive}
         if pattern:
             req["pattern"] = pattern
 
@@ -145,7 +145,7 @@ class ListDirectoryTool(InfinibayBaseTool):
 
         data = resp["data"]
         return self._success({
-            "path": path,
+            "file_path": file_path,
             "entries": data["entries"],
             "total": data["count"],
             "truncated": data["truncated"],

@@ -38,9 +38,8 @@ class GitPushTool(InfinibayBaseTool):
             )
             if check.returncode != 0:
                 return self._error(
-                    "No remote 'origin' configured. The repository has no "
-                    "connection to Forgejo. Report this issue to the Team Lead "
-                    "— do NOT attempt to configure it yourself."
+                    "No remote 'origin' configured. Cannot push without a "
+                    "remote. Ask the user to configure one."
                 )
 
             # Get current branch if not specified

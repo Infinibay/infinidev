@@ -43,11 +43,13 @@ Evaluate each change against these categories:
 - Unnecessary memory allocation or data copying?
 - Redundant I/O operations?
 
-### 4. Maintainability
-- Clear, descriptive naming?
-- Appropriate complexity (not over-engineered)?
-- No dead code or duplicated logic?
-- Consistent style with the existing codebase?
+### 4. Simplicity & Maintainability
+- Unnecessary abstractions or helpers for one-time operations?
+- Over-engineered solutions (feature flags, config for hardcoded values)?
+- Redundant state tracking or copy-paste code that should be a loop?
+- Error handling for impossible cases (internal guarantees)?
+- Dead code, unused imports, backward-compat shims?
+- Clear naming, consistent style with existing codebase?
 
 ### 5. Tests
 - New/modified functions have at least one test

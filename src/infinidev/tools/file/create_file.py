@@ -14,7 +14,7 @@ from infinidev.tools.base.db import execute_with_retry
 
 
 class CreateFileInput(BaseModel):
-    path: str = Field(..., description="Path for the new file")
+    file_path: str = Field(..., description="Path for the new file")
     content: str = Field(..., description="Content to write")
 
 
@@ -23,27 +23,27 @@ class CreateFileTool(InfinibayBaseTool):
     description: str = "Create a new file. Fails if the file already exists."
     args_schema: Type[BaseModel] = CreateFileInput
 
-    def _run(self, path: str, content: str) -> str:
-        path = self._resolve_path(os.path.expanduser(path))
+    def _run(self, file_path: str, content: str) -> str:
+        file_path = self._resolve_path(os.path.expanduser(file_path))
 
         if self._is_pod_mode():
-            return self._run_in_pod(path, content)
+            return self._run_in_pod(file_path, content)
 
         # Sandbox check
-        sandbox_err = self._validate_sandbox_path(path)
+        sandbox_err = self._validate_sandbox_path(file_path)
         if sandbox_err:
             return self._error(sandbox_err)
 
         # Permission check
         from infinidev.tools.base.permissions import check_file_permission
-        perm_err = check_file_permission("create_file", path)
+        perm_err = check_file_permission("create_file", file_path)
         if perm_err:
             return self._error(perm_err)
 
         # Fail if file already exists
-        if os.path.exists(path):
+        if os.path.exists(file_path):
             return self._error(
-                f"File already exists: {path}. "
+                f"File already exists: {file_path}. "
                 "Use replace_lines or edit_symbol to modify existing files."
             )
 
@@ -56,31 +56,31 @@ class CreateFileTool(InfinibayBaseTool):
             )
 
         # Create parent directories
-        parent = os.path.dirname(path)
+        parent = os.path.dirname(file_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
 
         # Atomic write: write to temp file then rename
         try:
-            dir_name = os.path.dirname(path)
+            dir_name = os.path.dirname(file_path)
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".infinibay_")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write(content)
-                os.replace(tmp_path, path)
+                os.replace(tmp_path, file_path)
             except Exception:
                 os.unlink(tmp_path)
                 raise
         except PermissionError:
-            return self._error(f"Permission denied: {path}")
+            return self._error(f"Permission denied: {file_path}")
         except Exception as e:
             return self._error(f"Error creating file: {e}")
 
         # Compute hash and size
         try:
-            with open(path, "rb") as f:
+            with open(file_path, "rb") as f:
                 after_hash = hashlib.sha256(f.read()).hexdigest()[:16]
-            size_bytes = os.path.getsize(path)
+            size_bytes = os.path.getsize(file_path)
         except Exception:
             after_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
             size_bytes = content_size
@@ -94,7 +94,7 @@ class CreateFileTool(InfinibayBaseTool):
                 """INSERT INTO artifact_changes
                    (project_id, agent_run_id, file_path, action, before_hash, after_hash, size_bytes)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (project_id, agent_run_id, path, "created", None, after_hash, size_bytes),
+                (project_id, agent_run_id, file_path, "created", None, after_hash, size_bytes),
             )
             conn.commit()
 
@@ -103,17 +103,17 @@ class CreateFileTool(InfinibayBaseTool):
         except Exception:
             pass
 
-        self._log_tool_usage(f"Created {path} ({size_bytes} bytes)")
+        self._log_tool_usage(f"Created {file_path} ({size_bytes} bytes)")
         return self._success({
-            "path": path,
+            "file_path": file_path,
             "action": "created",
             "size_bytes": size_bytes,
         })
 
-    def _run_in_pod(self, path: str, content: str) -> str:
+    def _run_in_pod(self, file_path: str, content: str) -> str:
         """Create file via infinibay-file-helper inside the pod."""
         import json
-        req = {"op": "write", "path": path, "content": content, "mode": "x"}
+        req = {"op": "write", "file_path": file_path, "content": content, "mode": "x"}
 
         try:
             result = self._exec_in_pod(
@@ -144,7 +144,7 @@ class CreateFileTool(InfinibayBaseTool):
                 """INSERT INTO artifact_changes
                    (project_id, agent_run_id, file_path, action, before_hash, after_hash, size_bytes)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (project_id, agent_run_id, path, "created",
+                (project_id, agent_run_id, file_path, "created",
                  None, data["after_hash"], data["size_bytes"]),
             )
             conn.commit()
@@ -154,9 +154,9 @@ class CreateFileTool(InfinibayBaseTool):
         except Exception:
             pass
 
-        self._log_tool_usage(f"Created {path} (pod, {data['size_bytes']} bytes)")
+        self._log_tool_usage(f"Created {file_path} (pod, {data['size_bytes']} bytes)")
         return self._success({
-            "path": path,
+            "file_path": file_path,
             "action": "created",
             "size_bytes": data["size_bytes"],
         })

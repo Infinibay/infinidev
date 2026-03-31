@@ -60,7 +60,8 @@ class TestFlowRegistry:
         config = get_flow_config("develop")
         assert "software engineer" in config.identity_prompt.lower()
         assert "read before writing" in config.identity_prompt.lower() or \
-               "read the relevant code" in config.identity_prompt.lower()
+               "read the relevant code" in config.identity_prompt.lower() or \
+               "read the specific files" in config.identity_prompt.lower()
 
 
 class TestAnalysisResultFlow:

@@ -176,8 +176,8 @@ PARAMS:
 RETURNS: Numbered lines in format "  LINE_NUM\\tCONTENT"
 
 EXAMPLES:
-  read_file(path="src/auth.py")
-  read_file(path="tests/test_auth.py")
+  read_file(file_path="src/auth.py")
+  read_file(file_path="tests/test_auth.py")
 
 TIPS:
   - For large files, use partial_read instead to read only what you need
@@ -195,8 +195,8 @@ PARAMS:
   end_line (int, required)   — Last line to read (1-based, inclusive)
 
 EXAMPLES:
-  partial_read(path="src/auth.py", start_line=10, end_line=30)
-  partial_read(path="src/main.py", start_line=1, end_line=5)  # just the imports""",
+  partial_read(file_path="src/auth.py", start_line=10, end_line=30)
+  partial_read(file_path="src/main.py", start_line=1, end_line=5)  # just the imports""",
 
     "create_file": """\
 create_file(path, content)
@@ -208,8 +208,8 @@ PARAMS:
   content (str, required) — Content to write
 
 EXAMPLES:
-  create_file(path="src/utils/helpers.py", content="def greet(name):\\n    return f'Hello, {name}!'\\n")
-  create_file(path="tests/test_helpers.py", content="import pytest\\n...")
+  create_file(file_path="src/utils/helpers.py", content="def greet(name):\\n    return f'Hello, {name}!'\\n")
+  create_file(file_path="tests/test_helpers.py", content="import pytest\\n...")
 
 NOTE: To modify existing files, use replace_lines or edit_symbol instead.""",
 
@@ -240,7 +240,7 @@ EXAMPLES:
   replace_lines(file_path="src/main.py", content="import os\\n", start_line=6, end_line=5)
 
 WORKFLOW:
-  1. read_file(path="src/foo.py")   → see numbered lines
+  1. read_file(file_path="src/foo.py")   → see numbered lines
   2. replace_lines(file_path="src/foo.py", content="new code\\n", start_line=10, end_line=20)""",
 
     "edit_symbol": """\

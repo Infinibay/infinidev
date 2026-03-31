@@ -10,7 +10,7 @@ from infinidev.tools.file.read_file import ReadFileTool
 
 
 class PartialReadInput(BaseModel):
-    path: str = Field(..., description="Path to the file to read")
+    file_path: str = Field(..., description="Path to the file to read")
     start_line: int = Field(..., description="First line to read (1-based, inclusive)")
     end_line: int = Field(..., description="Last line to read (1-based, inclusive)")
 
@@ -20,7 +20,7 @@ class PartialReadTool(InfinibayBaseTool):
     description: str = "Read a specific range of lines from a file."
     args_schema: Type[BaseModel] = PartialReadInput
 
-    def _run(self, path: str, start_line: int, end_line: int) -> str:
+    def _run(self, file_path: str, start_line: int, end_line: int) -> str:
         if start_line < 1:
             return self._error(f"start_line must be >= 1, got {start_line}")
         if end_line < start_line:
@@ -33,4 +33,4 @@ class PartialReadTool(InfinibayBaseTool):
         self._bind_delegate(reader)
         offset = start_line
         limit = end_line - start_line + 1
-        return reader._run(path=path, offset=offset, limit=limit)
+        return reader._run(file_path=file_path, offset=offset, limit=limit)

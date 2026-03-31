@@ -306,7 +306,7 @@ class TestReadFileAliases:
         from infinidev.tools.file.read_file import ReadFileTool
         tool = bound_tool(ReadFileTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"),
+            file_path=str(workspace_dir / "sample.txt"),
             start_line=2,
             end_line=3,
         )
@@ -320,7 +320,7 @@ class TestReadFileAliases:
         from infinidev.tools.file.read_file import ReadFileTool
         tool = bound_tool(ReadFileTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"),
+            file_path=str(workspace_dir / "sample.txt"),
             start_line=4,
         )
         assert "line four" in result
@@ -331,7 +331,7 @@ class TestReadFileAliases:
         """line_range='2-3' should read lines 2 and 3."""
         from infinidev.tools.file.read_file import ReadFileTool
         tool = bound_tool(ReadFileTool)
-        result = tool._run(path=str(workspace_dir / "sample.txt"), line_range="2-3")
+        result = tool._run(file_path=str(workspace_dir / "sample.txt"), line_range="2-3")
         assert "line two" in result
         assert "line three" in result
         assert "line one" not in result
@@ -340,7 +340,7 @@ class TestReadFileAliases:
         """line_range='4:5' should read lines 4 and 5."""
         from infinidev.tools.file.read_file import ReadFileTool
         tool = bound_tool(ReadFileTool)
-        result = tool._run(path=str(workspace_dir / "sample.txt"), line_range="4:5")
+        result = tool._run(file_path=str(workspace_dir / "sample.txt"), line_range="4:5")
         assert "line four" in result
         assert "line five" in result
 
@@ -349,7 +349,7 @@ class TestReadFileAliases:
         from infinidev.tools.file.read_file import ReadFileTool
         tool = bound_tool(ReadFileTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"),
+            file_path=str(workspace_dir / "sample.txt"),
             offset=1,
             limit=1,
             start_line=5,  # Should be ignored since offset is provided

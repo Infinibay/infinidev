@@ -16,7 +16,7 @@ class TestMultiEdit:
         tool = bound_tool(MultiEditFileTool)
         fpath = str(workspace_dir / "sample.txt")
         result = tool._run(
-            path=fpath,
+            file_path=fpath,
             edits=[
                 {"old_string": "line one", "new_string": "LINE ONE"},
                 {"old_string": "line five", "new_string": "LINE FIVE"},
@@ -37,7 +37,7 @@ class TestMultiEdit:
         original = open(fpath).read()
 
         result = tool._run(
-            path=fpath,
+            file_path=fpath,
             edits=[
                 {"old_string": "line one", "new_string": "CHANGED"},
                 {"old_string": "NONEXISTENT", "new_string": "WHATEVER"},
@@ -57,7 +57,7 @@ class TestMultiEdit:
             f.write("hello world\nhello world\n")
 
         result = tool._run(
-            path=fpath,
+            file_path=fpath,
             edits=[{"old_string": "hello world", "new_string": "goodbye"}],
         )
         data = json.loads(result)
@@ -72,7 +72,7 @@ class TestMultiEdit:
             f.write("abcdefgh\n")
 
         result = tool._run(
-            path=fpath,
+            file_path=fpath,
             edits=[
                 {"old_string": "abcdef", "new_string": "ABCDEF"},
                 {"old_string": "defgh", "new_string": "DEFGH"},
@@ -86,7 +86,7 @@ class TestMultiEdit:
         """Empty edits list returns error."""
         tool = bound_tool(MultiEditFileTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"),
+            file_path=str(workspace_dir / "sample.txt"),
             edits=[],
         )
         data = json.loads(result)
@@ -96,7 +96,7 @@ class TestMultiEdit:
         """old_string == new_string is rejected."""
         tool = bound_tool(MultiEditFileTool)
         result = tool._run(
-            path=str(workspace_dir / "sample.txt"),
+            file_path=str(workspace_dir / "sample.txt"),
             edits=[{"old_string": "line one", "new_string": "line one"}],
         )
         data = json.loads(result)
@@ -107,7 +107,7 @@ class TestMultiEdit:
         """Returns error for nonexistent file."""
         tool = bound_tool(MultiEditFileTool)
         result = tool._run(
-            path="/nonexistent/file.txt",
+            file_path="/nonexistent/file.txt",
             edits=[{"old_string": "a", "new_string": "b"}],
         )
         data = json.loads(result)
@@ -121,7 +121,7 @@ class TestMultiEdit:
             f.write("aaa\nbbb\nccc\n")
 
         result = tool._run(
-            path=fpath,
+            file_path=fpath,
             edits=[
                 {"old_string": "aaa", "new_string": "bbb"},  # Now file has "bbb\nbbb\n..."
                 {"old_string": "ccc", "new_string": "ddd"},

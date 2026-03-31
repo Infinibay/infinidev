@@ -15,7 +15,7 @@ class CodeSearchInput(BaseModel):
     pattern: str = Field(
         ..., description="Search pattern (text or regex) to find in source files"
     )
-    path: str = Field(
+    file_path: str = Field(
         default=".", description="Directory to search in (default: current directory)"
     )
     file_extensions: list[str] | None = Field(
@@ -41,27 +41,27 @@ class CodeSearchTool(InfinibayBaseTool):
     def _run(
         self,
         pattern: str = "",
-        path: str = ".",
+        file_path: str = ".",
         file_extensions: list[str] | None = None,
         case_sensitive: bool = True,
         max_results: int = 50,
         context_lines: int = 0,
     ) -> str:
-        path = self._resolve_path(os.path.expanduser(path))
+        file_path = self._resolve_path(os.path.expanduser(file_path))
 
         if self._is_pod_mode():
             return self._run_in_pod(
-                pattern, path, file_extensions, case_sensitive,
+                pattern, file_path, file_extensions, case_sensitive,
                 max_results, context_lines,
             )
 
         # Sandbox check (resolves symlinks, enforces directory boundaries)
-        sandbox_err = self._validate_sandbox_path(path)
+        sandbox_err = self._validate_sandbox_path(file_path)
         if sandbox_err:
             return self._error(sandbox_err)
 
-        if not os.path.isdir(path):
-            return self._error(f"Directory not found: {path}")
+        if not os.path.isdir(file_path):
+            return self._error(f"Directory not found: {file_path}")
 
         cmd = ["grep", "-rn", "-E"]
 
@@ -80,7 +80,7 @@ class CodeSearchTool(InfinibayBaseTool):
         for exclude_dir in [".git", "node_modules", "__pycache__", ".venv", "venv"]:
             cmd.extend(["--exclude-dir", exclude_dir])
 
-        cmd.extend(["--", pattern, path])
+        cmd.extend(["--", pattern, file_path])
 
         try:
             result = subprocess.run(
@@ -95,7 +95,7 @@ class CodeSearchTool(InfinibayBaseTool):
         if result.returncode == 1:
             return json.dumps({
                 "pattern": pattern,
-                "path": path,
+                "file_path": file_path,
                 "match_count": 0,
                 "truncated": False,
                 "matches": [],
@@ -145,12 +145,12 @@ class CodeSearchTool(InfinibayBaseTool):
         )
 
         self._log_tool_usage(
-            f"Searched '{pattern}' in {path} — {len(matches)} matches"
+            f"Searched '{pattern}' in {file_path} — {len(matches)} matches"
         )
 
         return json.dumps({
             "pattern": pattern,
-            "path": path,
+            "file_path": file_path,
             "match_count": len(matches),
             "truncated": truncated,
             "matches": matches,
@@ -159,7 +159,7 @@ class CodeSearchTool(InfinibayBaseTool):
     def _run_in_pod(
         self,
         pattern: str,
-        path: str,
+        file_path: str,
         file_extensions: list[str] | None,
         case_sensitive: bool,
         max_results: int,
@@ -169,7 +169,7 @@ class CodeSearchTool(InfinibayBaseTool):
         req = {
             "op": "search",
             "pattern": pattern,
-            "path": path,
+            "file_path": file_path,
             "case_sensitive": case_sensitive,
             "max_results": max_results,
             "context_lines": context_lines,
@@ -199,11 +199,11 @@ class CodeSearchTool(InfinibayBaseTool):
 
         data = resp["data"]
         self._log_tool_usage(
-            f"Searched '{pattern}' in {path} (pod) — {data['match_count']} matches"
+            f"Searched '{pattern}' in {file_path} (pod) — {data['match_count']} matches"
         )
         return json.dumps({
             "pattern": pattern,
-            "path": path,
+            "file_path": file_path,
             "match_count": data["match_count"],
             "truncated": False,
             "matches": data["matches"],

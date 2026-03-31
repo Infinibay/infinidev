@@ -18,7 +18,7 @@ from infinidev.tools.base.db import execute_with_retry
 class WriteFileInput(BaseModel):
     model_config = {"populate_by_name": True}
 
-    path: str = Field(..., description="Path to the file to write")
+    file_path: str = Field(..., description="Path to the file to write")
     content: str = Field(..., description="Content to write to the file")
     mode: Literal["w", "a"] = Field(
         default="w", description="Write mode: 'w' to overwrite, 'a' to append"
@@ -41,26 +41,26 @@ class WriteFileTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = WriteFileInput
 
-    def _run(self, path: str, content: str, mode: str = "w", reason: str = "") -> str:
-        path = self._resolve_path(os.path.expanduser(path))
+    def _run(self, file_path: str, content: str, mode: str = "w", reason: str = "") -> str:
+        file_path = self._resolve_path(os.path.expanduser(file_path))
 
         if self._is_pod_mode():
-            return self._run_in_pod(path, content, mode)
+            return self._run_in_pod(file_path, content, mode)
 
         # Sandbox check (resolves symlinks, enforces directory boundaries)
-        sandbox_err = self._validate_sandbox_path(path)
+        sandbox_err = self._validate_sandbox_path(file_path)
         if sandbox_err:
             return self._error(sandbox_err)
 
         # Permission check
         from infinidev.tools.base.permissions import check_file_permission
-        perm_err = check_file_permission("write_file", path)
+        perm_err = check_file_permission("write_file", file_path)
         if perm_err:
             return self._error(perm_err)
 
         # Check content size before writing
         content_size = len(content.encode("utf-8"))
-        existing_size = os.path.getsize(path) if os.path.exists(path) else 0
+        existing_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
         total_size = (existing_size + content_size) if mode == "a" else content_size
         if total_size > settings.MAX_FILE_SIZE_BYTES:
             return self._error(
@@ -70,46 +70,46 @@ class WriteFileTool(InfinibayBaseTool):
 
         # Compute before-hash if file exists
         before_hash = None
-        if os.path.exists(path):
+        if os.path.exists(file_path):
             try:
-                with open(path, "rb") as f:
+                with open(file_path, "rb") as f:
                     before_hash = hashlib.sha256(f.read()).hexdigest()[:16]
             except Exception:
                 pass
 
         # Create parent directories
-        parent = os.path.dirname(path)
+        parent = os.path.dirname(file_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
 
         # Atomic write: write to temp file then rename
         try:
-            dir_name = os.path.dirname(path)
+            dir_name = os.path.dirname(file_path)
             if mode == "w":
-                original_mode = os.stat(path).st_mode if os.path.exists(path) else None
+                original_mode = os.stat(file_path).st_mode if os.path.exists(file_path) else None
                 fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".infinibay_")
                 try:
                     with os.fdopen(fd, "w", encoding="utf-8") as f:
                         f.write(content)
                     if original_mode is not None:
                         os.chmod(tmp_path, stat.S_IMODE(original_mode))
-                    os.replace(tmp_path, path)
+                    os.replace(tmp_path, file_path)
                 except Exception:
                     os.unlink(tmp_path)
                     raise
             else:
-                with open(path, "a", encoding="utf-8") as f:
+                with open(file_path, "a", encoding="utf-8") as f:
                     f.write(content)
         except PermissionError:
-            return self._error(f"Permission denied: {path}")
+            return self._error(f"Permission denied: {file_path}")
         except Exception as e:
             return self._error(f"Error writing file: {e}")
 
         # Compute after-hash from the actual file content
         try:
-            with open(path, "rb") as f:
+            with open(file_path, "rb") as f:
                 after_hash = hashlib.sha256(f.read()).hexdigest()[:16]
-            size_bytes = os.path.getsize(path)
+            size_bytes = os.path.getsize(file_path)
         except Exception:
             after_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
             size_bytes = len(content.encode("utf-8"))
@@ -124,7 +124,7 @@ class WriteFileTool(InfinibayBaseTool):
                 """INSERT INTO artifact_changes
                    (project_id, agent_run_id, file_path, action, before_hash, after_hash, size_bytes)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (project_id, agent_run_id, path, action, before_hash, after_hash, size_bytes),
+                (project_id, agent_run_id, file_path, action, before_hash, after_hash, size_bytes),
             )
             conn.commit()
 
@@ -133,9 +133,9 @@ class WriteFileTool(InfinibayBaseTool):
         except Exception:
             pass  # Don't fail the write if audit logging fails
 
-        self._log_tool_usage(f"Wrote {path} ({size_bytes} bytes, {action})")
+        self._log_tool_usage(f"Wrote {file_path} ({size_bytes} bytes, {action})")
         result = {
-            "path": path,
+            "file_path": file_path,
             "action": action,
             "size_bytes": size_bytes,
         }
@@ -143,9 +143,9 @@ class WriteFileTool(InfinibayBaseTool):
             result["reason"] = reason
         return self._success(result)
 
-    def _run_in_pod(self, path: str, content: str, mode: str) -> str:
+    def _run_in_pod(self, file_path: str, content: str, mode: str) -> str:
         """Write file via infinibay-file-helper inside the pod."""
-        req = {"op": "write", "path": path, "content": content, "mode": mode}
+        req = {"op": "write", "file_path": file_path, "content": content, "mode": mode}
 
         try:
             result = self._exec_in_pod(
@@ -177,7 +177,7 @@ class WriteFileTool(InfinibayBaseTool):
                 """INSERT INTO artifact_changes
                    (project_id, agent_run_id, file_path, action, before_hash, after_hash, size_bytes)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (project_id, agent_run_id, path, data["action"],
+                (project_id, agent_run_id, file_path, data["action"],
                  data.get("before_hash"), data["after_hash"], data["size_bytes"]),
             )
             conn.commit()
@@ -187,9 +187,9 @@ class WriteFileTool(InfinibayBaseTool):
         except Exception:
             pass
 
-        self._log_tool_usage(f"Wrote {path} (pod, {data['size_bytes']} bytes, {data['action']})")
+        self._log_tool_usage(f"Wrote {file_path} (pod, {data['size_bytes']} bytes, {data['action']})")
         return self._success({
-            "path": path,
+            "file_path": file_path,
             "action": data["action"],
             "size_bytes": data["size_bytes"],
         })

@@ -87,9 +87,17 @@ def parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
 
     # Strip thinking sections (various model formats)
     cleaned = re.sub(
-        r"<(?:thinking|think|\|thinking\|)>.*?</(?:thinking|think|\|thinking\|)>",
+        r"<(?:thinking|think|thoughts|\|thinking\|)>.*?</(?:thinking|think|thoughts|\|thinking\|)>",
         "",
         content,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    # Strip hallucinated tool outputs — small models often generate fake results
+    cleaned = re.sub(
+        r"<(?:tool[_-]?output|tool[_-]?result|tool[_-]?response|observation)>.*?</(?:tool[_-]?output|tool[_-]?result|tool[_-]?response|observation)>",
+        "",
+        cleaned,
         flags=re.DOTALL | re.IGNORECASE,
     )
 
@@ -143,6 +151,32 @@ def parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
     )
     if fc_matches:
         calls = _extract_calls_from_fragments(fc_matches)
+        if calls:
+            return calls
+
+    # <tool>{...}</tool> or <tools>{...}</tools> (fine-tuned / small models)
+    tool_tag_matches = re.findall(
+        r"<tools?>\s*(.*?)\s*</tools?>",
+        cleaned, re.DOTALL | re.IGNORECASE,
+    )
+    if tool_tag_matches:
+        calls = _extract_calls_from_fragments(tool_tag_matches)
+        if calls:
+            return calls
+
+    # <function=tool_name>{"arg": "val"}</function> (attribute-style)
+    attr_matches = re.findall(
+        r"<function=([a-z_]\w*)>\s*(.*?)\s*</function>",
+        cleaned, re.DOTALL | re.IGNORECASE,
+    )
+    if attr_matches:
+        calls = []
+        for name, args_str in attr_matches:
+            try:
+                args = safe_json_loads(args_str)
+                calls.append({"name": name, "arguments": args if isinstance(args, dict) else {}})
+            except (json.JSONDecodeError, TypeError):
+                calls.append({"name": name, "arguments": {}})
         if calls:
             return calls
 

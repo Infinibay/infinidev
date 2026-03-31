@@ -315,3 +315,146 @@ class ReviewEngine:
     def can_review_again(self) -> bool:
         """Whether we can do another review-rework cycle."""
         return self._review_count < self._max_reviews
+
+
+def run_review_rework_loop(
+    *,
+    engine: Any,
+    agent: Any,
+    session_id: str,
+    task_prompt: tuple[str, str],
+    initial_result: str,
+    reviewer: ReviewEngine,
+    recent_messages: list[str] | None = None,
+    on_status: Any | None = None,
+) -> tuple[str, ReviewResult | None]:
+    """Run verification + review-rework cycle.
+
+    1. Run tests/import checks (VerificationEngine)
+    2. If tests fail, feed failure output back to developer for fixes
+    3. Run textual code review (ReviewEngine)
+    4. If rejected, feed feedback back to developer for fixes
+    5. Loop until approved or max rounds reached
+
+    Args:
+        engine: LoopEngine (or any engine with ``execute()`` and file-change methods).
+        agent: The developer agent.
+        session_id: Current session ID for agent context activation.
+        task_prompt: Original ``(description, expected_output)`` tuple.
+        initial_result: The developer's first result string.
+        reviewer: ReviewEngine instance (will be reset).
+        recent_messages: Optional recent conversation summaries.
+        on_status: Optional ``(level: str, message: str) -> None`` callback.
+            Called with levels: "verification_pass", "verification_fail",
+            "approved", "rejected", "max_reviews".
+
+    Returns:
+        ``(final_result, last_review)`` — the (possibly updated) result and
+        the last ReviewResult, or None if review was skipped entirely.
+    """
+    def _notify(level: str, msg: str) -> None:
+        if on_status:
+            on_status(level, msg)
+
+    def _run_verification_and_fix(current_result: str) -> str:
+        """Run tests; if they fail, re-execute developer with failure context."""
+        from infinidev.engine.verification_engine import VerificationEngine
+
+        workspace = getattr(engine, '_workspace', None)
+        if not workspace:
+            from infinidev.tools.base.context import get_current_workspace_path
+            workspace = get_current_workspace_path()
+
+        if not workspace:
+            return current_result
+
+        verifier = VerificationEngine(workspace=workspace)
+        changed = list((engine.get_file_contents() or {}).keys())
+        vresult = verifier.verify(changed_files=changed)
+
+        if vresult.passed:
+            _notify("verification_pass", vresult.summary)
+            return current_result
+
+        # Tests failed — feed output back to developer
+        _notify("verification_fail", vresult.summary)
+        failure_feedback = vresult.format_for_developer()
+        if not failure_feedback:
+            return current_result
+
+        fix_description = (
+            f"{task_prompt[0]}\n\n"
+            f"## IMPORTANT: Tests are FAILING\n"
+            f"You MUST fix the test failures below before proceeding.\n\n"
+            f"{failure_feedback}"
+        )
+        fix_prompt = (fix_description, task_prompt[1])
+
+        agent.activate_context(session_id=session_id)
+        try:
+            new_result = engine.execute(
+                agent=agent,
+                task_prompt=fix_prompt,
+                verbose=True,
+            )
+            return new_result if new_result and new_result.strip() else current_result
+        finally:
+            agent.deactivate()
+
+    reviewer.reset()
+    result = initial_result
+
+    # Run verification before review (catch real breakage first)
+    result = _run_verification_and_fix(result)
+
+    previous_feedback = ""
+
+    while True:
+        review = reviewer.review(
+            task_description=task_prompt[0],
+            developer_result=result,
+            file_changes_summary=engine.get_changed_files_summary(),
+            file_reasons=engine.get_file_change_reasons(),
+            file_contents=engine.get_file_contents(),
+            recent_messages=recent_messages or [],
+            previous_feedback=previous_feedback,
+        )
+
+        if review.is_approved:
+            _notify("approved", review.summary)
+            return result, review
+
+        if not review.is_rejected:
+            # SKIPPED
+            return result, review
+
+        # Rejected
+        feedback = review.format_feedback_for_developer()
+        _notify("rejected", review.format_for_user())
+
+        if not reviewer.can_review_again or not feedback:
+            _notify("max_reviews", "")
+            return result, review
+
+        # Re-execute the developer with feedback prepended to the prompt
+        fix_description = (
+            f"{task_prompt[0]}\n\n"
+            f"## IMPORTANT: Code Review Feedback\n"
+            f"Your previous implementation was REJECTED by the reviewer. "
+            f"You MUST address ALL blocking issues below before proceeding.\n\n"
+            f"{feedback}"
+        )
+        fix_prompt = (fix_description, task_prompt[1])
+        previous_feedback = feedback
+
+        agent.activate_context(session_id=session_id)
+        try:
+            result = engine.execute(
+                agent=agent,
+                task_prompt=fix_prompt,
+                verbose=True,
+            )
+            if not result or not result.strip():
+                result = "Done. (no additional output)"
+        finally:
+            agent.deactivate()

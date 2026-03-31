@@ -10,49 +10,24 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
 from typing import Any
+
+try:
+    from json_repair import repair_json as _repair_json
+except ImportError:
+    _repair_json = None
 
 from infinidev.engine.base import AgentEngine
 from infinidev.engine.llm_client import (
     call_llm as _call_llm,
     is_malformed_tool_call as _is_malformed_tool_call,
+    is_transient as _is_transient,
+    LLM_RETRIES as _LLM_RETRIES,
+    LLM_RETRY_DELAY as _LLM_RETRY_DELAY,
+    MALFORMED_TOOL_PATTERNS as _MALFORMED_TOOL_PATTERNS,
     PERMANENT_ERRORS as _PERMANENT_ERRORS,
-)
-from infinidev.engine.tool_call_parser import (
-    safe_json_loads as _safe_json_loads,
-    ManualToolCall as _ManualToolCall,
-    parse_text_tool_calls as _parse_text_tool_calls,
-    parse_step_complete_args as _parse_step_complete_args,
-)
-from infinidev.engine.engine_logging import (
-    emit_loop_event as _emit_loop_event,
-    log as _log,
-    emit_log as _emit_log,
-    extract_tool_detail as _extract_tool_detail,
-    extract_tool_error as _extract_tool_error,
-    log_start as _log_start,
-    log_step_start as _log_step_start,
-    log_tool as _log_tool,
-    log_step_done as _log_step_done,
-    log_plan as _log_plan,
-    log_finish as _log_finish,
-    DIM as _DIM,
-    BOLD as _BOLD,
-    RESET as _RESET,
-    CYAN as _CYAN,
-    GREEN as _GREEN,
-    YELLOW as _YELLOW,
-    RED as _RED,
-    BLUE as _BLUE,
-)
-from infinidev.engine.tool_executor import (
-    update_opened_files_cache as _update_opened_files_cache,
-    batch_tool_calls as _batch_tool_calls,
-    execute_tool_calls_parallel as _execute_tool_calls_parallel,
-    capture_pre_content as _capture_pre_content,
-    maybe_emit_file_change as _maybe_emit_file_change,
-    WRITE_TOOLS as _WRITE_TOOLS,
 )
 from infinidev.engine.loop_context import (
     build_iteration_prompt,
@@ -63,6 +38,8 @@ from infinidev.engine.loop_models import (
     ActionRecord,
     LoopPlan,
     LoopState,
+    PlanStep,
+    StepOperation,
     StepResult,
 )
 from infinidev.engine.file_change_tracker import FileChangeTracker
@@ -76,6 +53,26 @@ from infinidev.engine.loop_tools import (
 
 # Max consecutive calls to the same tool before forcing a step_complete nudge
 _MAX_SAME_TOOL_CONSECUTIVE = 3
+
+
+def _safe_json_loads(text: str) -> Any:
+    """Parse JSON with automatic repair for malformed model output.
+
+    Tries standard json.loads first, then falls back to json_repair
+    if available. This handles common LLM JSON issues like trailing
+    commas, unquoted keys, truncated strings, etc.
+    """
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        if _repair_json is not None:
+            try:
+                repaired = _repair_json(text, return_objects=True)
+                if repaired is not None:
+                    return repaired
+            except Exception:
+                pass
+        raise
 
 
 def _get_model_max_context(llm_params: dict[str, Any]) -> int:
@@ -115,6 +112,857 @@ def _get_model_max_context(llm_params: dict[str, Any]) -> int:
 _MAX_TEXT_RETRIES = 5
 
 logger = logging.getLogger(__name__)
+
+
+# -- Event handling via centralized EventBus --
+from infinidev.flows.event_listeners import event_bus
+
+def _emit_loop_event(
+    event_type: str,
+    project_id: int,
+    agent_id: str,
+    data: dict[str, Any],
+) -> None:
+    """Emit event to all subscribers via the EventBus."""
+    event_bus.emit(event_type, project_id, agent_id, data)
+
+
+# ── Pretty stdout logging ────────────────────────────────────────────────────
+
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
+_CYAN = "\033[36m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+_RED = "\033[31m"
+_MAGENTA = "\033[35m"
+_BLUE = "\033[34m"
+
+_STATUS_ICON = {
+    "continue": f"{_CYAN}→{_RESET}",
+    "done": f"{_GREEN}✓{_RESET}",
+    "blocked": f"{_RED}✗{_RESET}",
+}
+
+
+def _log(msg: str) -> None:
+    """Print to stderr in classic CLI mode.  Silent when a TUI/event callback
+    is registered (the TUI owns the terminal, so raw prints would corrupt it).
+    """
+    if not event_bus.has_subscribers:
+        print(msg, file=sys.stderr, flush=True)
+
+
+def _emit_log(level: str, text: str, *, project_id: int = 0, agent_id: str = "") -> None:
+    """Emit a log entry through the event system for TUI display.
+
+    *level* is ``"warning"`` or ``"error"``.  When no event callback is
+    registered, the message is also printed via ``_log`` as a fallback.
+    """
+    import re
+    clean = re.sub(r"\033\[[0-9;]*m", "", text)  # strip ANSI for the TUI
+    _emit_loop_event("loop_log", project_id, agent_id, {
+        "level": level,
+        "message": clean,
+    })
+    _log(text)  # no-op in TUI mode, shows in classic mode
+
+
+# ── Tool detail extraction for UI visibility ─────────────────────────────────
+
+# Maps tool name → list of arg keys to show in UI (in priority order).
+# Only the first matching key is shown, truncated to keep it short.
+_TOOL_DETAIL_KEYS: dict[str, list[str]] = {
+    "read_file": ["path", "file_path"],
+    "write_file": ["path", "file_path"],
+    "edit_file": ["path", "file_path"],
+    "multi_edit_file": ["path", "file_path"],
+    "apply_patch": ["patch"],
+    "list_directory": ["path", "directory"],
+    "code_search": ["query", "pattern", "search_query"],
+    "glob": ["pattern", "glob_pattern"],
+    "execute_command": ["command", "cmd"],
+    "git_branch": ["branch_name", "name"],
+    "git_commit": ["message"],
+    "git_push": ["branch"],
+    "git_diff": ["branch", "file_path"],
+    "git_status": [],
+
+    "web_search": ["query"],
+    "web_fetch": ["url"],
+    "code_search_web": ["query"],
+    "find_definition": ["name"],
+    "find_references": ["name"],
+    "list_symbols": ["file_path", "path"],
+    "search_symbols": ["query"],
+    "get_symbol_code": ["name"],
+    "project_structure": ["path", "directory", "dir", "folder", "subdir"],
+    "search_knowledge": ["query"],
+    "record_finding": ["title"],
+    "search_findings": ["query"],
+    "read_findings": ["query"],
+    "update_finding": ["finding_id"],
+    "delete_finding": ["finding_id"],
+}
+
+
+def _extract_tool_detail(tool_name: str, arguments: str) -> str:
+    """Extract a short human-readable detail from tool call arguments.
+
+    Returns e.g. "src/auth.py" for read_file, "gradient optimizer" for code_search.
+    Returns empty string if no useful detail can be extracted.
+    """
+    keys = _TOOL_DETAIL_KEYS.get(tool_name)
+    if keys is None:
+        # Unknown tool — try common keys
+        keys = ["path", "file_path", "query", "title", "name"]
+    if not keys:
+        return ""
+
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) and arguments.strip() else {}
+    except (json.JSONDecodeError, TypeError):
+        return ""
+
+    if not isinstance(args, dict):
+        return ""
+
+    for key in keys:
+        val = args.get(key)
+        if val is not None:
+            s = str(val).strip()
+            # Truncate long values (file contents, long commands)
+            if len(s) > 80:
+                s = s[:77] + "..."
+            return s
+    return ""
+
+
+def _extract_tool_error(result: str) -> str:
+    """Extract error message from a tool result, if any.
+
+    Returns a short error string for display, or empty string if no error.
+    Detects both JSON {"error": "..."} and "Unknown tool:" patterns.
+    """
+    if not result:
+        return ""
+    # Fast path: most results don't start with {"error
+    stripped = result.strip()
+    if not stripped.startswith("{"):
+        return ""
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict) and "error" in parsed:
+            err = str(parsed["error"])
+            if "Unknown tool:" in err:
+                tool_name = err.split("Unknown tool:", 1)[1].strip()
+                return f"hallucinated tool '{tool_name}'"
+            # Truncate long errors
+            if len(err) > 120:
+                err = err[:117] + "..."
+            return err
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return ""
+
+
+# ── Opened files cache helper ──────────────────────────────────────────────
+
+def _reindex_if_enabled(file_path: str) -> None:
+    """Trigger incremental reindex of a file after it's been modified."""
+    try:
+        from infinidev.config.settings import settings
+        if settings.CODE_INTEL_ENABLED and settings.CODE_INTEL_AUTO_INDEX:
+            from infinidev.code_intel.indexer import reindex_file
+            reindex_file(1, file_path)  # project_id=1 (default)
+    except Exception:
+        pass  # Never block the main loop for indexing
+
+
+def _update_opened_files_cache(
+    state: LoopState,
+    tool_name: str,
+    arguments: str | dict,
+    result: str,
+) -> None:
+    """Update the opened files cache based on tool calls.
+
+    - read_file: cache the returned content
+    - write_file: cache the written content (from arguments)
+    - edit_file: re-read the file and update cache
+    """
+    import os as _os
+
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(args, dict):
+        return
+
+    path = args.get("path")
+    if not path:
+        return
+
+    # Resolve to absolute path for consistent cache keys
+    from infinidev.tools.base.context import get_current_workspace_path
+    ws = get_current_workspace_path() or _os.getcwd()
+    if not _os.path.isabs(path):
+        path = _os.path.normpath(_os.path.join(ws, path))
+
+    if tool_name == "read_file":
+        # result is the file content (or JSON error)
+        if result and not result.strip().startswith('{"error'):
+            state.cache_file(path, result)
+
+    elif tool_name == "write_file":
+        # Content was in the arguments
+        content = args.get("content", "")
+        if content:
+            state.refresh_file(path, content)
+        _reindex_if_enabled(path)
+
+    elif tool_name in ("edit_file", "multi_edit_file"):
+        # After a successful edit, re-read the file to get updated content
+        try:
+            if _os.path.isfile(path):
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                state.refresh_file(path, content)
+        except Exception:
+            pass
+        _reindex_if_enabled(path)
+
+    elif tool_name == "apply_patch":
+        # After applying a patch, re-read all modified files into cache
+        try:
+            res = json.loads(result) if isinstance(result, str) else result
+            if isinstance(res, dict) and "files_modified" in res:
+                ws = get_current_workspace_path() or _os.getcwd()
+                for fpath in res["files_modified"]:
+                    abs_path = _os.path.join(ws, fpath) if not _os.path.isabs(fpath) else fpath
+                    if _os.path.isfile(abs_path):
+                        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                            state.refresh_file(abs_path, f.read())
+        except Exception:
+            pass
+
+    elif tool_name == "list_directory":
+        # Cache directory listing so the model doesn't re-list
+        if result and not result.strip().startswith('{"error'):
+            state.cache_file(f"[dir] {path}", result)
+
+    elif tool_name == "glob":
+        pattern = args.get("pattern", "")
+        if pattern and result and not result.strip().startswith('{"error'):
+            state.cache_file(f"[glob] {pattern}", result)
+
+    elif tool_name == "code_search":
+        query = args.get("query") or args.get("pattern") or args.get("search_query", "")
+        if query and result and not result.strip().startswith('{"error'):
+            state.cache_file(f"[search] {query}", result)
+
+
+# ── File change tracking helpers ────────────────────────────────────────────
+
+_FILE_CHANGE_TOOLS = {"edit_file", "write_file", "multi_edit_file", "apply_patch"}
+
+# Tools that modify state — these act as barriers in parallel execution.
+# All read-only tools before a write are executed in parallel, then the write runs alone.
+_WRITE_TOOLS = {
+    "edit_file", "write_file", "multi_edit_file", "apply_patch",
+    "git_commit", "git_branch", "git_push",
+    "execute_command",  # Commands can have side effects
+    "record_finding", "update_finding", "delete_finding",
+    "write_report", "delete_report",
+    "update_documentation", "delete_documentation",
+    "send_message",
+}
+
+
+def _batch_tool_calls(calls: list) -> list[list]:
+    """Group tool calls into batches for parallel/sequential execution.
+
+    Consecutive read-only tools are grouped together (run in parallel).
+    Write tools each get their own single-item batch (run sequentially).
+
+    Example: [r, r, r, w, r, r, w, w, r, r]
+    → [[r, r, r], [w], [r, r], [w], [w], [r, r]]
+    """
+    batches: list[list] = []
+    current_reads: list = []
+
+    for tc in calls:
+        name = tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name", "")
+        if name in _WRITE_TOOLS:
+            # Flush accumulated reads as a parallel batch
+            if current_reads:
+                batches.append(current_reads)
+                current_reads = []
+            # Write is its own batch (sequential)
+            batches.append([tc])
+        else:
+            current_reads.append(tc)
+
+    # Flush remaining reads
+    if current_reads:
+        batches.append(current_reads)
+
+    return batches
+
+
+def _execute_tool_calls_parallel(
+    batch: list,
+    tool_dispatch: dict,
+) -> list[tuple]:
+    """Execute a batch of read-only tool calls in parallel.
+
+    Returns list of (tc, result) tuples in original order.
+    """
+    if len(batch) <= 1:
+        # No parallelism needed
+        results = []
+        for tc in batch:
+            result = execute_tool_call(
+                tool_dispatch, tc.function.name, tc.function.arguments,
+            )
+            results.append((tc, result))
+        return results
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _exec(tc):
+        result = execute_tool_call(
+            tool_dispatch, tc.function.name, tc.function.arguments,
+        )
+        return (tc, result)
+
+    results = []
+    with ThreadPoolExecutor(max_workers=min(len(batch), 8)) as pool:
+        futures = {pool.submit(_exec, tc): i for i, tc in enumerate(batch)}
+        indexed_results = [None] * len(batch)
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                indexed_results[idx] = future.result()
+            except Exception as exc:
+                tc = batch[idx]
+                indexed_results[idx] = (tc, json.dumps({"error": f"Parallel execution failed: {exc}"}))
+        results = [r for r in indexed_results if r is not None]
+
+    return results
+_MAX_TRACK_FILE_SIZE = 1_000_000  # 1 MB — skip tracking larger files
+
+
+def _extract_file_path_from_args(tool_name: str, arguments: str | dict) -> str | None:
+    """Extract the file path from edit_file / write_file arguments."""
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(args, dict):
+        return None
+    return args.get("path")
+
+
+def _capture_pre_content(
+    tool_name: str,
+    arguments: str | dict,
+    tracker: FileChangeTracker,
+) -> str | None:
+    """Read file content before a write/edit tool mutates it."""
+    import os as _os
+    if tool_name not in _FILE_CHANGE_TOOLS or not tracker.active:
+        return None
+    file_path = _extract_file_path_from_args(tool_name, arguments)
+    if not file_path:
+        return None
+    file_path = _os.path.abspath(_os.path.expanduser(file_path))
+    if not _os.path.isfile(file_path):
+        return None  # new file — original is empty
+    try:
+        size = _os.path.getsize(file_path)
+        if size > _MAX_TRACK_FILE_SIZE:
+            return None
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _extract_reason_from_args(arguments: str | dict) -> str:
+    """Extract the reason/description from tool call arguments."""
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(args, dict):
+        return ""
+    return args.get("reason") or args.get("description") or ""
+
+
+def _maybe_emit_file_change(
+    tool_name: str,
+    arguments: str | dict,
+    result: str,
+    pre_content: str | None,
+    tracker: FileChangeTracker,
+    project_id: int,
+    agent_id: str,
+) -> None:
+    """After a write/edit tool call, record the change and emit a TUI event."""
+    import os as _os
+    if tool_name not in _FILE_CHANGE_TOOLS or not tracker.active:
+        return
+
+    # Skip if the tool returned an error
+    if _extract_tool_error(result):
+        return
+
+    file_path = _extract_file_path_from_args(tool_name, arguments)
+    if not file_path:
+        return
+    file_path = _os.path.abspath(_os.path.expanduser(file_path))
+
+    # Record reason if provided
+    reason = _extract_reason_from_args(arguments)
+    if reason:
+        tracker.record_reason(file_path, reason)
+
+    # Read current content after the mutation
+    try:
+        if not _os.path.isfile(file_path):
+            return
+        size = _os.path.getsize(file_path)
+        if size > _MAX_TRACK_FILE_SIZE:
+            return
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            after_content = f.read()
+    except Exception:
+        return
+
+    before = pre_content if pre_content is not None else ""
+    diff_text = tracker.record(file_path, before, after_content)
+    if not diff_text:
+        return
+
+    _emit_loop_event("loop_file_changed", project_id, agent_id, {
+        "path": file_path,
+        "diff": diff_text,
+        "action": tracker.get_action(file_path),
+        "num_changes": tracker.get_change_count(file_path),
+    })
+
+
+def _log_start(agent_id: str, agent_name: str, role: str, desc: str, tool_count: int) -> None:
+    _log(f"\n{_BOLD}{_CYAN}✨ Infinidev{_RESET}  {_DIM}•{_RESET}  {_BOLD}{agent_name}{_RESET} {_DIM}({role}){_RESET}")
+    _log(f"{_DIM}   {desc[:120]}{'…' if len(desc) > 120 else ''}{_RESET}")
+    _log(f"{_DIM}   {tool_count} tools ready{_RESET}")
+    _log(f"{_DIM}{'─' * 60}{_RESET}")
+
+
+def _log_step_start(iteration: int, step_desc: str | None) -> None:
+    label = step_desc or "Planning..."
+    _log(f"\n{_BOLD}{_BLUE}󰄵 Step {iteration}{_RESET} {label}")
+
+
+def _log_tool(agent_name: str, iteration: int, tool_name: str, call_num: int, total: int) -> None:
+    _log(f"  {_MAGENTA}⚙️  {tool_name}{_RESET}")
+
+
+def _log_step_done(iteration: int, status: str, summary: str, tool_calls: int, tokens: int) -> None:
+    # Use generic icon if specific one not found
+    icon = "✔" if status == "done" else "➜"
+    color = _GREEN if status == "done" else _YELLOW
+    _log(f"  {color}{icon} {status.title()}{_RESET}  {_DIM}({tool_calls} calls · {tokens} tokens){_RESET}")
+    if summary:
+        _log(f"    {_DIM}{summary[:150]}{_RESET}")
+
+
+def _log_plan(plan: LoopPlan) -> None:
+    if not plan.steps:
+        return
+    _log(f"\n  {_DIM}Proposed plan:{_RESET}")
+    for s in plan.steps:
+        if s.status == "done":
+            icon, color = "●", _GREEN
+        elif s.status == "active":
+            icon, color = "○", _CYAN
+        elif s.status == "skipped":
+            icon, color = "◌", _DIM
+        else:
+            icon, color = "◌", _DIM
+        _log(f"    {color}{icon} {s.description[:80]}{_RESET}")
+
+
+def _log_prompt(user_prompt: str, max_section: int = 300) -> None:
+    """Log the XML-structured prompt sent to the LLM, truncating each section."""
+    import re
+    sections = re.findall(r"<(\w[\w-]*)>\n?(.*?)\n?</\1>", user_prompt, re.DOTALL)
+    if not sections:
+        _log(f"{_DIM}   Prompt: {user_prompt[:max_section]}{_RESET}")
+        return
+    _log(f"{_DIM}   Prompt:{_RESET}")
+    for tag, content in sections:
+        preview = content.strip().replace("\n", " ↵ ")
+        if len(preview) > max_section:
+            preview = preview[:max_section] + "…"
+        _log(f"   {_DIM}<{tag}>{_RESET} {preview}")
+
+
+def _log_finish(agent_name: str, status: str, iterations: int, total_tools: int, total_tokens: int) -> None:
+    icon = "✅" if status == "done" else "🏁"
+    _log(f"\n{_DIM}{'─' * 60}{_RESET}")
+    _log(
+        f"{icon} {_BOLD}Completed{_RESET}  "
+        f"{_DIM}{iterations} steps · {total_tools} tools · {total_tokens} tokens{_RESET}\n"
+    )
+
+# Error classification constants and functions are in llm_client.py
+# Imported at top: _is_transient, _is_malformed_tool_call, _PERMANENT_ERRORS, etc.
+
+
+class _ManualToolCall:
+    """Lightweight stand-in for native tool call objects in manual TC mode.
+
+    Mirrors the attribute structure of litellm/OpenAI tool call objects
+    so the rest of the pipeline (dispatch, logging) works unchanged.
+    """
+
+    __slots__ = ("id", "function")
+
+    class _Function:
+        __slots__ = ("name", "arguments")
+
+        def __init__(self, name: str, arguments: str) -> None:
+            self.name = name
+            self.arguments = arguments
+
+    def __init__(self, id: str, name: str, arguments: str) -> None:
+        self.id = id
+        self.function = self._Function(name, arguments)
+
+
+def _parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
+    """Parse tool calls from model text when native FC is unavailable.
+
+    Supports multiple formats that models use to express tool calls:
+
+    1. Our manual-mode JSON: ``{"tool_calls": [{"name": ..., "arguments": ...}]}``
+    2. Qwen/GLM ``<tool_call>{"name": ..., "arguments": ...}</tool_call>``
+    3. Qwen pipe-delimited ``<|tool_call|>...<|/tool_call|>``
+    4. Mistral ``[TOOL_CALLS] [{"name": ..., "arguments": ...}]``
+    5. Llama ``<|python_tag|>`` function calls
+    6. ``<function_call>`` / ``<functioncall>`` wrappers
+    7. Markdown code blocks with JSON
+    8. Bare JSON objects
+
+    Returns a list of dicts with "name" and "arguments" keys,
+    or None if no valid tool calls found.
+    """
+    import re
+
+    if not content or not content.strip():
+        return None
+
+    # Strip thinking sections (various model formats)
+    cleaned = re.sub(
+        r"<(?:thinking|think|\|thinking\|)>.*?</(?:thinking|think|\|thinking\|)>",
+        "",
+        content,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    # ── 1. Native model tool-call tokens ─────────────────────────────
+    # Try these first — they're unambiguous signals of tool use intent.
+
+    # Qwen / GLM: <tool_call>{...}</tool_call>  (one or more)
+    tc_tag_matches = re.findall(
+        r"<tool_call>\s*(.*?)\s*</tool_call>",
+        cleaned, re.DOTALL,
+    )
+    if tc_tag_matches:
+        calls = _extract_calls_from_fragments(tc_tag_matches)
+        if calls:
+            return calls
+
+    # Qwen pipe-delimited: <|tool_call|>{...}<|/tool_call|>
+    tc_pipe_matches = re.findall(
+        r"<\|tool_call\|>\s*(.*?)\s*<\|/tool_call\|>",
+        cleaned, re.DOTALL,
+    )
+    if tc_pipe_matches:
+        calls = _extract_calls_from_fragments(tc_pipe_matches)
+        if calls:
+            return calls
+
+    # Mistral: [TOOL_CALLS] [{...}, ...]
+    mistral_match = re.search(
+        r"\[TOOL_CALLS\]\s*(\[.*?\])",
+        cleaned, re.DOTALL,
+    )
+    if mistral_match:
+        calls = _extract_calls_from_array(mistral_match.group(1))
+        if calls:
+            return calls
+
+    # Llama: <|python_tag|> followed by JSON (function call format)
+    python_tag_match = re.search(
+        r"<\|python_tag\|>\s*(.*)",
+        cleaned, re.DOTALL,
+    )
+    if python_tag_match:
+        calls = _extract_calls_from_fragments([python_tag_match.group(1)])
+        if calls:
+            return calls
+
+    # Generic: <function_call>{...}</function_call> or <functioncall>{...}</functioncall>
+    fc_matches = re.findall(
+        r"<function_?call>\s*(.*?)\s*</function_?call>",
+        cleaned, re.DOTALL | re.IGNORECASE,
+    )
+    if fc_matches:
+        calls = _extract_calls_from_fragments(fc_matches)
+        if calls:
+            return calls
+
+    # ── 2. Our manual-mode JSON: {"tool_calls": [...]} ───────────────
+    # Check markdown code blocks first, then bare text.
+    json_candidates: list[str] = []
+
+    # Match ```json ... ``` or ``` ... ```
+    code_blocks = re.findall(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
+    json_candidates.extend(code_blocks)
+
+    # Also try the raw cleaned text (model might output bare JSON)
+    json_candidates.append(cleaned.strip())
+
+    for candidate in json_candidates:
+        candidate = candidate.strip()
+        if not candidate:
+            continue
+
+        # Try to find a JSON object in the candidate
+        brace_start = candidate.find("{")
+        if brace_start == -1:
+            continue
+
+        # Find the matching closing brace
+        depth = 0
+        for i, ch in enumerate(candidate[brace_start:], start=brace_start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    json_str = candidate[brace_start : i + 1]
+                    try:
+                        parsed = _safe_json_loads(json_str)
+                        if isinstance(parsed, dict):
+                            # {"tool_calls": [...]} wrapper
+                            if "tool_calls" in parsed:
+                                calls = _normalize_call_list(parsed["tool_calls"])
+                                if calls:
+                                    return calls
+                            # Bare tool call object: {"name": "...", "arguments": {...}}
+                            if "name" in parsed:
+                                calls = _normalize_call_list([parsed])
+                                if calls:
+                                    return calls
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    continue  # try next brace pair in the candidate
+
+    # ── 9. SEARCH/REPLACE blocks (Aider-style diffs) ────────────────
+    # Models trained on code editing often produce:
+    #   <<<<<<< SEARCH
+    #   old code
+    #   =======
+    #   new code
+    #   >>>>>>> REPLACE
+    # Optionally with a file path before the block or in the SEARCH line.
+    sr_calls = _parse_search_replace_blocks(cleaned)
+    if sr_calls:
+        return sr_calls
+
+    return None
+
+
+def _parse_search_replace_blocks(text: str) -> list[dict[str, Any]] | None:
+    """Parse SEARCH/REPLACE blocks into edit_file tool calls.
+
+    Supports formats:
+    - ``<<<<<<< SEARCH`` ... ``=======`` ... ``>>>>>>> REPLACE``
+    - ``<<<<<<< SEARCH@path`` or ``<<<<<<< SEARCH path``
+    - File path on the line before the block
+    """
+    import re
+
+    # Match SEARCH/REPLACE blocks
+    pattern = re.compile(
+        r"(?:^([^\n<>]+\.[\w]+)\n)?"            # optional file path on preceding line
+        r"<{4,}\s*SEARCH"                         # <<<<<<< SEARCH
+        r"(?:[@\s]+([^\n]*\.[\w]+))?"             # optional @path or path after SEARCH
+        r"(?:[@\s]*(\d+)(?:-\d+)?)?\s*\n"        # optional @linenum or @start-end
+        r"(.*?)\n"                                # old code (captured)
+        r"={4,}\s*\n"                             # =======
+        r"(.*?)\n"                                # new code (captured)
+        r">{4,}\s*REPLACE",                       # >>>>>>> REPLACE
+        re.DOTALL | re.MULTILINE,
+    )
+
+    calls: list[dict[str, Any]] = []
+    for m in pattern.finditer(text):
+        path = m.group(1) or m.group(2) or ""
+        old_string = m.group(4)
+        new_string = m.group(5)
+
+        if old_string is not None and new_string is not None:
+            args: dict[str, Any] = {
+                "old_string": old_string,
+                "new_string": new_string,
+            }
+            if path:
+                args["path"] = path.strip()
+            calls.append({"name": "edit_file", "arguments": args})
+
+    return calls if calls else None
+
+
+def _extract_calls_from_fragments(fragments: list[str]) -> list[dict[str, Any]] | None:
+    """Parse JSON tool call objects from text fragments.
+
+    Each fragment may contain a single JSON object with "name" + "arguments",
+    or a "function" key wrapping them (some models use this nesting).
+    """
+    calls: list[dict[str, Any]] = []
+    for frag in fragments:
+        frag = frag.strip()
+        if not frag:
+            continue
+        parsed = None
+        try:
+            parsed = _safe_json_loads(frag)
+        except (json.JSONDecodeError, TypeError):
+            # Try to extract first JSON object from fragment
+            brace = frag.find("{")
+            if brace == -1:
+                continue
+            depth = 0
+            for i, ch in enumerate(frag[brace:], start=brace):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            parsed = _safe_json_loads(frag[brace : i + 1])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        break
+            if parsed is None:
+                continue
+
+        if not isinstance(parsed, dict):
+            continue
+
+        call = _normalize_single_call(parsed)
+        if call:
+            calls.append(call)
+
+    return calls if calls else None
+
+
+def _extract_calls_from_array(text: str) -> list[dict[str, Any]] | None:
+    """Parse a JSON array of tool call objects."""
+    try:
+        arr = _safe_json_loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(arr, list):
+        return None
+    return _normalize_call_list(arr)
+
+
+def _normalize_call_list(raw: list) -> list[dict[str, Any]] | None:
+    """Normalize a list of raw tool call dicts into [{name, arguments}, ...]."""
+    calls: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            call = _normalize_single_call(item)
+            if call:
+                calls.append(call)
+    return calls if calls else None
+
+
+def _normalize_single_call(obj: dict) -> dict[str, Any] | None:
+    """Normalize a single tool call dict.
+
+    Handles variants:
+    - {"name": "x", "arguments": {...}}
+    - {"function": {"name": "x", "arguments": {...}}}
+    - {"function": "x", "arguments": {...}}  (Llama-style)
+    - {"name": "x", "parameters": {...}}
+    """
+    name = obj.get("name")
+    arguments = obj.get("arguments") or obj.get("parameters") or {}
+
+    # Nested "function" key (OpenAI-style wrapper)
+    if not name and "function" in obj:
+        func = obj["function"]
+        if isinstance(func, dict):
+            name = func.get("name")
+            arguments = func.get("arguments") or func.get("parameters") or {}
+        elif isinstance(func, str):
+            # {"function": "read_file", "arguments": {...}}
+            name = func
+
+    if not name or not isinstance(name, str):
+        return None
+
+    return {"name": name, "arguments": arguments}
+
+
+def _parse_step_complete_args(arguments: str | dict[str, Any]) -> StepResult:
+    """Parse step_complete tool call arguments into a StepResult."""
+    if isinstance(arguments, str):
+        try:
+            args = _safe_json_loads(arguments) if arguments.strip() else {}
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+    else:
+        args = arguments or {}
+
+    # Parse next_steps into StepOperation objects
+    raw_next_steps = args.get("next_steps", [])
+    next_steps: list[StepOperation] = []
+    if isinstance(raw_next_steps, list):
+        for item in raw_next_steps:
+            if isinstance(item, dict) and "op" in item and "index" in item:
+                try:
+                    next_steps.append(StepOperation(
+                        op=item["op"],
+                        index=item["index"],
+                        description=item.get("description", ""),
+                    ))
+                except Exception:
+                    pass
+
+    # Coerce final_answer to string (model may pass dict/list instead of string)
+    raw_answer = args.get("final_answer")
+    if raw_answer is not None and not isinstance(raw_answer, str):
+        raw_answer = json.dumps(raw_answer)
+
+    return StepResult(
+        summary=args.get("summary", "Step completed (no summary provided)"),
+        status=args.get("status", "continue"),
+        next_steps=next_steps,
+        final_answer=raw_answer,
+    )
+
+
+# _call_llm is imported from llm_client.py at top of file
 
 
 _SUMMARIZER_SYSTEM_PROMPT = """\
@@ -382,11 +1230,6 @@ class LoopEngine(AgentEngine):
         max_tool_calls_per_action: int | None = None,
         nudge_threshold: int | None = None,
         summarizer_enabled: bool | None = None,
-        identity_override: str | None = None,
-        done_means_done: bool = False,
-        allow_only_add_steps: bool = False,
-        reject_write_on_existing: bool = False,
-        require_test_before_complete: bool = False,
     ) -> str:
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
@@ -428,13 +1271,26 @@ class LoopEngine(AgentEngine):
         caps = get_model_capabilities()
         manual_tc = not caps.supports_function_calling
 
-        # Build system prompt (identity_override param takes precedence over agent attribute)
-        _identity = identity_override or getattr(agent, '_system_prompt_identity', None)
+        # Detect model size for adaptive behavior
+        from infinidev.config.llm import _is_small_model
+        is_small = _is_small_model()
+        if is_small:
+            logger.info("LoopEngine: small model detected — using simplified prompts and reduced tools")
+
+        # Override tool set for small models (unless caller provided explicit tools)
+        if is_small and task_tools is None:
+            from infinidev.tools import get_tools_for_role
+            tools = get_tools_for_role("developer", small_model=True)
+            tool_schemas = build_tool_schemas(tools)
+            tool_dispatch = build_tool_dispatch(tools)
+
+        # Build system prompt
         system_prompt = build_system_prompt(
             agent.backstory,
             tech_hints=getattr(agent, '_tech_hints', None),
             session_summaries=getattr(agent, '_session_summaries', None),
-            identity_override=_identity,
+            identity_override=getattr(agent, '_system_prompt_identity', None),
+            small_model=is_small,
         )
 
         # For non-FC models, embed tool descriptions in the system prompt
@@ -786,19 +1642,6 @@ class LoopEngine(AgentEngine):
                                 # Sequential execution (single tool or write)
                                 batch_results = []
                                 for tc in batch:
-                                    # Deep mode guardrail: reject write_file on existing files
-                                    if reject_write_on_existing and tc.function.name == "write_file":
-                                        try:
-                                            import os as _os
-                                            _wf_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
-                                            _wf_path = _wf_args.get("path", "")
-                                            if _wf_path and _os.path.isfile(_os.path.abspath(_wf_path)):
-                                                result = json.dumps({"error": "write_file rejected: file already exists. Use edit_method or edit_file instead."})
-                                                batch_results.append((tc, result))
-                                                continue
-                                        except Exception:
-                                            pass
-
                                     # Pre-hook BEFORE execution for file changes
                                     _pre = _capture_pre_content(
                                         tc.function.name, tc.function.arguments, file_tracker,
@@ -861,8 +1704,9 @@ class LoopEngine(AgentEngine):
                                 state.total_tool_calls += 1
                                 state.tool_calls_since_last_note += 1
 
-                                # Nudge at threshold
-                                _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else settings.LOOP_STEP_NUDGE_THRESHOLD
+                                # Nudge at threshold (small models get nudged sooner: 4 vs 6)
+                                _default_nudge = 4 if is_small else settings.LOOP_STEP_NUDGE_THRESHOLD
+                                _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else _default_nudge
                                 if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
                                     _active_desc = ""
                                     if state.plan.active_step:
@@ -998,9 +1842,10 @@ class LoopEngine(AgentEngine):
                         break
 
                     # Detect identical tool call repetition — force step completion
-                    # Extract tool name from signature for readable messages
+                    # Small models get stricter threshold (2 vs 3)
+                    _rep_threshold = 2 if is_small else _MAX_SAME_TOOL_CONSECUTIVE
                     _loop_tool = (last_tool_sig or "").split(":", 1)[0]
-                    if same_tool_streak >= _MAX_SAME_TOOL_CONSECUTIVE and not repetition_nudged:
+                    if same_tool_streak >= _rep_threshold and not repetition_nudged:
                         repetition_nudged = True
                         _emit_log(
                             "warning",
@@ -1018,7 +1863,7 @@ class LoopEngine(AgentEngine):
                             ),
                         })
                         continue
-                    if same_tool_streak >= _MAX_SAME_TOOL_CONSECUTIVE + 2:
+                    if same_tool_streak >= _rep_threshold + 2:
                         # Nudge failed — force break with synthesized result
                         _emit_log(
                             "error",
@@ -1130,27 +1975,8 @@ class LoopEngine(AgentEngine):
             if step_result is None:
                 step_result = StepResult(summary="Step completed.", status="continue")
 
-            # --- Deep mode guardrail: require test before step_complete ---
-            if require_test_before_complete and step_result.status == "done":
-                # Check if any execute_command in this iteration contained a test
-                _had_test = any(
-                    tc.function.name == "execute_command"
-                    and any(kw in (tc.function.arguments or "") for kw in ["pytest", "test", "unittest"])
-                    for tc in (regular_calls if regular_calls else [])
-                )
-                if not _had_test:
-                    step_result.status = "continue"
-                    step_result.summary += " [BLOCKED: run tests before completing step]"
-                    _emit_log(
-                        "warning",
-                        f"{_YELLOW}⚠ Deep mode: step_complete blocked — run tests first{_RESET}",
-                        project_id=agent.project_id, agent_id=agent.agent_id,
-                    )
-
             # --- Auto-split: prevent premature "done" ---
-            # When done_means_done=True (e.g. PLAN phase), pending steps are
-            # the OUTPUT, not unfinished work — respect the model's "done".
-            if step_result.status == "done" and not step_result.final_answer and not done_means_done:
+            if step_result.status == "done" and not step_result.final_answer:
                 pending_count = sum(1 for s in state.plan.steps if s.status == "pending")
                 if pending_count > 0:
                     step_result.status = "continue"
@@ -1161,15 +1987,10 @@ class LoopEngine(AgentEngine):
                     )
 
             # --- Plan management ---
-            # Filter next_steps if restricted to add-only
-            _next_steps = step_result.next_steps
-            if allow_only_add_steps and _next_steps:
-                _next_steps = [op for op in _next_steps if op.op == "add"]
-
             # If we don't have a plan yet, use next_steps from step_result to create one
             if not state.plan.steps:
-                if _next_steps:
-                    state.plan.apply_operations(_next_steps)
+                if step_result.next_steps:
+                    state.plan.apply_operations(step_result.next_steps)
                 # Activate the first step if we got a plan
                 if state.plan.steps:
                     for s in state.plan.steps:
@@ -1179,8 +2000,8 @@ class LoopEngine(AgentEngine):
             else:
                 # Existing plan: mark current step done, apply changes, activate next
                 state.plan.mark_active_done()
-                if _next_steps:
-                    state.plan.apply_operations(_next_steps)
+                if step_result.next_steps:
+                    state.plan.apply_operations(step_result.next_steps)
                 state.plan.activate_next()
 
             step_index = state.plan.active_step.index if state.plan.active_step else iteration + 1

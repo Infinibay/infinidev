@@ -11,7 +11,7 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 
 
 class ReadFileInput(BaseModel):
-    path: str = Field(..., description="Path to the file to read")
+    file_path: str = Field(..., description="Path to the file to read")
     offset: int | None = Field(
         default=None,
         description=(
@@ -38,8 +38,8 @@ _TEXT_SAFE = frozenset(
 )
 
 
-def _is_binary_file(path: str, sample_size: int = 8192) -> bool:
-    """Detect whether *path* is a binary file by content heuristics.
+def _is_binary_file(file_path: str, sample_size: int = 8192) -> bool:
+    """Detect whether *file_path* is a binary file by content heuristics.
 
     Reads the first *sample_size* bytes and checks:
     1. Well-known binary magic signatures (ELF, PNG, JPEG, PDF, Zip, etc.).
@@ -51,7 +51,7 @@ def _is_binary_file(path: str, sample_size: int = 8192) -> bool:
     ``False`` (let the caller handle the error).
     """
     try:
-        with open(path, "rb") as f:
+        with open(file_path, "rb") as f:
             chunk = f.read(sample_size)
     except Exception:
         return False
@@ -100,7 +100,7 @@ class ReadFileTool(InfinibayBaseTool):
 
     def _run(
         self,
-        path: str,
+        file_path: str,
         offset: int | None = None,
         limit: int | None = None,
         start_line: int | None = None,
@@ -126,29 +126,29 @@ class ReadFileTool(InfinibayBaseTool):
             offset = start_line
         if end_line is not None and offset is not None and limit is None:
             limit = max(1, end_line - (offset or 1) + 1)
-        path = self._resolve_path(os.path.expanduser(path))
+        file_path = self._resolve_path(os.path.expanduser(file_path))
 
         if self._is_pod_mode():
-            return self._run_in_pod(path, offset, limit)
+            return self._run_in_pod(file_path, offset, limit)
 
         # Sandbox check (resolves symlinks, enforces directory boundaries)
-        sandbox_err = self._validate_sandbox_path(path)
+        sandbox_err = self._validate_sandbox_path(file_path)
         if sandbox_err:
             return self._error(sandbox_err)
 
-        if not os.path.exists(path):
-            return self._error(f"File not found: {path}")
-        if not os.path.isfile(path):
-            return self._error(f"Not a file: {path}")
+        if not os.path.exists(file_path):
+            return self._error(f"File not found: {file_path}")
+        if not os.path.isfile(file_path):
+            return self._error(f"Not a file: {file_path}")
 
         # Check if file is binary (non-text) by content analysis
-        if _is_binary_file(path):
+        if _is_binary_file(file_path):
             return self._error(
-                f"Cannot read '{path}': file appears to be binary (not a text file). "
+                f"Cannot read '{file_path}': file appears to be binary (not a text file). "
                 "Use a specialised tool or command to inspect binary files."
             )
 
-        file_size = os.path.getsize(path)
+        file_size = os.path.getsize(file_path)
         if file_size > settings.MAX_FILE_SIZE_BYTES:
             return self._error(
                 f"File too large: {file_size} bytes "
@@ -156,10 +156,10 @@ class ReadFileTool(InfinibayBaseTool):
             )
 
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 all_lines = f.readlines()
         except PermissionError:
-            return self._error(f"Permission denied: {path}")
+            return self._error(f"Permission denied: {file_path}")
         except Exception as e:
             return self._error(f"Error reading file: {e}")
 
@@ -184,24 +184,24 @@ class ReadFileTool(InfinibayBaseTool):
             content = "\n".join(numbered)
             desc = f"{total_lines} lines"
 
-        self._log_tool_usage(f"Read {path} ({desc})")
+        self._log_tool_usage(f"Read {file_path} ({desc})")
 
         # Auto-index the file for code intelligence (best-effort)
         try:
             from infinidev.code_intel.smart_index import ensure_indexed
             project_id = self.project_id
             if project_id:
-                ensure_indexed(project_id, path)
+                ensure_indexed(project_id, file_path)
         except Exception:
             pass  # Never fail a read because of indexing
 
         return content
 
     def _run_in_pod(
-        self, path: str, offset: int | None, limit: int | None,
+        self, file_path: str, offset: int | None, limit: int | None,
     ) -> str:
         """Read file via infinibay-file-helper inside the pod."""
-        req = {"op": "read", "path": path}
+        req = {"op": "read", "file_path": file_path}
         if offset is not None:
             req["offset"] = offset
         if limit is not None:
@@ -227,5 +227,5 @@ class ReadFileTool(InfinibayBaseTool):
             return self._error(resp.get("error", "Unknown error"))
 
         data = resp["data"]
-        self._log_tool_usage(f"Read {path} (pod, {data.get('total_lines', '?')} lines)")
+        self._log_tool_usage(f"Read {file_path} (pod, {data.get('total_lines', '?')} lines)")
         return data["content"]

@@ -637,15 +637,30 @@ class PhaseEngine:
                 if rw:
                     regression_warning = f"\n{rw}\n"
 
-            step_prompt = strategy.execute_prompt.replace(
-                "{{step_num}}", str(step_num)
-            ).replace(
-                "{{total_steps}}", str(total)
-            ).replace(
-                "{{step_description}}", step_desc
-            ).replace(
-                "{{step_files}}", files_str
-            )
+            # Use conditional prompt generation for small models
+            from infinidev.config.llm import _is_small_model
+            if _is_small_model():
+                from infinidev.prompts.tool_hints import (
+                    build_execute_prompt, get_available_tool_names,
+                )
+                _tool_names = get_available_tool_names(all_tools)
+                step_prompt = build_execute_prompt(
+                    available_tools=_tool_names,
+                    step_num=step_num,
+                    total_steps=total,
+                    step_description=step_desc,
+                    step_files=files_str,
+                )
+            else:
+                step_prompt = strategy.execute_prompt.replace(
+                    "{{step_num}}", str(step_num)
+                ).replace(
+                    "{{total_steps}}", str(total)
+                ).replace(
+                    "{{step_description}}", step_desc
+                ).replace(
+                    "{{step_files}}", files_str
+                )
 
             notes_section = f"## NOTES\n{notes_text}\n\n" if notes_text else ""
             depth_suffix = depth_config.prompt_suffix if depth_config else ""

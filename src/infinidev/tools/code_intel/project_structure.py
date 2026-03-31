@@ -8,7 +8,7 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 
 
 class ProjectStructureInput(BaseModel):
-    path: str = Field(
+    file_path: str = Field(
         default=".",
         description="Directory to show structure of. Defaults to project root.",
     )
@@ -25,7 +25,7 @@ class ProjectStructureTool(InfinibayBaseTool):
 
     def _run(
         self,
-        path: str = ".",
+        file_path: str = ".",
         depth: int = 2,
         # Aliases
         directory: str = "",
@@ -34,11 +34,11 @@ class ProjectStructureTool(InfinibayBaseTool):
         subdir: str = "",
     ) -> str:
         # Accept aliases
-        path = directory or dir or folder or subdir or path
+        file_path = directory or dir or folder or subdir or file_path
 
-        path = self._resolve_path(os.path.expanduser(path))
-        if not os.path.isdir(path):
-            return self._error(f"Directory not found: {path}")
+        file_path = self._resolve_path(os.path.expanduser(file_path))
+        if not os.path.isdir(file_path):
+            return self._error(f"Directory not found: {file_path}")
 
         depth = max(1, min(5, depth))
 
@@ -119,10 +119,10 @@ class ProjectStructureTool(InfinibayBaseTool):
                 else:
                     lines.append(f"{prefix}{f}")
 
-        _walk(path, 1, "")
+        _walk(file_path, 1, "")
 
         if not lines:
-            return self._error(f"Empty directory: {path}")
+            return self._error(f"Empty directory: {file_path}")
 
-        header = f"Project structure of {path} (depth={depth}):"
+        header = f"Project structure of {file_path} (depth={depth}):"
         return header + "\n" + "\n".join(lines)

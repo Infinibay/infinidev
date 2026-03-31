@@ -2694,33 +2694,35 @@ class InfinidevTUI(App):
             finally:
                 self.agent.deactivate()
 
-            # --- Code review phase (single pass, no retry loop) ---
+            # --- Code review phase (with review-rework loop) ---
             run_review = flow_config.run_review if flow_config else True
             if _settings.REVIEW_ENABLED and run_review and flow_label != "explore" and self.engine.has_file_changes():
-                self.reviewer.reset()
-                review = self.reviewer.review(
-                    task_description=task_prompt[0],
-                    developer_result=result,
-                    file_changes_summary=self.engine.get_changed_files_summary(),
-                    file_reasons=self.engine.get_file_change_reasons(),
-                    file_contents=self.engine.get_file_contents(),
-                    recent_messages=get_recent_summaries(self.session_id, limit=5),
-                )
+                from infinidev.engine.review_engine import run_review_rework_loop
 
-                if review.is_approved:
-                    self.call_from_thread(
-                        self.add_message,
-                        "Reviewer",
-                        f"Code review: APPROVED. {review.summary}",
-                        "system",
-                    )
-                elif review.is_rejected:
-                    self.call_from_thread(
-                        self.add_message,
-                        "Reviewer",
-                        review.format_for_user(),
-                        "system",
-                    )
+                def _tui_review_status(level: str, msg: str) -> None:
+                    if level == "verification_pass":
+                        self.call_from_thread(self.add_message, "Verifier", f"PASS. {msg}", "system")
+                    elif level == "verification_fail":
+                        self.call_from_thread(self.add_message, "Verifier", f"FAIL. {msg}", "system")
+                        self.call_from_thread(self.add_message, "System", "Re-running to fix test failures...", "system")
+                    elif level == "approved":
+                        self.call_from_thread(self.add_message, "Reviewer", f"Code review: APPROVED. {msg}", "system")
+                    elif level == "rejected":
+                        self.call_from_thread(self.add_message, "Reviewer", msg, "system")
+                        self.call_from_thread(self.add_message, "System", "Re-running with review feedback...", "system")
+                    elif level == "max_reviews":
+                        self.call_from_thread(self.add_message, "Reviewer", "Max review rounds reached.", "system")
+
+                result, _ = run_review_rework_loop(
+                    engine=self.engine,
+                    agent=self.agent,
+                    session_id=self.session_id,
+                    task_prompt=task_prompt,
+                    initial_result=result,
+                    reviewer=self.reviewer,
+                    recent_messages=get_recent_summaries(self.session_id, limit=5),
+                    on_status=_tui_review_status,
+                )
             # --- End code review phase ---
 
             self.call_from_thread(self._hide_thinking)
@@ -2786,8 +2788,6 @@ class InfinidevTUI(App):
             "EMBEDDING_PROVIDER": str,
             "EMBEDDING_MODEL": str,
             "EMBEDDING_BASE_URL": str,
-            "FORGEJO_API_URL": str,
-            "FORGEJO_OWNER": str,
             "LOOP_MAX_ITERATIONS": int,
             "LOOP_MAX_TOOL_CALLS_PER_ACTION": int,
             "LOOP_MAX_TOTAL_TOOL_CALLS": int,

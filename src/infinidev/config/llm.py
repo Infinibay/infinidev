@@ -3,6 +3,7 @@
 from __future__ import annotations
 import os
 import logging
+import re
 from typing import Any
 from infinidev.config.settings import settings
 
@@ -19,6 +20,29 @@ def _extract_provider(model: str) -> str:
 def _is_native_provider(model: str) -> bool:
     """Return True if LiteLLM handles this provider's endpoint natively."""
     return _extract_provider(model) in {"deepseek", "anthropic", "gemini", "openai", "zai"}
+
+def _get_model_size_b(model: str | None = None) -> int:
+    """Extract model size in billions from model name.
+
+    Parses patterns like 'qwen2.5-coder:7b', 'llama3.1:8b', 'mistral-7b-instruct'.
+    Returns 0 if size cannot be detected.
+    """
+    model = model or settings.LLM_MODEL or ""
+    match = re.search(r"(\d+)\s*[bB]\b", model.lower())
+    if match:
+        return int(match.group(1))
+    return 0
+
+
+def _is_small_model(model: str | None = None) -> bool:
+    """Return True if the model has fewer than 25B parameters.
+
+    Size is detected from the model name string.  Returns False when
+    the size cannot be determined (safe default — treat as large).
+    """
+    size = _get_model_size_b(model)
+    return 0 < size < 25
+
 
 def get_litellm_params() -> dict[str, Any]:
     """Return kwargs suitable for ``litellm.completion(**params, messages=...)``."""

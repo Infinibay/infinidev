@@ -248,17 +248,26 @@ def execute_tool_call(
     _PARAM_ALIASES = {
         "old_str": "old_string",
         "new_str": "new_string",
-        "file_path": "path",
-        "filepath": "path",
-        "file": "path",
-        "filename": "path",
-        "name": "path",  # safe: only applies when tool has "path" but not "name" (line 277-279 guards this)
-        "directory": "path",
-        "dir": "path",
-        "dir_path": "path",
+        # All tools now use file_path — alias common LLM variants
+        "path": "file_path",
+        "filepath": "file_path",
+        "file": "file_path",
+        "filename": "file_path",
+        "name": "file_path",  # safe: only applies when tool has "file_path" but not "name"
+        "directory": "file_path",
+        "dir": "file_path",
+        "dir_path": "file_path",
         # "content" is a valid param in create_file, replace_lines — no longer alias to new_string
         "query": "pattern",
         "search_query": "pattern",
+        # Line range aliases (gpt-oss uses line_start/line_end)
+        "line_start": "start_line",
+        "line_end": "end_line",
+        # Command aliases
+        "cmd": "command",
+        # Replace aliases
+        "replacement": "content",
+        "new_body": "new_code",
     }
 
     # Validate kwargs against _run() signature — reject unknown parameters
@@ -328,4 +337,35 @@ def execute_tool_call(
         return str(result) if result is not None else ""
     except Exception as exc:
         logger.warning("Tool %s raised %s: %s", name, type(exc).__name__, exc)
-        return json.dumps({"error": f"Tool '{name}' failed: {exc}"})
+        suggestion = _suggest_alternative(name, str(exc))
+        error_msg = f"Tool '{name}' failed: {exc}"
+        if suggestion:
+            error_msg += f"\n\nSuggestion: {suggestion}"
+        return json.dumps({"error": error_msg})
+
+
+# Tool failure → alternative suggestion mapping
+_TOOL_ALTERNATIVES: dict[str, str] = {
+    "edit_symbol": "Try replace_lines instead — read the file first to get line numbers.",
+    "add_symbol": "Try replace_lines or create_file instead.",
+    "remove_symbol": "Try replace_lines to delete the line range instead.",
+    "partial_read": "Try read_file with the full path instead.",
+    "web_fetch": "Try web_search to find the information instead.",
+    "web_search": "Try execute_command with 'curl' as a fallback.",
+    "code_search": "Try glob to find the file, then read_file to search its contents.",
+    "create_file": "If the file already exists, use replace_lines or edit_symbol to modify it.",
+}
+
+
+def _suggest_alternative(tool_name: str, error_msg: str) -> str:
+    """Suggest an alternative tool when one fails."""
+    # Direct mapping
+    if tool_name in _TOOL_ALTERNATIVES:
+        return _TOOL_ALTERNATIVES[tool_name]
+    # File not found → suggest glob
+    if "not found" in error_msg.lower() or "no such file" in error_msg.lower():
+        return "File not found. Use glob or list_directory to find the correct path."
+    # Permission denied
+    if "permission" in error_msg.lower():
+        return "Permission denied. Check the file path and try a different approach."
+    return ""

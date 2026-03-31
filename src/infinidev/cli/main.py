@@ -216,8 +216,6 @@ def handle_settings_command(parts: list[str]):
             "EMBEDDING_PROVIDER": str,
             "EMBEDDING_MODEL": str,
             "EMBEDDING_BASE_URL": str,
-            "FORGEJO_API_URL": str,
-            "FORGEJO_OWNER": str,
             "LOOP_MAX_ITERATIONS": int,
             "LOOP_MAX_TOOL_CALLS_PER_ACTION": int,
             "LOOP_MAX_TOTAL_TOOL_CALLS": int,
@@ -377,31 +375,35 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         finally:
             agent.deactivate()
 
-        # Code review phase for single-prompt mode
+        # Code review phase for single-prompt mode (with rework loop)
         if settings.REVIEW_ENABLED and engine.has_file_changes():
             click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
-            reviewer = ReviewEngine()
-            review = reviewer.review(
-                task_description=problem,
-                developer_result=result or "",
-                file_changes_summary=engine.get_changed_files_summary(),
-                file_reasons=engine.get_file_change_reasons(),
-                file_contents=engine.get_file_contents(),
+            from infinidev.engine.review_engine import run_review_rework_loop
+
+            def _sp_review_status(level: str, msg: str) -> None:
+                if level == "verification_pass":
+                    click.echo(click.style(f"Verification: PASS. {msg}", fg="green", dim=True))
+                elif level == "verification_fail":
+                    click.echo(click.style(f"Verification: FAIL. {msg}", fg="red"))
+                    click.echo(click.style("Re-running developer to fix test failures...", fg="magenta", dim=True))
+                elif level == "approved":
+                    click.echo(click.style(f"Code review: APPROVED. {msg}", fg="green", dim=True))
+                elif level == "rejected":
+                    click.echo(click.style(msg, fg="red"))
+                    click.echo(click.style("Re-running developer to fix review issues...", fg="magenta", dim=True))
+                elif level == "max_reviews":
+                    click.echo(click.style("Max review rounds reached — stopping.", fg="yellow", dim=True))
+
+            result, _ = run_review_rework_loop(
+                engine=engine,
+                agent=agent,
+                session_id=session_id,
+                task_prompt=task_prompt_sp,
+                initial_result=result or "",
+                reviewer=ReviewEngine(),
                 recent_messages=get_recent_summaries(session_id, limit=5),
+                on_status=_sp_review_status,
             )
-            if review.is_approved:
-                click.echo(click.style(
-                    f"Code review: APPROVED. {review.summary}",
-                    fg="green", dim=True,
-                ))
-            elif review.is_rejected:
-                click.echo(click.style(
-                    f"Code review: REJECTED. {review.summary}",
-                    fg="red",
-                ))
-                feedback = review.format_feedback_for_developer()
-                if feedback:
-                    click.echo(click.style(feedback, fg="red", dim=True))
 
     click.echo(result or "Done.")
 
@@ -721,33 +723,36 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, thi
             finally:
                 agent.deactivate()
 
-            # --- Code review phase (single pass, no retry loop) ---
+            # --- Code review phase (with review-rework loop) ---
             run_review = flow_config.run_review if flow_config else True
             if settings.REVIEW_ENABLED and run_review and current_flow != "explore" and engine.has_file_changes():
                 click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
-                reviewer.reset()
-                review = reviewer.review(
-                    task_description=task_prompt[0],
-                    developer_result=result,
-                    file_changes_summary=engine.get_changed_files_summary(),
-                    file_reasons=engine.get_file_change_reasons(),
-                    file_contents=engine.get_file_contents(),
-                    recent_messages=get_recent_summaries(session_id, limit=5),
-                )
+                from infinidev.engine.review_engine import run_review_rework_loop
 
-                if review.is_approved:
-                    click.echo(click.style(
-                        f"Code review: APPROVED. {review.summary}",
-                        fg="green", dim=True,
-                    ))
-                elif review.is_rejected:
-                    click.echo(click.style(
-                        f"Code review: REJECTED. {review.summary}",
-                        fg="red",
-                    ))
-                    feedback = review.format_feedback_for_developer()
-                    if feedback:
-                        click.echo(click.style(feedback, fg="red", dim=True))
+                def _cli_review_status(level: str, msg: str) -> None:
+                    if level == "verification_pass":
+                        click.echo(click.style(f"Verification: PASS. {msg}", fg="green", dim=True))
+                    elif level == "verification_fail":
+                        click.echo(click.style(f"Verification: FAIL. {msg}", fg="red"))
+                        click.echo(click.style("Re-running developer to fix test failures...", fg="magenta", dim=True))
+                    elif level == "approved":
+                        click.echo(click.style(f"Code review: APPROVED. {msg}", fg="green", dim=True))
+                    elif level == "rejected":
+                        click.echo(click.style(msg, fg="red"))
+                        click.echo(click.style("Re-running developer to fix review issues...", fg="magenta", dim=True))
+                    elif level == "max_reviews":
+                        click.echo(click.style("Max review rounds reached — stopping.", fg="yellow", dim=True))
+
+                result, _ = run_review_rework_loop(
+                    engine=engine,
+                    agent=agent,
+                    session_id=session_id,
+                    task_prompt=task_prompt,
+                    initial_result=result,
+                    reviewer=reviewer,
+                    recent_messages=get_recent_summaries(session_id, limit=5),
+                    on_status=_cli_review_status,
+                )
             # --- End code review phase ---
 
             click.echo(click.style("\nFinal Result:", fg="green", bold=True))
