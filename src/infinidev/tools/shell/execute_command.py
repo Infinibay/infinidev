@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class ExecuteCommandInput(BaseModel):
     command: str = Field(..., description="Command to execute")
     timeout: int = Field(
-        default=60, ge=1, le=600, description="Max execution time in seconds"
+        default=300, description="Max execution time in seconds. 0 or negative = no timeout."
     )
     cwd: str | None = Field(
         default=None, description="Working directory for the command"
@@ -88,13 +88,15 @@ class ExecuteCommandTool(InfinibayBaseTool):
         if not cwd:
             cwd = self.workspace_path or os.getcwd()
 
+        effective_timeout = timeout if timeout > 0 else None
+
         try:
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=effective_timeout,
                 cwd=cwd,
                 env=run_env,
             )

@@ -272,6 +272,8 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
     Supports /explore and /brainstorm prefixes, otherwise runs as develop flow.
     """
     init_db()
+    from infinidev.engine.ui_hooks import register_ui_hooks
+    register_ui_hooks()
 
     # Index workspace before LLM starts so code intelligence is available
     from infinidev.cli.initial_index import run_initial_index
@@ -414,14 +416,26 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
 @click.option("--prompt", "-p", default=None, help="Run a single prompt non-interactively and exit.")
 @click.option("--model", "-m", default=None, help="Override LLM model for this run (e.g., ollama_chat/qwen3:32b).")
 @click.option("--think", is_flag=True, help="Use phase engine (ANALYZE → PLAN → EXECUTE) for deeper reasoning.")
-def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, think: bool):
+@click.option("--profile", is_flag=True, help="Enable session profiling (saves to ~/.infinidev/profiles/).")
+def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, think: bool, profile: bool):
     """Main entry point for Infinidev CLI."""
+    from infinidev.cli.profiler import SessionProfiler
+
     # Apply model override in-memory (does NOT persist to settings.json)
     if model:
         if "/" not in model:
             model = f"ollama_chat/{model}"
         settings.LLM_MODEL = model
 
+    with SessionProfiler(enabled=profile) as profiler:
+        _run_main(no_tui, classic, prompt, think, profile)
+
+    if profile and profiler.report_path:
+        click.echo(click.style(f"\nProfile saved to: {profiler.report_path}", fg="cyan"))
+
+
+def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool):
+    """Inner dispatch — runs inside the profiler context manager."""
     # Non-interactive --prompt mode
     if prompt:
         _run_single_prompt(prompt, use_phase_engine=think)
@@ -433,6 +447,8 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, thi
         root = logging.getLogger()
         root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)
                          or getattr(h, 'stream', None) is not sys.stderr]
+        if profile:
+            click.echo(click.style("Profiling enabled — profile will be saved on exit.", fg="yellow"), err=True)
         app = InfinidevTUI()
         app.run()
         return
@@ -458,6 +474,9 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, thi
         index_callback=_index_queue.enqueue,
     )
     _classic_watcher.start()
+
+    from infinidev.engine.ui_hooks import register_ui_hooks
+    register_ui_hooks()
 
     click.echo(click.style("Welcome to Infinidev CLI (Classic Mode)!", fg="cyan", bold=True))
     click.echo("Type your instructions or /help for commands.")

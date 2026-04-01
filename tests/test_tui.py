@@ -38,6 +38,7 @@ class FullTUITestApp(InfinidevTUI):
     """InfinidevTUI with heavy deps mocked."""
 
     def on_mount(self) -> None:
+        self._thinking_indicator = None
         self.query_one("#chat-input").focus()
         self.add_message("System", "Test mode", "system")
         self.session_id = "test-session"

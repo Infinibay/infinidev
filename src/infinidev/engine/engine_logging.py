@@ -137,6 +137,73 @@ def extract_tool_detail(tool_name: str, arguments: str) -> str:
     return ""
 
 
+def extract_tool_output_preview(tool_name: str, result: str, max_lines: int = 4, max_width: int = 100) -> str:
+    """Extract a short preview of tool output for display in the CLI.
+
+    Shows the first few meaningful lines of the result, truncated.
+    Returns empty string if there's nothing useful to show (errors are
+    handled separately by extract_tool_error).
+    """
+    if not result or not result.strip():
+        return ""
+
+    stripped = result.strip()
+
+    # Skip if it's an error (handled by extract_tool_error)
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict) and "error" in parsed:
+                return ""
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # For execute_command: show the actual output (most valuable)
+    if tool_name == "execute_command":
+        lines = stripped.splitlines()
+        # Take last N lines (most relevant for test output, build output)
+        if len(lines) > max_lines:
+            preview_lines = lines[-max_lines:]
+        else:
+            preview_lines = lines
+        preview = "\n".join(
+            line[:max_width] + ("…" if len(line) > max_width else "")
+            for line in preview_lines
+        )
+        if len(lines) > max_lines:
+            preview = f"… ({len(lines) - max_lines} lines above)\n{preview}"
+        return preview
+
+    # For file tools: show line count or brief summary
+    if tool_name in ("read_file", "partial_read"):
+        lines = stripped.splitlines()
+        if len(lines) > 3:
+            return f"({len(lines)} lines)"
+        return ""
+
+    # For create_file, replace_lines: just confirm
+    if tool_name in ("create_file",):
+        if "Created file" in stripped or "created" in stripped.lower():
+            return stripped[:max_width]
+        return ""
+
+    if tool_name in ("replace_lines",):
+        if len(stripped) < max_width:
+            return stripped
+        return ""
+
+    # For search/list tools: show count
+    if tool_name in ("code_search", "glob", "search_symbols", "find_references"):
+        lines = stripped.splitlines()
+        if len(lines) > 3:
+            return f"({len(lines)} results)"
+        elif lines:
+            return "\n".join(line[:max_width] for line in lines[:3])
+        return ""
+
+    return ""
+
+
 def extract_tool_error(result: str) -> str:
     """Extract error message from a tool result, if any.
 

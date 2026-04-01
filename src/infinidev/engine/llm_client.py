@@ -128,10 +128,28 @@ def call_llm(
     if caps.supports_json_mode and not tools:
         kwargs["response_format"] = {"type": "json_object"}
 
+    # --- Pre-LLM hook ---
+    from infinidev.engine.hooks import hook_manager, HookContext, HookEvent
+
+    llm_ctx = HookContext(
+        event=HookEvent.PRE_LLM_CALL,
+        metadata={"messages": messages, "tools": tools, "kwargs": kwargs},
+    )
+    hook_manager.dispatch(llm_ctx)
+    if llm_ctx.skip:
+        return llm_ctx.metadata.get("response")
+
     last_exc: Exception | None = None
     for attempt in range(1, LLM_RETRIES + 1):
         try:
-            return litellm.completion(**kwargs)
+            response = litellm.completion(**kwargs)
+
+            # --- Post-LLM hook ---
+            llm_ctx.event = HookEvent.POST_LLM_CALL
+            llm_ctx.metadata["response"] = response
+            hook_manager.dispatch(llm_ctx)
+
+            return llm_ctx.metadata["response"]
         except Exception as exc:
             last_exc = exc
             if not is_transient(exc) or attempt == LLM_RETRIES:

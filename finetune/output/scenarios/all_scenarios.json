@@ -1,0 +1,4697 @@
+[
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in TestGenericHandlers.do_raise() in tests/test_user_error_handler.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py"
+    ],
+    "target_symbols": [
+      "TestGenericHandlers.do_raise"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py": [
+        238,
+        239
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "        def do_raise():\n            raise InternalServerError()\n"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in MySessionInterface.save_session() in tests/test_session_interface.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_session_interface.py"
+    ],
+    "target_symbols": [
+      "MySessionInterface.save_session"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_session_interface.py": [
+        13,
+        14
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "        def save_session(self, app, session, response):\n            pass\n"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Scaffold.register_error_handler() in src/flask/sansio/scaffold.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/src/flask/sansio/scaffold.py"
+    ],
+    "target_symbols": [
+      "Scaffold.register_error_handler"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/src/flask/sansio/scaffold.py": [
+        642,
+        654
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def register_error_handler(\n        self,\n        code_or_exception: type[Exception] | int,\n        f: ft.ErrorHandlerCallable,\n    ) -> None:\n        \"\"\"Alternative error attach function to the :meth:`errorhandler`\n        decorator that is more straightforward to use for non decorator\n        usage.\n\n        .. versionadded:: 0.7\n        \"\"\"\n        exc_class, code = self._get_exc_class_and_code(code_or_exception)\n        self.error_handler_spec[None][code][exc_class] = f\n"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `TagDict` class in tests/test_json_tag.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_json_tag.py"
+    ],
+    "target_symbols": [
+      "TagDict"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_json_tag.py": [
+        33,
+        34
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "TagDict"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `RenderTemplateView` class in tests/type_check/typing_route.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/type_check/typing_route.py"
+    ],
+    "target_symbols": [
+      "RenderTemplateView"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/tests/type_check/typing_route.py": [
+        101,
+        106
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "RenderTemplateView"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `ForbiddenSubclassUnregistered` class in tests/test_user_error_handler.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py"
+    ],
+    "target_symbols": [
+      "ForbiddenSubclassUnregistered"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py": [
+        104,
+        105
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "ForbiddenSubclassUnregistered"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_views.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_views.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_appctx.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_appctx.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_blueprints.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_blueprints.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "modify_method",
+    "prompt": "Modify TaggedJSONSerializer._untag_scan() in src/flask/json/tag.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/src/flask/json/tag.py"
+    ],
+    "target_symbols": [
+      "TaggedJSONSerializer._untag_scan"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/src/flask/json/tag.py": [
+        309,
+        319
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "modify_method",
+    "prompt": "Modify TestGenericHandlers.test_handle_generic_http() in tests/test_user_error_handler.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py"
+    ],
+    "target_symbols": [
+      "TestGenericHandlers.test_handle_generic_http"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py": [
+        269,
+        281
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_server_name_subdomain` to `test_server_name_subdomain_v2` in tests/test_basic.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_basic.py"
+    ],
+    "target_symbols": [
+      "test_server_name_subdomain"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_server_name_subdomain",
+      "new_name": "test_server_name_subdomain_v2"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `handle_500` to `handle_500_v2` in tests/test_user_error_handler.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py"
+    ],
+    "target_symbols": [
+      "handle_500"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "handle_500",
+      "new_name": "handle_500_v2"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `unregistered_test` to `unregistered_test_v2` in tests/test_user_error_handler.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_user_error_handler.py"
+    ],
+    "target_symbols": [
+      "unregistered_test"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "unregistered_test",
+      "new_name": "unregistered_test_v2"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `handle_accept_base` from tests/type_check/typing_error_handler.py to tests/type_check/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/type_check/typing_error_handler.py"
+    ],
+    "target_symbols": [
+      "handle_accept_base"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/type_check/helpers.py"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `reset_logging` from tests/test_logging.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_logging.py"
+    ],
+    "target_symbols": [
+      "reset_logging"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `bp_forbidden` function in tests/test_blueprints.py. Create tests/test_test_blueprints.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_blueprints.py"
+    ],
+    "target_symbols": [
+      "bp_forbidden"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_blueprints.py"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_add_template_filter_with_name_and_template` function in tests/test_templating.py. Create tests/test_test_templating.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_templating.py"
+    ],
+    "target_symbols": [
+      "test_add_template_filter_with_name_and_template"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_templating.py"
+    }
+  },
+  {
+    "repo": "flask",
+    "project_id": 1,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `index` function in tests/test_templating.py. Create tests/test_test_templating.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/flask/tests/test_templating.py"
+    ],
+    "target_symbols": [
+      "index"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_templating.py"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in codes.is_client_error() in httpx/_status_codes.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_status_codes.py"
+    ],
+    "target_symbols": [
+      "codes.is_client_error"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_status_codes.py": [
+        67,
+        71
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def is_client_error(cls, value: int) -> bool:\n        \"\"\"\n        Returns `True` for 4xx status codes, `False` otherwise.\n        \"\"\"\n        return 400 <= value <= 499\n"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in RepeatAuth.__init__() in tests/client/test_auth.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/client/test_auth.py"
+    ],
+    "target_symbols": [
+      "RepeatAuth.__init__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/tests/client/test_auth.py": [
+        97,
+        98
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def __init__(self, repeat: int) -> None:\n        self.repeat = repeat\n"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in BaseTransport.__enter__() in httpx/_transports/base.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_transports/base.py"
+    ],
+    "target_symbols": [
+      "BaseTransport.__enter__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_transports/base.py": [
+        15,
+        16
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def __enter__(self: T) -> T:\n        return self\n"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `DeflateDecoder` class in httpx/_decoders.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_decoders.py"
+    ],
+    "target_symbols": [
+      "DeflateDecoder"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_decoders.py": [
+        56,
+        82
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "DeflateDecoder"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `UnattachedStream` class in httpx/_content.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_content.py"
+    ],
+    "target_symbols": [
+      "UnattachedStream"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_content.py": [
+        92,
+        104
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "UnattachedStream"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Proxy` class in httpx/_config.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_config.py"
+    ],
+    "target_symbols": [
+      "Proxy"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_config.py": [
+        201,
+        243
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Proxy"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/models/test_responses.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/models/test_responses.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/models/test_url.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/models/test_url.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/client/test_async_client.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/client/test_async_client.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "modify_method",
+    "prompt": "Modify BaseClient.event_hooks() in httpx/_client.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_client.py"
+    ],
+    "target_symbols": [
+      "BaseClient.event_hooks"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_client.py": [
+        266,
+        270
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "modify_method",
+    "prompt": "Modify AsyncClient._init_proxy_transport() in httpx/_client.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_client.py"
+    ],
+    "target_symbols": [
+      "AsyncClient._init_proxy_transport"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/httpx/httpx/_client.py": [
+        1454,
+        1472
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_get_invalid_url` to `test_get_invalid_url_v2` in tests/client/test_async_client.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/client/test_async_client.py"
+    ],
+    "target_symbols": [
+      "test_get_invalid_url"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_get_invalid_url",
+      "new_name": "test_get_invalid_url_v2"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_queryparam_add` to `test_queryparam_add_v2` in tests/models/test_queryparams.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/models/test_queryparams.py"
+    ],
+    "target_symbols": [
+      "test_queryparam_add"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_queryparam_add",
+      "new_name": "test_queryparam_add_v2"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_empty_aread` to `test_empty_aread_v2` in tests/models/test_responses.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/models/test_responses.py"
+    ],
+    "target_symbols": [
+      "test_empty_aread"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_empty_aread",
+      "new_name": "test_empty_aread_v2"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_response_fallback_to_utf8_encoding` from tests/models/test_responses.py to tests/models/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/models/test_responses.py"
+    ],
+    "target_symbols": [
+      "test_response_fallback_to_utf8_encoding"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/models/helpers.py"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_asgi_raw_path` from tests/test_asgi.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/test_asgi.py"
+    ],
+    "target_symbols": [
+      "test_asgi_raw_path"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_wsgi_exc` function in tests/test_wsgi.py. Create tests/test_test_wsgi.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/test_wsgi.py"
+    ],
+    "target_symbols": [
+      "test_wsgi_exc"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_wsgi.py"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_wsgi_http_error` function in tests/test_wsgi.py. Create tests/test_test_wsgi.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/test_wsgi.py"
+    ],
+    "target_symbols": [
+      "test_wsgi_http_error"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_wsgi.py"
+    }
+  },
+  {
+    "repo": "httpx",
+    "project_id": 2,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_url_copywith_query` function in tests/models/test_url.py. Create tests/test_test_url.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/httpx/tests/models/test_url.py"
+    ],
+    "target_symbols": [
+      "test_url_copywith_query"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_url.py"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Parameter.convert() in src/click/core.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/core.py"
+    ],
+    "target_symbols": [
+      "Parameter.convert"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/core.py": [
+        2367,
+        2368
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "            def convert(value: t.Any) -> t.Any:  # tuple[t.Any, ...]\n                return tuple(self.type(x, self, ctx) for x in check_iter(value))\n"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in ProgressBar.format_eta() in src/click/_termui_impl.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/_termui_impl.py"
+    ],
+    "target_symbols": [
+      "ProgressBar.format_eta"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/_termui_impl.py": [
+        166,
+        179
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def format_eta(self) -> str:\n        if self.eta_known:\n            t = int(self.eta)\n            seconds = t % 60\n            t //= 60\n            minutes = t % 60\n            t //= 60\n            hours = t % 24\n            t //= 24\n            if t > 0:\n                return f\"{t}d {hours:02}:{minutes:02}:{seconds:02}\"\n            else:\n                return f\"{hours:02}:{minutes:02}:{seconds:02}\"\n        return \"\"\n"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in CompletionItem.__getattr__() in src/click/shell_completion.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/shell_completion.py"
+    ],
+    "target_symbols": [
+      "CompletionItem.__getattr__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/shell_completion.py": [
+        90,
+        91
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def __getattr__(self, name: str) -> t.Any:\n        return self._info.get(name)\n"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `_Option` class in src/click/parser.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/parser.py"
+    ],
+    "target_symbols": [
+      "_Option"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/parser.py": [
+        127,
+        178
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "_Option"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `_ParsingState` class in src/click/parser.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/parser.py"
+    ],
+    "target_symbols": [
+      "_ParsingState"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/parser.py": [
+        212,
+        217
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "_ParsingState"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Tuple` class in src/click/types.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/types.py"
+    ],
+    "target_symbols": [
+      "Tuple"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/types.py": [
+        1060,
+        1109
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Tuple"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_options.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_options.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to examples/aliases/aliases.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/examples/aliases/aliases.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_utils.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_utils.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "modify_method",
+    "prompt": "Modify Option.get_help_record() in src/click/core.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/core.py"
+    ],
+    "target_symbols": [
+      "Option.get_help_record"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/core.py": [
+        2988,
+        3031
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "modify_method",
+    "prompt": "Modify BashComplete._check_version() in src/click/shell_completion.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/shell_completion.py"
+    ],
+    "target_symbols": [
+      "BashComplete._check_version"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/shell_completion.py": [
+        311,
+        341
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "modify_method",
+    "prompt": "Modify ProgressBar.__exit__() in src/click/_termui_impl.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/src/click/_termui_impl.py"
+    ],
+    "target_symbols": [
+      "ProgressBar.__exit__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/click/src/click/_termui_impl.py": [
+        120,
+        126
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `bdist` to `bdist_v2` in tests/test_chain.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_chain.py"
+    ],
+    "target_symbols": [
+      "bdist"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "bdist",
+      "new_name": "bdist_v2"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_dynamic_default_help_unset` to `test_dynamic_default_help_unset_v2` in tests/test_options.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_options.py"
+    ],
+    "target_symbols": [
+      "test_dynamic_default_help_unset"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_dynamic_default_help_unset",
+      "new_name": "test_dynamic_default_help_unset_v2"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `other_cmd` to `other_cmd_v2` in tests/test_commands.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_commands.py"
+    ],
+    "target_symbols": [
+      "other_cmd"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "other_cmd",
+      "new_name": "other_cmd_v2"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `sdist` from tests/test_chain.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_chain.py"
+    ],
+    "target_symbols": [
+      "sdist"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `foo` from tests/test_normalization.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_normalization.py"
+    ],
+    "target_symbols": [
+      "foo"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_fast_edit` function in tests/test_termui.py. Create tests/test_test_termui.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_termui.py"
+    ],
+    "target_symbols": [
+      "test_fast_edit"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_termui.py"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `rcli` function in tests/test_options.py. Create tests/test_test_options.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/tests/test_options.py"
+    ],
+    "target_symbols": [
+      "rcli"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_options.py"
+    }
+  },
+  {
+    "repo": "click",
+    "project_id": 3,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `cli` function in examples/validation/validation.py. Create tests/test_validation.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/click/examples/validation/validation.py"
+    ],
+    "target_symbols": [
+      "cli"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_validation.py"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in AnsiDecoder.__init__() in rich/ansi.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/ansi.py"
+    ],
+    "target_symbols": [
+      "AnsiDecoder.__init__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/ansi.py": [
+        123,
+        124
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def __init__(self) -> None:\n        self.style = Style.null()\n"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Live._enable_redirect_io() in rich/live.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/live.py"
+    ],
+    "target_symbols": [
+      "Live._enable_redirect_io"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/live.py": [
+        195,
+        203
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def _enable_redirect_io(self) -> None:\n        \"\"\"Enable redirecting of stdout / stderr.\"\"\"\n        if self.console.is_terminal or self.console.is_jupyter:\n            if self._redirect_stdout and not isinstance(sys.stdout, FileProxy):\n                self._restore_stdout = sys.stdout\n                sys.stdout = cast(\"TextIO\", FileProxy(self.console, sys.stdout))\n            if self._redirect_stderr and not isinstance(sys.stderr, FileProxy):\n                self._restore_stderr = sys.stderr\n                sys.stderr = cast(\"TextIO\", FileProxy(self.console, sys.stderr))\n"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Console._enter_buffer() in rich/console.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/console.py"
+    ],
+    "target_symbols": [
+      "Console._enter_buffer"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/console.py": [
+        819,
+        821
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def _enter_buffer(self) -> None:\n        \"\"\"Enter in to a buffer context, and buffer all output.\"\"\"\n        self._buffer_index += 1\n"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Console` class in rich/console.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/console.py"
+    ],
+    "target_symbols": [
+      "Console"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/console.py": [
+        587,
+        2616
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Console"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Lines` class in rich/containers.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/containers.py"
+    ],
+    "target_symbols": [
+      "Lines"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/containers.py": [
+        66,
+        167
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Lines"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Region` class in rich/region.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/region.py"
+    ],
+    "target_symbols": [
+      "Region"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/region.py": [
+        4,
+        10
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Region"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_log.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_log.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_block_bar.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_block_bar.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_style.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_style.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "modify_method",
+    "prompt": "Modify Style.on() in rich/style.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/style.py"
+    ],
+    "target_symbols": [
+      "Style.on"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/style.py": [
+        254,
+        269
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "modify_method",
+    "prompt": "Modify Layout.get() in rich/layout.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/layout.py"
+    ],
+    "target_symbols": [
+      "Layout.get"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/rich/rich/layout.py": [
+        198,
+        214
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_control_move` to `test_control_move_v2` in tests/test_control.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_control.py"
+    ],
+    "target_symbols": [
+      "test_control_move"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_control_move",
+      "new_name": "test_control_move_v2"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_show_cursor` to `test_show_cursor_v2` in tests/test_win32_console.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_win32_console.py"
+    ],
+    "target_symbols": [
+      "test_show_cursor"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_show_cursor",
+      "new_name": "test_show_cursor_v2"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `GetConsoleCursorInfo` to `GetConsoleCursorInfo_v2` in rich/_win32_console.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/rich/_win32_console.py"
+    ],
+    "target_symbols": [
+      "GetConsoleCursorInfo"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "GetConsoleCursorInfo",
+      "new_name": "GetConsoleCursorInfo_v2"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_rich_repr_positional_only` from tests/test_repr.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_repr.py"
+    ],
+    "target_symbols": [
+      "test_rich_repr_positional_only"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_add` from tests/test_style.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_style.py"
+    ],
+    "target_symbols": [
+      "test_add"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_set_title` function in tests/test_win32_console.py. Create tests/test_test_win32_console.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/tests/test_win32_console.py"
+    ],
+    "target_symbols": [
+      "test_set_title"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_win32_console.py"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `print_calendar` function in examples/print_calendar.py. Create tests/test_print_calendar.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/examples/print_calendar.py"
+    ],
+    "target_symbols": [
+      "print_calendar"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_print_calendar.py"
+    }
+  },
+  {
+    "repo": "rich",
+    "project_id": 4,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `hello` function in examples/suppress.py. Create tests/test_suppress.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/rich/examples/suppress.py"
+    ],
+    "target_symbols": [
+      "hello"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_suppress.py"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in UnicodeIO.seek() in tests/tests_tqdm.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_tqdm.py"
+    ],
+    "target_symbols": [
+      "UnicodeIO.seek"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_tqdm.py": [
+        117,
+        118
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def seek(self, offset):\n        self.cursor = offset\n"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in ObjectWrapper.__setattr__() in tqdm/utils.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/utils.py"
+    ],
+    "target_symbols": [
+      "ObjectWrapper.__setattr__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/utils.py": [
+        142,
+        143
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def __setattr__(self, name, value):\n        return setattr(self._wrapped, name, value)\n"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in TestTqdmLoggingHandler.test_should_not_swallow_certain_exceptions() in tests/tests_contrib_logging.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_contrib_logging.py"
+    ],
+    "target_symbols": [
+      "TestTqdmLoggingHandler.test_should_not_swallow_certain_exceptions"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_contrib_logging.py": [
+        60,
+        66
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def test_should_not_swallow_certain_exceptions(self, exception_class):\n        logger = logging.Logger('test')\n        ErrorRaisingTqdm.exception_class = exception_class\n        handler = TqdmLoggingHandler(ErrorRaisingTqdm)\n        logger.handlers = [handler]\n        with pytest.raises(exception_class):\n            logger.info('test')\n"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `tqdm_telegram` class in tqdm/contrib/telegram.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/contrib/telegram.py"
+    ],
+    "target_symbols": [
+      "tqdm_telegram"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/contrib/telegram.py": [
+        89,
+        143
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "tqdm_telegram"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `wrapper` class in benchmarks/benchmarks.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/benchmarks/benchmarks.py"
+    ],
+    "target_symbols": [
+      "wrapper"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/tqdm/benchmarks/benchmarks.py": [
+        41,
+        50
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "wrapper"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Time` class in tests/tests_synchronisation.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_synchronisation.py"
+    ],
+    "target_symbols": [
+      "Time"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_synchronisation.py": [
+        10,
+        33
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Time"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/tests_perf.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_perf.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tqdm/utils.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/utils.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/tests_pandas.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_pandas.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "modify_method",
+    "prompt": "Modify Bar.colour() in tqdm/std.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/std.py"
+    ],
+    "target_symbols": [
+      "Bar.colour"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/std.py": [
+        168,
+        183
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_threading` to `test_threading_v2` in tests/tests_tqdm.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_tqdm.py"
+    ],
+    "target_symbols": [
+      "test_threading"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_threading",
+      "new_name": "test_threading_v2"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `disp_len` to `disp_len_v2` in tqdm/utils.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/utils.py"
+    ],
+    "target_symbols": [
+      "disp_len"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "disp_len",
+      "new_name": "disp_len_v2"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_dynamic_min_iters` to `test_dynamic_min_iters_v2` in tests/tests_tqdm.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_tqdm.py"
+    ],
+    "target_symbols": [
+      "test_dynamic_min_iters"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_dynamic_min_iters",
+      "new_name": "test_dynamic_min_iters_v2"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `tqdm_notebook` from tqdm/__init__.py to tqdm/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tqdm/__init__.py"
+    ],
+    "target_symbols": [
+      "tqdm_notebook"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tqdm/helpers.py"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `progressbar_rate` from tests/tests_tqdm.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_tqdm.py"
+    ],
+    "target_symbols": [
+      "progressbar_rate"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_manual_basic_overhead` function in tests/tests_perf.py. Create tests/test_tests_perf.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_perf.py"
+    ],
+    "target_symbols": [
+      "test_manual_basic_overhead"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_tests_perf.py"
+    }
+  },
+  {
+    "repo": "tqdm",
+    "project_id": 5,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_si_format` function in tests/tests_tqdm.py. Create tests/test_tests_tqdm.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/tqdm/tests/tests_tqdm.py"
+    ],
+    "target_symbols": [
+      "test_si_format"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_tests_tqdm.py"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in AzureKeyVaultSettings.settings_customise_sources() in tests/test_source_azure_key_vault.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_azure_key_vault.py"
+    ],
+    "target_symbols": [
+      "AzureKeyVaultSettings.settings_customise_sources"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_azure_key_vault.py": [
+        227,
+        243
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "            def settings_customise_sources(\n                cls,\n                settings_cls: type[BaseSettings],\n                init_settings: PydanticBaseSettingsSource,\n                env_settings: PydanticBaseSettingsSource,\n                dotenv_settings: PydanticBaseSettingsSource,\n                file_secret_settings: PydanticBaseSettingsSource,\n            ) -> tuple[PydanticBaseSettingsSource, ...]:\n                return (\n                    AzureKeyVaultSettingsSource(\n                        settings_cls,\n                        'https://my-resource.vault.azure.net/',\n                        DefaultAzureCredential(),\n                        snake_case_conversion=True,\n                        env_prefix=env_prefix,\n                    ),\n                )\n"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Settings.settings_customise_sources() in tests/test_source_gcp_secret_manager.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_gcp_secret_manager.py"
+    ],
+    "target_symbols": [
+      "Settings.settings_customise_sources"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_gcp_secret_manager.py": [
+        247,
+        264
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "            def settings_customise_sources(\n                cls,\n                settings_cls: type[BaseSettings],\n                init_settings: PydanticBaseSettingsSource,\n                env_settings: PydanticBaseSettingsSource,\n                dotenv_settings: PydanticBaseSettingsSource,\n                file_secret_settings: PydanticBaseSettingsSource,\n            ) -> tuple[PydanticBaseSettingsSource, ...]:\n                google_secret_manager_settings = GoogleSecretManagerSettingsSource(\n                    settings_cls, secret_client=mock_secret_client\n                )\n                return (\n                    init_settings,\n                    env_settings,\n                    dotenv_settings,\n                    file_secret_settings,\n                    google_secret_manager_settings,\n                )\n"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Settings.settings_customise_sources() in tests/test_settings.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py"
+    ],
+    "target_symbols": [
+      "Settings.settings_customise_sources"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py": [
+        751,
+        754
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "        def settings_customise_sources(\n            cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings\n        ):\n            return env_settings, dotenv_settings, init_settings, file_secret_settings\n"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Settings` class in tests/test_settings.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py"
+    ],
+    "target_symbols": [
+      "Settings"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py": [
+        1751,
+        1754
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Settings"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `CircleInvalidSubModel` class in tests/test_source_cli.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_cli.py"
+    ],
+    "target_symbols": [
+      "CircleInvalidSubModel"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_cli.py": [
+        2553,
+        2554
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "CircleInvalidSubModel"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Settings` class in tests/test_settings.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py"
+    ],
+    "target_symbols": [
+      "Settings"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py": [
+        210,
+        212
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Settings"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_precedence_and_merging.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_precedence_and_merging.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_settings.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_source_cli.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_cli.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "modify_method",
+    "prompt": "Modify Settings.settings_customise_sources() in tests/test_source_yaml.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_yaml.py"
+    ],
+    "target_symbols": [
+      "Settings.settings_customise_sources"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_yaml.py": [
+        262,
+        270
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "modify_method",
+    "prompt": "Modify TestGoogleSecretManagerSettingsSource.test_settings_source_init() in tests/test_source_gcp_secret_manager.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_gcp_secret_manager.py"
+    ],
+    "target_symbols": [
+      "TestGoogleSecretManagerSettingsSource.test_settings_source_init"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_gcp_secret_manager.py": [
+        148,
+        157
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `secret_manager_mapping` to `secret_manager_mapping_v2` in tests/test_source_gcp_secret_manager.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_gcp_secret_manager.py"
+    ],
+    "target_symbols": [
+      "secret_manager_mapping"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "secret_manager_mapping",
+      "new_name": "secret_manager_mapping_v2"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `clean_env` to `clean_env_v2` in tests/test_settings.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py"
+    ],
+    "target_symbols": [
+      "clean_env"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "clean_env",
+      "new_name": "clean_env_v2"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_pyproject_toml_file_header` to `test_pyproject_toml_file_header_v2` in tests/test_source_pyproject_toml.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_pyproject_toml.py"
+    ],
+    "target_symbols": [
+      "test_pyproject_toml_file_header"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_pyproject_toml_file_header",
+      "new_name": "test_pyproject_toml_file_header_v2"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_cli_submodels_strip_annotated` from tests/test_source_cli.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_cli.py"
+    ],
+    "target_symbols": [
+      "test_cli_submodels_strip_annotated"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_cli_suppress` from tests/test_source_cli.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_cli.py"
+    ],
+    "target_symbols": [
+      "test_cli_suppress"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_cli_metavar_format` function in tests/test_source_cli.py. Create tests/test_test_source_cli.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_source_cli.py"
+    ],
+    "target_symbols": [
+      "test_cli_metavar_format"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_source_cli.py"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `import_azure_key_vault` function in pydantic_settings/sources/providers/azure.py. Create tests/test_azure.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/pydantic_settings/sources/providers/azure.py"
+    ],
+    "target_symbols": [
+      "import_azure_key_vault"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_azure.py"
+    }
+  },
+  {
+    "repo": "pydantic-settings",
+    "project_id": 6,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_secrets_path_invalid_json` function in tests/test_settings.py. Create tests/test_test_settings.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pydantic-settings/tests/test_settings.py"
+    ],
+    "target_symbols": [
+      "test_secrets_path_invalid_json"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_settings.py"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in TestFieldSerialization.test_time_field_format() in tests/test_serialization.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_serialization.py"
+    ],
+    "target_symbols": [
+      "TestFieldSerialization.test_time_field_format"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_serialization.py": [
+        653,
+        656
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def test_time_field_format(self, user):\n        fmt = \"%H:%M:%S\"\n        field = fields.Time(format=fmt)\n        assert field.serialize(\"birthtime\", user) == user.birthtime.strftime(fmt)\n"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in ExampleSchema.add_envelope() in tests/test_decorators.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_decorators.py"
+    ],
+    "target_symbols": [
+      "ExampleSchema.add_envelope"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_decorators.py": [
+        46,
+        48
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "        def add_envelope(self, data, many, **kwargs):\n            key = self.get_envelope_key(many)\n            return {key: data}\n"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Decimal._to_string() in src/marshmallow/fields.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/src/marshmallow/fields.py"
+    ],
+    "target_symbols": [
+      "Decimal._to_string"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/src/marshmallow/fields.py": [
+        1111,
+        1112
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def _to_string(self, value: decimal.Decimal) -> str:\n        return format(value, \"f\")\n"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `ParentSchema` class in tests/test_schema.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py"
+    ],
+    "target_symbols": [
+      "ParentSchema"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py": [
+        691,
+        696
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "ParentSchema"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `BlogDefaultSchema` class in tests/test_schema.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py"
+    ],
+    "target_symbols": [
+      "BlogDefaultSchema"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py": [
+        1865,
+        1866
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "BlogDefaultSchema"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `IPv4` class in src/marshmallow/fields.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/src/marshmallow/fields.py"
+    ],
+    "target_symbols": [
+      "IPv4"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/src/marshmallow/fields.py": [
+        1801,
+        1809
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "IPv4"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_validate.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_validate.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_schema.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "modify_method",
+    "prompt": "Modify TestLoadOnly.test_load_only() in tests/test_schema.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py"
+    ],
+    "target_symbols": [
+      "TestLoadOnly.test_load_only"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py": [
+        2475,
+        2479
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "modify_method",
+    "prompt": "Modify MySchema.validate_raw() in tests/test_decorators.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_decorators.py"
+    ],
+    "target_symbols": [
+      "MySchema.validate_raw"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_decorators.py": [
+        499,
+        503
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "modify_method",
+    "prompt": "Modify TestIncludeOption.test_included_fields_ordered_after_declared_fields() in tests/test_options.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_options.py"
+    ],
+    "target_symbols": [
+      "TestIncludeOption.test_included_fields_ordered_after_declared_fields"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_options.py": [
+        115,
+        140
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_decorator_error_handling_with_load_dict_error` to `test_decorator_error_handling_with_load_dict_error_v2` in tests/test_decorators.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_decorators.py"
+    ],
+    "target_symbols": [
+      "test_decorator_error_handling_with_load_dict_error"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_decorator_error_handling_with_load_dict_error",
+      "new_name": "test_decorator_error_handling_with_load_dict_error_v2"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_load_validation_error_stores_input_data_and_valid_data` to `test_load_validation_error_stores_input_data_and_valid_data_v2` in tests/test_schema.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py"
+    ],
+    "target_symbols": [
+      "test_load_validation_error_stores_input_data_and_valid_data"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_load_validation_error_stores_input_data_and_valid_data",
+      "new_name": "test_load_validation_error_stores_input_data_and_valid_data_v2"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_nested_only` to `test_nested_only_v2` in tests/test_schema.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py"
+    ],
+    "target_symbols": [
+      "test_nested_only"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_nested_only",
+      "new_name": "test_nested_only_v2"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_multiple_classes_with_all` from tests/test_registry.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_registry.py"
+    ],
+    "target_symbols": [
+      "test_multiple_classes_with_all"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_field_aliases` from tests/test_fields.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_fields.py"
+    ],
+    "target_symbols": [
+      "test_field_aliases"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_nested_only_empty_inheritance` function in tests/test_schema.py. Create tests/test_test_schema.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/tests/test_schema.py"
+    ],
+    "target_symbols": [
+      "test_nested_only_empty_inheritance"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_schema.py"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `get_quote` function in examples/flask_example.py. Create tests/test_flask_example.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/examples/flask_example.py"
+    ],
+    "target_symbols": [
+      "get_quote"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_flask_example.py"
+    }
+  },
+  {
+    "repo": "marshmallow",
+    "project_id": 7,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `ensure_text_type` function in src/marshmallow/utils.py. Create tests/test_utils.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/marshmallow/src/marshmallow/utils.py"
+    ],
+    "target_symbols": [
+      "ensure_text_type"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_utils.py"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in HookImpl.__init__() in src/pluggy/_hooks.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/src/pluggy/_hooks.py"
+    ],
+    "target_symbols": [
+      "HookImpl.__init__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pluggy/src/pluggy/_hooks.py": [
+        656,
+        690
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def __init__(\n        self,\n        plugin: _Plugin,\n        plugin_name: str,\n        function: _HookImplFunction[object],\n        hook_impl_opts: HookimplOpts,\n    ) -> None:\n        \"\"\":meta private:\"\"\"\n        #: The hook implementation function.\n        self.function: Final = function\n        argnames, kwargnames = varnames(self.function)\n        #: The positional parameter names of ``function```.\n        self.argnames: Final = argnames\n        #: The keyword parameter names of ``function```.\n        self.kwargnames: Final = kwargnames\n        #: The plugin which defined this hook implementation.\n        self.plugin: Final = plugin\n        #: The :class:`HookimplOpts` used to configure this hook implementation.\n        self.opts: Final = hook_impl_opts\n        #: The name of the plugin which defined this hook implementation.\n        self.plugin_name: Final = plugin_name\n        #: Whether the hook implementation is a :ref:`wrapper <hookwrapper>`.\n        self.wrapper: Final = hook_impl_opts[\"wrapper\"]\n        #: Whether the hook implementation is an :ref:`old-style wrapper\n        #: <old_style_hookwrappers>`.\n        self.hookwrapper: Final = hook_impl_opts[\"hookwrapper\"]\n        #: Whether validation against a hook specification is :ref:`optional\n        #: <optionalhook>`.\n        self.optionalhook: Final = hook_impl_opts[\"optionalhook\"]\n        #: Whether to try to order this hook implementation :ref:`first\n        #: <callorder>`.\n        self.tryfirst: Final = hook_impl_opts[\"tryfirst\"]\n        #: Whether to try to order this hook implementation :ref:`last\n        #: <callorder>`.\n        self.trylast: Final = hook_impl_opts[\"trylast\"]\n"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Result.from_call() in src/pluggy/_result.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/src/pluggy/_result.py"
+    ],
+    "target_symbols": [
+      "Result.from_call"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pluggy/src/pluggy/_result.py": [
+        57,
+        65
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def from_call(cls, func: Callable[[], ResultType]) -> Result[ResultType]:\n        \"\"\":meta private:\"\"\"\n        __tracebackhide__ = True\n        result = exception = None\n        try:\n            result = func()\n        except BaseException as exc:\n            exception = exc\n        return cls(result, exception)\n"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in PluginWrap.__init__() in testing/benchmark.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/benchmark.py"
+    ],
+    "target_symbols": [
+      "PluginWrap.__init__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/benchmark.py": [
+        91,
+        92
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "        def __init__(self, num: int) -> None:\n            self.num = num\n"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Hooks` class in testing/test_pluginmanager.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_pluginmanager.py"
+    ],
+    "target_symbols": [
+      "Hooks"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_pluginmanager.py": [
+        412,
+        415
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Hooks"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `HookSpec` class in testing/test_hookcaller.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_hookcaller.py"
+    ],
+    "target_symbols": [
+      "HookSpec"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_hookcaller.py": [
+        305,
+        316
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "HookSpec"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `PluginNo` class in testing/test_pluginmanager.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_pluginmanager.py"
+    ],
+    "target_symbols": [
+      "PluginNo"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_pluginmanager.py": [
+        468,
+        469
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "PluginNo"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to scripts/release.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/scripts/release.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to testing/test_multicall.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_multicall.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to testing/test_hookcaller.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_hookcaller.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `he_method1_a` to `he_method1_a_v2` in testing/test_hookcaller.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_hookcaller.py"
+    ],
+    "target_symbols": [
+      "he_method1_a"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "he_method1_a",
+      "new_name": "he_method1_a_v2"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `wrappers` to `wrappers_v2` in testing/benchmark.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/benchmark.py"
+    ],
+    "target_symbols": [
+      "wrappers"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "wrappers",
+      "new_name": "wrappers_v2"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `m1` from testing/test_multicall.py to testing/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_multicall.py"
+    ],
+    "target_symbols": [
+      "m1"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "testing/helpers.py"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_wrapper` from testing/test_multicall.py to testing/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_multicall.py"
+    ],
+    "target_symbols": [
+      "test_wrapper"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "testing/helpers.py"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `m1` function in testing/test_hookcaller.py. Create tests/test_test_hookcaller.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_hookcaller.py"
+    ],
+    "target_symbols": [
+      "m1"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_hookcaller.py"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `MC` function in testing/test_multicall.py. Create tests/test_test_multicall.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_multicall.py"
+    ],
+    "target_symbols": [
+      "MC"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_multicall.py"
+    }
+  },
+  {
+    "repo": "pluggy",
+    "project_id": 8,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `wrap_path2` function in testing/test_multicall.py. Create tests/test_test_multicall.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/pluggy/testing/test_multicall.py"
+    ],
+    "target_symbols": [
+      "wrap_path2"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_multicall.py"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Logger.__repr__() in loguru/_logger.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_logger.py"
+    ],
+    "target_symbols": [
+      "Logger.__repr__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_logger.py": [
+        258,
+        259
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def __repr__(self):\n        return \"<loguru.logger handlers=%r>\" % list(self._core.handlers.values())\n"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in RotationTime.__call__() in loguru/_file_sink.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_file_sink.py"
+    ],
+    "target_symbols": [
+      "RotationTime.__call__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_file_sink.py": [
+        114,
+        154
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "        def __call__(self, message, file):\n            record_time = message.record[\"time\"]\n\n            if self._limit is None:\n                filepath = os.path.realpath(file.name)\n                creation_time = get_ctime(filepath)\n                set_ctime(filepath, creation_time)\n                start_time = datetime.datetime.fromtimestamp(\n                    creation_time, tz=datetime.timezone.utc\n                )\n\n                time_init = self._time_init\n\n                if time_init is None:\n                    limit = start_time.astimezone(record_time.tzinfo).replace(tzinfo=None)\n                    limit = self._step_forward(limit)\n                else:\n                    tzinfo = record_time.tzinfo if time_init.tzinfo is None else time_init.tzinfo\n                    limit = start_time.astimezone(tzinfo).replace(\n                        hour=time_init.hour,\n                        minute=time_init.minute,\n                        second=time_init.second,\n                        microsecond=time_init.microsecond,\n                    )\n\n                    if limit <= start_time:\n                        limit = self._step_forward(limit)\n\n                    if time_init.tzinfo is None:\n                        limit = limit.replace(tzinfo=None)\n\n                self._limit = limit\n\n            if self._limit.tzinfo is None:\n                record_time = record_time.replace(tzinfo=None)\n\n            if record_time >= self._limit:\n                while self._limit <= record_time:\n                    self._limit = self._step_forward(self._limit)\n                return True\n            return False\n"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in Sink.__init__() in tests/test_add_sinks.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_add_sinks.py"
+    ],
+    "target_symbols": [
+      "Sink.__init__"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_add_sinks.py": [
+        184,
+        185
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "        def __init__(self):\n            self.flush = flush\n"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Foo` class in tests/test_exceptions_catch.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_exceptions_catch.py"
+    ],
+    "target_symbols": [
+      "Foo"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_exceptions_catch.py": [
+        500,
+        503
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Foo"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Retention` class in loguru/_file_sink.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_file_sink.py"
+    ],
+    "target_symbols": [
+      "Retention"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_file_sink.py": [
+        70,
+        84
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Retention"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Sink` class in tests/test_add_sinks.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_add_sinks.py"
+    ],
+    "target_symbols": [
+      "Sink"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_add_sinks.py": [
+        200,
+        205
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Sink"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_multiprocessing.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_multiprocessing.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/test_coroutine_sink.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_coroutine_sink.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to tests/exceptions/source/modern/decorate_async_generator.py. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/exceptions/source/modern/decorate_async_generator.py"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "modify_method",
+    "prompt": "Modify CallableSink.tasks_to_complete() in loguru/_simple_sinks.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_simple_sinks.py"
+    ],
+    "target_symbols": [
+      "CallableSink.tasks_to_complete"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/loguru/loguru/_simple_sinks.py": [
+        233,
+        241
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_exception_not_raising` to `test_exception_not_raising_v2` in tests/test_exceptions_catch.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_exceptions_catch.py"
+    ],
+    "target_symbols": [
+      "test_exception_not_raising"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_exception_not_raising",
+      "new_name": "test_exception_not_raising_v2"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_pickling_file_handler_retention` to `test_pickling_file_handler_retention_v2` in tests/test_pickling.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_pickling.py"
+    ],
+    "target_symbols": [
+      "test_pickling_file_handler_retention"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_pickling_file_handler_retention",
+      "new_name": "test_pickling_file_handler_retention_v2"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `worker` from tests/test_coroutine_sink.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_coroutine_sink.py"
+    ],
+    "target_symbols": [
+      "worker"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `test_invalid_value_rotation_duration` from tests/test_filesink_rotation.py to tests/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_filesink_rotation.py"
+    ],
+    "target_symbols": [
+      "test_invalid_value_rotation_duration"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "tests/helpers.py"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_renaming_rotation_dest_exists_with_time` function in tests/test_filesink_rotation.py. Create tests/test_test_filesink_rotation.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_filesink_rotation.py"
+    ],
+    "target_symbols": [
+      "test_renaming_rotation_dest_exists_with_time"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_filesink_rotation.py"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_invalid_format_builtin` function in tests/test_add_option_format.py. Create tests/test_test_add_option_format.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_add_option_format.py"
+    ],
+    "target_symbols": [
+      "test_invalid_format_builtin"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_add_option_format.py"
+    }
+  },
+  {
+    "repo": "loguru",
+    "project_id": 9,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `test_complete_without_tasks` function in tests/test_coroutine_sink.py. Create tests/test_test_coroutine_sink.py with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/loguru/tests/test_coroutine_sink.py"
+    ],
+    "target_symbols": [
+      "test_complete_without_tasks"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_test_coroutine_sink.py"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in TestJSONTestSuiteParsing.test_n_object_garbage_at_end() in test/test_parsing.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_parsing.py"
+    ],
+    "target_symbols": [
+      "TestJSONTestSuiteParsing.test_n_object_garbage_at_end"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_parsing.py": [
+        1131,
+        1135
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def test_n_object_garbage_at_end(self):\n        \"\"\"\n        n_object_garbage_at_end.json\n        \"\"\"\n        self._run_fail_json(\"n_object_garbage_at_end.json\")\n"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in TestJSONTestSuiteParsing.test_n_object_unquoted_key() in test/test_parsing.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_parsing.py"
+    ],
+    "target_symbols": [
+      "TestJSONTestSuiteParsing.test_n_object_unquoted_key"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_parsing.py": [
+        1247,
+        1251
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def test_n_object_unquoted_key(self):\n        \"\"\"\n        n_object_unquoted_key.json\n        \"\"\"\n        self._run_fail_json(\"n_object_unquoted_key.json\")\n"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "bug_fix",
+    "prompt": "There's a bug in TestJSONTestSuiteParsing.test_n_array_star_inside() in test/test_parsing.py. The method doesn't handle None values correctly \u2014 it crashes with AttributeError when a None argument is passed. Fix it.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_parsing.py"
+    ],
+    "target_symbols": [
+      "TestJSONTestSuiteParsing.test_n_array_star_inside"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_parsing.py": [
+        741,
+        745
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "original_code": "    def test_n_array_star_inside(self):\n        \"\"\"\n        n_array_star_inside.json\n        \"\"\"\n        self._run_fail_json(\"n_array_star_inside.json\")\n"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `DataTypeU8` class in src/serialize/per_type/numpy.rs. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/per_type/numpy.rs"
+    ],
+    "target_symbols": [
+      "DataTypeU8"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/per_type/numpy.rs": [
+        836,
+        838
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "DataTypeU8"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `TestIndentedOutput` class in test/test_indent.py. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_indent.py"
+    ],
+    "target_symbols": [
+      "TestIndentedOutput"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_indent.py": [
+        13,
+        126
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "TestIndentedOutput"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_method",
+    "prompt": "Add a `to_dict()` method to the `Date` class in src/serialize/per_type/datetime.rs. It should return a dictionary representation of the instance's public attributes.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/per_type/datetime.rs"
+    ],
+    "target_symbols": [
+      "Date"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/per_type/datetime.rs": [
+        34,
+        36
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "class_name": "Date"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to src/deserialize/backend/yyjson.rs. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/deserialize/backend/yyjson.rs"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to include/yyjson/yyjson.h. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/include/yyjson/yyjson.h"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_function",
+    "prompt": "Add a `validate_input(data: dict) -> bool` function to src/serialize/per_type/numpy.rs. It should check that 'name' key exists and is a non-empty string, and 'value' key exists and is a positive number. Return True if valid, False otherwise.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/per_type/numpy.rs"
+    ],
+    "target_symbols": [],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "add_content_after_line",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "modify_method",
+    "prompt": "Modify TestJsonChecker.test_roundtrip024() in test/test_roundtrip.py to add logging. Add a `logger.debug()` call at the start of the method that logs the method name and its arguments.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_roundtrip.py"
+    ],
+    "target_symbols": [
+      "TestJsonChecker.test_roundtrip024"
+    ],
+    "target_lines": {
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_roundtrip.py": [
+        156,
+        160
+      ]
+    },
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "edit_symbol",
+      "step_complete"
+    ],
+    "extra": {}
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `raise_dumps_exception_fixed` to `raise_dumps_exception_fixed_v2` in src/exception.rs and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/exception.rs"
+    ],
+    "target_symbols": [
+      "raise_dumps_exception_fixed"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "raise_dumps_exception_fixed",
+      "new_name": "raise_dumps_exception_fixed_v2"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `serialize_i32` to `serialize_i32_v2` in src/serialize/writer/json.rs and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/writer/json.rs"
+    ],
+    "target_symbols": [
+      "serialize_i32"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "serialize_i32",
+      "new_name": "serialize_i32_v2"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "refactor_rename",
+    "prompt": "Rename the function `test_0x03` to `test_0x03_v2` in test/test_escape.py and update all references across the project.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/test/test_escape.py"
+    ],
+    "target_symbols": [
+      "test_0x03"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "find_references",
+      "think",
+      "rename_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "old_name": "test_0x03",
+      "new_name": "test_0x03_v2"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `pyunicode_ascii` from src/ffi/pystrref/pyunicode_new.rs to src/ffi/pystrref/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/ffi/pystrref/pyunicode_new.rs"
+    ],
+    "target_symbols": [
+      "pyunicode_ascii"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "src/ffi/pystrref/helpers.py"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "refactor_move",
+    "prompt": "Move the function `write_i64` from src/serialize/writer/formatter.rs to src/serialize/writer/helpers.py. Update all imports.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/writer/formatter.rs"
+    ],
+    "target_symbols": [
+      "write_i64"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "think",
+      "move_symbol",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "target_file": "src/serialize/writer/helpers.py"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `serialize_struct_variant` function in src/serialize/writer/json.rs. Create tests/test_json.rs with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/src/serialize/writer/json.rs"
+    ],
+    "target_symbols": [
+      "serialize_struct_variant"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_json.rs"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `yyjson_is_str` function in include/yyjson/yyjson.h. Create tests/test_yyjson.h with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/include/yyjson/yyjson.h"
+    ],
+    "target_symbols": [
+      "yyjson_is_str"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_yyjson.h"
+    }
+  },
+  {
+    "repo": "orjson",
+    "project_id": 10,
+    "scenario_type": "add_test",
+    "prompt": "Write unit tests for the `yyjson_ptr_get_num` function in include/yyjson/yyjson.h. Create tests/test_yyjson.h with at least 3 test cases covering normal input, edge cases, and error handling.",
+    "target_files": [
+      "/home/andres/infinidev/finetune/repos/orjson/include/yyjson/yyjson.h"
+    ],
+    "target_symbols": [
+      "yyjson_ptr_get_num"
+    ],
+    "target_lines": {},
+    "expected_tools": [
+      "help",
+      "read_file",
+      "get_symbol_code",
+      "think",
+      "create_file",
+      "execute_command",
+      "step_complete"
+    ],
+    "extra": {
+      "test_file": "tests/test_yyjson.h"
+    }
+  }
+]

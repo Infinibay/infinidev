@@ -20,6 +20,7 @@ except ImportError:
     _repair_json = None
 
 from infinidev.engine.base import AgentEngine
+from infinidev.engine.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.llm_client import (
     call_llm as _call_llm,
     is_malformed_tool_call as _is_malformed_tool_call,
@@ -267,6 +268,70 @@ def _extract_tool_error(result: str) -> str:
     return ""
 
 
+def _extract_tool_output_preview(tool_name: str, result: str) -> str:
+    """Extract a short preview of tool output for display in the CLI.
+
+    Shows the last few lines for execute_command, line count for reads,
+    result count for searches.  Returns empty string if nothing useful.
+    """
+    if not result or not result.strip():
+        return ""
+    stripped = result.strip()
+    max_lines = 4
+    max_width = 100
+
+    # Skip errors (handled separately)
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict) and "error" in parsed:
+                return ""
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if tool_name == "execute_command":
+        # Parse JSON result to extract stdout/stderr
+        if stripped.startswith("{"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    stdout = parsed.get("stdout", "").rstrip()
+                    stderr = parsed.get("stderr", "").rstrip()
+                    output = stdout or stderr
+                    if not output:
+                        exit_code = parsed.get("exit_code", 0)
+                        return f"(exit {exit_code})" if exit_code else ""
+                    return output
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Fallback: raw text
+        return stripped
+
+    if tool_name in ("read_file", "partial_read"):
+        lines = stripped.splitlines()
+        return f"({len(lines)} lines)" if len(lines) > 3 else ""
+
+    if tool_name in ("create_file",):
+        if len(stripped) < max_width:
+            return stripped
+        return ""
+
+    if tool_name in ("replace_lines",):
+        if len(stripped) < max_width:
+            return stripped
+        return ""
+
+    if tool_name in ("code_search", "glob", "search_symbols", "find_references"):
+        lines = stripped.splitlines()
+        if len(lines) > 3:
+            return f"({len(lines)} results)"
+        elif lines:
+            return "\n".join(l[:max_width] for l in lines[:3])
+        return ""
+
+    return ""
+
+
 # ── Opened files cache helper ──────────────────────────────────────────────
 
 def _reindex_if_enabled(file_path: str) -> None:
@@ -366,12 +431,18 @@ def _update_opened_files_cache(
 
 # ── File change tracking helpers ────────────────────────────────────────────
 
-_FILE_CHANGE_TOOLS = {"edit_file", "write_file", "multi_edit_file", "apply_patch"}
+_FILE_CHANGE_TOOLS = {
+    "edit_file", "write_file", "multi_edit_file", "apply_patch",
+    "create_file", "replace_lines",
+    "edit_symbol", "add_symbol", "remove_symbol",
+}
 
 # Tools that modify state — these act as barriers in parallel execution.
 # All read-only tools before a write are executed in parallel, then the write runs alone.
 _WRITE_TOOLS = {
     "edit_file", "write_file", "multi_edit_file", "apply_patch",
+    "create_file", "replace_lines",
+    "edit_symbol", "add_symbol", "remove_symbol",
     "git_commit", "git_branch", "git_push",
     "execute_command",  # Commands can have side effects
     "record_finding", "update_finding", "delete_finding",
@@ -415,6 +486,7 @@ def _batch_tool_calls(calls: list) -> list[list]:
 def _execute_tool_calls_parallel(
     batch: list,
     tool_dispatch: dict,
+    hook_metadata: dict[str, Any] | None = None,
 ) -> list[tuple]:
     """Execute a batch of read-only tool calls in parallel.
 
@@ -426,6 +498,7 @@ def _execute_tool_calls_parallel(
         for tc in batch:
             result = execute_tool_call(
                 tool_dispatch, tc.function.name, tc.function.arguments,
+                hook_metadata=hook_metadata,
             )
             results.append((tc, result))
         return results
@@ -435,6 +508,7 @@ def _execute_tool_calls_parallel(
     def _exec(tc):
         result = execute_tool_call(
             tool_dispatch, tc.function.name, tc.function.arguments,
+            hook_metadata=hook_metadata,
         )
         return (tc, result)
 
@@ -456,14 +530,14 @@ _MAX_TRACK_FILE_SIZE = 1_000_000  # 1 MB — skip tracking larger files
 
 
 def _extract_file_path_from_args(tool_name: str, arguments: str | dict) -> str | None:
-    """Extract the file path from edit_file / write_file arguments."""
+    """Extract the file path from tool arguments."""
     try:
         args = json.loads(arguments) if isinstance(arguments, str) else arguments
     except (json.JSONDecodeError, TypeError):
         return None
     if not isinstance(args, dict):
         return None
-    return args.get("path")
+    return args.get("file_path") or args.get("path")
 
 
 def _capture_pre_content(
@@ -1155,6 +1229,15 @@ class LoopEngine(AgentEngine):
         self._last_file_tracker: FileChangeTracker | None = None
         self._nudge_threshold_override: int | None = None
         self._summarizer_override: bool | None = None
+        self._cancel_event: __import__('threading').Event = __import__('threading').Event()
+
+    def cancel(self) -> None:
+        """Signal the engine to stop after the current tool call."""
+        self._cancel_event.set()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancel_event.is_set()
 
     def get_changed_files_summary(self) -> str:
         """Return a summary of files changed in the last execution.
@@ -1334,8 +1417,22 @@ class LoopEngine(AgentEngine):
 
         consecutive_all_done = 0  # Safety: terminate after 2 consecutive all-done iterations
 
+        self._cancel_event.clear()
+
+        _hook_manager.dispatch(_HookContext(
+            event=_HookEvent.LOOP_START,
+            metadata={"task_prompt": task_prompt, "tools": tools, "state": state},
+            project_id=agent.project_id, agent_id=agent.agent_id,
+        ))
+
         # --- Outer loop (plan-level) ---
         for iteration in range(start_iteration, max_iterations):
+            if self._cancel_event.is_set():
+                logger.info("LoopEngine: cancelled by user")
+                _emit_log("info", f"{_YELLOW}⚠ Task cancelled by user{_RESET}",
+                          project_id=agent.project_id, agent_id=agent.agent_id)
+                break
+
             state.iteration_count = iteration + 1
 
             # Apply history window
@@ -1376,26 +1473,13 @@ class LoopEngine(AgentEngine):
                 active_desc = f"Continuing ({done_steps[-1].description})" if done_steps else "Working..."
             if verbose:
                 _log_step_start(iteration + 1, active_desc)
-                # _log_prompt(user_prompt)  # Silenced for CLI
 
-            # Emit step-start event so UI shows the current step immediately
-            _emit_loop_event("loop_step_update", agent.project_id, agent.agent_id, {
-                "agent_id": agent.agent_id,
-                "agent_name": agent_name,
-                "iteration": iteration + 1,
-                "step_description": active_desc,
-                "status": "active",
-                "summary": "",
-                "plan_steps": [
-                    {"index": s.index, "description": s.description, "status": s.status}
-                    for s in state.plan.steps
-                ],
-                "tool_calls_step": 0,
-                "tool_calls_total": state.total_tool_calls,
-                "tokens_total": state.total_tokens,
-                "prompt_tokens": state.last_prompt_tokens,
-                "completion_tokens": state.last_completion_tokens,
-            })
+            # Emit step-start via hook (ui_hooks translates to EventBus)
+            _hook_manager.dispatch(_HookContext(
+                event=_HookEvent.PRE_STEP,
+                metadata={"iteration": iteration, "state": state, "plan": state.plan, "agent_name": agent_name},
+                project_id=agent.project_id, agent_id=agent.agent_id,
+            ))
 
             # --- Inner loop (function calling within one step) ---
             step_result: StepResult | None = None
@@ -1566,17 +1650,20 @@ class LoopEngine(AgentEngine):
                         else:
                             regular_calls.append(tc)
 
-                    # Process think calls (emit reasoning to chat, don't count as tool call)
+                    # Process think calls (dispatch via hook, don't count as tool call)
                     for tk in think_calls:
                         try:
                             tk_args = _safe_json_loads(tk.function.arguments) if isinstance(tk.function.arguments, str) else (tk.function.arguments or {})
                             reasoning = tk_args.get("reasoning", "").strip()
                             if reasoning:
-                                if verbose:
-                                    _log(f"  {_DIM}💭 {reasoning[:200]}{_RESET}")
-                                _emit_loop_event("loop_think", agent.project_id, agent.agent_id, {
-                                    "reasoning": reasoning,
-                                })
+                                _hook_manager.dispatch(_HookContext(
+                                    event=_HookEvent.POST_TOOL,
+                                    tool_name="think",
+                                    arguments=tk_args,
+                                    result=reasoning,
+                                    project_id=agent.project_id,
+                                    agent_id=agent.agent_id,
+                                ))
                         except (json.JSONDecodeError, AttributeError):
                             pass
 
@@ -1630,6 +1717,15 @@ class LoopEngine(AgentEngine):
                         # Collect tool results for both modes
                         # Batch tool calls: consecutive reads run in parallel, writes are barriers
                         tool_results_text: list[str] = []  # For manual mode
+                        # Base metadata for tool hooks (call_num updated per-tool)
+                        _tool_hook_meta = {
+                            "agent_name": agent_name,
+                            "iteration": iteration,
+                            "verbose": verbose,
+                            "tokens_total": state.total_tokens,
+                            "prompt_tokens": state.last_prompt_tokens,
+                            "completion_tokens": state.last_completion_tokens,
+                        }
                         batches = _batch_tool_calls(regular_calls)
 
                         for batch in batches:
@@ -1637,17 +1733,26 @@ class LoopEngine(AgentEngine):
 
                             if is_parallel:
                                 # Execute read-only batch in parallel
-                                batch_results = _execute_tool_calls_parallel(batch, tool_dispatch)
+                                _tool_hook_meta["call_num"] = action_tool_calls + 1
+                                _tool_hook_meta["total_calls"] = state.total_tool_calls + 1
+                                _tool_hook_meta["project_id"] = agent.project_id
+                                _tool_hook_meta["agent_id"] = agent.agent_id
+                                batch_results = _execute_tool_calls_parallel(batch, tool_dispatch, hook_metadata=_tool_hook_meta)
                             else:
                                 # Sequential execution (single tool or write)
                                 batch_results = []
-                                for tc in batch:
+                                for _bi, tc in enumerate(batch):
                                     # Pre-hook BEFORE execution for file changes
                                     _pre = _capture_pre_content(
                                         tc.function.name, tc.function.arguments, file_tracker,
                                     )
+                                    _tool_hook_meta["call_num"] = action_tool_calls + _bi + 1
+                                    _tool_hook_meta["total_calls"] = state.total_tool_calls + _bi + 1
+                                    _tool_hook_meta["project_id"] = agent.project_id
+                                    _tool_hook_meta["agent_id"] = agent.agent_id
                                     result = execute_tool_call(
                                         tool_dispatch, tc.function.name, tc.function.arguments,
+                                        hook_metadata=_tool_hook_meta,
                                     )
                                     # Post-hook AFTER execution
                                     _maybe_emit_file_change(
@@ -1658,17 +1763,9 @@ class LoopEngine(AgentEngine):
                                     batch_results.append((tc, result))
 
                             # Process results from the batch
+                            if self._cancel_event.is_set():
+                                break
                             for tc, result in batch_results:
-                                # Intercept send_message: emit to TUI chat
-                                if tc.function.name == "send_message":
-                                    try:
-                                        _msg_args = _safe_json_loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
-                                        _emit_loop_event("loop_user_message", agent.project_id, agent.agent_id, {
-                                            "message": _msg_args.get("message", ""),
-                                        })
-                                    except Exception:
-                                        pass
-
                                 # Detect errors / hallucinated tools and log visibly
                                 _tool_error = _extract_tool_error(result)
 
@@ -1724,29 +1821,6 @@ class LoopEngine(AgentEngine):
 
                                 # Tick opened files cache TTL
                                 state.tick_opened_files(1)
-
-                                tool_detail = _extract_tool_detail(tc.function.name, tc.function.arguments)
-
-                                if verbose:
-                                    _log_tool(agent_name, iteration + 1, tc.function.name, action_tool_calls, state.total_tool_calls)
-                                    if tool_detail:
-                                        _log(f"{_BLUE}│{_RESET}     {_DIM}{tool_detail}{_RESET}")
-                                    if _tool_error:
-                                        _log(f"{_BLUE}│{_RESET}     {_RED}✗ {_tool_error}{_RESET}")
-
-                            _emit_loop_event("loop_tool_call", agent.project_id, agent.agent_id, {
-                                "agent_id": agent.agent_id,
-                                "agent_name": agent_name,
-                                "tool_name": tc.function.name,
-                                "tool_detail": tool_detail,
-                                "tool_error": _tool_error,
-                                "call_num": action_tool_calls,
-                                "total_calls": state.total_tool_calls,
-                                "iteration": iteration + 1,
-                                "tokens_total": state.total_tokens,
-                                "prompt_tokens": state.last_prompt_tokens,
-                                "completion_tokens": state.last_completion_tokens,
-                            })
 
                         # Manual mode: send all tool results as a single user message
                         if manual_tc:
@@ -1913,12 +1987,14 @@ class LoopEngine(AgentEngine):
                     if _text_retries < _MAX_TEXT_RETRIES:
                         # Show the reasoning to the user (like a think call)
                         if content:
-                            preview = content[:200] + ("..." if len(content) > 200 else "")
-                            if verbose:
-                                _log(f"  {_DIM}💭 {preview}{_RESET}")
-                            _emit_loop_event("loop_think", agent.project_id, agent.agent_id, {
-                                "reasoning": content,
-                            })
+                            _hook_manager.dispatch(_HookContext(
+                                event=_HookEvent.POST_TOOL,
+                                tool_name="think",
+                                arguments={"reasoning": content},
+                                result=content,
+                                project_id=agent.project_id,
+                                agent_id=agent.agent_id,
+                            ))
 
                         # Keep the full text as assistant message in context
                         # (the model may need its own reasoning for the next call)
@@ -1985,6 +2061,13 @@ class LoopEngine(AgentEngine):
                         f"{_YELLOW}⚠ Override: status='done' but {pending_count} steps pending → continue{_RESET}",
                         project_id=agent.project_id, agent_id=agent.agent_id,
                     )
+
+            # --- Step transition hook ---
+            _hook_manager.dispatch(_HookContext(
+                event=_HookEvent.STEP_TRANSITION,
+                metadata={"step_result": step_result, "plan": state.plan, "iteration": iteration},
+                project_id=agent.project_id, agent_id=agent.agent_id,
+            ))
 
             # --- Plan management ---
             # If we don't have a plan yet, use next_steps from step_result to create one
@@ -2057,31 +2140,19 @@ class LoopEngine(AgentEngine):
                 _log_step_done(iteration + 1, step_result.status, step_result.summary, action_tool_calls, state.total_tokens)
                 _log_plan(state.plan)
 
-            # Emit step-done update to UI
-            done_steps = [s for s in state.plan.steps if s.status == "done"]
-            if done_steps:
-                done_desc = done_steps[-1].description
-            elif step_result.summary:
-                done_desc = step_result.summary[:120]
-            else:
-                done_desc = active_desc
-            _emit_loop_event("loop_step_update", agent.project_id, agent.agent_id, {
-                "agent_id": agent.agent_id,
-                "agent_name": agent_name,
-                "iteration": iteration + 1,
-                "step_description": done_desc,
-                "status": step_result.status,
-                "summary": step_result.summary[:200],
-                "plan_steps": [
-                    {"index": s.index, "description": s.description, "status": s.status}
-                    for s in state.plan.steps
-                ],
-                "tool_calls_step": action_tool_calls,
-                "tool_calls_total": state.total_tool_calls,
-                "tokens_total": state.total_tokens,
-                "prompt_tokens": state.last_prompt_tokens,
-                "completion_tokens": state.last_completion_tokens,
-            })
+            # Emit step-done via hook (ui_hooks translates to EventBus)
+            _hook_manager.dispatch(_HookContext(
+                event=_HookEvent.POST_STEP,
+                metadata={
+                    "iteration": iteration,
+                    "step_result": step_result,
+                    "record": record,
+                    "state": state,
+                    "agent_name": agent_name,
+                    "action_tool_calls": action_tool_calls,
+                },
+                project_id=agent.project_id, agent_id=agent.agent_id,
+            ))
 
             # Checkpoint for crash recovery
             if event_id:
@@ -2142,6 +2213,11 @@ class LoopEngine(AgentEngine):
                         "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
                     })
                     result = step_result.final_answer or step_result.summary
+                    _hook_manager.dispatch(_HookContext(
+                        event=_HookEvent.LOOP_END,
+                        metadata={"state": state, "result": result, "status": "done"},
+                        project_id=agent.project_id, agent_id=agent.agent_id,
+                    ))
                     self._store_stats(state)
                     return self._apply_guardrail(
                         result, guardrail, guardrail_max_retries,
@@ -2158,6 +2234,11 @@ class LoopEngine(AgentEngine):
                     "status": "blocked", "iterations": iteration + 1,
                     "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
                 })
+                _hook_manager.dispatch(_HookContext(
+                    event=_HookEvent.LOOP_END,
+                    metadata={"state": state, "result": step_result.summary, "status": "blocked"},
+                    project_id=agent.project_id, agent_id=agent.agent_id,
+                ))
                 self._store_stats(state)
                 return step_result.summary
 
@@ -2176,6 +2257,11 @@ class LoopEngine(AgentEngine):
                         "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
                     })
                     result = step_result.summary
+                    _hook_manager.dispatch(_HookContext(
+                        event=_HookEvent.LOOP_END,
+                        metadata={"state": state, "result": result, "status": "done"},
+                        project_id=agent.project_id, agent_id=agent.agent_id,
+                    ))
                     self._store_stats(state)
                     return self._apply_guardrail(
                         result, guardrail, guardrail_max_retries,
@@ -2194,6 +2280,11 @@ class LoopEngine(AgentEngine):
             "status": "exhausted", "iterations": max_iterations,
             "tool_calls_total": state.total_tool_calls, "tokens_total": state.total_tokens,
         })
+        _hook_manager.dispatch(_HookContext(
+            event=_HookEvent.LOOP_END,
+            metadata={"state": state, "result": None, "status": "exhausted"},
+            project_id=agent.project_id, agent_id=agent.agent_id,
+        ))
         self._store_stats(state)
         return _synthesize_final(state)
 

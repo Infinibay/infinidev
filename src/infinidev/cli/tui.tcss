@@ -321,12 +321,10 @@ SidebarPanel { height: auto; margin: 0 0 1 0; padding: 0; max-height: 50%; }
 
 /* ── Chat Messages ───────────────────────────────────────────── */
 
+.msg-header { text-style: bold; height: auto; }
 .user-msg { height: auto; color: #a8ffc8; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: tall #2df97f; }
 .pending-msg { height: auto; color: #7aad7a; margin-bottom: 1; background: #0a1a0a; padding: 0 1; border-left: dashed #2a8a4f; opacity: 80%; }
 .agent-msg { height: auto; color: #d0e4ff; margin-bottom: 1; background: #0a101a; padding: 0 1; border-left: tall #4da6ff; }
-.agent-msg Markdown { margin: 0; padding: 0; background: transparent; }
-.agent-msg MarkdownFence { margin: 1 0; max-height: 20; overflow-y: auto; }
-.agent-msg MarkdownH1, .agent-msg MarkdownH2, .agent-msg MarkdownH3 { margin: 1 0 0 0; padding: 0; background: transparent; border: none; }
 .system-msg { height: auto; color: #ffcc4d; text-style: italic; margin-bottom: 1; padding: 0 1; border-left: tall #ffaa00; background: #1a1500; }
 .think-msg { height: auto; color: #c0b8e0; margin-bottom: 1; background: #12101a; padding: 0 1; border-left: tall #8a70c8; text-style: italic; }
 
@@ -399,6 +397,30 @@ UnsavedChangesScreen {
     margin-bottom: 1;
 }
 #unsaved-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+}
+#cancel-box {
+    width: 50;
+    height: auto;
+    max-height: 10;
+    background: $surface;
+    border: round $error;
+    padding: 1 2;
+}
+#cancel-title {
+    text-align: center;
+    text-style: bold;
+    color: $error;
+    margin-bottom: 1;
+}
+#cancel-desc {
+    text-align: center;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+#cancel-buttons {
     width: 100%;
     height: auto;
     align: center middle;

@@ -1,0 +1,312 @@
+Validating 212 files in /home/andres/infinidev/finetune/scenarios_v3
+
+================================================================================
+PER-FILE ISSUES (files with problems only)
+================================================================================
+
+--- app_002_python_api_complex.jsonl ---
+  WARN:  Turn 51: create_file.content is empty string
+  WARN:  Turn 15: create_file has large content (3281 chars)
+  WARN:  Turn 57: create_file has large content (5196 chars)
+
+--- app_004_rust_cli_complex.jsonl ---
+  WARN:  Turn 31: create_file.content is empty string
+  WARN:  Turn 41: create_file has large content (3480 chars)
+
+--- app_005_python_scraper.jsonl ---
+  WARN:  Turn 39: create_file.content is empty string
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  Turn 9: create_file has large content (3351 chars)
+  WARN:  Turn 41: create_file has large content (6126 chars)
+  WARN:  Turn 43: create_file has large content (4277 chars)
+
+--- app_006_go_api.jsonl ---
+  WARN:  Turn 31: create_file has large content (6924 chars)
+
+--- app_007_ts_react_component.jsonl ---
+  WARN:  Turn 33: create_file has large content (7408 chars)
+
+--- app_008_python_calculator.jsonl ---
+  WARN:  Turn 47: create_file.content is empty string
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  Turn 15: create_file has large content (4419 chars)
+  WARN:  Turn 49: create_file has large content (5828 chars)
+
+--- batch2_009_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_012_project_setup_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_015_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_016_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_019_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_021_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_022_bug_investigation_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_024_code_review_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_025_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_026_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_027_bug_investigation_c.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_028_feature_python.jsonl ---
+  WARN:  Turn 14: create_file.content is empty string
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_030_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_031_api_integration_typescript.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_032_bug_investigation_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_033_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_034_feature_interaction_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_035_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_037_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_038_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_040_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_042_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_044_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_047_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_050_bug_investigation_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_051_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_054_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_055_bug_investigation_c.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_056_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_058_api_integration_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_060_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_061_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_062_bug_investigation_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_063_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_064_code_review_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_065_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_067_api_integration_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_068_feature_typescript.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_069_api_integration_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_071_bug_investigation_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_072_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_073_feature_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_074_code_review_typescript.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_075_project_setup_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_077_api_integration_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_078_feature_interaction_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_079_bug_investigation_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_080_doc_driven_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_081_api_integration_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_082_bug_investigation_go.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_083_feature_typescript.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_084_api_integration_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_085_code_review_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_086_feature_go.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_087_api_integration_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_088_bug_investigation_python.jsonl ---
+  WARN:  No verification (execute_command) after edits
+
+--- batch2_090_api_integration_python.jsonl ---
+  WARN:  No exploration (read_file/glob/list_directory) before first edit
+  WARN:  No verification (execute_command) after edits
+
+--- ts_003_feature_medium.jsonl ---
+  WARN:  Turn 19: create_file has large content (3386 chars)
+
+--- ts_004_add_method.jsonl ---
+  WARN:  Turn 29: create_file has large content (3107 chars)
+
+================================================================================
+SUMMARY STATISTICS
+================================================================================
+Total files:    212
+Files OK:       147
+Files w/issues: 65
+Total errors:   0
+Total warnings: 87
+
+Top error categories:
+
+Top warning categories:
+    57  no verification after edit
+    13  no exploration before edit
+    12  large content block
+     5  empty string arg
+
+================================================================================
+FILES TO DELETE (0 critical errors):
+================================================================================
+
+================================================================================
+FILES TO FIX (65 warnings only):
+================================================================================
+  app_002_python_api_complex.jsonl
+  app_004_rust_cli_complex.jsonl
+  app_005_python_scraper.jsonl
+  app_006_go_api.jsonl
+  app_007_ts_react_component.jsonl
+  app_008_python_calculator.jsonl
+  batch2_009_api_integration_python.jsonl
+  batch2_012_project_setup_python.jsonl
+  batch2_015_api_integration_python.jsonl
+  batch2_016_api_integration_python.jsonl
+  batch2_019_api_integration_python.jsonl
+  batch2_021_api_integration_python.jsonl
+  batch2_022_bug_investigation_python.jsonl
+  batch2_024_code_review_python.jsonl
+  batch2_025_api_integration_python.jsonl
+  batch2_026_api_integration_python.jsonl
+  batch2_027_bug_investigation_c.jsonl
+  batch2_028_feature_python.jsonl
+  batch2_030_api_integration_python.jsonl
+  batch2_031_api_integration_typescript.jsonl
+  batch2_032_bug_investigation_python.jsonl
+  batch2_033_api_integration_python.jsonl
+  batch2_034_feature_interaction_python.jsonl
+  batch2_035_api_integration_python.jsonl
+  batch2_037_feature_python.jsonl
+  batch2_038_api_integration_python.jsonl
+  batch2_040_api_integration_python.jsonl
+  batch2_042_api_integration_python.jsonl
+  batch2_044_api_integration_python.jsonl
+  batch2_047_api_integration_python.jsonl
+  batch2_050_bug_investigation_python.jsonl
+  batch2_051_api_integration_python.jsonl
+  batch2_054_feature_python.jsonl
+  batch2_055_bug_investigation_c.jsonl
+  batch2_056_feature_python.jsonl
+  batch2_058_api_integration_python.jsonl
+  batch2_060_feature_python.jsonl
+  batch2_061_api_integration_python.jsonl
+  batch2_062_bug_investigation_python.jsonl
+  batch2_063_feature_python.jsonl
+  batch2_064_code_review_python.jsonl
+  batch2_065_feature_python.jsonl
+  batch2_067_api_integration_python.jsonl
+  batch2_068_feature_typescript.jsonl
+  batch2_069_api_integration_python.jsonl
+  batch2_071_bug_investigation_python.jsonl
+  batch2_072_feature_python.jsonl
+  batch2_073_feature_python.jsonl
+  batch2_074_code_review_typescript.jsonl
+  batch2_075_project_setup_python.jsonl
+  batch2_077_api_integration_python.jsonl
+  batch2_078_feature_interaction_python.jsonl
+  batch2_079_bug_investigation_python.jsonl
+  batch2_080_doc_driven_python.jsonl
+  batch2_081_api_integration_python.jsonl
+  batch2_082_bug_investigation_go.jsonl
+  batch2_083_feature_typescript.jsonl
+  batch2_084_api_integration_python.jsonl
+  batch2_085_code_review_python.jsonl
+  batch2_086_feature_go.jsonl
+  batch2_087_api_integration_python.jsonl
+  batch2_088_bug_investigation_python.jsonl
+  batch2_090_api_integration_python.jsonl
+  ts_003_feature_medium.jsonl
+  ts_004_add_method.jsonl

@@ -13,7 +13,7 @@ from textual.app import App, ComposeResult
 from textual.screen import ModalScreen
 from typing import Optional, Callable, Set
 from textual.widgets import (
-    Header, Footer, Static, TextArea, Label, OptionList, Markdown,
+    Header, Footer, Static, TextArea, Label, OptionList,
     DirectoryTree, TabbedContent, TabPane, LoadingIndicator,
     ProgressBar, Button, Select, Input, Checkbox,
 )
@@ -84,6 +84,41 @@ COMMANDS = [
 # ── Reusable widgets ────────────────────────────────────────────────────
 
 
+class ChatHistory(VerticalScroll):
+    """VerticalScroll that hides off-screen children to cut render cost.
+
+    Children outside the visible viewport (plus a buffer) get
+    ``visibility: hidden`` — they keep their layout space so the
+    scrollbar stays accurate, but Textual's compositor skips them
+    entirely during rendering.
+    """
+
+    # Extra pixels above/below the viewport to keep rendered (avoids
+    # flicker when the user scrolls slowly).
+    _BUFFER_PX = 200
+
+    def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+        """React to vertical scroll changes."""
+        self._update_child_visibility()
+
+    def _update_child_visibility(self) -> None:
+        height = self.size.height
+        if not height:
+            return
+        top = self.scroll_y - self._BUFFER_PX
+        bottom = self.scroll_y + height + self._BUFFER_PX
+
+        for child in self.children:
+            vr = child.virtual_region
+            if not vr.height:
+                continue  # not yet laid out
+            in_view = vr.y + vr.height > top and vr.y < bottom
+            if in_view and child.styles.visibility != "visible":
+                child.styles.visibility = "visible"
+            elif not in_view and child.styles.visibility == "visible":
+                child.styles.visibility = "hidden"
+
+
 class SidebarPanel(Vertical):
     """A panel for the sidebar to show current progress."""
     def __init__(self, title: str, id: str = None):
@@ -104,6 +139,37 @@ class SidebarPanel(Vertical):
         except Exception:
             plain = re.sub(r"\[/?[^\]]*\]", "", text)
             self.content_static.update(plain)
+
+
+class ScrollableSidebarPanel(Vertical):
+    """A sidebar panel with scrollable content and auto-scroll support."""
+    def __init__(self, title: str, id: str = None):
+        super().__init__(id=id)
+        self.title_label = Label(f"[bold]{title}[/bold]", classes="sidebar-title")
+        self.content_static = Static("", classes="sidebar-content")
+        self._scroll = VerticalScroll()
+
+    def compose(self) -> ComposeResult:
+        yield self.title_label
+        with self._scroll:
+            yield self.content_static
+
+    def update_content(self, text: str):
+        import re
+        try:
+            from rich.text import Text
+            Text.from_markup(text)
+            self.content_static.update(text)
+        except Exception:
+            plain = re.sub(r"\[/?[^\]]*\]", "", text)
+            self.content_static.update(plain)
+
+    def scroll_to_line(self, line_index: int) -> None:
+        """Scroll so that the given line (0-based) is roughly centred."""
+        try:
+            self._scroll.scroll_to(y=max(0, line_index - 3), animate=False)
+        except Exception:
+            pass
 
 
 class ContextPanel(Vertical):
@@ -749,6 +815,40 @@ class DocsBrowserScreen(ModalScreen[None]):
 # ── Unsaved Changes Modal ────────────────────────────────────────────────
 
 
+class CancelTaskScreen(ModalScreen[bool]):
+    """Modal asking to confirm task cancellation."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss_cancel", "No", show=True),
+        Binding("y", "confirm_cancel", "Yes", show=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="cancel-box"):
+            yield Label("[bold]Cancel current task?[/bold]", id="cancel-title")
+            yield Label("The task will stop after the current tool call finishes.", id="cancel-desc")
+            with Horizontal(id="cancel-buttons"):
+                yield Button("Yes, cancel", id="btn-cancel-yes", variant="error")
+                yield Button("No, continue", id="btn-cancel-no", variant="success")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-cancel-no").focus()
+
+    @on(Button.Pressed, "#btn-cancel-yes")
+    def _yes(self, event: Button.Pressed) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#btn-cancel-no")
+    def _no(self, event: Button.Pressed) -> None:
+        self.dismiss(False)
+
+    def action_confirm_cancel(self) -> None:
+        self.dismiss(True)
+
+    def action_dismiss_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class UnsavedChangesScreen(ModalScreen[str]):
     """Modal asking to save/discard/cancel when closing a modified file."""
 
@@ -1236,61 +1336,89 @@ class InfinidevDirectoryTree(DirectoryTree):
     ICON_NODE_EXPANDED = "\U0001f4c2 "  # open folder
     ICON_FILE = "\U0001f4c4 "       # page
 
+    # Pre-compiled regex for file extension highlighting
+    _EXT_RE = re.compile(r"\..+$")
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._dirty_paths: set[str] = set()
+        # Render cache: (node_id, is_expanded, is_dirty, label_plain) → Text
+        self._label_cache: dict[tuple, Text] = {}
+        # Pre-resolved CSS styles (populated on mount)
+        self._style_folder = None
+        self._style_file = None
+        self._style_extension = None
+        self._style_hidden = None
+
+    def on_mount(self) -> None:
+        """Pre-resolve CSS component styles once instead of per-render."""
+        self._style_folder = self.get_component_rich_style(
+            "directory-tree--folder", partial=True
+        )
+        self._style_file = self.get_component_rich_style(
+            "directory-tree--file", partial=True
+        )
+        self._style_extension = self.get_component_rich_style(
+            "directory-tree--extension", partial=True
+        )
+        self._style_hidden = self.get_component_rich_style(
+            "directory-tree--hidden", partial=True
+        )
 
     def set_dirty_paths(self, paths: set[str]) -> None:
         """Update which file paths should show as modified."""
         if paths != self._dirty_paths:
             self._dirty_paths = paths.copy()
+            self._label_cache.clear()
             self.refresh()
 
     def render_label(self, node, base_style, style):
-        node_label = node._label.copy()
-        node_label.stylize(style)
-
         if not self.is_mounted:
+            node_label = node._label.copy()
+            node_label.stylize(style)
             return node_label
 
-        is_dirty = False
+        # Build cache key from the inputs that affect the output
+        is_expanded = node.is_expanded if node._allow_expand else False
         node_path = ""
         if node.data and hasattr(node.data, 'path'):
             node_path = str(node.data.path)
-            is_dirty = node_path in self._dirty_paths
+        is_dirty = node_path in self._dirty_paths
+        label_plain = node._label.plain
+
+        cache_key = (id(node), is_expanded, is_dirty, label_plain, id(style))
+        cached = self._label_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Cache miss — compute the label
+        node_label = node._label.copy()
+        node_label.stylize(style)
 
         if node._allow_expand:
-            # Directory — always use standard folder icons
-            icon = self.ICON_NODE_EXPANDED if node.is_expanded else self.ICON_NODE
+            icon = self.ICON_NODE_EXPANDED if is_expanded else self.ICON_NODE
             from rich.style import Style as RichStyle
             prefix = (icon, base_style + RichStyle(bold=True))
-            node_label.stylize_before(
-                self.get_component_rich_style("directory-tree--folder", partial=True)
-            )
+            if self._style_folder:
+                node_label.stylize_before(self._style_folder)
         else:
-            # File — pick icon by special filename first, then extension
-            fname = node_label.plain.strip()
+            fname = label_plain.strip()
             ext = pathlib.Path(fname).suffix.lower()
             icon = _SPECIAL_FILE_ICONS.get(fname,
                 _FILE_ICONS.get(ext, self.ICON_FILE)
             )
             prefix = (icon, base_style)
-            node_label.stylize_before(
-                self.get_component_rich_style("directory-tree--file", partial=True),
-            )
-            node_label.highlight_regex(
-                r"\..+$",
-                self.get_component_rich_style(
-                    "directory-tree--extension", partial=True
-                ),
-            )
+            if self._style_file:
+                node_label.stylize_before(self._style_file)
+            if self._style_extension:
+                node_label.highlight_regex(
+                    self._EXT_RE,
+                    self._style_extension,
+                )
 
-        if node_label.plain.startswith("."):
-            node_label.stylize_before(
-                self.get_component_rich_style("directory-tree--hidden", partial=True)
-            )
+        if label_plain.startswith(".") and self._style_hidden:
+            node_label.stylize_before(self._style_hidden)
 
-        # Dirty indicator
         if is_dirty:
             dirty_marker = Text("\u25cf ", style="bold yellow")
             node_label.stylize("yellow")
@@ -1298,6 +1426,10 @@ class InfinidevDirectoryTree(DirectoryTree):
         else:
             text = Text.assemble(prefix, node_label)
 
+        # Cap cache size to prevent unbounded growth after tree reloads
+        if len(self._label_cache) > 2000:
+            self._label_cache.clear()
+        self._label_cache[cache_key] = text
         return text
 
 
@@ -1322,6 +1454,7 @@ class InfinidevTUI(App):
         Binding("f2", "focus_chat", "Chat", show=True),
         Binding("f3", "focus_explorer", "Files", show=True),
         Binding("f4", "focus_sidebar", "Sidebar", show=True),
+        Binding("escape", "cancel_task", "Stop task", show=True),
     ]
 
     # ── Compose ──────────────────────────────────────────
@@ -1329,18 +1462,17 @@ class InfinidevTUI(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-container"):
-            # File explorer (hidden by default)
+            # File explorer (hidden by default, tree loaded lazily on first open)
             with Vertical(id="explorer"):
                 with Horizontal(id="explorer-header"):
                     yield Label("EXPLORER", id="explorer-title")
                     yield Button("⟳", id="btn-sync-tree", variant="default")
-                yield InfinidevDirectoryTree(os.getcwd(), id="file-tree")
 
             # Content area with tabs
             with Vertical(id="content-area"):
                 with TabbedContent(id="content-tabs"):
                     with TabPane("Chat", id="chat-pane"):
-                        yield VerticalScroll(id="chat-history")
+                        yield ChatHistory(id="chat-history")
                         yield OptionList(id="autocomplete-menu")
                         yield ChatInput(id="chat-input")
 
@@ -1349,7 +1481,7 @@ class InfinidevTUI(App):
                 # Context window panel
                 yield ContextPanel(id="context-panel")
                 yield SidebarPanel("PLANNING", id="plan-panel")
-                yield SidebarPanel("STEPS", id="steps-panel")
+                yield ScrollableSidebarPanel("STEPS", id="steps-panel")
                 yield SidebarPanel("ACTIONS", id="actions-panel")
                 yield SidebarPanel("LOGS", id="logs-panel")
                 yield Static("", id="sidebar-spacer")
@@ -1360,9 +1492,9 @@ class InfinidevTUI(App):
 
     def on_mount(self) -> None:
         init_db()
+        from infinidev.engine.ui_hooks import register_ui_hooks
+        register_ui_hooks()
         event_bus.subscribe(self.on_loop_event)
-        self.query_one("#chat-input").focus()
-        self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
 
         self.session_id = str(uuid.uuid4())
         self._log_lines: list[str] = []
@@ -1373,6 +1505,10 @@ class InfinidevTUI(App):
         self._file_diff_widgets: dict[str, FileChangeDiffWidget] = {}  # path → widget
         self._queued_messages: list = []  # queued message widgets
         self._tree_resolved_lines: list[str] = []  # accumulated tree resolution lines
+        self._thinking_indicator = None  # cached ref to thinking indicator widget
+
+        self.query_one("#chat-input").focus()
+        self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
 
         self.engine = LoopEngine()
         self.analyst = AnalysisEngine()
@@ -1443,6 +1579,31 @@ class InfinidevTUI(App):
         self.context_calculator.update_task(task_prompt_tokens=prompt_tokens)
         self._context_panel.update_status(self.context_calculator.get_context_status())
 
+    # ── Cancel running task ──────────────────────────────
+
+    def action_cancel_task(self) -> None:
+        """Show confirmation modal to cancel the running task."""
+        if not self._engine_running:
+            return
+
+        def _on_cancel_result(confirmed: bool) -> None:
+            if not confirmed:
+                return
+            # Signal the engine to stop
+            if hasattr(self, 'engine') and hasattr(self.engine, 'cancel'):
+                self.engine.cancel()
+            self._engine_running = False
+            self._hide_thinking()
+            self._pending_inputs.clear()
+            self.add_message(
+                "System",
+                "Task cancelled. You can give a new instruction or clarify what you want.",
+                "system",
+            )
+            self.query_one("#chat-input").focus()
+
+        self.push_screen(CancelTaskScreen(), _on_cancel_result)
+
     # ── Quit with unsaved check ─────────────────────────
 
     def action_quit(self) -> None:
@@ -1480,13 +1641,29 @@ class InfinidevTUI(App):
 
     # ── Focus actions ────────────────────────────────────
 
+    def _ensure_file_tree(self) -> None:
+        """Mount the DirectoryTree lazily on first explorer open."""
+        existing = self.query("#file-tree")
+        if existing:
+            return
+        tree = InfinidevDirectoryTree(os.getcwd(), id="file-tree")
+        explorer = self.query_one("#explorer")
+        explorer.mount(tree)
+
+    def _unmount_file_tree(self) -> None:
+        """Remove the DirectoryTree to free the _loader worker."""
+        for tree in self.query("#file-tree"):
+            tree.remove()
+
     def action_toggle_explorer(self) -> None:
         explorer = self.query_one("#explorer")
         if explorer.has_class("-visible"):
             explorer.remove_class("-visible")
+            self._unmount_file_tree()
             self.query_one("#chat-input", ChatInput).focus()
         else:
             explorer.add_class("-visible")
+            self._ensure_file_tree()
             self.query_one("#file-tree", DirectoryTree).focus()
 
     def action_focus_chat(self) -> None:
@@ -1498,6 +1675,7 @@ class InfinidevTUI(App):
         explorer = self.query_one("#explorer")
         if not explorer.has_class("-visible"):
             explorer.add_class("-visible")
+        self._ensure_file_tree()
         self.query_one("#file-tree", DirectoryTree).focus()
 
     def action_focus_sidebar(self) -> None:
@@ -1674,8 +1852,12 @@ class InfinidevTUI(App):
     @on(Button.Pressed, "#btn-sync-tree")
     def sync_file_tree(self, event: Button.Pressed) -> None:
         """Reload the file tree from disk."""
-        tree = self.query_one("#file-tree", DirectoryTree)
-        tree.reload()
+        self._ensure_file_tree()
+        try:
+            tree = self.query_one("#file-tree", DirectoryTree)
+            tree.reload()
+        except Exception:
+            pass
 
     @on(DirectoryTree.FileSelected)
     async def open_file(self, event: DirectoryTree.FileSelected) -> None:
@@ -1936,14 +2118,19 @@ class InfinidevTUI(App):
     def _process_event_inner(self, event_type: str, data: dict[str, Any]):
         if event_type == "loop_step_update":
             steps = data.get("plan_steps", [])
+            active_line = 0
             if steps:
                 steps_text = ""
-                for s in steps:
+                for i, s in enumerate(steps):
                     icon = "✓" if s["status"] == "done" else "○"
                     if s["status"] == "active":
                         icon = "●"
+                        active_line = i
                     steps_text += f"{icon} {s['description']}\n"
-                self.query_one("#steps-panel").update_content(steps_text)
+                steps_panel = self.query_one("#steps-panel")
+                steps_panel.update_content(steps_text)
+                # Auto-scroll to the active step
+                steps_panel.scroll_to_line(active_line)
             else:
                 self.query_one("#steps-panel").update_content("Waiting for plan...")
 
@@ -1951,6 +2138,15 @@ class InfinidevTUI(App):
             summary = data.get("summary", "")
             iteration = data.get("iteration", 0)
             status = data.get("status", "")
+
+            # Show step transition in chat
+            if desc and status == "active":
+                self.add_message(
+                    "Step",
+                    f"━━━ Step {iteration}: {desc} ━━━",
+                    "system",
+                )
+
             plan_text = f"Step {iteration}: {desc}" if iteration else desc
             if summary:
                 plan_text += f"\n{summary}"
@@ -1968,10 +2164,22 @@ class InfinidevTUI(App):
         elif event_type == "loop_tool_call":
             tool_name = data.get("tool_name", "")
             tool_detail = data.get("tool_detail", "")
+            tool_error = data.get("tool_error", "")
+            tool_output = data.get("tool_output_preview", "")
             action_text = f"⚙️ {tool_name}\n"
             if tool_detail:
-                action_text += f"   {tool_detail}"
-            self.query_one("#actions-panel").update_content(action_text)
+                action_text += f"   {tool_detail}\n"
+            if tool_error:
+                action_text += f"   ✗ {tool_error}\n"
+            elif tool_output:
+                for line in tool_output.splitlines()[:4]:
+                    action_text += f"   {line}\n"
+            self.query_one("#actions-panel").update_content(action_text.rstrip())
+
+            # Show important tool calls in the chat
+            chat_msg = self._format_tool_chat_message(tool_name, tool_detail, tool_error, tool_output)
+            if chat_msg:
+                self.add_message("Tool", chat_msg, "system")
 
             # Update context window after each tool call
             self._refresh_context_panel(
@@ -1996,9 +2204,8 @@ class InfinidevTUI(App):
                 widget = FileChangeDiffWidget(path, diff, action)
                 self._file_diff_widgets[path] = widget
                 history = self.query_one("#chat-history")
-                thinking = self.query(".thinking-indicator")
-                if thinking:
-                    history.mount(widget, before=thinking.first())
+                if self._thinking_indicator is not None:
+                    history.mount(widget, before=self._thinking_indicator)
                 else:
                     history.mount(widget)
                 history.scroll_end(animate=False)
@@ -2009,12 +2216,10 @@ class InfinidevTUI(App):
             if reasoning:
                 history = self.query_one("#chat-history")
                 container = Vertical(classes="think-msg")
-                from rich.markup import escape as _escape_markup
-                header = self._safe_static("[bold #b0a0d8]💭 Thinking:[/bold #b0a0d8]")
-                body = self._safe_static(f"[dim #c0b8e0]{_escape_markup(reasoning)}[/dim #c0b8e0]")
-                thinking_widgets = self.query(".thinking-indicator")
-                if thinking_widgets:
-                    history.mount(container, before=thinking_widgets.first())
+                header = Static("Thinking:", markup=False, classes="msg-header")
+                body = Static(reasoning, markup=False)
+                if self._thinking_indicator is not None:
+                    history.mount(container, before=self._thinking_indicator)
                 else:
                     history.mount(container)
                 container.mount(header)
@@ -2188,25 +2393,69 @@ class InfinidevTUI(App):
 
     # ── Chat messages ────────────────────────────────────
 
-    _SENDER_COLORS = {"user": "#6fbf6f", "agent": "#7a9fd4", "system": "#c8c870"}
+    _SENDER_COLORS = {
+        "user": "#6fbf6f",
+        "agent": "#7a9fd4",
+        "system": "#888888",
+    }
+    # Specific sender colors override the type-based default
+    _SENDER_NAME_COLORS = {
+        "Tool": "#9b8ec4",       # purple — tool calls
+        "Step": "#5e9bcf",       # blue — step transitions
+        "Reviewer": "#d4a05a",   # amber — code review
+        "Verifier": "#5ab87a",   # green — verification
+        "Shell": "#a0a0a0",      # grey — shell output
+        "System": "#888888",     # dim grey — generic system
+    }
 
     @staticmethod
     def _safe_static(content: str) -> Static:
-        """Create a Static widget, falling back to plain text if markup is invalid."""
-        import re
-        try:
-            # Test-render the markup to catch errors before mounting
-            from rich.text import Text
-            Text.from_markup(content)
-            return Static(content)
-        except Exception:
-            # Strip all Rich markup tags and show plain text
-            plain = re.sub(r"\[/?[^\]]*\]", "", content)
-            return Static(plain, markup=False)
+        """Create a Static widget with plain text (no Rich/Markdown parsing)."""
+        return Static(content, markup=False)
+
+    @staticmethod
+    def _format_tool_chat_message(
+        tool_name: str, detail: str, error: str, output: str,
+    ) -> str:
+        """Format a tool call as a chat message. Returns empty string to skip."""
+        if tool_name == "execute_command":
+            cmd = detail or "…"
+            msg = f"```bash\n$ {cmd}\n```"
+            if error:
+                msg += f"\n```\n✗ {error}\n```"
+            elif output:
+                msg += f"\n```\n{output}\n```"
+            return msg
+
+        if tool_name == "create_file":
+            if error:
+                path = detail or "?"
+                return f"**create** `{path}`\n✗ {error}"
+            return ""  # Diff widget handles successful creates
+
+        if tool_name in ("replace_lines", "edit_symbol", "add_symbol", "remove_symbol"):
+            if error:
+                path = detail or "?"
+                label = {
+                    "replace_lines": "edit",
+                    "edit_symbol": "edit",
+                    "add_symbol": "add",
+                    "remove_symbol": "remove",
+                }.get(tool_name, "edit")
+                return f"**{label}** `{path}`\n✗ {error}"
+            return ""  # Diff widget handles successful edits
+
+        if tool_name == "git_commit":
+            return f"**commit** `{detail}`" if detail else "**commit**"
+
+        if tool_name == "git_branch":
+            return f"**branch** `{detail}`" if detail else "**branch**"
+
+        return ""
 
     def _is_thinking(self) -> bool:
         """Return True if the thinking indicator is currently visible."""
-        return len(self.query(".thinking-indicator")) > 0
+        return self._thinking_indicator is not None
 
     def add_message(self, sender: str, text: str, type: str = "agent", queued: bool = False, queue_index: int | None = None):
         """Add a message to the chat history.
@@ -2219,7 +2468,8 @@ class InfinidevTUI(App):
             queue_index: Queue position if queued (1-based)
         """
         history = self.query_one("#chat-history")
-        color = self._SENDER_COLORS.get(type, "#cccccc")
+        # Use sender-specific color if available, fall back to type color
+        color = self._SENDER_NAME_COLORS.get(sender, self._SENDER_COLORS.get(type, "#cccccc"))
         text = str(text) if text else ""
 
         # If thinking is active and this is a user message, show as pending
@@ -2227,29 +2477,23 @@ class InfinidevTUI(App):
         msg_class = "pending-msg" if is_pending else f"{type}-msg"
 
         container = Vertical(classes=msg_class)
-        header_text = f"[bold {color}]{sender}:[/bold {color}]"
-        if is_pending:
-            header_text = f"[dim bold]{sender} (pending):[/dim bold]"
-        header = self._safe_static(header_text)
+        header_text = f"{sender}:" if not is_pending else f"{sender} (pending):"
+        header = Static(header_text, markup=False, classes="msg-header")
 
-        if type == "agent" and ("```" in text or "**" in text or "# " in text):
-            body = Markdown(text)
-        else:
-            body = self._safe_static(text)
+        body = Static(text, markup=False)
 
         # Add queue indicator if queued
         if queued:
             queue_label = Static(
-                f"[dim]● Queued message #{queue_index} - Not yet processed[/dim]",
-                classes="queue-indicator"
+                f"Queued message #{queue_index} - Not yet processed",
+                markup=False, classes="queue-indicator"
             )
             container.mount(queue_label)
 
         # If thinking, mount read messages before the indicator, pending after
-        thinking_widgets = self.query(".thinking-indicator")
-        if thinking_widgets and not is_pending:
+        if self._thinking_indicator is not None and not is_pending:
             # Non-pending message while thinking → place before the indicator
-            history.mount(container, before=thinking_widgets.first())
+            history.mount(container, before=self._thinking_indicator)
         else:
             history.mount(container)
 
@@ -2343,15 +2587,16 @@ class InfinidevTUI(App):
             LoadingIndicator(),
             classes="thinking-indicator",
         )
+        self._thinking_indicator = indicator
         history.mount(indicator)
         history.scroll_end(animate=False)
 
     def _hide_thinking(self) -> None:
-        """Remove all thinking indicators and promote pending messages."""
-        for widget in self.query(".thinking-indicator"):
-            widget.remove()
+        """Remove the thinking indicator and promote pending messages."""
+        if self._thinking_indicator is not None:
+            self._thinking_indicator.remove()
+            self._thinking_indicator = None
         # Promote pending messages to normal user messages
-        color = self._SENDER_COLORS.get("user", "#cccccc")
         for widget in list(self.query(".pending-msg")):
             widget.remove_class("pending-msg")
             widget.add_class("user-msg")
@@ -2359,7 +2604,7 @@ class InfinidevTUI(App):
             try:
                 statics = widget.query(Static)
                 if statics:
-                    statics.first().update(f"[bold {color}]You:[/bold {color}]")
+                    statics.first().update("You:")
             except Exception:
                 pass
 
@@ -2386,12 +2631,12 @@ class InfinidevTUI(App):
 
             output_lines = []
             if result.stdout:
-                output_lines.append(f"[bold #00ff88]stdout:[/bold #00ff88]\n{result.stdout}")
+                output_lines.append(f"stdout:\n{result.stdout}")
             if result.stderr:
-                output_lines.append(f"[bold #ff4466]stderr:[/bold #ff4466]\n{result.stderr}")
+                output_lines.append(f"stderr:\n{result.stderr}")
 
             output_text = "\n".join(output_lines) if output_lines else "(no output)"
-            exit_info = f"\n[bold]Exit code:[/bold] {result.returncode}"
+            exit_info = f"\nExit code: {result.returncode}"
 
             self.add_message("Shell", output_text + exit_info, "system")
 

@@ -215,6 +215,7 @@ def execute_tool_call(
     dispatch: dict[str, Any],
     name: str,
     arguments: str | dict[str, Any],
+    hook_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Execute a tool call and return the result as a string.
 
@@ -331,17 +332,40 @@ def execute_tool_call(
     except (ValueError, TypeError):
         pass
 
+    # --- Pre-tool hook ---
+    from infinidev.engine.hooks import hook_manager, HookContext, HookEvent
+
+    _meta = dict(hook_metadata) if hook_metadata else {}
+    ctx = HookContext(
+        event=HookEvent.PRE_TOOL,
+        tool_name=name,
+        arguments=dict(args),
+        metadata=_meta,
+        project_id=_meta.pop("project_id", 0),
+        agent_id=_meta.pop("agent_id", ""),
+    )
+    hook_manager.dispatch(ctx)
+    if ctx.skip:
+        return ctx.result or json.dumps({"skipped": True, "tool": name})
+    args = ctx.arguments
+
     # Execute
     try:
         result = tool._run(**args)
-        return str(result) if result is not None else ""
+        result_str = str(result) if result is not None else ""
     except Exception as exc:
         logger.warning("Tool %s raised %s: %s", name, type(exc).__name__, exc)
         suggestion = _suggest_alternative(name, str(exc))
         error_msg = f"Tool '{name}' failed: {exc}"
         if suggestion:
             error_msg += f"\n\nSuggestion: {suggestion}"
-        return json.dumps({"error": error_msg})
+        result_str = json.dumps({"error": error_msg})
+
+    # --- Post-tool hook ---
+    ctx.event = HookEvent.POST_TOOL
+    ctx.result = result_str
+    hook_manager.dispatch(ctx)
+    return ctx.result
 
 
 # Tool failure → alternative suggestion mapping
