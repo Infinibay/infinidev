@@ -21,7 +21,7 @@ from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop_engine import LoopEngine
 from infinidev.engine.analysis_engine import AnalysisEngine
 from infinidev.engine.review_engine import ReviewEngine
-from infinidev.cli.tui import InfinidevTUI
+# InfinidevTUI (Textual) replaced by infinidev.ui.app.run_tui (prompt_toolkit)
 import infinidev.prompts.flows  # noqa: F401 — registers flows
 
 # Configure logging (ensure base dir exists before creating file handler)
@@ -443,14 +443,14 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
 
     if not (no_tui or classic):
         # TUI mode: remove the stderr handler so log output doesn't corrupt
-        # the Textual terminal.  File logging is preserved.
+        # the terminal.  File logging is preserved.
         root = logging.getLogger()
         root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)
                          or getattr(h, 'stream', None) is not sys.stderr]
         if profile:
             click.echo(click.style("Profiling enabled — profile will be saved on exit.", fg="yellow"), err=True)
-        app = InfinidevTUI()
-        app.run()
+        from infinidev.ui.app import run_tui
+        run_tui()
         return
 
     # Classic mode (the original while True loop)
