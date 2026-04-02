@@ -125,6 +125,31 @@ ADD_NOTE_SCHEMA: dict[str, Any] = {
 }
 
 
+ADD_SESSION_NOTE_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "add_session_note",
+        "description": (
+            "Save a note that persists across tasks in this session. Unlike add_note "
+            "(which resets each task), session notes survive until the session ends. "
+            "Use for: project-wide context, user preferences discovered during work, "
+            "cross-task decisions, and anything the next task will need. "
+            "Max 10 session notes."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "description": "The session note to save (1-2 sentences)",
+                },
+            },
+            "required": ["note"],
+        },
+    },
+}
+
+
 THINK_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
@@ -192,6 +217,7 @@ def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     schemas = [tool_to_openai_schema(t) for t in tools]
     schemas.append(STEP_COMPLETE_SCHEMA)
     schemas.append(ADD_NOTE_SCHEMA)
+    schemas.append(ADD_SESSION_NOTE_SCHEMA)
     schemas.append(THINK_SCHEMA)
     return schemas
 
@@ -310,6 +336,32 @@ def execute_tool_call(
                 })
     except (ValueError, TypeError):
         pass  # Can't inspect, pass all args
+
+    # Coerce argument types based on _run() annotations.
+    # LLMs frequently send ints as strings (e.g. "300" instead of 300).
+    try:
+        sig = inspect.signature(tool._run)
+        for p_name, p in sig.parameters.items():
+            if p_name not in args:
+                continue
+            ann = p.annotation
+            if ann is inspect.Parameter.empty:
+                continue
+            val = args[p_name]
+            if ann is int and isinstance(val, str):
+                try:
+                    args[p_name] = int(val)
+                except (ValueError, TypeError):
+                    pass
+            elif ann is float and isinstance(val, str):
+                try:
+                    args[p_name] = float(val)
+                except (ValueError, TypeError):
+                    pass
+            elif ann is bool and isinstance(val, str):
+                args[p_name] = val.lower() in ("true", "1", "yes")
+    except (ValueError, TypeError):
+        pass
 
     # Check for missing required parameters before calling
     try:
