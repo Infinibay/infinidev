@@ -122,47 +122,51 @@ def run_engine_task(app: InfinidevApp, user_input: str) -> None:
                 return
 
             if analysis.action == "proceed":
-                # Show spec, wait for confirmation
-                spec = analysis.specification
-                spec_parts = []
-                if spec.get("summary"):
-                    spec_parts.append(f"Summary: {spec['summary']}")
-                for key in ("requirements", "hidden_requirements", "assumptions", "out_of_scope"):
-                    items = spec.get(key, [])
-                    if items:
-                        spec_parts.append(f"\n{key.replace('_', ' ').title()}:")
-                        for item in items:
-                            spec_parts.append(f"  - {item}")
-                if spec.get("technical_notes"):
-                    spec_parts.append(f"\nTechnical Notes: {spec['technical_notes']}")
-                spec_parts.append("\nProceed? Type y to proceed, n to cancel, or add feedback.")
+                # Only show spec + ask for confirmation for develop flow
+                # Research, document, sysadmin flows don't need user approval
+                _needs_confirmation = analysis.flow == "develop"
 
-                app._chat_history_control.show_thinking = False
-                app.add_message("Analyst", "\n".join(spec_parts), "agent")
+                if _needs_confirmation:
+                    spec = analysis.specification
+                    spec_parts = []
+                    if spec.get("summary"):
+                        spec_parts.append(f"Summary: {spec['summary']}")
+                    for key in ("requirements", "hidden_requirements", "assumptions", "out_of_scope"):
+                        items = spec.get(key, [])
+                        if items:
+                            spec_parts.append(f"\n{key.replace('_', ' ').title()}:")
+                            for item in items:
+                                spec_parts.append(f"  - {item}")
+                    if spec.get("technical_notes"):
+                        spec_parts.append(f"\nTechnical Notes: {spec['technical_notes']}")
+                    spec_parts.append("\nProceed? Type y to proceed, n to cancel, or add feedback.")
 
-                app._analysis_event = threading.Event()
-                app._analysis_waiting = True
-                app._analysis_answer = ""
-                app._analysis_original_input = user_input
-                app._analysis_event.wait()
-
-                confirm = app._analysis_answer.strip()
-                app._analysis_event = None
-
-                if confirm.lower() in ("n", "no", "cancel"):
                     app._chat_history_control.show_thinking = False
-                    app.add_message("System", "Development skipped.", "system")
-                    app._actions_text = "Idle"
+                    app.add_message("Analyst", "\n".join(spec_parts), "agent")
+
+                    app._analysis_event = threading.Event()
+                    app._analysis_waiting = True
+                    app._analysis_answer = ""
+                    app._analysis_original_input = user_input
+                    app._analysis_event.wait()
+
+                    confirm = app._analysis_answer.strip()
+                    app._analysis_event = None
+
+                    if confirm.lower() in ("n", "no", "cancel"):
+                        app._chat_history_control.show_thinking = False
+                        app.add_message("System", "Development skipped.", "system")
+                        app._actions_text = "Idle"
+                        app.invalidate()
+                        return
+
+                    if confirm and confirm.lower() not in ("y", "yes", ""):
+                        desc, expected = task_prompt
+                        desc += f"\n\n## Additional User Feedback\n{confirm}"
+                        task_prompt = (desc, expected)
+
+                    app._chat_history_control.show_thinking = True
                     app.invalidate()
-                    return
-
-                if confirm and confirm.lower() not in ("y", "yes", ""):
-                    desc, expected = task_prompt
-                    desc += f"\n\n## Additional User Feedback\n{confirm}"
-                    task_prompt = (desc, expected)
-
-                app._chat_history_control.show_thinking = True
-                app.invalidate()
 
             from infinidev.engine.flows import get_flow_config
             flow_config = get_flow_config(analysis.flow)
@@ -348,6 +352,180 @@ def run_brainstorm_task(app: InfinidevApp, problem: str) -> None:
                    task_prompt=(problem, flow_config.expected_output),
                    use_tree_engine=True,
                    empty_result_msg="Brainstorm complete (no synthesis produced).")
+
+
+def run_plan_task(app: InfinidevApp, task_description: str) -> None:
+    """Run /plan in background thread: investigate → plan → review → execute."""
+    import threading
+    from infinidev.config.settings import reload_all, settings as _settings
+    from infinidev.db.service import store_conversation_turn, get_recent_summaries
+    from infinidev.engine.phase_engine import PhaseEngine
+    from infinidev.engine.test_checkpoint import TestCheckpoint
+    from infinidev.prompts.phases import get_strategy
+    from infinidev.tools.base.context import get_current_workspace_path
+
+    try:
+        reload_all()
+        store_conversation_turn(app.session_id, "user", f"/plan {task_description}")
+        summaries = get_recent_summaries(app.session_id, limit=10)
+        app.agent._session_summaries = summaries
+
+        app._context_flow = "plan"
+        app._actions_text = "Planning..."
+        app.invalidate()
+
+        phase_engine = PhaseEngine()
+
+        # Init test checkpoint
+        workdir = get_current_workspace_path()
+        phase_engine._test_checkpoint = TestCheckpoint(None, workdir)
+
+        # ── Classify ─────────────────────────────────────
+        classification = phase_engine._classify(app.agent, task_description, verbose=True)
+        from infinidev.gather.models import DEPTH_CONFIGS
+        depth_config = DEPTH_CONFIGS.get(classification.depth)
+        task_type = classification.ticket_type.value
+        strategy = get_strategy(task_type)
+
+        app.agent.activate_context(session_id=app.session_id)
+        try:
+            # ── Phases 1+2: Iterative investigation ──────
+            strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
+            answers, all_notes = phase_engine._investigate_iteratively(
+                app.agent, task_description, strategy, None, verbose=True,
+                max_questions=depth_config.questions_max,
+                skip_investigate=depth_config.skip_investigate,
+            )
+
+            # ── Phase 3: Plan + Review Loop ──────────────
+            feedback_context = ""
+            strategy.plan_min_steps = depth_config.plan_min_steps
+
+            while True:
+                plan_desc = task_description
+                if feedback_context:
+                    plan_desc += f"\n\n## USER FEEDBACK ON PREVIOUS PLAN\n{feedback_context}"
+
+                app._actions_text = "Generating plan..."
+                app._chat_history_control.show_thinking = True
+                app.invalidate()
+
+                plan_steps = phase_engine._generate_plan(
+                    app.agent, plan_desc, answers, all_notes, strategy, None, verbose=True,
+                )
+
+                if not plan_steps:
+                    app._chat_history_control.show_thinking = False
+                    app.add_message("System", "Failed to generate a plan.", "system")
+                    app._actions_text = "Idle"
+                    app.invalidate()
+                    return
+
+                # Display plan
+                plan_display = _format_plan_for_display(plan_steps)
+                app._chat_history_control.show_thinking = False
+                app.add_message("Planner", plan_display, "agent")
+                app._actions_text = "Waiting for plan review..."
+                app.invalidate()
+
+                # Wait for user response
+                app._plan_review_event = threading.Event()
+                app._plan_review_waiting = True
+                app._plan_review_answer = ""
+                app._plan_review_event.wait()
+
+                answer = app._plan_review_answer.strip()
+                app._plan_review_event = None
+
+                if answer.lower() in ("y", "yes", "approve", ""):
+                    break
+                elif answer.lower() in ("n", "no", "cancel"):
+                    app._chat_history_control.show_thinking = False
+                    app.add_message("System", "Plan cancelled.", "system")
+                    app._actions_text = "Idle"
+                    app.invalidate()
+                    return
+                else:
+                    feedback_context = answer
+                    app.add_message("System", "Regenerating plan with feedback...", "system")
+                    continue
+
+            # ── Phase 4: Execute ─────────────────────────
+            app._chat_history_control.show_thinking = True
+            app._actions_text = "Executing plan..."
+            app.add_message("System", "Plan approved. Executing...", "system")
+            app.invalidate()
+
+            result = phase_engine._execute_plan(
+                app.agent, task_description, "Complete the task.",
+                answers, all_notes, plan_steps, strategy, None, depth_config, verbose=True,
+            )
+
+        finally:
+            app.agent.deactivate()
+
+        # ── Review phase (if enabled) ────────────────────
+        if (_settings.REVIEW_ENABLED
+                and phase_engine.has_file_changes()):
+            from infinidev.engine.review_engine import run_review_rework_loop
+
+            app._actions_text = "Code review..."
+            app.invalidate()
+
+            def _review_status(level: str, msg: str) -> None:
+                if level == "approved":
+                    app.add_message("Reviewer", f"Code review: APPROVED. {msg}", "system")
+                elif level == "rejected":
+                    app.add_message("Reviewer", msg, "system")
+                    app.add_message("System", "Re-running with review feedback...", "system")
+
+            try:
+                result, _ = run_review_rework_loop(
+                    engine=phase_engine._last_engine,
+                    agent=app.agent,
+                    session_id=app.session_id,
+                    task_prompt=(task_description, "Complete the task."),
+                    initial_result=result or "",
+                    reviewer=app.reviewer,
+                    recent_messages=get_recent_summaries(app.session_id, limit=5),
+                    on_status=_review_status,
+                )
+            except Exception as review_err:
+                logger.error("Review phase failed: %s", review_err, exc_info=True)
+                app.add_message("System", f"Review error: {review_err}", "system")
+
+        # ── Finish ───────────────────────────────────────
+        app._chat_history_control.show_thinking = False
+        app.add_message("Infinidev", result or "Plan executed.", "agent")
+        store_conversation_turn(
+            app.session_id, "assistant",
+            result or "Plan executed.",
+            (result or "")[:200],
+        )
+        app._actions_text = "Idle"
+        app.invalidate()
+
+    except Exception as e:
+        app._plan_review_waiting = False
+        app._chat_history_control.show_thinking = False
+        app.add_message("Error", str(e), "system")
+    finally:
+        app._engine_running = False
+        app._context_flow = ""
+        app.invalidate()
+        _drain_pending(app)
+
+
+def _format_plan_for_display(plan_steps: list[dict]) -> str:
+    """Format plan steps as a readable numbered list for user review."""
+    lines = ["## Generated Plan\n"]
+    for step in plan_steps:
+        files = ", ".join(step.get("files", [])) or ""
+        files_str = f"  [{files}]" if files else ""
+        lines.append(f"  {step['step']}. {step['description']}{files_str}")
+    lines.append("")
+    lines.append("Type **y** to approve and execute, **n** to cancel, or type feedback to revise.")
+    return "\n".join(lines)
 
 
 def _drain_pending(app: InfinidevApp) -> None:

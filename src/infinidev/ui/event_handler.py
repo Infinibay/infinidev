@@ -128,7 +128,9 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
     elif event_type == "loop_think":
         reasoning = data.get("reasoning", "").strip()
         if reasoning:
-            app.add_message("Thinking", reasoning, "think")
+            agent_id = data.get("_agent_id", "")
+            sender = "Analyst" if agent_id == "analyst" else "Thinking"
+            app.add_message(sender, reasoning, "think")
 
     elif event_type == "loop_log":
         level = data.get("level", "warning")

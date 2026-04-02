@@ -91,34 +91,14 @@ class PhaseEngine:
         all_notes: list[str] = []
 
         if not depth_config.skip_questions:
-            # ── Phase 1: QUESTIONS ────────────────────────────────────
-            if verbose:
-                _log(f"\n{BOLD}❓ Phase 1: QUESTIONS{RESET}")
+            # Override investigate budget from depth config
+            strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
 
-            questions = self._generate_questions(
-                agent, description, strategy, verbose,
+            answers, all_notes = self._investigate_iteratively(
+                agent, description, strategy, task_tools, verbose,
                 max_questions=depth_config.questions_max,
+                skip_investigate=depth_config.skip_investigate,
             )
-
-            if verbose:
-                _log(f"  {DIM}{len(questions)} questions generated{RESET}")
-                for i, q in enumerate(questions):
-                    _log(f"    {DIM}{i+1}. {q['question'][:80]}{RESET}")
-
-            if not depth_config.skip_investigate and questions:
-                # ── Phase 2: INVESTIGATE ──────────────────────────────
-                if verbose:
-                    _log(f"\n{BOLD}🔍 Phase 2: INVESTIGATE{RESET}")
-
-                # Override investigate budget from depth config
-                strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
-
-                answers, all_notes = self._investigate(
-                    agent, questions, strategy, task_tools, verbose,
-                )
-
-                if verbose:
-                    _log(f"  {DIM}{len(answers)} answers, {len(all_notes)} total notes{RESET}")
 
         # ── Phase 3: PLAN ─────────────────────────────────────────────
         if verbose:
@@ -444,6 +424,259 @@ class PhaseEngine:
                 _log(f"    {DIM}→ {note_count} notes: {answer_text[:100]}{RESET}")
 
         return answers, all_notes
+
+    # ── Iterative investigation (merged phases 1+2) ────────────────────
+
+    _MAX_FOLLOWUP_DEPTH = 2  # Max chain depth for follow-up questions
+
+    def _investigate_iteratively(
+        self,
+        agent: Any,
+        description: str,
+        strategy: PhaseStrategy,
+        all_tools: list | None,
+        verbose: bool,
+        max_questions: int,
+        skip_investigate: bool = False,
+    ) -> tuple[list[dict[str, str]], list[str]]:
+        """Interleave question generation and investigation.
+
+        1. Generate seed questions
+        2. Investigate each, then ask for follow-ups
+        3. Investigate follow-ups (up to _MAX_FOLLOWUP_DEPTH)
+        4. Return all answers + notes
+        """
+        # Phase 1: Seed questions
+        if verbose:
+            _log(f"\n{BOLD}❓ Phase 1: QUESTIONS{RESET}")
+
+        seed_questions = self._generate_questions(
+            agent, description, strategy, verbose,
+            max_questions=max_questions,
+        )
+
+        if verbose:
+            _log(f"  {DIM}{len(seed_questions)} seed questions generated{RESET}")
+            for i, q in enumerate(seed_questions):
+                _log(f"    {DIM}{i+1}. {q['question'][:80]}{RESET}")
+
+        if skip_investigate or not seed_questions:
+            return [], []
+
+        if verbose:
+            _log(f"\n{BOLD}🔍 Phase 2: INVESTIGATE{RESET}")
+
+        # Build read-only tool set
+        if all_tools:
+            read_tools = [
+                t for t in all_tools
+                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
+            ]
+        else:
+            agent_tools = getattr(agent, 'tools', []) or []
+            read_tools = [
+                t for t in agent_tools
+                if getattr(t, 'name', '') in _READ_ONLY_TOOLS
+            ] if agent_tools else []
+
+        answers: list[dict[str, str]] = []
+        all_notes: list[str] = []
+        total_investigated = 0
+
+        def _investigate_one(question: dict, label: str) -> None:
+            """Investigate a single question and collect results."""
+            nonlocal total_investigated
+            q_text = question["question"]
+
+            if verbose:
+                _log(f"  {CYAN}{label}: {q_text[:80]}{RESET}")
+
+            # Build previous answers context
+            previous_text = ""
+            if answers:
+                prev_lines = "\n".join(
+                    f"  Q: {a['question']}\n  A: {a['answer']}"
+                    for a in answers
+                )
+                previous_text = f"## PREVIOUS ANSWERS\n{prev_lines}"
+
+            inv_prompt = strategy.investigate_prompt.replace(
+                "{{q_num}}", str(total_investigated + 1)
+            ).replace(
+                "{{q_total}}", str(max_questions)
+            ).replace(
+                "{{question}}", q_text
+            ).replace(
+                "{{previous_answers}}", previous_text
+            )
+
+            engine = LoopEngine()
+            result = engine.execute(
+                agent=agent,
+                task_prompt=(inv_prompt, "Answer the question with add_note."),
+                verbose=verbose,
+                task_tools=read_tools,
+                max_iterations=3,
+                max_total_tool_calls=strategy.investigate_max_tool_calls,
+                max_tool_calls_per_action=strategy.investigate_max_tool_calls,
+                nudge_threshold=strategy.investigate_max_tool_calls - 2,
+                summarizer_enabled=False,
+                identity_override=strategy.investigate_identity or None,
+            )
+
+            # Collect notes
+            if engine._last_state and engine._last_state.notes:
+                for note in engine._last_state.notes:
+                    if note not in all_notes:
+                        all_notes.append(note)
+
+            answer_text = result or "No answer found."
+            if engine._last_state and engine._last_state.notes:
+                answer_text = " | ".join(engine._last_state.notes)
+
+            answers.append({
+                "question": q_text,
+                "answer": answer_text[:800],
+            })
+            total_investigated += 1
+
+            if verbose:
+                note_count = len(engine._last_state.notes) if engine._last_state else 0
+                _log(f"    {DIM}→ {note_count} notes: {answer_text[:100]}{RESET}")
+
+        def _investigate_with_followups(question: dict, label_prefix: str, depth: int) -> None:
+            """Investigate a question, then recursively investigate follow-ups."""
+            _investigate_one(question, label_prefix)
+
+            # Check budget and depth
+            if total_investigated >= max_questions or depth >= self._MAX_FOLLOWUP_DEPTH:
+                return
+
+            # Generate follow-ups
+            followups = self._generate_followups(
+                agent, description, answers, all_notes, strategy, verbose,
+            )
+
+            if not followups:
+                return
+
+            remaining_budget = max_questions - total_investigated
+            followups = followups[:remaining_budget]
+
+            if verbose:
+                _log(f"    {DIM}↳ {len(followups)} follow-up(s) generated{RESET}")
+
+            for j, fq in enumerate(followups):
+                if total_investigated >= max_questions:
+                    break
+                fu_label = f"{label_prefix} → F{j+1}"
+                _investigate_with_followups(fq, fu_label, depth + 1)
+
+        # Investigate each seed question with follow-ups
+        for i, q in enumerate(seed_questions):
+            if total_investigated >= max_questions:
+                break
+            _investigate_with_followups(q, f"Q{i+1}/{len(seed_questions)}", depth=0)
+
+        if verbose:
+            _log(f"  {DIM}Investigation complete: {len(answers)} answers, {len(all_notes)} notes{RESET}")
+
+        return answers, all_notes
+
+    def _generate_followups(
+        self,
+        agent: Any,
+        description: str,
+        answers: list[dict[str, str]],
+        all_notes: list[str],
+        strategy: PhaseStrategy,
+        verbose: bool,
+    ) -> list[dict[str, Any]]:
+        """Ask LLM if follow-up questions are needed based on investigation so far."""
+        from infinidev.config.llm import get_litellm_params
+        from infinidev.engine.loop_context import build_system_prompt
+        from infinidev.engine.loop_tools import (
+            STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
+        )
+        from infinidev.prompts.phases.investigate import FOLLOWUP_PROMPT
+
+        answers_text = "\n".join(
+            f"  Q: {a['question']}\n  A: {a['answer']}"
+            for a in answers
+        )
+        notes_text = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(all_notes)) if all_notes else "(none)"
+
+        user_prompt = FOLLOWUP_PROMPT.format(
+            answers_text=answers_text,
+            notes_text=notes_text,
+            description=description,
+        )
+
+        llm_params = get_litellm_params()
+        system_prompt = build_system_prompt(
+            agent.backstory,
+            identity_override=strategy.investigate_identity or None,
+        )
+
+        tools = [GENERATE_QUESTION_SCHEMA, STEP_COMPLETE_SCHEMA]
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        collected: list[dict[str, Any]] = []
+        # Single round — follow-up generation should be quick
+        max_rounds = 3
+
+        for round_num in range(max_rounds):
+            try:
+                response = call_llm(llm_params, messages, tools=tools, tool_choice="auto")
+            except Exception as exc:
+                logger.warning("Follow-up generation failed: %s", str(exc)[:200])
+                break
+
+            choice = response.choices[0]
+            message = choice.message
+            tool_calls = getattr(message, "tool_calls", None)
+
+            if not tool_calls:
+                break
+
+            done = False
+            for tc in tool_calls:
+                fn_name = tc.function.name
+                if fn_name == "generate_question":
+                    try:
+                        args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+
+                    q_text = args.get("question", "")
+                    q_intent = args.get("intent", "followup")
+
+                    if q_text and len(q_text) >= 10:
+                        collected.append({"question": q_text, "intent": q_intent})
+
+                    messages.append({"role": "assistant", "tool_calls": [
+                        {"id": getattr(tc, "id", f"fu_{round_num}"),
+                         "type": "function",
+                         "function": {"name": "generate_question", "arguments": tc.function.arguments}}
+                    ]})
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": getattr(tc, "id", f"fu_{round_num}"),
+                        "content": f"Follow-up #{len(collected)} recorded. "
+                                   f"Generate more or call step_complete(status='done').",
+                    })
+
+                elif fn_name == "step_complete":
+                    done = True
+                    break
+
+            if done or len(collected) >= 2:
+                break
+
+        return collected
 
     # ── Phase 3: Generate plan ────────────────────────────────────────
 

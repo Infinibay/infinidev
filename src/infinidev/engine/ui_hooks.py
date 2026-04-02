@@ -43,7 +43,7 @@ def _extract_error(result: str) -> str:
 def _on_post_tool(ctx: HookContext) -> None:
     """Emit ``loop_tool_call`` event after each real tool execution."""
     # Skip pseudo-tools handled separately
-    if ctx.tool_name in ("think", "step_complete", "add_note"):
+    if ctx.tool_name in ("think", "step_complete", "add_note", "add_session_note"):
         return
 
     # Handle send_message specially

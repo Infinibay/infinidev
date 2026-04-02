@@ -152,6 +152,14 @@ def call_llm(
             return llm_ctx.metadata["response"]
         except Exception as exc:
             last_exc = exc
+            # Auto-drop tool_choice if the endpoint doesn't support it at all
+            err_msg = str(exc).lower()
+            if "tool_choice" in err_msg or "tool_choise" in err_msg:
+                if "tool_choice" in kwargs:
+                    logger.info("Dropping tool_choice — endpoint does not support it")
+                    del kwargs["tool_choice"]
+                    caps.supports_tool_choice_required = False
+                    continue  # retry without tool_choice
             if not is_transient(exc) or attempt == LLM_RETRIES:
                 raise
             delay = LLM_RETRY_DELAY * (2 ** (attempt - 1))

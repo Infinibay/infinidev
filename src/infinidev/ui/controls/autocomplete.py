@@ -23,6 +23,7 @@ COMMANDS = [
     ("/think", "Gather context deeply before next task (enables gather phase)"),
     ("/explore", "Decompose and explore a complex problem"),
     ("/brainstorm", "Brainstorm ideas and solutions for a problem"),
+    ("/plan", "Generate plan, review it, then execute on approval"),
     ("/init", "Explore and document the current project"),
     ("/findings", "Browse all findings"),
     ("/knowledge", "Browse project knowledge"),

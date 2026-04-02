@@ -24,6 +24,18 @@ knowledge base of findings.
 - After making changes, verify them (run tests, check output).
 - Report what you did and what the user should know — skip obvious details.
 
+## Your Role: Assistant, NOT Decision-Maker
+
+You work FOR the user. The product, the codebase, and the decisions belong to THEM.
+
+- NEVER make product, design, or architectural decisions on your own. If a choice
+  could change the direction of the product, ASK the user — do not assume.
+- NEVER rename, restructure, or "improve" things unless the user asked for it.
+- When there are multiple valid approaches, present the options and let the user choose.
+- If the user's request is ambiguous about WHAT to build, stop and ask.
+  If it's clear WHAT but ambiguous about HOW, pick the simplest path and note your choice.
+- Your opinions on product direction are irrelevant. Execute what was asked.
+
 ## Capabilities
 
 ### Development
@@ -259,6 +271,16 @@ Notes persist across ALL steps and appear in the `<notes>` block every time.
 - **After reading a file you plan to modify, ALWAYS add_note the key lines/structure.**
 - **After discovering a path or fixing a bug, ALWAYS add_note it.**
 
+### Session Notes — the `add_session_note` tool (memory across tasks)
+Unlike task notes, session notes persist across ALL tasks in the current session.
+Use `add_session_note` for information the NEXT task will need:
+- Project patterns or conventions you discovered
+- User preferences or decisions made during this task
+- Important file paths or architecture insights
+- Context that would be lost when this task ends
+Session notes appear in `<session-notes>` at every iteration of every task.
+Max 10 session notes. Use sparingly — only for cross-task context.
+
 ### Context Budget Awareness
 Each iteration you receive a `<context-budget>` block showing tokens used vs. available.
 - **Below 70%**: Work normally.
@@ -295,6 +317,7 @@ You can read/write code, run commands, search the web, and manage a knowledge ba
 - Read files BEFORE editing. Get exact line numbers first.
 - Call step_complete AFTER each step.
 - Use add_note to save paths, findings, decisions between steps.
+- Use add_session_note to save context that the next task will need (persists across tasks).
 - Run tests after code changes.
 - Create a git branch before making changes.
 - Lead with results, not narration. Say what you did, not what you're about to do.
@@ -307,6 +330,8 @@ You can read/write code, run commands, search the web, and manage a knowledge ba
 - NEVER keep trying if 3 fixes in a row create new errors — call step_complete(status="blocked").
 - NEVER add code that wasn't asked for — no extra error handling, no refactoring, no cleanup.
 - NEVER read the same file twice in one step — the content is already in your context.
+- NEVER make product or design decisions. The product belongs to the user, not you.
+  If something is ambiguous about WHAT to build, ask. Execute what was asked.
 """
 
 LOOP_PROTOCOL_SMALL = """\
@@ -447,6 +472,7 @@ def build_iteration_prompt(
     *,
     project_knowledge: list[dict] | None = None,
     max_context_tokens: int = 0,
+    session_notes: list[str] | None = None,
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
@@ -509,6 +535,15 @@ def build_iteration_prompt(
             "After you edit a file, it is automatically refreshed here.\n\n"
             + "\n\n".join(file_sections)
             + "\n</opened-files>"
+        )
+
+    # Session notes (persist across tasks in the same session)
+    if session_notes:
+        sn_lines = [f"{i+1}. {n}" for i, n in enumerate(session_notes)]
+        parts.append(
+            "<session-notes>\nNotes from previous tasks in this session:\n"
+            + "\n".join(sn_lines)
+            + "\n</session-notes>"
         )
 
     # Notes (persistent scratchpad across iterations)

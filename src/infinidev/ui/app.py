@@ -106,6 +106,11 @@ class InfinidevApp:
         self._analysis_answer: str = ""
         self._analysis_original_input: str = ""
 
+        # ── Plan review state ──────────────────────────────
+        self._plan_review_waiting: bool = False
+        self._plan_review_event = None
+        self._plan_review_answer: str = ""
+
         # ── Engine objects (lazy-initialized on first run) ──
         self.engine = None       # LoopEngine
         self.analyst = None      # AnalysisEngine
@@ -117,6 +122,11 @@ class InfinidevApp:
         self._settings_state = None
         self._settings_sections_ctrl_window = None
         self._settings_settings_ctrl_window = None
+
+        # ── Findings dialog state ───────────────────────────
+        self._findings_list_ctrl = None
+        self._findings_list_window = None
+        self._findings_detail_window = None
 
         # ── Permission state ────────────────────────────────
         self._permission_waiting: bool = False
@@ -308,6 +318,13 @@ class InfinidevApp:
             self._analysis_event.set()
             return
 
+        # Plan review feed-back
+        if self._plan_review_waiting and self._plan_review_event is not None:
+            self._plan_review_answer = user_text
+            self._plan_review_waiting = False
+            self._plan_review_event.set()
+            return
+
         if user_text.startswith("!"):
             self._execute_shell_command(user_text[1:])
         elif user_text.startswith("/"):
@@ -360,6 +377,7 @@ class InfinidevApp:
                 "/settings <key>       Show specific setting\n"
                 "/settings <key> <val> Change setting\n"
                 "/settings reset       Reset to defaults\n"
+                "/plan <task>          Generate plan, review, then execute\n"
                 "/explore <problem>    Decompose and explore a complex problem\n"
                 "/init                 Explore and document the current project\n"
                 "/findings             Browse all findings\n"
@@ -377,16 +395,13 @@ class InfinidevApp:
             self._handle_models(parts)
 
         elif cmd == "/findings":
-            # Phase 8: self._browse_findings(filter_type=None)
-            self.add_message("System", "[Findings browser — Phase 8]", "system")
+            self._open_findings_dialog(filter_type=None)
 
         elif cmd == "/knowledge":
-            # Phase 8: self._browse_findings(filter_type="project_context")
-            self.add_message("System", "[Knowledge browser — Phase 8]", "system")
+            self._open_findings_dialog(filter_type="project_context")
 
         elif cmd in ("/documentation", "/docs"):
-            # Phase 8: self._browse_documentation()
-            self.add_message("System", "[Docs browser — Phase 8]", "system")
+            self.add_message("System", "[Docs browser — coming soon]", "system")
 
         elif cmd == "/explore":
             problem = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -417,6 +432,21 @@ class InfinidevApp:
                 self._ensure_engine()
                 from infinidev.ui.workers import run_in_background, run_brainstorm_task
                 run_in_background(self, run_brainstorm_task, self, problem, exclusive=True)
+
+        elif cmd == "/plan":
+            task = " ".join(parts[1:]) if len(parts) > 1 else ""
+            if not task:
+                self.add_message("System", "Usage: /plan <task description>", "system")
+            elif self._engine_running:
+                self.add_message("System", "Cannot run /plan while a task is running.", "system")
+            else:
+                self._engine_running = True
+                self.add_message("System", f"Planning: {task}", "system")
+                self._chat_history_control.show_thinking = True
+                self.invalidate()
+                self._ensure_engine()
+                from infinidev.ui.workers import run_in_background, run_plan_task
+                run_in_background(self, run_plan_task, self, task, exclusive=True)
 
         elif cmd == "/think":
             self._gather_next_task = True
@@ -497,30 +527,44 @@ class InfinidevApp:
     def _handle_models(self, parts: list[str]) -> None:
         """Handle /models subcommands."""
         from infinidev.config.settings import settings, reload_all
+        from infinidev.config.providers import get_provider, fetch_models
 
         subcmd = parts[1].lower() if len(parts) > 1 else "info"
 
         if subcmd == "set" and len(parts) > 2:
             new_model = parts[2]
+            # Use current provider's prefix if model has no prefix
             if "/" not in new_model:
-                new_model = f"ollama_chat/{new_model}"
+                provider = get_provider(settings.LLM_PROVIDER)
+                new_model = f"{provider.prefix}{new_model}"
             settings.save_user_settings({"LLM_MODEL": new_model})
             reload_all()
             self.add_message("System", f"Model updated to: {settings.LLM_MODEL}", "system")
             self._update_status_bar()
 
         elif subcmd == "list":
-            # Phase 8: self._list_models()
-            self.add_message("System", "[Model list — Phase 4/8]", "system")
+            provider = get_provider(settings.LLM_PROVIDER)
+            self.add_message("System", f"Fetching models for {provider.display_name}...", "system")
+            try:
+                models = fetch_models(settings.LLM_PROVIDER, settings.LLM_API_KEY, settings.LLM_BASE_URL)
+                if models:
+                    model_list = "\n".join(f"  {m}" for m in models)
+                    self.add_message("System", f"Available models:\n{model_list}", "system")
+                else:
+                    self.add_message("System", "No models found. Check API key and connection.", "system")
+            except Exception as e:
+                self.add_message("System", f"Error fetching models: {e}", "system")
 
         elif subcmd == "manage":
-            # Phase 8: self._manage_models()
-            self.add_message("System", "[Model picker — Phase 8]", "system")
+            self.add_message("System", "[Model picker — coming soon]", "system")
 
         else:
+            provider = get_provider(settings.LLM_PROVIDER)
             self.add_message(
                 "System",
-                f"Current model: {settings.LLM_MODEL}\nBase URL: {settings.LLM_BASE_URL}",
+                f"Provider: {provider.display_name}\n"
+                f"Model: {settings.LLM_MODEL}\n"
+                f"Base URL: {settings.LLM_BASE_URL}",
                 "system",
             )
 
@@ -868,6 +912,109 @@ class InfinidevApp:
         if self._float_container:
             self._float_container.floats.append(dialog_float)
 
+    # ── Findings dialog ────────────────────────────────────────────
+
+    def _open_findings_dialog(self, filter_type: str | None = None) -> None:
+        """Open the findings browser modal."""
+        if self._findings_list_ctrl is None:
+            self._init_findings_dialog()
+
+        # Load findings from DB
+        from infinidev.db.service import get_all_findings
+        try:
+            findings = get_all_findings()
+        except Exception:
+            findings = []
+        if filter_type:
+            findings = [f for f in findings if f.get("finding_type") == filter_type]
+
+        self._findings_list_ctrl.findings = findings
+        self._findings_list_ctrl.cursor = 0
+        self.active_dialog = "findings_browser"
+
+        try:
+            self.app.layout.focus(self._findings_list_window)
+        except Exception:
+            pass
+        self.invalidate()
+
+    def _init_findings_dialog(self) -> None:
+        """Lazy-create the findings dialog and register as a Float."""
+        from prompt_toolkit.layout.containers import (
+            Float, ConditionalContainer, VSplit, Window,
+        )
+        from prompt_toolkit.layout.dimension import Dimension as D
+        from prompt_toolkit.filters import Condition
+        from infinidev.ui.dialogs.findings_browser import (
+            FindingsListControl, FindingsDetailControl,
+        )
+        from infinidev.ui.dialogs.base import dialog_frame as _df
+
+        list_ctrl = FindingsListControl()
+        detail_ctrl = FindingsDetailControl(list_ctrl)
+        self._findings_list_ctrl = list_ctrl
+
+        # Stable windows
+        self._findings_list_window = Window(content=list_ctrl, width=D(weight=40))
+        self._findings_detail_window = Window(content=detail_ctrl, width=D(weight=60))
+
+        # Add keybindings for navigation and panel switching
+        from prompt_toolkit.key_binding import KeyBindings
+        nav_kb = KeyBindings()
+
+        @nav_kb.add("up")
+        def _up(event):
+            list_ctrl.move_cursor(-1)
+
+        @nav_kb.add("down")
+        def _down(event):
+            list_ctrl.move_cursor(1)
+
+        @nav_kb.add("escape")
+        def _close(event):
+            self.active_dialog = None
+            self.focus_chat()
+            self.invalidate()
+
+        # Attach keybindings to the list control
+        list_ctrl._nav_kb = nav_kb
+        _orig_get_kb = list_ctrl.get_key_bindings if hasattr(list_ctrl, 'get_key_bindings') else None
+
+        def _get_kb():
+            return nav_kb
+        list_ctrl.get_key_bindings = _get_kb
+        list_ctrl.is_focusable = lambda: True
+
+        # Mouse click on list
+        from prompt_toolkit.mouse_events import MouseEventType as _MET
+
+        def _mouse(mouse_event):
+            if mouse_event.event_type == _MET.MOUSE_UP:
+                row = mouse_event.position.y
+                if 0 <= row < len(list_ctrl.findings):
+                    list_ctrl.cursor = row
+            return None
+        list_ctrl.mouse_handler = _mouse
+
+        title = "Findings"
+        body = VSplit([
+            self._findings_list_window,
+            Window(width=1, char="│", style=f"{PRIMARY}"),
+            self._findings_detail_window,
+        ])
+
+        frame = _df(title, body, width=90, height=30, border_color=PRIMARY)
+
+        dialog_float = Float(
+            content=ConditionalContainer(
+                content=frame,
+                filter=Condition(lambda: self.active_dialog == "findings_browser"),
+            ),
+            transparent=False,
+        )
+        if self._float_container:
+            self._float_container.floats.append(dialog_float)
+
     # ── Tab bar fragments ────────────────────────────────────────────
 
     def _switch_tab(self, tab_id: str) -> None:
@@ -1019,6 +1166,9 @@ class InfinidevApp:
     def on_loop_event(self, event_type: str, project_id: int,
                       agent_id: str, data: dict[str, Any]) -> None:
         """EventBus subscriber callback — called from engine worker threads."""
+        # Pass agent_id through so the event handler can differentiate
+        data["_agent_id"] = agent_id
+
         from infinidev.ui.event_handler import process_event
         process_event(self, event_type, data)
         self.invalidate()

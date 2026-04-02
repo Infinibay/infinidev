@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     MAX_DIR_LISTING: int = 1000
 
     # LLM (via LiteLLM)
+    LLM_PROVIDER: str = "ollama"  # Provider ID: ollama, openai, anthropic, gemini, zai, kimi, minimax, openai_compatible
     LLM_MODEL: str = "ollama_chat/qwen2.5-coder:7b"
     LLM_BASE_URL: str = "http://localhost:11434"
     LLM_API_KEY: str = "ollama"

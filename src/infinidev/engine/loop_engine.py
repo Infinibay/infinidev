@@ -1230,6 +1230,7 @@ class LoopEngine(AgentEngine):
         self._nudge_threshold_override: int | None = None
         self._summarizer_override: bool | None = None
         self._cancel_event: __import__('threading').Event = __import__('threading').Event()
+        self.session_notes: list[str] = []  # Persist across tasks within a session
 
     def cancel(self) -> None:
         """Signal the engine to stop after the current tool call."""
@@ -1455,6 +1456,7 @@ class LoopEngine(AgentEngine):
                 desc, expected, effective_state,
                 project_knowledge=_project_knowledge if iteration == start_iteration else None,
                 max_context_tokens=max_context_tokens,
+                session_notes=self.session_notes if self.session_notes else None,
             )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
@@ -1639,12 +1641,15 @@ class LoopEngine(AgentEngine):
                     regular_calls = []
                     sc_call = None
                     note_calls = []
+                    session_note_calls = []
                     think_calls = []
                     for tc in tool_calls:
                         if tc.function.name == "step_complete":
                             sc_call = tc
                         elif tc.function.name == "add_note":
                             note_calls.append(tc)
+                        elif tc.function.name == "add_session_note":
+                            session_note_calls.append(tc)
                         elif tc.function.name == "think":
                             think_calls.append(tc)
                         else:
@@ -1676,6 +1681,17 @@ class LoopEngine(AgentEngine):
                             if note_text and len(state.notes) < _MAX_NOTES:
                                 state.notes.append(note_text)
                                 state.tool_calls_since_last_note = 0  # Reset nudge counter
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+
+                    # Process add_session_note calls (write to engine-level session notes)
+                    _MAX_SESSION_NOTES = 10
+                    for snc in session_note_calls:
+                        try:
+                            snc_args = _safe_json_loads(snc.function.arguments) if isinstance(snc.function.arguments, str) else (snc.function.arguments or {})
+                            note_text = snc_args.get("note", "").strip()
+                            if note_text and len(self.session_notes) < _MAX_SESSION_NOTES:
+                                self.session_notes.append(note_text)
                         except (json.JSONDecodeError, AttributeError):
                             pass
 
@@ -1826,6 +1842,8 @@ class LoopEngine(AgentEngine):
                         if manual_tc:
                             for nc in note_calls:
                                 tool_results_text.append('[Tool: add_note] Result:\n{"status": "noted"}')
+                            for snc in session_note_calls:
+                                tool_results_text.append('[Tool: add_session_note] Result:\n{"status": "noted"}')
                             for tk in think_calls:
                                 tool_results_text.append('[Tool: think] Result:\n{"status": "acknowledged"}')
                             if tool_results_text:
@@ -1846,7 +1864,7 @@ class LoopEngine(AgentEngine):
                             same_tool_streak = 1
                             repetition_nudged = False
 
-                        # Provide think + add_note tool results
+                        # Provide think + add_note + add_session_note tool results
                         if not manual_tc:
                             for tk in think_calls:
                                 messages.append({
@@ -1860,6 +1878,12 @@ class LoopEngine(AgentEngine):
                                     "tool_call_id": nc.id,
                                     "content": '{"status": "noted"}',
                                 })
+                            for snc in session_note_calls:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": snc.id,
+                                    "content": '{"status": "noted"}',
+                                })
 
                         # Provide step_complete tool result if it was in this batch
                         if sc_call and not manual_tc:
@@ -1869,7 +1893,7 @@ class LoopEngine(AgentEngine):
                                 "content": '{"status": "acknowledged"}',
                             })
 
-                    elif sc_call or note_calls or think_calls:
+                    elif sc_call or note_calls or session_note_calls or think_calls:
                         # Only engine pseudo-tools, no regular tools
                         if manual_tc:
                             messages.append({
@@ -1878,7 +1902,7 @@ class LoopEngine(AgentEngine):
                             })
                         else:
                             assistant_msg = {"role": "assistant", "content": message.content or ""}
-                            pseudo_calls = think_calls + note_calls + ([sc_call] if sc_call else [])
+                            pseudo_calls = think_calls + note_calls + session_note_calls + ([sc_call] if sc_call else [])
                             assistant_msg["tool_calls"] = [
                                 {
                                     "id": pc.id,
@@ -1901,6 +1925,12 @@ class LoopEngine(AgentEngine):
                                 messages.append({
                                     "role": "tool",
                                     "tool_call_id": nc.id,
+                                    "content": '{"status": "noted"}',
+                                })
+                            for snc in session_note_calls:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": snc.id,
                                     "content": '{"status": "noted"}',
                                 })
                             if sc_call:

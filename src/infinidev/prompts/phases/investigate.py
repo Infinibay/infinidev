@@ -197,3 +197,33 @@ OTHER_INVESTIGATE_IDENTITY = """\
 You are a system investigator. You check current state before making changes.
 Read configs, check logs, verify services, and document what you find.
 """
+
+
+# ── Follow-up question generation (used between investigation rounds) ────
+
+FOLLOWUP_PROMPT = """\
+You just investigated a question and discovered new information.
+Review your findings and determine if follow-up investigation is needed.
+
+## What you know so far:
+{answers_text}
+
+## Your investigation notes:
+{notes_text}
+
+## Original task:
+{description}
+
+Generate 0-2 follow-up questions ONLY if:
+- An answer revealed something unexpected that needs deeper investigation
+- A dependency or caller was mentioned but not yet explored
+- A test or config was referenced but not yet read
+
+Do NOT generate follow-ups if:
+- The answers are sufficient for planning
+- The follow-up would just be "read more of the same file"
+- You're curious but it's not essential for the task
+
+Call generate_question for each follow-up, then step_complete(done).
+If no follow-ups needed, just call step_complete(done) immediately.
+"""

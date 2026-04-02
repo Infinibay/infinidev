@@ -30,8 +30,9 @@ DIALOG_NAME = "settings_editor"
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
-        ("LLM_MODEL", "LLM model (cycle with Enter/Space)", "select_dynamic:ollama_models"),
-        ("LLM_BASE_URL", "Ollama/LiteLLM base URL", "str"),
+        ("LLM_PROVIDER", "LLM provider", "select:ollama,openai,anthropic,gemini,zai,kimi,minimax,openrouter,openai_compatible"),
+        ("LLM_MODEL", "LLM model", "select_dynamic:provider_models"),
+        ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
         ("LLM_TIMEOUT", "LLM request timeout in seconds", "int"),
     ],
@@ -98,15 +99,21 @@ class SettingsEditorState:
         self._on_focus_change = on_focus_change
         self._on_edit_start = on_edit_start
         self._ollama_models: list[str] | None = None  # cached model list
+        self._pending_changes: dict[str, str] = {}  # unsaved changes for cross-field deps
 
         # Dropdown picker state
         self.dropdown_open: bool = False
-        self.dropdown_options: list[str] = []
+        self.dropdown_options: list[str] = []      # all options (unfiltered)
         self.dropdown_cursor: int = 0
-        self._dropdown_key: str = ""  # which setting key the dropdown is for
+        self._dropdown_key: str = ""               # which setting key the dropdown is for
+        self.dropdown_filter: str = ""             # search text for filtering
 
         # Edit buffer for string/int/float editing
-        self.edit_buffer = Buffer(name="setting-edit", multiline=False)
+        self.edit_buffer = Buffer(
+            name="setting-edit",
+            multiline=False,
+            accept_handler=lambda buff: self.confirm_edit(),
+        )
 
     @property
     def focus_panel(self) -> str:
@@ -155,27 +162,24 @@ class SettingsEditorState:
     def _get_select_options(self, stype: str) -> list[str]:
         """Get options for a select field, including dynamic ones."""
         if stype == "select_dynamic:ollama_models":
-            return self._fetch_ollama_models()
+            return self._fetch_provider_models()
+        if stype == "select_dynamic:provider_models":
+            return self._fetch_provider_models()
         if stype.startswith("select:"):
             return stype[7:].split(",")
         return []
 
-    def _fetch_ollama_models(self) -> list[str]:
-        """Fetch available models from Ollama (cached)."""
+    def _fetch_provider_models(self) -> list[str]:
+        """Fetch available models for the current provider (cached)."""
         if self._ollama_models is not None:
             return self._ollama_models
         try:
-            import httpx
             from infinidev.config.settings import settings
-            base_url = settings.LLM_BASE_URL.rstrip("/")
-            resp = httpx.get(f"{base_url}/api/tags", timeout=5)
-            if resp.status_code == 200:
-                models = resp.json().get("models", [])
-                self._ollama_models = [
-                    f"ollama_chat/{m['name']}" for m in models
-                ]
-            else:
-                self._ollama_models = []
+            from infinidev.config.providers import fetch_models
+            provider_id = self._pending_changes.get("LLM_PROVIDER", settings.LLM_PROVIDER)
+            api_key = self._pending_changes.get("LLM_API_KEY", settings.LLM_API_KEY)
+            base_url = self._pending_changes.get("LLM_BASE_URL", settings.LLM_BASE_URL)
+            self._ollama_models = fetch_models(provider_id, api_key, base_url)
         except Exception:
             self._ollama_models = []
         return self._ollama_models
@@ -233,20 +237,42 @@ class SettingsEditorState:
     def cancel_edit(self) -> None:
         self.editing = False
 
+    @property
+    def dropdown_filtered(self) -> list[str]:
+        """Return dropdown options filtered by search text (case-insensitive)."""
+        if not self.dropdown_filter:
+            return self.dropdown_options
+        query = self.dropdown_filter.lower()
+        return [o for o in self.dropdown_options if query in o.lower()]
+
     def dropdown_move(self, delta: int) -> None:
-        if self.dropdown_options:
-            self.dropdown_cursor = max(0, min(len(self.dropdown_options) - 1,
+        filtered = self.dropdown_filtered
+        if filtered:
+            self.dropdown_cursor = max(0, min(len(filtered) - 1,
                                               self.dropdown_cursor + delta))
 
+    def dropdown_type(self, char: str) -> None:
+        """Append a character to the search filter."""
+        self.dropdown_filter += char
+        self.dropdown_cursor = 0
+
+    def dropdown_backspace(self) -> None:
+        """Delete last character from search filter."""
+        if self.dropdown_filter:
+            self.dropdown_filter = self.dropdown_filter[:-1]
+            self.dropdown_cursor = 0
+
     def dropdown_confirm(self) -> None:
-        if self.dropdown_open and 0 <= self.dropdown_cursor < len(self.dropdown_options):
-            selected = self.dropdown_options[self.dropdown_cursor]
+        filtered = self.dropdown_filtered
+        if self.dropdown_open and 0 <= self.dropdown_cursor < len(filtered):
+            selected = filtered[self.dropdown_cursor]
             self._save(self._dropdown_key, selected)
         self.dropdown_close()
 
     def dropdown_close(self) -> None:
         self.dropdown_open = False
         self.dropdown_options = []
+        self.dropdown_filter = ""
         self._dropdown_key = ""
         if self._on_focus_change:
             self._on_focus_change("settings")
@@ -269,10 +295,43 @@ class SettingsEditorState:
                 else:
                     settings.save_user_settings({key: value})
                 reload_all()
+
+                # When provider changes, auto-fill base_url and clear model cache
+                if key == "LLM_PROVIDER":
+                    self._on_provider_change(value)
+
         except Exception:
             pass
         if self._on_save:
             self._on_save(key, value)
+
+    def _on_provider_change(self, provider_id: str) -> None:
+        """Update related settings when provider changes."""
+        from infinidev.config.settings import settings, reload_all
+        from infinidev.config.providers import get_provider
+        provider = get_provider(provider_id)
+
+        updates: dict = {}
+        # Auto-fill base_url from provider defaults
+        if provider.default_base_url:
+            updates["LLM_BASE_URL"] = provider.default_base_url
+        # Clear model — old model won't be valid for new provider
+        updates["LLM_MODEL"] = ""
+        # Set API key: "ollama" placeholder for local, empty for cloud providers
+        if not provider.api_key_required:
+            updates["LLM_API_KEY"] = "ollama"
+        else:
+            # Clear the key so user must enter their own — don't send "ollama" to cloud APIs
+            updates["LLM_API_KEY"] = ""
+
+        if updates:
+            settings.save_user_settings(updates)
+            reload_all()
+            # Track pending changes for model fetch
+            self._pending_changes.update(updates)
+
+        # Clear cached model list so it re-fetches for new provider
+        self._ollama_models = None
 
 
 class SectionsControl(UIControl):
@@ -482,13 +541,34 @@ class DropdownControl(UIControl):
         def _cancel(event):
             s.dropdown_close()
 
+        @kb.add("backspace")
+        def _backspace(event):
+            s.dropdown_backspace()
+
+        # Typing any printable character adds to the search filter
+        @kb.add("<any>")
+        def _type(event):
+            char = event.data
+            if char and len(char) == 1 and char.isprintable():
+                s.dropdown_type(char)
+
         return kb
 
     def create_content(self, width: int, height: int | None,
                        preview_search: bool = False) -> UIContent:
-        options = self._state.dropdown_options
+        options = self._state.dropdown_filtered
         current_val = str(self._state._get_value(self._state._dropdown_key))
+        filter_text = self._state.dropdown_filter
         lines = []
+
+        # Search bar (always visible when dropdown is open)
+        if filter_text:
+            search_display = f" Search: {filter_text}_ ({len(options)} matches)"
+        else:
+            search_display = " Type to search..."
+        pad = " " * max(0, width - len(search_display))
+        lines.append([(f"bg:{SURFACE_LIGHT} {ACCENT} italic", f"{search_display}{pad}")])
+
         for i, opt in enumerate(options):
             is_current = opt == current_val
             marker = ">" if is_current else " "
@@ -501,8 +581,8 @@ class DropdownControl(UIControl):
             pad = " " * max(0, width - len(opt) - 4)
             lines.append([(style, f" {marker} {opt}{pad}")])
 
-        if not lines:
-            lines = [[(f"{TEXT_MUTED}", " No options available")]]
+        if len(lines) == 1:  # only search bar, no results
+            lines.append([(f"{TEXT_MUTED}", " No matches")])
 
         def get_line(i):
             return lines[i] if 0 <= i < len(lines) else []

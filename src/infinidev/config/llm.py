@@ -19,6 +19,12 @@ def _extract_provider(model: str) -> str:
 
 def _is_native_provider(model: str) -> bool:
     """Return True if LiteLLM handles this provider's endpoint natively."""
+    from infinidev.config.providers import get_provider
+    provider_id = settings.LLM_PROVIDER
+    provider = get_provider(provider_id)
+    if provider.is_native:
+        return True
+    # Fallback: check model prefix for backward compatibility
     return _extract_provider(model) in {"deepseek", "anthropic", "gemini", "openai", "zai"}
 
 def _get_model_size_b(model: str | None = None) -> int:

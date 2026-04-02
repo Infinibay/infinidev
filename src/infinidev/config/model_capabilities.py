@@ -85,8 +85,64 @@ _PROBE_MESSAGES = [
 _THINKING_MARKERS = ("<thinking>", "<|thinking|>", "<think>")
 
 
+# Known capability presets per provider — skip probing for these
+_PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
+    "openai": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=True,
+        supports_json_mode=True,
+        probed=True,
+    ),
+    "anthropic": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=True,
+        supports_json_mode=True,
+        probed=True,
+    ),
+    "gemini": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=True,
+        supports_json_mode=True,
+        probed=True,
+    ),
+    "zai": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=False,
+        supports_json_mode=True,
+        probed=True,
+    ),
+    "kimi": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=False,
+        supports_json_mode=True,
+        probed=True,
+    ),
+    "minimax": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=False,
+        supports_json_mode=True,
+        probed=True,
+    ),
+    "openrouter": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=False,  # varies by model — be conservative
+        supports_json_mode=False,             # varies by model — be conservative
+        probed=True,
+    ),
+}
+
+
 def get_model_capabilities() -> ModelCapabilities:
-    """Return the current model capabilities (probed or defaults)."""
+    """Return model capabilities. Uses provider presets for known cloud providers."""
+    global _capabilities
+    if not _capabilities.probed:
+        try:
+            from infinidev.config.settings import settings
+            provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
+            if provider_id in _PROVIDER_PRESETS:
+                _capabilities = _PROVIDER_PRESETS[provider_id]
+        except Exception:
+            pass
     return _capabilities
 
 
