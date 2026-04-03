@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 1800  # Request timeout in seconds (default 30 min for large local models)
     OLLAMA_NUM_CTX: int = 16384  # Context window for Ollama models (0 = use model default)
 
+    # Thinking / Reasoning
+    THINKING_ENABLED: bool = True  # Master toggle — disables all reasoning when False
+    # Budget presets: "low", "medium", "high", "ultra", "custom"
+    THINKING_BUDGET: str = "medium"
+    THINKING_BUDGET_TOKENS: int = 4096  # Used when THINKING_BUDGET="custom"
+
     # Embedding / Knowledge
     EMBEDDING_PROVIDER: str = "ollama"
     EMBEDDING_MODEL: str = "nomic-embed-text"

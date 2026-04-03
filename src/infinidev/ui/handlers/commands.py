@@ -41,6 +41,8 @@ def _cmd_clear(app: InfinidevApp, parts: list[str]) -> None:
     app._thinking_text = ""
     app._steps_text = ""
     app._actions_text = ""
+    app._streaming_tool_name = None
+    app._streaming_token_count = 0
     app.invalidate()
 
 

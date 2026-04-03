@@ -41,6 +41,11 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("EMBEDDING_MODEL", "Embedding model name", "str"),
         ("EMBEDDING_BASE_URL", "Embedding API base URL", "str"),
     ],
+    "Thinking": [
+        ("THINKING_ENABLED", "Enable model reasoning/thinking", "bool"),
+        ("THINKING_BUDGET", "Thinking budget preset", "select:low,medium,high,ultra,custom"),
+        ("THINKING_BUDGET_TOKENS", "Custom token budget (when preset=custom)", "int"),
+    ],
     "Loop Engine": [
         ("LOOP_MAX_ITERATIONS", "Max plan-execute cycles per task", "int"),
         ("LOOP_MAX_TOOL_CALLS_PER_ACTION", "Tool calls per step (0=unlimited)", "int"),
@@ -241,6 +246,12 @@ class SettingsEditorState:
                 self._on_focus_change("dropdown")
 
         else:
+            # Block editing on THINKING_BUDGET_TOKENS when preset is not "custom"
+            if key == "THINKING_BUDGET_TOKENS":
+                budget = str(self._get_value("THINKING_BUDGET")).lower()
+                if budget != "custom":
+                    return  # Read-only — value is controlled by the preset
+
             # Start inline editing for str/int/float
             self.editing = True
             self.edit_buffer.set_document(

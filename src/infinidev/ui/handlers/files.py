@@ -171,6 +171,7 @@ class FileManager:
         editor_content_window = _W(
             content=editor.control,
             left_margins=[NumberedMargin()] if self.line_numbers_visible else [],
+            wrap_lines=True,
         )
         # Store ref so toggle_line_numbers can update margins later
         editor._content_window = editor_content_window

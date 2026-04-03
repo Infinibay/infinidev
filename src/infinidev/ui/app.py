@@ -76,6 +76,8 @@ class InfinidevApp:
         self._thinking_text: str = ""  # Live streaming thinking content
         self._steps_text: str = ""
         self._actions_text: str = ""
+        self._streaming_tool_name: str | None = None  # Tool detected during streaming
+        self._streaming_token_count: int = 0           # Tokens received so far
         self._log_entries: deque[tuple[float, str]] = deque(maxlen=15)  # (timestamp, text)
 
         # ── File management (delegated to FileManager) ──────
@@ -166,6 +168,13 @@ class InfinidevApp:
         # Welcome message
         self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
 
+        # ── Animation refresh timer ─────────────────────────────
+        self._start_animation_timer()
+
+        # ── Start background workspace indexing ────────────────
+        self._index_ready = False
+        self._start_background_index()
+
     # ── Run ──────────────────────────────────────────────────────────
 
     def run(self) -> None:
@@ -178,6 +187,88 @@ class InfinidevApp:
     def invalidate(self) -> None:
         """Request a screen redraw (thread-safe)."""
         self.app.invalidate()
+
+    # ── Background workspace indexing ───────────────────────────────
+
+    def _start_background_index(self) -> None:
+        """Kick off workspace indexing in a background thread.
+
+        Shows progress in the chat history so the user knows what's happening.
+        The index runs once at startup; subsequent file changes are handled
+        by the file watcher.
+        """
+        import threading
+
+        def _index_worker():
+            from infinidev.config.settings import settings
+            if not settings.CODE_INTEL_ENABLED:
+                self._index_ready = True
+                return
+
+            if self.status_bar_control:
+                self.status_bar_control.set_status("indexing...")
+                self.invalidate()
+
+            self.add_message(
+                "System",
+                "Indexing workspace — code intelligence will be ready shortly...",
+                "system",
+            )
+            try:
+                from infinidev.cli.initial_index import run_initial_index
+
+                stats = run_initial_index(project_id=1)
+
+                files = stats.get("files_indexed", 0)
+                symbols = stats.get("symbols_total", 0)
+                elapsed = stats.get("elapsed_ms", 0)
+
+                if files > 0:
+                    self.add_message(
+                        "System",
+                        f"Index ready: {files} files, {symbols} symbols ({elapsed}ms)",
+                        "system",
+                    )
+                else:
+                    self.add_message("System", "Index up to date.", "system")
+
+                if self.status_bar_control:
+                    self.status_bar_control.set_status("ready")
+                    self.invalidate()
+
+            except Exception as exc:
+                logger.warning("Background indexing failed: %s", exc)
+                self.add_message(
+                    "System",
+                    f"Indexing failed: {exc} — code intelligence may be limited.",
+                    "system",
+                )
+            finally:
+                self._index_ready = True
+
+        t = threading.Thread(target=_index_worker, daemon=True, name="infinidev-index")
+        t.start()
+
+    def _start_animation_timer(self) -> None:
+        """Periodic invalidation for sidebar animations while engine runs.
+
+        Without this, time-based animations (spinners, blinking) would freeze
+        because prompt_toolkit only redraws on explicit invalidate() calls.
+        Runs at ~6 FPS — enough for smooth spinners, cheap enough to be idle.
+        """
+        import threading
+
+        def _tick():
+            while True:
+                time.sleep(0.16)  # ~6 FPS
+                if self._engine_running or self._streaming_token_count > 0:
+                    try:
+                        self.invalidate()
+                    except Exception:
+                        pass
+
+        t = threading.Thread(target=_tick, daemon=True, name="infinidev-anim")
+        t.start()
 
     # ── Message management ───────────────────────────────────────────
 
@@ -595,6 +686,38 @@ class InfinidevApp:
         return FormattedText(fragments) if fragments else FormattedText([(f"{TEXT_MUTED}", " Waiting...")])
 
     def get_actions_fragments(self) -> FormattedText:
+        # Streaming tool detection — show animated indicator
+        if self._streaming_tool_name:
+            import time
+            # Cycle through animation frames based on time
+            frames = ["◐", "◓", "◑", "◒"]
+            frame = frames[int(time.monotonic() * 4) % len(frames)]
+            tokens = self._streaming_token_count
+            return FormattedText([
+                (f"{ACCENT} bold", f" {frame} "),
+                (f"{ACCENT}", f"{self._streaming_tool_name}"),
+                (f"{TEXT_MUTED}", f"\n   streaming... {tokens} tokens"),
+            ])
+
+        # Active streaming without tool detection — show token count
+        if self._streaming_token_count > 0 and self._engine_running and not self._actions_text:
+            import time
+            frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            frame = frames[int(time.monotonic() * 8) % len(frames)]
+            tokens = self._streaming_token_count
+            return FormattedText([
+                (f"{TEXT_MUTED}", f" {frame} receiving... {tokens} tokens"),
+            ])
+
+        # Engine running but no streaming data yet — show waiting animation
+        if self._engine_running and not self._actions_text:
+            import time
+            frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            frame = frames[int(time.monotonic() * 6) % len(frames)]
+            return FormattedText([
+                (f"{TEXT_MUTED}", f" {frame} waiting for LLM..."),
+            ])
+
         if not self._actions_text:
             return FormattedText([(f"{TEXT_MUTED}", " Idle")])
         return FormattedText([(STYLE_SIDEBAR_CONTENT, self._actions_text)])

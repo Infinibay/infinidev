@@ -45,5 +45,15 @@ class GlobInput(BaseModel):
         le=500,
         description="Maximum number of matching files to return (default: 100).",
     )
+    include_ignored: bool = Field(
+        default=False,
+        description="Include files normally ignored (caches, build artifacts, node_modules, etc.). By default these are hidden.",
+    )
+    max_depth: int | None = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description="Maximum directory depth for results. 1 = files in base dir only. None = unlimited.",
+    )
 
 

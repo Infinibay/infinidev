@@ -220,7 +220,18 @@ class LoopEngine(AgentEngine):
             _emit_loop_event("loop_thinking_chunk", ctx.project_id, ctx.agent_id, {
                 "text": text,
             })
-        llm_caller = LLMCaller(on_thinking_chunk=_on_thinking)
+
+        def _on_stream_status(phase: str, token_count: int, tool_name: str | None) -> None:
+            _emit_loop_event("loop_stream_status", ctx.project_id, ctx.agent_id, {
+                "phase": phase,
+                "token_count": token_count,
+                "tool_name": tool_name,
+            })
+
+        llm_caller = LLMCaller(
+            on_thinking_chunk=_on_thinking,
+            on_stream_status=_on_stream_status,
+        )
         tool_proc = ToolProcessor()
         guard = LoopGuard(is_small=ctx.is_small)
         step_mgr = StepManager(self)
@@ -493,6 +504,9 @@ class LoopEngine(AgentEngine):
         guard.reset()
 
         while action_tool_calls < ctx.max_per_action and ctx.state.total_tool_calls < ctx.max_total_calls:
+            # Signal UI that LLM call is starting
+            _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {})
+
             result = llm_caller.call(ctx, messages, is_planning, action_tool_calls)
 
             if result.should_retry:
@@ -502,6 +516,16 @@ class LoopEngine(AgentEngine):
                 break
 
             if result.tool_calls:
+                # In FC mode (no streaming), signal the detected tool names immediately
+                if not ctx.manual_tc:
+                    first_tc = result.tool_calls[0]
+                    tc_name = getattr(first_tc, "name", None) or getattr(getattr(first_tc, "function", None), "name", None)
+                    if tc_name:
+                        _emit_loop_event("loop_stream_status", ctx.project_id, ctx.agent_id, {
+                            "phase": "tool_detected",
+                            "token_count": 0,
+                            "tool_name": tc_name,
+                        })
                 guard.text_retries = 0
                 classified = tool_proc.classify(result.tool_calls)
                 tool_proc.process_pseudo_tools(ctx, classified, self)

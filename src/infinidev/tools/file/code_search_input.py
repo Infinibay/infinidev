@@ -31,5 +31,11 @@ class CodeSearchInput(BaseModel):
     context_lines: int = Field(
         default=0, ge=0, le=5, description="Lines of context before and after each match"
     )
+    max_depth: int | None = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description="Maximum directory depth to search. 1 = files in base dir only. None = unlimited.",
+    )
 
 

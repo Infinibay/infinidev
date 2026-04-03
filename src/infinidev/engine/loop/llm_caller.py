@@ -34,10 +34,15 @@ from infinidev.engine.loop.classified_calls import ClassifiedCalls
 class LLMCaller:
     """Encapsulates LLM calling with manual-TC / FC-mode branching and retry."""
 
-    def __init__(self, on_thinking_chunk: "Callable[[str], None] | None" = None) -> None:
+    def __init__(
+        self,
+        on_thinking_chunk: "Callable[[str], None] | None" = None,
+        on_stream_status: "Callable[[str, int, str | None], None] | None" = None,
+    ) -> None:
         self._malformed_retries = 0
         self._MAX_MALFORMED_RETRIES = 4
         self._on_thinking_chunk = on_thinking_chunk
+        self._on_stream_status = on_stream_status
 
     def reset(self) -> None:
         """Reset per-inner-loop counters."""
@@ -70,7 +75,8 @@ class LLMCaller:
         for attempt in range(1, _MANUAL_PARSE_RETRIES + 1):
             try:
                 response = _call_llm(ctx.llm_params, messages,
-                                     on_thinking_chunk=self._on_thinking_chunk)
+                                     on_thinking_chunk=self._on_thinking_chunk,
+                                     on_stream_status=self._on_stream_status)
                 break
             except Exception as exc:
                 msg = str(exc).lower()
@@ -134,7 +140,8 @@ class LLMCaller:
         iter_tools = ctx.planning_schemas if is_planning else ctx.tool_schemas
         try:
             response = _call_llm(ctx.llm_params, messages, iter_tools, tool_choice="required",
-                                 on_thinking_chunk=self._on_thinking_chunk)
+                                 on_thinking_chunk=self._on_thinking_chunk,
+                                 on_stream_status=self._on_stream_status)
         except Exception as exc:
             return self._handle_fc_error(ctx, exc, messages)
 

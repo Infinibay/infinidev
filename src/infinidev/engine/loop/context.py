@@ -233,6 +233,7 @@ Example step_complete call:
 - **summary** is an internal note for your own memory (~150 tokens). The USER NEVER SEES IT.
 - **final_answer** is what the user sees. It must be complete, helpful, and well-written.
 - NEVER set status="done" without a substantive `final_answer`. If you only have a summary, use status="continue".
+- **Before status="done"**, always call `add_session_note` to record what you did/learned for subsequent tasks.
 
 ### Conversational Messages (no tools needed)
 For simple greetings or meta-questions that need NO tool calls:
@@ -273,13 +274,22 @@ Notes persist across ALL steps and appear in the `<notes>` block every time.
 
 ### Session Notes — the `add_session_note` tool (memory across tasks)
 Unlike task notes, session notes persist across ALL tasks in the current session.
-Use `add_session_note` for information the NEXT task will need:
-- Project patterns or conventions you discovered
+Use `add_session_note` to build a useful knowledge base for subsequent tasks:
+- Project patterns, conventions, or architecture insights you discovered
 - User preferences or decisions made during this task
-- Important file paths or architecture insights
-- Context that would be lost when this task ends
+- Important file paths, entry points, or key function locations
+- What you changed and why (so the next task has context)
+- Bugs found, workarounds applied, or known issues
+- Test commands that work, build commands, etc.
 Session notes appear in `<session-notes>` at every iteration of every task.
-Max 10 session notes. Use sparingly — only for cross-task context.
+Max 10 session notes — each one should be high-value context.
+
+**IMPORTANT:** Before calling `step_complete` with `status="done"`, you MUST call
+`add_session_note` with a concise summary of what you learned or changed in this task.
+This ensures the next task benefits from your work. Example:
+```
+add_session_note("Refactored auth module: verify_token() now at src/auth/jwt.py:42, uses RS256. Tests in tests/test_jwt.py.")
+```
 
 ### Context Budget Awareness
 Each iteration you receive a `<context-budget>` block showing tokens used vs. available.
@@ -407,10 +417,19 @@ Step: "Fix verify_token() in src/auth.py — add expiry check"
        status="continue")                               → done with step
 ```
 
+### Session Notes — `add_session_note`
+Session notes persist across ALL tasks in this session (task notes reset each task).
+Use `add_session_note` for things the NEXT task will benefit from:
+- What you changed and where (files, functions, line ranges)
+- Project conventions or patterns you discovered
+- Important paths, entry points, build/test commands that work
+**Before status="done", ALWAYS call `add_session_note` with a summary of your work.**
+
 ### Critical Rules
 - NEVER set status="done" without a substantive final_answer.
 - summary is internal only — user sees final_answer.
 - Use add_note to save file paths, function names, key findings.
+- Before status="done", call add_session_note with what you learned/changed.
 - You MUST call step_complete after every step.
 """
 

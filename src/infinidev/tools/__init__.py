@@ -44,10 +44,11 @@ CHAT_TOOLS = [SendMessageTool]
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
 CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool]
 
-# Curated subset for small models (<25B) — 15 tools with simple schemas
+# Curated subset for small models (<25B) — tools with simple schemas
 SMALL_MODEL_TOOLS = [
-    # File I/O (6)
+    # File I/O (8)
     ReadFileTool, CreateFileTool, ReplaceLinesTool,
+    AddContentAfterLineTool, AddContentBeforeLineTool,
     ListDirectoryTool, CodeSearchTool, GlobTool,
     # Git (3)
     GitCommitTool, GitDiffTool, GitStatusTool,
@@ -55,8 +56,9 @@ SMALL_MODEL_TOOLS = [
     ExecuteCommandTool,
     # Knowledge (2)
     RecordFindingTool, SearchFindingsTool,
-    # Code intelligence (3)
+    # Code intelligence (4)
     SearchSymbolsTool, GetSymbolCodeTool, EditSymbolTool,
+    FindReferencesTool,
 ]
 
 

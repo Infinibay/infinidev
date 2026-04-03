@@ -39,8 +39,11 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
     # ── Loop engine events ───────────────────────────────────────────
 
     if event_type == "loop_step_update":
-        # Clear streaming thinking on step transition
+        # Clear all transient state on step transition
         app._thinking_text = ""
+        app._streaming_tool_name = None
+        app._streaming_token_count = 0
+        app._actions_text = ""  # Reset so "waiting for LLM..." animation shows
         steps = data.get("plan_steps", [])
         if steps:
             lines = []
@@ -75,6 +78,10 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         )
 
     elif event_type == "loop_tool_call":
+        # Clear streaming state — tool is now executing
+        app._streaming_tool_name = None
+        app._streaming_token_count = 0
+
         tool_name = data.get("tool_name", "")
         tool_detail = data.get("tool_detail", "")
         tool_error = data.get("tool_error", "")
@@ -126,6 +133,25 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         })
         app._chat_history_control.invalidate_cache()
         app.invalidate()
+
+    elif event_type == "loop_llm_call_start":
+        # LLM call starting — clear previous actions so animation shows
+        app._actions_text = ""
+        app._streaming_tool_name = None
+        app._streaming_token_count = 0
+
+    elif event_type == "loop_stream_status":
+        # Streaming progress — show in ACTIONS with token count + tool detection
+        phase = data.get("phase", "")
+        token_count = data.get("token_count", 0)
+        tool_name = data.get("tool_name")
+
+        if phase == "tool_detected" and tool_name:
+            app._streaming_tool_name = tool_name
+            app._streaming_token_count = token_count
+            app._actions_text = ""  # Clear — fragments handle it now
+        else:
+            app._streaming_token_count = token_count
 
     elif event_type == "loop_thinking_chunk":
         # Streaming thinking — append to the THINKING sidebar panel

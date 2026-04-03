@@ -3,6 +3,7 @@
 import fnmatch
 import json
 import os
+import subprocess
 from typing import Type
 
 from pydantic import BaseModel, Field
@@ -11,14 +12,88 @@ from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.file.list_directory_input import ListDirectoryInput
 
+# Directories that are almost never interesting to browse.
+# Used as fallback when git-based ignore detection is unavailable.
+_FALLBACK_SKIP_DIRS: set[str] = {
+    ".git", "__pycache__", "node_modules", ".venv", "venv", ".tox",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache",
+    "dist", "build", ".eggs", ".nox", ".hg", ".svn",
+    "coverage", "htmlcov", ".coverage", ".hypothesis",
+    ".next", ".nuxt", ".output", ".turbo",
+    "target",          # Rust / Java
+    "vendor",          # Go (when not explicit)
+    "bower_components",
+}
+_FALLBACK_SKIP_SUFFIXES: set[str] = {".egg-info"}
+
 
 class ListDirectoryTool(InfinibayBaseTool):
     name: str = "list_directory"
     description: str = "List files and directories at a path."
     args_schema: Type[BaseModel] = ListDirectoryInput
 
+    # ── git-based ignore helpers ──────────────────────────────────────
+
+    @staticmethod
+    def _find_git_root(path: str) -> str | None:
+        """Return the repo root if *path* lives inside a git repo."""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, cwd=path, timeout=5,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _git_ignored_set(dir_path: str, names: list[str]) -> set[str]:
+        """Return the subset of *names* that git would ignore in *dir_path*.
+
+        Uses ``git check-ignore`` which respects .gitignore at every level.
+        Falls back to an empty set on any error.
+        """
+        if not names:
+            return set()
+        try:
+            result = subprocess.run(
+                ["git", "check-ignore", "--stdin", "-z"],
+                input="\0".join(
+                    os.path.join(dir_path, n) for n in names
+                ),
+                capture_output=True, text=True, cwd=dir_path, timeout=5,
+            )
+            if result.returncode <= 1:  # 0 = some ignored, 1 = none ignored
+                ignored_paths = {
+                    p for p in result.stdout.split("\0") if p
+                }
+                return {os.path.basename(p) for p in ignored_paths}
+        except Exception:
+            pass
+        return set()
+
+    def _should_skip_fallback(self, name: str) -> bool:
+        """Fallback skip check when git is not available."""
+        if name.startswith("."):
+            return True
+        if name in _FALLBACK_SKIP_DIRS:
+            return True
+        for suffix in _FALLBACK_SKIP_SUFFIXES:
+            if name.endswith(suffix):
+                return True
+        return False
+
+    # ── main entry ────────────────────────────────────────────────────
+
     def _run(
-        self, file_path: str = ".", recursive: bool = False, pattern: str | None = None
+        self,
+        file_path: str = ".",
+        recursive: bool = False,
+        pattern: str | None = None,
+        include_ignored: bool = False,
+        max_depth: int | None = None,
     ) -> str:
         # Normalise — LLMs sometimes pass "None" as a string instead of null
         if pattern is not None and pattern.lower() in ("none", "null", ""):
@@ -39,21 +114,41 @@ class ListDirectoryTool(InfinibayBaseTool):
         if not os.path.isdir(file_path):
             return self._error(f"Not a directory: {file_path}")
 
+        use_git = not include_ignored and self._find_git_root(file_path) is not None
+
         entries = []
         count = 0
         max_entries = settings.MAX_DIR_LISTING
 
-        # Hidden dirs and .git excluded by default
-        skip_dirs = {".git", "__pycache__", "node_modules", ".venv", ".tox"}
-
         try:
             if recursive:
                 for root, dirs, files in os.walk(file_path):
-                    # Prune hidden/skip dirs
-                    dirs[:] = [
-                        d for d in dirs
-                        if d not in skip_dirs and not d.startswith(".")
-                    ]
+                    # Depth limiting
+                    if max_depth is not None:
+                        rel_root = os.path.relpath(root, file_path)
+                        depth = 0 if rel_root == "." else rel_root.count(os.sep) + 1
+                        if depth >= max_depth:
+                            dirs.clear()  # don't descend further
+                            continue
+
+                    if not include_ignored:
+                        if use_git:
+                            ignored = self._git_ignored_set(root, dirs + files)
+                            dirs[:] = [
+                                d for d in dirs
+                                if d not in ignored and d != ".git"
+                            ]
+                            files = [f for f in files if f not in ignored]
+                        else:
+                            dirs[:] = [
+                                d for d in dirs
+                                if not self._should_skip_fallback(d)
+                            ]
+                            files = [
+                                f for f in files
+                                if not f.startswith(".")
+                            ]
+
                     for name in files:
                         if count >= max_entries:
                             break
@@ -75,11 +170,23 @@ class ListDirectoryTool(InfinibayBaseTool):
                     if count >= max_entries:
                         break
             else:
-                for name in sorted(os.listdir(file_path)):
+                all_names = sorted(os.listdir(file_path))
+                if not include_ignored:
+                    if use_git:
+                        ignored = self._git_ignored_set(file_path, all_names)
+                        all_names = [
+                            n for n in all_names
+                            if n not in ignored and n != ".git"
+                        ]
+                    else:
+                        all_names = [
+                            n for n in all_names
+                            if not self._should_skip_fallback(n)
+                        ]
+
+                for name in all_names:
                     if count >= max_entries:
                         break
-                    if name in skip_dirs or name.startswith("."):
-                        continue
                     full = os.path.join(file_path, name)
                     if pattern and not fnmatch.fnmatch(name, pattern):
                         continue

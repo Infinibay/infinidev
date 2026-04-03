@@ -12,6 +12,8 @@ import logging
 import time
 from typing import Any
 
+from infinidev.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 # ── Retry configuration ──────────────────────────────────────────────────
@@ -83,41 +85,116 @@ def is_malformed_tool_call(exc: Exception) -> bool:
     return any(p in msg for p in MALFORMED_TOOL_PATTERNS)
 
 
-def _stream_and_assemble(litellm_mod: Any, kwargs: dict, on_chunk: Any) -> Any:
+def _stream_and_assemble(
+    litellm_mod: Any,
+    kwargs: dict,
+    on_chunk: Any,
+    on_stream_status: "Callable[[str, int, str | None], None] | None" = None,
+) -> Any:
     """Stream a completion and assemble into a normal response.
 
     Calls *on_chunk(text)* for each content or reasoning_content delta,
-    giving the UI real-time thinking visibility. Returns the fully
-    assembled response (same shape as non-streaming ``litellm.completion``).
+    giving the UI real-time thinking visibility.
+
+    *on_stream_status(phase, token_count, tool_name)* is called periodically
+    to report streaming progress:
+      - phase="thinking" — reasoning tokens arriving
+      - phase="content"  — regular content tokens arriving
+      - phase="tool_detected" — a tool call name was detected in content
+
+    Returns the fully assembled response.
     """
     kwargs_stream = {**kwargs, "stream": True}
     stream = litellm_mod.completion(**kwargs_stream)
 
-    # litellm's stream_chunk_builder assembles chunks into a full response
     chunks = []
+    content_buffer = ""
+    token_count = 0
+    detected_tool: str | None = None
+    is_reasoning = False
+
     for chunk in stream:
         chunks.append(chunk)
-        # Extract text delta for the callback
         try:
             delta = chunk.choices[0].delta if chunk.choices else None
-            if delta:
-                text = getattr(delta, "reasoning_content", None) or ""
-                if not text:
-                    # For non-thinking models, stream the regular content
-                    text = getattr(delta, "content", None) or ""
-                if text:
-                    on_chunk(text)
+            if not delta:
+                continue
+            reasoning = getattr(delta, "reasoning_content", None) or ""
+            content = getattr(delta, "content", None) or ""
+
+            if reasoning:
+                is_reasoning = True
+                token_count += 1
+                on_chunk(reasoning)
+                if on_stream_status and token_count % 5 == 0:
+                    on_stream_status("thinking", token_count, None)
+            elif content:
+                is_reasoning = False
+                token_count += 1
+                content_buffer += content
+                on_chunk(content)
+
+                # Early tool call detection from content stream
+                if not detected_tool:
+                    detected_tool = _detect_tool_name(content_buffer)
+                    if detected_tool and on_stream_status:
+                        on_stream_status("tool_detected", token_count, detected_tool)
+
+                if on_stream_status and token_count % 5 == 0:
+                    on_stream_status("content", token_count, detected_tool)
         except (IndexError, AttributeError):
             pass
+
+    # Final status update
+    if on_stream_status:
+        phase = "tool_detected" if detected_tool else ("thinking" if is_reasoning else "content")
+        on_stream_status(phase, token_count, detected_tool)
 
     # Assemble chunks into a complete response object
     try:
         assembled = litellm_mod.stream_chunk_builder(chunks)
     except (AttributeError, Exception):
-        # Fallback: re-call without streaming if assembly fails
         kwargs_no_stream = {k: v for k, v in kwargs.items() if k != "stream"}
         assembled = litellm_mod.completion(**kwargs_no_stream)
     return assembled
+
+
+# Regex patterns for early tool name detection from streamed JSON/text
+import re
+
+_TOOL_NAME_PATTERNS = [
+    # {"name": "tool_name", ...}
+    re.compile(r'"name"\s*:\s*"([a-z_][a-z0-9_]*)"', re.IGNORECASE),
+    # <tool_call> or <|tool_call|> formats with name field
+    re.compile(r'<\|?tool_call\|?>\s*\{[^}]*"name"\s*:\s*"([a-z_][a-z0-9_]*)"', re.IGNORECASE),
+    # function_call style
+    re.compile(r'"function"\s*:\s*"([a-z_][a-z0-9_]*)"', re.IGNORECASE),
+]
+
+# Known tool names to validate detected names against
+_KNOWN_TOOLS = frozenset({
+    "read_file", "partial_read", "create_file", "replace_lines",
+    "list_directory", "code_search", "glob",
+    "get_symbol_code", "list_symbols", "search_symbols",
+    "find_references", "edit_symbol", "add_symbol", "remove_symbol",
+    "project_structure",
+    "git_branch", "git_commit", "git_diff", "git_status",
+    "execute_command", "code_interpreter",
+    "record_finding", "read_findings", "search_findings",
+    "step_complete", "help",
+})
+
+
+def _detect_tool_name(text: str) -> str | None:
+    """Try to detect a tool name from partially streamed text."""
+    for pattern in _TOOL_NAME_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            name = match.group(1)
+            # Validate against known tools (models sometimes hallucinate)
+            if name in _KNOWN_TOOLS:
+                return name
+    return None
 
 
 def call_llm(
@@ -126,6 +203,7 @@ def call_llm(
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] = "auto",
     on_thinking_chunk: Any | None = None,
+    on_stream_status: "Callable[[str, int, str | None], None] | None" = None,
 ) -> Any:
     """Call litellm.completion with retry for transient errors.
 
@@ -136,7 +214,8 @@ def call_llm(
 
     If *on_thinking_chunk* is provided, enables streaming mode and calls
     ``on_thinking_chunk(text)`` for each content/reasoning chunk as it
-    arrives. The final assembled response is still returned normally.
+    arrives. *on_stream_status(phase, tokens, tool_name)* reports streaming
+    progress. The final assembled response is still returned normally.
     """
     import litellm
     from infinidev.config.model_capabilities import get_model_capabilities
@@ -154,7 +233,11 @@ def call_llm(
         # Suppress thinking tags for models that emit <think> in FC mode
         # (e.g. Qwen 3.x). Ollama can't parse <think> mixed with tool call
         # JSON, causing "invalid character '<'" errors on every request.
-        if caps.has_thinking_sections:
+        # Suppress when thinking is disabled or budget is low — higher budgets
+        # mean the user explicitly wants reasoning, so we let it through.
+        if caps.has_thinking_sections and (
+            not settings.THINKING_ENABLED or settings.THINKING_BUDGET.lower() == "low"
+        ):
             msgs = kwargs["messages"]
             for i in range(len(msgs) - 1, -1, -1):
                 if msgs[i].get("role") == "user":
@@ -170,6 +253,10 @@ def call_llm(
     # JSON text instead of tool calls.
     if caps.supports_json_mode and not tools:
         kwargs["response_format"] = {"type": "json_object"}
+
+    # --- Apply thinking budget ---
+    from infinidev.config.thinking_budget import apply_thinking_budget
+    apply_thinking_budget(kwargs, settings.LLM_PROVIDER, kwargs["model"])
 
     # --- Pre-LLM hook ---
     from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent
@@ -192,6 +279,7 @@ def call_llm(
             if use_streaming:
                 response = _stream_and_assemble(
                     litellm, kwargs, on_thinking_chunk,
+                    on_stream_status=on_stream_status,
                 )
             else:
                 response = litellm.completion(**kwargs)

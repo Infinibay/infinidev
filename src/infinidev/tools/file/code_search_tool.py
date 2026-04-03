@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import subprocess
 from typing import Type
 
@@ -12,10 +13,27 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.file.code_search_input import CodeSearchInput
 
 
+def _shell_quote(s: str) -> str:
+    """Quote a string for safe shell usage."""
+    return shlex.quote(s)
+
+
 class CodeSearchTool(InfinibayBaseTool):
     name: str = "code_search"
     description: str = "Search code files for a text pattern or regex."
     args_schema: Type[BaseModel] = CodeSearchInput
+
+    @staticmethod
+    def _has_git(path: str) -> bool:
+        """Return True if *path* is inside a git repository."""
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, cwd=path, timeout=5,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
 
     def _run(
         self,
@@ -25,6 +43,7 @@ class CodeSearchTool(InfinibayBaseTool):
         case_sensitive: bool = True,
         max_results: int = 50,
         context_lines: int = 0,
+        max_depth: int | None = None,
     ) -> str:
         file_path = self._resolve_path(os.path.expanduser(file_path))
 
@@ -42,36 +61,100 @@ class CodeSearchTool(InfinibayBaseTool):
         if not os.path.isdir(file_path):
             return self._error(f"Directory not found: {file_path}")
 
-        cmd = ["grep", "-rn", "-E"]
+        # Prefer git grep when inside a git repo — it respects .gitignore
+        # and skips untracked build artifacts automatically.
+        use_git_grep = self._has_git(file_path)
 
-        if not case_sensitive:
-            cmd.append("-i")
+        if use_git_grep:
+            cmd = ["git", "grep", "-n", "-E"]
+            if not case_sensitive:
+                cmd.append("-i")
+            if context_lines > 0:
+                cmd.extend(["-C", str(context_lines)])
+            if max_depth is not None:
+                cmd.extend(["--max-depth", str(max_depth)])
+            cmd.extend(["--", pattern])
+            if file_extensions:
+                for ext in file_extensions:
+                    ext = ext if ext.startswith(".") else f".{ext}"
+                    cmd.append(f"*{ext}")
+        else:
+            # Fallback to plain grep
+            cmd = ["grep", "-rn", "-E"]
+            if not case_sensitive:
+                cmd.append("-i")
+            if context_lines > 0:
+                cmd.extend(["-C", str(context_lines)])
+            if file_extensions:
+                for ext in file_extensions:
+                    ext = ext if ext.startswith(".") else f".{ext}"
+                    cmd.extend(["--include", f"*{ext}"])
+            for exclude_dir in [
+                ".git", "node_modules", "__pycache__", ".venv", "venv",
+                ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache",
+                "dist", "build", ".eggs", ".nox", ".tox",
+            ]:
+                cmd.extend(["--exclude-dir", exclude_dir])
 
-        if context_lines > 0:
-            cmd.extend(["-C", str(context_lines)])
+            if max_depth is not None:
+                # Use find with -maxdepth piped to xargs grep
+                find_cmd = ["find", ".", "-maxdepth", str(max_depth), "-type", "f"]
+                if file_extensions:
+                    find_expr = []
+                    for ext in file_extensions:
+                        ext = ext if ext.startswith(".") else f".{ext}"
+                        if find_expr:
+                            find_expr.append("-o")
+                        find_expr.extend(["-name", f"*{ext}"])
+                    if find_expr:
+                        find_cmd.extend(["("] + find_expr + [")"])
+                # Strip -r from grep for file-list mode
+                cmd = [g for g in cmd if g != "-r"]
+                cmd.extend(["--", pattern])
+                shell_cmd = (
+                    " ".join(_shell_quote(c) for c in find_cmd)
+                    + " -print0 | xargs -0 "
+                    + " ".join(_shell_quote(c) for c in cmd)
+                )
+                try:
+                    result = subprocess.run(
+                        shell_cmd, shell=True,
+                        capture_output=True, text=True, timeout=30,
+                        cwd=file_path,
+                    )
+                except subprocess.TimeoutExpired:
+                    return self._error("Search timed out (pattern may be too broad)")
+                except FileNotFoundError:
+                    return self._error("grep is not installed or not in PATH")
 
-        if file_extensions:
-            for ext in file_extensions:
-                ext = ext if ext.startswith(".") else f".{ext}"
-                cmd.extend(["--include", f"*{ext}"])
+                if result.returncode in (1, 123):
+                    return json.dumps({
+                        "pattern": pattern, "file_path": file_path,
+                        "match_count": 0, "truncated": False, "matches": [],
+                    })
+                if result.returncode not in (0, 1, 123):
+                    return self._error(f"Search failed: {result.stderr.strip()}")
 
-        # Exclude common non-source directories
-        for exclude_dir in [".git", "node_modules", "__pycache__", ".venv", "venv"]:
-            cmd.extend(["--exclude-dir", exclude_dir])
+                # Skip the normal command execution below
+                cmd = None
+            else:
+                cmd.extend(["--", pattern, file_path])
 
-        cmd.extend(["--", pattern, file_path])
+        if cmd is not None:
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30,
+                    cwd=file_path,
+                )
+            except subprocess.TimeoutExpired:
+                return self._error("Search timed out (pattern may be too broad)")
+            except FileNotFoundError:
+                return self._error(
+                    "git/grep is not installed or not in PATH"
+                )
 
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30,
-            )
-        except subprocess.TimeoutExpired:
-            return self._error("Search timed out (pattern may be too broad)")
-        except FileNotFoundError:
-            return self._error("grep is not installed or not in PATH")
-
-        # grep returns 1 when no matches found (not an error)
-        if result.returncode == 1:
+        # grep/git-grep returns 1 when no matches found
+        if result.returncode in (1, 123):
             return json.dumps({
                 "pattern": pattern,
                 "file_path": file_path,

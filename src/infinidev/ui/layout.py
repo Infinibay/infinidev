@@ -21,6 +21,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.layout import Layout
 
+from infinidev.ui.controls.scrollable_text import ScrollableTextControl
 from infinidev.ui.theme import (
     EXPLORER_WIDTH,
     CHAT_INPUT_HEIGHT,
@@ -92,6 +93,10 @@ def build_layout(app_state: InfinidevApp) -> Layout:
     def _sidebar_section(title: str, content_getter, scrollable: bool = False):
         from prompt_toolkit.layout.margins import ScrollbarMargin
         margins = [ScrollbarMargin()] if scrollable else []
+        if scrollable:
+            control = ScrollableTextControl(content_getter)
+        else:
+            control = FormattedTextControl(content_getter)
         return HSplit([
             Window(
                 content=FormattedTextControl(lambda t=title: [
@@ -100,7 +105,7 @@ def build_layout(app_state: InfinidevApp) -> Layout:
                 height=1,
             ),
             Window(
-                content=FormattedTextControl(content_getter),
+                content=control,
                 height=D(min=2, max=15, preferred=4),
                 style=f"bg:{SURFACE_LIGHT}",
                 wrap_lines=True,
