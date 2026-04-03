@@ -29,7 +29,7 @@ def _generate_questions(agent: Any,
     from infinidev.engine.loop.tools import (
         STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
     )
-    from infinidev.engine.tool_call_parser import parse_step_complete_args
+    from infinidev.engine.formats.tool_call_parser import parse_step_complete_args
 
     q_max = max_questions or strategy.questions_max
     q_min = strategy.questions_min

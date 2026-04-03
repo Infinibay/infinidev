@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
-from infinidev.engine.hook_event import HookEvent
+from infinidev.engine.hooks.hook_event import HookEvent
 
 
 @dataclass

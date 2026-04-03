@@ -426,7 +426,7 @@ def execute_tool_call(
         pass
 
     # --- Pre-tool hook ---
-    from infinidev.engine.hooks import hook_manager, HookContext, HookEvent
+    from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent
 
     _meta = dict(hook_metadata) if hook_metadata else {}
     ctx = HookContext(

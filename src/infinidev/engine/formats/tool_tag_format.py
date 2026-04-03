@@ -174,60 +174,25 @@ def _extract_calls_from_array(text: str) -> list[dict[str, Any]] | None:
 
 
 # ── ManualToolCall ────────────────────────────────────────────────────────
-from infinidev.engine.tool_call_format import ToolCallFormat
-from infinidev.engine.tool_call_format import register_format
+from infinidev.engine.formats.tool_call_format import ToolCallFormat
+from infinidev.engine.formats.tool_call_format import register_format
 
 
 @register_format
-class ManualJsonFormat(ToolCallFormat):
-    """Manual-mode JSON: {"tool_calls": [...]}, bare JSON, or markdown blocks."""
+class ToolTagFormat(ToolCallFormat):
+    """Fine-tuned / small models: <tool>{...}</tool> or <tools>{...}</tools>"""
 
-    name = "manual_json"
-    priority = 100
+    name = "tool_tag"
+    priority = 51
+
+    _RE = re.compile(r"<tools?>\s*(.*?)\s*</tools?>", re.DOTALL | re.IGNORECASE)
 
     def detect(self, text: str) -> bool:
-        return "{" in text
+        low = text.lower()
+        return ("<tool>" in low or "<tools>") and ("</tool>" in low or "</tools>" in low)
 
     def parse(self, text: str) -> list[dict[str, Any]] | None:
-        candidates: list[str] = []
-
-        # Markdown code blocks
-        code_blocks = re.findall(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-        candidates.extend(code_blocks)
-        candidates.append(text.strip())
-
-        for candidate in candidates:
-            candidate = candidate.strip()
-            if not candidate:
-                continue
-
-            brace_start = candidate.find("{")
-            if brace_start == -1:
-                continue
-
-            depth = 0
-            for i, ch in enumerate(candidate[brace_start:], start=brace_start):
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        json_str = candidate[brace_start : i + 1]
-                        try:
-                            parsed = safe_json_loads(json_str)
-                            if isinstance(parsed, dict):
-                                if "tool_calls" in parsed:
-                                    calls = _normalize_call_list(parsed["tool_calls"])
-                                    if calls:
-                                        return calls
-                                if "name" in parsed:
-                                    calls = _normalize_call_list([parsed])
-                                    if calls:
-                                        return calls
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                        continue
-
-        return None
+        matches = self._RE.findall(text)
+        return _extract_calls_from_fragments(matches) if matches else None
 
 

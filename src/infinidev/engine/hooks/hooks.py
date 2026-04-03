@@ -16,9 +16,9 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 
-from infinidev.engine.hook_event import HookEvent
-from infinidev.engine.hook_context import HookContext
-from infinidev.engine.hook_manager import HookManager
+from infinidev.engine.hooks.hook_event import HookEvent
+from infinidev.engine.hooks.hook_context import HookContext
+from infinidev.engine.hooks.hook_manager import HookManager
 
 HookCallback = Callable[[HookContext], None]
 

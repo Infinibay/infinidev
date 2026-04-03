@@ -151,7 +151,7 @@ def run_execution_phase(
                 mode=flow,
             )
         elif use_phase_engine:
-            from infinidev.engine.phase_engine import PhaseEngine
+            from infinidev.engine.phases.phase_engine import PhaseEngine
             _task_type = "feature"
             if analysis and hasattr(analysis, 'specification'):
                 _task_type = analysis.specification.get("task_type", "feature")
@@ -206,7 +206,7 @@ def run_review_phase(
         return result
 
     click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
-    from infinidev.engine.review_engine import run_review_rework_loop
+    from infinidev.engine.analysis.review_engine import run_review_rework_loop
 
     def _cli_review_status(level: str, msg: str) -> None:
         colors = {

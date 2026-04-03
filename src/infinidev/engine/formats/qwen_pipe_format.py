@@ -174,24 +174,24 @@ def _extract_calls_from_array(text: str) -> list[dict[str, Any]] | None:
 
 
 # ── ManualToolCall ────────────────────────────────────────────────────────
-from infinidev.engine.tool_call_format import ToolCallFormat
-from infinidev.engine.tool_call_format import register_format
+from infinidev.engine.formats.tool_call_format import ToolCallFormat
+from infinidev.engine.formats.tool_call_format import register_format
 
 
 @register_format
-class LlamaFormat(ToolCallFormat):
-    """Llama: <|python_tag|> followed by JSON"""
+class QwenPipeFormat(ToolCallFormat):
+    """Qwen pipe-delimited: <|tool_call|>{...}<|/tool_call|>"""
 
-    name = "llama"
-    priority = 40
+    name = "qwen_pipe"
+    priority = 21
 
-    _RE = re.compile(r"<\|python_tag\|>\s*(.*)", re.DOTALL)
+    _RE = re.compile(r"<\|tool_call\|>\s*(.*?)\s*<\|/tool_call\|>", re.DOTALL)
 
     def detect(self, text: str) -> bool:
-        return "<|python_tag|>" in text
+        return "<|tool_call|>" in text and "<|/tool_call|>" in text
 
     def parse(self, text: str) -> list[dict[str, Any]] | None:
-        m = self._RE.search(text)
-        return _extract_calls_from_fragments([m.group(1)]) if m else None
+        matches = self._RE.findall(text)
+        return _extract_calls_from_fragments(matches) if matches else None
 
 

@@ -91,7 +91,7 @@ from infinidev.engine.llm_client import call_llm as _call_llm
 
 
 # Manual tool call parsing — imported from canonical module
-from infinidev.engine.tool_call_parser import (
+from infinidev.engine.formats.tool_call_parser import (
     ManualToolCall as _ManualToolCall,
     parse_text_tool_calls as _parse_text_tool_calls,
 )

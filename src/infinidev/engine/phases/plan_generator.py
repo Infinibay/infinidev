@@ -9,7 +9,7 @@ from typing import Any
 
 from infinidev.engine.llm_client import call_llm
 from infinidev.engine.engine_logging import log as _log, DIM, BOLD, RESET, YELLOW, RED
-from infinidev.engine.plan_validator import validate_questions, format_rejection
+from infinidev.engine.phases.plan_validator import validate_questions, format_rejection
 from infinidev.prompts.phases import PhaseStrategy
 from infinidev.prompts.phases.plan import PLANNER_IDENTITY as _PLANNER_IDENTITY
 
@@ -39,7 +39,7 @@ def _generate_plan(agent: Any,
     from infinidev.config.llm import get_litellm_params
     from infinidev.engine.loop.context import build_system_prompt
     from infinidev.engine.loop.tools import STEP_COMPLETE_SCHEMA, build_tool_schemas
-    from infinidev.engine.tool_call_parser import parse_step_complete_args
+    from infinidev.engine.formats.tool_call_parser import parse_step_complete_args
 
     answers_text = "\n".join(
         f"  Q: {a['question']}\n  A: {a['answer']}"
@@ -100,7 +100,7 @@ def _generate_plan(agent: Any,
             # Model returned text instead of tool call — try to parse
             content = (getattr(message, "content", None) or "").strip()
             if content:
-                from infinidev.engine.tool_call_parser import parse_text_tool_calls, ManualToolCall
+                from infinidev.engine.formats.tool_call_parser import parse_text_tool_calls, ManualToolCall
                 import json as _json
                 parsed = parse_text_tool_calls(content)
                 if parsed:

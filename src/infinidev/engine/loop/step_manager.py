@@ -12,7 +12,7 @@ from infinidev.engine.engine_logging import (
     YELLOW as _YELLOW,
     RESET as _RESET,
 )
-from infinidev.engine.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
+from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.loop.models import ActionRecord, StepResult
 
 if TYPE_CHECKING:

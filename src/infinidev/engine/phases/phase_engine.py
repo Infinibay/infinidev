@@ -25,16 +25,16 @@ from infinidev.engine.engine_logging import (
 from infinidev.prompts.phases import get_strategy, PhaseStrategy
 
 # Phase components
-from infinidev.engine.question_generator import (
+from infinidev.engine.phases.question_generator import (
     _generate_questions,
     _generate_followups,
 )
-from infinidev.engine.investigator import (
+from infinidev.engine.phases.investigator import (
     _investigate,
     _investigate_iteratively,
 )
-from infinidev.engine.plan_generator import _generate_plan
-from infinidev.engine.plan_executor import (
+from infinidev.engine.phases.plan_generator import _generate_plan
+from infinidev.engine.phases.plan_executor import (
     _execute_minimal,
     _execute_plan,
 )

@@ -223,7 +223,7 @@ def run_engine_task(app: InfinidevApp, user_input: str) -> None:
         # ── Review phase ─────────────────────────────────────
         run_review = flow_config.run_review if flow_config else True
         if _settings.REVIEW_ENABLED and run_review and flow_label != "explore" and app.engine.has_file_changes():
-            from infinidev.engine.review_engine import run_review_rework_loop
+            from infinidev.engine.analysis.review_engine import run_review_rework_loop
 
             app._actions_text = "Code review..."
             app.invalidate()
@@ -359,7 +359,7 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
     import threading
     from infinidev.config.settings import reload_all, settings as _settings
     from infinidev.db.service import store_conversation_turn, get_recent_summaries
-    from infinidev.engine.phase_engine import PhaseEngine
+    from infinidev.engine.phases.phase_engine import PhaseEngine
     from infinidev.engine.test_checkpoint import TestCheckpoint
     from infinidev.prompts.phases import get_strategy
     from infinidev.tools.base.context import get_current_workspace_path
@@ -467,7 +467,7 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
         # ── Review phase (if enabled) ────────────────────
         if (_settings.REVIEW_ENABLED
                 and phase_engine.has_file_changes()):
-            from infinidev.engine.review_engine import run_review_rework_loop
+            from infinidev.engine.analysis.review_engine import run_review_rework_loop
 
             app._actions_text = "Code review..."
             app.invalidate()

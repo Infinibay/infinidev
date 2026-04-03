@@ -4,7 +4,7 @@ import json
 import pytest
 
 from infinidev.engine.flows import FlowConfig, FLOW_REGISTRY, get_flow_config, register_flow
-from infinidev.engine.analysis_engine import AnalysisEngine, AnalysisResult
+from infinidev.engine.analysis.analysis_engine import AnalysisEngine, AnalysisResult
 
 # Ensure flows are registered
 import infinidev.prompts.flows  # noqa: F401

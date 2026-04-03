@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 from infinidev.engine.base import AgentEngine
-from infinidev.engine.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
+from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.llm_client import (
     call_llm as _call_llm,
     is_malformed_tool_call as _is_malformed_tool_call,
@@ -38,7 +38,7 @@ from infinidev.engine.loop.tools import (
     build_tool_schemas,
     execute_tool_call,
 )
-from infinidev.engine.tool_call_parser import (
+from infinidev.engine.formats.tool_call_parser import (
     safe_json_loads as _safe_json_loads,
     ManualToolCall as _ManualToolCall,
     parse_text_tool_calls as _parse_text_tool_calls,

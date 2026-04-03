@@ -18,7 +18,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-from infinidev.engine.analysis_result import AnalysisResult
+from infinidev.engine.analysis.analysis_result import AnalysisResult
 
 class AnalysisEngine:
     """Pre-development analysis engine.

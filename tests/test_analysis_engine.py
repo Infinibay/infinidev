@@ -4,7 +4,7 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock
 
-from infinidev.engine.analysis_engine import AnalysisEngine, AnalysisResult
+from infinidev.engine.analysis.analysis_engine import AnalysisEngine, AnalysisResult
 
 
 class TestAnalysisResult:

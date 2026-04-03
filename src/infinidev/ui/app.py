@@ -198,15 +198,15 @@ class InfinidevApp:
 
         from infinidev.db.service import init_db
         from infinidev.engine.loop import LoopEngine
-        from infinidev.engine.analysis_engine import AnalysisEngine
-        from infinidev.engine.review_engine import ReviewEngine
+        from infinidev.engine.analysis.analysis_engine import AnalysisEngine
+        from infinidev.engine.analysis.review_engine import ReviewEngine
         from infinidev.agents.base import InfinidevAgent
         from infinidev.flows.event_listeners import event_bus
 
         init_db()
 
         # Register UI hooks
-        from infinidev.engine.ui_hooks import register_ui_hooks
+        from infinidev.engine.hooks.ui_hooks import register_ui_hooks
         register_ui_hooks()
 
         # Subscribe to engine events

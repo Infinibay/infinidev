@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = 120  # seconds per command
 
 
-from infinidev.engine.verification_result import VerificationResult
+from infinidev.engine.analysis.verification_result import VerificationResult
 
 class VerificationEngine:
     """Run tests and import checks against changed files.

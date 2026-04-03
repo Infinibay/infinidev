@@ -20,7 +20,7 @@ from infinidev.engine.engine_logging import (
 )
 from infinidev.engine.loop.context import build_system_prompt, build_tools_prompt_section
 from infinidev.engine.loop.models import StepResult
-from infinidev.engine.tool_call_parser import (
+from infinidev.engine.formats.tool_call_parser import (
     ManualToolCall as _ManualToolCall,
     parse_text_tool_calls as _parse_text_tool_calls,
 )

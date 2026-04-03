@@ -130,7 +130,7 @@ def call_llm(
         kwargs["response_format"] = {"type": "json_object"}
 
     # --- Pre-LLM hook ---
-    from infinidev.engine.hooks import hook_manager, HookContext, HookEvent
+    from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent
 
     llm_ctx = HookContext(
         event=HookEvent.PRE_LLM_CALL,

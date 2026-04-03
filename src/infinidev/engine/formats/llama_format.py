@@ -174,25 +174,24 @@ def _extract_calls_from_array(text: str) -> list[dict[str, Any]] | None:
 
 
 # ── ManualToolCall ────────────────────────────────────────────────────────
-from infinidev.engine.tool_call_format import ToolCallFormat
-from infinidev.engine.tool_call_format import register_format
+from infinidev.engine.formats.tool_call_format import ToolCallFormat
+from infinidev.engine.formats.tool_call_format import register_format
 
 
 @register_format
-class FunctionCallFormat(ToolCallFormat):
-    """Generic: <function_call>{...}</function_call>"""
+class LlamaFormat(ToolCallFormat):
+    """Llama: <|python_tag|> followed by JSON"""
 
-    name = "function_call"
-    priority = 50
+    name = "llama"
+    priority = 40
 
-    _RE = re.compile(r"<function_?call>\s*(.*?)\s*</function_?call>", re.DOTALL | re.IGNORECASE)
+    _RE = re.compile(r"<\|python_tag\|>\s*(.*)", re.DOTALL)
 
     def detect(self, text: str) -> bool:
-        low = text.lower()
-        return "<functioncall>" in low or "<function_call>" in low
+        return "<|python_tag|>" in text
 
     def parse(self, text: str) -> list[dict[str, Any]] | None:
-        matches = self._RE.findall(text)
-        return _extract_calls_from_fragments(matches) if matches else None
+        m = self._RE.search(text)
+        return _extract_calls_from_fragments([m.group(1)]) if m else None
 
 

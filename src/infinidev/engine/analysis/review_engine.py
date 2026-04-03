@@ -15,7 +15,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-from infinidev.engine.review_result import ReviewResult
+from infinidev.engine.analysis.review_result import ReviewResult
 
 class ReviewEngine:
     """Post-development code review engine.
@@ -204,7 +204,7 @@ class ReviewEngine:
                     json_lines.append(line)
             raw = "\n".join(json_lines)
 
-        from infinidev.engine.tool_call_parser import safe_json_loads
+        from infinidev.engine.formats.tool_call_parser import safe_json_loads
         try:
             data = safe_json_loads(raw)
         except (json.JSONDecodeError, TypeError):
@@ -272,7 +272,7 @@ def run_review_rework_loop(
 
     def _run_verification_and_fix(current_result: str) -> str:
         """Run tests; if they fail, re-execute developer with failure context."""
-        from infinidev.engine.verification_engine import VerificationEngine
+        from infinidev.engine.analysis.verification_engine import VerificationEngine
 
         workspace = getattr(engine, '_workspace', None)
         if not workspace:

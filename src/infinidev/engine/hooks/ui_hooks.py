@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any
 
-from infinidev.engine.hooks import hook_manager, HookEvent, HookContext
+from infinidev.engine.hooks.hooks import hook_manager, HookEvent, HookContext
 from infinidev.flows.event_listeners import event_bus
 
 logger = logging.getLogger(__name__)

@@ -19,8 +19,8 @@ import uuid
 from infinidev.db.service import init_db, get_recent_summaries
 from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop import LoopEngine
-from infinidev.engine.analysis_engine import AnalysisEngine
-from infinidev.engine.review_engine import ReviewEngine
+from infinidev.engine.analysis.analysis_engine import AnalysisEngine
+from infinidev.engine.analysis.review_engine import ReviewEngine
 import infinidev.prompts.flows  # noqa: F401 — registers flows
 
 # Configure logging (ensure base dir exists before creating file handler)
@@ -274,7 +274,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
     Supports /explore and /brainstorm prefixes, otherwise runs as develop flow.
     """
     init_db()
-    from infinidev.engine.ui_hooks import register_ui_hooks
+    from infinidev.engine.hooks.ui_hooks import register_ui_hooks
     register_ui_hooks()
 
     # Index workspace before LLM starts so code intelligence is available
@@ -322,7 +322,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         analysis_prompt = None
         if settings.ANALYSIS_ENABLED:
             try:
-                from infinidev.engine.analysis_engine import AnalysisEngine
+                from infinidev.engine.analysis.analysis_engine import AnalysisEngine
                 analyst_sp = AnalysisEngine()
                 click.echo(click.style("Analyzing request...", fg="cyan", dim=True))
                 analysis = analyst_sp.analyze(problem)
@@ -360,7 +360,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
 
         try:
             if use_phase_engine:
-                from infinidev.engine.phase_engine import PhaseEngine
+                from infinidev.engine.phases.phase_engine import PhaseEngine
                 phase_eng = PhaseEngine()
                 result = phase_eng.execute(
                     agent=agent,
@@ -382,7 +382,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         # Code review phase for single-prompt mode (with rework loop)
         if settings.REVIEW_ENABLED and engine.has_file_changes():
             click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
-            from infinidev.engine.review_engine import run_review_rework_loop
+            from infinidev.engine.analysis.review_engine import run_review_rework_loop
 
             def _sp_review_status(level: str, msg: str) -> None:
                 if level == "verification_pass":
@@ -485,7 +485,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     _index_queue = IndexQueue(project_id=1)
     _index_queue.start()
 
-    from infinidev.engine.ui_hooks import register_ui_hooks
+    from infinidev.engine.hooks.ui_hooks import register_ui_hooks
     register_ui_hooks()
 
     click.echo(click.style("Welcome to Infinidev CLI (Classic Mode)!", fg="cyan", bold=True))

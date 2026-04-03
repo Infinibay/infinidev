@@ -174,8 +174,8 @@ def _extract_calls_from_array(text: str) -> list[dict[str, Any]] | None:
 
 
 # ── ManualToolCall ────────────────────────────────────────────────────────
-from infinidev.engine.tool_call_format import ToolCallFormat
-from infinidev.engine.tool_call_format import register_format
+from infinidev.engine.formats.tool_call_format import ToolCallFormat
+from infinidev.engine.formats.tool_call_format import register_format
 
 
 @register_format
