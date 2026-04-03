@@ -48,6 +48,14 @@ class FileManager:
         from infinidev.ui.controls.search_bar import SearchBarState
         self.search_bar = SearchBarState()
 
+        # Line numbers toggle
+        self.line_numbers_visible: bool = False
+
+        # Quick file picker (Ctrl+P) — lazy-initialized
+        self._file_picker: Any = None
+        self._file_picker_window: Any = None
+        self._file_picker_input_window: Any = None
+
     # ── Explorer ────────────────────────────────────────────────────
 
     def toggle_explorer(self) -> None:
@@ -115,6 +123,15 @@ class FileManager:
         self.tab_names[tab_id] = name
 
         search = self.search_bar
+        from prompt_toolkit.layout.margins import NumberedMargin
+
+        editor_content_window = _W(
+            content=editor.control,
+            left_margins=[NumberedMargin()] if self.line_numbers_visible else [],
+        )
+        # Store ref so toggle_line_numbers can update margins later
+        editor._content_window = editor_content_window
+
         editor_window = _H([
             _CC(
                 content=_H([
@@ -123,7 +140,7 @@ class FileManager:
                 ]),
                 filter=_Cond(lambda tid=tab_id: search.visible and app.active_tab == tid),
             ),
-            _W(content=editor.control),
+            editor_content_window,
         ])
         self.editor_windows[tab_id] = editor_window
 
@@ -208,4 +225,125 @@ class FileManager:
             self.dirty_files.add(tab_id)
         else:
             self.dirty_files.discard(tab_id)
+        self._app.invalidate()
+
+    # ── Line numbers (Ctrl+L) ──────────────────────────────────────
+
+    def toggle_line_numbers(self) -> None:
+        """Toggle line number margin on all open editor windows."""
+        from prompt_toolkit.layout.margins import NumberedMargin
+
+        self.line_numbers_visible = not self.line_numbers_visible
+
+        for editor in self.editors.values():
+            window = getattr(editor, '_content_window', None)
+            if window is None:
+                continue
+            if self.line_numbers_visible:
+                window.left_margins = [NumberedMargin()]
+            else:
+                window.left_margins = []
+
+        self._app.invalidate()
+
+    # ── Quick file picker (Ctrl+P) ─────────────────────────────────
+
+    def _ensure_file_picker(self) -> None:
+        """Lazy-init the file picker and register its Float."""
+        if self._file_picker is not None:
+            return
+
+        from prompt_toolkit.layout.containers import (
+            Float, ConditionalContainer, HSplit, Window,
+        )
+        from prompt_toolkit.layout.controls import BufferControl
+        from prompt_toolkit.layout.dimension import Dimension as D
+        from prompt_toolkit.filters import Condition
+        from prompt_toolkit.key_binding import KeyBindings
+        from infinidev.ui.controls.file_picker import FilePickerState
+        from infinidev.ui.dialogs.base import dialog_frame
+        from infinidev.ui.theme import PRIMARY, SURFACE, TEXT_MUTED
+
+        app = self._app
+        picker = FilePickerState(
+            root=os.getcwd(),
+            on_select=self.open_file,
+        )
+        self._file_picker = picker
+
+        # Input keybindings (up/down/enter/escape within the search field)
+        picker_kb = KeyBindings()
+
+        @picker_kb.add("up")
+        def _up(event):
+            picker.results_control.move_cursor(-1)
+            app.invalidate()
+
+        @picker_kb.add("down")
+        def _down(event):
+            picker.results_control.move_cursor(1)
+            app.invalidate()
+
+        @picker_kb.add("enter")
+        def _select(event):
+            picker.select_current()
+            app.active_dialog = None
+            app.invalidate()
+
+        @picker_kb.add("escape")
+        def _close(event):
+            picker.close()
+            app.active_dialog = None
+            app.focus_chat()
+            app.invalidate()
+
+        # Stable windows
+        self._file_picker_input_window = Window(
+            content=BufferControl(
+                buffer=picker.search_buffer,
+                key_bindings=picker_kb,
+                focusable=True,
+            ),
+            height=1,
+            style=f"bg:{SURFACE} #ffffff bold",
+        )
+
+        self._file_picker_window = Window(
+            content=picker.results_control,
+        )
+
+        hint = Window(
+            content=__import__('prompt_toolkit').layout.controls.FormattedTextControl(
+                lambda: [(f"{TEXT_MUTED}", " Type to filter  |  ↑↓ Navigate  |  Enter Open  |  Esc Close")]
+            ),
+            height=1,
+        )
+
+        body = HSplit([
+            self._file_picker_input_window,
+            self._file_picker_window,
+            hint,
+        ])
+
+        frame = dialog_frame("Open File", body, width=70, height=22, border_color=PRIMARY)
+
+        dialog_float = Float(
+            content=ConditionalContainer(
+                content=frame,
+                filter=Condition(lambda: app.active_dialog == "file_picker"),
+            ),
+            transparent=False,
+        )
+        if app._float_container:
+            app._float_container.floats.append(dialog_float)
+
+    def open_file_picker(self) -> None:
+        """Show the quick file picker dialog (Ctrl+P)."""
+        self._ensure_file_picker()
+        self._file_picker.open()
+        self._app.active_dialog = "file_picker"
+        try:
+            self._app.app.layout.focus(self._file_picker_input_window)
+        except Exception:
+            pass
         self._app.invalidate()

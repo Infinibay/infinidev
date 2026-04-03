@@ -50,6 +50,16 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Open project-wide search dialog."""
         app_state.show_project_search()
 
+    @kb.add("c-l")
+    def toggle_line_numbers(event):
+        """Toggle line numbers in file editors."""
+        app_state.toggle_line_numbers()
+
+    @kb.add("c-p")
+    def quick_open(event):
+        """Open the quick file picker."""
+        app_state.open_file_picker()
+
     @kb.add("f2")
     def focus_chat(event):
         """Move focus to the chat input."""
@@ -77,13 +87,12 @@ def create_global_keybindings(app_state) -> KeyBindings:
 
 FOOTER_HINTS = [
     ("Ctrl+C", "Exit"),
+    ("Ctrl+P", "Open file"),
     ("Ctrl+E", "Explorer"),
+    ("Ctrl+L", "Line #"),
     ("Ctrl+W", "Close tab"),
     ("Ctrl+S", "Save"),
     ("Ctrl+F", "Find"),
-    ("Ctrl+G", "Search project"),
     ("F2", "Chat"),
-    ("F3", "Files"),
-    ("F4", "Sidebar"),
     ("Esc", "Stop task"),
 ]

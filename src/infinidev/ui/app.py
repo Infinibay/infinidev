@@ -398,6 +398,12 @@ class InfinidevApp:
     def show_project_search(self) -> None:
         pass  # Phase 8
 
+    def toggle_line_numbers(self) -> None:
+        self.file_manager.toggle_line_numbers()
+
+    def open_file_picker(self) -> None:
+        self.file_manager.open_file_picker()
+
     def focus_chat(self) -> None:
         """Focus the chat input buffer."""
         try:
