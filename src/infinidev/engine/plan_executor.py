@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from infinidev.engine.loop_engine import LoopEngine
+from infinidev.engine.loop import LoopEngine
 from infinidev.engine.engine_logging import log as _log, DIM, BOLD, RESET, CYAN, GREEN, RED
 from infinidev.prompts.phases import PhaseStrategy
 

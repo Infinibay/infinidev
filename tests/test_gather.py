@@ -282,7 +282,7 @@ class TestDynamicQuestionsParser:
 class TestToolAliases:
     def test_query_alias_for_pattern(self):
         """query should be auto-corrected to pattern in tool dispatch."""
-        from infinidev.engine.loop_tools import execute_tool_call
+        from infinidev.engine.loop.tools import execute_tool_call
         # We can't fully test without a real tool, but we can verify the alias map
         # exists in the code
         import infinidev.engine.loop.tools as lt

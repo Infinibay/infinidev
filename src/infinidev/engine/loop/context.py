@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from infinidev.engine.loop_models import LoopState
+from infinidev.engine.loop.models import LoopState
 from infinidev.engine.summarizer import SmartContextSummarizer
 
 CLI_AGENT_IDENTITY = """\

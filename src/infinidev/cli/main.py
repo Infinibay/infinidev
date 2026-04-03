@@ -18,7 +18,7 @@ from infinidev.config.llm import get_litellm_params
 import uuid
 from infinidev.db.service import init_db, get_recent_summaries
 from infinidev.agents.base import InfinidevAgent
-from infinidev.engine.loop_engine import LoopEngine
+from infinidev.engine.loop import LoopEngine
 from infinidev.engine.analysis_engine import AnalysisEngine
 from infinidev.engine.review_engine import ReviewEngine
 import infinidev.prompts.flows  # noqa: F401 — registers flows
@@ -299,7 +299,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         problem = prompt_text
 
     from infinidev.engine.flows import get_flow_config
-    from infinidev.engine.tree_engine import TreeEngine
+    from infinidev.engine.tree import TreeEngine
 
     if mode in ("explore", "brainstorm"):
         flow_config = get_flow_config(mode)
@@ -527,7 +527,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                 if isinstance(cmd_result, tuple) and cmd_result[0] == "explore":
                     from infinidev.config.settings import reload_all
                     reload_all()
-                    from infinidev.engine.tree_engine import TreeEngine
+                    from infinidev.engine.tree import TreeEngine
                     from infinidev.engine.flows import get_flow_config
                     click.echo(click.style(f"[explore] Exploring: {cmd_result[1]}", fg="yellow"))
                     flow_config = get_flow_config("explore")
@@ -546,7 +546,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                 elif isinstance(cmd_result, tuple) and cmd_result[0] == "brainstorm":
                     from infinidev.config.settings import reload_all
                     reload_all()
-                    from infinidev.engine.tree_engine import TreeEngine
+                    from infinidev.engine.tree import TreeEngine
                     from infinidev.engine.flows import get_flow_config
                     click.echo(click.style(f"[brainstorm] Brainstorming: {cmd_result[1]}", fg="magenta"))
                     flow_config = get_flow_config("brainstorm")

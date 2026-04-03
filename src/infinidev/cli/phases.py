@@ -143,7 +143,7 @@ def run_execution_phase(
     agent.activate_context(session_id=session_id)
     try:
         if flow in ("explore", "brainstorm"):
-            from infinidev.engine.tree_engine import TreeEngine
+            from infinidev.engine.tree import TreeEngine
             tree_engine = TreeEngine()
             result = tree_engine.execute(
                 agent=agent,

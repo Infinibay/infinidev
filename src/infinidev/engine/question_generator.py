@@ -25,8 +25,8 @@ def _generate_questions(agent: Any,
     per question, then step_complete(done) when finished.
     """
     from infinidev.config.llm import get_litellm_params
-    from infinidev.engine.loop_context import build_system_prompt
-    from infinidev.engine.loop_tools import (
+    from infinidev.engine.loop.context import build_system_prompt
+    from infinidev.engine.loop.tools import (
         STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
     )
     from infinidev.engine.tool_call_parser import parse_step_complete_args
@@ -141,8 +141,8 @@ def _generate_followups(agent: Any,
 ) -> list[dict[str, Any]]:
     """Ask LLM if follow-up questions are needed based on investigation so far."""
     from infinidev.config.llm import get_litellm_params
-    from infinidev.engine.loop_context import build_system_prompt
-    from infinidev.engine.loop_tools import (
+    from infinidev.engine.loop.context import build_system_prompt
+    from infinidev.engine.loop.tools import (
         STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
     )
     from infinidev.prompts.phases.investigate import FOLLOWUP_PROMPT

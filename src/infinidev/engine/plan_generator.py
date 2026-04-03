@@ -37,8 +37,8 @@ def _generate_plan(agent: Any,
     """
     from infinidev.engine.llm_client import call_llm
     from infinidev.config.llm import get_litellm_params
-    from infinidev.engine.loop_context import build_system_prompt
-    from infinidev.engine.loop_tools import STEP_COMPLETE_SCHEMA, build_tool_schemas
+    from infinidev.engine.loop.context import build_system_prompt
+    from infinidev.engine.loop.tools import STEP_COMPLETE_SCHEMA, build_tool_schemas
     from infinidev.engine.tool_call_parser import parse_step_complete_args
 
     answers_text = "\n".join(

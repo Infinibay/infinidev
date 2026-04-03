@@ -583,7 +583,7 @@ def get_registered_formats() -> list[dict[str, Any]]:
 
 def parse_step_complete_args(arguments: str | dict[str, Any]) -> "StepResult":
     """Parse step_complete tool call arguments into a StepResult."""
-    from infinidev.engine.loop_models import StepOperation, StepResult
+    from infinidev.engine.loop.models import StepOperation, StepResult
 
     if isinstance(arguments, str):
         try:

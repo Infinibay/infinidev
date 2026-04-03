@@ -1,6 +1,6 @@
 """Tests for Infinidev engine components."""
 import pytest
-from infinidev.engine.loop_models import (
+from infinidev.engine.loop.models import (
     LoopState,
     LoopPlan,
     PlanStep,
@@ -9,7 +9,7 @@ from infinidev.engine.loop_models import (
     StepResult,
 )
 from infinidev.engine.summarizer import SmartContextSummarizer
-from infinidev.engine.loop_context import build_tools_prompt_section
+from infinidev.engine.loop.context import build_tools_prompt_section
 
 
 class TestLoopState:

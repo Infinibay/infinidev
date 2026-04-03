@@ -16,7 +16,7 @@ import logging
 import re
 from typing import Any
 
-from infinidev.engine.loop_engine import LoopEngine
+from infinidev.engine.loop import LoopEngine
 from infinidev.engine.test_checkpoint import TestCheckpoint
 from infinidev.engine.engine_logging import (
     log as _log,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from infinidev.engine.loop_models import LoopState
+from infinidev.engine.loop.models import LoopState
 from infinidev.engine.file_change_tracker import FileChangeTracker
 
 

@@ -197,7 +197,7 @@ class InfinidevApp:
             return
 
         from infinidev.db.service import init_db
-        from infinidev.engine.loop_engine import LoopEngine
+        from infinidev.engine.loop import LoopEngine
         from infinidev.engine.analysis_engine import AnalysisEngine
         from infinidev.engine.review_engine import ReviewEngine
         from infinidev.agents.base import InfinidevAgent

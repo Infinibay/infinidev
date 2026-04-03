@@ -18,8 +18,8 @@ from infinidev.engine.engine_logging import (
     RED as _RED,
     RESET as _RESET,
 )
-from infinidev.engine.loop_context import build_system_prompt, build_tools_prompt_section
-from infinidev.engine.loop_models import StepResult
+from infinidev.engine.loop.context import build_system_prompt, build_tools_prompt_section
+from infinidev.engine.loop.models import StepResult
 from infinidev.engine.tool_call_parser import (
     ManualToolCall as _ManualToolCall,
     parse_text_tool_calls as _parse_text_tool_calls,

@@ -75,7 +75,7 @@ class GatherSession:
     ) -> QuestionResult:
         """Answer a single question, sharing state with previous questions."""
         from infinidev.config.settings import settings
-        from infinidev.engine.loop_engine import LoopEngine
+        from infinidev.engine.loop import LoopEngine
 
         # Filter to read-only tools
         read_only_tools = [t for t in agent.tools if t.name in READ_ONLY_TOOL_NAMES]

@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from typing import List
 
-from .loop_models import ActionRecord, LoopState
+from infinidev.engine.loop.models import ActionRecord, LoopState
 
 
 CLASSIFIER_ID = "SMART_CONTEXT_SUMMARIZER"

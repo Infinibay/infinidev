@@ -520,7 +520,7 @@ class TestAnalysisEngineResearch:
 class TestAnalysisEngineRunLoop:
     """Test _run_analyst_loop creates agent with correct config."""
 
-    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.engine.loop.LoopEngine", new_callable=MagicMock)
     @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
     def test_analyst_agent_has_identity_override(self, mock_agent_cls, mock_engine_cls):
         """Analyst agent should have _system_prompt_identity set."""
@@ -548,7 +548,7 @@ class TestAnalysisEngineRunLoop:
         # Verify loop engine was called
         mock_engine.execute.assert_called_once()
 
-    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.engine.loop.LoopEngine", new_callable=MagicMock)
     @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
     def test_analyst_loop_parses_output(self, mock_agent_cls, mock_engine_cls):
         """Loop engine output should be parsed into AnalysisResult."""
@@ -568,7 +568,7 @@ class TestAnalysisEngineRunLoop:
         assert result.action == "proceed"
         assert result.specification["summary"] == "Built from codebase analysis"
 
-    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.engine.loop.LoopEngine", new_callable=MagicMock)
     @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
     def test_analyst_context_activated_and_deactivated(self, mock_agent_cls, mock_engine_cls):
         """Agent context should be activated before and deactivated after loop."""
@@ -585,7 +585,7 @@ class TestAnalysisEngineRunLoop:
         mock_agent.activate_context.assert_called_once()
         mock_agent.deactivate.assert_called_once()
 
-    @patch("infinidev.engine.loop_engine.LoopEngine", new_callable=MagicMock)
+    @patch("infinidev.engine.loop.LoopEngine", new_callable=MagicMock)
     @patch("infinidev.agents.base.InfinidevAgent", new_callable=MagicMock)
     def test_analyst_deactivates_on_error(self, mock_agent_cls, mock_engine_cls):
         """Agent should be deactivated even if loop engine raises."""

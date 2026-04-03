@@ -71,7 +71,7 @@ def classify_ticket(
         return fallback
 
     from infinidev.config.settings import settings
-    from infinidev.engine.loop_engine import LoopEngine
+    from infinidev.engine.loop import LoopEngine
 
     # Save original settings
     original_identity = getattr(agent, "_system_prompt_identity", None)

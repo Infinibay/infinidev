@@ -246,7 +246,7 @@ class AnalysisEngine:
     ) -> AnalysisResult:
         """Run the analyst as a full agent loop with tool access."""
         from infinidev.agents.base import InfinidevAgent  # noqa: deferred to avoid circular
-        from infinidev.engine.loop_engine import LoopEngine  # noqa: deferred to avoid circular
+        from infinidev.engine.loop import LoopEngine  # noqa: deferred to avoid circular
         from infinidev.prompts.analyst.system import (  # noqa
             ANALYST_BACKSTORY,
             ANALYST_GOAL,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from infinidev.engine.tree_models import (
+from infinidev.engine.tree.models import (
     Blocker,
     CONF_RANK,
     Fact,

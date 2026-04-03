@@ -339,7 +339,7 @@ def _synthesize_ticket(
         return user_input
 
     from infinidev.config.settings import settings
-    from infinidev.engine.loop_engine import LoopEngine
+    from infinidev.engine.loop import LoopEngine
 
     parts = []
     if chat_history:
@@ -402,7 +402,7 @@ def _generate_dynamic_questions(
     max_dynamic = settings.GATHER_MAX_DYNAMIC_QUESTIONS
 
     from infinidev.config.settings import settings as _settings
-    from infinidev.engine.loop_engine import LoopEngine
+    from infinidev.engine.loop import LoopEngine
 
     context_parts = [
         f"Ticket type: {classification.ticket_type.value}",

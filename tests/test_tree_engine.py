@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from infinidev.engine.tree.engine import TreeEngine
-from infinidev.engine.tree_models import (
+from infinidev.engine.tree.models import (
     TreeNode,
     TreeState,
     propagate,
@@ -657,19 +657,19 @@ class TestBrainstormContext:
     """Tests for brainstorm_context.py prompt/schema utilities."""
 
     def test_select_perspectives_returns_n(self):
-        from infinidev.engine.brainstorm_context import select_perspectives
+        from infinidev.engine.tree.brainstorm_context import select_perspectives
         result = select_perspectives(5)
         assert len(result) == 5
 
     def test_select_perspectives_includes_anchors(self):
-        from infinidev.engine.brainstorm_context import select_perspectives
+        from infinidev.engine.tree.brainstorm_context import select_perspectives
         result = select_perspectives(3)
         ids = [p["id"] for p in result]
         assert "inversion" in ids
         assert "stupid_solution" in ids
 
     def test_select_perspectives_resolves_templates(self):
-        from infinidev.engine.brainstorm_context import select_perspectives
+        from infinidev.engine.tree.brainstorm_context import select_perspectives
         result = select_perspectives(10)
         for p in result:
             assert "{domain}" not in p["prompt"]
@@ -677,20 +677,20 @@ class TestBrainstormContext:
             assert "{concept}" not in p["prompt"]
 
     def test_get_random_oblique_returns_string(self):
-        from infinidev.engine.brainstorm_context import get_random_oblique
+        from infinidev.engine.tree.brainstorm_context import get_random_oblique
         result = get_random_oblique()
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_build_anti_pattern_prompt(self):
-        from infinidev.engine.brainstorm_context import build_anti_pattern_prompt
+        from infinidev.engine.tree.brainstorm_context import build_anti_pattern_prompt
         prompt = build_anti_pattern_prompt("Optimize API")
         assert "Optimize API" in prompt
         assert "identify_obvious" in prompt
         assert "BANNED" in prompt or "OBVIOUS" in prompt
 
     def test_build_diverge_prompt_includes_banned(self):
-        from infinidev.engine.brainstorm_context import build_diverge_prompt
+        from infinidev.engine.tree.brainstorm_context import build_diverge_prompt
         perspective = {"id": "test", "name": "Test Lens", "prompt": "Try something"}
         anti_patterns = [{"approach": "Use cache", "why_obvious": "generic"}]
         prompt = build_diverge_prompt("problem", perspective, anti_patterns, "oblique hint")
@@ -699,7 +699,7 @@ class TestBrainstormContext:
         assert "oblique hint" in prompt
 
     def test_build_converge_prompt(self):
-        from infinidev.engine.brainstorm_context import build_converge_prompt
+        from infinidev.engine.tree.brainstorm_context import build_converge_prompt
         tree = TreeState()
         tree.root = TreeNode(id="1", problem_statement="test", depth=0)
         prompt = build_converge_prompt("problem", tree, [])

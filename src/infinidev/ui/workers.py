@@ -206,7 +206,7 @@ def run_engine_task(app: InfinidevApp, user_input: str) -> None:
         app.agent.activate_context(session_id=app.session_id)
         try:
             if flow_label == "explore":
-                from infinidev.engine.tree_engine import TreeEngine
+                from infinidev.engine.tree import TreeEngine
                 tree_engine = TreeEngine()
                 result = tree_engine.execute(
                     agent=app.agent, task_prompt=task_prompt, verbose=True,
@@ -297,7 +297,7 @@ def _run_flow_task(app: InfinidevApp, flow_name: str,
         app.agent.activate_context(session_id=app.session_id)
         try:
             if use_tree_engine:
-                from infinidev.engine.tree_engine import TreeEngine
+                from infinidev.engine.tree import TreeEngine
                 engine = TreeEngine()
             else:
                 engine = app.engine

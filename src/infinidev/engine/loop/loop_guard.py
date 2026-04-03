@@ -11,7 +11,7 @@ from infinidev.engine.engine_logging import (
     RESET as _RESET,
 )
 from infinidev.engine.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
-from infinidev.engine.loop_models import StepResult
+from infinidev.engine.loop.models import StepResult
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext

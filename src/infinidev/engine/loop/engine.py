@@ -20,18 +20,18 @@ from infinidev.engine.llm_client import (
     is_transient as _is_transient,
     PERMANENT_ERRORS as _PERMANENT_ERRORS,
 )
-from infinidev.engine.loop_context import (
+from infinidev.engine.loop.context import (
     build_iteration_prompt,
     build_system_prompt,
     build_tools_prompt_section,
 )
-from infinidev.engine.loop_models import (
+from infinidev.engine.loop.models import (
     ActionRecord,
     LoopState,
     StepResult,
 )
 from infinidev.engine.file_change_tracker import FileChangeTracker
-from infinidev.engine.loop_tools import (
+from infinidev.engine.loop.tools import (
     ADD_NOTE_SCHEMA,
     STEP_COMPLETE_SCHEMA,
     build_tool_dispatch,
@@ -683,7 +683,7 @@ class LoopEngine(AgentEngine):
                    f"{_YELLOW}🌳 Delegating to exploration tree: {step_result.summary[:120]}{_RESET}",
                    project_id=ctx.project_id, agent_id=ctx.agent_id)
         try:
-            from infinidev.engine.tree_engine import TreeEngine
+            from infinidev.engine.tree import TreeEngine
             tree_engine = TreeEngine()
             explore_result = tree_engine.explore_subproblem(ctx.agent, step_result.summary)
             if len(ctx.state.notes) < 20:
