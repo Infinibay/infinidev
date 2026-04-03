@@ -285,13 +285,13 @@ class TestToolAliases:
         from infinidev.engine.loop_tools import execute_tool_call
         # We can't fully test without a real tool, but we can verify the alias map
         # exists in the code
-        import infinidev.engine.loop_tools as lt
+        import infinidev.engine.loop.tools as lt
         source = open(lt.__file__).read()
         assert '"query": "pattern"' in source
 
     def test_metadata_params_stripped(self):
         """description/reason should be silently stripped, not cause errors."""
-        import infinidev.engine.loop_tools as lt
+        import infinidev.engine.loop.tools as lt
         source = open(lt.__file__).read()
         assert "_METADATA_PARAMS" in source
         assert '"description"' in source

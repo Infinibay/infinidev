@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from infinidev.engine.tree_engine import TreeEngine
+from infinidev.engine.tree.engine import TreeEngine
 from infinidev.engine.tree_models import (
     TreeNode,
     TreeState,
@@ -69,20 +69,20 @@ def _patch_engine():
 
     patches = {
         "llm_params": patch(
-            "infinidev.engine.tree_engine.get_litellm_params",
+            "infinidev.engine.tree.engine.get_litellm_params",
             return_value={"model": "test"},
             create=True,
         ),
         "caps": patch(
-            "infinidev.engine.tree_engine.get_model_capabilities",
+            "infinidev.engine.tree.engine.get_model_capabilities",
             return_value=caps,
             create=True,
         ),
         "store": patch(
-            "infinidev.engine.tree_engine.store_exploration_tree",
+            "infinidev.engine.tree.engine.store_exploration_tree",
             create=True,
         ),
-        "call_llm": patch("infinidev.engine.tree_engine._call_llm"),
+        "call_llm": patch("infinidev.engine.tree.engine._call_llm"),
     }
     return patches
 
@@ -288,7 +288,7 @@ class TestTreeEngineToolCalls:
 
         with patches["llm_params"], patches["caps"], patches["store"], \
              patches["call_llm"] as mock_llm, \
-             patch("infinidev.engine.tree_engine.execute_tool_call", return_value="file content here"):
+             patch("infinidev.engine.tree.engine.execute_tool_call", return_value="file content here"):
 
             mock_llm.side_effect = [
                 # Init
