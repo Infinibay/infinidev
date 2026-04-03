@@ -135,8 +135,9 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         app.invalidate()
 
     elif event_type == "loop_llm_call_start":
-        # LLM call starting — clear previous actions so animation shows
-        app._actions_text = ""
+        # LLM call starting — clear streaming state but keep _actions_text
+        # so the previous tool result remains visible while waiting.
+        # _actions_text is cleared by loop_step_update on step transitions.
         app._streaming_tool_name = None
         app._streaming_token_count = 0
 
