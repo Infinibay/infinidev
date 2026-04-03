@@ -8,9 +8,10 @@ from typing import Any, TYPE_CHECKING
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.formats.tool_call_parser import safe_json_loads as _safe_json_loads
 
+from infinidev.engine.loop.classified_calls import ClassifiedCalls
+
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
-    from infinidev.engine.loop.llm_caller import ClassifiedCalls
 
 
 class ToolProcessor:
