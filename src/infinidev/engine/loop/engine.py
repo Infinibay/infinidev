@@ -73,7 +73,7 @@ from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.llm_caller import LLMCaller, LLMCallResult, ClassifiedCalls
 from infinidev.engine.loop.tool_processor import ToolProcessor
 from infinidev.engine.loop.loop_guard import LoopGuard
-from infinidev.engine.loop.step_manager import StepManager
+from infinidev.engine.loop.step_manager import StepManager, _get_settings
 
 logger = logging.getLogger(__name__)
 
