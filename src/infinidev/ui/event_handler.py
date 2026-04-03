@@ -135,7 +135,13 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             # Keep only last ~500 chars to prevent sidebar overflow
             if len(app._thinking_text) > 500:
                 app._thinking_text = "..." + app._thinking_text[-450:]
-            app.invalidate()
+            # Throttle redraws to ~10 FPS to avoid excessive invalidation
+            import time
+            now = time.monotonic()
+            last = getattr(app, '_last_thinking_invalidate', 0.0)
+            if now - last > 0.1:
+                app._last_thinking_invalidate = now
+                app.invalidate()
 
     elif event_type == "loop_think":
         reasoning = data.get("reasoning", "").strip()

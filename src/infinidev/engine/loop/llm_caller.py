@@ -34,7 +34,7 @@ from infinidev.engine.loop.classified_calls import ClassifiedCalls
 class LLMCaller:
     """Encapsulates LLM calling with manual-TC / FC-mode branching and retry."""
 
-    def __init__(self, on_thinking_chunk: Any = None) -> None:
+    def __init__(self, on_thinking_chunk: "Callable[[str], None] | None" = None) -> None:
         self._malformed_retries = 0
         self._MAX_MALFORMED_RETRIES = 4
         self._on_thinking_chunk = on_thinking_chunk

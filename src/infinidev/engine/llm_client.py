@@ -111,7 +111,12 @@ def _stream_and_assemble(litellm_mod: Any, kwargs: dict, on_chunk: Any) -> Any:
             pass
 
     # Assemble chunks into a complete response object
-    assembled = litellm_mod.stream_chunk_builder(chunks)
+    try:
+        assembled = litellm_mod.stream_chunk_builder(chunks)
+    except (AttributeError, Exception):
+        # Fallback: re-call without streaming if assembly fails
+        kwargs_no_stream = {k: v for k, v in kwargs.items() if k != "stream"}
+        assembled = litellm_mod.completion(**kwargs_no_stream)
     return assembled
 
 
@@ -177,8 +182,9 @@ def call_llm(
     if llm_ctx.skip:
         return llm_ctx.metadata.get("response")
 
-    # Enable streaming if thinking callback provided
-    use_streaming = on_thinking_chunk is not None
+    # Enable streaming only for non-tool calls (streaming + FC is unreliable
+    # on some providers like Ollama). Thinking is most useful in manual mode anyway.
+    use_streaming = on_thinking_chunk is not None and not tools
 
     last_exc: Exception | None = None
     for attempt in range(1, LLM_RETRIES + 1):
