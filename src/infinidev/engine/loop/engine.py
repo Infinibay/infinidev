@@ -507,6 +507,8 @@ class LoopEngine(AgentEngine):
                     )
                     if self._cancel_event.is_set():
                         break
+                    # Expire old thinking content to save context window
+                    self._expire_thinking(messages)
                     # Check guard conditions
                     forced = guard.check_repetition(ctx, messages)
                     if forced:
@@ -699,6 +701,48 @@ class LoopEngine(AgentEngine):
                 messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
             if classified.step_complete:
                 messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
+
+    # How many tool call rounds before thinking content is truncated
+    _THINKING_TTL = 3
+
+    @staticmethod
+    def _expire_thinking(messages: list[dict[str, Any]]) -> None:
+        """Truncate old assistant thinking to save context window.
+
+        Assistant messages carry a ``_thinking_age`` counter that increments
+        each time this method is called.  Once a message is older than
+        ``_THINKING_TTL`` rounds, its ``content`` (reasoning text) is
+        replaced with a short placeholder — the tool_calls structure stays
+        intact so the API conversation remains valid.
+
+        For manual-TC mode (no tool_calls), the entire assistant content
+        is the reasoning, so we truncate it to the first line.
+        """
+        ttl = LoopEngine._THINKING_TTL
+
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+
+            content = msg.get("content", "")
+            if not content or len(content) < 80:
+                continue  # Already short, skip
+
+            # Initialize or bump age counter
+            age = msg.get("_thinking_age", 0) + 1
+            msg["_thinking_age"] = age
+
+            if age <= ttl:
+                continue
+
+            # Truncate — keep first line as summary
+            first_line = content.split("\n", 1)[0][:120]
+            if msg.get("tool_calls"):
+                # FC mode: content is optional reasoning alongside tool calls
+                msg["content"] = f"[thinking truncated] {first_line}"
+            else:
+                # Manual mode or text-only: content IS the reasoning
+                msg["content"] = f"[thinking truncated] {first_line}"
 
     def _handle_explore(
         self, ctx: ExecutionContext, step_result: StepResult, iteration: int,
