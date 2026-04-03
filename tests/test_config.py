@@ -174,11 +174,12 @@ class TestModelCapabilities:
         assert caps.supports_function_calling is True
 
     def test_reset_capabilities(self):
-        """_reset_capabilities restores defaults."""
-        from infinidev.config.model_capabilities import (
-            _reset_capabilities,
-            get_model_capabilities,
-        )
-        _reset_capabilities()
-        caps = get_model_capabilities()
-        assert caps.probed is False
+        """_reset_capabilities restores defaults, then auto-detection re-probes."""
+        import infinidev.config.model_capabilities as mc
+        mc._reset_capabilities()
+        # After reset, the module-level singleton is unprobed
+        assert mc._capabilities.probed is False
+        # But get_model_capabilities() triggers auto-detection (for ollama),
+        # so the returned object is always probed
+        caps = mc.get_model_capabilities()
+        assert caps.probed is True

@@ -1,15 +1,20 @@
-"""Tool call parsing for multiple LLM output formats.
+"""Modular tool call parsing for multiple LLM output formats.
 
-Supports 9+ formats:
-1. Manual-mode JSON: {"tool_calls": [{"name": ..., "arguments": ...}]}
-2. Qwen/GLM: <tool_call>{...}</tool_call>
-3. Qwen pipe-delimited: <|tool_call|>...<|/tool_call|>
-4. Mistral: [TOOL_CALLS] [...]
-5. Llama: <|python_tag|> function calls
-6. <function_call>/<functioncall> wrappers
-7. Markdown code blocks with JSON
-8. Bare JSON objects
-9. SEARCH/REPLACE blocks (Aider-style diffs)
+Each format is a ToolCallFormat subclass with a `detect()` and `parse()` method.
+Formats are tried in priority order (lowest number first). To add a new format,
+subclass ToolCallFormat and register it with @register_format.
+
+Built-in formats:
+- Gemma4Format:        <|tool_call>call:name{args}<tool_call|>
+- QwenFormat:          <tool_call>{...}</tool_call>
+- QwenPipeFormat:      <|tool_call|>{...}<|/tool_call|>
+- MistralFormat:       [TOOL_CALLS] [...]
+- LlamaFormat:         <|python_tag|> {...}
+- FunctionCallFormat:  <function_call>{...}</function_call>
+- ToolTagFormat:       <tool>{...}</tool>
+- AttrFunctionFormat:  <function=name>{...}</function>
+- ManualJsonFormat:    {"tool_calls": [...]}  / bare JSON / markdown blocks
+- SearchReplaceFormat: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
 
 Also provides:
 - safe_json_loads() with automatic JSON repair
@@ -21,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+from abc import ABC, abstractmethod
 from typing import Any
 
 try:
@@ -32,12 +38,7 @@ except ImportError:
 # ── JSON utilities ────────────────────────────────────────────────────────
 
 def safe_json_loads(text: str) -> Any:
-    """Parse JSON with automatic repair for malformed model output.
-
-    Tries standard json.loads first, then falls back to json_repair
-    if available. This handles common LLM JSON issues like trailing
-    commas, unquoted keys, truncated strings, etc.
-    """
+    """Parse JSON with automatic repair for malformed model output."""
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
@@ -51,229 +52,76 @@ def safe_json_loads(text: str) -> Any:
         raise
 
 
-# ── ManualToolCall ────────────────────────────────────────────────────────
+def _fix_jslike_json(args_str: str) -> dict[str, Any]:
+    """Convert JS-like object syntax to a Python dict.
 
-class ManualToolCall:
-    """Lightweight stand-in for native tool call objects in manual TC mode.
-
-    Mirrors the attribute structure of litellm/OpenAI tool call objects
-    so the rest of the pipeline (dispatch, logging) works unchanged.
+    Many models emit tool args with unquoted keys and/or single-quoted
+    values. This normalizes to valid JSON.
     """
+    args_str = args_str.strip()
+    try:
+        result = safe_json_loads(args_str)
+        if isinstance(result, dict):
+            return result
+    except (json.JSONDecodeError, TypeError):
+        pass
 
-    __slots__ = ("id", "function")
-
-    class _Function:
-        __slots__ = ("name", "arguments")
-
-        def __init__(self, name: str, arguments: str) -> None:
-            self.name = name
-            self.arguments = arguments
-
-    def __init__(self, id: str, name: str, arguments: str) -> None:
-        self.id = id
-        self.function = self._Function(name, arguments)
-
-
-# ── Main parser ───────────────────────────────────────────────────────────
-
-def parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
-    """Parse tool calls from model text when native FC is unavailable.
-
-    Returns a list of dicts with "name" and "arguments" keys,
-    or None if no valid tool calls found.
-    """
-    if not content or not content.strip():
-        return None
-
-    # Strip thinking sections (various model formats)
-    cleaned = re.sub(
-        r"<(?:thinking|think|thoughts|\|thinking\|)>.*?</(?:thinking|think|thoughts|\|thinking\|)>",
-        "",
-        content,
-        flags=re.DOTALL | re.IGNORECASE,
+    fixed = re.sub(
+        r"'((?:[^'\\]|\\.)*)'",
+        lambda m: '"' + m.group(1).replace('"', '\\"').replace("\\'", "'") + '"',
+        args_str,
     )
+    fixed = re.sub(r'(?<=[{\[,])\s*([a-zA-Z_]\w*)\s*:', r' "\1":', fixed)
+    fixed = re.sub(r'^\{\s*([a-zA-Z_]\w*)\s*:', r'{ "\1":', fixed)
 
-    # Strip hallucinated tool outputs — small models often generate fake results
-    cleaned = re.sub(
-        r"<(?:tool[_-]?output|tool[_-]?result|tool[_-]?response|observation)>.*?</(?:tool[_-]?output|tool[_-]?result|tool[_-]?response|observation)>",
-        "",
-        cleaned,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
+    try:
+        result = safe_json_loads(fixed)
+        if isinstance(result, dict):
+            return result
+    except (json.JSONDecodeError, TypeError):
+        pass
 
-    # ── 1. Native model tool-call tokens ─────────────────────────────
-    # Try these first — they're unambiguous signals of tool use intent.
-
-    # Qwen / GLM: <tool_call>{...}</tool_call>  (one or more)
-    tc_tag_matches = re.findall(
-        r"<tool_call>\s*(.*?)\s*</tool_call>",
-        cleaned, re.DOTALL,
-    )
-    if tc_tag_matches:
-        calls = _extract_calls_from_fragments(tc_tag_matches)
-        if calls:
-            return calls
-
-    # Qwen pipe-delimited: <|tool_call|>{...}<|/tool_call|>
-    tc_pipe_matches = re.findall(
-        r"<\|tool_call\|>\s*(.*?)\s*<\|/tool_call\|>",
-        cleaned, re.DOTALL,
-    )
-    if tc_pipe_matches:
-        calls = _extract_calls_from_fragments(tc_pipe_matches)
-        if calls:
-            return calls
-
-    # Mistral: [TOOL_CALLS] [{...}, ...]
-    mistral_match = re.search(
-        r"\[TOOL_CALLS\]\s*(\[.*?\])",
-        cleaned, re.DOTALL,
-    )
-    if mistral_match:
-        calls = _extract_calls_from_array(mistral_match.group(1))
-        if calls:
-            return calls
-
-    # Llama: <|python_tag|> followed by JSON (function call format)
-    python_tag_match = re.search(
-        r"<\|python_tag\|>\s*(.*)",
-        cleaned, re.DOTALL,
-    )
-    if python_tag_match:
-        calls = _extract_calls_from_fragments([python_tag_match.group(1)])
-        if calls:
-            return calls
-
-    # Generic: <function_call>{...}</function_call> or <functioncall>{...}</functioncall>
-    fc_matches = re.findall(
-        r"<function_?call>\s*(.*?)\s*</function_?call>",
-        cleaned, re.DOTALL | re.IGNORECASE,
-    )
-    if fc_matches:
-        calls = _extract_calls_from_fragments(fc_matches)
-        if calls:
-            return calls
-
-    # <tool>{...}</tool> or <tools>{...}</tools> (fine-tuned / small models)
-    tool_tag_matches = re.findall(
-        r"<tools?>\s*(.*?)\s*</tools?>",
-        cleaned, re.DOTALL | re.IGNORECASE,
-    )
-    if tool_tag_matches:
-        calls = _extract_calls_from_fragments(tool_tag_matches)
-        if calls:
-            return calls
-
-    # <function=tool_name>{"arg": "val"}</function> (attribute-style)
-    attr_matches = re.findall(
-        r"<function=([a-z_]\w*)>\s*(.*?)\s*</function>",
-        cleaned, re.DOTALL | re.IGNORECASE,
-    )
-    if attr_matches:
-        calls = []
-        for name, args_str in attr_matches:
-            try:
-                args = safe_json_loads(args_str)
-                calls.append({"name": name, "arguments": args if isinstance(args, dict) else {}})
-            except (json.JSONDecodeError, TypeError):
-                calls.append({"name": name, "arguments": {}})
-        if calls:
-            return calls
-
-    # ── 2. Our manual-mode JSON: {"tool_calls": [...]} ───────────────
-    # Check markdown code blocks first, then bare text.
-    json_candidates: list[str] = []
-
-    # Match ```json ... ``` or ``` ... ```
-    code_blocks = re.findall(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
-    json_candidates.extend(code_blocks)
-
-    # Also try the raw cleaned text (model might output bare JSON)
-    json_candidates.append(cleaned.strip())
-
-    for candidate in json_candidates:
-        candidate = candidate.strip()
-        if not candidate:
-            continue
-
-        # Try to find a JSON object in the candidate
-        brace_start = candidate.find("{")
-        if brace_start == -1:
-            continue
-
-        # Find the matching closing brace
-        depth = 0
-        for i, ch in enumerate(candidate[brace_start:], start=brace_start):
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    json_str = candidate[brace_start : i + 1]
-                    try:
-                        parsed = safe_json_loads(json_str)
-                        if isinstance(parsed, dict):
-                            # {"tool_calls": [...]} wrapper
-                            if "tool_calls" in parsed:
-                                calls = _normalize_call_list(parsed["tool_calls"])
-                                if calls:
-                                    return calls
-                            # Bare tool call object: {"name": "...", "arguments": {...}}
-                            if "name" in parsed:
-                                calls = _normalize_call_list([parsed])
-                                if calls:
-                                    return calls
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                    continue  # try next brace pair in the candidate
-
-    # ── 9. SEARCH/REPLACE blocks (Aider-style diffs) ────────────────
-    sr_calls = _parse_search_replace_blocks(cleaned)
-    if sr_calls:
-        return sr_calls
-
-    return None
+    return {}
 
 
-def _parse_search_replace_blocks(text: str) -> list[dict[str, Any]] | None:
-    """Parse SEARCH/REPLACE blocks into edit_file tool calls.
+# ── Normalization helpers ────────────────────────────────────────────────
 
-    Supports formats:
-    - ``<<<<<<< SEARCH`` ... ``=======`` ... ``>>>>>>> REPLACE``
-    - ``<<<<<<< SEARCH@path`` or ``<<<<<<< SEARCH path``
-    - File path on the line before the block
-    """
-    pattern = re.compile(
-        r"(?:^([^\n<>]+\.[\w]+)\n)?"            # optional file path on preceding line
-        r"<{4,}\s*SEARCH"                         # <<<<<<< SEARCH
-        r"(?:[@\s]+([^\n]*\.[\w]+))?"             # optional @path or path after SEARCH
-        r"(?:[@\s]*(\d+)(?:-\d+)?)?\s*\n"        # optional @linenum or @start-end
-        r"(.*?)\n"                                # old code (captured)
-        r"={4,}\s*\n"                             # =======
-        r"(.*?)\n"                                # new code (captured)
-        r">{4,}\s*REPLACE",                       # >>>>>>> REPLACE
-        re.DOTALL | re.MULTILINE,
-    )
-
+def _normalize_call_list(raw: list) -> list[dict[str, Any]] | None:
+    """Normalize a list of raw tool call dicts into [{name, arguments}, ...]."""
     calls: list[dict[str, Any]] = []
-    for m in pattern.finditer(text):
-        path = m.group(1) or m.group(2) or ""
-        old_string = m.group(4)
-        new_string = m.group(5)
-
-        if old_string is not None and new_string is not None:
-            args: dict[str, Any] = {
-                "old_string": old_string,
-                "new_string": new_string,
-            }
-            if path:
-                args["path"] = path.strip()
-            calls.append({"name": "edit_file", "arguments": args})
-
+    for item in raw:
+        if isinstance(item, dict):
+            call = _normalize_single_call(item)
+            if call:
+                calls.append(call)
     return calls if calls else None
 
 
-# ── Fragment / array parsers ──────────────────────────────────────────────
+def _normalize_single_call(obj: dict) -> dict[str, Any] | None:
+    """Normalize a single tool call dict.
+
+    Handles variants:
+    - {"name": "x", "arguments": {...}}
+    - {"function": {"name": "x", "arguments": {...}}}
+    - {"function": "x", "arguments": {...}}
+    - {"name": "x", "parameters": {...}}
+    """
+    name = obj.get("name")
+    arguments = obj.get("arguments") or obj.get("parameters") or {}
+
+    if not name and "function" in obj:
+        func = obj["function"]
+        if isinstance(func, dict):
+            name = func.get("name")
+            arguments = func.get("arguments") or func.get("parameters") or {}
+        elif isinstance(func, str):
+            name = func
+
+    if not name or not isinstance(name, str):
+        return None
+
+    return {"name": name, "arguments": arguments}
+
 
 def _extract_calls_from_fragments(fragments: list[str]) -> list[dict[str, Any]] | None:
     """Parse JSON tool call objects from text fragments."""
@@ -286,7 +134,6 @@ def _extract_calls_from_fragments(fragments: list[str]) -> list[dict[str, Any]] 
         try:
             parsed = safe_json_loads(frag)
         except (json.JSONDecodeError, TypeError):
-            # Try to extract first JSON object from fragment
             brace = frag.find("{")
             if brace == -1:
                 continue
@@ -326,43 +173,410 @@ def _extract_calls_from_array(text: str) -> list[dict[str, Any]] | None:
     return _normalize_call_list(arr)
 
 
-def _normalize_call_list(raw: list) -> list[dict[str, Any]] | None:
-    """Normalize a list of raw tool call dicts into [{name, arguments}, ...]."""
-    calls: list[dict[str, Any]] = []
-    for item in raw:
-        if isinstance(item, dict):
-            call = _normalize_single_call(item)
-            if call:
-                calls.append(call)
-    return calls if calls else None
+# ── ManualToolCall ────────────────────────────────────────────────────────
+
+class ManualToolCall:
+    """Lightweight stand-in for native tool call objects in manual TC mode."""
+
+    __slots__ = ("id", "function")
+
+    class _Function:
+        __slots__ = ("name", "arguments")
+
+        def __init__(self, name: str, arguments: str) -> None:
+            self.name = name
+            self.arguments = arguments
+
+    def __init__(self, id: str, name: str, arguments: str) -> None:
+        self.id = id
+        self.function = self._Function(name, arguments)
 
 
-def _normalize_single_call(obj: dict) -> dict[str, Any] | None:
-    """Normalize a single tool call dict.
+# ══════════════════════════════════════════════════════════════════════════
+# Format registry
+# ══════════════════════════════════════════════════════════════════════════
 
-    Handles variants:
-    - {"name": "x", "arguments": {...}}
-    - {"function": {"name": "x", "arguments": {...}}}
-    - {"function": "x", "arguments": {...}}  (Llama-style)
-    - {"name": "x", "parameters": {...}}
+_FORMATS: list[type["ToolCallFormat"]] = []
+
+
+def register_format(cls: type["ToolCallFormat"]) -> type["ToolCallFormat"]:
+    """Class decorator to register a tool call format."""
+    _FORMATS.append(cls)
+    _FORMATS.sort(key=lambda c: c.priority)
+    return cls
+
+
+class ToolCallFormat(ABC):
+    """Base class for tool call format parsers.
+
+    Subclass and decorate with @register_format to add a new format.
+
+    Attributes:
+        name:     Human-readable format name (for logging).
+        priority: Lower = tried first. Native token formats should be 10-50,
+                  generic JSON formats 100+, fallbacks 200+.
     """
-    name = obj.get("name")
-    arguments = obj.get("arguments") or obj.get("parameters") or {}
 
-    # Nested "function" key (OpenAI-style wrapper)
-    if not name and "function" in obj:
-        func = obj["function"]
-        if isinstance(func, dict):
-            name = func.get("name")
-            arguments = func.get("arguments") or func.get("parameters") or {}
-        elif isinstance(func, str):
-            # {"function": "read_file", "arguments": {...}}
-            name = func
+    name: str = "unknown"
+    priority: int = 100
 
-    if not name or not isinstance(name, str):
+    @abstractmethod
+    def detect(self, text: str) -> bool:
+        """Return True if this format's markers are present in the text."""
+        ...
+
+    @abstractmethod
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        """Extract tool calls from text. Return None if parsing fails."""
+        ...
+
+
+# ── Preprocessing ────────────────────────────────────────────────────────
+
+# Thinking section tags to strip before parsing
+_THINKING_RE = re.compile(
+    r"<(?:thinking|think|thoughts|\|thinking\|)>.*?</(?:thinking|think|thoughts|\|thinking\|)>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Hallucinated tool output tags to strip
+_HALLUCINATED_OUTPUT_RE = re.compile(
+    r"<(?:tool[_-]?output|tool[_-]?result|tool[_-]?response|observation)>"
+    r".*?"
+    r"</(?:tool[_-]?output|tool[_-]?result|tool[_-]?response|observation)>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Gemma 4 noise tokens
+_GEMMA4_NOISE_RE = re.compile(
+    r"<\|?tool_response\|?>|<\|?channel\|?>|<\|?channel>|<channel\|>|<eos>"
+)
+
+
+def _preprocess(text: str) -> str:
+    """Strip thinking sections, hallucinated outputs, and noise tokens."""
+    text = _THINKING_RE.sub("", text)
+    text = _HALLUCINATED_OUTPUT_RE.sub("", text)
+    text = _GEMMA4_NOISE_RE.sub("", text)
+    return text
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Built-in formats (ordered by priority)
+# ══════════════════════════════════════════════════════════════════════════
+
+@register_format
+class Gemma4Format(ToolCallFormat):
+    """Gemma 4: <|tool_call>call:func_name{args}<tool_call|>"""
+
+    name = "gemma4"
+    priority = 10
+
+    _PREFIX = re.compile(r"<\|tool_call>call:([a-z_]\w*)")
+
+    def detect(self, text: str) -> bool:
+        return "<|tool_call>call:" in text
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        calls: list[dict[str, Any]] = []
+
+        for m in self._PREFIX.finditer(text):
+            name = m.group(1)
+            rest = text[m.end():]
+
+            brace_start = rest.find("{")
+            if brace_start == -1:
+                calls.append({"name": name, "arguments": {}})
+                continue
+
+            # Brace-depth match (handles nested objects/arrays)
+            depth = 0
+            end_idx = -1
+            in_sq = in_dq = False
+            for i, ch in enumerate(rest[brace_start:]):
+                if in_sq:
+                    if ch == "'" and (i == 0 or rest[brace_start + i - 1] != "\\"):
+                        in_sq = False
+                    continue
+                if in_dq:
+                    if ch == '"' and (i == 0 or rest[brace_start + i - 1] != "\\"):
+                        in_dq = False
+                    continue
+                if ch == "'":
+                    in_sq = True
+                elif ch == '"':
+                    in_dq = True
+                elif ch in "{[":
+                    depth += 1
+                elif ch in "}]":
+                    depth -= 1
+                    if depth == 0:
+                        end_idx = brace_start + i
+                        break
+
+            if end_idx == -1:
+                args_str = rest[brace_start:]
+                cut = args_str.find("<tool_call|>")
+                if cut != -1:
+                    args_str = args_str[:cut]
+            else:
+                args_str = rest[brace_start : end_idx + 1]
+
+            calls.append({"name": name, "arguments": _fix_jslike_json(args_str)})
+
+        return calls if calls else None
+
+
+@register_format
+class QwenFormat(ToolCallFormat):
+    """Qwen / GLM: <tool_call>{...}</tool_call>"""
+
+    name = "qwen"
+    priority = 20
+
+    _RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+
+    def detect(self, text: str) -> bool:
+        return "<tool_call>" in text and "</tool_call>" in text
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        matches = self._RE.findall(text)
+        return _extract_calls_from_fragments(matches) if matches else None
+
+
+@register_format
+class QwenPipeFormat(ToolCallFormat):
+    """Qwen pipe-delimited: <|tool_call|>{...}<|/tool_call|>"""
+
+    name = "qwen_pipe"
+    priority = 21
+
+    _RE = re.compile(r"<\|tool_call\|>\s*(.*?)\s*<\|/tool_call\|>", re.DOTALL)
+
+    def detect(self, text: str) -> bool:
+        return "<|tool_call|>" in text and "<|/tool_call|>" in text
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        matches = self._RE.findall(text)
+        return _extract_calls_from_fragments(matches) if matches else None
+
+
+@register_format
+class MistralFormat(ToolCallFormat):
+    """Mistral: [TOOL_CALLS] [{...}, ...]"""
+
+    name = "mistral"
+    priority = 30
+
+    _RE = re.compile(r"\[TOOL_CALLS\]\s*(\[.*?\])", re.DOTALL)
+
+    def detect(self, text: str) -> bool:
+        return "[TOOL_CALLS]" in text
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        m = self._RE.search(text)
+        return _extract_calls_from_array(m.group(1)) if m else None
+
+
+@register_format
+class LlamaFormat(ToolCallFormat):
+    """Llama: <|python_tag|> followed by JSON"""
+
+    name = "llama"
+    priority = 40
+
+    _RE = re.compile(r"<\|python_tag\|>\s*(.*)", re.DOTALL)
+
+    def detect(self, text: str) -> bool:
+        return "<|python_tag|>" in text
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        m = self._RE.search(text)
+        return _extract_calls_from_fragments([m.group(1)]) if m else None
+
+
+@register_format
+class FunctionCallFormat(ToolCallFormat):
+    """Generic: <function_call>{...}</function_call>"""
+
+    name = "function_call"
+    priority = 50
+
+    _RE = re.compile(r"<function_?call>\s*(.*?)\s*</function_?call>", re.DOTALL | re.IGNORECASE)
+
+    def detect(self, text: str) -> bool:
+        low = text.lower()
+        return "<functioncall>" in low or "<function_call>" in low
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        matches = self._RE.findall(text)
+        return _extract_calls_from_fragments(matches) if matches else None
+
+
+@register_format
+class ToolTagFormat(ToolCallFormat):
+    """Fine-tuned / small models: <tool>{...}</tool> or <tools>{...}</tools>"""
+
+    name = "tool_tag"
+    priority = 51
+
+    _RE = re.compile(r"<tools?>\s*(.*?)\s*</tools?>", re.DOTALL | re.IGNORECASE)
+
+    def detect(self, text: str) -> bool:
+        low = text.lower()
+        return ("<tool>" in low or "<tools>") and ("</tool>" in low or "</tools>" in low)
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        matches = self._RE.findall(text)
+        return _extract_calls_from_fragments(matches) if matches else None
+
+
+@register_format
+class AttrFunctionFormat(ToolCallFormat):
+    """Attribute-style: <function=tool_name>{"arg": "val"}</function>"""
+
+    name = "attr_function"
+    priority = 52
+
+    _RE = re.compile(r"<function=([a-z_]\w*)>\s*(.*?)\s*</function>", re.DOTALL | re.IGNORECASE)
+
+    def detect(self, text: str) -> bool:
+        return "<function=" in text.lower()
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        matches = self._RE.findall(text)
+        if not matches:
+            return None
+        calls = []
+        for name, args_str in matches:
+            try:
+                args = safe_json_loads(args_str)
+                calls.append({"name": name, "arguments": args if isinstance(args, dict) else {}})
+            except (json.JSONDecodeError, TypeError):
+                calls.append({"name": name, "arguments": {}})
+        return calls if calls else None
+
+
+@register_format
+class ManualJsonFormat(ToolCallFormat):
+    """Manual-mode JSON: {"tool_calls": [...]}, bare JSON, or markdown blocks."""
+
+    name = "manual_json"
+    priority = 100
+
+    def detect(self, text: str) -> bool:
+        return "{" in text
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        candidates: list[str] = []
+
+        # Markdown code blocks
+        code_blocks = re.findall(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+        candidates.extend(code_blocks)
+        candidates.append(text.strip())
+
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+
+            brace_start = candidate.find("{")
+            if brace_start == -1:
+                continue
+
+            depth = 0
+            for i, ch in enumerate(candidate[brace_start:], start=brace_start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        json_str = candidate[brace_start : i + 1]
+                        try:
+                            parsed = safe_json_loads(json_str)
+                            if isinstance(parsed, dict):
+                                if "tool_calls" in parsed:
+                                    calls = _normalize_call_list(parsed["tool_calls"])
+                                    if calls:
+                                        return calls
+                                if "name" in parsed:
+                                    calls = _normalize_call_list([parsed])
+                                    if calls:
+                                        return calls
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        continue
+
         return None
 
-    return {"name": name, "arguments": arguments}
+
+@register_format
+class SearchReplaceFormat(ToolCallFormat):
+    """Aider-style SEARCH/REPLACE blocks → edit_file tool calls."""
+
+    name = "search_replace"
+    priority = 200
+
+    _RE = re.compile(
+        r"(?:^([^\n<>]+\.[\w]+)\n)?"
+        r"<{4,}\s*SEARCH"
+        r"(?:[@\s]+([^\n]*\.[\w]+))?"
+        r"(?:[@\s]*(\d+)(?:-\d+)?)?\s*\n"
+        r"(.*?)\n"
+        r"={4,}\s*\n"
+        r"(.*?)\n"
+        r">{4,}\s*REPLACE",
+        re.DOTALL | re.MULTILINE,
+    )
+
+    def detect(self, text: str) -> bool:
+        return "SEARCH" in text and "REPLACE" in text and "=====" in text
+
+    def parse(self, text: str) -> list[dict[str, Any]] | None:
+        calls: list[dict[str, Any]] = []
+        for m in self._RE.finditer(text):
+            path = m.group(1) or m.group(2) or ""
+            old_string = m.group(4)
+            new_string = m.group(5)
+            if old_string is not None and new_string is not None:
+                args: dict[str, Any] = {"old_string": old_string, "new_string": new_string}
+                if path:
+                    args["path"] = path.strip()
+                calls.append({"name": "edit_file", "arguments": args})
+        return calls if calls else None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Main entry point
+# ══════════════════════════════════════════════════════════════════════════
+
+def parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
+    """Parse tool calls from model text when native FC is unavailable.
+
+    Tries each registered format in priority order. Returns a list of
+    dicts with "name" and "arguments" keys, or None if nothing found.
+    """
+    if not content or not content.strip():
+        return None
+
+    cleaned = _preprocess(content)
+
+    for fmt_cls in _FORMATS:
+        fmt = fmt_cls()
+        if fmt.detect(cleaned):
+            result = fmt.parse(cleaned)
+            if result:
+                return result
+
+    return None
+
+
+def get_registered_formats() -> list[dict[str, Any]]:
+    """Return info about all registered formats (for debugging/help)."""
+    return [
+        {"name": cls.name, "priority": cls.priority, "doc": cls.__doc__ or ""}
+        for cls in _FORMATS
+    ]
 
 
 # ── Step complete parser ──────────────────────────────────────────────────
@@ -379,7 +593,6 @@ def parse_step_complete_args(arguments: str | dict[str, Any]) -> "StepResult":
     else:
         args = arguments or {}
 
-    # Parse next_steps into StepOperation objects
     raw_next_steps = args.get("next_steps", [])
     next_steps: list[StepOperation] = []
     if isinstance(raw_next_steps, list):
@@ -394,7 +607,6 @@ def parse_step_complete_args(arguments: str | dict[str, Any]) -> "StepResult":
                 except Exception:
                     pass
 
-    # Coerce final_answer to string (model may pass dict/list instead of string)
     raw_answer = args.get("final_answer")
     if raw_answer is not None and not isinstance(raw_answer, str):
         raw_answer = json.dumps(raw_answer)

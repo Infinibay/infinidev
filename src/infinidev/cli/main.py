@@ -21,7 +21,6 @@ from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop_engine import LoopEngine
 from infinidev.engine.analysis_engine import AnalysisEngine
 from infinidev.engine.review_engine import ReviewEngine
-# InfinidevTUI (Textual) replaced by infinidev.ui.app.run_tui (prompt_toolkit)
 import infinidev.prompts.flows  # noqa: F401 — registers flows
 
 # Configure logging (ensure base dir exists before creating file handler)
@@ -61,7 +60,10 @@ def handle_command(cmd_text: str):
             # Reload settings globally for all modules (llm.py, engine, etc.)
             from infinidev.config.settings import reload_all
             reload_all()
-            
+            # Re-detect capabilities for the new model
+            from infinidev.config.model_capabilities import _reset_capabilities
+            _reset_capabilities()
+
             click.echo(click.style(f"Model updated to: {settings.LLM_MODEL}", fg="green"))
         elif subcmd == "list":
             import httpx
@@ -415,17 +417,30 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
 @click.option("--classic", is_flag=True, hidden=True, help="Alias for --no-tui.")
 @click.option("--prompt", "-p", default=None, help="Run a single prompt non-interactively and exit.")
 @click.option("--model", "-m", default=None, help="Override LLM model for this run (e.g., ollama_chat/qwen3:32b).")
+@click.option("--provider", default=None, help="Override LLM provider (ollama, openai, anthropic, gemini, etc.).")
 @click.option("--think", is_flag=True, help="Use phase engine (ANALYZE → PLAN → EXECUTE) for deeper reasoning.")
 @click.option("--profile", is_flag=True, help="Enable session profiling (saves to ~/.infinidev/profiles/).")
-def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, think: bool, profile: bool):
+def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool):
     """Main entry point for Infinidev CLI."""
     from infinidev.cli.profiler import SessionProfiler
+
+    # Apply provider override in-memory (does NOT persist to settings.json)
+    if provider:
+        settings.LLM_PROVIDER = provider
 
     # Apply model override in-memory (does NOT persist to settings.json)
     if model:
         if "/" not in model:
-            model = f"ollama_chat/{model}"
+            # Use provider prefix if available, otherwise default to ollama_chat/
+            from infinidev.config.providers import get_provider
+            prov = get_provider(settings.LLM_PROVIDER)
+            model = f"{prov.prefix}{model}"
         settings.LLM_MODEL = model
+
+    # Reset capability cache so it re-detects for the new model/provider
+    if model or provider:
+        from infinidev.config.model_capabilities import _reset_capabilities
+        _reset_capabilities()
 
     with SessionProfiler(enabled=profile) as profiler:
         _run_main(no_tui, classic, prompt, think, profile)
@@ -463,17 +478,12 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         on_progress=lambda msg: click.echo(click.style(f"  {msg}", dim=True)),
     )
 
-    # Start background file watcher + indexing queue
+    # Start background indexing queue (no file watcher in classic mode —
+    # watchfiles' Rust backend writes debug spam to stdout that can't be
+    # suppressed. Files are indexed on-demand via read_file instead.)
     from infinidev.cli.index_queue import IndexQueue
-    from infinidev.cli.file_watcher import FileWatcher as _FileWatcher
     _index_queue = IndexQueue(project_id=1)
     _index_queue.start()
-    _classic_watcher = _FileWatcher(
-        workspace=os.getcwd(),
-        callback=lambda p: None,  # no visual callback in classic mode
-        index_callback=_index_queue.enqueue,
-    )
-    _classic_watcher.start()
 
     from infinidev.engine.ui_hooks import register_ui_hooks
     register_ui_hooks()
@@ -501,6 +511,11 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     from infinidev.tools.permission import set_permission_handler
     set_permission_handler(_classic_permission_handler)
 
+    from infinidev.cli.phases import (
+        run_analysis_phase, run_gather_phase,
+        run_execution_phase, run_review_phase,
+    )
+
     while True:
         try:
             user_input = session.prompt("infinidev> ")
@@ -510,26 +525,17 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             if user_input.startswith("/"):
                 cmd_result = handle_command(user_input)
                 if isinstance(cmd_result, tuple) and cmd_result[0] == "explore":
-                    # /explore command — run exploration tree engine
-                    problem = cmd_result[1]
                     from infinidev.config.settings import reload_all
                     reload_all()
-
                     from infinidev.engine.tree_engine import TreeEngine
                     from infinidev.engine.flows import get_flow_config
-
-                    click.echo(click.style(f"[explore] Exploring: {problem}", fg="yellow"))
+                    click.echo(click.style(f"[explore] Exploring: {cmd_result[1]}", fg="yellow"))
                     flow_config = get_flow_config("explore")
                     agent._system_prompt_identity = flow_config.identity_prompt
                     agent.backstory = flow_config.backstory
                     agent.activate_context(session_id=session_id)
                     try:
-                        tree_engine = TreeEngine()
-                        result = tree_engine.execute(
-                            agent=agent,
-                            task_prompt=(problem, flow_config.expected_output),
-                            verbose=True,
-                        )
+                        result = TreeEngine().execute(agent=agent, task_prompt=(cmd_result[1], flow_config.expected_output), verbose=True)
                         if not result or not result.strip():
                             result = "Exploration complete (no synthesis produced)."
                     finally:
@@ -538,26 +544,17 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                     click.echo(result)
                     continue
                 elif isinstance(cmd_result, tuple) and cmd_result[0] == "brainstorm":
-                    # /brainstorm command — run brainstorm tree engine
-                    problem = cmd_result[1]
                     from infinidev.config.settings import reload_all
                     reload_all()
-
                     from infinidev.engine.tree_engine import TreeEngine
                     from infinidev.engine.flows import get_flow_config
-
-                    click.echo(click.style(f"[brainstorm] Brainstorming: {problem}", fg="magenta"))
+                    click.echo(click.style(f"[brainstorm] Brainstorming: {cmd_result[1]}", fg="magenta"))
                     flow_config = get_flow_config("brainstorm")
                     agent._system_prompt_identity = flow_config.identity_prompt
                     agent.backstory = flow_config.backstory
                     agent.activate_context(session_id=session_id)
                     try:
-                        tree_engine = TreeEngine()
-                        result = tree_engine.execute(
-                            agent=agent,
-                            task_prompt=(problem, flow_config.expected_output),
-                            mode="brainstorm",
-                        )
+                        result = TreeEngine().execute(agent=agent, task_prompt=(cmd_result[1], flow_config.expected_output), mode="brainstorm")
                         if not result or not result.strip():
                             result = "Brainstorm complete (no synthesis produced)."
                     finally:
@@ -566,24 +563,17 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                     click.echo(result)
                     continue
                 elif cmd_result == "init":
-                    # /init command — run project exploration
                     from infinidev.prompts.init_project import INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT
                     from infinidev.engine.flows import get_flow_config
-
                     from infinidev.config.settings import reload_all
                     reload_all()
-
                     click.echo(click.style("[init] Exploring and documenting project...", fg="yellow"))
                     flow_config = get_flow_config("document")
                     agent._system_prompt_identity = flow_config.identity_prompt
                     agent.backstory = flow_config.backstory
                     agent.activate_context(session_id=session_id)
                     try:
-                        result = engine.execute(
-                            agent=agent,
-                            task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
-                            verbose=True,
-                        )
+                        result = engine.execute(agent=agent, task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT), verbose=True)
                         if not result or not result.strip():
                             result = "Project initialization complete."
                     finally:
@@ -599,180 +589,34 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             from infinidev.config.settings import reload_all
             reload_all()
 
-            # --- Analysis phase ---
-            if settings.ANALYSIS_ENABLED:
-                analyst.reset()
-                click.echo(click.style("Analyzing request...", fg="cyan", dim=True))
+            # ── Pipeline: analysis → gather → execute → review ──
+            task_prompt, analysis, flow = run_analysis_phase(user_input, analyst, session)
+            if flow in ("done", "cancelled"):
+                continue
 
-                analysis = analyst.analyze(user_input)
+            # Configure agent with flow
+            from infinidev.engine.flows import get_flow_config
+            flow_config = get_flow_config(flow)
+            agent._system_prompt_identity = flow_config.identity_prompt
+            agent.backstory = flow_config.backstory
 
-                # Handle question loop
-                while analysis.action == "ask" and analyst.can_ask_more:
-                    questions_text = analysis.format_questions_for_user()
-                    click.echo(click.style("\n" + questions_text, fg="cyan"))
-
-                    answer = session.prompt("Your answer> ")
-                    if not answer.strip():
-                        # User skipped — force proceed with assumptions
-                        break
-                    analyst.add_answer(questions_text, answer)
-                    analysis = analyst.analyze(
-                        user_input + "\n\nUser clarification: " + answer
-                    )
-
-                # Build the task prompt from analysis result
-                task_prompt = analysis.build_flow_prompt()
-
-                # Handle "done" pseudo-flow (greetings, simple questions answered by analyst)
-                if analysis.flow == "done":
-                    click.echo(click.style("\n" + (analysis.reason or analysis.original_input), fg="green"))
-                    continue
-
-                if analysis.action == "proceed":
-                    # Show spec and wait for user confirmation
-                    spec = analysis.specification
-                    click.echo(click.style("\n── Analysis Result ──", fg="cyan", bold=True))
-                    if spec.get("summary"):
-                        click.echo(click.style(f"Summary: {spec['summary']}", fg="cyan"))
-                    for key in ("requirements", "hidden_requirements", "assumptions", "out_of_scope"):
-                        items = spec.get(key, [])
-                        if items:
-                            click.echo(click.style(f"\n{key.replace('_', ' ').title()}:", fg="cyan", bold=True))
-                            for item in items:
-                                click.echo(f"  • {item}")
-                    if spec.get("technical_notes"):
-                        click.echo(click.style(f"\nTechnical Notes:", fg="cyan", bold=True))
-                        click.echo(f"  {spec['technical_notes']}")
-                    click.echo(click.style("─" * 40, fg="cyan"))
-
-                    confirm = session.prompt(
-                        "Proceed with implementation? [Y/n/feedback] "
-                    ).strip()
-                    if confirm.lower() in ("n", "no", "cancel"):
-                        click.echo(click.style("Skipped development.", dim=True))
-                        continue
-                    if confirm and confirm.lower() not in ("y", "yes", ""):
-                        # User gave extra feedback — append to the task prompt
-                        desc, expected = task_prompt
-                        desc += f"\n\n## Additional User Feedback\n{confirm}"
-                        task_prompt = (desc, expected)
-
-                # Get flow config and configure agent
-                from infinidev.engine.flows import get_flow_config
-                flow_config = get_flow_config(analysis.flow)
-                agent._system_prompt_identity = flow_config.identity_prompt
-                agent.backstory = flow_config.backstory
-
-                # Override expected output with flow-specific template
-                desc, _ = task_prompt
-                task_prompt = (desc, flow_config.expected_output)
-            else:
-                task_prompt = (user_input, "Complete the task and report findings.")
-                flow_config = None
-                analysis = None
-            # --- End analysis phase ---
-
-            current_flow = analysis.flow if analysis is not None else "develop"
-
-            # --- Gather phase ---
-            _do_gather = settings.GATHER_ENABLED or _gather_next_task
-            _gather_next_task = False  # Reset after use
-            if _do_gather and current_flow == "develop":
-                try:
-                    from infinidev.gather import run_gather
-                    agent.activate_context(session_id=session_id)
-                    click.echo(click.style("Gathering context...", fg="cyan", dim=True))
-                    chat_history = [
-                        {"role": "user" if "[user]" in s.lower() else "assistant", "content": s}
-                        for s in get_recent_summaries(session_id, limit=10)
-                    ]
-                    brief = run_gather(user_input, chat_history, analysis, agent)
-                    desc, expected = task_prompt
-                    desc = brief.render() + "\n\n" + desc
-                    task_prompt = (desc, expected)
-                    click.echo(click.style(f"  {brief.summary()}", fg="cyan", dim=True))
-                except Exception as exc:
-                    click.echo(click.style(f"  Gather failed (proceeding without): {exc}", fg="yellow", dim=True))
-            # --- End gather phase ---
-
-            click.echo(click.style(f"[{current_flow}] Working on: {user_input}", fg="yellow"))
-
-            # --- Development/Exploration phase ---
-            agent.activate_context(session_id=session_id)
-            try:
-                if current_flow in ("explore", "brainstorm"):
-                    from infinidev.engine.tree_engine import TreeEngine
-                    tree_engine = TreeEngine()
-                    result = tree_engine.execute(
-                        agent=agent,
-                        task_prompt=task_prompt,
-                        mode=current_flow,
-                    )
-                elif _use_phase_engine:
-                    _use_phase_engine = False  # Reset after use
-                    from infinidev.engine.phase_engine import PhaseEngine
-                    # Determine task type from analysis or default to feature
-                    _task_type = "feature"
-                    if analysis and hasattr(analysis, 'specification'):
-                        _task_type = analysis.specification.get("task_type", "feature")
-                    # Extract depth config from gather brief if available
-                    _depth_config = None
-                    if hasattr(agent, '_gather_brief') and agent._gather_brief:
-                        try:
-                            from infinidev.gather.models import DEPTH_CONFIGS
-                            _depth_config = DEPTH_CONFIGS.get(agent._gather_brief.classification.depth)
-                        except Exception:
-                            pass
-                    phase_eng = PhaseEngine()
-                    result = phase_eng.execute(
-                        agent=agent,
-                        task_prompt=task_prompt,
-                        task_type=_task_type,
-                        verbose=True,
-                        depth_config=_depth_config,
-                    )
-                else:
-                    result = engine.execute(
-                        agent=agent,
-                        task_prompt=task_prompt,
-                        verbose=True
-                    )
-                if not result or not result.strip():
-                    result = "Done. (no additional output)"
-            finally:
-                agent.deactivate()
-
-            # --- Code review phase (with review-rework loop) ---
-            run_review = flow_config.run_review if flow_config else True
-            if settings.REVIEW_ENABLED and run_review and current_flow != "explore" and engine.has_file_changes():
-                click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
-                from infinidev.engine.review_engine import run_review_rework_loop
-
-                def _cli_review_status(level: str, msg: str) -> None:
-                    if level == "verification_pass":
-                        click.echo(click.style(f"Verification: PASS. {msg}", fg="green", dim=True))
-                    elif level == "verification_fail":
-                        click.echo(click.style(f"Verification: FAIL. {msg}", fg="red"))
-                        click.echo(click.style("Re-running developer to fix test failures...", fg="magenta", dim=True))
-                    elif level == "approved":
-                        click.echo(click.style(f"Code review: APPROVED. {msg}", fg="green", dim=True))
-                    elif level == "rejected":
-                        click.echo(click.style(msg, fg="red"))
-                        click.echo(click.style("Re-running developer to fix review issues...", fg="magenta", dim=True))
-                    elif level == "max_reviews":
-                        click.echo(click.style("Max review rounds reached — stopping.", fg="yellow", dim=True))
-
-                result, _ = run_review_rework_loop(
-                    engine=engine,
-                    agent=agent,
-                    session_id=session_id,
-                    task_prompt=task_prompt,
-                    initial_result=result,
-                    reviewer=reviewer,
-                    recent_messages=get_recent_summaries(session_id, limit=5),
-                    on_status=_cli_review_status,
+            if flow == "develop":
+                task_prompt = run_gather_phase(
+                    user_input, agent, task_prompt, analysis,
+                    session_id, force_gather=_gather_next_task,
                 )
-            # --- End code review phase ---
+            _gather_next_task = False
+
+            result = run_execution_phase(
+                agent, engine, task_prompt, flow, analysis,
+                session_id, use_phase_engine=_use_phase_engine,
+            )
+            _use_phase_engine = False
+
+            result = run_review_phase(
+                engine, agent, session_id, task_prompt,
+                result, reviewer, flow, flow_config,
+            )
 
             click.echo(click.style("\nFinal Result:", fg="green", bold=True))
             click.echo(result)
@@ -786,7 +630,6 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             logging.exception("Error in main loop")
 
     # Cleanup background services
-    _classic_watcher.stop()
     _index_queue.stop()
 
 if __name__ == "__main__":

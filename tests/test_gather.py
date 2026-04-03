@@ -363,7 +363,7 @@ class TestReadFileAliases:
 class TestStepResultCoercion:
     def test_final_answer_dict_coerced_to_string(self):
         """final_answer passed as dict should be JSON-serialized."""
-        from infinidev.engine.loop_engine import _parse_step_complete_args
+        from infinidev.engine.tool_call_parser import parse_step_complete_args as _parse_step_complete_args
         result = _parse_step_complete_args({
             "summary": "classified",
             "status": "done",
@@ -374,7 +374,7 @@ class TestStepResultCoercion:
         assert parsed["ticket_type"] == "bug"
 
     def test_final_answer_list_coerced_to_string(self):
-        from infinidev.engine.loop_engine import _parse_step_complete_args
+        from infinidev.engine.tool_call_parser import parse_step_complete_args as _parse_step_complete_args
         result = _parse_step_complete_args({
             "summary": "generated questions",
             "status": "done",
@@ -384,7 +384,7 @@ class TestStepResultCoercion:
         assert "q1" in result.final_answer
 
     def test_final_answer_string_unchanged(self):
-        from infinidev.engine.loop_engine import _parse_step_complete_args
+        from infinidev.engine.tool_call_parser import parse_step_complete_args as _parse_step_complete_args
         result = _parse_step_complete_args({
             "summary": "done",
             "status": "done",
@@ -393,7 +393,7 @@ class TestStepResultCoercion:
         assert result.final_answer == "The answer is 42."
 
     def test_final_answer_none_unchanged(self):
-        from infinidev.engine.loop_engine import _parse_step_complete_args
+        from infinidev.engine.tool_call_parser import parse_step_complete_args as _parse_step_complete_args
         result = _parse_step_complete_args({
             "summary": "continuing",
             "status": "continue",

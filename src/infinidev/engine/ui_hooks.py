@@ -19,23 +19,23 @@ logger = logging.getLogger(__name__)
 _registered = False
 
 
-# ── Helpers (imported from loop_engine to avoid duplication) ──────────────
+# ── Helpers (imported from canonical engine_logging module) ───────────────
 
 def _extract_detail(tool_name: str, arguments: dict[str, Any] | str) -> str:
-    from infinidev.engine.loop_engine import _extract_tool_detail
+    from infinidev.engine.engine_logging import extract_tool_detail
     if isinstance(arguments, dict):
         arguments = json.dumps(arguments)
-    return _extract_tool_detail(tool_name, arguments)
+    return extract_tool_detail(tool_name, arguments)
 
 
 def _extract_preview(tool_name: str, result: str) -> str:
-    from infinidev.engine.loop_engine import _extract_tool_output_preview
-    return _extract_tool_output_preview(tool_name, result)
+    from infinidev.engine.engine_logging import extract_tool_output_preview
+    return extract_tool_output_preview(tool_name, result)
 
 
 def _extract_error(result: str) -> str:
-    from infinidev.engine.loop_engine import _extract_tool_error
-    return _extract_tool_error(result)
+    from infinidev.engine.engine_logging import extract_tool_error
+    return extract_tool_error(result)
 
 
 # ── POST_TOOL: emit loop_tool_call + special handling ────────────────────
@@ -96,7 +96,7 @@ def _on_think(ctx: HookContext) -> None:
 
     # Classic CLI
     if not event_bus.has_subscribers:
-        from infinidev.engine.loop_engine import _log, _DIM, _RESET
+        from infinidev.engine.engine_logging import log as _log, DIM as _DIM, RESET as _RESET
         _log(f"  {_DIM}💭 {reasoning[:200]}{_RESET}")
 
     event_bus.emit("loop_think", ctx.project_id, ctx.agent_id, {
@@ -196,8 +196,9 @@ def _cli_log_tool(
     """Log tool call to stderr in classic CLI mode (no-op when TUI is active)."""
     if event_bus.has_subscribers:
         return
-    from infinidev.engine.loop_engine import (
-        _log, _log_tool, _BLUE, _DIM, _RED, _RESET,
+    from infinidev.engine.engine_logging import (
+        log as _log, log_tool as _log_tool,
+        BLUE as _BLUE, DIM as _DIM, RED as _RED, RESET as _RESET,
     )
     meta = ctx.metadata
     agent_name = meta.get("agent_name", ctx.agent_id)

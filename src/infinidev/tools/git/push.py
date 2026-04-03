@@ -1,13 +1,13 @@
 """Tool for Git push operations (async-capable)."""
 
 import asyncio
-import subprocess
 from typing import Type
 
 from pydantic import BaseModel, Field
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
+from infinidev.tools.git._helpers import run_git, GitToolError
 
 
 class GitPushInput(BaseModel):
@@ -32,10 +32,7 @@ class GitPushTool(InfinibayBaseTool):
         cwd = self._git_cwd
         try:
             # Verify origin remote exists before pushing
-            check = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                capture_output=True, text=True, timeout=10, cwd=cwd,
-            )
+            check = run_git(["git", "remote", "get-url", "origin"], cwd=cwd, timeout=10)
             if check.returncode != 0:
                 return self._error(
                     "No remote 'origin' configured. Cannot push without a "
@@ -44,23 +41,16 @@ class GitPushTool(InfinibayBaseTool):
 
             # Get current branch if not specified
             if branch is None:
-                result = subprocess.run(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    capture_output=True, text=True, timeout=10, cwd=cwd,
+                result = run_git(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, timeout=10, check=True,
                 )
-                if result.returncode != 0:
-                    return self._error("Failed to determine current branch")
                 branch = result.stdout.strip()
 
             cmd = ["git", "push", "-u", "origin", branch]
             if force:
                 cmd.insert(2, "--force")
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True, text=True,
-                timeout=settings.GIT_PUSH_TIMEOUT, cwd=cwd,
-            )
+            result = run_git(cmd, cwd=cwd, timeout=settings.GIT_PUSH_TIMEOUT)
             if result.returncode != 0:
                 stderr = result.stderr.strip()
                 if "rejected" in stderr:
@@ -70,12 +60,8 @@ class GitPushTool(InfinibayBaseTool):
                     )
                 return self._error(f"Push failed: {stderr}")
 
-        except subprocess.TimeoutExpired:
-            return self._error(
-                f"Push timed out after {settings.GIT_PUSH_TIMEOUT}s"
-            )
-        except FileNotFoundError:
-            return self._error("Git is not installed or not in PATH")
+        except GitToolError as e:
+            return self._error(str(e))
 
         try:
             from infinidev.flows.event_listeners import FlowEvent, event_bus

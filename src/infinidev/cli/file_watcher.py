@@ -10,6 +10,9 @@ from typing import Callable, Optional, Set
 from threading import Thread, Event
 import logging
 
+import os
+os.environ["WATCHFILES_DEBUG"] = "false"  # Suppress Rust-level debug output
+
 try:
     from watchfiles import watch
     WATCHFILES_AVAILABLE = True
@@ -112,13 +115,14 @@ class FileWatcher:
     def _run_watcher(self):
         """Internal watcher loop running in background thread."""
         logger.info(f"Starting file watcher for {self.workspace}")
-        
+
         try:
             for changes in watch(
                 str(self.workspace),
                 stop_event=self._stop_event,
                 watch_filter=None,
                 debounce=500,  # 500ms debounce to batch rapid changes
+                debug=False,
             ):
                 if self._stop_event.is_set():
                     break

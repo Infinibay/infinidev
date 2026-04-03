@@ -30,7 +30,7 @@ DIALOG_NAME = "settings_editor"
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
-        ("LLM_PROVIDER", "LLM provider", "select:ollama,openai,anthropic,gemini,zai,kimi,minimax,openrouter,openai_compatible"),
+        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,openai_compatible"),
         ("LLM_MODEL", "LLM model", "select_dynamic:provider_models"),
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
@@ -169,6 +169,14 @@ class SettingsEditorState:
             return stype[7:].split(",")
         return []
 
+    def _is_free_text_model(self) -> bool:
+        """Return True if the current provider uses free-text model input."""
+        from infinidev.config.settings import settings
+        from infinidev.config.providers import get_provider
+        provider_id = self._pending_changes.get("LLM_PROVIDER", settings.LLM_PROVIDER)
+        provider = get_provider(provider_id)
+        return provider.model_list_format == "free_text"
+
     def _fetch_provider_models(self) -> list[str]:
         """Fetch available models for the current provider (cached)."""
         if self._ollama_models is not None:
@@ -199,9 +207,27 @@ class SettingsEditorState:
             self._save(key, str(new_val))
 
         elif stype.startswith("select:") or stype.startswith("select_dynamic:"):
+            # For free-text providers (e.g. openai_compatible), use inline text editor
+            if key == "LLM_MODEL" and self._is_free_text_model():
+                self.editing = True
+                self.edit_buffer.set_document(
+                    Document(str(value)), bypass_readonly=True
+                )
+                if self._on_edit_start:
+                    self._on_edit_start()
+                return
+
             # Open dropdown picker
             options = self._get_select_options(stype)
             if not options:
+                # No models found (server down?) — fall back to text input
+                if key == "LLM_MODEL":
+                    self.editing = True
+                    self.edit_buffer.set_document(
+                        Document(str(value)), bypass_readonly=True
+                    )
+                    if self._on_edit_start:
+                        self._on_edit_start()
                 return
             self.dropdown_open = True
             self.dropdown_options = options
@@ -485,11 +511,19 @@ class SettingsControl(UIControl):
                 ])
             elif stype.startswith("select:") or stype.startswith("select_dynamic:"):
                 current_val = str(value)
-                lines.append([
-                    (f"{TEXT}", f"   = "),
-                    (f"{ACCENT} bold", f"{current_val}"),
-                    (f"{TEXT_MUTED}", "  ▾"),
-                ])
+                # Show as plain text (no ▾) for free-text model fields
+                if key == "LLM_MODEL" and self._state._is_free_text_model():
+                    lines.append([
+                        (f"{TEXT}", f"   = "),
+                        (f"{ACCENT} bold", f"{current_val}"),
+                        (f"{TEXT_MUTED}", "  (free text)"),
+                    ])
+                else:
+                    lines.append([
+                        (f"{TEXT}", f"   = "),
+                        (f"{ACCENT} bold", f"{current_val}"),
+                        (f"{TEXT_MUTED}", "  ▾"),
+                    ])
             else:
                 val_str = str(value)
                 lines.append([(f"{TEXT}", f"   = {val_str}")])

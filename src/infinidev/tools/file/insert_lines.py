@@ -2,16 +2,13 @@
 
 import hashlib
 import os
-import stat
-import sqlite3
-import tempfile
 from typing import Type
 
 from pydantic import BaseModel, Field
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.base.db import execute_with_retry
+from infinidev.tools.file._helpers import guard_file_access, atomic_write, record_artifact_change
 
 
 # ── Shared insert logic ──────────────────────────────────────────────────────
@@ -21,14 +18,9 @@ def _insert_at(tool: InfinibayBaseTool, path: str, content: str, insert_idx: int
     """Insert content at a 0-based line index. Shared by both tools."""
     path = tool._resolve_path(os.path.expanduser(path))
 
-    sandbox_err = tool._validate_sandbox_path(path)
-    if sandbox_err:
-        return tool._error(sandbox_err)
-
-    from infinidev.tools.base.permissions import check_file_permission
-    perm_err = check_file_permission("insert_lines", path)
-    if perm_err:
-        return tool._error(perm_err)
+    access_err = guard_file_access(tool, path, "insert_lines")
+    if access_err:
+        return access_err
 
     if not os.path.exists(path):
         return tool._error(f"File not found: {path}")
@@ -74,17 +66,7 @@ def _insert_at(tool: InfinibayBaseTool, path: str, content: str, insert_idx: int
 
     # Atomic write
     try:
-        dir_name = os.path.dirname(path)
-        original_mode = os.stat(path).st_mode
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".infinibay_")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(new_content)
-            os.chmod(tmp_path, stat.S_IMODE(original_mode))
-            os.replace(tmp_path, path)
-        except Exception:
-            os.unlink(tmp_path)
-            raise
+        atomic_write(path, new_content)
     except PermissionError:
         return tool._error(f"Permission denied: {path}")
     except Exception as e:
@@ -93,22 +75,7 @@ def _insert_at(tool: InfinibayBaseTool, path: str, content: str, insert_idx: int
     after_hash = hashlib.sha256(new_content.encode("utf-8")).hexdigest()[:16]
 
     # Audit
-    project_id = tool.project_id
-    agent_run_id = tool.agent_run_id
-
-    def _record(conn: sqlite3.Connection):
-        conn.execute(
-            """INSERT INTO artifact_changes
-               (project_id, agent_run_id, file_path, action, before_hash, after_hash, size_bytes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (project_id, agent_run_id, path, "modified", before_hash, after_hash, new_size),
-        )
-        conn.commit()
-
-    try:
-        execute_with_retry(_record)
-    except Exception:
-        pass
+    record_artifact_change(tool, path, "modified", before_hash, after_hash, new_size)
 
     return tool._success({
         "path": path,

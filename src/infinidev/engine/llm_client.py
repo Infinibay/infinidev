@@ -53,6 +53,7 @@ MALFORMED_TOOL_PATTERNS = (
     "looking for beginning of value",
     "unexpected end of json",
     "failed to parse json",
+    "failed to parse input",
     "unexpected token",
     "unterminated string",
     "after top-level value",

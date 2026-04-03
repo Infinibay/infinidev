@@ -1,11 +1,11 @@
 """Tool for viewing Git status."""
 
-import subprocess
 from typing import Type
 
 from pydantic import BaseModel
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
+from infinidev.tools.git._helpers import run_git, GitToolError
 
 
 class GitStatusInput(BaseModel):
@@ -25,16 +25,9 @@ class GitStatusTool(InfinibayBaseTool):
 
         cwd = self._git_cwd
         try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain"],
-                capture_output=True, text=True, timeout=15, cwd=cwd,
-            )
-            if result.returncode != 0:
-                return self._error(f"Git status failed: {result.stderr.strip()}")
-        except subprocess.TimeoutExpired:
-            return self._error("Git status timed out")
-        except FileNotFoundError:
-            return self._error("Git is not installed or not in PATH")
+            result = run_git(["git", "status", "--porcelain"], cwd=cwd, check=True)
+        except GitToolError as e:
+            return self._error(str(e))
 
         raw = result.stdout.rstrip("\n")
         lines = raw.split("\n") if raw else []
@@ -59,12 +52,9 @@ class GitStatusTool(InfinibayBaseTool):
 
         # Get current branch
         try:
-            branch_result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, timeout=10, cwd=cwd,
-            )
+            branch_result = run_git(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, timeout=10)
             branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except GitToolError:
             branch = "unknown"
 
         return self._success({

@@ -3,6 +3,11 @@
 Runs lightweight test calls at startup to determine what the configured LLM
 actually supports (function calling, tool_choice=required, JSON mode, etc.)
 rather than relying on hardcoded provider lists.
+
+For Ollama models, the ``/api/show`` endpoint is queried first: if the model
+template lacks tool-calling markers (``.ToolCalls``, ``if .Tools``), the model
+is assumed to lack native function-calling support and the system falls back
+to manual (text-based) tool calling without ever sending a slow probe request.
 """
 
 from __future__ import annotations
@@ -14,6 +19,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Timeout (seconds) for probe calls — much shorter than the general LLM
+# timeout so a failing probe doesn't block the session for minutes.
+_PROBE_TIMEOUT = 30
 
 
 @dataclass
@@ -133,7 +142,12 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
 
 
 def get_model_capabilities() -> ModelCapabilities:
-    """Return model capabilities. Uses provider presets for known cloud providers."""
+    """Return model capabilities. Uses provider presets for known cloud providers.
+
+    For Ollama, queries the ``/api/show`` endpoint to check if the model
+    template includes tool-calling markers.  This is fast (~5 ms local) and
+    avoids a 30-second probe that would hang for unsupported models.
+    """
     global _capabilities
     if not _capabilities.probed:
         try:
@@ -141,9 +155,123 @@ def get_model_capabilities() -> ModelCapabilities:
             provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
             if provider_id in _PROVIDER_PRESETS:
                 _capabilities = _PROVIDER_PRESETS[provider_id]
+            elif provider_id == "ollama":
+                _capabilities = _detect_ollama_capabilities()
+            elif provider_id in ("openai_compatible", "llama_cpp", "vllm"):
+                _capabilities = _detect_openai_compatible_capabilities()
         except Exception:
             pass
     return _capabilities
+
+
+# ── Ollama-specific detection ───────────────────────────────────────────
+
+# Markers in the Go template that indicate tool-calling support.
+_TOOL_TEMPLATE_MARKERS = (".ToolCalls", "if .Tools", ".tools")
+
+
+def _detect_ollama_capabilities() -> ModelCapabilities:
+    """Detect capabilities for an Ollama model via /api/show.
+
+    Checks whether the model template contains tool-calling markers.
+    Falls back to a short live probe if the template check is inconclusive.
+    """
+    import httpx
+    from infinidev.config.settings import settings
+
+    model = settings.LLM_MODEL or ""
+    base_url = settings.LLM_BASE_URL or "http://localhost:11434"
+
+    # Strip litellm prefix to get bare model name
+    bare_model = model
+    for prefix in ("ollama_chat/", "ollama/"):
+        if bare_model.startswith(prefix):
+            bare_model = bare_model[len(prefix):]
+            break
+
+    caps = ModelCapabilities(probed=True)
+
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/show",
+            json={"name": bare_model},
+            timeout=5.0,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "Ollama /api/show returned %d for %s — assuming full capabilities",
+                resp.status_code, bare_model,
+            )
+            return caps
+
+        data = resp.json()
+        template = data.get("template", "")
+
+        has_tool_markers = any(m in template for m in _TOOL_TEMPLATE_MARKERS)
+
+        if has_tool_markers:
+            logger.info(
+                "Ollama model %s: template has tool-calling markers — FC enabled",
+                bare_model,
+            )
+            caps.supports_function_calling = True
+            # tool_choice="required" is generally unreliable on Ollama
+            caps.supports_tool_choice_required = False
+        else:
+            logger.info(
+                "Ollama model %s: template lacks tool-calling markers — "
+                "falling back to manual tool calling",
+                bare_model,
+            )
+            caps.supports_function_calling = False
+            caps.supports_tool_choice_required = False
+
+        # JSON mode is generally supported by Ollama
+        caps.supports_json_mode = True
+
+        # Check for thinking markers in the template
+        template_lower = template.lower()
+        if any(m in template_lower for m in ("<thinking>", "<|thinking|>", "<think>")):
+            caps.has_thinking_sections = True
+
+    except Exception as exc:
+        logger.warning(
+            "Failed to query Ollama /api/show for %s: %s — assuming full capabilities",
+            bare_model, str(exc)[:200],
+        )
+
+    return caps
+
+
+def _detect_openai_compatible_capabilities() -> ModelCapabilities:
+    """Detect capabilities for an OpenAI-compatible server (llama.cpp, vLLM, TGI, etc.).
+
+    For llama_cpp and vLLM: runs a live probe to test FC support. Modern
+    llama-server and vLLM both support native function calling for most models.
+
+    For generic openai_compatible: conservative defaults (manual mode).
+    """
+    from infinidev.config.settings import settings
+
+    provider_id = getattr(settings, "LLM_PROVIDER", "openai_compatible")
+
+    if provider_id in ("llama_cpp", "vllm"):
+        # vLLM has robust FC — probe it
+        try:
+            from infinidev.config.llm import get_litellm_params
+            caps = _run_probes(get_litellm_params())
+            caps.probed = True
+            return caps
+        except Exception as exc:
+            logger.warning("vLLM probe failed: %s — falling back to manual TC", str(exc)[:200])
+
+    # Generic openai_compatible: conservative defaults
+    return ModelCapabilities(
+        supports_function_calling=False,
+        supports_tool_choice_required=False,
+        supports_json_mode=False,
+        probed=True,
+    )
 
 
 def probe_model(llm_params: dict[str, Any]) -> ModelCapabilities:
@@ -193,7 +321,7 @@ def _run_probes(llm_params: dict[str, Any]) -> ModelCapabilities:
     import litellm
 
     caps = ModelCapabilities()
-    probe_params = {**llm_params, "max_tokens": 100}
+    probe_params = {**llm_params, "max_tokens": 100, "timeout": _PROBE_TIMEOUT}
 
     # ── Probe 1: Function calling + tool_choice=required ─────────────
     try:

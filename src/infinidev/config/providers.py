@@ -122,13 +122,31 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=True,
     ),
+    "llama_cpp": ProviderConfig(
+        id="llama_cpp",
+        display_name="llama.cpp Server",
+        prefix="custom_openai/",
+        default_base_url="http://localhost:8080/v1",
+        api_key_required=False,
+        base_url_editable=True,
+        model_list_format="openai",
+    ),
+    "vllm": ProviderConfig(
+        id="vllm",
+        display_name="vLLM Server",
+        prefix="custom_openai/",
+        default_base_url="http://localhost:8000/v1",
+        api_key_required=False,
+        base_url_editable=True,
+        model_list_format="openai",
+    ),
     "openai_compatible": ProviderConfig(
         id="openai_compatible",
         display_name="OpenAI Compatible",
         prefix="custom_openai/",
         default_base_url="",
         base_url_editable=True,
-        model_list_format="openai",
+        model_list_format="free_text",
     ),
 }
 

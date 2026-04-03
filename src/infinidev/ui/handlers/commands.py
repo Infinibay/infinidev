@@ -1,0 +1,294 @@
+"""Command routing for /commands in the TUI.
+
+Uses the Command pattern: each /command maps to a handler function.
+The router dispatches based on the command name, keeping the app free
+from command-specific logic.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from infinidev.ui.app import InfinidevApp
+
+
+def handle_command(app: InfinidevApp, cmd_text: str) -> None:
+    """Dispatch a /command to the appropriate handler."""
+    parts = cmd_text.split()
+    cmd = parts[0].lower()
+
+    handler = _COMMAND_TABLE.get(cmd)
+    if handler:
+        handler(app, parts)
+    else:
+        app.add_message("System", f"Unknown command: {cmd}", "system")
+
+
+# ── Individual command handlers ─────────────────────────────────────────
+
+
+def _cmd_exit(app: InfinidevApp, parts: list[str]) -> None:
+    app.app.exit()
+
+
+def _cmd_clear(app: InfinidevApp, parts: list[str]) -> None:
+    app.chat_messages.clear()
+    app._chat_history_control.invalidate_cache()
+    app._log_lines.clear()
+    app._plan_text = ""
+    app._steps_text = ""
+    app._actions_text = ""
+    app.invalidate()
+
+
+def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
+    app.add_message(
+        "System",
+        "Ctrl+E                Toggle file explorer\n"
+        "F2 / F3 / F4          Focus: Chat / Explorer / Sidebar\n"
+        "Ctrl+W                Close file tab\n"
+        "--------------------------------------------\n"
+        "!ls                   Execute shell command\n"
+        "!grep foo *.py        Run shell with piping\n"
+        "/models               Show current model\n"
+        "/models list          List available Ollama models\n"
+        "/models set <name>    Change model\n"
+        "/models manage        Pick a model interactively\n"
+        "/settings             Show current settings\n"
+        "/settings <key>       Show specific setting\n"
+        "/settings <key> <val> Change setting\n"
+        "/settings reset       Reset to defaults\n"
+        "/plan <task>          Generate plan, review, then execute\n"
+        "/explore <problem>    Decompose and explore a complex problem\n"
+        "/init                 Explore and document the current project\n"
+        "/findings             Browse all findings\n"
+        "/knowledge            Browse project knowledge\n"
+        "/documentation        Browse cached library docs\n"
+        "/clear                Clear chat\n"
+        "/exit, /quit          Exit",
+        "system",
+    )
+
+
+def _cmd_settings(app: InfinidevApp, parts: list[str]) -> None:
+    handle_settings(app, parts)
+
+
+def _cmd_models(app: InfinidevApp, parts: list[str]) -> None:
+    handle_models(app, parts)
+
+
+def _cmd_findings(app: InfinidevApp, parts: list[str]) -> None:
+    app.dialog_manager.open_findings(filter_type=None)
+
+
+def _cmd_knowledge(app: InfinidevApp, parts: list[str]) -> None:
+    app.dialog_manager.open_findings(filter_type="project_context")
+
+
+def _cmd_docs(app: InfinidevApp, parts: list[str]) -> None:
+    app.add_message("System", "[Docs browser — coming soon]", "system")
+
+
+def _cmd_think(app: InfinidevApp, parts: list[str]) -> None:
+    app._gather_next_task = True
+    app.add_message(
+        "System",
+        "Gather mode enabled for the next task. Send your prompt and "
+        "infinidev will deeply analyze the codebase before acting.",
+        "system",
+    )
+
+
+def _cmd_engine_task(app: InfinidevApp, parts: list[str], cmd: str, task_runner_name: str, label: str) -> None:
+    """Generic handler for /explore, /brainstorm, /plan, /init."""
+    if cmd != "/init":
+        problem = " ".join(parts[1:]) if len(parts) > 1 else ""
+        if not problem:
+            app.add_message("System", f"Usage: {cmd} <description>", "system")
+            return
+    else:
+        problem = None
+
+    if app._engine_running:
+        app.add_message("System", f"Cannot run {cmd} while a task is running.", "system")
+        return
+
+    app._engine_running = True
+    if problem:
+        app.add_message("System", f"{label}: {problem}", "system")
+    else:
+        app.add_message("System", f"{label}...", "system")
+    app._chat_history_control.show_thinking = True
+    app.invalidate()
+    app._ensure_engine()
+
+    from infinidev.ui import workers as _workers
+    from infinidev.ui.workers import run_in_background
+    task_fn = getattr(_workers, task_runner_name)
+    if problem is not None:
+        run_in_background(app, task_fn, app, problem, exclusive=True)
+    else:
+        run_in_background(app, task_fn, app, exclusive=True)
+
+
+def _cmd_explore(app: InfinidevApp, parts: list[str]) -> None:
+    _cmd_engine_task(app, parts, "/explore", "run_explore_task", "Exploring")
+
+
+def _cmd_brainstorm(app: InfinidevApp, parts: list[str]) -> None:
+    _cmd_engine_task(app, parts, "/brainstorm", "run_brainstorm_task", "Brainstorming")
+
+
+def _cmd_plan(app: InfinidevApp, parts: list[str]) -> None:
+    _cmd_engine_task(app, parts, "/plan", "run_plan_task", "Planning")
+
+
+def _cmd_init(app: InfinidevApp, parts: list[str]) -> None:
+    _cmd_engine_task(app, parts, "/init", "run_init_task", "Exploring and documenting project")
+
+
+# ── Command dispatch table ──────────────────────────────────────────────
+
+_COMMAND_TABLE: dict[str, Any] = {
+    "/exit": _cmd_exit,
+    "/quit": _cmd_exit,
+    "/clear": _cmd_clear,
+    "/help": _cmd_help,
+    "/settings": _cmd_settings,
+    "/models": _cmd_models,
+    "/findings": _cmd_findings,
+    "/knowledge": _cmd_knowledge,
+    "/documentation": _cmd_docs,
+    "/docs": _cmd_docs,
+    "/explore": _cmd_explore,
+    "/brainstorm": _cmd_brainstorm,
+    "/plan": _cmd_plan,
+    "/think": _cmd_think,
+    "/init": _cmd_init,
+}
+
+
+# ── Settings subcommand handler ─────────────────────────────────────────
+
+
+def handle_settings(app: InfinidevApp, parts: list[str]) -> None:
+    """Handle /settings subcommands."""
+    from infinidev.config.settings import settings, reload_all
+
+    if len(parts) == 1 or (len(parts) == 2 and parts[1].lower() == "browse"):
+        app.dialog_manager.open_settings()
+        return
+
+    subcmd = parts[1].lower()
+
+    if subcmd == "reset":
+        settings.reset_to_defaults()
+        reload_all()
+        app.add_message("System", "Settings reset to defaults.", "system")
+
+    elif subcmd == "export" and len(parts) > 2:
+        path = parts[2]
+        settings.export_to_file(path)
+        app.add_message("System", f"Settings exported to {path}", "system")
+
+    elif subcmd == "import" and len(parts) > 2:
+        path = parts[2]
+        settings.import_from_file(path)
+        reload_all()
+        app.add_message("System", f"Settings imported from {path}", "system")
+
+    elif len(parts) == 2:
+        key = parts[1].upper()
+        val = getattr(settings, key, None)
+        if val is not None:
+            app.add_message("System", f"{key}: {val}", "system")
+        else:
+            app.add_message("System", f"Unknown setting: {key}", "system")
+
+    elif len(parts) >= 3:
+        key = parts[1].upper()
+        value = " ".join(parts[2:])
+        try:
+            settings.save_user_settings({key: value})
+            reload_all()
+            app.add_message("System", f"{key} = {value}", "system")
+            app._update_status_bar()
+        except Exception as e:
+            app.add_message("System", f"Error setting {key}: {e}", "system")
+
+
+# ── Models subcommand handler ───────────────────────────────────────────
+
+
+def handle_models(app: InfinidevApp, parts: list[str]) -> None:
+    """Handle /models subcommands."""
+    from infinidev.config.settings import settings, reload_all
+    from infinidev.config.providers import get_provider, fetch_models
+
+    subcmd = parts[1].lower() if len(parts) > 1 else "info"
+
+    if subcmd == "set" and len(parts) > 2:
+        new_model = parts[2]
+        if "/" not in new_model:
+            provider = get_provider(settings.LLM_PROVIDER)
+            new_model = f"{provider.prefix}{new_model}"
+        settings.save_user_settings({"LLM_MODEL": new_model})
+        reload_all()
+        from infinidev.config.model_capabilities import _reset_capabilities
+        _reset_capabilities()
+        app.add_message("System", f"Model updated to: {settings.LLM_MODEL}", "system")
+        app._update_status_bar()
+
+    elif subcmd == "list":
+        provider = get_provider(settings.LLM_PROVIDER)
+        app.add_message("System", f"Fetching models for {provider.display_name}...", "system")
+        try:
+            models = fetch_models(settings.LLM_PROVIDER, settings.LLM_API_KEY, settings.LLM_BASE_URL)
+            if models:
+                model_list = "\n".join(f"  {m}" for m in models)
+                app.add_message("System", f"Available models:\n{model_list}", "system")
+            else:
+                app.add_message("System", "No models found. Check API key and connection.", "system")
+        except Exception as e:
+            app.add_message("System", f"Error fetching models: {e}", "system")
+
+    elif subcmd == "manage":
+        app.add_message("System", "[Model picker — coming soon]", "system")
+
+    else:
+        provider = get_provider(settings.LLM_PROVIDER)
+        app.add_message(
+            "System",
+            f"Provider: {provider.display_name}\n"
+            f"Model: {settings.LLM_MODEL}\n"
+            f"Base URL: {settings.LLM_BASE_URL}",
+            "system",
+        )
+
+
+# ── Shell command executor ──────────────────────────────────────────────
+
+
+def execute_shell_command(app: InfinidevApp, cmd: str) -> None:
+    """Execute a shell command and display results in chat."""
+    app.add_message("User", f"$ {cmd}", "user")
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=30,
+        )
+        output_parts = []
+        if result.stdout.strip():
+            output_parts.append(result.stdout.strip())
+        if result.stderr.strip():
+            output_parts.append(f"stderr:\n{result.stderr.strip()}")
+        if result.returncode != 0:
+            output_parts.append(f"Exit code: {result.returncode}")
+        output = "\n".join(output_parts) or "(no output)"
+    except subprocess.TimeoutExpired:
+        output = "Command timed out after 30 seconds."
+    except Exception as e:
+        output = f"Error: {e}"
+    app.add_message("System", output, "system")

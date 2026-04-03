@@ -3,26 +3,19 @@
 import sqlite3
 import logging
 import os
-from typing import Any, Callable
+from typing import Any
 from infinidev.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-def execute_with_retry(func: Callable[[sqlite3.Connection], Any]) -> Any:
-    """Execute a DB operation with retry logic."""
-    import time
-    for attempt in range(settings.MAX_RETRIES):
-        try:
-            with sqlite3.connect(settings.DB_PATH) as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.row_factory = sqlite3.Row
-                return func(conn)
-        except sqlite3.OperationalError as e:
-            if ("locked" in str(e) or "busy" in str(e)) and attempt < settings.MAX_RETRIES - 1:
-                time.sleep(settings.RETRY_BASE_DELAY * (2 ** attempt))
-                continue
-            raise
-    return None
+def execute_with_retry(func, db_path=None, max_retries=None, base_delay=None):
+    """Execute a DB operation with retry logic.
+
+    Delegates to the canonical implementation in tools/base/db.py which
+    includes jitter, proper pragmas, and connection management.
+    """
+    from infinidev.tools.base.db import execute_with_retry as _canonical
+    return _canonical(func, db_path=db_path, max_retries=max_retries, base_delay=base_delay)
 
 def _migrate_add_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
     """Add a column to a table if it doesn't already exist."""

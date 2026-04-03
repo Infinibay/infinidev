@@ -1,11 +1,11 @@
 """Tool for viewing Git diffs."""
 
-import subprocess
 from typing import Type
 
 from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
+from infinidev.tools.git._helpers import run_git, GitToolError
 
 
 class GitDiffInput(BaseModel):
@@ -48,16 +48,9 @@ class GitDiffTool(InfinibayBaseTool):
             return self._run_in_pod(cmd)
 
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30,
-                cwd=self._git_cwd,
-            )
-            if result.returncode != 0:
-                return self._error(f"Git diff failed: {result.stderr.strip()}")
-        except subprocess.TimeoutExpired:
-            return self._error("Git diff timed out")
-        except FileNotFoundError:
-            return self._error("Git is not installed or not in PATH")
+            result = run_git(cmd, cwd=self._git_cwd, timeout=30, check=True)
+        except GitToolError as e:
+            return self._error(str(e))
 
         output = result.stdout
         if not output.strip():

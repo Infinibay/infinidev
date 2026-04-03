@@ -3,7 +3,6 @@
 import logging
 import re
 import sqlite3
-import subprocess
 from typing import Type
 
 logger = logging.getLogger(__name__)
@@ -12,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
+from infinidev.tools.git._helpers import run_git, GitToolError
 
 
 class GitBranchInput(BaseModel):
@@ -45,20 +45,14 @@ class GitBranchTool(InfinibayBaseTool):
         try:
             if create:
                 # Verify origin remote exists before fetching
-                check = subprocess.run(
-                    ["git", "remote", "get-url", "origin"],
-                    capture_output=True, text=True, timeout=10, cwd=cwd,
-                )
+                check = run_git(["git", "remote", "get-url", "origin"], cwd=cwd, timeout=10)
                 if check.returncode != 0:
                     return self._error(
                         "No remote 'origin' configured. Cannot fetch from remote. "
                         "Will use local branch as base instead."
                     )
                 # Fetch latest; fall back to local ref if fetch fails
-                fetch = subprocess.run(
-                    ["git", "fetch", "origin", base_branch],
-                    capture_output=True, text=True, timeout=30, cwd=cwd,
-                )
+                fetch = run_git(["git", "fetch", "origin", base_branch], cwd=cwd, timeout=30)
                 if fetch.returncode == 0:
                     checkout_ref = f"origin/{base_branch}"
                 else:
@@ -69,33 +63,24 @@ class GitBranchTool(InfinibayBaseTool):
                         fetch.stderr.strip(), base_branch,
                     )
                     checkout_ref = base_branch
-                result = subprocess.run(
-                    ["git", "checkout", "-b", branch_name, checkout_ref],
-                    capture_output=True, text=True, timeout=15, cwd=cwd,
+                result = run_git(
+                    ["git", "checkout", "-b", branch_name, checkout_ref], cwd=cwd,
                 )
                 if result.returncode != 0:
                     # Maybe branch already exists, try checkout
-                    result = subprocess.run(
-                        ["git", "checkout", branch_name],
-                        capture_output=True, text=True, timeout=15, cwd=cwd,
-                    )
+                    result = run_git(["git", "checkout", branch_name], cwd=cwd)
                     if result.returncode != 0:
                         return self._error(f"Git error: {result.stderr.strip()}")
                     action = "checked_out"
                 else:
                     action = "created"
             else:
-                result = subprocess.run(
-                    ["git", "checkout", branch_name],
-                    capture_output=True, text=True, timeout=15, cwd=cwd,
-                )
+                result = run_git(["git", "checkout", branch_name], cwd=cwd)
                 if result.returncode != 0:
                     return self._error(f"Git error: {result.stderr.strip()}")
                 action = "checked_out"
-        except subprocess.TimeoutExpired:
-            return self._error("Git operation timed out")
-        except FileNotFoundError:
-            return self._error("Git is not installed or not in PATH")
+        except GitToolError as e:
+            return self._error(str(e))
 
         # Register branch in DB
         project_id = self.project_id

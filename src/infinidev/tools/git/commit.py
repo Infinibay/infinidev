@@ -1,13 +1,13 @@
 """Tool for Git commit operations."""
 
 import sqlite3
-import subprocess
 from typing import Type
 
 from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
+from infinidev.tools.git._helpers import run_git, GitToolError
 
 
 class GitCommitInput(BaseModel):
@@ -33,50 +33,26 @@ class GitCommitTool(InfinibayBaseTool):
         cwd = self._git_cwd
         try:
             # Check if there are changes to commit
-            status = subprocess.run(
-                ["git", "status", "--porcelain"],
-                capture_output=True, text=True, timeout=15, cwd=cwd,
-            )
+            status = run_git(["git", "status", "--porcelain"], cwd=cwd)
             if not status.stdout.strip():
                 return self._error("No changes to commit")
 
             # Stage files
             if files:
                 for f in files:
-                    result = subprocess.run(
-                        ["git", "add", f],
-                        capture_output=True, text=True, timeout=15, cwd=cwd,
-                    )
-                    if result.returncode != 0:
-                        return self._error(f"Failed to stage {f}: {result.stderr.strip()}")
+                    run_git(["git", "add", f], cwd=cwd, check=True)
             else:
-                result = subprocess.run(
-                    ["git", "add", "-A"],
-                    capture_output=True, text=True, timeout=15, cwd=cwd,
-                )
-                if result.returncode != 0:
-                    return self._error(f"Failed to stage changes: {result.stderr.strip()}")
+                run_git(["git", "add", "-A"], cwd=cwd, check=True)
 
             # Commit
-            result = subprocess.run(
-                ["git", "commit", "-m", message],
-                capture_output=True, text=True, timeout=30, cwd=cwd,
-            )
-            if result.returncode != 0:
-                return self._error(f"Commit failed: {result.stderr.strip()}")
+            result = run_git(["git", "commit", "-m", message], cwd=cwd, timeout=30, check=True)
 
             # Get commit hash
-            hash_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=10, cwd=cwd,
-            )
+            hash_result = run_git(["git", "rev-parse", "HEAD"], cwd=cwd, timeout=10)
             commit_hash = hash_result.stdout.strip() if hash_result.returncode == 0 else None
 
             # Get current branch
-            branch_result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, timeout=10, cwd=cwd,
-            )
+            branch_result = run_git(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, timeout=10)
             branch_name = branch_result.stdout.strip() if branch_result.returncode == 0 else None
 
             # Update branch record in DB
@@ -114,10 +90,8 @@ class GitCommitTool(InfinibayBaseTool):
                 except Exception:
                     pass  # Don't fail the commit if event emission fails
 
-        except subprocess.TimeoutExpired:
-            return self._error("Git operation timed out")
-        except FileNotFoundError:
-            return self._error("Git is not installed or not in PATH")
+        except GitToolError as e:
+            return self._error(str(e))
 
         self._log_tool_usage(f"Committed: {message[:80]}")
         return self._success({

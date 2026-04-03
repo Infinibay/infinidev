@@ -85,80 +85,16 @@ def _log(msg: str) -> None:
         print(msg, file=sys.stderr, flush=True)
 
 
-# ── LLM calling (reuse from loop engine) ────────────────────────────────────
+# LLM calling — imported from canonical module (includes retry, hooks,
+# thinking suppression, JSON mode, and malformed tool call handling)
+from infinidev.engine.llm_client import call_llm as _call_llm
 
-# Transient errors for retry
-_TRANSIENT_ERRORS = (
-    "connection error", "connectionerror", "disconnected",
-    "rate limit", "timeout", "503", "502", "429",
-    "overloaded", "internal server error",
+
+# Manual tool call parsing — imported from canonical module
+from infinidev.engine.tool_call_parser import (
+    ManualToolCall as _ManualToolCall,
+    parse_text_tool_calls as _parse_text_tool_calls,
 )
-_LLM_RETRIES = 3
-_LLM_RETRY_DELAY = 5.0
-
-
-def _call_llm(
-    params: dict[str, Any],
-    messages: list[dict[str, Any]],
-    tools: list[dict[str, Any]] | None = None,
-    tool_choice: str | dict[str, Any] = "auto",
-) -> Any:
-    """Call litellm.completion with retry for transient errors."""
-    import litellm
-    from infinidev.config.model_capabilities import get_model_capabilities
-
-    caps = get_model_capabilities()
-    kwargs: dict[str, Any] = {**params, "messages": messages}
-
-    if tools:
-        kwargs["tools"] = tools
-        if tool_choice == "required" and not caps.supports_tool_choice_required:
-            kwargs["tool_choice"] = "auto"
-        else:
-            kwargs["tool_choice"] = tool_choice
-
-    last_exc: Exception | None = None
-    for attempt in range(1, _LLM_RETRIES + 1):
-        try:
-            return litellm.completion(**kwargs)
-        except Exception as exc:
-            last_exc = exc
-            msg = str(exc).lower()
-            is_transient = any(p in msg for p in _TRANSIENT_ERRORS)
-            if not is_transient or attempt == _LLM_RETRIES:
-                raise
-            delay = _LLM_RETRY_DELAY * (2 ** (attempt - 1))
-            logger.warning(
-                "Transient LLM error (attempt %d/%d), retrying in %.1fs: %s",
-                attempt, _LLM_RETRIES, delay, str(exc)[:200],
-            )
-            time.sleep(delay)
-    raise last_exc  # type: ignore[misc]
-
-
-# ── Manual tool call parsing (simplified from loop engine) ───────────────────
-
-class _ManualToolCall:
-    """Lightweight stand-in for native tool call objects."""
-
-    __slots__ = ("id", "function")
-
-    class _Function:
-        __slots__ = ("name", "arguments")
-
-        def __init__(self, name: str, arguments: str) -> None:
-            self.name = name
-            self.arguments = arguments
-
-    def __init__(self, id: str, name: str, arguments: str) -> None:
-        self.id = id
-        self.function = self._Function(name, arguments)
-
-
-def _parse_text_tool_calls(content: str) -> list[dict[str, Any]] | None:
-    """Parse tool calls from model text (reuse loop engine's parser)."""
-    from infinidev.engine.loop_engine import _parse_text_tool_calls as _parse
-    return _parse(content)
 
 
 # ── Main Engine ──────────────────────────────────────────────────────────────

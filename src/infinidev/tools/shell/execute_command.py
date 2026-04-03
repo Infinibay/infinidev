@@ -71,6 +71,8 @@ class ExecuteCommandTool(InfinibayBaseTool):
         cwd: str | None = None,
         env: dict[str, str] | None = None,
     ) -> str:
+        if not isinstance(command, str):
+            command = str(command) if command else ""
         if not command or not command.strip():
             return self._error("Empty command")
 
@@ -83,9 +85,12 @@ class ExecuteCommandTool(InfinibayBaseTool):
         # since this is a local CLI for the user's own machine.
         run_env = os.environ.copy()
         if env:
-            run_env.update(env)
+            # LLMs sometimes send non-string values (ints, bools) in env dicts.
+            # subprocess requires all env values to be strings.
+            if isinstance(env, dict):
+                run_env.update({str(k): str(v) for k, v in env.items()})
 
-        if not cwd:
+        if not cwd or not isinstance(cwd, str):
             cwd = self.workspace_path or os.getcwd()
 
         effective_timeout = timeout if timeout > 0 else None

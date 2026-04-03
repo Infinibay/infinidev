@@ -73,4 +73,9 @@ def get_litellm_params() -> dict[str, Any]:
     if settings.LLM_TIMEOUT:
         params["timeout"] = float(settings.LLM_TIMEOUT)
 
+    # Pass num_ctx for Ollama to control KV cache allocation.
+    # Models like gemma4 default to 262k context which hangs on consumer GPUs.
+    if settings.LLM_PROVIDER == "ollama" and settings.OLLAMA_NUM_CTX > 0:
+        params["num_ctx"] = settings.OLLAMA_NUM_CTX
+
     return params

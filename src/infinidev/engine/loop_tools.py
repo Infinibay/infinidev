@@ -338,8 +338,10 @@ def execute_tool_call(
         pass  # Can't inspect, pass all args
 
     # Coerce argument types based on _run() annotations.
-    # LLMs frequently send ints as strings (e.g. "300" instead of 300).
+    # LLMs frequently send ints as strings (e.g. "300" instead of 300),
+    # or dicts/lists for params that expect simple types.
     try:
+        import typing, types
         sig = inspect.signature(tool._run)
         for p_name, p in sig.parameters.items():
             if p_name not in args:
@@ -347,19 +349,58 @@ def execute_tool_call(
             ann = p.annotation
             if ann is inspect.Parameter.empty:
                 continue
+            # Unwrap Optional[X] / X | None to get the inner type
+            _target = ann
+            origin = getattr(ann, "__origin__", None)
+            if origin is types.UnionType or origin is typing.Union:
+                _inner = [a for a in typing.get_args(ann) if a is not type(None)]
+                if _inner:
+                    _target = _inner[0]
             val = args[p_name]
-            if ann is int and isinstance(val, str):
+            # Skip if already correct type or None
+            if val is None:
+                continue
+            if _target is int and not isinstance(val, int):
                 try:
-                    args[p_name] = int(val)
+                    args[p_name] = int(str(val) if not isinstance(val, str) else val)
                 except (ValueError, TypeError):
                     pass
-            elif ann is float and isinstance(val, str):
+            elif _target is float and not isinstance(val, (int, float)):
                 try:
-                    args[p_name] = float(val)
+                    args[p_name] = float(str(val) if not isinstance(val, str) else val)
                 except (ValueError, TypeError):
                     pass
-            elif ann is bool and isinstance(val, str):
+            elif _target is bool and isinstance(val, str):
                 args[p_name] = val.lower() in ("true", "1", "yes")
+            elif _target is str and not isinstance(val, str):
+                if isinstance(val, dict):
+                    # LLM wrapped a simple value in a dict — try to extract it.
+                    # e.g. {"command": "ls", "cwd": "."} for param "command"
+                    # → extract "ls" and promote extra keys (cwd, timeout, env)
+                    #   to top-level args if the tool accepts them.
+                    if p_name in val:
+                        # {"command": "ls"} → extract "ls"
+                        extracted = val.pop(p_name)
+                        args[p_name] = str(extracted)
+                        # Promote remaining keys as extra args
+                        for ek, ev in val.items():
+                            if ek not in args:
+                                args[ek] = ev
+                    elif len(val) == 1:
+                        # Single key dict — use the value
+                        args[p_name] = str(next(iter(val.values())))
+                    else:
+                        # Try common aliases: cmd, value, text, code, query
+                        for alias in ("cmd", "value", "text", "code", "query", "content"):
+                            if alias in val:
+                                args[p_name] = str(val[alias])
+                                break
+                        else:
+                            args[p_name] = str(val)
+                elif isinstance(val, list):
+                    args[p_name] = " ".join(str(v) for v in val)
+                else:
+                    args[p_name] = str(val)
     except (ValueError, TypeError):
         pass
 
