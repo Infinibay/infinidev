@@ -9,6 +9,7 @@ from infinidev.engine.loop.models import LoopState
 from infinidev.engine.file_change_tracker import FileChangeTracker
 
 
+@dataclass
 class ExecutionContext:
     """All shared state for a single execute() invocation.
 
