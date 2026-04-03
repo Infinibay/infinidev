@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from collections import deque
 from typing import Any
@@ -21,7 +22,8 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.mouse_events import MouseEventType
 
 from infinidev.ui.theme import (
-    TEXT, TEXT_MUTED, PRIMARY, ACCENT, SURFACE, SURFACE_LIGHT,
+    TEXT, TEXT_MUTED, TEXT_DIM, PRIMARY, ACCENT, SUCCESS,
+    SURFACE, SURFACE_LIGHT,
     STYLE_SIDEBAR_CONTENT, CHAT_INPUT_HEIGHT,
     SCROLLBAR_BG, SCROLLBAR_FG,
 )
@@ -73,7 +75,7 @@ class InfinidevApp:
         self._plan_text: str = ""
         self._steps_text: str = ""
         self._actions_text: str = ""
-        self._log_lines: deque[str] = deque(maxlen=15)
+        self._log_entries: deque[tuple[float, str]] = deque(maxlen=15)  # (timestamp, text)
 
         # ── File management (delegated to FileManager) ──────
         self.file_manager = FileManager(self)
@@ -558,7 +560,24 @@ class InfinidevApp:
     def get_steps_fragments(self) -> FormattedText:
         if not self._steps_text:
             return FormattedText([(f"{TEXT_MUTED}", " Waiting...")])
-        return FormattedText([(STYLE_SIDEBAR_CONTENT, self._steps_text)])
+        # Parse step lines and render with styled icons
+        fragments = []
+        for line in self._steps_text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("v "):  # done
+                fragments.append((f"{SUCCESS} bg:{SURFACE_LIGHT}", " \u2714 "))
+                fragments.append((f"{TEXT_MUTED} bg:{SURFACE_LIGHT}", f"{line[2:]}\n"))
+            elif line.startswith("> "):  # active
+                fragments.append((f"{ACCENT} bold bg:{SURFACE_LIGHT}", " \u25b6 "))
+                fragments.append((f"#ffffff bold bg:{SURFACE_LIGHT}", f"{line[2:]}\n"))
+            elif line.startswith("o "):  # pending
+                fragments.append((f"{TEXT_DIM} bg:{SURFACE_LIGHT}", " \u25cb "))
+                fragments.append((f"{TEXT_DIM} bg:{SURFACE_LIGHT}", f"{line[2:]}\n"))
+            else:
+                fragments.append((STYLE_SIDEBAR_CONTENT, f" {line}\n"))
+        return FormattedText(fragments) if fragments else FormattedText([(f"{TEXT_MUTED}", " Waiting...")])
 
     def get_actions_fragments(self) -> FormattedText:
         if not self._actions_text:
@@ -566,10 +585,18 @@ class InfinidevApp:
         return FormattedText([(STYLE_SIDEBAR_CONTENT, self._actions_text)])
 
     def get_logs_fragments(self) -> FormattedText:
-        if not self._log_lines:
+        now = time.monotonic()
+        # Filter entries older than 30s
+        active = [(ts, text) for ts, text in self._log_entries if now - ts < 30.0]
+        if not active:
             return FormattedText([(f"{TEXT_MUTED}", " No logs")])
-        text = "\n".join(list(self._log_lines)[-5:])
-        return FormattedText([(STYLE_SIDEBAR_CONTENT, text)])
+        # Show last 5
+        lines = [text for _, text in active[-5:]]
+        return FormattedText([(STYLE_SIDEBAR_CONTENT, "\n".join(lines))])
+
+    def add_log(self, text: str) -> None:
+        """Add a timestamped log entry (auto-expires after 30s)."""
+        self._log_entries.append((time.monotonic(), text))
 
     # ── Status bar ───────────────────────────────────────────────────
 

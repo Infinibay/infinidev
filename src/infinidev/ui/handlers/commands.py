@@ -36,7 +36,7 @@ def _cmd_exit(app: InfinidevApp, parts: list[str]) -> None:
 def _cmd_clear(app: InfinidevApp, parts: list[str]) -> None:
     app.chat_messages.clear()
     app._chat_history_control.invalidate_cache()
-    app._log_lines.clear()
+    app._log_entries.clear()
     app._plan_text = ""
     app._steps_text = ""
     app._actions_text = ""

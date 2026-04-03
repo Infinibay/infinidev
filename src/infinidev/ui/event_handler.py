@@ -29,7 +29,7 @@ def process_event(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> N
         _dispatch(app, event_type, data)
     except Exception:
         logger.debug("process_event(%s) failed", event_type, exc_info=True)
-        app._log_lines.append(f"x UI event error: {event_type}")
+        app.add_log(f"x UI event error: {event_type}")
         # deque(maxlen=15) handles the cap automatically
 
 
@@ -137,7 +137,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         msg = data.get("message", "")
         icon = "!" if level == "warning" else "x"
         line = f"{icon} {msg}"
-        app._log_lines.append(line)
+        app.add_log(line)
         # deque(maxlen=15) handles the cap automatically
 
     # ── Tree engine events ───────────────────────────────────────────
@@ -189,7 +189,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         log_line = short_line
         if summary:
             log_line += f" - {summary[:60]}"
-        app._log_lines.append(log_line)
+        app.add_log(log_line)
         # deque(maxlen=15) handles the cap automatically
         app.update_context_tokens(prompt_tokens=data.get("prompt_tokens", 0))
 
@@ -213,7 +213,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         line = f"! [{node_id}] {fact[:60]}"
         if tool:
             line += f" (via {tool})"
-        app._log_lines.append(line)
+        app.add_log(line)
         # deque(maxlen=15) handles the cap automatically
 
     elif event_type == "tree_synthesizing":
@@ -226,7 +226,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         limit = data.get("limit", 0)
         btype = data.get("type", "")
         line = f"! Budget {btype}: {used}/{limit}"
-        app._log_lines.append(line)
+        app.add_log(line)
         # deque(maxlen=15) handles the cap automatically
 
     elif event_type == "tree_finished":

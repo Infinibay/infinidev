@@ -89,7 +89,9 @@ def build_layout(app_state: InfinidevApp) -> Layout:
 
     sidebar_border = Window(width=1, char="│", style=f"{PRIMARY}")
 
-    def _sidebar_section(title: str, content_getter):
+    def _sidebar_section(title: str, content_getter, scrollable: bool = False):
+        from prompt_toolkit.layout.margins import ScrollbarMargin
+        margins = [ScrollbarMargin()] if scrollable else []
         return HSplit([
             Window(
                 content=FormattedTextControl(lambda t=title: [
@@ -99,15 +101,16 @@ def build_layout(app_state: InfinidevApp) -> Layout:
             ),
             Window(
                 content=FormattedTextControl(content_getter),
-                height=D(min=2, max=8, preferred=3),
+                height=D(min=2, max=15, preferred=4),
                 style=f"bg:{SURFACE_LIGHT}",
                 wrap_lines=True,
+                right_margins=margins,
             ),
         ])
 
     context_section = _sidebar_section("CONTEXT", lambda: app_state.get_context_fragments())
     plan_section = _sidebar_section("PLANNING", lambda: app_state.get_plan_fragments())
-    steps_section = _sidebar_section("STEPS", lambda: app_state.get_steps_fragments())
+    steps_section = _sidebar_section("STEPS", lambda: app_state.get_steps_fragments(), scrollable=True)
     actions_section = _sidebar_section("ACTIONS", lambda: app_state.get_actions_fragments())
     logs_section = _sidebar_section("LOGS", lambda: app_state.get_logs_fragments())
 
