@@ -473,12 +473,13 @@ def build_iteration_prompt(
     project_knowledge: list[dict] | None = None,
     max_context_tokens: int = 0,
     session_notes: list[str] | None = None,
+    user_messages: list[str] | None = None,
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
     Assembles <project-knowledge>, <task>, <notes>, <plan>,
     <previous-actions>, <current-action>, <next-actions>,
-    <expected-output>, and <context-budget> XML blocks.
+    <expected-output>, <user-message>, and <context-budget> XML blocks.
     """
     parts: list[str] = []
 
@@ -632,6 +633,17 @@ def build_iteration_prompt(
         if next_steps:
             lines = [f"{s.index}. {s.description}" for s in next_steps]
             parts.append(f"<next-actions>\n{chr(10).join(lines)}\n</next-actions>")
+
+    # User messages injected mid-task (live guidance from the user)
+    if user_messages:
+        for msg in user_messages:
+            parts.append(
+                "<user-message>\n"
+                "IMPORTANT — The user sent this message while you are working. "
+                "Read it carefully and adjust your approach accordingly.\n\n"
+                f"{msg}\n"
+                "</user-message>"
+            )
 
     # Expected output
     if expected_output:

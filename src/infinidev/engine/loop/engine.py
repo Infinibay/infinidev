@@ -93,6 +93,28 @@ class LoopEngine(AgentEngine):
         self._summarizer_override: bool | None = None
         self._cancel_event: __import__('threading').Event = __import__('threading').Event()
         self.session_notes: list[str] = []  # Persist across tasks within a session
+        # Thread-safe queue for user messages injected mid-task
+        import queue as _queue_mod
+        self._user_messages: _queue_mod.Queue[str] = _queue_mod.Queue()
+
+    def inject_message(self, message: str) -> None:
+        """Inject a user message into the running loop (thread-safe).
+
+        The message will be included in the next iteration's prompt as
+        a ``<user-message>`` block, giving the LLM live guidance without
+        interrupting the current step.
+        """
+        self._user_messages.put(message)
+
+    def _drain_user_messages(self) -> list[str]:
+        """Drain all pending user messages from the queue."""
+        messages = []
+        while not self._user_messages.empty():
+            try:
+                messages.append(self._user_messages.get_nowait())
+            except Exception:
+                break
+        return messages
 
     def cancel(self) -> None:
         """Signal the engine to stop after the current tool call."""
@@ -434,11 +456,15 @@ class LoopEngine(AgentEngine):
             except Exception:
                 self._project_knowledge = []
 
+        # Drain any user messages injected mid-task
+        injected = self._drain_user_messages()
+
         user_prompt = build_iteration_prompt(
             ctx.desc, ctx.expected, effective_state,
             project_knowledge=self._project_knowledge if iteration == ctx.start_iteration else None,
             max_context_tokens=ctx.max_context_tokens,
             session_notes=self.session_notes if self.session_notes else None,
+            user_messages=injected if injected else None,
         )
         return [
             {"role": "system", "content": ctx.system_prompt},
