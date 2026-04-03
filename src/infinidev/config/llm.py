@@ -78,4 +78,20 @@ def get_litellm_params() -> dict[str, Any]:
     if settings.LLM_PROVIDER == "ollama" and settings.OLLAMA_NUM_CTX > 0:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
 
+    # Identify Infinidev to providers via HTTP headers.
+    # Providers track client identity for analytics, rate-limit fairness,
+    # and partnership eligibility.
+    from importlib.metadata import version as _pkg_version
+    try:
+        _version = _pkg_version("infinidev")
+    except Exception:
+        _version = "0.1.0"
+    params["extra_headers"] = {
+        "User-Agent": f"infinidev/{_version}",
+        "X-Client-Name": "infinidev",
+        "X-Client-Version": _version,
+        "anthropic-client-name": "infinidev",
+        "anthropic-client-version": _version,
+    }
+
     return params
