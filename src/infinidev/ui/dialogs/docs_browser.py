@@ -13,57 +13,8 @@ from infinidev.ui.dialogs.base import dialog_frame
 DIALOG_NAME = "docs_browser"
 
 
-class DocsListControl(UIControl):
-    """Generic selectable list for libraries or sections."""
-
-    def __init__(self) -> None:
-        self.items: list[dict[str, Any]] = []
-        self.cursor: int = 0
-
-    def move_cursor(self, delta: int) -> None:
-        if self.items:
-            self.cursor = max(0, min(len(self.items) - 1, self.cursor + delta))
-
-    def get_selected(self) -> dict | None:
-        if 0 <= self.cursor < len(self.items):
-            return self.items[self.cursor]
-        return None
-
-    def create_content(self, width: int, height: int | None,
-                       preview_search: bool = False) -> UIContent:
-        lines = []
-        for i, item in enumerate(self.items):
-            label = item.get("label", "?")[:width - 4]
-            style = f"bg:{PRIMARY} #ffffff bold" if i == self.cursor else f"{TEXT}"
-            lines.append([(style, f"  {label}")])
-
-        if not lines:
-            lines = [[(f"{TEXT_MUTED}", "  (empty)")]]
-
-        def get_line(i):
-            return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
-
-
-class DocsContentControl(UIControl):
-    """Content viewer for documentation."""
-
-    def __init__(self) -> None:
-        self.content: str = ""
-
-    def create_content(self, width: int, height: int | None,
-                       preview_search: bool = False) -> UIContent:
-        if not self.content:
-            lines = [[(f"{TEXT_MUTED}", " Select a section")]]
-        else:
-            lines = []
-            for line in self.content.split("\n"):
-                lines.append([(f"{TEXT}", f" {line}")])
-
-        def get_line(i):
-            return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
-
+from infinidev.ui.dialogs.docs_list_control import DocsListControl
+from infinidev.ui.dialogs.docs_content_control import DocsContentControl
 
 def create_docs_browser():
     """Create the three-panel docs browser dialog."""

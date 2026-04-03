@@ -44,25 +44,8 @@ _PYTHON_BUILTINS = frozenset({
 ALL_CHECKS = ["broken_imports", "undefined_symbols", "unused_imports", "unused_definitions"]
 
 
-@dataclass
-class Diagnostic:
-    """A single diagnostic finding."""
-    file_path: str
-    line: int
-    severity: str  # "error", "warning", "hint"
-    check: str  # check name
-    message: str
-    fix_suggestion: str = ""
-
-
-@dataclass
-class AnalysisReport:
-    """Result of running code analysis."""
-    diagnostics: list[Diagnostic] = field(default_factory=list)
-    stats: dict[str, int] = field(default_factory=dict)
-    scope: str = "file"
-    file_path: str | None = None
-
+from infinidev.code_intel.diagnostic import Diagnostic
+from infinidev.code_intel.analysis_report import AnalysisReport
 
 def analyze_code(
     project_id: int,

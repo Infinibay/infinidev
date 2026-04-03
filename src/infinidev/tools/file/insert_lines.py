@@ -90,40 +90,10 @@ def _insert_at(tool: InfinibayBaseTool, path: str, content: str, insert_idx: int
 # ── add_content_after_line ────────────────────────────────────────────────────
 
 
-class AddContentAfterLineInput(BaseModel):
-    file_path: str = Field(..., description="Path to the file")
-    line_number: int = Field(..., description="Line number to insert AFTER (1-based)")
-    content: str = Field(..., description="Content to insert")
-
-
-class AddContentAfterLineTool(InfinibayBaseTool):
-    name: str = "add_content_after_line"
-    description: str = "Insert content after a specific line number."
-    args_schema: Type[BaseModel] = AddContentAfterLineInput
-
-    def _run(self, file_path: str, line_number: int, content: str) -> str:
-        if line_number < 0:
-            return self._error(f"line_number must be >= 0, got {line_number}")
-        self._log_tool_usage(f"add_content_after_line: line {line_number} in {file_path}")
-        return _insert_at(self, file_path, content, insert_idx=line_number)
-
+from infinidev.tools.file.add_content_after_line_input import AddContentAfterLineInput
+from infinidev.tools.file.add_content_after_line_tool import AddContentAfterLineTool
+from infinidev.tools.file.add_content_before_line_input import AddContentBeforeLineInput
+from infinidev.tools.file.add_content_before_line_tool import AddContentBeforeLineTool
 
 # ── add_content_before_line ───────────────────────────────────────────────────
 
-
-class AddContentBeforeLineInput(BaseModel):
-    file_path: str = Field(..., description="Path to the file")
-    line_number: int = Field(..., description="Line number to insert BEFORE (1-based)")
-    content: str = Field(..., description="Content to insert")
-
-
-class AddContentBeforeLineTool(InfinibayBaseTool):
-    name: str = "add_content_before_line"
-    description: str = "Insert content before a specific line number."
-    args_schema: Type[BaseModel] = AddContentBeforeLineInput
-
-    def _run(self, file_path: str, line_number: int, content: str) -> str:
-        if line_number < 1:
-            return self._error(f"line_number must be >= 1, got {line_number}")
-        self._log_tool_usage(f"add_content_before_line: line {line_number} in {file_path}")
-        return _insert_at(self, file_path, content, insert_idx=line_number - 1)

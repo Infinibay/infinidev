@@ -29,27 +29,8 @@ if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
 
 
-class LLMCallResult:
-    """Result of a single LLM call from :class:`LLMCaller`."""
-
-    tool_calls: list[Any] | None = None
-    message: Any = None            # Raw LLM message object
-    raw_content: str = ""
-    reasoning_content: str = ""
-    forced_step_result: StepResult | None = None   # Set when retries exhausted
-    should_retry: bool = False                      # True on FC→manual switch
-
-
-@dataclass
-class ClassifiedCalls:
-    """Tool calls separated by category."""
-
-    regular: list[Any] = field(default_factory=list)
-    step_complete: Any | None = None
-    notes: list[Any] = field(default_factory=list)
-    session_notes: list[Any] = field(default_factory=list)
-    thinks: list[Any] = field(default_factory=list)
-
+from infinidev.engine.loop.llm_call_result import LLMCallResult
+from infinidev.engine.loop.classified_calls import ClassifiedCalls
 
 class LLMCaller:
     """Encapsulates LLM calling with manual-TC / FC-mode branching and retry."""

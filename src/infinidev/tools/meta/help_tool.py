@@ -7,12 +7,7 @@ from pydantic import BaseModel, Field
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 
 
-class HelpInput(BaseModel):
-    context: str | None = Field(
-        default=None,
-        description="Tool name or category to get help for. Omit for overview.",
-    )
-
+from infinidev.tools.meta.help_input import HelpInput
 
 # ---------------------------------------------------------------------------
 # Help content: categories and individual tools

@@ -19,66 +19,8 @@ _TYPE_ICONS = {
 }
 
 
-class FindingsListControl(UIControl):
-    """Selectable findings list."""
-
-    def __init__(self) -> None:
-        self.findings: list[dict[str, Any]] = []
-        self.cursor: int = 0
-
-    def move_cursor(self, delta: int) -> None:
-        if self.findings:
-            self.cursor = max(0, min(len(self.findings) - 1, self.cursor + delta))
-
-    def get_selected(self) -> dict | None:
-        if 0 <= self.cursor < len(self.findings):
-            return self.findings[self.cursor]
-        return None
-
-    def create_content(self, width: int, height: int | None,
-                       preview_search: bool = False) -> UIContent:
-        lines = []
-        for i, f in enumerate(self.findings):
-            icon = _TYPE_ICONS.get(f.get("finding_type", ""), "*")
-            topic = f.get("topic", "?")[:width - 6]
-            style = f"bg:{PRIMARY} #ffffff bold" if i == self.cursor else f"{TEXT}"
-            lines.append([(style, f" {icon} {topic}")])
-
-        if not lines:
-            lines = [[(f"{TEXT_MUTED}", " No findings")]]
-
-        def get_line(i):
-            return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
-
-
-class FindingsDetailControl(UIControl):
-    """Detail view for the selected finding."""
-
-    def __init__(self, list_ctrl: FindingsListControl) -> None:
-        self._list = list_ctrl
-
-    def create_content(self, width: int, height: int | None,
-                       preview_search: bool = False) -> UIContent:
-        finding = self._list.get_selected()
-        if not finding:
-            lines = [[(f"{TEXT_MUTED}", " Select a finding")]]
-        else:
-            lines = []
-            lines.append([(f"{TEXT} bold", f" {finding.get('topic', '?')}")])
-            lines.append([(f"{TEXT_MUTED}",
-                           f" Type: {finding.get('finding_type', '?')} | "
-                           f"Confidence: {finding.get('confidence', '?')} | "
-                           f"Status: {finding.get('status', '?')}")])
-            lines.append([("", "")])
-            content = finding.get("content", "")
-            for line in content.split("\n"):
-                lines.append([(f"{TEXT}", f" {line}")])
-
-        def get_line(i):
-            return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
-
+from infinidev.ui.dialogs.findings_list_control import FindingsListControl
+from infinidev.ui.dialogs.findings_detail_control import FindingsDetailControl
 
 def create_findings_browser(title: str = "Findings"):
     """Create the findings browser dialog."""

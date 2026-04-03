@@ -11,48 +11,5 @@ from infinidev.ui.theme import (
 from infinidev.ui.keybindings import FOOTER_HINTS
 
 
-class StatusBarControl(FormattedTextControl):
-    """Single-line status bar showing model, project, and status info."""
-
-    def __init__(self) -> None:
-        self._model = "unknown"
-        self._project = ""
-        self._status = ""
-        super().__init__(self._get_text)
-
-    def _get_text(self) -> FormattedText:
-        fragments: list[tuple[str, str]] = []
-        fragments.append((f"{PRIMARY} bold", " infinidev "))
-        fragments.append((f"{TEXT_MUTED}", " │ "))
-        fragments.append((f"{TEXT}", self._model))
-        if self._project:
-            fragments.append((f"{TEXT_MUTED}", " │ "))
-            fragments.append((f"{TEXT}", self._project))
-        if self._status:
-            fragments.append((f"{TEXT_MUTED}", " │ "))
-            fragments.append((f"{ACCENT}", self._status))
-        return FormattedText(fragments)
-
-    def set_model(self, model: str) -> None:
-        self._model = model
-
-    def set_project(self, project: str) -> None:
-        self._project = project
-
-    def set_status(self, status: str) -> None:
-        self._status = status
-
-
-class FooterControl(FormattedTextControl):
-    """Bottom bar showing keybinding hints. Computed once (static content)."""
-
-    def __init__(self) -> None:
-        # Build once — footer never changes
-        fragments: list[tuple[str, str]] = []
-        for i, (key, desc) in enumerate(FOOTER_HINTS):
-            if i > 0:
-                fragments.append((f"{TEXT_MUTED}", "  "))
-            fragments.append((f"{PRIMARY} bold", f" {key} "))
-            fragments.append((f"{TEXT_MUTED}", f" {desc}"))
-        self._cached = FormattedText(fragments)
-        super().__init__(lambda: self._cached)
+from infinidev.ui.controls.status_bar_control import StatusBarControl
+from infinidev.ui.controls.footer_control import FooterControl
