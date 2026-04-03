@@ -167,7 +167,10 @@ class InfinidevApp:
 
     def run(self) -> None:
         """Launch the full-screen TUI."""
-        self.app.run()
+        try:
+            self.app.run()
+        finally:
+            self.file_manager.stop_file_watcher()
 
     def invalidate(self) -> None:
         """Request a screen redraw (thread-safe)."""

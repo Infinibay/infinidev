@@ -56,6 +56,9 @@ class FileManager:
         self._file_picker_window: Any = None
         self._file_picker_input_window: Any = None
 
+        # File watcher for live explorer updates
+        self._file_watcher: Any = None
+
     # ── Explorer ────────────────────────────────────────────────────
 
     def toggle_explorer(self) -> None:
@@ -87,6 +90,39 @@ class FileManager:
             content=self._tree_control,
             right_margins=[ScrollbarMargin(display_arrows=True)],
         )
+        # Start file watcher for live updates
+        self._start_file_watcher()
+
+    def _start_file_watcher(self) -> None:
+        """Start background file watcher to refresh the tree on changes."""
+        if self._file_watcher is not None:
+            return
+        try:
+            from infinidev.cli.file_watcher import FileWatcher, WATCHFILES_AVAILABLE
+            if not WATCHFILES_AVAILABLE:
+                return
+
+            def _on_change(path: str) -> None:
+                if self._tree_control is not None:
+                    self._tree_control.refresh()
+                # Also invalidate the file picker cache
+                if self._file_picker is not None:
+                    self._file_picker.refresh()
+                self._app.invalidate()
+
+            self._file_watcher = FileWatcher(
+                workspace=os.getcwd(),
+                callback=_on_change,
+            )
+            self._file_watcher.start()
+        except Exception:
+            pass  # Non-critical — explorer works without live updates
+
+    def stop_file_watcher(self) -> None:
+        """Stop the file watcher (call on app exit)."""
+        if self._file_watcher is not None:
+            self._file_watcher.stop()
+            self._file_watcher = None
 
     def _on_file_selected(self, file_path: str) -> None:
         self.open_file(file_path)
