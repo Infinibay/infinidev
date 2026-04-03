@@ -97,9 +97,7 @@ def update_opened_files_cache(
 ) -> None:
     """Update the opened files cache based on tool calls.
 
-    - read_file: cache the returned content
-    - write_file: cache the written content (from arguments)
-    - edit_file: re-read the file and update cache
+    Dispatches to tool-specific handlers via ``_CACHE_HANDLERS``.
     """
     import os as _os
 
@@ -114,92 +112,124 @@ def update_opened_files_cache(
     if not path:
         return
 
-    # Resolve to absolute path for consistent cache keys
     from infinidev.tools.base.context import get_current_workspace_path
     ws = get_current_workspace_path() or _os.getcwd()
     if not _os.path.isabs(path):
         path = _os.path.normpath(_os.path.join(ws, path))
 
-    # ── Read tools: cache the returned content ──
-    if tool_name in ("read_file", "partial_read"):
-        if result and not result.strip().startswith('{"error'):
-            state.cache_file(path, result)
+    handler = _CACHE_HANDLERS.get(tool_name)
+    if handler:
+        handler(state, path, args, result, ws)
 
-    # ── Write/create tools: cache the written content ──
-    elif tool_name in ("write_file", "create_file"):
-        content = args.get("content", "")
-        if content:
-            state.refresh_file(path, content)
-        reindex_if_enabled(path)
 
-    # ── Edit tools (old-style): re-read and cache ──
-    elif tool_name in ("edit_file", "multi_edit_file"):
-        _reread_and_cache(state, path)
-        reindex_if_enabled(path)
+def _cache_read(state, path, args, result, ws):
+    if result and not result.strip().startswith('{"error'):
+        state.cache_file(path, result)
 
-    # ── Line-based edit tools: re-read and cache ──
-    elif tool_name in ("replace_lines", "add_content_after_line", "add_content_before_line"):
-        file_path_arg = args.get("file_path") or path
-        if file_path_arg:
-            if not _os.path.isabs(file_path_arg):
-                file_path_arg = _os.path.normpath(_os.path.join(ws, file_path_arg))
-            _reread_and_cache(state, file_path_arg)
-            reindex_if_enabled(file_path_arg)
 
-    # ── Symbol tools: extract path from result, re-read and cache ──
-    elif tool_name in ("edit_symbol", "add_symbol", "remove_symbol"):
-        affected_path = _extract_path_from_result(result)
-        if affected_path:
-            _reread_and_cache(state, affected_path)
-            reindex_if_enabled(affected_path)
+def _cache_write(state, path, args, result, ws):
+    content = args.get("content", "")
+    if content:
+        state.refresh_file(path, content)
+    reindex_if_enabled(path)
 
-    # ── Refactoring tools: may touch multiple files ──
-    elif tool_name == "rename_symbol":
-        try:
-            res = json.loads(result) if isinstance(result, str) else result
-            if isinstance(res, dict):
-                for fpath in res.get("files_modified", []):
+
+def _cache_edit(state, path, args, result, ws):
+    _reread_and_cache(state, path)
+    reindex_if_enabled(path)
+
+
+def _cache_line_edit(state, path, args, result, ws):
+    import os as _os
+    file_path_arg = args.get("file_path") or path
+    if file_path_arg:
+        if not _os.path.isabs(file_path_arg):
+            file_path_arg = _os.path.normpath(_os.path.join(ws, file_path_arg))
+        _reread_and_cache(state, file_path_arg)
+        reindex_if_enabled(file_path_arg)
+
+
+def _cache_symbol_edit(state, path, args, result, ws):
+    affected_path = _extract_path_from_result(result)
+    if affected_path:
+        _reread_and_cache(state, affected_path)
+        reindex_if_enabled(affected_path)
+
+
+def _cache_rename_symbol(state, path, args, result, ws):
+    try:
+        res = json.loads(result) if isinstance(result, str) else result
+        if isinstance(res, dict):
+            for fpath in res.get("files_modified", []):
+                _reread_and_cache(state, fpath)
+                reindex_if_enabled(fpath)
+    except Exception:
+        pass
+
+
+def _cache_move_symbol(state, path, args, result, ws):
+    try:
+        res = json.loads(result) if isinstance(result, str) else result
+        if isinstance(res, dict):
+            for key in ("source_file", "target_file"):
+                fpath = res.get(key)
+                if fpath:
                     _reread_and_cache(state, fpath)
                     reindex_if_enabled(fpath)
-        except Exception:
-            pass
+    except Exception:
+        pass
 
-    elif tool_name == "move_symbol":
-        try:
-            res = json.loads(result) if isinstance(result, str) else result
-            if isinstance(res, dict):
-                for key in ("source_file", "target_file"):
-                    fpath = res.get(key)
-                    if fpath:
-                        _reread_and_cache(state, fpath)
-                        reindex_if_enabled(fpath)
-        except Exception:
-            pass
 
-    elif tool_name == "apply_patch":
-        try:
-            res = json.loads(result) if isinstance(result, str) else result
-            if isinstance(res, dict) and "files_modified" in res:
-                for fpath in res["files_modified"]:
-                    abs_path = _os.path.join(ws, fpath) if not _os.path.isabs(fpath) else fpath
-                    _reread_and_cache(state, abs_path)
-        except Exception:
-            pass
+def _cache_apply_patch(state, path, args, result, ws):
+    import os as _os
+    try:
+        res = json.loads(result) if isinstance(result, str) else result
+        if isinstance(res, dict) and "files_modified" in res:
+            for fpath in res["files_modified"]:
+                abs_path = _os.path.join(ws, fpath) if not _os.path.isabs(fpath) else fpath
+                _reread_and_cache(state, abs_path)
+    except Exception:
+        pass
 
-    # ── Exploration tools: cache search results ──
-    elif tool_name == "list_directory":
-        if result and not result.strip().startswith('{"error'):
-            state.cache_file(f"[dir] {path}", result)
 
-    elif tool_name == "glob":
-        pattern = args.get("pattern", "")
-        if pattern and result and not result.strip().startswith('{"error'):
-            state.cache_file(f"[glob] {pattern}", result)
+def _cache_list_dir(state, path, args, result, ws):
+    if result and not result.strip().startswith('{"error'):
+        state.cache_file(f"[dir] {path}", result)
 
-    elif tool_name == "code_search":
-        query = args.get("query") or args.get("pattern") or args.get("search_query", "")
-        if query and result and not result.strip().startswith('{"error'):
-            state.cache_file(f"[search] {query}", result)
+
+def _cache_glob(state, path, args, result, ws):
+    pattern = args.get("pattern", "")
+    if pattern and result and not result.strip().startswith('{"error'):
+        state.cache_file(f"[glob] {pattern}", result)
+
+
+def _cache_code_search(state, path, args, result, ws):
+    query = args.get("query") or args.get("pattern") or args.get("search_query", "")
+    if query and result and not result.strip().startswith('{"error'):
+        state.cache_file(f"[search] {query}", result)
+
+
+# Dispatch table: tool_name → handler function
+_CACHE_HANDLERS = {
+    "read_file": _cache_read,
+    "partial_read": _cache_read,
+    "write_file": _cache_write,
+    "create_file": _cache_write,
+    "edit_file": _cache_edit,
+    "multi_edit_file": _cache_edit,
+    "replace_lines": _cache_line_edit,
+    "add_content_after_line": _cache_line_edit,
+    "add_content_before_line": _cache_line_edit,
+    "edit_symbol": _cache_symbol_edit,
+    "add_symbol": _cache_symbol_edit,
+    "remove_symbol": _cache_symbol_edit,
+    "rename_symbol": _cache_rename_symbol,
+    "move_symbol": _cache_move_symbol,
+    "apply_patch": _cache_apply_patch,
+    "list_directory": _cache_list_dir,
+    "glob": _cache_glob,
+    "code_search": _cache_code_search,
+}
 
 
 # ── Batching ──────────────────────────────────────────────────────────────

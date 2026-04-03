@@ -279,26 +279,15 @@ class ReviewEngine:
                     json_lines.append(line)
             raw = "\n".join(json_lines)
 
+        from infinidev.engine.tool_call_parser import safe_json_loads
         try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            # Try to find JSON in the response
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    data = json.loads(raw[start:end])
-                except json.JSONDecodeError:
-                    logger.warning("ReviewEngine: could not parse response")
-                    return ReviewResult(
-                        verdict="SKIPPED",
-                        summary="Could not parse review response",
-                    )
-            else:
-                return ReviewResult(
-                    verdict="SKIPPED",
-                    summary="No JSON in review response",
-                )
+            data = safe_json_loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("ReviewEngine: could not parse response")
+            return ReviewResult(
+                verdict="SKIPPED",
+                summary="Could not parse review response",
+            )
 
         verdict = data.get("verdict", "APPROVED").upper()
         if verdict not in ("APPROVED", "REJECTED"):
