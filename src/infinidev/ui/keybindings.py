@@ -50,12 +50,12 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Open project-wide search dialog."""
         app_state.show_project_search()
 
-    @kb.add("c-l")
+    @kb.add("c-l", eager=True)
     def toggle_line_numbers(event):
         """Toggle line numbers in file editors."""
         app_state.toggle_line_numbers()
 
-    @kb.add("c-p")
+    @kb.add("c-p", eager=True)
     def quick_open(event):
         """Open the quick file picker."""
         app_state.open_file_picker()
