@@ -285,10 +285,11 @@ class DirectoryTreeControl(UIControl):
                 return lines[i]
             return []
 
+        from prompt_toolkit.data_structures import Point
         return UIContent(
             get_line=get_line,
             line_count=len(lines),
-            cursor_position=None,
+            cursor_position=Point(x=0, y=self._cursor),
             show_cursor=False,
         )
 

@@ -82,7 +82,11 @@ class FileManager:
             root_path=os.getcwd(),
             on_file_selected=self._on_file_selected,
         )
-        self._tree_window = Window(content=self._tree_control)
+        from prompt_toolkit.layout.margins import ScrollbarMargin
+        self._tree_window = Window(
+            content=self._tree_control,
+            right_margins=[ScrollbarMargin(display_arrows=True)],
+        )
 
     def _on_file_selected(self, file_path: str) -> None:
         self.open_file(file_path)
