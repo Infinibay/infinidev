@@ -237,10 +237,33 @@ class DirectoryTreeControl(UIControl):
             self._on_file_selected(node.path)
 
     def refresh(self) -> None:
-        """Reload the tree from disk."""
+        """Reload the tree from disk, preserving expanded directory state."""
+        # Collect paths of currently expanded dirs
+        expanded: set[str] = set()
+
+        def _collect(node):
+            if node.is_dir and node.expanded:
+                expanded.add(node.path)
+                for child in node.children:
+                    _collect(child)
+
+        _collect(self._root)
+
+        # Reload root
         self._root.loaded = False
         self._root.children.clear()
         self._root.load_children()
+
+        # Re-expand previously expanded dirs
+        def _restore(node):
+            if node.is_dir and node.path in expanded:
+                node.expanded = True
+                if not node.loaded:
+                    node.load_children()
+                for child in node.children:
+                    _restore(child)
+
+        _restore(self._root)
         self._rebuild_flat()
 
     def create_content(self, width: int, height: int | None,

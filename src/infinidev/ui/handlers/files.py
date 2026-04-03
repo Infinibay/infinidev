@@ -110,9 +110,12 @@ class FileManager:
                     self._file_picker.refresh()
                 self._app.invalidate()
 
+            cwd = os.getcwd()
             self._file_watcher = FileWatcher(
-                workspace=os.getcwd(),
+                workspace=cwd,
                 callback=_on_change,
+                # Return workspace root as always-visible so all changes trigger refresh
+                visible_paths_callback=lambda: {cwd},
             )
             self._file_watcher.start()
         except Exception:
