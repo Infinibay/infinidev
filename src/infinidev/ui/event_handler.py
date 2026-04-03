@@ -39,6 +39,8 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
     # ── Loop engine events ───────────────────────────────────────────
 
     if event_type == "loop_step_update":
+        # Clear streaming thinking on step transition
+        app._thinking_text = ""
         steps = data.get("plan_steps", [])
         if steps:
             lines = []
@@ -125,12 +127,24 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         app._chat_history_control.invalidate_cache()
         app.invalidate()
 
+    elif event_type == "loop_thinking_chunk":
+        # Streaming thinking — append to the THINKING sidebar panel
+        chunk = data.get("text", "")
+        if chunk:
+            app._thinking_text += chunk
+            # Keep only last ~500 chars to prevent sidebar overflow
+            if len(app._thinking_text) > 500:
+                app._thinking_text = "..." + app._thinking_text[-450:]
+            app.invalidate()
+
     elif event_type == "loop_think":
         reasoning = data.get("reasoning", "").strip()
         if reasoning:
             agent_id = data.get("_agent_id", "")
             sender = "Analyst" if agent_id == "analyst" else "Thinking"
             app.add_message(sender, reasoning, "think")
+        # Clear streaming thinking when the full think arrives
+        app._thinking_text = ""
 
     elif event_type == "loop_log":
         level = data.get("level", "warning")

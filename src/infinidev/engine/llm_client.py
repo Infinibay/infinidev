@@ -83,11 +83,44 @@ def is_malformed_tool_call(exc: Exception) -> bool:
     return any(p in msg for p in MALFORMED_TOOL_PATTERNS)
 
 
+def _stream_and_assemble(litellm_mod: Any, kwargs: dict, on_chunk: Any) -> Any:
+    """Stream a completion and assemble into a normal response.
+
+    Calls *on_chunk(text)* for each content or reasoning_content delta,
+    giving the UI real-time thinking visibility. Returns the fully
+    assembled response (same shape as non-streaming ``litellm.completion``).
+    """
+    kwargs_stream = {**kwargs, "stream": True}
+    stream = litellm_mod.completion(**kwargs_stream)
+
+    # litellm's stream_chunk_builder assembles chunks into a full response
+    chunks = []
+    for chunk in stream:
+        chunks.append(chunk)
+        # Extract text delta for the callback
+        try:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta:
+                text = getattr(delta, "reasoning_content", None) or ""
+                if not text:
+                    # For non-thinking models, stream the regular content
+                    text = getattr(delta, "content", None) or ""
+                if text:
+                    on_chunk(text)
+        except (IndexError, AttributeError):
+            pass
+
+    # Assemble chunks into a complete response object
+    assembled = litellm_mod.stream_chunk_builder(chunks)
+    return assembled
+
+
 def call_llm(
     params: dict[str, Any],
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] = "auto",
+    on_thinking_chunk: Any | None = None,
 ) -> Any:
     """Call litellm.completion with retry for transient errors.
 
@@ -95,6 +128,10 @@ def call_llm(
     - Downgrades tool_choice="required" → "auto" if unsupported
     - Skips response_format=json_object if unsupported
     - Injects /no_think for models with thinking sections in FC mode
+
+    If *on_thinking_chunk* is provided, enables streaming mode and calls
+    ``on_thinking_chunk(text)`` for each content/reasoning chunk as it
+    arrives. The final assembled response is still returned normally.
     """
     import litellm
     from infinidev.config.model_capabilities import get_model_capabilities
@@ -140,10 +177,18 @@ def call_llm(
     if llm_ctx.skip:
         return llm_ctx.metadata.get("response")
 
+    # Enable streaming if thinking callback provided
+    use_streaming = on_thinking_chunk is not None
+
     last_exc: Exception | None = None
     for attempt in range(1, LLM_RETRIES + 1):
         try:
-            response = litellm.completion(**kwargs)
+            if use_streaming:
+                response = _stream_and_assemble(
+                    litellm, kwargs, on_thinking_chunk,
+                )
+            else:
+                response = litellm.completion(**kwargs)
 
             # --- Post-LLM hook ---
             llm_ctx.event = HookEvent.POST_LLM_CALL

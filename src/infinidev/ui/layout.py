@@ -109,7 +109,7 @@ def build_layout(app_state: InfinidevApp) -> Layout:
         ])
 
     context_section = _sidebar_section("CONTEXT", lambda: app_state.get_context_fragments())
-    plan_section = _sidebar_section("PLANNING", lambda: app_state.get_plan_fragments())
+    plan_section = _sidebar_section("THINKING", lambda: app_state.get_plan_fragments(), scrollable=True)
     steps_section = _sidebar_section("STEPS", lambda: app_state.get_steps_fragments(), scrollable=True)
     actions_section = _sidebar_section("ACTIONS", lambda: app_state.get_actions_fragments())
     logs_section = _sidebar_section("LOGS", lambda: app_state.get_logs_fragments())

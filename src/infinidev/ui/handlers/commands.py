@@ -38,6 +38,7 @@ def _cmd_clear(app: InfinidevApp, parts: list[str]) -> None:
     app._chat_history_control.invalidate_cache()
     app._log_entries.clear()
     app._plan_text = ""
+    app._thinking_text = ""
     app._steps_text = ""
     app._actions_text = ""
     app.invalidate()

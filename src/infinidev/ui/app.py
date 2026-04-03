@@ -73,6 +73,7 @@ class InfinidevApp:
         self._context_status: dict[str, Any] = {}
         self._context_flow: str = ""
         self._plan_text: str = ""
+        self._thinking_text: str = ""  # Live streaming thinking content
         self._steps_text: str = ""
         self._actions_text: str = ""
         self._log_entries: deque[tuple[float, str]] = deque(maxlen=15)  # (timestamp, text)
@@ -559,9 +560,17 @@ class InfinidevApp:
         ]
 
     def get_plan_fragments(self) -> FormattedText:
-        if not self._plan_text:
-            return FormattedText([(f"{TEXT_MUTED}", " No active plan")])
-        return FormattedText([(STYLE_SIDEBAR_CONTENT, self._plan_text)])
+        if not self._thinking_text and not self._plan_text:
+            return FormattedText([(f"{TEXT_MUTED}", " Idle")])
+        # Show streaming thinking first, then plan context
+        fragments = []
+        if self._thinking_text:
+            fragments.append((f"#c0b8e0 bg:{SURFACE_LIGHT}", f" {self._thinking_text}"))
+        if self._plan_text:
+            if fragments:
+                fragments.append((STYLE_SIDEBAR_CONTENT, "\n"))
+            fragments.append((f"{TEXT_DIM} bg:{SURFACE_LIGHT}", f" {self._plan_text}"))
+        return FormattedText(fragments)
 
     def get_steps_fragments(self) -> FormattedText:
         if not self._steps_text:

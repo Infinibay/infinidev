@@ -215,7 +215,12 @@ class LoopEngine(AgentEngine):
             nudge_threshold=nudge_threshold,
             summarizer_enabled=summarizer_enabled,
         )
-        llm_caller = LLMCaller()
+        # Streaming callback: emit thinking chunks to the UI via event bus
+        def _on_thinking(text: str) -> None:
+            _emit_loop_event("loop_thinking_chunk", ctx.project_id, ctx.agent_id, {
+                "text": text,
+            })
+        llm_caller = LLMCaller(on_thinking_chunk=_on_thinking)
         tool_proc = ToolProcessor()
         guard = LoopGuard(is_small=ctx.is_small)
         step_mgr = StepManager(self)
