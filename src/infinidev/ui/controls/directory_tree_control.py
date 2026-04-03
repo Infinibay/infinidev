@@ -132,8 +132,16 @@ class DirectoryTreeControl(UIControl):
         return True
 
     def mouse_handler(self, mouse_event: MouseEvent) -> None:
-        """Handle mouse: single click = select, double click = open/expand."""
+        """Handle mouse: click = select, double-click = open, scroll = navigate."""
         import time
+
+        if mouse_event.event_type == MouseEventType.SCROLL_UP:
+            self.move_cursor(-3)
+            return None
+
+        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+            self.move_cursor(3)
+            return None
 
         if mouse_event.event_type == MouseEventType.MOUSE_UP:
             row = mouse_event.position.y

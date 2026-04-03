@@ -51,11 +51,13 @@ def create_global_keybindings(app_state) -> KeyBindings:
         app_state.show_project_search()
 
     @kb.add("c-l", eager=True)
+    @kb.add("f6")
     def toggle_line_numbers(event):
         """Toggle line numbers in file editors."""
         app_state.toggle_line_numbers()
 
     @kb.add("c-p", eager=True)
+    @kb.add("c-o", eager=True)
     def quick_open(event):
         """Open the quick file picker."""
         app_state.open_file_picker()
@@ -87,9 +89,9 @@ def create_global_keybindings(app_state) -> KeyBindings:
 
 FOOTER_HINTS = [
     ("Ctrl+C", "Exit"),
-    ("Ctrl+P", "Open file"),
+    ("Ctrl+O", "Open file"),
     ("Ctrl+E", "Explorer"),
-    ("Ctrl+L", "Line #"),
+    ("F6", "Line #"),
     ("Ctrl+W", "Close tab"),
     ("Ctrl+S", "Save"),
     ("Ctrl+F", "Find"),
