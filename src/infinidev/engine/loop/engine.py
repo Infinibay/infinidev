@@ -509,6 +509,14 @@ class LoopEngine(AgentEngine):
 
             result = llm_caller.call(ctx, messages, is_planning, action_tool_calls)
 
+            # Emit reasoning content to THINKING panel (works in both FC and manual mode).
+            # In manual mode, streaming chunks already showed it live — this adds the
+            # full reasoning for FC mode where streaming is disabled.
+            if result.reasoning_content and not ctx.manual_tc:
+                _emit_loop_event("loop_think", ctx.project_id, ctx.agent_id, {
+                    "reasoning": result.reasoning_content,
+                })
+
             if result.should_retry:
                 continue
             if result.forced_step_result:

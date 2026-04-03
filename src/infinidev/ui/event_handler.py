@@ -176,8 +176,15 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             agent_id = data.get("_agent_id", "")
             sender = "Analyst" if agent_id == "analyst" else "Thinking"
             app.add_message(sender, reasoning, "think")
-        # Clear streaming thinking when the full think arrives
-        app._thinking_text = ""
+            # Show reasoning in THINKING panel (works in both FC and manual mode).
+            # Truncate to last ~500 chars for sidebar display.
+            if len(reasoning) > 500:
+                app._thinking_text = "..." + reasoning[-450:]
+            else:
+                app._thinking_text = reasoning
+        else:
+            # No reasoning in this response — clear the panel
+            app._thinking_text = ""
 
     elif event_type == "loop_log":
         level = data.get("level", "warning")
