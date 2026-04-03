@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
 
 
+@dataclass
 class LLMCallResult:
     """Result of a single LLM call from :class:`LLMCaller`."""
 
