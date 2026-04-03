@@ -88,13 +88,14 @@ def is_malformed_tool_call(exc: Exception) -> bool:
 def _stream_and_assemble(
     litellm_mod: Any,
     kwargs: dict,
-    on_chunk: Any,
+    on_thinking_chunk: Any,
     on_stream_status: "Callable[[str, int, str | None], None] | None" = None,
 ) -> Any:
     """Stream a completion and assemble into a normal response.
 
-    Calls *on_chunk(text)* for each content or reasoning_content delta,
-    giving the UI real-time thinking visibility.
+    Calls *on_thinking_chunk(text)* only for reasoning_content deltas
+    (NOT regular content — that would leak tool call JSON into the
+    thinking panel).
 
     *on_stream_status(phase, token_count, tool_name)* is called periodically
     to report streaming progress:
@@ -111,7 +112,6 @@ def _stream_and_assemble(
     content_buffer = ""
     token_count = 0
     detected_tool: str | None = None
-    is_reasoning = False
 
     for chunk in stream:
         chunks.append(chunk)
@@ -123,16 +123,15 @@ def _stream_and_assemble(
             content = getattr(delta, "content", None) or ""
 
             if reasoning:
-                is_reasoning = True
                 token_count += 1
-                on_chunk(reasoning)
+                on_thinking_chunk(reasoning)
                 if on_stream_status and token_count % 5 == 0:
                     on_stream_status("thinking", token_count, None)
             elif content:
-                is_reasoning = False
                 token_count += 1
                 content_buffer += content
-                on_chunk(content)
+                # Do NOT send content to on_thinking_chunk — it contains
+                # tool call JSON which would pollute the THINKING panel.
 
                 # Early tool call detection from content stream
                 if not detected_tool:
@@ -147,7 +146,7 @@ def _stream_and_assemble(
 
     # Final status update
     if on_stream_status:
-        phase = "tool_detected" if detected_tool else ("thinking" if is_reasoning else "content")
+        phase = "tool_detected" if detected_tool else "content"
         on_stream_status(phase, token_count, detected_tool)
 
     # Assemble chunks into a complete response object
@@ -278,7 +277,8 @@ def call_llm(
         try:
             if use_streaming:
                 response = _stream_and_assemble(
-                    litellm, kwargs, on_thinking_chunk,
+                    litellm, kwargs,
+                    on_thinking_chunk=on_thinking_chunk,
                     on_stream_status=on_stream_status,
                 )
             else:
