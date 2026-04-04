@@ -1,50 +1,39 @@
-"""Findings browser — two-panel dialog for browsing findings/knowledge."""
+"""Findings detail control — right panel of the findings browser."""
 
 from __future__ import annotations
-from typing import Any
 
-from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window
-from prompt_toolkit.layout.controls import UIControl, UIContent, FormattedTextControl
-from prompt_toolkit.layout.dimension import Dimension as D
-
-from infinidev.ui.theme import PRIMARY, TEXT, TEXT_MUTED, ACCENT
-from infinidev.ui.dialogs.base import dialog_frame
-
-DIALOG_NAME = "findings_browser"
-
-_TYPE_ICONS = {
-    "project": "P", "observation": "O", "conclusion": "C",
-    "hypothesis": "?", "experiment": "E", "proof": "V",
-}
+from infinidev.ui.theme import TEXT, TEXT_MUTED
+from infinidev.ui.controls.scrollable_text import ScrollableTextControl
 from infinidev.ui.dialogs.findings_list_control import FindingsListControl
 
 
-class FindingsDetailControl(UIControl):
-    """Detail view for the selected finding."""
+class FindingsDetailControl(ScrollableTextControl):
+    """Detail view for the selected finding.
+
+    Subclasses ScrollableTextControl for mouse-wheel scrolling and
+    automatic line wrapping via the parent Window's wrap_lines=True.
+    """
 
     def __init__(self, list_ctrl: FindingsListControl) -> None:
         self._list = list_ctrl
+        super().__init__(self._get_fragments)
 
-    def create_content(self, width: int, height: int | None,
-                       preview_search: bool = False) -> UIContent:
+    def _get_fragments(self):
         finding = self._list.get_selected()
         if not finding:
-            lines = [[(f"{TEXT_MUTED}", " Select a finding")]]
-        else:
-            lines = []
-            lines.append([(f"{TEXT} bold", f" {finding.get('topic', '?')}")])
-            lines.append([(f"{TEXT_MUTED}",
-                           f" Type: {finding.get('finding_type', '?')} | "
-                           f"Confidence: {finding.get('confidence', '?')} | "
-                           f"Status: {finding.get('status', '?')}")])
-            lines.append([("", "")])
-            content = finding.get("content", "")
-            for line in content.split("\n"):
-                lines.append([(f"{TEXT}", f" {line}")])
+            return [(f"{TEXT_MUTED}", " Select a finding")]
 
-        def get_line(i):
-            return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
+        fragments = [
+            (f"{TEXT} bold", f" {finding.get('topic', '?')}\n"),
+            (f"{TEXT_MUTED}",
+             f" Type: {finding.get('finding_type', '?')} | "
+             f"Confidence: {finding.get('confidence', '?')} | "
+             f"Status: {finding.get('status', '?')}\n"),
+            ("", "\n"),
+        ]
+        content = finding.get("content", "")
+        for line in content.split("\n"):
+            fragments.append((f"{TEXT}", f" {line}\n"))
+        return fragments
 
 
