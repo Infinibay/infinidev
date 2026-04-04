@@ -42,8 +42,8 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("EMBEDDING_BASE_URL", "Embedding API base URL", "str"),
     ],
     "Thinking": [
-        ("THINKING_ENABLED", "Enable model reasoning/thinking", "bool"),
-        ("THINKING_BUDGET", "Thinking budget preset", "select:low,medium,high,ultra,custom"),
+        ("THINKING_ENABLED", "Enable reasoning (best-effort for local models)", "bool"),
+        ("THINKING_BUDGET", "Thinking budget (local models may ignore)", "select:low,medium,high,ultra,custom"),
         ("THINKING_BUDGET_TOKENS", "Custom token budget (when preset=custom)", "int"),
     ],
     "Loop Engine": [
@@ -85,6 +85,9 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("TREE_MAX_DEPTH", "Max tree depth", "int"),
         ("TREE_MAX_LLM_CALLS", "Max LLM calls per exploration", "int"),
         ("TREE_MAX_TOOL_CALLS", "Max tool calls per exploration", "int"),
+    ],
+    "UI": [
+        ("MARKDOWN_MESSAGES", "Render LLM responses with markdown styling", "bool"),
     ],
 }
 

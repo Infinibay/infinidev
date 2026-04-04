@@ -57,6 +57,18 @@ _BORDER_CHARS = {
     "queued": ("▌", ACCENT),
 }
 
+# Code block style for markdown rendering
+_CODE_BLOCK_STYLE = f"{TEXT_MUTED}"
+
+
+def _markdown_enabled() -> bool:
+    """Check if markdown message rendering is enabled."""
+    try:
+        from infinidev.config.settings import settings
+        return settings.MARKDOWN_MESSAGES
+    except Exception:
+        return False
+
 
 class ChatHistoryControl(UIControl):
     """Custom UIControl that renders chat messages as formatted text lines.
@@ -268,23 +280,93 @@ class ChatHistoryControl(UIControl):
 
         # Body lines — word-wrap to width minus border indent
         content_width = max(width - 3, 20)  # 3 = border + space + margin
+
+        use_markdown = (
+            msg_type in ("agent", "think")
+            and _markdown_enabled()
+        )
+
+        in_code_block = False
         for raw_line in text.split("\n"):
-            # Wrap long lines
-            while len(raw_line) > content_width:
-                chunk = raw_line[:content_width]
-                used = 2 + len(chunk)
+            if use_markdown:
+                # Track code block state for plain rendering inside fences
+                if raw_line.rstrip().startswith("```"):
+                    in_code_block = not in_code_block
+                    from infinidev.ui.controls.markdown_render import render_markdown_line
+                    frags = render_markdown_line(raw_line, body_style, bg_part)
+                    used = 2 + sum(len(t) for _, t in frags)
+                    lines.append(
+                        [(border_style, f"{border_char} ")]
+                        + frags
+                        + [(fill_style, " " * max(0, width - used))]
+                    )
+                    continue
+
+                if in_code_block:
+                    # Inside code block — render as plain code with code style
+                    code_style = f"{_CODE_BLOCK_STYLE} {bg_part}" if bg_part else _CODE_BLOCK_STYLE
+                    while len(raw_line) > content_width:
+                        chunk = raw_line[:content_width]
+                        used = 2 + len(chunk)
+                        lines.append([
+                            (border_style, f"{border_char} "),
+                            (code_style, chunk),
+                            (fill_style, " " * max(0, width - used)),
+                        ])
+                        raw_line = raw_line[content_width:]
+                    used = 2 + len(raw_line)
+                    lines.append([
+                        (border_style, f"{border_char} "),
+                        (code_style, raw_line),
+                        (fill_style, " " * max(0, width - used)),
+                    ])
+                    continue
+
+                # Markdown line — parse into styled fragments
+                from infinidev.ui.controls.markdown_render import render_markdown_line
+                frags = render_markdown_line(raw_line, body_style, bg_part)
+                used = 2 + sum(len(t) for _, t in frags)
+                # Simple overflow: if too wide, fall back to plain wrap
+                if used > width:
+                    # Fall back to plain text wrapping for very long lines
+                    while len(raw_line) > content_width:
+                        chunk = raw_line[:content_width]
+                        u = 2 + len(chunk)
+                        lines.append([
+                            (border_style, f"{border_char} "),
+                            (body_style, chunk),
+                            (fill_style, " " * max(0, width - u)),
+                        ])
+                        raw_line = raw_line[content_width:]
+                    used = 2 + len(raw_line)
+                    lines.append([
+                        (border_style, f"{border_char} "),
+                        (body_style, raw_line),
+                        (fill_style, " " * max(0, width - used)),
+                    ])
+                else:
+                    lines.append(
+                        [(border_style, f"{border_char} ")]
+                        + frags
+                        + [(fill_style, " " * max(0, width - used))]
+                    )
+            else:
+                # Plain text rendering (original behavior)
+                while len(raw_line) > content_width:
+                    chunk = raw_line[:content_width]
+                    used = 2 + len(chunk)
+                    lines.append([
+                        (border_style, f"{border_char} "),
+                        (body_style, chunk),
+                        (fill_style, " " * max(0, width - used)),
+                    ])
+                    raw_line = raw_line[content_width:]
+                used = 2 + len(raw_line)
                 lines.append([
                     (border_style, f"{border_char} "),
-                    (body_style, chunk),
+                    (body_style, raw_line),
                     (fill_style, " " * max(0, width - used)),
                 ])
-                raw_line = raw_line[content_width:]
-            used = 2 + len(raw_line)
-            lines.append([
-                (border_style, f"{border_char} "),
-                (body_style, raw_line),
-                (fill_style, " " * max(0, width - used)),
-            ])
 
         # Blank line after message (no fill — separator)
         lines.append([("", "")])

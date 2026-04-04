@@ -46,7 +46,10 @@ class Settings(BaseSettings):
     OLLAMA_NUM_CTX: int = 16384  # Context window for Ollama models (0 = use model default)
 
     # Thinking / Reasoning
-    THINKING_ENABLED: bool = True  # Master toggle — disables all reasoning when False
+    # NOTE: Anthropic, OpenAI, and Gemini enforce thinking budgets server-side.
+    # Local providers (Ollama, llama.cpp, vLLM) use prompt tags (/no_think)
+    # which the model may ignore — disabling thinking is best-effort only.
+    THINKING_ENABLED: bool = True  # Master toggle �� disables all reasoning when False
     # Budget presets: "low", "medium", "high", "ultra", "custom"
     THINKING_BUDGET: str = "medium"
     THINKING_BUDGET_TOKENS: int = 4096  # Used when THINKING_BUDGET="custom"
@@ -108,6 +111,9 @@ class Settings(BaseSettings):
     # Phases
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True
+
+    # UI
+    MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling
 
 
 
