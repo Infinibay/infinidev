@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEvent
 
@@ -14,6 +15,8 @@ class FindingsDetailControl(UIControl):
 
     def __init__(self, list_ctrl: FindingsListControl) -> None:
         self._list = list_ctrl
+        self._scroll_offset: int = 0
+        self._line_count: int = 0
 
     def is_focusable(self) -> bool:
         return True
@@ -21,6 +24,16 @@ class FindingsDetailControl(UIControl):
     def mouse_handler(self, mouse_event: MouseEvent):
         """Let Window handle scroll wheel."""
         return NotImplemented
+
+    def move_cursor_down(self) -> None:
+        if self._scroll_offset > 0:
+            self._scroll_offset -= 1
+
+    def move_cursor_up(self) -> None:
+        self._scroll_offset = min(
+            self._scroll_offset + 1,
+            max(0, self._line_count - 1),
+        )
 
     def create_content(self, width: int, height: int | None,
                        preview_search: bool = False) -> UIContent:
@@ -39,6 +52,14 @@ class FindingsDetailControl(UIControl):
             for line in content.split("\n"):
                 lines.append([(f"{TEXT}", f" {line}")])
 
+        self._line_count = len(lines)
+        cursor_y = max(0, self._line_count - 1 - self._scroll_offset)
+
         def get_line(i):
             return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
+
+        return UIContent(
+            get_line=get_line,
+            line_count=len(lines),
+            cursor_position=Point(x=0, y=cursor_y),
+        )

@@ -1,17 +1,13 @@
-"""Findings browser — two-panel dialog for browsing findings/knowledge."""
+"""Findings list control — left panel of the findings browser."""
 
 from __future__ import annotations
 from typing import Any
 
-from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window
-from prompt_toolkit.layout.controls import UIControl, UIContent, FormattedTextControl
-from prompt_toolkit.layout.dimension import Dimension as D
+from prompt_toolkit.data_structures import Point
+from prompt_toolkit.layout.controls import UIControl, UIContent
+from prompt_toolkit.mouse_events import MouseEvent
 
-from infinidev.ui.theme import PRIMARY, TEXT, TEXT_MUTED, ACCENT
-from infinidev.ui.dialogs.base import dialog_frame
-
-DIALOG_NAME = "findings_browser"
+from infinidev.ui.theme import PRIMARY, TEXT, TEXT_MUTED
 
 _TYPE_ICONS = {
     "project": "P", "observation": "O", "conclusion": "C",
@@ -20,11 +16,17 @@ _TYPE_ICONS = {
 
 
 class FindingsListControl(UIControl):
-    """Selectable findings list."""
+    """Selectable findings list with scroll support."""
 
     def __init__(self) -> None:
         self.findings: list[dict[str, Any]] = []
         self.cursor: int = 0
+
+    def is_focusable(self) -> bool:
+        return True
+
+    def mouse_handler(self, mouse_event: MouseEvent):
+        return NotImplemented
 
     def move_cursor(self, delta: int) -> None:
         if self.findings:
@@ -49,6 +51,11 @@ class FindingsListControl(UIControl):
 
         def get_line(i):
             return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
+
+        return UIContent(
+            get_line=get_line,
+            line_count=len(lines),
+            cursor_position=Point(x=0, y=self.cursor),
+        )
 
 

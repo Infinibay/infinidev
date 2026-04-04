@@ -20,7 +20,8 @@ def create_findings_browser(title: str = "Findings"):
     detail_ctrl = FindingsDetailControl(list_ctrl)
 
     body = VSplit([
-        Window(content=list_ctrl, width=D(weight=40)),
+        Window(content=list_ctrl, width=D(weight=40),
+               right_margins=[ScrollbarMargin()]),
         Window(width=1, char="│", style=f"{PRIMARY}"),
         Window(
             content=detail_ctrl,
