@@ -108,6 +108,13 @@ EXPLORER_HIDDEN = "#888888"
 
 IMAGE_VIEWER_BG = "#111111"
 
+# ── Shell mode input ────────────────────────────────────────────────
+
+SHELL_INPUT_BG = "#1a0a0a"
+SHELL_INPUT_FG = "#e0e0e0"
+SHELL_BORDER_COLOR = "#ff4444"
+SHELL_LABEL_FG = "#ff4444"
+
 # ── Dimensions ──────────────────────────────────────────────────────────
 
 EXPLORER_WIDTH = 30

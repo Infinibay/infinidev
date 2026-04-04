@@ -416,7 +416,6 @@ class InfinidevApp:
                 # Inject message into the running loop — will appear in next iteration
                 if self.engine is not None:
                     self.engine.inject_message(user_text)
-                    self.add_message("User", user_text, "user")
                     self.add_message("System", "Message injected — the agent will see it on the next step.", "system")
                 else:
                     self._pending_inputs.append(user_text)

@@ -29,6 +29,10 @@ from infinidev.ui.theme import (
     PRIMARY,
     SURFACE_DARK,
     SURFACE_LIGHT,
+    SHELL_INPUT_BG,
+    SHELL_INPUT_FG,
+    SHELL_BORDER_COLOR,
+    SHELL_LABEL_FG,
     TEXT_MUTED,
 )
 from infinidev.ui.controls.status_bar import StatusBarControl, FooterControl
@@ -77,12 +81,36 @@ def build_layout(app_state: InfinidevApp) -> Layout:
     content_body = DynamicContainer(lambda: app_state.get_active_content())
 
     # Chat input — uses the real Buffer from the app
-    chat_input_area = ConditionalContainer(
+    # Shell mode (! prefix): red border line + dark red-tinted background
+    def _is_shell_mode() -> bool:
+        return app_state._chat_buffer.text.startswith("!")
+
+    def _chat_input_style() -> str:
+        if _is_shell_mode():
+            return f"fg:{SHELL_INPUT_FG} bg:{SHELL_INPUT_BG}"
+        return f"bg:{SURFACE_LIGHT}"
+
+    shell_border_line = ConditionalContainer(
         content=Window(
-            content=app_state._chat_input_control,
-            height=CHAT_INPUT_HEIGHT,
-            style=f"bg:{SURFACE_LIGHT}",
+            content=FormattedTextControl(lambda: [
+                (f"{SHELL_LABEL_FG} bg:{SHELL_INPUT_BG} bold", " SHELL "),
+                (f"{SHELL_BORDER_COLOR} bg:{SHELL_INPUT_BG}", " ─" * 40),
+            ]),
+            height=1,
+            style=f"bg:{SHELL_INPUT_BG}",
         ),
+        filter=Condition(_is_shell_mode),
+    )
+
+    chat_input_area = ConditionalContainer(
+        content=HSplit([
+            shell_border_line,
+            Window(
+                content=app_state._chat_input_control,
+                height=CHAT_INPUT_HEIGHT,
+                style=_chat_input_style,
+            ),
+        ]),
         filter=Condition(lambda: app_state.active_tab == "chat"),
     )
 
@@ -178,4 +206,4 @@ def build_layout(app_state: InfinidevApp) -> Layout:
 
     app_state._float_container = root
 
-    return Layout(root)
+    return Layout(root, focused_element=app_state._chat_input_control)

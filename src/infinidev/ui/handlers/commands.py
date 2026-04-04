@@ -277,7 +277,6 @@ def handle_models(app: InfinidevApp, parts: list[str]) -> None:
 
 def execute_shell_command(app: InfinidevApp, cmd: str) -> None:
     """Execute a shell command and display results in chat."""
-    app.add_message("User", f"$ {cmd}", "user")
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=30,
