@@ -2,64 +2,41 @@
 
 from __future__ import annotations
 
-from prompt_toolkit.data_structures import Point
-from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEvent
 
+from infinidev.ui.controls.scrollable_text import ScrollableTextControl
 from infinidev.ui.theme import TEXT, TEXT_MUTED
 from infinidev.ui.dialogs.findings_list_control import FindingsListControl
 
 
-class FindingsDetailControl(UIControl):
-    """Detail view for the selected finding with scroll support."""
+class FindingsDetailControl(ScrollableTextControl):
+    """Detail view for the selected finding.
+
+    Uses ScrollableTextControl (subclass of FormattedTextControl) so that
+    wrap_lines=True on the parent Window works correctly, and mouse wheel
+    scrolling is supported.
+    """
 
     def __init__(self, list_ctrl: FindingsListControl) -> None:
         self._list = list_ctrl
-        self._scroll_offset: int = 0
-        self._line_count: int = 0
+        super().__init__(self._build_fragments)
 
-    def is_focusable(self) -> bool:
-        return True
-
-    def mouse_handler(self, mouse_event: MouseEvent):
-        """Let Window handle scroll wheel."""
-        return NotImplemented
-
-    def move_cursor_down(self) -> None:
-        if self._scroll_offset > 0:
-            self._scroll_offset -= 1
-
-    def move_cursor_up(self) -> None:
-        self._scroll_offset = min(
-            self._scroll_offset + 1,
-            max(0, self._line_count - 1),
-        )
-
-    def create_content(self, width: int, height: int | None,
-                       preview_search: bool = False) -> UIContent:
+    def _build_fragments(self):
         finding = self._list.get_selected()
         if not finding:
-            lines = [[(f"{TEXT_MUTED}", " Select a finding")]]
-        else:
-            lines = []
-            lines.append([(f"{TEXT} bold", f" {finding.get('topic', '?')}")])
-            lines.append([(f"{TEXT_MUTED}",
-                           f" Type: {finding.get('finding_type', '?')} | "
-                           f"Confidence: {finding.get('confidence', '?')} | "
-                           f"Status: {finding.get('status', '?')}")])
-            lines.append([("", "")])
-            content = finding.get("content", "")
-            for line in content.split("\n"):
-                lines.append([(f"{TEXT}", f" {line}")])
+            return [(f"{TEXT_MUTED}", " Select a finding")]
 
-        self._line_count = len(lines)
-        cursor_y = max(0, self._line_count - 1 - self._scroll_offset)
-
-        def get_line(i):
-            return lines[i] if 0 <= i < len(lines) else []
-
-        return UIContent(
-            get_line=get_line,
-            line_count=len(lines),
-            cursor_position=Point(x=0, y=cursor_y),
-        )
+        fragments = [
+            (f"{TEXT} bold", f" {finding.get('topic', '?')}"),
+            ("", "\n"),
+            (f"{TEXT_MUTED}",
+             f" Type: {finding.get('finding_type', '?')} | "
+             f"Confidence: {finding.get('confidence', '?')} | "
+             f"Status: {finding.get('status', '?')}"),
+            ("", "\n\n"),
+        ]
+        content = finding.get("content", "")
+        for line in content.split("\n"):
+            fragments.append((f"{TEXT}", f" {line}"))
+            fragments.append(("", "\n"))
+        return fragments
