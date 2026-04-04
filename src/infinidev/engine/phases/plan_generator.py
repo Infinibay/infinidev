@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from infinidev.engine.llm_client import call_llm
-from infinidev.engine.engine_logging import log as _log, DIM, BOLD, RESET, YELLOW, RED
+from infinidev.engine.engine_logging import emit_loop_event, log as _log, DIM, BOLD, RESET, YELLOW, RED
 from infinidev.engine.phases.plan_validator import validate_questions, format_rejection
 from infinidev.prompts.phases import PhaseStrategy
 from infinidev.prompts.phases.plan import PLANNER_IDENTITY as _PLANNER_IDENTITY
@@ -80,12 +80,24 @@ def _generate_plan(agent: Any,
         {"role": "user", "content": user_prompt},
     ]
 
+    _pid = getattr(agent, "project_id", 0)
+    _aid = getattr(agent, "agent_id", "")
+
+    def _on_thinking(text: str) -> None:
+        emit_loop_event("loop_thinking_chunk", _pid, _aid, {"text": text})
+
+    def _on_stream_status(phase: str, tokens: int, tool_name: str | None) -> None:
+        emit_loop_event("loop_stream_status", _pid, _aid, {
+            "phase": phase, "tokens": tokens, "tool_name": tool_name,
+        })
+
     collected_steps: list[dict[str, Any]] = []
     max_rounds = 5
 
     for round_num in range(max_rounds):
         try:
-            response = call_llm(llm_params, messages, tools=tools, tool_choice="required")
+            response = call_llm(llm_params, messages, tools=tools, tool_choice="required",
+                                on_thinking_chunk=_on_thinking, on_stream_status=_on_stream_status)
         except Exception as exc:
             logger.warning("Plan LLM call failed (round %d): %s", round_num + 1, str(exc)[:200])
             if verbose:

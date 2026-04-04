@@ -147,7 +147,11 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         token_count = data.get("token_count", 0)
         tool_name = data.get("tool_name")
 
-        if phase == "tool_detected" and tool_name:
+        if phase == "done":
+            # Stream finished (or failed) — clear streaming UI state
+            app._streaming_tool_name = None
+            app._streaming_token_count = 0
+        elif phase == "tool_detected" and tool_name:
             app._streaming_tool_name = tool_name
             app._streaming_token_count = token_count
             app._actions_text = ""  # Clear — fragments handle it now

@@ -113,41 +113,54 @@ def _stream_and_assemble(
     token_count = 0
     detected_tool: str | None = None
 
-    for chunk in stream:
-        chunks.append(chunk)
-        try:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if not delta:
-                continue
-            reasoning = getattr(delta, "reasoning_content", None) or ""
-            content = getattr(delta, "content", None) or ""
+    try:
+        for chunk in stream:
+            chunks.append(chunk)
+            try:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if not delta:
+                    continue
+                reasoning = getattr(delta, "reasoning_content", None) or ""
+                content = getattr(delta, "content", None) or ""
 
-            if reasoning:
-                token_count += 1
-                on_thinking_chunk(reasoning)
-                if on_stream_status and token_count % 5 == 0:
-                    on_stream_status("thinking", token_count, None)
-            elif content:
-                token_count += 1
-                content_buffer += content
-                # Do NOT send content to on_thinking_chunk — it contains
-                # tool call JSON which would pollute the THINKING panel.
+                if reasoning:
+                    token_count += 1
+                    on_thinking_chunk(reasoning)
+                    if on_stream_status and token_count % 5 == 0:
+                        on_stream_status("thinking", token_count, None)
+                elif content:
+                    token_count += 1
+                    content_buffer += content
+                    # Do NOT send content to on_thinking_chunk — it contains
+                    # tool call JSON which would pollute the THINKING panel.
 
-                # Early tool call detection from content stream
-                if not detected_tool:
-                    detected_tool = _detect_tool_name(content_buffer)
-                    if detected_tool and on_stream_status:
-                        on_stream_status("tool_detected", token_count, detected_tool)
+                    # Early tool call detection from content stream
+                    if not detected_tool:
+                        detected_tool = _detect_tool_name(content_buffer)
+                        if detected_tool and on_stream_status:
+                            on_stream_status("tool_detected", token_count, detected_tool)
 
-                if on_stream_status and token_count % 5 == 0:
-                    on_stream_status("content", token_count, detected_tool)
-        except (IndexError, AttributeError):
-            pass
+                    if on_stream_status and token_count % 5 == 0:
+                        on_stream_status("content", token_count, detected_tool)
 
-    # Final status update
-    if on_stream_status:
-        phase = "tool_detected" if detected_tool else "content"
-        on_stream_status(phase, token_count, detected_tool)
+                # FC mode: tool call deltas arrive as delta.tool_calls
+                tc_deltas = getattr(delta, "tool_calls", None)
+                if tc_deltas and not detected_tool:
+                    for tc_delta in tc_deltas:
+                        fn = getattr(tc_delta, "function", None)
+                        if fn:
+                            name = getattr(fn, "name", None)
+                            if name and name in _KNOWN_TOOLS:
+                                detected_tool = name
+                                if on_stream_status:
+                                    on_stream_status("tool_detected", token_count, detected_tool)
+            except (IndexError, AttributeError):
+                pass
+    finally:
+        # Always signal stream completion so the UI clears "streaming..." state,
+        # even if the stream raised an exception (timeout, connection reset, etc.)
+        if on_stream_status:
+            on_stream_status("done", token_count, detected_tool)
 
     # Assemble chunks into a complete response object
     try:
@@ -268,9 +281,11 @@ def call_llm(
     if llm_ctx.skip:
         return llm_ctx.metadata.get("response")
 
-    # Enable streaming only for non-tool calls (streaming + FC is unreliable
-    # on some providers like Ollama). Thinking is most useful in manual mode anyway.
-    use_streaming = on_thinking_chunk is not None and not tools
+    # Enable streaming whenever a thinking callback is provided.
+    # All supported providers (Ollama, OpenAI, Anthropic, Gemini, etc.)
+    # support streaming with function calling — litellm's stream_chunk_builder
+    # correctly assembles tool_call deltas from the stream.
+    use_streaming = on_thinking_chunk is not None
 
     last_exc: Exception | None = None
     for attempt in range(1, LLM_RETRIES + 1):
