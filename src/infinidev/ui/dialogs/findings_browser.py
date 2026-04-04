@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from prompt_toolkit.layout.containers import VSplit, Window
+from prompt_toolkit.layout.containers import VSplit, Window, ScrollOffsets
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.margins import ScrollbarMargin
 
@@ -27,6 +27,7 @@ def create_findings_browser(title: str = "Findings"):
             content=detail_ctrl,
             width=D(weight=60),
             right_margins=[ScrollbarMargin(display_arrows=True)],
+            scroll_offsets=ScrollOffsets(top=1, bottom=1),
         ),
     ])
 
