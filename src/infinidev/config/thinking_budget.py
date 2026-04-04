@@ -56,11 +56,9 @@ def _resolve_tokens() -> int:
 def _is_openai_reasoning_model(model: str) -> bool:
     """Return True if the model is an OpenAI o-series reasoning model."""
     # o1, o1-mini, o1-pro, o3, o3-mini, o3-pro, o4-mini, etc.
-    model_lower = model.lower()
-    for prefix in ("o1", "o3", "o4"):
-        if prefix in model_lower:
-            return True
-    return False
+    # Use regex word boundary to avoid matching "gpt-4o1" or "photo1".
+    import re
+    return bool(re.search(r'\bo[134](-|\b)', model, re.IGNORECASE))
 
 
 # ── Public API ──────────────────────────────────────────────────────
@@ -212,5 +210,8 @@ def _disable_thinking(
         return
 
     # Ollama / llama.cpp / vLLM / OpenRouter / compatible / others:
-    # inject /no_think prompt tag
+    # inject /no_think prompt tag + cap max_tokens so the model can't
+    # spend unlimited tokens on reasoning if it ignores the tag.
     _inject_prompt_tag(kwargs, "/no_think")
+    if "max_tokens" not in kwargs:
+        kwargs["max_tokens"] = 4096

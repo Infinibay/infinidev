@@ -242,21 +242,8 @@ def call_llm(
             kwargs["tool_choice"] = "auto"
         else:
             kwargs["tool_choice"] = tool_choice
-        # Suppress thinking tags for models that emit <think> in FC mode
-        # (e.g. Qwen 3.x). Ollama can't parse <think> mixed with tool call
-        # JSON, causing "invalid character '<'" errors on every request.
-        # Suppress when thinking is disabled or budget is low — higher budgets
-        # mean the user explicitly wants reasoning, so we let it through.
-        if caps.has_thinking_sections and (
-            not settings.THINKING_ENABLED or settings.THINKING_BUDGET.lower() == "low"
-        ):
-            msgs = kwargs["messages"]
-            for i in range(len(msgs) - 1, -1, -1):
-                if msgs[i].get("role") == "user":
-                    content = msgs[i].get("content", "")
-                    if "/no_think" not in content:
-                        msgs[i] = {**msgs[i], "content": "/no_think\n" + content}
-                    break
+        # /no_think injection is handled by apply_thinking_budget() below —
+        # no duplicate injection needed here.
     # Force JSON output — prevents models (especially Ollama) from mixing
     # natural language text into tool call arguments.
     # NOTE: Do NOT set response_format when tools are present — for llama-server
