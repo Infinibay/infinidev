@@ -263,6 +263,7 @@ def batch_tool_calls(calls: list) -> list[list]:
 def execute_tool_calls_parallel(
     batch: list,
     tool_dispatch: dict,
+    hook_metadata: dict[str, Any] | None = None,
 ) -> list[tuple]:
     """Execute a batch of read-only tool calls in parallel.
 
@@ -273,6 +274,7 @@ def execute_tool_calls_parallel(
         for tc in batch:
             result = execute_tool_call(
                 tool_dispatch, tc.function.name, tc.function.arguments,
+                hook_metadata=hook_metadata,
             )
             results.append((tc, result))
         return results
@@ -282,6 +284,7 @@ def execute_tool_calls_parallel(
     def _exec(tc):
         result = execute_tool_call(
             tool_dispatch, tc.function.name, tc.function.arguments,
+            hook_metadata=hook_metadata,
         )
         return (tc, result)
 

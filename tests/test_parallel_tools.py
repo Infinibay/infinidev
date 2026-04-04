@@ -124,7 +124,7 @@ class TestParallelExecution:
         """Results should be in the same order as input, not completion order."""
         tcs = [_make_tc(f"read_file", f'{{"path": "file{i}.txt"}}') for i in range(5)]
 
-        def mock_execute(dispatch, name, args):
+        def mock_execute(dispatch, name, args, hook_metadata=None):
             # Simulate varying execution times
             import time
             idx = int(json.loads(args)["path"].replace("file", "").replace(".txt", ""))
@@ -143,7 +143,7 @@ class TestParallelExecution:
         """Parallel execution of slow operations should be faster than sequential."""
         tcs = [_make_tc(f"read_file", f'{{"path": "file{i}.txt"}}') for i in range(4)]
 
-        def slow_execute(dispatch, name, args):
+        def slow_execute(dispatch, name, args, hook_metadata=None):
             time.sleep(0.1)
             return "ok"
 
@@ -175,7 +175,7 @@ class TestParallelExecution:
                _make_tc("read_file", '{"path": "ok2.txt"}')]
 
         call_count = 0
-        def failing_execute(dispatch, name, args):
+        def failing_execute(dispatch, name, args, hook_metadata=None):
             nonlocal call_count
             call_count += 1
             if "fail" in json.loads(args)["path"]:
