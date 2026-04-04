@@ -60,7 +60,9 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
         "name": "step_complete",
         "description": (
             "Signal that the current step is complete. "
-            "You MUST call this after finishing each step."
+            "You MUST call this after finishing each step. "
+            "Before calling this, save key facts via add_note (file paths, function names, decisions). "
+            "Before status='done', call add_session_note with what you learned."
         ),
         "parameters": {
             "type": "object",
@@ -106,10 +108,10 @@ ADD_NOTE_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "add_note",
         "description": (
-            "Save a note to the task scratchpad. Notes persist across all steps "
-            "and are always visible in the <notes> block. Use for: key decisions, "
-            "file paths found, things to remember, warnings to yourself. "
-            "Notes are short (1-2 sentences each). Max 20 notes."
+            "IMPORTANT: Save a fact to your persistent memory. Your context is rebuilt "
+            "from scratch each step — anything not saved here is PERMANENTLY LOST. "
+            "Call this after every file read, discovery, or decision. "
+            "Notes appear in <notes> at every step. Max 20 notes."
         ),
         "parameters": {
             "type": "object",

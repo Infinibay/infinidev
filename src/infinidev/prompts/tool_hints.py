@@ -153,6 +153,10 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Save a note that persists across steps",
         "add_note(note='verify_token at line 42')",
     ),
+    "add_session_note": (
+        "Save a note that persists across tasks in this session",
+        "add_session_note(note='Auth uses JWT RS256, verify_token at src/auth/jwt.py:42')",
+    ),
     "think": (
         "Reason before acting (does not count as tool call)",
         "think(reasoning='The bug is in...')",
@@ -385,5 +389,5 @@ def get_available_tool_names(tools: list) -> set[str]:
         if name:
             names.add(name)
     # Engine pseudo-tools are always available
-    names.update({"step_complete", "add_note", "think"})
+    names.update({"step_complete", "add_note", "add_session_note", "think"})
     return names

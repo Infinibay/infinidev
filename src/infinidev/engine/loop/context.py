@@ -136,6 +136,8 @@ LOOP_PROTOCOL = """\
 
 You operate in a plan-execute-summarize loop. Follow these rules:
 
+**MEMORY RULE: Your context resets every step. Use `add_note` after every read/discovery and `add_session_note` before status="done". Details not in notes are LOST.**
+
 ### Planning Philosophy
 - **Never plan what you can't concretely anticipate.** Only create steps for actions you know are needed based on what you've seen so far.
 - Start with 2-3 concrete steps. After each step, add the next 1-2 based on what you discovered.
@@ -201,7 +203,9 @@ After finishing each step, you MUST call the `step_complete` tool with these par
   - `description`: Step description (required for add/modify, ignored for remove)
 - **final_answer** (optional): When status=done, provide the final result here.
 
-Example step_complete call:
+Before calling step_complete, save important facts:
+`add_note("auth module: verify_token() at src/auth.py:42, uses JWT HS256, no expiry check")`
+Then complete the step:
 ```json
 {
   "summary": "Found auth module at src/auth.py with verify_token() on line 42",
@@ -348,6 +352,8 @@ LOOP_PROTOCOL_SMALL = """\
 ## Loop Protocol
 
 You operate in a plan-execute-summarize loop.
+
+**MEMORY RULE: Your context resets every step. Use `add_note` after every read/discovery and `add_session_note` before status="done". Details not in notes are LOST.**
 
 ### Planning
 - Start with 2-3 concrete steps. Add more as you discover what's needed.
@@ -574,14 +580,24 @@ def build_iteration_prompt(
             + "\n".join(note_lines)
             + "\n</notes>"
         )
-    # Gentle nudge if the agent hasn't taken notes in a while
-    elif state.tool_calls_since_last_note >= 10 and state.total_tool_calls >= 10:
+    # Note-taking nudge — fires even when some notes exist, based on recent activity
+    if state.tool_calls_since_last_note >= 4 and state.total_tool_calls >= 4:
         parts.append(
             "<note-reminder>\n"
-            "You have made 10+ tool calls without using add_note. Consider saving "
-            "key facts (file paths, function names, decisions) so you don't lose them "
-            "between steps. This is optional but recommended.\n"
+            "You have made multiple tool calls without saving notes. Your context resets "
+            "each step — anything not in add_note will be lost. Save key facts NOW: "
+            "file paths, function locations, decisions made, values discovered.\n"
             "</note-reminder>"
+        )
+    # Stronger warning if previous steps completed but zero notes saved
+    if state.history and not state.notes and state.total_tool_calls >= 4:
+        parts.append(
+            "<note-warning>\n"
+            "WARNING: You have completed step(s) but have ZERO notes saved. "
+            "Your context from previous steps is limited to ~150-token summaries. "
+            "Critical details (file paths, line numbers, function signatures, decisions) "
+            "MUST be saved via add_note or they are permanently lost.\n"
+            "</note-warning>"
         )
 
     # Plan (if we have one)
