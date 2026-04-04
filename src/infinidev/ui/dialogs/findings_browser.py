@@ -26,7 +26,6 @@ def create_findings_browser(title: str = "Findings"):
         Window(
             content=detail_ctrl,
             width=D(weight=60),
-            wrap_lines=True,
             right_margins=[ScrollbarMargin(display_arrows=True)],
         ),
     ])
