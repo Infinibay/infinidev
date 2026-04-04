@@ -114,8 +114,8 @@ class FileManager:
             self._file_watcher = FileWatcher(
                 workspace=cwd,
                 callback=_on_change,
-                # Return workspace root as always-visible so all changes trigger refresh
-                visible_paths_callback=lambda: {cwd},
+                visible_paths_callback=lambda: self._tree_control.expanded_dirs()
+                    if self._tree_control is not None else {cwd},
             )
             self._file_watcher.start()
         except Exception:

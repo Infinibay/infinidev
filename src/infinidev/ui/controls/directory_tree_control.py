@@ -236,6 +236,19 @@ class DirectoryTreeControl(UIControl):
         elif self._on_file_selected:
             self._on_file_selected(node.path)
 
+    def expanded_dirs(self) -> set[str]:
+        """Return absolute paths of all currently expanded directories."""
+        dirs: set[str] = set()
+
+        def _collect(node: _TreeNode) -> None:
+            if node.is_dir and node.expanded:
+                dirs.add(node.path)
+                for child in node.children:
+                    _collect(child)
+
+        _collect(self._root)
+        return dirs
+
     def refresh(self) -> None:
         """Reload the tree from disk, preserving expanded directory state."""
         # Collect paths of currently expanded dirs

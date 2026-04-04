@@ -138,6 +138,13 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
         supports_json_mode=False,             # varies by model — be conservative
         probed=True,
     ),
+    "qwen": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=True,
+        supports_json_mode=True,
+        needs_schema_sanitization=True,  # Qwen rejects anyOf and complex schemas
+        probed=True,
+    ),
 }
 
 

@@ -26,6 +26,51 @@ def _clean_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
+def _sanitize_schema_deep(schema: dict[str, Any]) -> dict[str, Any]:
+    """Aggressively simplify a JSON schema for providers that reject anyOf/oneOf.
+
+    Qwen/DashScope and some other providers reject complex schema constructs.
+    This flattens anyOf/oneOf to the first non-null type and recurses into
+    nested properties and array items.
+    """
+    import copy
+    schema = copy.deepcopy(schema)
+    _simplify_node(schema)
+    return schema
+
+
+def _simplify_node(node: dict[str, Any]) -> None:
+    """Recursively simplify a schema node in-place."""
+    # Resolve anyOf/oneOf → pick first non-null type
+    for key in ("anyOf", "oneOf"):
+        if key in node:
+            variants = node.pop(key)
+            chosen = None
+            for v in variants:
+                if isinstance(v, dict) and v.get("type") != "null":
+                    chosen = v
+                    break
+            if chosen:
+                # Merge the chosen variant into the node
+                for k, v in chosen.items():
+                    if k not in node:
+                        node[k] = v
+
+    # Remove unsupported keywords
+    for drop in ("$defs", "definitions", "title", "default", "examples"):
+        node.pop(drop, None)
+
+    # Recurse into properties
+    for prop in node.get("properties", {}).values():
+        if isinstance(prop, dict):
+            _simplify_node(prop)
+
+    # Recurse into array items
+    items = node.get("items")
+    if isinstance(items, dict):
+        _simplify_node(items)
+
+
 def tool_to_openai_schema(tool: Any) -> dict[str, Any]:
     """Convert a InfinibayBaseTool to an OpenAI function-calling tool schema."""
     parameters: dict[str, Any] = {"type": "object", "properties": {}}
@@ -221,7 +266,24 @@ def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     schemas.append(ADD_NOTE_SCHEMA)
     schemas.append(ADD_SESSION_NOTE_SCHEMA)
     schemas.append(THINK_SCHEMA)
+
+    # Deep-sanitize schemas for providers that reject anyOf/oneOf/complex constructs
+    from infinidev.config.model_capabilities import get_model_capabilities
+    if get_model_capabilities().needs_schema_sanitization:
+        schemas = [_sanitize_tool_schema(s) for s in schemas]
+
     return schemas
+
+
+def _sanitize_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Apply deep sanitization to a single tool schema."""
+    import copy
+    schema = copy.deepcopy(schema)
+    params = schema.get("function", {}).get("parameters")
+    if params:
+        sanitized = _sanitize_schema_deep(params)
+        schema["function"]["parameters"] = sanitized
+    return schema
 
 
 def build_tool_dispatch(tools: list[Any]) -> dict[str, Any]:

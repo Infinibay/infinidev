@@ -60,6 +60,7 @@ MALFORMED_TOOL_PATTERNS = (
     "unterminated string",
     "after top-level value",
     "after object key:value pair",
+    "must be in json format",           # DashScope/Qwen
 )
 
 
@@ -256,6 +257,10 @@ def call_llm(
     # --- Apply thinking budget ---
     from infinidev.config.thinking_budget import apply_thinking_budget
     apply_thinking_budget(kwargs, settings.LLM_PROVIDER, kwargs["model"])
+
+    # --- Apply prompt caching ---
+    from infinidev.config.prompt_cache import apply_prompt_caching
+    apply_prompt_caching(kwargs, settings.LLM_PROVIDER)
 
     # --- Pre-LLM hook ---
     from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent

@@ -148,6 +148,22 @@ PROVIDERS: dict[str, ProviderConfig] = {
         base_url_editable=True,
         model_list_format="free_text",
     ),
+    "qwen": ProviderConfig(
+        id="qwen",
+        display_name="Qwen (Alibaba)",
+        prefix="custom_openai/",
+        default_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        model_list_format="openai",
+        static_models=[
+            "qwen3.6-plus",
+            "qwen3.5-plus", "qwen3.5-flash",
+            "qwen3.5-397b-a17b", "qwen3.5-122b-a10b",
+            "qwen3-max", "qwen3-coder-plus", "qwen3-coder-flash",
+            "qwen3-235b-a22b", "qwen3-32b", "qwen3-30b-a3b",
+            "qwen-max", "qwen-plus", "qwen-turbo", "qwen-flash",
+            "qwq-plus",
+        ],
+    ),
 }
 
 
@@ -170,7 +186,12 @@ def fetch_models(
 ) -> list[str]:
     """Fetch available models for a provider. Returns prefixed model names."""
     provider = get_provider(provider_id)
-    url = base_url.rstrip("/") if base_url else provider.default_base_url.rstrip("/")
+    # For providers with a fixed URL, always use their default — the passed
+    # base_url likely belongs to a previously-selected provider (e.g. Ollama).
+    if not provider.base_url_editable and provider.default_base_url:
+        url = provider.default_base_url.rstrip("/")
+    else:
+        url = base_url.rstrip("/") if base_url else provider.default_base_url.rstrip("/")
 
     if not url:
         return [f"{provider.prefix}{m}" for m in provider.static_models]

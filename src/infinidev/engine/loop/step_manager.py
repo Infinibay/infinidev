@@ -8,7 +8,9 @@ from typing import Any, TYPE_CHECKING
 from infinidev.engine.engine_logging import (
     emit_loop_event as _emit_loop_event,
     emit_log as _emit_log,
+    log as _log,
     log_finish as _log_finish,
+    DIM as _DIM,
     YELLOW as _YELLOW,
     RESET as _RESET,
 )
@@ -23,6 +25,26 @@ def _get_settings():
     """Lazy import to avoid circular import at module load time."""
     from infinidev.config.settings import settings
     return settings
+
+
+def _log_cache_summary(state: Any) -> None:
+    """Log a one-line cache summary if any cache metrics are non-zero."""
+    cache_read = state.cache_read_tokens
+    cache_write = state.cache_creation_tokens
+    cached_prefix = state.cached_tokens
+
+    if not (cache_read or cache_write or cached_prefix):
+        return
+
+    parts: list[str] = []
+    if cache_read:
+        parts.append(f"{cache_read:,} read from cache")
+    if cache_write:
+        parts.append(f"{cache_write:,} written to cache")
+    if cached_prefix:
+        parts.append(f"{cached_prefix:,} prefix-cached")
+
+    _log(f"   {_DIM}💾 Cache: {' · '.join(parts)}{_RESET}")
 
 
 class StepManager:
@@ -115,6 +137,7 @@ class StepManager:
         ctx.file_tracker.deactivate()
         if ctx.verbose:
             _log_finish(ctx.agent_name, status, iteration + 1, ctx.state.total_tool_calls, ctx.state.total_tokens)
+            _log_cache_summary(ctx.state)
         _emit_loop_event("loop_finished", ctx.project_id, ctx.agent_id, {
             "agent_id": ctx.agent_id, "agent_name": ctx.agent_name,
             "status": status, "iterations": iteration + 1,
@@ -123,7 +146,14 @@ class StepManager:
         })
         _hook_manager.dispatch(_HookContext(
             event=_HookEvent.LOOP_END,
-            metadata={"state": ctx.state, "result": result, "status": status},
+            metadata={
+                "state": ctx.state, "result": result, "status": status,
+                "cache_stats": {
+                    "cache_creation_tokens": ctx.state.cache_creation_tokens,
+                    "cache_read_tokens": ctx.state.cache_read_tokens,
+                    "cached_tokens": ctx.state.cached_tokens,
+                },
+            },
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         ))
         self._engine._store_stats(ctx.state)

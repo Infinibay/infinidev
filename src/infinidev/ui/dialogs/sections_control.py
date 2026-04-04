@@ -30,7 +30,7 @@ DIALOG_NAME = "settings_editor"
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
-        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,openai_compatible"),
+        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,qwen,openai_compatible"),
         ("LLM_MODEL", "LLM model", "select_dynamic:provider_models"),
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),

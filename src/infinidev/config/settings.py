@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     MAX_DIR_LISTING: int = 1000
 
     # LLM (via LiteLLM)
-    LLM_PROVIDER: str = "ollama"  # Provider ID: ollama, llama_cpp, vllm, openai, anthropic, gemini, zai, kimi, minimax, openrouter, openai_compatible
+    LLM_PROVIDER: str = "ollama"  # Provider ID: ollama, llama_cpp, vllm, openai, anthropic, gemini, zai, kimi, minimax, openrouter, qwen, openai_compatible
     LLM_MODEL: str = "ollama_chat/qwen2.5-coder:7b"
     LLM_BASE_URL: str = "http://localhost:11434"
     LLM_API_KEY: str = "ollama"
@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # Phases
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True
+
+    # Prompt Caching
+    PROMPT_CACHE_ENABLED: bool = True  # Enable provider-specific prompt caching
 
     # UI
     MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling

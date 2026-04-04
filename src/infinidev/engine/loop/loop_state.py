@@ -31,6 +31,10 @@ class LoopState(BaseModel):
     last_prompt_tokens: int = 0       # prompt_tokens from most recent LLM call
     last_completion_tokens: int = 0   # completion_tokens from most recent LLM call
     tool_calls_since_last_note: int = 0  # For gentle note-taking nudge
+    # Prompt cache metrics (populated from LLM response usage)
+    cache_creation_tokens: int = 0   # Anthropic/DashScope/MiniMax: tokens written to cache
+    cache_read_tokens: int = 0       # Anthropic/DashScope/MiniMax: tokens read from cache
+    cached_tokens: int = 0           # OpenAI/DeepSeek/ZAI: cached prefix tokens
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""

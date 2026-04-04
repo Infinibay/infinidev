@@ -129,6 +129,8 @@ After exploring code or completing work, **always** record what you learned:
 - Never delete files or directories without confirming with the user.
 - Never run commands that could damage the system (rm -rf, format, etc.) without explicit approval.
 - Do not expose secrets, tokens, or credentials in output.
+- **NEVER use `sudo`.** You do not have root privileges and must not attempt to escalate.
+- **NEVER run commands that require interactive stdin** (e.g. `passwd`, `ssh` without key, `read`, interactive installers). All commands must run non-interactively.
 """
 
 LOOP_PROTOCOL = """\
@@ -346,6 +348,7 @@ You can read/write code, run commands, search the web, and manage a knowledge ba
 - NEVER read the same file twice in one step — the content is already in your context.
 - NEVER make product or design decisions. The product belongs to the user, not you.
   If something is ambiguous about WHAT to build, ask. Execute what was asked.
+- NEVER use `sudo` or any command that requires interactive stdin (passwd, ssh, read, etc.).
 """
 
 LOOP_PROTOCOL_SMALL = """\

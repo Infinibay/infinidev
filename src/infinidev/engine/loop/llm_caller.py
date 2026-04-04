@@ -235,3 +235,20 @@ class LLMCaller:
             ctx.state.total_tokens += getattr(usage, "total_tokens", 0)
             ctx.state.last_prompt_tokens = getattr(usage, "prompt_tokens", 0)
             ctx.state.last_completion_tokens = getattr(usage, "completion_tokens", 0)
+
+            # Cache metrics — Anthropic/DashScope/MiniMax format
+            cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            ctx.state.cache_creation_tokens += cache_creation
+            ctx.state.cache_read_tokens += cache_read
+
+            # Cache metrics — OpenAI/ZAI format (prompt_tokens_details)
+            details = getattr(usage, "prompt_tokens_details", None)
+            if details:
+                cached = getattr(details, "cached_tokens", 0) or 0
+                ctx.state.cached_tokens += cached
+
+            # Cache metrics — DeepSeek-specific format
+            ds_hit = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+            if ds_hit:
+                ctx.state.cached_tokens += ds_hit

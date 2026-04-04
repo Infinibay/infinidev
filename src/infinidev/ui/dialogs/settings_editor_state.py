@@ -30,7 +30,7 @@ DIALOG_NAME = "settings_editor"
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
-        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,openai_compatible"),
+        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,qwen,openai_compatible"),
         ("LLM_MODEL", "LLM model", "select_dynamic:provider_models"),
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
@@ -273,9 +273,15 @@ class SettingsEditorState:
         key, desc, stype = setting
         self._save(key, self.edit_buffer.text)
         self.editing = False
+        # Move focus back to settings panel — the edit buffer is now hidden
+        # and leaving focus there hangs prompt_toolkit.
+        if self._on_focus_change:
+            self._on_focus_change("settings")
 
     def cancel_edit(self) -> None:
         self.editing = False
+        if self._on_focus_change:
+            self._on_focus_change("settings")
 
     @property
     def dropdown_filtered(self) -> list[str]:
@@ -339,6 +345,11 @@ class SettingsEditorState:
                 # When provider changes, auto-fill base_url and clear model cache
                 if key == "LLM_PROVIDER":
                     self._on_provider_change(value)
+                # When API key or base URL changes, invalidate cached model list
+                # so next dropdown open fetches with the new credentials
+                if key in ("LLM_API_KEY", "LLM_BASE_URL"):
+                    self._pending_changes[key] = value
+                    self._ollama_models = None
 
         except Exception:
             pass
