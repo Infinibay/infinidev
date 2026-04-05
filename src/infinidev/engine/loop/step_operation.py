@@ -13,6 +13,6 @@ class StepOperation(BaseModel):
     op: Literal["add", "modify", "remove"]
     index: int
     title: str = ""  # required for add/modify, ignored for remove
-    description: str = ""  # optional detailed guidance (tools to use, how to approach)
+    explanation: str = ""  # optional detailed guidance (tools to use, how to approach)
 
 

@@ -263,9 +263,9 @@ ADD_STEP_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "Short step title naming FILE, FUNCTION, and CHANGE",
                 },
-                "description": {
+                "explanation": {
                     "type": "string",
-                    "description": "Detailed guidance (optional)",
+                    "description": "Detailed explanation of how to approach the step (optional)",
                 },
             },
             "required": ["title"],
@@ -279,7 +279,7 @@ MODIFY_STEP_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "modify_step",
         "description": (
-            "Modify the title or description of an existing pending step "
+            "Modify the title or explanation of an existing pending step "
             "WITHOUT completing the current step. "
             "Does NOT count as a tool call."
         ),
@@ -294,9 +294,9 @@ MODIFY_STEP_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "New title (leave empty to keep current)",
                 },
-                "description": {
+                "explanation": {
                     "type": "string",
-                    "description": "New description (leave empty to keep current)",
+                    "description": "New explanation (leave empty to keep current)",
                 },
             },
             "required": ["index"],

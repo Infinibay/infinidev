@@ -65,7 +65,7 @@ def _summarize_step(
     # Next pending steps
     next_pending = [s for s in state.plan.steps if s.status == "pending"]
     if next_pending:
-        next_lines = [f"- {s.description}" for s in next_pending[:5]]
+        next_lines = [f"- {s.title}" for s in next_pending[:5]]
         parts.append(f"<next-steps>\n{chr(10).join(next_lines)}\n</next-steps>")
 
     # Previous summaries for context

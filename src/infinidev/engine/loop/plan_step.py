@@ -12,7 +12,7 @@ class PlanStep(BaseModel):
 
     index: int
     title: str
-    description: str = ""
+    explanation: str = ""
     status: Literal["pending", "active", "done", "skipped"] = "pending"
 
 

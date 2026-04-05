@@ -129,7 +129,7 @@ class PhaseEngine:
             _log(f"  {DIM}Plan: {len(plan_steps)} steps{RESET}")
             for s in plan_steps:
                 files_str = ", ".join(s.get("files", [])) or "(verify)"
-                _log(f"    {DIM}{s['step']}. {s.get('title', s.get('description', ''))[:70]} [{files_str}]{RESET}")
+                _log(f"    {DIM}{s['step']}. {s.get('title', s.get('explanation', ''))[:70]} [{files_str}]{RESET}")
 
         # ── Phase 4: EXECUTE (with re-plan loop) ────────────────
         result = ""
@@ -169,7 +169,7 @@ class PhaseEngine:
                     if verbose:
                         _log(f"  {DIM}Re-plan: {len(plan_steps)} new steps{RESET}")
                         for s in plan_steps:
-                            _log(f"    {DIM}{s['step']}. {s.get('title', s.get('description', ''))[:70]}{RESET}")
+                            _log(f"    {DIM}{s['step']}. {s.get('title', s.get('explanation', ''))[:70]}{RESET}")
             else:
                 break
 

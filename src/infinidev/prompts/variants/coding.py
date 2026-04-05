@@ -124,7 +124,7 @@ def execute_loop(task):
         # Manage plan BEFORE step_complete (these don't count as tool calls)
         add_step(title="...")                                 # append step at end
         add_step(title="...", index=N)                        # add at specific position
-        modify_step(index=N, title="...", description="...")  # update pending step
+        modify_step(index=N, title="...", explanation="...")  # update pending step
         remove_step(index=N)                                  # remove pending step
 
         step_complete(

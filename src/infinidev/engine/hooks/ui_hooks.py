@@ -134,7 +134,7 @@ def _on_pre_step(ctx: HookContext) -> None:
         "status": "active",
         "summary": "",
         "plan_steps": [
-            {"index": s.index, "title": s.title, "description": s.description, "status": s.status}
+            {"index": s.index, "title": s.title, "explanation": s.explanation, "status": s.status}
             for s in (plan.steps if plan else [])
         ],
         "tool_calls_step": 0,
@@ -174,7 +174,7 @@ def _on_post_step(ctx: HookContext) -> None:
         "status": step_result.status,
         "summary": step_result.summary[:200],
         "plan_steps": [
-            {"index": s.index, "title": s.title, "description": s.description, "status": s.status}
+            {"index": s.index, "title": s.title, "explanation": s.explanation, "status": s.status}
             for s in state.plan.steps
         ],
         "tool_calls_step": action_tool_calls,

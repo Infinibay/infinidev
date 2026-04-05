@@ -685,7 +685,7 @@ To manage the plan, use add_step/modify_step/remove_step BEFORE calling step_com
 
 EXAMPLES:
   add_step(title="Fix verify_token() expiry check in auth.py:42",
-    description="Use edit_symbol to add datetime.utcnow() comparison against exp field.")
+    explanation="Use edit_symbol to add datetime.utcnow() comparison against exp field.")
   add_step(title="Run pytest tests/test_auth.py to verify fix")
   step_complete(summary="Read: auth.py — found verify_token() on line 42", status="continue")
 
@@ -698,29 +698,29 @@ IMPORTANT:
   - Use add_step/modify_step/remove_step to manage the plan, NOT step_complete""",
 
     "add_step": """\
-add_step(title, description?, index?)
+add_step(title, explanation?, index?)
 
 Add a new step to the plan WITHOUT completing the current step.
 Use when you discover new work mid-step. Omit index to append at end.
 
 PARAMS:
-  title (str, required)        — Short title: FILE, FUNCTION, CHANGE
-  description (str, optional)  — Detailed guidance
-  index (int, optional)        — Step number. Omit to append at end of plan.
+  title (str, required)           — Short title: FILE, FUNCTION, CHANGE
+  explanation (str, optional)     — Detailed explanation of how to approach the step
+  index (int, optional)           — Step number. Omit to append at end of plan.
 
 EXAMPLES:
   add_step(title="Run pytest tests/test_auth.py to verify fix")
   add_step(title="Fix refresh_token() in auth.py:85", index=4)""",
 
     "modify_step": """\
-modify_step(index, title?, description?)
+modify_step(index, title?, explanation?)
 
-Modify the title or description of a pending step WITHOUT completing the current step.
+Modify the title or explanation of a pending step WITHOUT completing the current step.
 
 PARAMS:
-  index (int, required)        — Step number to modify
-  title (str, optional)        — New title (empty = keep current)
-  description (str, optional)  — New description (empty = keep current)
+  index (int, required)           — Step number to modify
+  title (str, optional)           — New title (empty = keep current)
+  explanation (str, optional)     — New explanation (empty = keep current)
 
 EXAMPLE:
   modify_step(index=4, title="Also fix refresh_token() in auth.py:85")""",

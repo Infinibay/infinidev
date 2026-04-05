@@ -76,9 +76,8 @@ def _execute_plan(
 
     for step in plan_steps:
         step_num = step["step"]
-        step_desc = step.get("title", step.get("description", ""))
-        # Only use description as guidance if title exists separately
-        step_detail = step.get("description", "") if "title" in step else ""
+        step_desc = step.get("title", step.get("explanation", ""))
+        step_detail = step.get("explanation", "") if "title" in step else ""
         step_files = step.get("files", [])
         total = len(plan_steps)
 

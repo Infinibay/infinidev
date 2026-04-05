@@ -204,8 +204,8 @@ After finishing each step, you MUST call the `step_complete` tool with these par
 ### Managing the Plan — `add_step`, `modify_step`, `remove_step`
 
 To update the plan, use these tools BEFORE calling step_complete:
-- **add_step**(title, description?, index?): Add a new step. Omit index to append at end.
-- **modify_step**(index, title?, description?): Update a pending step's title or description.
+- **add_step**(title, explanation?, index?): Add a new step. Omit index to append at end.
+- **modify_step**(index, title?, explanation?): Update a pending step's title or explanation.
 - **remove_step**(index): Remove a pending step.
 
 These do NOT count as tool calls and do NOT complete the current step. Use them freely.
@@ -658,7 +658,7 @@ def build_iteration_prompt(
                 f"If you discover that this step requires work from future steps, "
                 f"call step_complete with status='continue' and add new steps."
             )
-        guidance = f"\n\n{active.description}" if active.description else ""
+        guidance = f"\n\n{active.explanation}" if active.explanation else ""
         parts.append(
             f"<current-action>\nStep {active.index}: {active.title}"
             f"{guidance}{scope_warning}\n</current-action>"

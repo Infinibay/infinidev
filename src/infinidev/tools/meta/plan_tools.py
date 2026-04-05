@@ -11,14 +11,14 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 
 class AddStepInput(BaseModel):
     title: str = Field(description="Short step title naming FILE, FUNCTION, and CHANGE")
-    description: str = Field(default="", description="Detailed guidance (optional)")
+    explanation: str = Field(default="", description="Detailed explanation: tools to use, approach, edge cases (optional)")
     index: int = Field(default=0, description="Step number. 0 or omit to append at end of plan.")
 
 
 class ModifyStepInput(BaseModel):
     index: int = Field(description="Step number to modify")
     title: str = Field(default="", description="New title (empty = keep current)")
-    description: str = Field(default="", description="New description (empty = keep current)")
+    explanation: str = Field(default="", description="New explanation (empty = keep current)")
 
 
 class RemoveStepInput(BaseModel):
@@ -34,7 +34,7 @@ class AddStepTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = AddStepInput
 
-    def _run(self, title: str, description: str = "", index: int = 0) -> str:
+    def _run(self, title: str, explanation: str = "", index: int = 0) -> str:
         from infinidev.tools.base.context import get_context_for_agent
         ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
@@ -47,7 +47,7 @@ class AddStepTool(InfinibayBaseTool):
             existing_max = max((s.index for s in plan.steps), default=0)
             index = existing_max + 1
 
-        op = StepOperation(op="add", index=index, title=title, description=description)
+        op = StepOperation(op="add", index=index, title=title, description=explanation)
         plan.apply_operations([op])
         return self._success({"status": "added", "index": index, "total_steps": len(plan.steps)})
 
@@ -60,7 +60,7 @@ class ModifyStepTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = ModifyStepInput
 
-    def _run(self, index: int, title: str = "", description: str = "") -> str:
+    def _run(self, index: int, title: str = "", explanation: str = "") -> str:
         from infinidev.tools.base.context import get_context_for_agent
         ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
@@ -69,7 +69,7 @@ class ModifyStepTool(InfinibayBaseTool):
         plan = ctx.loop_state.plan
         from infinidev.engine.loop.step_operation import StepOperation
 
-        op = StepOperation(op="modify", index=index, title=title, description=description)
+        op = StepOperation(op="modify", index=index, title=title, description=explanation)
         plan.apply_operations([op])
         return self._success({"status": "modified", "index": index})
 

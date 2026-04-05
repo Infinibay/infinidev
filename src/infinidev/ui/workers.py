@@ -473,7 +473,7 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
                 lines = []
                 for s in all_steps:
                     s_num = s["step"]
-                    s_title = s.get("title", s.get("description", ""))
+                    s_title = s.get("title", "")
                     if s_num in _completed_step_nums:
                         lines.append(f"v {s_title}")
                     elif s_num == step_num:

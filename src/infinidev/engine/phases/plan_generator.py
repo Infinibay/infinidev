@@ -149,13 +149,13 @@ def _generate_plan(agent: Any,
                 try:
                     args = _safe_json(tc.function.arguments) if isinstance(tc.function.arguments, str) else (tc.function.arguments or {})
                     if isinstance(args, dict):
-                        title = args.get("title", args.get("description", ""))
-                        desc = args.get("description", "")
+                        title = args.get("title", args.get("explanation", ""))
+                        expl = args.get("explanation", "")
                         if title:
                             collected_steps.append({
                                 "step": len(collected_steps) + 1,
                                 "title": title,
-                                "description": desc if title != desc else "",
+                                "explanation": expl if title != expl else "",
                                 "files": [],
                             })
                             steps_added_this_round += 1

@@ -43,7 +43,7 @@ def validate_plan(
         steps = plan_json
 
     # If model returned a single step object instead of array, wrap it
-    if isinstance(steps, dict) and ("step" in steps or "title" in steps or "description" in steps):
+    if isinstance(steps, dict) and ("step" in steps or "title" in steps or "explanation" in steps):
         steps = [steps]
     elif not isinstance(steps, list):
         return False, [], ["Plan must be a JSON array of step objects."]
@@ -64,7 +64,7 @@ def validate_plan(
             errors.append(f"Step {i + 1}: must be a JSON object with 'title' and 'files' keys.")
             continue
 
-        desc = step.get("title", step.get("description", ""))
+        desc = step.get("title", step.get("explanation", ""))
         files = step.get("files", [])
 
         # Description checks
@@ -101,7 +101,7 @@ def validate_plan(
         test_steps = [
             s for s in steps
             if any(
-                kw in s.get("title", s.get("description", "")).lower()
+                kw in s.get("title", s.get("explanation", "")).lower()
                 for kw in ["run test", "pytest", "npm test", "verify", "check progress"]
             )
         ]
@@ -117,8 +117,8 @@ def validate_plan(
         if isinstance(step, dict):
             normalized.append({
                 "step": step.get("step", i + 1),
-                "title": step.get("title", step.get("description", f"Step {i + 1}")),
-                "description": step.get("description", ""),
+                "title": step.get("title", step.get("explanation", f"Step {i + 1}")),
+                "explanation": step.get("explanation", ""),
                 "files": step.get("files", []),
             })
 
