@@ -87,6 +87,28 @@ class ReadFileTool(InfinibayBaseTool):
         end_line: int | None = None,
         line_range: str | None = None,
     ) -> str:
+        # Coerce offset/limit to int (LLMs may send strings like "10")
+        if offset is not None:
+            try:
+                offset = int(offset)
+            except (ValueError, TypeError):
+                offset = None
+        if limit is not None:
+            try:
+                limit = int(limit)
+            except (ValueError, TypeError):
+                limit = None
+        if start_line is not None:
+            try:
+                start_line = int(start_line)
+            except (ValueError, TypeError):
+                start_line = None
+        if end_line is not None:
+            try:
+                end_line = int(end_line)
+            except (ValueError, TypeError):
+                end_line = None
+
         # Parse line_range (e.g. "10-50", "10:50", "10,50")
         if line_range is not None and offset is None:
             import re
