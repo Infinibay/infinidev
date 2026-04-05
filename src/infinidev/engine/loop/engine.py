@@ -411,6 +411,7 @@ class LoopEngine(AgentEngine):
             tech_hints=getattr(agent, '_tech_hints', None),
             session_summaries=getattr(agent, '_session_summaries', None),
             identity_override=getattr(agent, '_system_prompt_identity', None),
+            protocol_override=getattr(agent, '_system_prompt_protocol', None),
             small_model=is_small,
         )
         if manual_tc:
@@ -458,6 +459,7 @@ class LoopEngine(AgentEngine):
             agent=agent, agent_name=getattr(agent, "name", agent.agent_id),
             agent_role=getattr(agent, "role", "agent"),
             desc=desc, expected=expected, event_id=event_id,
+            skip_plan=bool(getattr(agent, '_system_prompt_protocol', None)),
             state=state, file_tracker=file_tracker,
             start_iteration=state.iteration_count,
         )
@@ -487,6 +489,7 @@ class LoopEngine(AgentEngine):
             max_context_tokens=ctx.max_context_tokens,
             session_notes=self.session_notes if self.session_notes else None,
             user_messages=injected if injected else None,
+            skip_plan=ctx.skip_plan,
         )
         return [
             {"role": "system", "content": ctx.system_prompt},

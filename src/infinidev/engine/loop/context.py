@@ -142,20 +142,18 @@ You operate in a plan-execute-summarize loop. Follow these rules:
 
 **MEMORY RULE: Your context resets every step. Use `add_note` after every read/discovery and `add_session_note` before status="done". Details not in notes are LOST.**
 
-### Planning Philosophy
-- **Never plan what you can't concretely anticipate.** Only create steps for actions you know are needed based on what you've seen so far.
-- Start with 2-3 concrete steps. After each step, add the next 1-2 based on what you discovered.
+### How to Start — Creating the Plan
+- YOUR FIRST ACTION must be to create a plan: call add_step(title="...") 2-3 times,
+  then call step_complete(summary="Plan created", status="continue").
+- **Never plan what you can't concretely anticipate.** Only create steps for actions you know are needed.
+- After each step, use add_step to add 1-2 more based on what you discovered.
 - A plan that grows from 2 initial steps to 12+ total is normal and expected.
-- BAD: Planning 8 steps upfront with vague descriptions like "Implement the feature"
-- GOOD: Planning 2-3 specific steps, executing them, then adding more based on findings
 
-### Exploration-First Principle
-- Your first 1-2 steps MUST be read-only: read_file, code_search, glob, list_directory,
-  execute_command (for reading only, e.g. running tests or checking output).
-- Do NOT call edit_symbol, replace_lines, or create_file until you have read ALL relevant
-  files and understand the full scope of changes needed.
-- Editing before understanding leads to incomplete patches. Most bugs require changes in
-  MULTIPLE locations — you must find them all before editing any of them.
+### Exploration Proportional to Complexity
+- Scale exploration to the task: simple fixes need one read then edit; large changes may
+  need a full exploration step first. Every step should produce a concrete output
+  (a file edit, a test run), not just reads.
+- Read relevant files before editing them, but do not over-explore.
 
 ### Fix Order (when editing multiple things)
 When a step involves fixes or implementations, apply changes in this order:
@@ -456,6 +454,7 @@ def build_system_prompt(
     tech_hints: list[str] | None = None,
     session_summaries: list[str] | None = None,
     identity_override: str | None = None,
+    protocol_override: str | None = None,
     small_model: bool = False,
 ) -> str:
     """Combine CLI identity, tech guidelines, session context, and loop protocol.
@@ -463,19 +462,18 @@ def build_system_prompt(
     Args:
         identity_override: If provided, replaces CLI_AGENT_IDENTITY as the
             base identity section (used by analyst and other non-developer agents).
+        protocol_override: If provided, replaces LOOP_PROTOCOL. Use for agents
+            that don't need plan/step management (e.g. analyst).
         small_model: If True, use shortened prompts optimized for <25B models.
     """
     if small_model:
-        # Always use the simplified identity for small models — flow-specific
-        # identities (DEVELOP_IDENTITY, etc.) mention tools not available to
-        # small models and are too long for their context window.
         identity = CLI_AGENT_IDENTITY_SMALL
         protocol = LOOP_PROTOCOL_SMALL
     else:
         from infinidev.prompts.variants import get_variant
 
         identity = identity_override or get_variant("loop.identity") or CLI_AGENT_IDENTITY
-        protocol = get_variant("loop.protocol") or LOOP_PROTOCOL
+        protocol = protocol_override or get_variant("loop.protocol") or LOOP_PROTOCOL
 
     parts: list[str] = [identity]
 
@@ -511,6 +509,7 @@ def build_iteration_prompt(
     max_context_tokens: int = 0,
     session_notes: list[str] | None = None,
     user_messages: list[str] | None = None,
+    skip_plan: bool = False,
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
@@ -612,14 +611,16 @@ def build_iteration_prompt(
             "</note-warning>"
         )
 
-    # Plan (if we have one)
-    if state.plan.steps:
-        parts.append(f"<plan>\n{state.plan.render()}\n</plan>")
-    else:
-        parts.append(
-            "<plan>\nNo plan yet. Create 2-3 concrete steps by calling step_complete "
-            "with add_step(title=\"...\") calls. You will add more steps as you discover what's needed.\n</plan>"
-        )
+    # Plan (if we have one) — skip for agents that don't use plans (e.g. analyst)
+    if not skip_plan:
+        if state.plan.steps:
+            parts.append(f"<plan>\n{state.plan.render()}\n</plan>")
+        else:
+            parts.append(
+                "<plan>\nNo plan yet. Your FIRST action must be to call add_step(title=\"...\") "
+                "2-3 times to create your initial steps, then call "
+                "step_complete(summary=\"Plan created\", status=\"continue\").\n</plan>"
+            )
 
     # Previous action summaries (rich format if available)
     if state.history:
@@ -644,8 +645,8 @@ def build_iteration_prompt(
                 f"{chr(10).join(avoid_lines)}\n</avoid>"
             )
 
-    # Current action
-    active = state.plan.active_step
+    # Current action — skip for agents that don't use plans
+    active = state.plan.active_step if not skip_plan else None
     if active:
         scope_warning = ""
         next_pending = [s for s in state.plan.steps if s.status == "pending"]
@@ -672,8 +673,8 @@ def build_iteration_prompt(
             "</current-action>"
         )
 
-    # Next actions (pending steps after current)
-    if state.plan.steps:
+    # Next actions (pending steps after current) — skip for non-plan agents
+    if state.plan.steps and not skip_plan:
         next_steps = [
             s for s in state.plan.steps
             if s.status == "pending" and (active is None or s.index > active.index)

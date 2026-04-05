@@ -36,7 +36,7 @@ class AddStepTool(InfinibayBaseTool):
 
     def _run(self, title: str, description: str = "", index: int = 0) -> str:
         from infinidev.tools.base.context import get_context_for_agent
-        ctx = get_context_for_agent(self._agent_id)
+        ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
             return self._error("No active plan context")
 
@@ -62,7 +62,7 @@ class ModifyStepTool(InfinibayBaseTool):
 
     def _run(self, index: int, title: str = "", description: str = "") -> str:
         from infinidev.tools.base.context import get_context_for_agent
-        ctx = get_context_for_agent(self._agent_id)
+        ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
             return self._error("No active plan context")
 
@@ -83,7 +83,7 @@ class RemoveStepTool(InfinibayBaseTool):
 
     def _run(self, index: int) -> str:
         from infinidev.tools.base.context import get_context_for_agent
-        ctx = get_context_for_agent(self._agent_id)
+        ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
             return self._error("No active plan context")
 

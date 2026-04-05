@@ -50,6 +50,9 @@ class ExecutionContext:
     file_tracker: FileChangeTracker
     start_iteration: int
 
+    # Behavior flags
+    skip_plan: bool = False  # True for agents that don't use plan management (e.g. analyst)
+
     @property
     def project_id(self) -> int:
         return self.agent.project_id

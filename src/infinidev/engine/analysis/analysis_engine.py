@@ -135,9 +135,10 @@ class AnalysisEngine:
             ANALYST_BACKSTORY,
             ANALYST_GOAL,
             ANALYST_SYSTEM_PROMPT,
+            ANALYST_PROTOCOL,
         )
 
-        # Create analyst agent with all tools but analyst identity
+        # Create analyst agent with analyst identity and simplified protocol
         analyst_agent = InfinidevAgent(
             agent_id="analyst",
             role="analyst",
@@ -147,14 +148,16 @@ class AnalysisEngine:
         )
         analyst_agent._session_summaries = session_summaries
         analyst_agent._system_prompt_identity = ANALYST_SYSTEM_PROMPT
+        analyst_agent._system_prompt_protocol = ANALYST_PROTOCOL
 
         # Build task prompt for the analyst
         task_description = self._build_analysis_prompt(user_input, session_summaries)
         expected_output = (
-            "A JSON object with your analysis result. The JSON must have an "
-            '"action" field set to one of: "passthrough", "ask", "research", '
-            'or "proceed". See the system prompt for the exact format of each action type. '
-            "Output ONLY the JSON object as your final_answer."
+            "Call step_complete(status='done', summary='Analysis complete', "
+            "final_answer='{your JSON}') with a JSON string containing your "
+            'analysis result. The JSON must have an "action" field set to one '
+            'of: "passthrough", "ask", "research", or "proceed". '
+            "Do NOT write JSON as text — use the step_complete tool call."
         )
 
         # Run the loop engine

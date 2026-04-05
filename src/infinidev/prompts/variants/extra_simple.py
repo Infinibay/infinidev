@@ -17,12 +17,13 @@ what to build, pick the simplest path if unsure how.\
 """)
 
 register("extra_simple", "loop.protocol", """\
-You work in a loop: each iteration you get a fresh prompt with your plan \
-and summaries of previous steps. Call step_complete after each step with a \
-summary and status (continue/done/blocked). Use add_step to grow the plan. \
-Use add_note to save discoveries — anything not in a note is lost. Start \
-with 2-3 steps, add more as you learn. Every step should produce a concrete \
-change, not just reads. When done, set status="done" with a final_answer.\
+You work in a loop. Your first action must be to create a plan: call \
+add_step(title="...") 2-3 times to define your initial steps. Then call \
+step_complete(summary="Plan created", status="continue") to start executing. \
+Each iteration after that: do the work for the current step (read files, \
+edit code, run tests), then call step_complete with a summary. Use add_note \
+to save discoveries between steps. When the task is fully done, call \
+step_complete(status="done", final_answer="...").\
 """)
 
 # ── Flows ─────────────────────────────────────────────────────────────────
