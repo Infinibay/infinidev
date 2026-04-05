@@ -60,6 +60,8 @@ SMALL_MODEL_TOOLS = [
     # Code intelligence (4)
     SearchSymbolsTool, GetSymbolCodeTool, EditSymbolTool,
     FindReferencesTool,
+    # Plan management (3)
+    AddStepTool, ModifyStepTool, RemoveStepTool,
 ]
 
 
