@@ -169,8 +169,9 @@ def run_engine_task(app: InfinidevApp, user_input: str) -> None:
                     app.invalidate()
 
             from infinidev.engine.flows import get_flow_config
+            from infinidev.prompts.flows import get_flow_identity
             flow_config = get_flow_config(analysis.flow)
-            app.agent._system_prompt_identity = flow_config.identity_prompt
+            app.agent._system_prompt_identity = get_flow_identity(analysis.flow)
             app.agent.backstory = flow_config.backstory
             desc, _ = task_prompt
             task_prompt = (desc, flow_config.expected_output)
@@ -291,7 +292,8 @@ def _run_flow_task(app: InfinidevApp, flow_name: str,
         app.invalidate()
 
         flow_config = get_flow_config(flow_name)
-        app.agent._system_prompt_identity = flow_config.identity_prompt
+        from infinidev.prompts.flows import get_flow_identity
+        app.agent._system_prompt_identity = get_flow_identity(flow_name)
         app.agent.backstory = flow_config.backstory
 
         app.agent.activate_context(session_id=app.session_id)

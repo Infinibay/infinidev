@@ -86,6 +86,9 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("TREE_MAX_LLM_CALLS", "Max LLM calls per exploration", "int"),
         ("TREE_MAX_TOOL_CALLS", "Max tool calls per exploration", "int"),
     ],
+    "Prompts": [
+        ("PROMPT_STYLE", "Prompt verbosity style (auto=detect from model size)", "select:auto,full,generalized,coding"),
+    ],
     "UI": [
         ("MARKDOWN_MESSAGES", "Render LLM responses with markdown styling", "bool"),
     ],

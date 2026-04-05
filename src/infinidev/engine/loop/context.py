@@ -70,14 +70,16 @@ Call help(tool_name) anytime you are unsure how to use a specific tool.
 - **get_symbol_code**(symbol): Get source code of a symbol by name.
 - **list_directory** / **glob** / **code_search**: Explore the codebase.
 
-### Writing — always read_file FIRST to get line numbers
+### Writing — YOU MUST USE THESE TOOLS TO EDIT FILES
+You CANNOT modify files by writing code in your response. The ONLY way to create or edit files is by calling these tools:
 - **create_file**(path, content): Create new files only. Fails if file already exists.
-- **replace_lines**(file_path, content, start_line, end_line): Replace a line range. Deterministic — no text matching.
+- **replace_lines**(file_path, content, start_line, end_line): Replace a line range. Always read_file FIRST to get line numbers.
 - **add_content_after_line**(file_path, line_number, content): Insert content after a line.
 - **add_content_before_line**(file_path, line_number, content): Insert content before a line.
 - **edit_symbol**(symbol, new_code): Replace a method/function by name.
 - **add_symbol**(code, file_path, class_name?): Add a method to a class or file.
 - **remove_symbol**(symbol): Remove a method/function by name.
+If you want to change code, you MUST call one of these tools. Do NOT just describe the change — execute it.
 
 ### Other
 - **search_symbols**(name): Search symbols across the project.
@@ -330,6 +332,7 @@ You can read/write code, run commands, search the web, and manage a knowledge ba
 
 ## Key Rules
 
+- You CANNOT edit files by writing code in your response. You MUST call replace_lines, create_file, edit_symbol, or similar tools.
 - Read files BEFORE editing. Get exact line numbers first.
 - Call step_complete AFTER each step.
 - Use add_note to save paths, findings, decisions between steps.
@@ -465,8 +468,15 @@ def build_system_prompt(
         identity = CLI_AGENT_IDENTITY_SMALL
         protocol = LOOP_PROTOCOL_SMALL
     else:
-        identity = identity_override or CLI_AGENT_IDENTITY
-        protocol = LOOP_PROTOCOL
+        from infinidev.prompts.variants import resolve_style, get_variant
+
+        style = resolve_style()
+        if style != "full":
+            identity = identity_override or get_variant("loop.identity", style) or CLI_AGENT_IDENTITY
+            protocol = get_variant("loop.protocol", style) or LOOP_PROTOCOL
+        else:
+            identity = identity_override or CLI_AGENT_IDENTITY
+            protocol = LOOP_PROTOCOL
 
     parts: list[str] = [identity]
 

@@ -143,5 +143,37 @@ STRATEGIES: dict[str, PhaseStrategy] = {
 
 
 def get_strategy(task_type: str) -> PhaseStrategy:
-    """Get the phase strategy for a task type. Defaults to 'feature'."""
-    return STRATEGIES.get(task_type, STRATEGIES["feature"])
+    """Get the phase strategy for a task type, respecting ``PROMPT_STYLE``.
+
+    When the resolved style is ``generalized`` or ``coding``, prompt strings
+    inside the strategy are replaced with their variant versions.  Numeric
+    limits and flags are always inherited from the full strategy.
+
+    Defaults to task_type ``'feature'`` when *task_type* is unknown.
+    """
+    base = STRATEGIES.get(task_type, STRATEGIES["feature"])
+
+    from infinidev.prompts.variants import resolve_style, get_variant
+
+    style = resolve_style()
+    if style == "full":
+        return base
+
+    return PhaseStrategy(
+        questions_prompt=base.questions_prompt,  # questions stay unchanged
+        investigate_prompt=get_variant(f"phase.{task_type}.investigate", style) or base.investigate_prompt,
+        plan_prompt=get_variant(f"phase.{task_type}.plan", style) or base.plan_prompt,
+        execute_prompt=get_variant(f"phase.{task_type}.execute", style) or base.execute_prompt,
+        investigate_identity=get_variant(f"phase.{task_type}.investigate_identity", style) or base.investigate_identity,
+        plan_identity=get_variant(f"phase.{task_type}.plan_identity", style) or base.plan_identity,
+        execute_identity=get_variant(f"phase.{task_type}.execute_identity", style) or base.execute_identity,
+        fallback_questions=base.fallback_questions,
+        questions_min=base.questions_min,
+        questions_max=base.questions_max,
+        investigate_max_tool_calls=base.investigate_max_tool_calls,
+        plan_min_steps=base.plan_min_steps,
+        plan_max_step_files=base.plan_max_step_files,
+        execute_max_tool_calls_per_step=base.execute_max_tool_calls_per_step,
+        auto_test=base.auto_test,
+        anti_rewrite=base.anti_rewrite,
+    )

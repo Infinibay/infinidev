@@ -299,11 +299,12 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         problem = prompt_text
 
     from infinidev.engine.flows import get_flow_config
+    from infinidev.prompts.flows import get_flow_identity
     from infinidev.engine.tree import TreeEngine
 
     if mode in ("explore", "brainstorm"):
         flow_config = get_flow_config(mode)
-        agent._system_prompt_identity = flow_config.identity_prompt
+        agent._system_prompt_identity = get_flow_identity(mode)
         agent.backstory = flow_config.backstory
         agent.activate_context(session_id=session_id)
         try:
@@ -336,7 +337,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
                 click.echo(click.style(f"  Analysis failed: {exc}", fg="yellow", dim=True))
 
         flow_config = get_flow_config(detected_flow)
-        agent._system_prompt_identity = flow_config.identity_prompt
+        agent._system_prompt_identity = get_flow_identity(detected_flow)
         agent.backstory = flow_config.backstory
         agent.activate_context(session_id=session_id)
 
@@ -529,9 +530,10 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                     reload_all()
                     from infinidev.engine.tree import TreeEngine
                     from infinidev.engine.flows import get_flow_config
+                    from infinidev.prompts.flows import get_flow_identity
                     click.echo(click.style(f"[explore] Exploring: {cmd_result[1]}", fg="yellow"))
                     flow_config = get_flow_config("explore")
-                    agent._system_prompt_identity = flow_config.identity_prompt
+                    agent._system_prompt_identity = get_flow_identity("explore")
                     agent.backstory = flow_config.backstory
                     agent.activate_context(session_id=session_id)
                     try:
@@ -548,9 +550,10 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                     reload_all()
                     from infinidev.engine.tree import TreeEngine
                     from infinidev.engine.flows import get_flow_config
+                    from infinidev.prompts.flows import get_flow_identity
                     click.echo(click.style(f"[brainstorm] Brainstorming: {cmd_result[1]}", fg="magenta"))
                     flow_config = get_flow_config("brainstorm")
-                    agent._system_prompt_identity = flow_config.identity_prompt
+                    agent._system_prompt_identity = get_flow_identity("brainstorm")
                     agent.backstory = flow_config.backstory
                     agent.activate_context(session_id=session_id)
                     try:
@@ -565,11 +568,12 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                 elif cmd_result == "init":
                     from infinidev.prompts.init_project import INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT
                     from infinidev.engine.flows import get_flow_config
+                    from infinidev.prompts.flows import get_flow_identity
                     from infinidev.config.settings import reload_all
                     reload_all()
                     click.echo(click.style("[init] Exploring and documenting project...", fg="yellow"))
                     flow_config = get_flow_config("document")
-                    agent._system_prompt_identity = flow_config.identity_prompt
+                    agent._system_prompt_identity = get_flow_identity("document")
                     agent.backstory = flow_config.backstory
                     agent.activate_context(session_id=session_id)
                     try:
@@ -596,8 +600,9 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
 
             # Configure agent with flow
             from infinidev.engine.flows import get_flow_config
+            from infinidev.prompts.flows import get_flow_identity
             flow_config = get_flow_config(flow)
-            agent._system_prompt_identity = flow_config.identity_prompt
+            agent._system_prompt_identity = get_flow_identity(flow)
             agent.backstory = flow_config.backstory
 
             if flow == "develop":
