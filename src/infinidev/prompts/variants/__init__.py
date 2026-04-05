@@ -16,8 +16,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 # ── Registry ────────────────────────────────────────────────────────────
-# Keyed by (style, prompt_name).  ``full`` is never registered — it's the
-# existing constants, used as the fallback when a variant is missing.
+# Keyed by (style, prompt_name).  All three styles (full, generalized,
+# coding) are registered as first-class variants.
 
 _REGISTRY: dict[tuple[str, str], str] = {}
 
@@ -28,7 +28,7 @@ def register(style: str, name: str, prompt: str) -> None:
     Parameters
     ----------
     style : str
-        ``"generalized"`` or ``"coding"``.
+        ``"full"``, ``"generalized"``, or ``"coding"``.
     name : str
         Dot-separated prompt name, e.g. ``"flow.develop.identity"``,
         ``"phase.bug.execute"``, ``"loop.identity"``.
@@ -42,12 +42,9 @@ def get_variant(name: str, style: str | None = None) -> str | None:
     """Return a prompt variant, or *None* if not registered.
 
     When *style* is ``None`` the effective style is resolved automatically.
-    ``full`` always returns ``None`` (caller should use the original constant).
     """
     if style is None:
         style = resolve_style()
-    if style == "full":
-        return None
     return _REGISTRY.get((style, name))
 
 
@@ -82,6 +79,10 @@ def registered_names(style: str) -> set[str]:
 
 def _load_variants() -> None:
     """Import variant modules to trigger their register() calls."""
+    try:
+        from infinidev.prompts.variants import full as _f  # noqa: F401
+    except Exception as exc:
+        logger.debug("Failed to load full variants: %s", exc)
     try:
         from infinidev.prompts.variants import generalized as _g  # noqa: F401
     except Exception as exc:

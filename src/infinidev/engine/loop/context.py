@@ -468,15 +468,10 @@ def build_system_prompt(
         identity = CLI_AGENT_IDENTITY_SMALL
         protocol = LOOP_PROTOCOL_SMALL
     else:
-        from infinidev.prompts.variants import resolve_style, get_variant
+        from infinidev.prompts.variants import get_variant
 
-        style = resolve_style()
-        if style != "full":
-            identity = identity_override or get_variant("loop.identity", style) or CLI_AGENT_IDENTITY
-            protocol = get_variant("loop.protocol", style) or LOOP_PROTOCOL
-        else:
-            identity = identity_override or CLI_AGENT_IDENTITY
-            protocol = LOOP_PROTOCOL
+        identity = identity_override or get_variant("loop.identity") or CLI_AGENT_IDENTITY
+        protocol = get_variant("loop.protocol") or LOOP_PROTOCOL
 
     parts: list[str] = [identity]
 

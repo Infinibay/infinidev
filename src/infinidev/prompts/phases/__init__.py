@@ -145,9 +145,8 @@ STRATEGIES: dict[str, PhaseStrategy] = {
 def get_strategy(task_type: str) -> PhaseStrategy:
     """Get the phase strategy for a task type, respecting ``PROMPT_STYLE``.
 
-    When the resolved style is ``generalized`` or ``coding``, prompt strings
-    inside the strategy are replaced with their variant versions.  Numeric
-    limits and flags are always inherited from the full strategy.
+    Prompt strings are resolved from the variant registry.  Numeric limits
+    and flags are always inherited from the base (full) strategy definition.
 
     Defaults to task_type ``'feature'`` when *task_type* is unknown.
     """
@@ -156,8 +155,6 @@ def get_strategy(task_type: str) -> PhaseStrategy:
     from infinidev.prompts.variants import resolve_style, get_variant
 
     style = resolve_style()
-    if style == "full":
-        return base
 
     return PhaseStrategy(
         questions_prompt=base.questions_prompt,  # questions stay unchanged

@@ -8,9 +8,6 @@ from infinidev.engine.flows import FlowConfig, register_flow, get_flow_config
 def get_flow_identity(flow_name: str, available_tools: set[str] | None = None) -> str:
     """Return the identity prompt for *flow_name*, respecting ``PROMPT_STYLE``.
 
-    When the resolved style is ``generalized`` or ``coding``, returns the
-    variant prompt.  Otherwise falls back to the full (original) prompt.
-
     For the ``develop`` flow with *available_tools* provided and style ``full``,
     delegates to ``get_develop_identity(available_tools)`` which generates a
     conditional tool section.
@@ -18,17 +15,13 @@ def get_flow_identity(flow_name: str, available_tools: set[str] | None = None) -
     from infinidev.prompts.variants import resolve_style, get_variant
 
     style = resolve_style()
-    if style != "full":
-        variant = get_variant(f"flow.{flow_name}.identity", style)
-        if variant:
-            return variant
 
-    # Full style (or variant not found — fall back to full)
-    if flow_name == "develop" and available_tools is not None:
+    # Special case: develop + available_tools + full → dynamic tool section
+    if flow_name == "develop" and available_tools is not None and style == "full":
         from infinidev.prompts.flows.develop import get_develop_identity
         return get_develop_identity(available_tools)
 
-    return get_flow_config(flow_name).identity_prompt
+    return get_variant(f"flow.{flow_name}.identity", style) or get_flow_config(flow_name).identity_prompt
 
 from infinidev.prompts.flows.develop import (
     DEVELOP_BACKSTORY,

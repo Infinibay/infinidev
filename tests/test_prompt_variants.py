@@ -48,8 +48,10 @@ class TestResolveStyle:
 # ── get_variant ──────────────────────────────────────────────────────────
 
 class TestGetVariant:
-    def test_returns_none_for_full(self):
-        assert get_variant("loop.identity", "full") is None
+    def test_full_returns_prompt(self):
+        result = get_variant("loop.identity", "full")
+        assert result is not None
+        assert len(result) > 1000  # full prompts are detailed
 
     def test_returns_none_for_missing(self):
         assert get_variant("nonexistent.prompt", "generalized") is None
@@ -103,6 +105,14 @@ class TestRegistrationCompleteness:
         "phase.other.investigate_identity",
     }
 
+    def test_full_covers_all_expected(self):
+        full_names = registered_names("full")
+        # phase.investigate.rules is a shared prefix only used by generalized/coding;
+        # in full, it's baked into the per-type investigate prompts.
+        expected = self.EXPECTED_NAMES - {"phase.investigate.rules"}
+        missing = expected - full_names
+        assert not missing, f"Missing in full: {missing}"
+
     def test_generalized_covers_all_expected(self):
         gen_names = registered_names("generalized")
         missing = self.EXPECTED_NAMES - gen_names
@@ -134,30 +144,25 @@ class TestSizeReduction:
         "flow.sysadmin.identity",
     ])
     def test_generalized_shorter_than_full(self, name):
+        full = get_variant(name, "full")
         gen = get_variant(name, "generalized")
+        assert full is not None
         assert gen is not None
-
-        # Compare against known full prompt sizes (approximate)
-        full_sizes = {
-            "loop.identity": 5000,
-            "loop.protocol": 7000,
-            "flow.develop.identity": 10000,
-            "flow.research.identity": 4000,
-            "flow.sysadmin.identity": 5000,
-        }
-        full_size = full_sizes[name]
-        ratio = len(gen) / full_size
+        ratio = len(gen) / len(full)
         assert ratio < 0.5, f"{name}: generalized is {ratio:.0%} of full (expected <50%)"
 
 
 # ── Phase strategy integration ───────────────────────────────────────────
 
 class TestPhaseStrategyIntegration:
-    def test_full_returns_original(self):
+    def test_full_returns_same_content(self):
         with patch("infinidev.prompts.variants.resolve_style", return_value="full"):
             from infinidev.prompts.phases import get_strategy, STRATEGIES
             s = get_strategy("bug")
-            assert s is STRATEGIES["bug"]
+            original = STRATEGIES["bug"]
+            assert s.execute_prompt == original.execute_prompt
+            assert s.plan_prompt == original.plan_prompt
+            assert s.questions_min == original.questions_min
 
     def test_generalized_returns_variant_prompts(self):
         with patch("infinidev.prompts.variants.resolve_style", return_value="generalized"):
@@ -174,7 +179,7 @@ class TestPhaseStrategyIntegration:
         with patch("infinidev.prompts.variants.resolve_style", return_value="full"):
             from infinidev.prompts.phases import get_strategy, STRATEGIES
             s = get_strategy("unknown_type")
-            assert s is STRATEGIES["feature"]
+            assert s.execute_prompt == STRATEGIES["feature"].execute_prompt
 
 
 # ── Flow identity integration ────────────────────────────────────────────
