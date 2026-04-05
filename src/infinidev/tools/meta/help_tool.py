@@ -14,9 +14,9 @@ from infinidev.tools.meta.help_input import HelpInput
 # ---------------------------------------------------------------------------
 
 _CATEGORY_INDEX = {
-    "file": ["read_file", "partial_read", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "list_directory", "glob", "code_search"],
+    "file": ["read_file", "partial_read", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "apply_patch", "list_directory", "glob", "code_search"],
     "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure", "analyze_code"],
-    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "rename_symbol", "move_symbol"],
+    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "apply_patch", "rename_symbol", "move_symbol"],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
     "shell": ["execute_command", "code_interpreter"],
     "knowledge": ["record_finding", "read_findings", "search_findings", "search_knowledge"],
@@ -41,13 +41,13 @@ Call help(context="<category>") for tool list, or help(context="<tool_name>") fo
     "file": """\
 FILE TOOLS — Reading and creating files
 
-  read_file(path)
+  read_file(file_path)
     Read entire file. Returns numbered lines. Auto-indexes the file for code intelligence.
 
-  partial_read(path, start_line, end_line)
+  partial_read(file_path, start_line, end_line)
     Read a specific line range (both 1-based, inclusive).
 
-  create_file(path, content)
+  create_file(file_path, content)
     Create a new file. FAILS if the file already exists.
 
   replace_lines(file_path, content, start_line, end_line)
@@ -58,6 +58,9 @@ FILE TOOLS — Reading and creating files
 
   add_content_before_line(file_path, line_number, content)
     Insert content before a specific line. See help("add_content_before_line").
+
+  apply_patch(patch, strip?)
+    Apply a unified diff to one or more files. See help("apply_patch").
 
   list_directory(path)
     List files and directories at a path.
@@ -77,9 +80,9 @@ EDIT TOOLS — Modifying existing files
 TWO APPROACHES:
 
 1. SYMBOLIC (preferred for methods/functions):
-   edit_symbol(symbol, new_code)  — Replace a method/function by name
-   add_symbol(code, file_path)    — Add a method to a file or class
-   remove_symbol(symbol)          — Remove a method by name
+   edit_symbol(symbol, new_code)      — Replace a method/function by name
+   add_symbol(file_path, code, class_name?) — Add a method to a file or class
+   remove_symbol(symbol)              — Remove a method by name
 
 2. LINE-BASED (for anything else):
    replace_lines(file_path, content, start_line, end_line)
@@ -90,7 +93,10 @@ TWO APPROACHES:
    add_content_after_line(file_path, line_number, content)
    add_content_before_line(file_path, line_number, content)
 
-4. REFACTORING (project-wide operations):
+4. PATCH (multi-file changes as unified diff):
+   apply_patch(patch, strip?) — Apply a unified diff to one or more files
+
+5. REFACTORING (project-wide operations):
    rename_symbol(symbol, new_name)  — Rename everywhere: definition + all references + imports
    move_symbol(symbol, target_file) — Move to another file/class, update imports
 
@@ -160,13 +166,13 @@ WEB TOOLS
     # ── Individual tools ──────────────────────────────────────────────────
 
     "read_file": """\
-read_file(path)
+read_file(file_path)
 
 Read the full contents of a file. Returns numbered lines for easy reference.
 Automatically indexes the file for code intelligence (symbol lookup, etc).
 
 PARAMS:
-  path (str, required) — File path (absolute or relative to workspace)
+  file_path (str, required) — File path (absolute or relative to workspace)
 
 RETURNS: Numbered lines in format "  LINE_NUM\\tCONTENT"
 
@@ -180,12 +186,12 @@ TIPS:
   - Binary files are automatically detected and rejected""",
 
     "partial_read": """\
-partial_read(path, start_line, end_line)
+partial_read(file_path, start_line, end_line)
 
 Read a specific range of lines from a file. Both bounds are 1-based and inclusive.
 
 PARAMS:
-  path (str, required)       — File path
+  file_path (str, required)  — File path
   start_line (int, required) — First line to read (1-based)
   end_line (int, required)   — Last line to read (1-based, inclusive)
 
@@ -194,13 +200,13 @@ EXAMPLES:
   partial_read(file_path="src/main.py", start_line=1, end_line=5)  # just the imports""",
 
     "create_file": """\
-create_file(path, content)
+create_file(file_path, content)
 
 Create a new file. FAILS if the file already exists. Creates parent directories as needed.
 
 PARAMS:
-  path (str, required)    — Path for the new file
-  content (str, required) — Content to write
+  file_path (str, required) — Path for the new file
+  content (str, required)   — Content to write
 
 EXAMPLES:
   create_file(file_path="src/utils/helpers.py", content="def greet(name):\\n    return f'Hello, {name}!'\\n")
@@ -259,15 +265,14 @@ TIPS:
   - Use get_symbol_code first to see the current implementation""",
 
     "add_symbol": """\
-add_symbol(code, file_path, class_name?, position?)
+add_symbol(file_path, code, class_name?)
 
 Add a new method or function to a file or class.
 
 PARAMS:
-  code (str, required)        — Complete method/function source
   file_path (str, required)   — Target file
-  class_name (str, optional)  — Class to add to (indentation auto-adjusted)
-  position (str, optional)    — "end" (default) — where to insert
+  code (str, required)        — Complete method/function source (including def line)
+  class_name (str, optional)  — Class to add to (indentation auto-adjusted). If empty, appends to end of file.
 
 EXAMPLES:
   # Add method to a class
@@ -383,6 +388,47 @@ EXAMPLES:
 
   # Add imports before the first function definition
   add_content_before_line(file_path="src/utils.py", line_number=5, content="from typing import Optional\\n")""",
+
+    "apply_patch": """\
+apply_patch(patch, strip?)
+
+Apply a unified diff patch to one or more files. Like running `patch -p1`.
+
+PARAMS:
+  patch (str, required) — Unified diff string (like output of `git diff`).
+                          Must include diff headers (--- a/file, +++ b/file) and hunks (@@ ... @@).
+  strip (int, optional) — Number of leading path components to strip (like `patch -pN`). Default 1.
+
+EXAMPLES:
+  # Single file change
+  apply_patch(patch=\"\"\"--- a/src/auth.py
++++ b/src/auth.py
+@@ -10,3 +10,4 @@
+     def verify(self):
+-        return True
++        if not self.token:
++            return False
++        return self._check(self.token)
+\"\"\")
+
+  # Multi-file change in one call
+  apply_patch(patch=\"\"\"--- a/src/auth.py
++++ b/src/auth.py
+@@ -1,3 +1,4 @@
+ import os
++import jwt
+ from .base import Base
+--- a/src/config.py
++++ b/src/config.py
+@@ -5,1 +5,1 @@
+-TIMEOUT = 30
++TIMEOUT = 60
+\"\"\")
+
+TIPS:
+  - Use for multi-file changes when you can express the fix as a diff
+  - Context lines (unchanged) help locate the right position
+  - strip=0 if paths are already correct (no a/ b/ prefix)""",
 
     "rename_symbol": """\
 rename_symbol(symbol, new_name, file_path?)
