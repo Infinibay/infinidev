@@ -20,7 +20,7 @@ import os
 import threading
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 _ctx_logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class ToolContext:
     workspace_path: Optional[str] = None
     event_id: Optional[int] = None
     resume_state: Optional[dict] = None
+    loop_state: Optional[Any] = None  # LoopState reference for plan tools
 
 
 # ── Setting context ──────────────────────────────────────────────────────────
@@ -125,6 +126,14 @@ def get_context_for_agent(agent_id: str) -> ToolContext:
     """Get context for a specific agent from process-global storage."""
     with _agent_contexts_lock:
         return _agent_contexts.get(agent_id, ToolContext())
+
+
+def set_loop_state(agent_id: str, loop_state: Any) -> None:
+    """Attach the LoopState to an agent's context so plan tools can access it."""
+    with _agent_contexts_lock:
+        ctx = _agent_contexts.get(agent_id)
+        if ctx:
+            ctx.loop_state = loop_state
 
 
 def clear_agent_context(agent_id: str) -> None:

@@ -34,9 +34,6 @@ from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.loop.tools import (
     ADD_NOTE_SCHEMA,
     STEP_COMPLETE_SCHEMA,
-    ADD_STEP_SCHEMA,
-    MODIFY_STEP_SCHEMA,
-    REMOVE_STEP_SCHEMA,
     build_tool_dispatch,
     build_tool_schemas,
     execute_tool_call,
@@ -243,6 +240,10 @@ class LoopEngine(AgentEngine):
 
         self._cancel_event.clear()
         self._last_state = ctx.state  # Make state available for live introspection
+
+        # Attach loop state to tool context so plan tools can modify the plan
+        from infinidev.tools.base.context import set_loop_state
+        set_loop_state(ctx.agent_id, ctx.state)
         _hook_manager.dispatch(_HookContext(
             event=_HookEvent.LOOP_START,
             metadata={"task_prompt": task_prompt, "tools": ctx.tools, "state": ctx.state},
@@ -385,7 +386,7 @@ class LoopEngine(AgentEngine):
             from infinidev.tools.base.context import bind_tools_to_agent
             bind_tools_to_agent(task_tools, agent.agent_id)
 
-        tool_schemas = build_tool_schemas(tools) if tools else [ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, STEP_COMPLETE_SCHEMA]
+        tool_schemas = build_tool_schemas(tools) if tools else [STEP_COMPLETE_SCHEMA]
         tool_dispatch = build_tool_dispatch(tools) if tools else {}
 
         file_tracker = FileChangeTracker()
@@ -447,7 +448,7 @@ class LoopEngine(AgentEngine):
         return ExecutionContext(
             llm_params=llm_params, manual_tc=manual_tc, is_small=is_small,
             system_prompt=system_prompt, tool_schemas=tool_schemas,
-            tool_dispatch=tool_dispatch, planning_schemas=[ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, STEP_COMPLETE_SCHEMA],
+            tool_dispatch=tool_dispatch, planning_schemas=[STEP_COMPLETE_SCHEMA],
             tools=tools, max_iterations=max_iterations, max_per_action=max_per_action,
             max_total_calls=max_total_calls, history_window=settings.LOOP_HISTORY_WINDOW,
             max_context_tokens=max_context_tokens,
@@ -556,7 +557,7 @@ class LoopEngine(AgentEngine):
                         step_result = forced
                         break
                     guard.check_error_circuit_breaker(ctx, messages)
-                elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks or classified.plan_ops:
+                elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks :
                     # Only pseudo-tools, no regular tools
                     self._build_pseudo_only_messages(ctx, classified, messages, result)
 
@@ -610,7 +611,7 @@ class LoopEngine(AgentEngine):
                  "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                 for tc in classified.regular
             ]
-            for pseudo_tc in classified.thinks + classified.notes + classified.plan_ops + ([classified.step_complete] if classified.step_complete else []):
+            for pseudo_tc in classified.thinks + classified.notes +([classified.step_complete] if classified.step_complete else []):
                 assistant_msg["tool_calls"].append({
                     "id": pseudo_tc.id, "type": "function",
                     "function": {"name": pseudo_tc.function.name, "arguments": pseudo_tc.function.arguments},
@@ -696,8 +697,6 @@ class LoopEngine(AgentEngine):
                 tool_results_text.append('[Tool: add_session_note] Result:\n{"status": "noted"}')
             for tk in classified.thinks:
                 tool_results_text.append('[Tool: think] Result:\n{"status": "acknowledged"}')
-            for po in classified.plan_ops:
-                tool_results_text.append(f'[Tool: {po.function.name}] Result:\n{{"status": "updated"}}')
             if tool_results_text:
                 messages.append({"role": "user", "content": "\n\n".join(tool_results_text)})
 
@@ -709,8 +708,7 @@ class LoopEngine(AgentEngine):
                 messages.append({"role": "tool", "tool_call_id": nc.id, "content": '{"status": "noted"}'})
             for snc in classified.session_notes:
                 messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
-            for po in classified.plan_ops:
-                messages.append({"role": "tool", "tool_call_id": po.id, "content": '{"status": "updated"}'})
+
             if classified.step_complete:
                 messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
 
@@ -731,7 +729,7 @@ class LoopEngine(AgentEngine):
             })
         else:
             assistant_msg = {"role": "assistant", "content": message.content or ""}
-            pseudo_calls = classified.thinks + classified.notes + classified.session_notes + classified.plan_ops + ([classified.step_complete] if classified.step_complete else [])
+            pseudo_calls = classified.thinks + classified.notes + classified.session_notes +([classified.step_complete] if classified.step_complete else [])
             assistant_msg["tool_calls"] = [
                 {"id": pc.id, "type": "function",
                  "function": {"name": pc.function.name, "arguments": pc.function.arguments}}
@@ -744,8 +742,7 @@ class LoopEngine(AgentEngine):
                 messages.append({"role": "tool", "tool_call_id": nc.id, "content": '{"status": "noted"}'})
             for snc in classified.session_notes:
                 messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
-            for po in classified.plan_ops:
-                messages.append({"role": "tool", "tool_call_id": po.id, "content": '{"status": "updated"}'})
+
             if classified.step_complete:
                 messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
 

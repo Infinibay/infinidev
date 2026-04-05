@@ -7,6 +7,7 @@ from infinidev.tools.file import (
     AddContentAfterLineTool, AddContentBeforeLineTool,
 )
 from infinidev.tools.meta import HelpTool
+from infinidev.tools.meta.plan_tools import AddStepTool, ModifyStepTool, RemoveStepTool
 from infinidev.tools.git import (
     GitBranchTool, GitCommitTool,
     GitDiffTool, GitStatusTool,
@@ -30,7 +31,7 @@ from infinidev.tools.code_intel import (
 )
 
 FILE_TOOLS = [ReadFileTool, PartialReadTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
-META_TOOLS = [HelpTool]
+META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]

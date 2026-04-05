@@ -338,9 +338,8 @@ def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     schemas.append(ADD_NOTE_SCHEMA)
     schemas.append(ADD_SESSION_NOTE_SCHEMA)
     schemas.append(THINK_SCHEMA)
-    schemas.append(ADD_STEP_SCHEMA)
-    schemas.append(MODIFY_STEP_SCHEMA)
-    schemas.append(REMOVE_STEP_SCHEMA)
+    # Plan tools (add_step, modify_step, remove_step) are real tools
+    # registered in META_TOOLS — they get their schemas via tool_to_openai_schema().
 
     # Deep-sanitize schemas for providers that reject anyOf/oneOf/complex constructs
     from infinidev.config.model_capabilities import get_model_capabilities

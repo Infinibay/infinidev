@@ -17,8 +17,6 @@ if TYPE_CHECKING:
 class ToolProcessor:
     """Classifies tool calls and orchestrates execution + message building."""
 
-    _PLAN_OP_NAMES = frozenset({"add_step", "modify_step", "remove_step"})
-
     @staticmethod
     def classify(tool_calls: list[Any]) -> ClassifiedCalls:
         """Separate tool calls into categories."""
@@ -33,8 +31,6 @@ class ToolProcessor:
                 result.session_notes.append(tc)
             elif name == "think":
                 result.thinks.append(tc)
-            elif name in ToolProcessor._PLAN_OP_NAMES:
-                result.plan_ops.append(tc)
             else:
                 result.regular.append(tc)
         return result
@@ -83,38 +79,5 @@ class ToolProcessor:
             except (json.JSONDecodeError, AttributeError):
                 pass
 
-        # Plan operation pseudo-tools: add_step, modify_step, remove_step
-        # Batch all ops and apply once so the bulk-removal guard works correctly.
-        from infinidev.engine.loop.step_operation import StepOperation
-        plan_op_batch: list[StepOperation] = []
-        for po in classified.plan_ops:
-            try:
-                po_args = _safe_json_loads(po.function.arguments) if isinstance(po.function.arguments, str) else (po.function.arguments or {})
-                if not isinstance(po_args, dict):
-                    continue
-                name = po.function.name
-                raw_index = po_args.get("index")
-                if name == "add_step":
-                    title = po_args.get("title", "")
-                    desc = po_args.get("description", "")
-                    if title:
-                        if raw_index is not None:
-                            index = int(raw_index)
-                        else:
-                            # Auto-assign: max existing index + 1 (accounting for batch)
-                            existing_max = max((s.index for s in ctx.state.plan.steps), default=0)
-                            batch_max = max((op.index for op in plan_op_batch if op.op == "add"), default=0)
-                            index = max(existing_max, batch_max) + 1
-                        plan_op_batch.append(StepOperation(op="add", index=index, title=title, description=desc))
-                elif raw_index is not None:
-                    index = int(raw_index)
-                    if name == "modify_step":
-                        title = po_args.get("title", "")
-                        desc = po_args.get("description", "")
-                        plan_op_batch.append(StepOperation(op="modify", index=index, title=title, description=desc))
-                    elif name == "remove_step":
-                        plan_op_batch.append(StepOperation(op="remove", index=index))
-            except (json.JSONDecodeError, AttributeError, ValueError, TypeError):
-                pass
-        if plan_op_batch:
-            ctx.state.plan.apply_operations(plan_op_batch)
+        # Plan tools (add_step, modify_step, remove_step) are now real tools
+        # handled via execute_tool_call — no pseudo-tool processing needed.
