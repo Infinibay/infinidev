@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from infinidev.engine.llm_client import call_llm
@@ -11,6 +12,83 @@ from infinidev.engine.engine_logging import emit_loop_event, log as _log, DIM, R
 from infinidev.prompts.phases import PhaseStrategy
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_questions_text_mode(
+    agent: Any,
+    description: str,
+    strategy: PhaseStrategy,
+    verbose: bool,
+    max_questions: int,
+) -> list[dict[str, Any]]:
+    """Generate questions via text output for small models.
+
+    Single LLM call — asks for a numbered list, parses it.
+    Far more reliable than multi-round tool calling for <40B models.
+    """
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.engine.loop.context import build_system_prompt
+
+    q_min = strategy.questions_min
+
+    prompt = (
+        f"You are preparing to work on a task. Generate investigation "
+        f"questions to understand the codebase before implementing.\n\n"
+        f"Task: {description}\n\n"
+        f"{strategy.questions_prompt}\n\n"
+        f"Output a NUMBERED LIST of {q_min}-{max_questions} questions.\n"
+        f"Each question should be answerable by reading code or running commands.\n\n"
+        f"Example format:\n"
+        f"1. Where is the auth module and what function handles login?\n"
+        f"2. Are there existing tests for the login flow?\n"
+        f"3. What is the current test baseline?\n\n"
+        f"Output ONLY the numbered list."
+    )
+
+    llm_params = get_litellm_params()
+    system_prompt = build_system_prompt(
+        agent.backstory,
+        identity_override=getattr(agent, '_system_prompt_identity', None),
+        small_model=True,
+    )
+
+    _pid = getattr(agent, "project_id", 0)
+    _aid = getattr(agent, "agent_id", "")
+
+    def _on_thinking(text: str) -> None:
+        emit_loop_event("loop_thinking_chunk", _pid, _aid, {"text": text})
+
+    try:
+        response = call_llm(
+            llm_params,
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            tools=None,
+            on_thinking_chunk=_on_thinking,
+        )
+    except Exception as exc:
+        logger.warning("Text-mode question generation failed: %s", str(exc)[:200])
+        return []
+
+    text = response.choices[0].message.content or ""
+    # Strip thinking tags
+    text = re.sub(
+        r"<(?:think|thinking)>.*?</(?:think|thinking)>",
+        "", text, flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    questions: list[dict[str, Any]] = []
+    for match in re.finditer(r'^\s*\d+\s*[.):\-]\s*(.+)', text, re.MULTILINE):
+        q = match.group(1).strip().rstrip("?") + "?"
+        if len(q) >= 10:
+            questions.append({"question": q, "intent": "general"})
+
+    if verbose and questions:
+        _log(f"  {DIM}Text-mode questions: {len(questions)} parsed{RESET}")
+
+    return questions[:max_questions]
 
 
 def _generate_questions(agent: Any,
@@ -23,8 +101,9 @@ def _generate_questions(agent: Any,
 
     Same pattern as _generate_plan: model calls generate_question once
     per question, then step_complete(done) when finished.
+    For small models, tries text-mode (numbered list) first.
     """
-    from infinidev.config.llm import get_litellm_params
+    from infinidev.config.llm import get_litellm_params, _is_small_model
     from infinidev.engine.loop.context import build_system_prompt
     from infinidev.engine.loop.tools import (
         STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
@@ -33,6 +112,16 @@ def _generate_questions(agent: Any,
 
     q_max = max_questions or strategy.questions_max
     q_min = strategy.questions_min
+
+    # Small models: try text-mode first (more reliable than tool calling)
+    if _is_small_model():
+        if verbose:
+            _log(f"  {DIM}Using text-mode question generation (small model){RESET}")
+        text_qs = _generate_questions_text_mode(agent, description, strategy, verbose, q_max)
+        if len(text_qs) >= q_min:
+            return text_qs
+        if verbose and text_qs:
+            _log(f"  {YELLOW}⚠ Text-mode produced {len(text_qs)} questions (need {q_min}), falling back to tool mode{RESET}")
 
     user_prompt = (
         f"You are preparing to work on a task. Generate investigation "

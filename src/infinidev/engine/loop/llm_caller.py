@@ -215,7 +215,7 @@ class LLMCaller:
                 project_id=ctx.project_id, agent_id=ctx.agent_id,
             )
             ctx.manual_tc = True
-            tools_section = build_tools_prompt_section(ctx.tool_schemas)
+            tools_section = build_tools_prompt_section(ctx.tool_schemas, small_model=ctx.is_small)
             ctx.system_prompt = build_system_prompt(
                 ctx.agent.backstory,
                 tech_hints=getattr(ctx.agent, '_tech_hints', None),

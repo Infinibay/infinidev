@@ -77,8 +77,14 @@ def apply_thinking_budget(
     if not settings.THINKING_ENABLED:
         return _disable_thinking(kwargs, provider_id, model)
 
-    preset = settings.THINKING_BUDGET.lower().strip()
-    tokens = _resolve_tokens()
+    # ── Small models: force low thinking to prevent reasoning bloat ──
+    from infinidev.config.llm import _is_small_model
+    if _is_small_model(model):
+        preset = "low"
+        tokens = _PRESET_TOKENS["low"]  # 1024
+    else:
+        preset = settings.THINKING_BUDGET.lower().strip()
+        tokens = _resolve_tokens()
 
     # ── Anthropic ────────────────────────────────────────────────
     if provider_id == "anthropic":

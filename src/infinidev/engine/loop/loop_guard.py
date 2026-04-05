@@ -33,6 +33,8 @@ class LoopGuard:
         self.last_tool_sig: str | None = None
         self.same_tool_streak = 0
         self.repetition_nudged = False
+        self.reads_since_last_note = 0
+        self._note_nudged = False
 
     def on_tool_result(self, tool_name: str, args: str, had_error: bool) -> None:
         """Track a tool call for repetition/error detection."""
@@ -41,6 +43,10 @@ class LoopGuard:
         else:
             self.consecutive_tool_errors = 0
 
+        # Track reads without notes (for small model nudging)
+        if tool_name in ("read_file", "partial_read"):
+            self.reads_since_last_note += 1
+
         sig = f"{tool_name}:{args}"
         if sig == self.last_tool_sig:
             self.same_tool_streak += 1
@@ -48,6 +54,11 @@ class LoopGuard:
             self.last_tool_sig = sig
             self.same_tool_streak = 1
             self.repetition_nudged = False
+
+    def reset_read_counter(self) -> None:
+        """Reset the read-without-note counter (called when a note is recorded)."""
+        self.reads_since_last_note = 0
+        self._note_nudged = False
 
     def check_repetition(
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],
@@ -106,9 +117,25 @@ class LoopGuard:
                 "content": (
                     f"WARNING: Your last {_MAX} tool calls all failed. "
                     "You are stuck in a failing pattern. Change your approach:\n"
-                    "- If edit_file keeps failing, use write_file to rewrite the entire file.\n"
-                    "- If read_file keeps failing on a path, use list_directory to find the correct path.\n"
-                    "- If nothing works, call step_complete to move on and revisit later."
+                    "- If edit_symbol or replace_lines keeps failing, try a different edit tool.\n"
+                    "- If read_file keeps failing on a path, use glob or list_directory to find the correct path.\n"
+                    "- If nothing works, call step_complete(status='blocked') to move on."
+                ),
+            })
+
+    def check_note_discipline(
+        self, ctx: ExecutionContext, messages: list[dict[str, Any]],
+    ) -> None:
+        """Nudge small models to save notes after multiple reads without noting."""
+        if not self._is_small:
+            return
+        if self.reads_since_last_note >= 2 and not self._note_nudged:
+            self._note_nudged = True
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You read files but saved no notes. Call add_note NOW with what you found. "
+                    "Example: add_note(note='verify_token at auth.py line 42, uses JWT')"
                 ),
             })
 
@@ -133,11 +160,13 @@ class LoopGuard:
                 ))
             messages.append({"role": "assistant", "content": content})
             if ctx.manual_tc:
+                # For small models: include available tool names in the nudge
+                available = sorted(list(ctx.tool_dispatch.keys())[:12])
+                tools_str = ", ".join(available) if available else "read_file, step_complete"
                 nudge = (
-                    "Good reasoning. Now execute it by responding with a "
-                    "JSON tool call. Example:\n"
-                    '{"tool_calls": [{"name": "tool_name", '
-                    '"arguments": {"param": "value"}}]}'
+                    "You must respond with a JSON tool call. Exact format:\n"
+                    '{"tool_calls": [{"name": "read_file", "arguments": {"file_path": "src/main.py"}}]}\n\n'
+                    f"Available tools: {tools_str}"
                 )
             else:
                 nudge = (

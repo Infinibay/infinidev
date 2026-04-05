@@ -33,7 +33,11 @@ from infinidev.engine.loop.models import (
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.loop.tools import (
     ADD_NOTE_SCHEMA,
+    ADD_STEP_SCHEMA,
+    MODIFY_STEP_SCHEMA,
+    REMOVE_STEP_SCHEMA,
     STEP_COMPLETE_SCHEMA,
+    THINK_SCHEMA,
     build_tool_dispatch,
     build_tool_schemas,
     execute_tool_call,
@@ -386,9 +390,6 @@ class LoopEngine(AgentEngine):
             from infinidev.tools.base.context import bind_tools_to_agent
             bind_tools_to_agent(task_tools, agent.agent_id)
 
-        tool_schemas = build_tool_schemas(tools) if tools else [STEP_COMPLETE_SCHEMA]
-        tool_dispatch = build_tool_dispatch(tools) if tools else {}
-
         file_tracker = FileChangeTracker()
         self._last_file_tracker = file_tracker
         self._last_total_tool_calls = 0
@@ -403,8 +404,9 @@ class LoopEngine(AgentEngine):
         if is_small and task_tools is None:
             from infinidev.tools import get_tools_for_role
             tools = get_tools_for_role("developer", small_model=True)
-            tool_schemas = build_tool_schemas(tools)
-            tool_dispatch = build_tool_dispatch(tools)
+
+        tool_schemas = build_tool_schemas(tools, small_model=is_small) if tools else [STEP_COMPLETE_SCHEMA]
+        tool_dispatch = build_tool_dispatch(tools) if tools else {}
 
         system_prompt = build_system_prompt(
             agent.backstory,
@@ -415,7 +417,7 @@ class LoopEngine(AgentEngine):
             small_model=is_small,
         )
         if manual_tc:
-            tools_section = build_tools_prompt_section(tool_schemas)
+            tools_section = build_tools_prompt_section(tool_schemas, small_model=is_small)
             system_prompt = f"{system_prompt}\n\n{tools_section}"
             logger.info("LoopEngine [%s]: manual tool calling mode", getattr(agent, "agent_id", "?"))
 
@@ -449,7 +451,11 @@ class LoopEngine(AgentEngine):
         return ExecutionContext(
             llm_params=llm_params, manual_tc=manual_tc, is_small=is_small,
             system_prompt=system_prompt, tool_schemas=tool_schemas,
-            tool_dispatch=tool_dispatch, planning_schemas=[STEP_COMPLETE_SCHEMA],
+            tool_dispatch=tool_dispatch,
+            planning_schemas=[
+                ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA,
+                ADD_NOTE_SCHEMA, THINK_SCHEMA, STEP_COMPLETE_SCHEMA,
+            ],
             tools=tools, max_iterations=max_iterations, max_per_action=max_per_action,
             max_total_calls=max_total_calls, history_window=settings.LOOP_HISTORY_WINDOW,
             max_context_tokens=max_context_tokens,
@@ -490,6 +496,7 @@ class LoopEngine(AgentEngine):
             session_notes=self.session_notes if self.session_notes else None,
             user_messages=injected if injected else None,
             skip_plan=ctx.skip_plan,
+            small_model=ctx.is_small,
         )
         return [
             {"role": "system", "content": ctx.system_prompt},
@@ -545,6 +552,9 @@ class LoopEngine(AgentEngine):
                 guard.text_retries = 0
                 classified = tool_proc.classify(result.tool_calls)
                 tool_proc.process_pseudo_tools(ctx, classified, self)
+                # Reset read-without-note counter when notes are added
+                if classified.notes:
+                    guard.reset_read_counter()
 
                 if classified.regular:
                     action_tool_calls = self._execute_regular_tools(
@@ -560,11 +570,31 @@ class LoopEngine(AgentEngine):
                         step_result = forced
                         break
                     guard.check_error_circuit_breaker(ctx, messages)
+                    guard.check_note_discipline(ctx, messages)
                 elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks :
                     # Only pseudo-tools, no regular tools
                     self._build_pseudo_only_messages(ctx, classified, messages, result)
 
                 if classified.step_complete:
+                    # For small models: gate step_complete on having notes
+                    # (prevents context loss from models that never use add_note)
+                    if (ctx.is_small
+                        and not ctx.state.notes
+                        and action_tool_calls >= 2
+                        and not getattr(self, '_step_complete_gated', False)):
+                        self._step_complete_gated = True
+                        nudge = (
+                            "You must save notes before completing this step. "
+                            "Call add_note with file paths and findings first. "
+                            "Example: add_note(note='auth.py:42 verify_token() uses JWT')"
+                        )
+                        if ctx.manual_tc:
+                            messages.append({"role": "user", "content": nudge})
+                        else:
+                            messages.append({"role": "tool", "tool_call_id": classified.step_complete.id,
+                                             "content": nudge})
+                        continue  # Don't break — let model add notes first
+                    self._step_complete_gated = False
                     step_result = _parse_step_complete_args(classified.step_complete.function.arguments)
                     break
             else:
@@ -659,6 +689,8 @@ class LoopEngine(AgentEngine):
 
                 if not _tool_error:
                     _update_opened_files_cache(ctx.state, tc.function.name, tc.function.arguments, result)
+                    # Auto-note for small models on successful reads
+                    ToolProcessor.auto_note_for_small(ctx, tc.function.name, tc.function.arguments, result)
 
                 counter_tag = f"\n[Tool call {action_tool_calls + 1}/{ctx.max_per_action} for this step]"
                 if is_parallel:
@@ -691,6 +723,10 @@ class LoopEngine(AgentEngine):
                         messages.append({"role": "user", "content": _nudge_msg})
 
                 ctx.state.tick_opened_files(1)
+
+        # Small model: compact old messages to prevent context bloat
+        if ctx.is_small:
+            self._compact_messages_for_small(messages)
 
         # Manual mode: send all results as single user message
         if ctx.manual_tc:
@@ -790,6 +826,38 @@ class LoopEngine(AgentEngine):
             else:
                 # Manual mode or text-only: content IS the reasoning
                 msg["content"] = f"[thinking truncated] {first_line}"
+
+    @staticmethod
+    def _compact_messages_for_small(messages: list[dict[str, Any]]) -> None:
+        """Compact old messages in the inner loop for small models.
+
+        Small models have limited context.  This truncates tool result
+        messages older than the last 2 assistant rounds to their first
+        200 chars, preventing context bloat from large tool outputs.
+        The system and first user message are always preserved.
+        """
+        # Count assistant messages from the end to find the cutoff
+        assistant_count = 0
+        cutoff_idx = len(messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "assistant":
+                assistant_count += 1
+                if assistant_count >= 2:
+                    cutoff_idx = i
+                    break
+
+        # Truncate tool results before the cutoff (skip system + first user)
+        for i in range(2, cutoff_idx):
+            msg = messages[i]
+            if msg.get("role") == "tool":
+                content = msg.get("content", "")
+                if len(content) > 200:
+                    msg["content"] = content[:200] + "\n[truncated for context]"
+            elif msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                if content and len(content) > 100:
+                    first_line = content.split("\n", 1)[0][:100]
+                    msg["content"] = f"[compacted] {first_line}"
 
     def _handle_explore(
         self, ctx: ExecutionContext, step_result: StepResult, iteration: int,

@@ -16,6 +16,107 @@ from infinidev.prompts.phases.plan import PLANNER_IDENTITY as _PLANNER_IDENTITY
 logger = logging.getLogger(__name__)
 
 
+def _parse_numbered_plan(text: str) -> list[dict[str, Any]]:
+    """Parse a numbered list into plan steps.
+
+    Accepts formats like:
+        1. Read src/auth.py to find verify_token()
+        2) Fix verify_token() in src/auth.py — add expiry check
+        3 - Run pytest tests/test_auth.py to verify
+    """
+    steps: list[dict[str, Any]] = []
+    for match in re.finditer(r'^\s*(\d+)\s*[.):\-]\s*(.+)', text, re.MULTILINE):
+        title = match.group(2).strip()
+        if len(title) >= 10:  # Skip trivially short lines
+            steps.append({
+                "step": len(steps) + 1,
+                "title": title,
+                "explanation": "",
+                "files": [],
+            })
+    return steps
+
+
+def _generate_plan_text_mode(
+    agent: Any,
+    description: str,
+    answers_text: str,
+    notes_text: str,
+    strategy: PhaseStrategy,
+    verbose: bool,
+) -> list[dict[str, Any]]:
+    """Generate plan via text output for models that struggle with add_step tool.
+
+    Small models (<40B) often fail to produce reliable tool calls in a
+    multi-round loop.  This single-shot approach asks for a numbered list
+    and parses it, which is far more reliable.
+    """
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.engine.loop.context import build_system_prompt
+    from infinidev.prompts.phases.plan import PLANNER_IDENTITY as _default_identity
+
+    prompt = (
+        f"Create a step-by-step implementation plan.\n\n"
+        f"## TASK\n{description}\n\n"
+        f"## INVESTIGATION RESULTS\n{answers_text}\n"
+        f"{notes_text}\n\n"
+        f"## OUTPUT FORMAT\n"
+        f"Output a NUMBERED LIST of implementation steps.\n"
+        f"Each step MUST name the FILE and FUNCTION to change.\n"
+        f"Include 'Run tests' steps after every 2-3 implementation steps.\n\n"
+        f"## EXAMPLES\n"
+        f"1. Read src/auth.py to find verify_token()\n"
+        f"2. Fix verify_token() in src/auth.py — add expiry check\n"
+        f"3. Run pytest tests/test_auth.py to verify fix\n"
+        f"4. Fix refresh_token() in src/auth.py — return new token\n"
+        f"5. Run full test suite\n\n"
+        f"Output ONLY the numbered list. No explanations before or after."
+    )
+
+    llm_params = get_litellm_params()
+    identity = strategy.plan_identity or _default_identity
+    system_prompt = build_system_prompt(
+        "Software engineering planner.",
+        identity_override=identity,
+        small_model=True,
+    )
+
+    _pid = getattr(agent, "project_id", 0)
+    _aid = getattr(agent, "agent_id", "")
+
+    def _on_thinking(text: str) -> None:
+        emit_loop_event("loop_thinking_chunk", _pid, _aid, {"text": text})
+
+    try:
+        response = call_llm(
+            llm_params,
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            tools=None,
+            on_thinking_chunk=_on_thinking,
+        )
+    except Exception as exc:
+        logger.warning("Text-mode plan generation failed: %s", str(exc)[:200])
+        if verbose:
+            _log(f"  {RED}⚠ Text-mode plan failed: {str(exc)[:80]}{RESET}")
+        return []
+
+    text = response.choices[0].message.content or ""
+    # Strip thinking tags that some models emit
+    text = re.sub(
+        r"<(?:think|thinking)>.*?</(?:think|thinking)>",
+        "", text, flags=re.DOTALL | re.IGNORECASE,
+    )
+    steps = _parse_numbered_plan(text)
+
+    if verbose and steps:
+        _log(f"  {DIM}Text-mode plan: {len(steps)} steps parsed{RESET}")
+
+    return steps
+
+
 def _generate_plan(agent: Any,
     description: str,
     answers: list[dict[str, str]],
@@ -36,7 +137,7 @@ def _generate_plan(agent: Any,
     says done or max rounds reached.
     """
     from infinidev.engine.llm_client import call_llm
-    from infinidev.config.llm import get_litellm_params
+    from infinidev.config.llm import get_litellm_params, _is_small_model
     from infinidev.engine.loop.context import build_system_prompt
     from infinidev.engine.loop.tools import STEP_COMPLETE_SCHEMA, ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, build_tool_schemas
     from infinidev.engine.formats.tool_call_parser import parse_step_complete_args
@@ -50,6 +151,18 @@ def _generate_plan(agent: Any,
     if all_notes:
         notes_lines = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(all_notes))
         notes_text = f"\n## DETAILED NOTES FROM INVESTIGATION\n{notes_lines}\n"
+
+    # Small models: try text-mode plan generation first (more reliable)
+    if _is_small_model():
+        if verbose:
+            _log(f"  {DIM}Using text-mode plan generation (small model){RESET}")
+        text_steps = _generate_plan_text_mode(
+            agent, description, answers_text, notes_text, strategy, verbose,
+        )
+        if len(text_steps) >= strategy.plan_min_steps:
+            return text_steps
+        if verbose and text_steps:
+            _log(f"  {YELLOW}⚠ Text-mode produced {len(text_steps)} steps (need {strategy.plan_min_steps}), falling back to tool mode{RESET}")
 
     baseline_str = ""
     if strategy.auto_test and test_checkpoint:

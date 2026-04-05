@@ -73,11 +73,25 @@ class PhaseEngine:
         self._test_checkpoint = TestCheckpoint(test_command, workdir)
 
         # ── Step 0: CLASSIFY ─────────────────────────────────────
+        from infinidev.config.llm import _is_small_model
         if depth_config is None:
-            classification = self._classify(agent, description, verbose)
+            if _is_small_model():
+                # Skip classification LLM call for small models — saves
+                # an entire round-trip and small models get it wrong anyway.
+                from infinidev.gather.models import ClassificationResult, TicketType
+                classification = ClassificationResult(
+                    ticket_type=TicketType.feature,
+                    reasoning="Small model — skipped classification.",
+                    depth=DepthLevel.standard,
+                    depth_reasoning="Small model default.",
+                )
+                if verbose:
+                    _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — type: feature, depth: standard (small model — skipped classify)")
+            else:
+                classification = self._classify(agent, description, verbose)
             task_type = classification.ticket_type.value
             depth_config = DEPTH_CONFIGS.get(classification.depth, DEPTH_CONFIGS[DepthLevel.standard])
-            if verbose:
+            if verbose and not _is_small_model():
                 _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — type: {task_type}, depth: {classification.depth.value}")
                 if classification.depth_reasoning:
                     _log(f"  {DIM}{classification.depth_reasoning}{RESET}")

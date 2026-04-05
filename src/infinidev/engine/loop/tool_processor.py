@@ -81,3 +81,37 @@ class ToolProcessor:
 
         # Plan tools (add_step, modify_step, remove_step) are now real tools
         # handled via execute_tool_call — no pseudo-tool processing needed.
+
+    @staticmethod
+    def auto_note_for_small(
+        ctx: "ExecutionContext",
+        tool_name: str,
+        tool_args: dict | str,
+        tool_result: str,
+    ) -> None:
+        """For small models: auto-save a note when reading files.
+
+        Small models often forget to call add_note after reading a file,
+        losing critical context between steps.  This automatically records
+        the file path (and optionally key symbols) as a note.
+        """
+        _MAX_NOTES = 20
+        if not ctx.is_small:
+            return
+
+        if isinstance(tool_args, str):
+            import json as _json
+            try:
+                tool_args = _json.loads(tool_args) if tool_args.strip() else {}
+            except Exception:
+                tool_args = {}
+
+        if tool_name in ("read_file", "partial_read"):
+            path = tool_args.get("file_path", tool_args.get("path", ""))
+            if path and len(ctx.state.notes) < _MAX_NOTES:
+                # Check if we already have a note about this file
+                path_short = path.split("/")[-1] if "/" in path else path
+                already_noted = any(path_short in n for n in ctx.state.notes)
+                if not already_noted:
+                    ctx.state.notes.append(f"Read {path}")
+                    ctx.state.tool_calls_since_last_note = 0

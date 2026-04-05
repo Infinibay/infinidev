@@ -41,13 +41,14 @@ def _get_model_size_b(model: str | None = None) -> int:
 
 
 def _is_small_model(model: str | None = None) -> bool:
-    """Return True if the model has fewer than 25B parameters.
+    """Return True if the model has fewer than 40B parameters.
 
-    Size is detected from the model name string.  Returns False when
-    the size cannot be determined (safe default — treat as large).
+    Covers 7B, 8B, 14B, 27B, and 32B models that struggle with complex
+    tool orchestration.  Size is detected from the model name string.
+    Returns False when size cannot be determined (safe default — treat as large).
     """
     size = _get_model_size_b(model)
-    return 0 < size < 25
+    return 0 < size < 40
 
 
 def get_litellm_params() -> dict[str, Any]:

@@ -21,6 +21,52 @@ if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
 
 
+def _auto_enhance_record(record: ActionRecord, messages: list[dict]) -> ActionRecord:
+    """Extract key facts from tool calls for small models that produce poor summaries.
+
+    Scans the step's messages for read/write tool calls and auto-populates
+    the ActionRecord's discovered_context and changes_made fields.
+    """
+    import json as _json
+    files_read: list[str] = []
+    files_changed: list[str] = []
+    errors: list[str] = []
+
+    for msg in messages:
+        if msg.get("role") == "assistant":
+            for tc in msg.get("tool_calls", []):
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "")
+                args_str = fn.get("arguments", "{}")
+                try:
+                    args = _json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
+                except (_json.JSONDecodeError, TypeError):
+                    args = {}
+                path = args.get("file_path", args.get("path", ""))
+                if fn_name in ("read_file", "partial_read") and path:
+                    if path not in files_read:
+                        files_read.append(path)
+                elif fn_name in ("replace_lines", "create_file", "edit_symbol",
+                                 "add_symbol", "remove_symbol", "add_content_after_line",
+                                 "add_content_before_line") and path:
+                    if path not in files_changed:
+                        files_changed.append(path)
+        elif msg.get("role") == "tool":
+            content = msg.get("content", "")
+            if '"error"' in content and len(errors) < 3:
+                # Extract first 80 chars of error
+                errors.append(content[:80])
+
+    if files_read and not record.discovered_context:
+        record.discovered_context = f"Read: {', '.join(files_read[:5])}"
+    if files_changed and not record.changes_made:
+        record.changes_made = f"Modified: {', '.join(files_changed[:5])}"
+    if errors and not record.pending_items:
+        record.pending_items = f"Errors: {len(errors)} tool failures"
+
+    return record
+
+
 def _get_settings():
     """Lazy import to avoid circular import at module load time."""
     from infinidev.config.settings import settings
@@ -115,6 +161,10 @@ class StepManager:
                 record = ActionRecord(step_index=step_index, summary=step_result.summary, tool_calls_count=action_tool_calls)
         else:
             record = ActionRecord(step_index=step_index, summary=step_result.summary, tool_calls_count=action_tool_calls)
+
+        # For small models: auto-enhance record with extracted facts
+        if ctx.is_small:
+            record = _auto_enhance_record(record, messages)
 
         ctx.state.history.append(record)
 

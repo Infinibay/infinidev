@@ -17,7 +17,7 @@ _READ_ONLY_TOOLS = {
     "read_file", "list_directory", "glob", "code_search",
     "project_structure", "find_definition", "find_references",
     "list_symbols", "search_symbols", "get_symbol_code",
-    "search_knowledge", "read_findings", "search_findings",
+    "read_findings", "search_findings",
     "web_search", "web_fetch", "execute_command",
 }
 
@@ -72,13 +72,16 @@ def _investigate(agent: Any,
             "{{previous_answers}}", previous_text
         )
 
+        from infinidev.config.llm import _is_small_model as _is_sm
+        _max_iters = 2 if _is_sm() else 3
+
         engine = LoopEngine()
         result = engine.execute(
             agent=agent,
             task_prompt=(inv_prompt, "Answer the question with add_note."),
             verbose=verbose,
             task_tools=read_tools,
-            max_iterations=3,
+            max_iterations=_max_iters,
             max_total_tool_calls=strategy.investigate_max_tool_calls,
             max_tool_calls_per_action=strategy.investigate_max_tool_calls,
             nudge_threshold=strategy.investigate_max_tool_calls - 2,
@@ -192,13 +195,16 @@ def _investigate_iteratively(agent: Any,
             "{{previous_answers}}", previous_text
         )
 
+        from infinidev.config.llm import _is_small_model as _is_sm2
+        _max_iters2 = 2 if _is_sm2() else 3
+
         engine = LoopEngine()
         result = engine.execute(
             agent=agent,
             task_prompt=(inv_prompt, "Answer the question with add_note."),
             verbose=verbose,
             task_tools=read_tools,
-            max_iterations=3,
+            max_iterations=_max_iters2,
             max_total_tool_calls=strategy.investigate_max_tool_calls,
             max_tool_calls_per_action=strategy.investigate_max_tool_calls,
             nudge_threshold=strategy.investigate_max_tool_calls - 2,

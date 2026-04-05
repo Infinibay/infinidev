@@ -312,139 +312,65 @@ Each iteration you receive a `<context-budget>` block showing tokens used vs. av
 """
 
 
-# ── Simplified prompts for small models (<25B) ──────────────────────────
+# ── Simplified prompts for small models (<40B) ──────────────────────────
 
 CLI_AGENT_IDENTITY_SMALL = """\
-## Identity
-
 You are a software engineer assistant working via a terminal CLI.
-You can read/write code, run commands, search the web, and manage a knowledge base.
 
-## Workflow
+## How to Edit Files
+You CANNOT edit files by writing code in your response.
+You MUST call one of these tools: replace_lines, create_file, edit_symbol.
+ALWAYS read a file BEFORE editing it — you need exact line numbers.
 
-1. **Understand** — Read code or research the topic.
-2. **Plan** — Create 2-3 concrete steps.
-3. **Execute** — Use tools to implement.
-4. **Verify** — Run tests, check output.
-5. **Report** — Summarize results via step_complete(status="done", final_answer="...").
-
-## Key Rules
-
-- You CANNOT edit files by writing code in your response. You MUST call replace_lines, create_file, edit_symbol, or similar tools.
-- Read files BEFORE editing. Get exact line numbers first.
-- Call step_complete AFTER each step.
-- Use add_note to save paths, findings, decisions between steps.
-- Use add_session_note to save context that the next task will need (persists across tasks).
-- Run tests after code changes.
-- Create a git branch before making changes.
-- Lead with results, not narration. Say what you did, not what you're about to do.
-
-## NEVER Do These
-
-- NEVER edit a file you haven't read in this step — you need exact line numbers.
-- NEVER rewrite an entire file to change one function — use replace_lines or edit_symbol.
-- NEVER skip verification — run tests or import check after every edit.
-- NEVER keep trying if 3 fixes in a row create new errors — call step_complete(status="blocked").
-- NEVER add code that wasn't asked for — no extra error handling, no refactoring, no cleanup.
-- NEVER read the same file twice in one step — the content is already in your context.
-- NEVER make product or design decisions. The product belongs to the user, not you.
-  If something is ambiguous about WHAT to build, ask. Execute what was asked.
-- NEVER use `sudo` or any command that requires interactive stdin (passwd, ssh, read, etc.).
+## Rules
+1. Read files BEFORE editing them.
+2. Call step_complete AFTER each step.
+3. Call add_note to save paths and findings between steps.
+4. Run tests after code changes.
+5. Do NOT add code that wasn't asked for.
+6. Do NOT make product or design decisions — ask the user.
+7. Do NOT use `sudo` or interactive commands.
 """
 
 LOOP_PROTOCOL_SMALL = """\
 ## Loop Protocol
 
-You operate in a plan-execute-summarize loop.
+You work in steps. Each step: use tools → call step_complete.
 
-**MEMORY RULE: Your context resets every step. Use `add_note` after every read/discovery and `add_session_note` before status="done". Details not in notes are LOST.**
+**⚠ CRITICAL: Your context resets every step. Call add_note after EVERY file read. Details not in notes are PERMANENTLY LOST.**
 
-### Planning
-- Start with 2-3 concrete steps. Add more as you discover what's needed.
-- Every step MUST name the file and function to change.
-- BAD: "Implement the feature" (which file? which function?)
-- BAD: "Fix the bug" (where? what's broken?)
-- GOOD: "Read src/auth.py to find verify_token()" (specific file + function)
-- GOOD: "Fix verify_token() in src/auth.py — add expiry check" (file + function + what to do)
+### How to Start
+Call add_step 2-3 times to create your plan, then call step_complete(status="continue").
+Every step MUST name: FILE + FUNCTION + CHANGE.
+- GOOD: "Read src/auth.py to find verify_token()"
+- BAD: "Implement the feature"
 
-### Exploration First
-- Your first 1-2 steps MUST be read-only (read_file, code_search, glob, list_directory).
-- Do NOT edit until you have read ALL relevant files.
-- Before fixing a bug: trace what imports the file AND what the file imports.
+### Step Cycle (follow this pattern)
+1. read_file → see code and line numbers
+2. add_note → save what you found (file path, function name, line number)
+3. replace_lines or edit_symbol → make ONE edit
+4. execute_command → run tests to verify
+5. step_complete → summarize and move on
 
-### Fix Order
-When editing, apply changes in this order:
-1. Imports/dependencies first
-2. Data structures/types second
-3. Logic/feature code third
-4. Tests last
-5. Verify with test run
-Wrong order = cascading failures.
+### step_complete
+- summary: "Did: X. Found: Y. Next: Z." (internal note, user never sees this)
+- status: "continue" (more work) | "done" (finished) | "blocked" (stuck)
+- final_answer: (REQUIRED when status=done) — this is what the user sees
 
-### 3-Strike Rule
-If 3 edits in a row each create NEW errors, STOP. Call step_complete(status="blocked").
-The problem is architectural — more fixes will make it worse.
+### Plan Management (call BEFORE step_complete)
+- add_step(title="..."): Add a new step
+- modify_step(index=N, title="..."): Update a step
+- remove_step(index=N): Delete a step
 
-### Step Execution
-- Each step = 1-8 tool calls.
-- Use `think` tool to reason before acting.
-- Call `step_complete` AFTER each step.
-- Stay within the scope of <current-action>.
+### Recovery — When Things Go Wrong
+- File not found → use glob or list_directory to find it
+- Wrong line numbers → re-read the file
+- Tool error → read the error message, try a different approach
+- 3 failures in a row → call step_complete(status="blocked")
 
-### step_complete Parameters
-- **summary** (required): Use format: "Read: ... | Changed: ... | Remaining: ... | Issues: ..."
-- **status** (required): "continue" (more work), "done" (finished), "blocked" (stuck)
-- **final_answer** (required when status=done): Complete user-facing answer.
-
-### Plan Management (use BEFORE step_complete)
-- **add_step**(title, description?, index?): Add a step (omit index to append at end).
-- **modify_step**(index, title?, description?): Update a pending step.
-- **remove_step**(index): Remove a pending step.
-
-### Verification After Every Edit
-After EVERY code change, verify with a specific command:
-- Python: `python -m pytest tests/ -x -q` or `python -c "import module_name"`
-- JavaScript: `npm test` or `node -e "require('./module')"`
-- Rust: `cargo test` or `cargo check`
-- Go: `go test ./...`
-Pick the most specific test possible. "Run tests" is not enough — run the exact command.
-
-### If Something Breaks
-If your edit causes test failures or import errors:
-1. Read the file again to see what actually changed
-2. Check the error message carefully — is it your change or pre-existing?
-3. If your change caused it: fix with a targeted replace_lines (not a full rewrite)
-4. If pre-existing: note it and move on — don't fix unrelated bugs
-
-### Complete Step Example
-Here is one complete step cycle showing the correct pattern:
-```
-Step: "Fix verify_token() in src/auth.py — add expiry check"
-  1. read_file(file_path="src/auth.py")                    → see code + line numbers
-  2. add_note("verify_token at line 42-58, no exp check")  → save for later
-  3. replace_lines(file_path="src/auth.py",
-       content="    if payload.get('exp', 0) < time.time():\n        return None\n",
-       start_line=45, end_line=45)                      → surgical edit
-  4. execute_command("python -m pytest tests/test_auth.py::test_expired -v")
-     → PASSED                                           → verify
-  5. step_complete(summary="Changed: auth.py:45 — added expiry check. Test passes.",
-       status="continue")                               → done with step
-```
-
-### Session Notes — `add_session_note`
-Session notes persist across ALL tasks in this session (task notes reset each task).
-Use `add_session_note` for things the NEXT task will benefit from:
-- What you changed and where (files, functions, line ranges)
-- Project conventions or patterns you discovered
-- Important paths, entry points, build/test commands that work
-**Before status="done", ALWAYS call `add_session_note` with a summary of your work.**
-
-### Critical Rules
-- NEVER set status="done" without a substantive final_answer.
-- summary is internal only — user sees final_answer.
-- Use add_note to save file paths, function names, key findings.
-- Before status="done", call add_session_note with what you learned/changed.
-- You MUST call step_complete after every step.
+### Session Notes
+Before status="done", call add_session_note with what you changed.
+Session notes persist across tasks — task notes (add_note) reset each task.
 """
 
 
@@ -510,6 +436,7 @@ def build_iteration_prompt(
     session_notes: list[str] | None = None,
     user_messages: list[str] | None = None,
     skip_plan: bool = False,
+    small_model: bool = False,
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
@@ -519,14 +446,15 @@ def build_iteration_prompt(
     """
     parts: list[str] = []
 
-    # Smart context summarizer - injects condensed action history
-    summarizer = SmartContextSummarizer()
-    smart_summary = summarizer.generate_summary(state)
-    if smart_summary:
-        parts.append(
-            "<smart-context-summary>\n"
-            f"Loop progress summary:\n{smart_summary}\n</smart-context-summary>"
-        )
+    # Smart context summarizer — skip for small models (redundant with notes)
+    if not small_model:
+        summarizer = SmartContextSummarizer()
+        smart_summary = summarizer.generate_summary(state)
+        if smart_summary:
+            parts.append(
+                "<smart-context-summary>\n"
+                f"Loop progress summary:\n{smart_summary}\n</smart-context-summary>"
+            )
 
     # Project knowledge (auto-injected from DB)
     if project_knowledge:
@@ -593,23 +521,29 @@ def build_iteration_prompt(
         )
     # Note-taking nudge — fires even when some notes exist, based on recent activity
     if state.tool_calls_since_last_note >= 4 and state.total_tool_calls >= 4:
-        parts.append(
-            "<note-reminder>\n"
-            "You have made multiple tool calls without saving notes. Your context resets "
-            "each step — anything not in add_note will be lost. Save key facts NOW: "
-            "file paths, function locations, decisions made, values discovered.\n"
-            "</note-reminder>"
-        )
+        if small_model:
+            parts.append("⚠ SAVE NOTES NOW — call add_note with file paths and findings.")
+        else:
+            parts.append(
+                "<note-reminder>\n"
+                "You have made multiple tool calls without saving notes. Your context resets "
+                "each step — anything not in add_note will be lost. Save key facts NOW: "
+                "file paths, function locations, decisions made, values discovered.\n"
+                "</note-reminder>"
+            )
     # Stronger warning if previous steps completed but zero notes saved
     if state.history and not state.notes and state.total_tool_calls >= 4:
-        parts.append(
-            "<note-warning>\n"
-            "WARNING: You have completed step(s) but have ZERO notes saved. "
-            "Your context from previous steps is limited to ~150-token summaries. "
-            "Critical details (file paths, line numbers, function signatures, decisions) "
-            "MUST be saved via add_note or they are permanently lost.\n"
-            "</note-warning>"
-        )
+        if small_model:
+            parts.append("⚠ WARNING: ZERO notes saved. Call add_note NOW or you will lose all context.")
+        else:
+            parts.append(
+                "<note-warning>\n"
+                "WARNING: You have completed step(s) but have ZERO notes saved. "
+                "Your context from previous steps is limited to ~150-token summaries. "
+                "Critical details (file paths, line numbers, function signatures, decisions) "
+                "MUST be saved via add_note or they are permanently lost.\n"
+                "</note-warning>"
+            )
 
     # Plan (if we have one) — skip for agents that don't use plans (e.g. analyst)
     if not skip_plan:
@@ -624,8 +558,10 @@ def build_iteration_prompt(
 
     # Previous action summaries (rich format if available)
     if state.history:
+        # Small models: only show last 2 records to save context
+        history_slice = state.history[-2:] if small_model else state.history
         summaries = []
-        for record in state.history:
+        for record in history_slice:
             lines = [f"### Step {record.step_index}: {record.summary}"]
             if record.changes_made:
                 lines.append(f"  Changes: {record.changes_made}")
@@ -636,33 +572,42 @@ def build_iteration_prompt(
             summaries.append("\n".join(lines))
         parts.append(f"<previous-actions>\n{chr(10).join(summaries)}\n</previous-actions>")
 
-        # Consolidated anti-patterns from all steps
-        all_anti = [r.anti_patterns for r in state.history if r.anti_patterns]
-        if all_anti:
-            avoid_lines = [f"- {ap}" for ap in all_anti]
-            parts.append(
-                f"<avoid>\nDo NOT repeat these patterns from previous steps:\n"
-                f"{chr(10).join(avoid_lines)}\n</avoid>"
-            )
+        # Consolidated anti-patterns from all steps — skip for small models
+        if not small_model:
+            all_anti = [r.anti_patterns for r in state.history if r.anti_patterns]
+            if all_anti:
+                avoid_lines = [f"- {ap}" for ap in all_anti]
+                parts.append(
+                    f"<avoid>\nDo NOT repeat these patterns from previous steps:\n"
+                    f"{chr(10).join(avoid_lines)}\n</avoid>"
+                )
 
     # Current action — skip for agents that don't use plans
     active = state.plan.active_step if not skip_plan else None
     if active:
-        scope_warning = ""
-        next_pending = [s for s in state.plan.steps if s.status == "pending"]
-        if next_pending:
-            off_limits = ", ".join(f'"{s.title}"' for s in next_pending[:3])
-            scope_warning = (
-                f"\n\nSCOPE CONSTRAINT: This step is ONLY about: {active.title}\n"
-                f"Do NOT work on future steps: {off_limits}\n"
-                f"If you discover that this step requires work from future steps, "
-                f"call step_complete with status='continue' and add new steps."
+        if small_model:
+            # Simplified scope for small models
+            guidance = f"\n{active.explanation}" if active.explanation else ""
+            parts.append(
+                f"<current-action>\nDO NOW: Step {active.index} — {active.title}"
+                f"{guidance}\n</current-action>"
             )
-        guidance = f"\n\n{active.explanation}" if active.explanation else ""
-        parts.append(
-            f"<current-action>\nStep {active.index}: {active.title}"
-            f"{guidance}{scope_warning}\n</current-action>"
-        )
+        else:
+            scope_warning = ""
+            next_pending = [s for s in state.plan.steps if s.status == "pending"]
+            if next_pending:
+                off_limits = ", ".join(f'"{s.title}"' for s in next_pending[:3])
+                scope_warning = (
+                    f"\n\nSCOPE CONSTRAINT: This step is ONLY about: {active.title}\n"
+                    f"Do NOT work on future steps: {off_limits}\n"
+                    f"If you discover that this step requires work from future steps, "
+                    f"call step_complete with status='continue' and add new steps."
+                )
+            guidance = f"\n\n{active.explanation}" if active.explanation else ""
+            parts.append(
+                f"<current-action>\nStep {active.index}: {active.title}"
+                f"{guidance}{scope_warning}\n</current-action>"
+            )
     elif state.plan.steps:
         # All planned steps are done — prompt to continue or finish
         parts.append(
@@ -733,13 +678,22 @@ def build_iteration_prompt(
     return "\n\n".join(parts)
 
 
-def build_tools_prompt_section(tool_schemas: list[dict[str, Any]]) -> str:
+def build_tools_prompt_section(
+    tool_schemas: list[dict[str, Any]],
+    *,
+    small_model: bool = False,
+) -> str:
     """Render tool schemas as a text section for non-FC models.
 
     When the model doesn't support native function calling, tool descriptions
     are embedded directly in the system prompt. The model is instructed to
     respond with a JSON object containing a "tool_calls" array.
+
+    For small models, uses a compact grouped format with fewer details.
     """
+    if small_model:
+        return _build_tools_prompt_small(tool_schemas)
+
     lines = [
         "## Available Tools",
         "",
@@ -780,5 +734,67 @@ def build_tools_prompt_section(tool_schemas: list[dict[str, Any]]) -> str:
                 lines.append(f"  - `{pname}` ({ptype}{req_marker}): {pdesc}")
 
         lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_tools_prompt_small(tool_schemas: list[dict[str, Any]]) -> str:
+    """Compact tool prompt for small models — grouped by category, minimal details."""
+    # Group tools by workflow category
+    _GROUPS = {
+        "READING": {"read_file", "partial_read", "list_directory", "glob", "code_search",
+                    "project_structure", "list_symbols", "search_symbols", "get_symbol_code",
+                    "find_definition", "find_references"},
+        "EDITING": {"replace_lines", "create_file", "edit_symbol", "add_symbol",
+                    "remove_symbol", "add_content_after_line", "add_content_before_line",
+                    "apply_patch"},
+        "SHELL": {"execute_command"},
+        "GIT": {"git_branch", "git_commit", "git_diff", "git_status"},
+        "WEB": {"web_search", "web_fetch"},
+        "KNOWLEDGE": {"record_finding", "search_findings", "read_findings"},
+        "STEP MANAGEMENT": {"step_complete", "add_note", "add_session_note", "add_step",
+                           "modify_step", "remove_step"},
+    }
+
+    # Collect available tool names
+    available = {}
+    for schema in tool_schemas:
+        func = schema.get("function", {})
+        name = func.get("name", "unknown")
+        available[name] = func
+
+    lines = [
+        "## Tools",
+        "",
+        "Respond with a JSON tool call. Format:",
+        '{"tool_calls": [{"name": "tool_name", "arguments": {"param": "value"}}]}',
+        "",
+        "Example:",
+        '{"tool_calls": [{"name": "read_file", "arguments": {"file_path": "src/main.py"}}]}',
+        "",
+    ]
+
+    for group_name, group_tools in _GROUPS.items():
+        present = [n for n in group_tools if n in available]
+        if not present:
+            continue
+        tool_list = ", ".join(present)
+        lines.append(f"**{group_name}**: {tool_list}")
+
+    lines.append("")
+
+    # Show required params for the most important tools
+    _KEY_TOOLS = ["read_file", "replace_lines", "create_file", "execute_command",
+                  "step_complete", "add_note", "add_step", "glob", "code_search"]
+    for name in _KEY_TOOLS:
+        if name not in available:
+            continue
+        func = available[name]
+        params = func.get("parameters", {})
+        props = params.get("properties", {})
+        required = set(params.get("required", []))
+        req_params = [f"{p}" for p in required if p in props]
+        if req_params:
+            lines.append(f"- **{name}**({', '.join(req_params)})")
 
     return "\n".join(lines)

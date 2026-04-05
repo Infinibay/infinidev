@@ -327,17 +327,20 @@ REMOVE_STEP_SCHEMA: dict[str, Any] = {
 }
 
 
-def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
+def build_tool_schemas(tools: list[Any], *, small_model: bool = False) -> list[dict[str, Any]]:
     """Convert a list of tools to OpenAI function-calling schemas.
 
-    Always appends the engine pseudo-tools (step_complete, add_note, think)
-    so the LLM can signal step completion, take notes, and reason.
+    Always appends the engine pseudo-tools (step_complete, add_note)
+    so the LLM can signal step completion and take notes.
+    The ``think`` pseudo-tool is excluded for small models to prevent
+    reasoning bloat (small models waste tokens on think → reason → think loops).
     """
     schemas = [tool_to_openai_schema(t) for t in tools]
     schemas.append(STEP_COMPLETE_SCHEMA)
     schemas.append(ADD_NOTE_SCHEMA)
     schemas.append(ADD_SESSION_NOTE_SCHEMA)
-    schemas.append(THINK_SCHEMA)
+    if not small_model:
+        schemas.append(THINK_SCHEMA)
     # Plan tools (add_step, modify_step, remove_step) are real tools
     # registered in META_TOOLS — they get their schemas via tool_to_openai_schema().
 
@@ -345,6 +348,10 @@ def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     from infinidev.config.model_capabilities import get_model_capabilities
     if get_model_capabilities().needs_schema_sanitization:
         schemas = [_sanitize_tool_schema(s) for s in schemas]
+
+    # For small models: shorten descriptions and remove "explore" status
+    if small_model:
+        schemas = [_simplify_schema_for_small(s) for s in schemas]
 
     return schemas
 
@@ -357,6 +364,32 @@ def _sanitize_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if params:
         sanitized = _sanitize_schema_deep(params)
         schema["function"]["parameters"] = sanitized
+    return schema
+
+
+def _simplify_schema_for_small(schema: dict[str, Any]) -> dict[str, Any]:
+    """Simplify a tool schema for small models (<40B).
+
+    - Shortens descriptions to ≤120 chars
+    - Removes 'explore' from step_complete status enum
+    - Strips optional parameter descriptions to save tokens
+    """
+    import copy
+    schema = copy.deepcopy(schema)
+    func = schema.get("function", {})
+
+    # Shorten description
+    desc = func.get("description", "")
+    if len(desc) > 120:
+        func["description"] = desc[:117] + "..."
+
+    # Remove 'explore' status from step_complete (confuses small models)
+    if func.get("name") == "step_complete":
+        props = func.get("parameters", {}).get("properties", {})
+        status_prop = props.get("status", {})
+        if "enum" in status_prop:
+            status_prop["enum"] = [s for s in status_prop["enum"] if s != "explore"]
+
     return schema
 
 
@@ -394,7 +427,41 @@ def execute_tool_call(
 
     tool = dispatch.get(name)
     if tool is None:
-        return json.dumps({"error": f"Unknown tool: {name}"})
+        # Case-insensitive match
+        for rname, rtool in dispatch.items():
+            if rname.lower() == name.lower():
+                tool, name = rtool, rname
+                logger.info("Tool case-corrected: '%s' → '%s'", name, rname)
+                break
+
+    if tool is None:
+        # Common hallucinations from small models
+        _HALLUCINATION_MAP = {
+            "write_file": "create_file",
+            "edit_file": "replace_lines",
+            "read": "read_file",
+            "search": "code_search",
+            "run": "execute_command",
+            "run_command": "execute_command",
+            "ls": "list_directory",
+            "find": "glob",
+            "grep": "code_search",
+            "cat": "read_file",
+            "vim": "replace_lines",
+            "search_knowledge": "search_findings",
+        }
+        canonical = _HALLUCINATION_MAP.get(name) or _TOOL_ALIASES.get(name)
+        if canonical:
+            tool = dispatch.get(canonical)
+            if tool:
+                logger.info("Tool hallucination recovered: '%s' → '%s'", name, canonical)
+                name = canonical
+
+    if tool is None:
+        available = sorted(dispatch.keys())[:15]
+        return json.dumps({
+            "error": f"Unknown tool: {name}. Available tools: {', '.join(available)}",
+        })
 
     # Parse arguments
     if isinstance(arguments, str):
