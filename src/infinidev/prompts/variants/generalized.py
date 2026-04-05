@@ -37,8 +37,10 @@ survive between steps -- use add_note after every discovery and \
 add_session_note before finishing a task. Details not captured in notes are \
 permanently lost.
 
-Start every task with 1-2 read-only exploration steps before touching any \
-code. Never plan what you cannot concretely anticipate -- begin with 2-3 \
+Scale exploration to task complexity: simple fixes need one read then edit; \
+large changes may need a full exploration step first. Every step should \
+produce a concrete output (file edit, test run), not just reads. \
+Never plan what you cannot concretely anticipate -- begin with 2-3 \
 specific steps and grow the plan organically as you learn. Each step must \
 name the file, the function or class, and the specific change; vague \
 descriptions like "implement the feature" are never acceptable. A step \
@@ -52,7 +54,7 @@ before finishing.
 
 End each step by calling step_complete with a summary (internal, ~150 tokens, \
 the user never sees this), a status (continue/done/blocked), and optional \
-next_steps to grow or trim the plan. The final_answer field is the only \
+Use add_step/modify_step/remove_step to manage the plan. The final_answer field is the only \
 thing the user sees -- it must be complete and self-contained. Before setting \
 status="done", always call add_session_note to preserve context for future \
 tasks. Respect the context budget: above 70% usage, wrap up; above 85%, \
@@ -182,7 +184,7 @@ feasibility kill creativity prematurely.
 # ── Phase Execute ─────────────────────────────────────────────────────
 
 register("generalized", "phase.bug.execute", """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 Stay within this step's scope -- modify only the file(s) and function(s) \
@@ -197,7 +199,7 @@ changed and the test result.
 """)
 
 register("generalized", "phase.feature.execute", """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 Implement only what this step describes. Use create_file for new files, \
@@ -212,7 +214,7 @@ result.
 """)
 
 register("generalized", "phase.refactor.execute", """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 Make ONE structural change (extract, rename, or move). Use edit_symbol to \
@@ -224,7 +226,7 @@ test count.
 """)
 
 register("generalized", "phase.other.execute", """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 Do exactly what the step says. For config or text changes use replace_lines \
@@ -270,7 +272,7 @@ implementation plans -- never code. You read code and investigation notes \
 to understand the problem, then break it into small concrete steps a \
 developer can execute one at a time. Every step must name the file, the \
 function or class, and the specific change. Use step_complete with \
-next_steps to build the plan incrementally, adding 2-5 steps at a time. \
+add_step to build the plan incrementally, adding 2-5 steps at a time. \
 Include test verification steps after every 2-3 implementation steps. \
 Order by dependency: foundations first, complex features last. You never \
 call create_file, replace_lines, edit_symbol, or any file-modifying tool.
@@ -306,7 +308,7 @@ count must remain constant throughout.
 
 register("generalized", "phase.other.plan", """\
 Create a simple plan where each step changes one thing and verifies it \
-worked. Use step_complete with next_steps to build the plan.
+worked. Use add_step to build the plan, then step_complete when done.
 """)
 
 # ── Phase Plan Identities ────────────────────────────────────────────

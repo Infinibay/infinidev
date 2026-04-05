@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from pydantic import BaseModel, Field
 from infinidev.engine.loop.plan_step import PlanStep
 from infinidev.engine.loop.step_operation import StepOperation
+
+logger = logging.getLogger(__name__)
 
 
 class LoopPlan(BaseModel):
@@ -47,19 +50,39 @@ class LoopPlan(BaseModel):
         self.activate_next()
 
     def apply_operations(self, ops: list[StepOperation]) -> None:
-        """Apply structured add/modify/remove operations to the plan."""
+        """Apply structured add/modify/remove operations to the plan.
+
+        Protections:
+        - ``done`` steps are never replaced or removed.
+        - Bulk removal of all pending steps is blocked (max 50% can be removed
+          per call) to prevent the LLM from accidentally wiping the plan.
+        """
+        # Count how many pending/active steps would be removed
+        pending_count = sum(1 for s in self.steps if s.status in ("pending", "active"))
+        remove_count = sum(1 for op in ops if op.op == "remove")
+        if pending_count > 0 and remove_count >= pending_count:
+            logger.warning(
+                "Blocked bulk removal: %d remove ops for %d pending steps — "
+                "keeping existing plan and only applying add/modify ops",
+                remove_count, pending_count,
+            )
+            ops = [op for op in ops if op.op != "remove"]
+
         for op in ops:
             if op.op == "add":
                 # Replace existing step at same index if present, but preserve done steps
                 self.steps = [s for s in self.steps if s.index != op.index or s.status == "done"]
                 # Only add if we actually removed the old step (i.e., it wasn't done)
                 if not any(s.index == op.index and s.status == "done" for s in self.steps):
-                    self.steps.append(PlanStep(index=op.index, description=op.description))
+                    self.steps.append(PlanStep(index=op.index, title=op.title, description=op.description))
 
             elif op.op == "modify":
                 for step in self.steps:
                     if step.index == op.index:
-                        step.description = op.description
+                        if op.title:
+                            step.title = op.title
+                        if op.description:
+                            step.description = op.description
                         break
 
             elif op.op == "remove":
@@ -75,7 +98,7 @@ class LoopPlan(BaseModel):
         lines: list[str] = []
         for step in self.steps:
             tag = f"[{step.status}] " if step.status != "pending" else ""
-            lines.append(f"{step.index}. {tag}{step.description}")
+            lines.append(f"{step.index}. {tag}{step.title}")
         return "\n".join(lines)
 
 

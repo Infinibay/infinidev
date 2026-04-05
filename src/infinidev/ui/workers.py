@@ -362,6 +362,9 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
     from infinidev.config.settings import reload_all, settings as _settings
     from infinidev.db.service import store_conversation_turn, get_recent_summaries
     from infinidev.engine.phases.phase_engine import PhaseEngine
+    from infinidev.engine.phases.investigator import _investigate_iteratively
+    from infinidev.engine.phases.plan_generator import _generate_plan
+    from infinidev.engine.phases.plan_executor import _execute_plan
     from infinidev.engine.test_checkpoint import TestCheckpoint
     from infinidev.prompts.phases import get_strategy
     from infinidev.tools.base.context import get_current_workspace_path
@@ -393,7 +396,7 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
         try:
             # ── Phases 1+2: Iterative investigation ──────
             strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
-            answers, all_notes = phase_engine._investigate_iteratively(
+            answers, all_notes = _investigate_iteratively(
                 app.agent, task_description, strategy, None, verbose=True,
                 max_questions=depth_config.questions_max,
                 skip_investigate=depth_config.skip_investigate,
@@ -412,7 +415,7 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
                 app._chat_history_control.show_thinking = True
                 app.invalidate()
 
-                plan_steps = phase_engine._generate_plan(
+                plan_steps = _generate_plan(
                     app.agent, plan_desc, answers, all_notes, strategy, None, verbose=True,
                 )
 
@@ -458,10 +461,35 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
             app.add_message("System", "Plan approved. Executing...", "system")
             app.invalidate()
 
-            result = phase_engine._execute_plan(
+            _completed_step_nums: set[int] = set()
+
+            def _on_step_start(step_num, total, all_steps, completed_list):
+                """Update the TUI STEPS panel with phase plan progress."""
+                # Track completed steps by number (previous step is done)
+                for s in all_steps:
+                    if s["step"] < step_num:
+                        _completed_step_nums.add(s["step"])
+
+                lines = []
+                for s in all_steps:
+                    s_num = s["step"]
+                    s_title = s.get("title", s.get("description", ""))
+                    if s_num in _completed_step_nums:
+                        lines.append(f"v {s_title}")
+                    elif s_num == step_num:
+                        lines.append(f"> {s_title}")
+                    else:
+                        lines.append(f"o {s_title}")
+                app._steps_text = "\n".join(lines)
+                app._actions_text = f"Executing step {step_num}/{total}..."
+                app.invalidate()
+
+            result, _last_engine = _execute_plan(
                 app.agent, task_description, "Complete the task.",
                 answers, all_notes, plan_steps, strategy, None, depth_config, verbose=True,
+                on_step_start=_on_step_start,
             )
+            phase_engine._last_engine = _last_engine
 
         finally:
             app.agent.deactivate()
@@ -524,7 +552,7 @@ def _format_plan_for_display(plan_steps: list[dict]) -> str:
     for step in plan_steps:
         files = ", ".join(step.get("files", [])) or ""
         files_str = f"  [{files}]" if files else ""
-        lines.append(f"  {step['step']}. {step['description']}{files_str}")
+        lines.append(f"  {step['step']}. {step.get('title', step.get('description', ''))}{files_str}")
     lines.append("")
     lines.append("Type **y** to approve and execute, **n** to cancel, or type feedback to revise.")
     return "\n".join(lines)

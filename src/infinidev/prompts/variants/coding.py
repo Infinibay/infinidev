@@ -121,10 +121,15 @@ def execute_loop(task):
         # Save important facts BEFORE step_complete
         add_note(key_findings)   # file paths, function names, decisions
 
+        # Manage plan BEFORE step_complete (these don't count as tool calls)
+        add_step(title="...")                                 # append step at end
+        add_step(title="...", index=N)                        # add at specific position
+        modify_step(index=N, title="...", description="...")  # update pending step
+        remove_step(index=N)                                  # remove pending step
+
         step_complete(
             summary="Read: ... | Changed: ... | Remaining: ... | Issues: ...",
             status="continue|done|blocked|explore",
-            next_steps=[{"op": "add|modify|remove", "index": N, "description": "..."}],
             final_answer="..."   # user-facing, REQUIRED when status="done"
         )
 
@@ -156,7 +161,7 @@ def execute_loop(task):
     if task.involved_code_changes:
         run_tests()              # before status="done"
 
-    # next_steps rules
+    # Plan management rules
     assert only_operate_on_pending_steps
     if status == "continue":
         assert at_least_one_pending_step
@@ -423,7 +428,7 @@ Follow these behavioral rules:
 
 ```
 def fix_bug(step={{step_num}}/{{total_steps}}):
-    \"\"\"{{step_description}}\"\"\"
+    \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
     # IMPORTANT: call help("edit") if unsure about editing tools
@@ -453,7 +458,7 @@ Follow these behavioral rules:
 
 ```
 def implement_feature(step={{step_num}}/{{total_steps}}):
-    \"\"\"{{step_description}}\"\"\"
+    \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
     # IMPORTANT: call help("edit") if unsure about editing tools
@@ -485,7 +490,7 @@ Follow these behavioral rules:
 
 ```
 def refactor(step={{step_num}}/{{total_steps}}):
-    \"\"\"{{step_description}}\"\"\"
+    \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
     # IMPORTANT: call help("edit") if unsure about editing tools
@@ -512,7 +517,7 @@ Follow these behavioral rules:
 
 ```
 def execute_step(step={{step_num}}/{{total_steps}}):
-    \"\"\"{{step_description}}\"\"\"
+    \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
     # IMPORTANT: call help("edit") if unsure about editing tools
@@ -604,9 +609,9 @@ def plan_bug_fix():
         steps.append("Add test for the new behavior")
     steps.append("Run full test suite to verify no regressions")
 
-    step_complete(status="continue", next_steps=[
-        {{"op": "add", "index": i+2, "description": s}} for i, s in enumerate(steps)
-    ])
+    for i, s in enumerate(steps):
+        add_step(index=i+2, title=s)
+    step_complete(status="continue", summary="Plan created")
     step_complete(status="done", summary="Plan complete")
 
     assert every_step.names_file_and_function
@@ -638,9 +643,9 @@ def plan_feature():
     # Test checkpoints every 2-3 steps
     insert_test_steps(steps, interval=3)
 
-    step_complete(status="continue", next_steps=[
-        {{"op": "add", "index": i+2, "description": s}} for i, s in enumerate(steps)
-    ])
+    for i, s in enumerate(steps):
+        add_step(index=i+2, title=s)
+    step_complete(status="continue", summary="Plan created")
     step_complete(status="done")
 
     assert each_step.adds_ONE_method_or_capability
@@ -664,9 +669,9 @@ def plan_refactor():
         steps.append(f"{change.op} {change.target} — {change.description}")
         steps.append("Run full test suite to verify all tests still pass")
 
-    step_complete(status="continue", next_steps=[
-        {{"op": "add", "index": i+2, "description": s}} for i, s in enumerate(steps)
-    ])
+    for i, s in enumerate(steps):
+        add_step(index=i+2, title=s)
+    step_complete(status="continue", summary="Plan created")
     step_complete(status="done")
 
     assert every_step_preserves_behavior        # tests pass after each step
@@ -688,9 +693,9 @@ def plan_task():
         steps.append(f"Change {change.what} in {change.file}")
         steps.append(f"Verify: {change.verification_command}")
 
-    step_complete(status="continue", next_steps=[
-        {{"op": "add", "index": i+2, "description": s}} for i, s in enumerate(steps)
-    ])
+    for i, s in enumerate(steps):
+        add_step(index=i+2, title=s)
+    step_complete(status="continue", summary="Plan created")
     step_complete(status="done")
 
     never(write_code)                           # planner NEVER edits
@@ -708,7 +713,8 @@ class Planner(Agent):
     def work(self):
         read(task_description, investigation_notes)
         use_read_only_tools(read_file, code_search, glob)  # if needed
-        step_complete(next_steps=[...])  # 2-5 steps per call
+        add_step(title="...")               # 2-5 steps per call, index auto-assigned
+        step_complete(status="continue")  # after adding steps
         when_plan_complete: step_complete(status="done")
 
     assert every_step.names(file, function_or_class, specific_change)

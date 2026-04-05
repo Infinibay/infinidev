@@ -38,5 +38,6 @@ class ClassifiedCalls:
     notes: list[Any] = field(default_factory=list)
     session_notes: list[Any] = field(default_factory=list)
     thinks: list[Any] = field(default_factory=list)
+    plan_ops: list[Any] = field(default_factory=list)  # add_step, modify_step, remove_step
 
 

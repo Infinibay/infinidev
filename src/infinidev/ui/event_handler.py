@@ -49,12 +49,12 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             lines = []
             for s in steps:
                 icon = {"done": "v", "active": ">", }.get(s["status"], "o")
-                lines.append(f"{icon} {s['description']}")
+                lines.append(f"{icon} {s['title']}")
             app._steps_text = "\n".join(lines)
         else:
             app._steps_text = "Waiting for plan..."
 
-        desc = data.get("step_description", "")
+        desc = data.get("step_title", "")
         summary = data.get("summary", "")
         iteration = data.get("iteration", 0)
         status = data.get("status", "")

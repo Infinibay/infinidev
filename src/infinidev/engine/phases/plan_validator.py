@@ -43,7 +43,7 @@ def validate_plan(
         steps = plan_json
 
     # If model returned a single step object instead of array, wrap it
-    if isinstance(steps, dict) and ("step" in steps or "description" in steps):
+    if isinstance(steps, dict) and ("step" in steps or "title" in steps or "description" in steps):
         steps = [steps]
     elif not isinstance(steps, list):
         return False, [], ["Plan must be a JSON array of step objects."]
@@ -61,18 +61,18 @@ def validate_plan(
     # Validate each step
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
-            errors.append(f"Step {i + 1}: must be a JSON object with 'description' and 'files' keys.")
+            errors.append(f"Step {i + 1}: must be a JSON object with 'title' and 'files' keys.")
             continue
 
-        desc = step.get("description", "")
+        desc = step.get("title", step.get("description", ""))
         files = step.get("files", [])
 
         # Description checks
         if not desc:
-            errors.append(f"Step {i + 1}: missing 'description'.")
+            errors.append(f"Step {i + 1}: missing 'title'.")
         elif len(desc) < 20:
             errors.append(
-                f"Step {i + 1}: description too short ({len(desc)} chars). "
+                f"Step {i + 1}: title too short ({len(desc)} chars). "
                 f"Be specific about what to do and where."
             )
 
@@ -85,7 +85,7 @@ def validate_plan(
         if desc and any(p in desc.lower() for p in vague_patterns):
             if len(desc) < 60:  # Short + vague = bad
                 errors.append(
-                    f"Step {i + 1}: description is too vague: \"{desc}\". "
+                    f"Step {i + 1}: title is too vague: \"{desc}\". "
                     f"Name specific files, functions, and what changes."
                 )
 
@@ -101,7 +101,7 @@ def validate_plan(
         test_steps = [
             s for s in steps
             if any(
-                kw in s.get("description", "").lower()
+                kw in s.get("title", s.get("description", "")).lower()
                 for kw in ["run test", "pytest", "npm test", "verify", "check progress"]
             )
         ]
@@ -117,7 +117,8 @@ def validate_plan(
         if isinstance(step, dict):
             normalized.append({
                 "step": step.get("step", i + 1),
-                "description": step.get("description", f"Step {i + 1}"),
+                "title": step.get("title", step.get("description", f"Step {i + 1}")),
+                "description": step.get("description", ""),
                 "files": step.get("files", []),
             })
 

@@ -150,7 +150,7 @@ class SmartContextSummarizer:
         pending_steps = []
         for step in plan.steps:
             if step.status in ["pending", "active"]:
-                pending_steps.append(step.description)
+                pending_steps.append(step.title)
 
         return pending_steps[:3]  # Keep first 3 pending items
 

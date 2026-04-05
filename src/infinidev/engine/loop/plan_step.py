@@ -11,7 +11,8 @@ class PlanStep(BaseModel):
     """A single step in the agent's execution plan."""
 
     index: int
-    description: str
+    title: str
+    description: str = ""
     status: Literal["pending", "active", "done", "skipped"] = "pending"
 
 

@@ -109,7 +109,8 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
             "WARNING: After this call, ALL tool outputs and conversation from this step will be discarded. "
             "Only the summary and your notes (add_note) survive to the next step. "
             "Before calling this, save key facts via add_note (file paths, function names, decisions). "
-            "Before status='done', call add_session_note with what you learned."
+            "Before status='done', call add_session_note with what you learned. "
+            "To modify the plan, use add_step/modify_step/remove_step BEFORE calling this."
         ),
         "parameters": {
             "type": "object",
@@ -122,22 +123,6 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "enum": ["continue", "done", "blocked", "explore"],
                     "description": "continue = more work to do, done = task complete, blocked = cannot proceed, explore = delegate sub-problem to exploration tree",
-                },
-                "next_steps": {
-                    "type": "array",
-                    "description": "Operations to update the plan (add/modify/remove steps)",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "op": {
-                                "type": "string",
-                                "enum": ["add", "modify", "remove"],
-                            },
-                            "index": {"type": "integer"},
-                            "description": {"type": "string"},
-                        },
-                        "required": ["op", "index"],
-                    },
                 },
                 "final_answer": {
                     "type": "string",
@@ -257,6 +242,91 @@ GENERATE_QUESTION_SCHEMA: dict[str, Any] = {
 }
 
 
+ADD_STEP_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "add_step",
+        "description": (
+            "Add a new step to the plan WITHOUT completing the current step. "
+            "Use this when you discover new work mid-step. "
+            "Does NOT count as a tool call. "
+            "If index is omitted, the step is appended at the end of the plan."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "description": "Step number (position in plan). Omit to append at end.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Short step title naming FILE, FUNCTION, and CHANGE",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Detailed guidance (optional)",
+                },
+            },
+            "required": ["title"],
+        },
+    },
+}
+
+
+MODIFY_STEP_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "modify_step",
+        "description": (
+            "Modify the title or description of an existing pending step "
+            "WITHOUT completing the current step. "
+            "Does NOT count as a tool call."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "description": "Step number to modify",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "New title (leave empty to keep current)",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "New description (leave empty to keep current)",
+                },
+            },
+            "required": ["index"],
+        },
+    },
+}
+
+
+REMOVE_STEP_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "remove_step",
+        "description": (
+            "Remove a pending step from the plan WITHOUT completing the current step. "
+            "Does NOT count as a tool call."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "description": "Step number to remove",
+                },
+            },
+            "required": ["index"],
+        },
+    },
+}
+
+
 def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     """Convert a list of tools to OpenAI function-calling schemas.
 
@@ -268,6 +338,9 @@ def build_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
     schemas.append(ADD_NOTE_SCHEMA)
     schemas.append(ADD_SESSION_NOTE_SCHEMA)
     schemas.append(THINK_SCHEMA)
+    schemas.append(ADD_STEP_SCHEMA)
+    schemas.append(MODIFY_STEP_SCHEMA)
+    schemas.append(REMOVE_STEP_SCHEMA)
 
     # Deep-sanitize schemas for providers that reject anyOf/oneOf/complex constructs
     from infinidev.config.model_capabilities import get_model_capabilities

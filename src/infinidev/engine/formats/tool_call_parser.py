@@ -273,19 +273,11 @@ def parse_step_complete_args(arguments: str | dict[str, Any]) -> "StepResult":
     else:
         args = arguments or {}
 
-    raw_next_steps = args.get("next_steps", [])
-    next_steps: list[StepOperation] = []
-    if isinstance(raw_next_steps, list):
-        for item in raw_next_steps:
-            if isinstance(item, dict) and "op" in item and "index" in item:
-                try:
-                    next_steps.append(StepOperation(
-                        op=item["op"],
-                        index=item["index"],
-                        description=item.get("description", ""),
-                    ))
-                except Exception:
-                    pass
+    if not isinstance(args, dict):
+        args = {}
+
+    # next_steps is ignored — plan management is now done via add_step/modify_step/remove_step.
+    # We still parse it for backward compat so existing LLM behavior doesn't crash.
 
     raw_answer = args.get("final_answer")
     if raw_answer is not None and not isinstance(raw_answer, str):
@@ -294,6 +286,6 @@ def parse_step_complete_args(arguments: str | dict[str, Any]) -> "StepResult":
     return StepResult(
         summary=args.get("summary", "Step completed (no summary provided)"),
         status=args.get("status", "continue"),
-        next_steps=next_steps,
+        next_steps=[],
         final_answer=raw_answer,
     )

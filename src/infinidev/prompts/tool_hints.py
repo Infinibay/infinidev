@@ -351,7 +351,7 @@ def build_execute_prompt(
     available_tools: set[str],
     step_num: int,
     total_steps: int,
-    step_description: str,
+    step_title: str,
     step_files: str,
 ) -> str:
     """Build a complete execute prompt with only available tool references.
@@ -360,7 +360,7 @@ def build_execute_prompt(
     with a dynamically generated version.
     """
     parts = [
-        f"STEP {step_num}/{total_steps}: {step_description}",
+        f"STEP {step_num}/{total_steps}: {step_title}",
         f"Files you may modify: {step_files}",
         "",
         "## RULES",

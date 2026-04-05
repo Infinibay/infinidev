@@ -57,6 +57,7 @@ def _execute_plan(
     depth_config: Any,
     verbose: bool,
     test_checkpoint: Any | None = None,
+    on_step_start: Any | None = None,
 ) -> tuple[str, LoopEngine]:
     """Execute each plan step via LoopEngine.
 
@@ -75,9 +76,14 @@ def _execute_plan(
 
     for step in plan_steps:
         step_num = step["step"]
-        step_desc = step["description"]
+        step_desc = step.get("title", step.get("description", ""))
+        # Only use description as guidance if title exists separately
+        step_detail = step.get("description", "") if "title" in step else ""
         step_files = step.get("files", [])
         total = len(plan_steps)
+
+        if on_step_start is not None:
+            on_step_start(step_num, total, plan_steps, completed)
 
         files_str = ", ".join(step_files) if step_files else "(verification step)"
         completed_str = "\n".join(
@@ -103,7 +109,7 @@ def _execute_plan(
                 available_tools=_tool_names,
                 step_num=step_num,
                 total_steps=total,
-                step_description=step_desc,
+                step_title=step_desc,
                 step_files=files_str,
             )
         else:
@@ -112,15 +118,17 @@ def _execute_plan(
             ).replace(
                 "{{total_steps}}", str(total)
             ).replace(
-                "{{step_description}}", step_desc
+                "{{step_title}}", step_desc
             ).replace(
                 "{{step_files}}", files_str
             )
 
         notes_section = f"## NOTES\n{notes_text}\n\n" if notes_text else ""
+        detail_section = f"## STEP GUIDANCE\n{step_detail}\n\n" if step_detail else ""
         depth_suffix = depth_config.prompt_suffix if depth_config else ""
         full_prompt = (
             f"{step_prompt}\n\n"
+            f"{detail_section}"
             f"{notes_section}"
             f"## INVESTIGATION RESULTS\n{answers_text}\n\n"
             f"## COMPLETED STEPS\n{completed_str}\n"

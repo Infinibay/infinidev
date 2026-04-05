@@ -261,12 +261,12 @@ class LoopEngine(AgentEngine):
             # Log step start
             active = ctx.state.plan.active_step
             if active:
-                active_desc = active.description
+                active_desc = active.title
             elif not ctx.state.plan.steps:
                 active_desc = "Planning..."
             else:
                 done_steps = [s for s in ctx.state.plan.steps if s.status == "done"]
-                active_desc = f"Continuing ({done_steps[-1].description})" if done_steps else "Working..."
+                active_desc = f"Continuing ({done_steps[-1].title})" if done_steps else "Working..."
             if ctx.verbose:
                 _log_step_start(iteration + 1, active_desc)
 
@@ -553,7 +553,7 @@ class LoopEngine(AgentEngine):
                         step_result = forced
                         break
                     guard.check_error_circuit_breaker(ctx, messages)
-                elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks:
+                elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks or classified.plan_ops:
                     # Only pseudo-tools, no regular tools
                     self._build_pseudo_only_messages(ctx, classified, messages, result)
 
@@ -607,7 +607,7 @@ class LoopEngine(AgentEngine):
                  "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                 for tc in classified.regular
             ]
-            for pseudo_tc in classified.thinks + classified.notes + ([classified.step_complete] if classified.step_complete else []):
+            for pseudo_tc in classified.thinks + classified.notes + classified.plan_ops + ([classified.step_complete] if classified.step_complete else []):
                 assistant_msg["tool_calls"].append({
                     "id": pseudo_tc.id, "type": "function",
                     "function": {"name": pseudo_tc.function.name, "arguments": pseudo_tc.function.arguments},
@@ -671,7 +671,7 @@ class LoopEngine(AgentEngine):
                 _default_nudge = 4 if ctx.is_small else _get_settings().LOOP_STEP_NUDGE_THRESHOLD
                 _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else _default_nudge
                 if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
-                    _active_desc = ctx.state.plan.active_step.description if ctx.state.plan.active_step else ""
+                    _active_desc = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
                     _nudge_msg = (
                         f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls for this step. "
                         f"Step scope: \"{_active_desc}\". "
@@ -693,6 +693,8 @@ class LoopEngine(AgentEngine):
                 tool_results_text.append('[Tool: add_session_note] Result:\n{"status": "noted"}')
             for tk in classified.thinks:
                 tool_results_text.append('[Tool: think] Result:\n{"status": "acknowledged"}')
+            for po in classified.plan_ops:
+                tool_results_text.append(f'[Tool: {po.function.name}] Result:\n{{"status": "updated"}}')
             if tool_results_text:
                 messages.append({"role": "user", "content": "\n\n".join(tool_results_text)})
 
@@ -704,6 +706,8 @@ class LoopEngine(AgentEngine):
                 messages.append({"role": "tool", "tool_call_id": nc.id, "content": '{"status": "noted"}'})
             for snc in classified.session_notes:
                 messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
+            for po in classified.plan_ops:
+                messages.append({"role": "tool", "tool_call_id": po.id, "content": '{"status": "updated"}'})
             if classified.step_complete:
                 messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
 
@@ -724,7 +728,7 @@ class LoopEngine(AgentEngine):
             })
         else:
             assistant_msg = {"role": "assistant", "content": message.content or ""}
-            pseudo_calls = classified.thinks + classified.notes + classified.session_notes + ([classified.step_complete] if classified.step_complete else [])
+            pseudo_calls = classified.thinks + classified.notes + classified.session_notes + classified.plan_ops + ([classified.step_complete] if classified.step_complete else [])
             assistant_msg["tool_calls"] = [
                 {"id": pc.id, "type": "function",
                  "function": {"name": pc.function.name, "arguments": pc.function.arguments}}
@@ -737,6 +741,8 @@ class LoopEngine(AgentEngine):
                 messages.append({"role": "tool", "tool_call_id": nc.id, "content": '{"status": "noted"}'})
             for snc in classified.session_notes:
                 messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
+            for po in classified.plan_ops:
+                messages.append({"role": "tool", "tool_call_id": po.id, "content": '{"status": "updated"}'})
             if classified.step_complete:
                 messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
 

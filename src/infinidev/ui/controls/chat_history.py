@@ -412,10 +412,10 @@ def format_tool_chat_message(tool_name: str, detail: str,
         return msg
 
     if tool_name == "create_file":
+        path = detail or "?"
         if error:
-            path = detail or "?"
             return f"create {path}\n  x {error}"
-        return ""  # Diff widget handles successful creates
+        return f"+ created {path}"
 
     if tool_name in ("replace_lines", "edit_symbol", "add_symbol", "remove_symbol"):
         if error:

@@ -17,17 +17,10 @@ from infinidev.prompts.variants import (
 # ── resolve_style ────────────────────────────────────────────────────────
 
 class TestResolveStyle:
-    def test_auto_small_model(self):
+    def test_auto_defaults_to_generalized(self):
         with patch("infinidev.config.settings.settings") as mock_settings:
             mock_settings.PROMPT_STYLE = "auto"
-            with patch("infinidev.config.llm._is_small_model", return_value=True):
-                assert resolve_style() == "generalized"
-
-    def test_auto_large_model(self):
-        with patch("infinidev.config.settings.settings") as mock_settings:
-            mock_settings.PROMPT_STYLE = "auto"
-            with patch("infinidev.config.llm._is_small_model", return_value=False):
-                assert resolve_style() == "full"
+            assert resolve_style() == "generalized"
 
     def test_explicit_full(self):
         with patch("infinidev.config.settings.settings") as mock_settings:
@@ -123,6 +116,11 @@ class TestRegistrationCompleteness:
         missing = self.EXPECTED_NAMES - cod_names
         assert not missing, f"Missing in coding: {missing}"
 
+    def test_extra_simple_covers_all_expected(self):
+        es_names = registered_names("extra_simple")
+        missing = self.EXPECTED_NAMES - es_names
+        assert not missing, f"Missing in extra_simple: {missing}"
+
     def test_generalized_subset_of_coding(self):
         """Every generalized prompt should have a coding counterpart."""
         gen_names = registered_names("generalized")
@@ -210,17 +208,17 @@ class TestFlowIdentityIntegration:
 class TestPlaceholdersPreserved:
     """Phase prompts must keep {{placeholder}} variables for runtime substitution."""
 
-    @pytest.mark.parametrize("style", ["generalized", "coding"])
+    @pytest.mark.parametrize("style", ["generalized", "coding", "extra_simple"])
     @pytest.mark.parametrize("task_type", ["bug", "feature", "refactor", "other"])
     def test_execute_has_step_placeholders(self, style, task_type):
         prompt = get_variant(f"phase.{task_type}.execute", style)
         assert prompt is not None
         assert "{{step_num}}" in prompt
         assert "{{total_steps}}" in prompt
-        assert "{{step_description}}" in prompt
+        assert "{{step_title}}" in prompt
         assert "{{step_files}}" in prompt
 
-    @pytest.mark.parametrize("style", ["generalized", "coding"])
+    @pytest.mark.parametrize("style", ["generalized", "coding", "extra_simple"])
     def test_investigate_has_question_placeholders(self, style):
         prompt = get_variant("phase.investigate.rules", style)
         assert prompt is not None

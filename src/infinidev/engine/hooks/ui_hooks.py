@@ -119,22 +119,22 @@ def _on_pre_step(ctx: HookContext) -> None:
     # Determine active step description (mirrors original logic)
     active = plan.active_step if plan else None
     if active:
-        active_desc = active.description
+        active_desc = active.title
     elif not plan or not plan.steps:
         active_desc = "Planning..."
     else:
         done_steps = [s for s in plan.steps if s.status == "done"]
-        active_desc = f"Continuing ({done_steps[-1].description})" if done_steps else "Working..."
+        active_desc = f"Continuing ({done_steps[-1].title})" if done_steps else "Working..."
 
     event_bus.emit("loop_step_update", ctx.project_id, ctx.agent_id, {
         "agent_id": ctx.agent_id,
         "agent_name": meta.get("agent_name", ctx.agent_id),
         "iteration": iteration + 1,
-        "step_description": active_desc,
+        "step_title": active_desc,
         "status": "active",
         "summary": "",
         "plan_steps": [
-            {"index": s.index, "description": s.description, "status": s.status}
+            {"index": s.index, "title": s.title, "description": s.description, "status": s.status}
             for s in (plan.steps if plan else [])
         ],
         "tool_calls_step": 0,
@@ -160,7 +160,7 @@ def _on_post_step(ctx: HookContext) -> None:
 
     done_steps = [s for s in state.plan.steps if s.status == "done"]
     if done_steps:
-        done_desc = done_steps[-1].description
+        done_desc = done_steps[-1].title
     elif step_result.summary:
         done_desc = step_result.summary[:120]
     else:
@@ -170,11 +170,11 @@ def _on_post_step(ctx: HookContext) -> None:
         "agent_id": ctx.agent_id,
         "agent_name": meta.get("agent_name", ctx.agent_id),
         "iteration": iteration + 1,
-        "step_description": done_desc,
+        "step_title": done_desc,
         "status": step_result.status,
         "summary": step_result.summary[:200],
         "plan_steps": [
-            {"index": s.index, "description": s.description, "status": s.status}
+            {"index": s.index, "title": s.title, "description": s.description, "status": s.status}
             for s in state.plan.steps
         ],
         "tool_calls_step": action_tool_calls,

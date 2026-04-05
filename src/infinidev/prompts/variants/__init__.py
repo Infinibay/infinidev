@@ -51,11 +51,12 @@ def get_variant(name: str, style: str | None = None) -> str | None:
 # ── Style resolution ───────────────────────────────────────────────────
 
 def resolve_style() -> str:
-    """Return the effective prompt style: ``full``, ``generalized``, or ``coding``.
+    """Return the effective prompt style.
 
     Reads ``settings.PROMPT_STYLE``.  When set to ``"auto"`` (the default),
-    small models (< 25 B params) get ``generalized`` and everything else
-    gets ``full``.
+    uses ``generalized`` for all models — shorter prompts with less
+    over-exploration bias. Set to ``"full"``, ``"coding"``, or
+    ``"extra_simple"`` explicitly if needed.
     """
     from infinidev.config.settings import settings
 
@@ -63,11 +64,7 @@ def resolve_style() -> str:
     if style != "auto":
         return style
 
-    try:
-        from infinidev.config.llm import _is_small_model
-        return "generalized" if _is_small_model() else "full"
-    except Exception:
-        return "full"
+    return "generalized"
 
 
 def registered_names(style: str) -> set[str]:
@@ -91,6 +88,10 @@ def _load_variants() -> None:
         from infinidev.prompts.variants import coding as _c  # noqa: F401
     except Exception as exc:
         logger.debug("Failed to load coding variants: %s", exc)
+    try:
+        from infinidev.prompts.variants import extra_simple as _es  # noqa: F401
+    except Exception as exc:
+        logger.debug("Failed to load extra_simple variants: %s", exc)
 
 
 _load_variants()

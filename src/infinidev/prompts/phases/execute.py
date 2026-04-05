@@ -4,7 +4,7 @@ Used in EXECUTE phase — LoopEngine with full tool access, one run per plan ste
 """
 
 BUG_EXECUTE = """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 ## IMPORTANT: Call help("edit") if you are unsure how to use the editing tools. They work differently from standard tools.
@@ -94,7 +94,7 @@ When working through multiple failing tests:
 
 
 FEATURE_EXECUTE = """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 ## IMPORTANT: Call help("edit") if you are unsure how to use the editing tools. They work differently from standard tools.
@@ -218,7 +218,7 @@ You are a developer implementing ONE step. Write working code, verify it, move o
 
 
 REFACTOR_EXECUTE = """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 ## IMPORTANT: Call help("edit") if you are unsure how to use the editing tools. They work differently from standard tools.
@@ -282,7 +282,7 @@ You are a refactoring developer. ONE structural change, verify tests pass, move 
 
 
 OTHER_EXECUTE = """\
-STEP {{step_num}}/{{total_steps}}: {{step_description}}
+STEP {{step_num}}/{{total_steps}}: {{step_title}}
 Files you may modify: {{step_files}}
 
 ## IMPORTANT: Call help("edit") if you are unsure how to use the editing tools. They work differently from standard tools.

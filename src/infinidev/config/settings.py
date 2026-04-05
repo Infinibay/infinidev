@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     PROMPT_CACHE_ENABLED: bool = True  # Enable provider-specific prompt caching
 
     # Prompt Style
-    PROMPT_STYLE: str = "auto"  # "auto", "full", "generalized", "coding"
+    PROMPT_STYLE: str = "auto"  # "auto", "full", "generalized", "coding", "extra_simple"
 
     # UI
     MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling

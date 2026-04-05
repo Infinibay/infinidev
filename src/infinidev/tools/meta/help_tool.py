@@ -671,6 +671,71 @@ WHAT IT DOES:
   4. Updates import statements in all files that referenced the symbol
   5. Re-indexes both source and target files""",
 
+    "step_complete": """\
+step_complete(summary, status, final_answer?)
+
+Signal that the current step is complete. You MUST call this after each step.
+
+PARAMS:
+  summary (str, required)       — Structured summary (~150 tokens): "Read: ... | Changed: ... | Remaining: ..."
+  status (str, required)        — "continue" (more work), "done" (task complete), "blocked" (stuck)
+  final_answer (str, required when status=done) — Final user-facing result
+
+To manage the plan, use add_step/modify_step/remove_step BEFORE calling step_complete.
+
+EXAMPLES:
+  add_step(title="Fix verify_token() expiry check in auth.py:42",
+    description="Use edit_symbol to add datetime.utcnow() comparison against exp field.")
+  add_step(title="Run pytest tests/test_auth.py to verify fix")
+  step_complete(summary="Read: auth.py — found verify_token() on line 42", status="continue")
+
+  step_complete(summary="Changed: auth.py:42 — added expiry check", status="done",
+    final_answer="Fixed the token expiry bug in auth.py.")
+
+IMPORTANT:
+  - Before calling, save key findings via add_note (they survive between steps)
+  - Before status="done", call add_session_note (persists across tasks)
+  - Use add_step/modify_step/remove_step to manage the plan, NOT step_complete""",
+
+    "add_step": """\
+add_step(title, description?, index?)
+
+Add a new step to the plan WITHOUT completing the current step.
+Use when you discover new work mid-step. Omit index to append at end.
+
+PARAMS:
+  title (str, required)        — Short title: FILE, FUNCTION, CHANGE
+  description (str, optional)  — Detailed guidance
+  index (int, optional)        — Step number. Omit to append at end of plan.
+
+EXAMPLES:
+  add_step(title="Run pytest tests/test_auth.py to verify fix")
+  add_step(title="Fix refresh_token() in auth.py:85", index=4)""",
+
+    "modify_step": """\
+modify_step(index, title?, description?)
+
+Modify the title or description of a pending step WITHOUT completing the current step.
+
+PARAMS:
+  index (int, required)        — Step number to modify
+  title (str, optional)        — New title (empty = keep current)
+  description (str, optional)  — New description (empty = keep current)
+
+EXAMPLE:
+  modify_step(index=4, title="Also fix refresh_token() in auth.py:85")""",
+
+    "remove_step": """\
+remove_step(index)
+
+Remove a pending step from the plan WITHOUT completing the current step.
+
+PARAMS:
+  index (int, required) — Step number to remove
+
+EXAMPLE:
+  remove_step(index=6)""",
+
     "analyze_code": """\
 analyze_code(file_path?, checks?)
 

@@ -27,26 +27,26 @@ class TestLoopState:
         """Active step is detected correctly."""
         state = LoopState()
         state.plan.steps = [
-            PlanStep(index=0, description="Step 1", status="pending"),
-            PlanStep(index=1, description="Step 2", status="active"),
-            PlanStep(index=2, description="Step 3", status="done"),
+            PlanStep(index=0, title="Step 1", status="pending"),
+            PlanStep(index=1, title="Step 2", status="active"),
+            PlanStep(index=2, title="Step 3", status="done"),
         ]
         assert state.plan.active_step is not None
-        assert state.plan.active_step.description == "Step 2"
+        assert state.plan.active_step.title == "Step 2"
         assert state.plan.active_step.index == 1
 
     def test_has_pending_property(self):
         """has_pending property works correctly."""
         state = LoopState()
         state.plan.steps = [
-            PlanStep(index=0, description="Step 1", status="pending"),
-            PlanStep(index=1, description="Step 2", status="done"),
+            PlanStep(index=0, title="Step 1", status="pending"),
+            PlanStep(index=1, title="Step 2", status="done"),
         ]
         assert state.plan.has_pending is True
 
         state.plan.steps = [
-            PlanStep(index=0, description="Step 1", status="done"),
-            PlanStep(index=1, description="Step 2", status="skipped"),
+            PlanStep(index=0, title="Step 1", status="done"),
+            PlanStep(index=1, title="Step 2", status="skipped"),
         ]
         assert state.plan.has_pending is False
 
@@ -57,18 +57,18 @@ class TestLoopPlan:
     def test_from_steps(self):
         """LoopPlan can be created with steps."""
         plan = LoopPlan(steps=[
-            PlanStep(index=0, description="Read source code"),
-            PlanStep(index=1, description="Analyze requirements"),
+            PlanStep(index=0, title="Read source code"),
+            PlanStep(index=1, title="Analyze requirements"),
         ])
         assert len(plan.steps) == 2
-        assert plan.steps[0].description == "Read source code"
+        assert plan.steps[0].title == "Read source code"
         assert plan.steps[1].status == "pending"
 
     def test_operations(self):
         """LoopPlan operations work correctly."""
         plan = LoopPlan(steps=[
-            PlanStep(index=0, description="Step 1"),
-            PlanStep(index=1, description="Step 2", status="active"),
+            PlanStep(index=0, title="Step 1"),
+            PlanStep(index=1, title="Step 2", status="active"),
         ])
 
         # Mark active step done
@@ -161,7 +161,7 @@ class TestSummarizer:
             ActionRecord(step_index=0, summary="Read main.py", tool_calls_count=1),
         ]
         state.plan.steps = [
-            PlanStep(index=0, description="Next step"),
+            PlanStep(index=0, title="Next step"),
         ]
         result = summarizer.generate_summary(state)
         assert len(result) <= 100

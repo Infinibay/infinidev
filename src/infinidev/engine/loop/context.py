@@ -191,8 +191,8 @@ Do NOT keep trying different fixes — each attempt makes things worse.
 
 ### Step Discipline
 - Each step has a specific scope defined in <current-action>. Stay within that scope.
-- Do NOT jump ahead to future steps. If you discover needed work, add it to the plan via step_complete.
-- You will see a tool call counter (e.g. [Tool call 3/8]) after each tool result. After the nudge threshold, you MUST call step_complete — use status='continue' with next_steps if not finished.
+- Do NOT jump ahead to future steps. If you discover needed work, call add_step to add it to the plan.
+- You will see a tool call counter (e.g. [Tool call 3/8]) after each tool result. After the nudge threshold, you MUST call step_complete — use status='continue' if not finished.
 - Exploration steps should ONLY explore. Editing steps should ONLY edit what was planned.
 
 ### Completing Steps — the `step_complete` tool
@@ -201,29 +201,29 @@ After finishing each step, you MUST call the `step_complete` tool with these par
 
 - **summary** (required): 1-2 sentence summary of what you did and key facts discovered.
 - **status** (required): One of `continue`, `done`, or `blocked`.
-- **next_steps** (optional): Array of operations to update your plan. Each operation is an object with:
-  - `op`: `"add"`, `"modify"`, or `"remove"`
-  - `index`: Step number (integer)
-  - `description`: Step description (required for add/modify, ignored for remove)
 - **final_answer** (optional): When status=done, provide the final result here.
+
+### Managing the Plan — `add_step`, `modify_step`, `remove_step`
+
+To update the plan, use these tools BEFORE calling step_complete:
+- **add_step**(title, description?, index?): Add a new step. Omit index to append at end.
+- **modify_step**(index, title?, description?): Update a pending step's title or description.
+- **remove_step**(index): Remove a pending step.
+
+These do NOT count as tool calls and do NOT complete the current step. Use them freely.
 
 Before calling step_complete, save important facts:
 `add_note("auth module: verify_token() at src/auth.py:42, uses JWT HS256, no expiry check")`
-Then complete the step:
-```json
-{
-  "summary": "Found auth module at src/auth.py with verify_token() on line 42",
-  "status": "continue",
-  "next_steps": [
-    {"op": "add", "index": 5, "description": "Run pytest tests/test_auth.py to verify the fix"},
-    {"op": "add", "index": 6, "description": "Update error messages in handle_request()"},
-    {"op": "modify", "index": 4, "description": "Also check rollback behavior, not just forward migration"},
-    {"op": "remove", "index": 3}
-  ]
-}
+Then update the plan and complete the step:
+```
+add_step(title="Run pytest tests/test_auth.py to verify the fix")
+add_step(title="Update error messages in handle_request()")
+modify_step(index=4, title="Also check rollback behavior, not just forward migration")
+remove_step(index=3)
+step_complete(summary="Found auth module at src/auth.py with verify_token() on line 42", status="continue")
 ```
 
-### Rules for next_steps operations
+### Rules for plan operations
 - Only operate on pending steps — you cannot modify done or skipped steps.
 - When status is `continue`, you MUST have at least one pending step. Add steps if needed.
 - After completing your last planned step, either add more steps or set status: done.
@@ -396,8 +396,12 @@ The problem is architectural — more fixes will make it worse.
 ### step_complete Parameters
 - **summary** (required): Use format: "Read: ... | Changed: ... | Remaining: ... | Issues: ..."
 - **status** (required): "continue" (more work), "done" (finished), "blocked" (stuck)
-- **next_steps** (optional): Array of {"op": "add|modify|remove", "index": int, "description": str}
 - **final_answer** (required when status=done): Complete user-facing answer.
+
+### Plan Management (use BEFORE step_complete)
+- **add_step**(title, description?, index?): Add a step (omit index to append at end).
+- **modify_step**(index, title?, description?): Update a pending step.
+- **remove_step**(index): Remove a pending step.
 
 ### Verification After Every Edit
 After EVERY code change, verify with a specific command:
@@ -614,7 +618,7 @@ def build_iteration_prompt(
     else:
         parts.append(
             "<plan>\nNo plan yet. Create 2-3 concrete steps by calling step_complete "
-            "with next_steps operations. You will add more steps as you discover what's needed.\n</plan>"
+            "with add_step(title=\"...\") calls. You will add more steps as you discover what's needed.\n</plan>"
         )
 
     # Previous action summaries (rich format if available)
@@ -646,23 +650,24 @@ def build_iteration_prompt(
         scope_warning = ""
         next_pending = [s for s in state.plan.steps if s.status == "pending"]
         if next_pending:
-            off_limits = ", ".join(f'"{s.description}"' for s in next_pending[:3])
+            off_limits = ", ".join(f'"{s.title}"' for s in next_pending[:3])
             scope_warning = (
-                f"\n\nSCOPE CONSTRAINT: This step is ONLY about: {active.description}\n"
+                f"\n\nSCOPE CONSTRAINT: This step is ONLY about: {active.title}\n"
                 f"Do NOT work on future steps: {off_limits}\n"
                 f"If you discover that this step requires work from future steps, "
                 f"call step_complete with status='continue' and add new steps."
             )
+        guidance = f"\n\n{active.description}" if active.description else ""
         parts.append(
-            f"<current-action>\nStep {active.index}: {active.description}"
-            f"{scope_warning}\n</current-action>"
+            f"<current-action>\nStep {active.index}: {active.title}"
+            f"{guidance}{scope_warning}\n</current-action>"
         )
     elif state.plan.steps:
         # All planned steps are done — prompt to continue or finish
         parts.append(
             "<current-action>\n"
             "All planned steps are complete. Review what was accomplished against the task requirements.\n"
-            "Either add new steps via step_complete(next_steps=[...]) if more work is needed,\n"
+            "Either add new steps via add_step() if more work is needed,\n"
             "or call step_complete(status=\"done\", final_answer=\"...\") if the task is fully complete.\n"
             "</current-action>"
         )
@@ -674,7 +679,7 @@ def build_iteration_prompt(
             if s.status == "pending" and (active is None or s.index > active.index)
         ]
         if next_steps:
-            lines = [f"{s.index}. {s.description}" for s in next_steps]
+            lines = [f"{s.index}. {s.title}" for s in next_steps]
             parts.append(f"<next-actions>\n{chr(10).join(lines)}\n</next-actions>")
 
     # User messages injected mid-task (live guidance from the user)
