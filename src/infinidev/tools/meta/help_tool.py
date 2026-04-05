@@ -41,8 +41,8 @@ Call help(context="<category>") for tool list, or help(context="<tool_name>") fo
     "file": """\
 FILE TOOLS — Reading and creating files
 
-  read_file(file_path)
-    Read entire file. Returns numbered lines. Auto-indexes the file for code intelligence.
+  read_file(file_path, offset?, limit?)
+    Read file with numbered lines. Use offset/limit for large files.
 
   partial_read(file_path, start_line, end_line)
     Read a specific line range (both 1-based, inclusive).
@@ -51,24 +51,24 @@ FILE TOOLS — Reading and creating files
     Create a new file. FAILS if the file already exists.
 
   replace_lines(file_path, content, start_line, end_line)
-    Replace a range of lines with new content. See help("replace_lines") for details.
+    Replace a range of lines with new content. See help("replace_lines").
 
   add_content_after_line(file_path, line_number, content)
-    Insert content after a specific line. See help("add_content_after_line").
+    Insert content after a specific line.
 
   add_content_before_line(file_path, line_number, content)
-    Insert content before a specific line. See help("add_content_before_line").
+    Insert content before a specific line.
 
   apply_patch(patch, strip?)
     Apply a unified diff to one or more files. See help("apply_patch").
 
-  list_directory(path)
-    List files and directories at a path.
+  list_directory(file_path?)
+    List files and directories. Defaults to workspace root.
 
-  glob(pattern, path?)
+  glob(pattern, file_path?)
     Find files matching a glob pattern.
 
-  code_search(pattern, path?, include?)
+  code_search(pattern, file_path?, file_extensions?)
     Search for text/regex patterns across files.
 
 TIP: Always read_file first to get line numbers, then use replace_lines or edit_symbol to edit.""",
@@ -101,30 +101,33 @@ TWO APPROACHES:
    move_symbol(symbol, target_file) — Move to another file/class, update imports
 
 WORKFLOW:
-  1. read_file("src/foo.py")           → see the code with line numbers
-  2. edit_symbol("Foo.bar", new_code)  → replace method by name
+  1. read_file(file_path="src/foo.py")           → see the code with line numbers
+  2. edit_symbol(symbol="Foo.bar", new_code=...)  → replace method by name
   OR
-  2. replace_lines("src/foo.py", new_code, 10, 25)  → replace lines 10-25""",
+  2. replace_lines(file_path="src/foo.py", content="new code", start_line=10, end_line=25)""",
 
     # ── Category: code_intel ──────────────────────────────────────────────
     "code_intel": """\
 CODE INTELLIGENCE TOOLS — Symbol-based code navigation
 
-  get_symbol_code(symbol, file_path?)
+  get_symbol_code(name, file_path?)
     Get the full source code of a function, method, or class by name.
     Use qualified names: "ClassName.method_name" or just "function_name".
 
   list_symbols(file_path, kind?)
     List all symbols in a file. Filter by kind: "class", "method", "function", "variable".
 
-  search_symbols(name, kind?, limit?)
+  search_symbols(query, kind?)
     Search for symbols by name across the project. Supports partial matching.
 
-  find_references(name, kind?, file_path?)
+  find_references(name, ref_kind?)
     Find all places where a symbol is used. Essential before renaming or removing.
 
-  project_structure(path?, depth?)
-    Show project directory tree.
+  project_structure(file_path?, depth?)
+    Show project directory tree with file descriptions.
+
+  analyze_code(file_path?, checks?)
+    Detect broken imports, undefined symbols, unused code.
 
 TIP: Files are auto-indexed when you read_file them. Symbol tools work best after reading.""",
 
@@ -132,56 +135,65 @@ TIP: Files are auto-indexed when you read_file them. Symbol tools work best afte
     "git": """\
 GIT TOOLS
 
-  git_status()               — Show working tree status
-  git_diff(ref?, staged?)    — Show changes (unstaged by default)
-  git_branch(name?, action?) — Create, switch, list, or delete branches
-  git_commit(message, files?)— Commit changes""",
+  git_status()                              — Show working tree status
+  git_diff(branch?, file?, staged?)         — Show changes (unstaged by default)
+  git_branch(branch_name, create?, base_branch?) — Create or checkout branches
+  git_commit(message, files?)               — Commit changes""",
 
     # ── Category: shell ───────────────────────────────────────────────────
     "shell": """\
 SHELL TOOLS
 
-  execute_command(command, cwd?, timeout?)
+  execute_command(command, cwd?, timeout?, env?)
     Run a shell command. Use for: running tests, installing packages, build commands.
 
-  code_interpreter(code, language?)
-    Execute code snippets (Python by default) in an isolated environment.""",
+  code_interpreter(code, libraries_used?, timeout?)
+    Execute Python code snippets in an isolated environment.""",
 
     # ── Category: knowledge ───────────────────────────────────────────────
     "knowledge": """\
 KNOWLEDGE TOOLS — Findings and reports
 
-  record_finding(title, content, tags?)  — Save a finding
-  read_findings(tag?, limit?)            — Read stored findings
-  search_findings(query)                 — Semantic search over findings
-  search_knowledge(query)                — Search across findings + docs""",
+  record_finding(title, content, finding_type?, confidence?, tags?, sources?)
+    Save a finding with metadata.
+
+  read_findings(query?, finding_type?, limit?)
+    Read stored findings. Filter by query or type.
+
+  search_findings(query, limit?)
+    Semantic search over findings.
+
+  search_knowledge(query, sources?, limit?)
+    Search across findings + docs.""",
 
     # ── Category: web ─────────────────────────────────────────────────────
     "web": """\
 WEB TOOLS
 
   web_search(query, num_results?)  — Search the web
-  web_fetch(url)                   — Fetch content from a URL""",
+  web_fetch(url, format?)          — Fetch content from a URL (markdown or text)""",
 
     # ── Individual tools ──────────────────────────────────────────────────
 
     "read_file": """\
-read_file(file_path)
+read_file(file_path, offset?, limit?)
 
 Read the full contents of a file. Returns numbered lines for easy reference.
 Automatically indexes the file for code intelligence (symbol lookup, etc).
 
 PARAMS:
   file_path (str, required) — File path (absolute or relative to workspace)
+  offset (int, optional)    — Line number to start reading from (1-based). Default: start of file.
+  limit (int, optional)     — Maximum number of lines to read. Default: entire file.
 
 RETURNS: Numbered lines in format "  LINE_NUM\\tCONTENT"
 
 EXAMPLES:
   read_file(file_path="src/auth.py")
-  read_file(file_path="tests/test_auth.py")
+  read_file(file_path="src/big_file.py", offset=100, limit=50)  # lines 100-149
 
 TIPS:
-  - For large files, use partial_read instead to read only what you need
+  - For large files, use offset/limit or partial_read to read only what you need
   - Line numbers in the output can be used with replace_lines for editing
   - Binary files are automatically detected and rejected""",
 
@@ -255,7 +267,7 @@ PARAMS:
   file_path (str, optional)  — File hint if symbol name is ambiguous
 
 EXAMPLES:
-  edit_symbol(symbol="AuthService.verify_token", new_code="    def verify_token(self, token):\\n        payload = self._decode(token)\\n        return payload if payload else None\\n")
+  edit_symbol(symbol="AuthService.verify_token", new_code="    def verify_token(self, token):\\n        payload = self._decode(token):\\n        return payload if payload else None\\n")
 
   edit_symbol(symbol="parse_config", new_code="def parse_config(path):\\n    with open(path) as f:\\n        return json.load(f)\\n")
 
@@ -276,10 +288,10 @@ PARAMS:
 
 EXAMPLES:
   # Add method to a class
-  add_symbol(code="def validate(self):\\n    return bool(self.token)\\n", file_path="src/auth.py", class_name="AuthService")
+  add_symbol(file_path="src/auth.py", code="def validate(self):\\n    return bool(self.token)\\n", class_name="AuthService")
 
   # Add standalone function to file
-  add_symbol(code="def helper():\\n    pass\\n", file_path="src/utils.py")""",
+  add_symbol(file_path="src/utils.py", code="def helper():\\n    pass\\n")""",
 
     "remove_symbol": """\
 remove_symbol(symbol, file_path?)
@@ -295,19 +307,19 @@ EXAMPLES:
   remove_symbol(symbol="old_helper_function", file_path="src/utils.py")""",
 
     "get_symbol_code": """\
-get_symbol_code(symbol, file_path?)
+get_symbol_code(name, file_path?)
 
 Get the full source code of a function, method, or class by name.
 
 PARAMS:
-  symbol (str, required)     — Qualified name: "ClassName.method" or "function_name"
+  name (str, required)       — Qualified name: "ClassName.method" or "function_name"
   file_path (str, optional)  — File hint for disambiguation
 
 RETURNS: File path, line range, and complete source code.
 
 EXAMPLES:
-  get_symbol_code(symbol="AuthService.verify_token")
-  get_symbol_code(symbol="parse_config", file_path="src/config.py")""",
+  get_symbol_code(name="AuthService.verify_token")
+  get_symbol_code(name="parse_config", file_path="src/config.py")""",
 
     "list_symbols": """\
 list_symbols(file_path, kind?)
@@ -323,32 +335,43 @@ EXAMPLES:
   list_symbols(file_path="src/auth.py", kind="method")""",
 
     "search_symbols": """\
-search_symbols(name, kind?, limit?)
+search_symbols(query, kind?)
 
 Search for symbols by name across the entire project. Supports partial matching.
 
 PARAMS:
-  name (str, required)   — Symbol name (partial match: "token" finds "verify_token")
+  query (str, required)  — Symbol name to search (partial match: "token" finds "verify_token")
   kind (str, optional)   — Filter by kind: "class", "method", "function"
-  limit (int, optional)  — Max results (default 10)
 
 EXAMPLES:
-  search_symbols(name="verify_token")
-  search_symbols(name="Auth", kind="class")""",
+  search_symbols(query="verify_token")
+  search_symbols(query="Auth", kind="class")""",
 
     "find_references": """\
-find_references(name, kind?, file_path?)
+find_references(name, ref_kind?)
 
 Find all places where a symbol is used in the codebase.
 
 PARAMS:
   name (str, required)       — Symbol name to find references for
-  kind (str, optional)       — Reference kind filter: "usage", "call", "import"
-  file_path (str, optional)  — Limit search to a specific file
+  ref_kind (str, optional)   — Reference kind filter: "usage", "call", "import"
 
 EXAMPLES:
   find_references(name="verify_token")
-  find_references(name="AuthService", kind="import")""",
+  find_references(name="AuthService", ref_kind="import")""",
+
+    "project_structure": """\
+project_structure(file_path?, depth?)
+
+Show project directory tree with descriptions of what each file contains.
+
+PARAMS:
+  file_path (str, optional) — Root path to show. Default: workspace root.
+  depth (int, optional)     — Tree depth. Default: 2.
+
+EXAMPLES:
+  project_structure()
+  project_structure(file_path="src/", depth=3)""",
 
     "add_content_after_line": """\
 add_content_after_line(file_path, line_number, content)
@@ -429,6 +452,175 @@ TIPS:
   - Use for multi-file changes when you can express the fix as a diff
   - Context lines (unchanged) help locate the right position
   - strip=0 if paths are already correct (no a/ b/ prefix)""",
+
+    "git_status": """\
+git_status()
+
+Show the current working tree status (staged, unstaged, untracked files).
+
+PARAMS: None
+
+EXAMPLES:
+  git_status()""",
+
+    "git_diff": """\
+git_diff(branch?, file?, staged?)
+
+Show uncommitted changes or diff against a branch.
+
+PARAMS:
+  branch (str, optional)  — Branch or ref to diff against (e.g. "main"). Default: working tree changes.
+  file (str, optional)    — Limit diff to a specific file path.
+  staged (bool, optional) — If True, show only staged changes. Default: False (unstaged).
+
+EXAMPLES:
+  git_diff()
+  git_diff(branch="main")
+  git_diff(file="src/auth.py")
+  git_diff(staged=True)""",
+
+    "git_branch": """\
+git_branch(branch_name, create?, base_branch?)
+
+Create or checkout a git branch.
+
+PARAMS:
+  branch_name (str, required)  — Name of the branch
+  create (bool, optional)      — Create the branch if True (default), checkout if False.
+  base_branch (str, optional)  — Base branch to create from. Default: "main".
+
+EXAMPLES:
+  git_branch(branch_name="fix-auth", create=True)
+  git_branch(branch_name="existing-branch", create=False)
+  git_branch(branch_name="feature-x", base_branch="develop")""",
+
+    "git_commit": """\
+git_commit(message, files?)
+
+Commit changes to git.
+
+PARAMS:
+  message (str, required)       — Commit message
+  files (list[str], optional)   — Specific files to commit. Default: all staged changes.
+
+EXAMPLES:
+  git_commit(message="Fix auth expiry check")
+  git_commit(message="Update config", files=["src/config.py"])""",
+
+    "execute_command": """\
+execute_command(command, cwd?, timeout?, env?)
+
+Run a shell command and return its output.
+
+PARAMS:
+  command (str, required)           — Shell command to run
+  cwd (str, optional)               — Working directory. Default: workspace root.
+  timeout (int, optional)           — Timeout in seconds. Default: 300.
+  env (dict[str, str], optional)    — Extra environment variables to set.
+
+EXAMPLES:
+  execute_command(command="python -m pytest tests/ -x -q")
+  execute_command(command="npm test", cwd="frontend/")
+  execute_command(command="cargo build", timeout=600)""",
+
+    "code_interpreter": """\
+code_interpreter(code, libraries_used?, timeout?)
+
+Execute Python code snippets in an isolated environment.
+
+PARAMS:
+  code (str, required)                — Python code to execute
+  libraries_used (list[str], optional) — Libraries to make available (pip-installed if needed)
+  timeout (int, optional)              — Timeout in seconds. Default: 120.
+
+EXAMPLES:
+  code_interpreter(code="print(2 + 2)")
+  code_interpreter(code="import pandas as pd\\ndf = pd.read_csv('data.csv')\\nprint(df.head())", libraries_used=["pandas"])""",
+
+    "record_finding": """\
+record_finding(title, content, finding_type?, confidence?, tags?, sources?)
+
+Save a finding to the knowledge base for future sessions.
+
+PARAMS:
+  title (str, required)             — Searchable title/topic
+  content (str, required)           — Finding details (self-contained, useful without extra context)
+  finding_type (str, optional)      — "observation" (default), "conclusion", or "project_context"
+  confidence (float, optional)      — 0.0-1.0. Default: 0.5. Use 0.8+ for verified facts.
+  tags (list[str], optional)        — Tags for categorization
+  sources (list[str], optional)     — Source URLs or file paths
+
+EXAMPLES:
+  record_finding(title="Auth module structure", content="JWT with HS256, verify_token at src/auth.py:42", finding_type="project_context", confidence=0.9)
+  record_finding(title="Redis 7.2 caching", content="Supports client-side caching via RESP3", sources=["https://redis.io/docs/"])""",
+
+    "read_findings": """\
+read_findings(query?, finding_type?, limit?)
+
+Read stored findings from the knowledge base.
+
+PARAMS:
+  query (str, optional)         — Filter findings by text match
+  finding_type (str, optional)  — Filter by type: "observation", "conclusion", "project_context"
+  limit (int, optional)         — Max results. Default: 50.
+
+EXAMPLES:
+  read_findings()
+  read_findings(query="auth")
+  read_findings(finding_type="project_context", limit=10)""",
+
+    "search_findings": """\
+search_findings(query, limit?)
+
+Semantic search over findings using embeddings. Better than read_findings for fuzzy queries.
+
+PARAMS:
+  query (str, required)   — Search query (semantic matching, not exact text)
+  limit (int, optional)   — Max results. Default: 20.
+
+EXAMPLES:
+  search_findings(query="authentication flow")
+  search_findings(query="database connection pooling", limit=5)""",
+
+    "search_knowledge": """\
+search_knowledge(query, sources?, limit?)
+
+Unified search across findings, reports, and cached documentation.
+
+PARAMS:
+  query (str, required)           — Search query
+  sources (list[str], optional)   — Which sources to search. Default: ["findings", "reports"].
+  limit (int, optional)           — Max results. Default: 20.
+
+EXAMPLES:
+  search_knowledge(query="rate limiting")
+  search_knowledge(query="FastAPI auth", sources=["findings", "reports"])""",
+
+    "web_search": """\
+web_search(query, num_results?)
+
+Search the web for documentation, APIs, error messages, or solutions.
+
+PARAMS:
+  query (str, required)       — Search query (be specific for better results)
+  num_results (int, optional) — Number of results. Default: 10.
+
+EXAMPLES:
+  web_search(query="python requests timeout configuration")
+  web_search(query="FastAPI dependency injection lifespan", num_results=5)""",
+
+    "web_fetch": """\
+web_fetch(url, format?)
+
+Fetch and read a web page. Prefer official documentation URLs.
+
+PARAMS:
+  url (str, required)            — URL to fetch
+  format (str, optional)         — "markdown" (default) or "text". Markdown preserves structure.
+
+EXAMPLES:
+  web_fetch(url="https://docs.python.org/3/library/json.html")
+  web_fetch(url="https://api.example.com/docs", format="text")""",
 
     "rename_symbol": """\
 rename_symbol(symbol, new_name, file_path?)
