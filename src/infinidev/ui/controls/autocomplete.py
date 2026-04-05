@@ -25,6 +25,8 @@ COMMANDS = [
     ("/brainstorm", "Brainstorm ideas and solutions for a problem"),
     ("/plan", "Generate plan, review it, then execute on approval"),
     ("/init", "Explore and document the current project"),
+    ("/debug", "Inspect agent internals: notes, history, plan, state"),
+    ("/notes", "Show agent notes (alias for /debug)"),
     ("/findings", "Browse all findings"),
     ("/knowledge", "Browse project knowledge"),
     ("/documentation", "Browse cached library documentation"),

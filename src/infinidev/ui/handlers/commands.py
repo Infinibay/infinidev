@@ -66,6 +66,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "/plan <task>          Generate plan, review, then execute\n"
         "/explore <problem>    Decompose and explore a complex problem\n"
         "/init                 Explore and document the current project\n"
+        "/debug                Inspect agent: notes, history, plan, state\n"
         "/findings             Browse all findings\n"
         "/knowledge            Browse project knowledge\n"
         "/documentation        Browse cached library docs\n"
@@ -93,6 +94,16 @@ def _cmd_knowledge(app: InfinidevApp, parts: list[str]) -> None:
 
 def _cmd_docs(app: InfinidevApp, parts: list[str]) -> None:
     app.add_message("System", "[Docs browser — coming soon]", "system")
+
+
+def _cmd_notes(app: InfinidevApp, parts: list[str]) -> None:
+    """Show agent notes — alias for /debug."""
+    app.dialog_manager.open_debug()
+
+
+def _cmd_debug(app: InfinidevApp, parts: list[str]) -> None:
+    """Open the debug panel with notes, history, plan, and state."""
+    app.dialog_manager.open_debug()
 
 
 def _cmd_think(app: InfinidevApp, parts: list[str]) -> None:
@@ -162,6 +173,8 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/help": _cmd_help,
     "/settings": _cmd_settings,
     "/models": _cmd_models,
+    "/debug": _cmd_debug,
+    "/notes": _cmd_notes,
     "/findings": _cmd_findings,
     "/knowledge": _cmd_knowledge,
     "/documentation": _cmd_docs,

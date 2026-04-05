@@ -106,6 +106,8 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
         "description": (
             "Signal that the current step is complete. "
             "You MUST call this after finishing each step. "
+            "WARNING: After this call, ALL tool outputs and conversation from this step will be discarded. "
+            "Only the summary and your notes (add_note) survive to the next step. "
             "Before calling this, save key facts via add_note (file paths, function names, decisions). "
             "Before status='done', call add_session_note with what you learned."
         ),

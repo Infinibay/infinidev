@@ -35,6 +35,15 @@ class DialogManager:
         self._findings_list_window: Any = None
         self._findings_detail_window: Any = None
 
+        # Notes dialog state (legacy — replaced by debug panel)
+        self._notes_ctrl: Any = None
+        self._notes_window: Any = None
+
+        # Debug panel state
+        self._debug_state: Any = None
+        self._debug_sections_window: Any = None
+        self._debug_content_window: Any = None
+
     # ── Settings dialog ─────────────────────────────────────────────
 
     def open_settings(self) -> None:
@@ -235,6 +244,247 @@ class DialogManager:
             content=ConditionalContainer(
                 content=frame,
                 filter=Condition(lambda: app.active_dialog == "findings_browser"),
+            ),
+            transparent=False,
+        )
+        if app._float_container:
+            app._float_container.floats.append(dialog_float)
+
+    # ── Notes dialog ───────────────────────────────────────────────
+
+    def open_notes(self) -> None:
+        """Open the notes browser modal (lazy-inits on first call)."""
+        if self._notes_ctrl is None:
+            self._init_notes_dialog()
+
+        engine = self._app.engine
+        if engine is None:
+            self._notes_ctrl.session_notes = []
+            self._notes_ctrl.task_notes = []
+        else:
+            self._notes_ctrl.session_notes = list(engine.session_notes)
+            state = getattr(engine, "_last_state", None)
+            self._notes_ctrl.task_notes = list(state.notes) if state and hasattr(state, "notes") else []
+
+        self._notes_ctrl._scroll = 0
+        self._app.active_dialog = "notes_browser"
+
+        try:
+            self._app.app.layout.focus(self._notes_window)
+        except Exception:
+            pass
+        self._app.invalidate()
+
+    def _init_notes_dialog(self) -> None:
+        """Create the notes dialog and register as a Float."""
+        from prompt_toolkit.layout.containers import (
+            Float, ConditionalContainer, Window,
+        )
+        from prompt_toolkit.layout.margins import ScrollbarMargin
+        from prompt_toolkit.layout.containers import ScrollOffsets
+        from prompt_toolkit.filters import Condition
+        from prompt_toolkit.key_binding import KeyBindings
+        from infinidev.ui.dialogs.notes_browser import NotesBrowserControl
+        from infinidev.ui.dialogs.base import dialog_frame
+        from infinidev.ui.theme import ACCENT
+
+        app = self._app
+
+        ctrl = NotesBrowserControl()
+        self._notes_ctrl = ctrl
+
+        self._notes_window = Window(
+            content=ctrl,
+            right_margins=[ScrollbarMargin(display_arrows=True)],
+            scroll_offsets=ScrollOffsets(top=1, bottom=1),
+        )
+
+        kb = KeyBindings()
+
+        @kb.add("up")
+        @kb.add("k")
+        def _up(event):
+            ctrl.scroll_up()
+
+        @kb.add("down")
+        @kb.add("j")
+        def _down(event):
+            ctrl.scroll_down()
+
+        @kb.add("escape")
+        def _close(event):
+            app.active_dialog = None
+            app.focus_chat()
+            app.invalidate()
+
+        ctrl._nav_kb = kb
+        ctrl.get_key_bindings = lambda: kb
+
+        frame = dialog_frame("Agent Notes", self._notes_window,
+                             width=70, height=24, border_color=ACCENT)
+
+        dialog_float = Float(
+            content=ConditionalContainer(
+                content=frame,
+                filter=Condition(lambda: app.active_dialog == "notes_browser"),
+            ),
+            transparent=False,
+        )
+        if app._float_container:
+            app._float_container.floats.append(dialog_float)
+
+    # ── Debug panel ────────────────────────────────────────────────
+
+    def open_debug(self) -> None:
+        """Open the debug panel modal (lazy-inits on first call)."""
+        if self._debug_state is None:
+            self._init_debug_dialog()
+
+        state = self._debug_state
+        state.section_cursor = 0
+        state.scroll = 0
+        state.focus = "sections"
+
+        # Populate data from engine
+        engine = self._app.engine
+        if engine is None:
+            state.session_notes = []
+            state.task_notes = []
+            state.history = []
+            state.plan_text = ""
+            state.state_info = {}
+        else:
+            state.session_notes = list(engine.session_notes)
+            last = getattr(engine, "_last_state", None)
+            if last:
+                state.task_notes = list(last.notes)
+                state.history = list(last.history)
+                state.plan_text = last.plan.render() if last.plan.steps else ""
+                state.state_info = {
+                    "iteration": last.iteration_count,
+                    "tool_calls": last.total_tool_calls,
+                    "total_tokens": f"{last.total_tokens:,}",
+                    "last_prompt_tokens": f"{last.last_prompt_tokens:,}",
+                    "last_completion_tokens": f"{last.last_completion_tokens:,}",
+                    "notes_count": len(last.notes),
+                    "opened_files": len(last.opened_files),
+                    "cache_creation_tokens": f"{last.cache_creation_tokens:,}",
+                    "cache_read_tokens": f"{last.cache_read_tokens:,}",
+                    "cached_tokens": f"{last.cached_tokens:,}",
+                }
+            else:
+                state.task_notes = []
+                state.history = []
+                state.plan_text = ""
+                state.state_info = {}
+
+        self._app.active_dialog = "debug_panel"
+        try:
+            self._app.app.layout.focus(self._debug_sections_window)
+        except Exception:
+            pass
+        self._app.invalidate()
+
+    def _init_debug_dialog(self) -> None:
+        """Create the debug panel dialog and register as a Float."""
+        from prompt_toolkit.layout.containers import (
+            Float, ConditionalContainer, VSplit, Window,
+        )
+        from prompt_toolkit.layout.dimension import Dimension as D
+        from prompt_toolkit.layout.margins import ScrollbarMargin
+        from prompt_toolkit.layout.containers import ScrollOffsets
+        from prompt_toolkit.filters import Condition
+        from prompt_toolkit.key_binding import KeyBindings
+        from infinidev.ui.dialogs.debug_panel import (
+            DebugPanelState, DebugSectionsControl, DebugContentControl,
+        )
+        from infinidev.ui.dialogs.base import dialog_frame
+        from infinidev.ui.theme import PRIMARY, ACCENT
+
+        app = self._app
+
+        state = DebugPanelState()
+        self._debug_state = state
+
+        sections_ctrl = DebugSectionsControl(state)
+        content_ctrl = DebugContentControl(state)
+
+        self._debug_sections_window = Window(content=sections_ctrl, width=14)
+        self._debug_content_window = Window(
+            content=content_ctrl,
+            right_margins=[ScrollbarMargin(display_arrows=True)],
+            scroll_offsets=ScrollOffsets(top=1, bottom=1),
+        )
+
+        # Escape keybinding on both controls
+        for ctrl in (sections_ctrl, content_ctrl):
+            original_kb = ctrl.get_key_bindings
+
+            def _make_kb(orig_fn=original_kb):
+                kb = orig_fn()
+
+                @kb.add("escape")
+                def _close(event):
+                    app.active_dialog = None
+                    app.focus_chat()
+                    app.invalidate()
+
+                return kb
+
+            ctrl.get_key_bindings = _make_kb
+
+        # Focus switching: when sections control says "content", move focus
+        _orig_sections_kb = sections_ctrl.get_key_bindings
+
+        def _sections_kb_with_focus():
+            kb = _orig_sections_kb()
+
+            @kb.add("enter")
+            @kb.add("right")
+            @kb.add("tab")
+            def _to_content(event):
+                state.focus = "content"
+                try:
+                    app.app.layout.focus(self._debug_content_window)
+                except Exception:
+                    pass
+                app.invalidate()
+
+            return kb
+
+        sections_ctrl.get_key_bindings = _sections_kb_with_focus
+
+        _orig_content_kb = content_ctrl.get_key_bindings
+
+        def _content_kb_with_focus():
+            kb = _orig_content_kb()
+
+            @kb.add("left")
+            @kb.add("s-tab")
+            def _to_sections(event):
+                state.focus = "sections"
+                try:
+                    app.app.layout.focus(self._debug_sections_window)
+                except Exception:
+                    pass
+                app.invalidate()
+
+            return kb
+
+        content_ctrl.get_key_bindings = _content_kb_with_focus
+
+        body = VSplit([
+            self._debug_sections_window,
+            Window(width=1, char="│", style=f"{PRIMARY}"),
+            self._debug_content_window,
+        ])
+
+        frame = dialog_frame("Debug", body, width=95, height=30, border_color=ACCENT)
+
+        dialog_float = Float(
+            content=ConditionalContainer(
+                content=frame,
+                filter=Condition(lambda: app.active_dialog == "debug_panel"),
             ),
             transparent=False,
         )
