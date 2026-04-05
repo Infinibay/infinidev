@@ -129,6 +129,9 @@ class StepManager:
 
         ctx.state.current_step_index = step_index
 
+        # Keep _last_state up-to-date for live introspection (e.g. /debug panel)
+        self._engine._last_state = ctx.state
+
     def finish(
         self, ctx: ExecutionContext, status: str,
         iteration: int, result: str | None = None,

@@ -89,6 +89,8 @@ class LoopEngine(AgentEngine):
 
     def __init__(self) -> None:
         self._last_file_tracker: FileChangeTracker | None = None
+        self._last_state: LoopState | None = None
+        self._last_total_tool_calls: int = 0
         self._nudge_threshold_override: int | None = None
         self._summarizer_override: bool | None = None
         self._cancel_event: __import__('threading').Event = __import__('threading').Event()
@@ -237,6 +239,7 @@ class LoopEngine(AgentEngine):
         step_mgr = StepManager(self)
 
         self._cancel_event.clear()
+        self._last_state = ctx.state  # Make state available for live introspection
         _hook_manager.dispatch(_HookContext(
             event=_HookEvent.LOOP_START,
             metadata={"task_prompt": task_prompt, "tools": ctx.tools, "state": ctx.state},
@@ -385,7 +388,6 @@ class LoopEngine(AgentEngine):
         file_tracker = FileChangeTracker()
         self._last_file_tracker = file_tracker
         self._last_total_tool_calls = 0
-        self._last_state = None
 
         caps = get_model_capabilities()
         manual_tc = not caps.supports_function_calling
