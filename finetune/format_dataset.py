@@ -84,7 +84,7 @@ TOOL_SCHEMAS = [
     {"type": "function", "function": {"name": "execute_command", "parameters": {"type": "object", "properties": {"command": {"type": "string"}, "timeout": {"type": "integer"}}, "required": ["command"]}}},
     {"type": "function", "function": {"name": "add_note", "parameters": {"type": "object", "properties": {"note": {"type": "string"}}, "required": ["note"]}}},
     {"type": "function", "function": {"name": "think", "parameters": {"type": "object", "properties": {"reasoning": {"type": "string"}}, "required": ["reasoning"]}}},
-    {"type": "function", "function": {"name": "step_complete", "parameters": {"type": "object", "properties": {"summary": {"type": "string"}, "status": {"type": "string", "enum": ["continue", "done", "blocked"]}, "next_steps": {"type": "array"}, "final_answer": {"type": "string"}}, "required": ["summary", "status"]}}},
+    {"type": "function", "function": {"name": "step_complete", "parameters": {"type": "object", "properties": {"summary": {"type": "string"}, "status": {"type": "string", "enum": ["continue", "done", "blocked"]}, "next_steps": {"type": "array", "items": {"type": "object", "properties": {"op": {"type": "string"}, "index": {"type": "integer"}, "title": {"type": "string"}, "description": {"type": "string"}}}}, "final_answer": {"type": "string"}}, "required": ["summary", "status"]}}},
 ]
 
 

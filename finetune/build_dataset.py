@@ -45,7 +45,7 @@ TOOLS_SCHEMA = [
     {"name": "execute_command", "description": "Run shell command", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
     {"name": "add_note", "description": "Save info for later", "parameters": {"type": "object", "properties": {"note": {"type": "string"}}, "required": ["note"]}},
     {"name": "think", "description": "Reason before acting (user sees this)", "parameters": {"type": "object", "properties": {"reasoning": {"type": "string"}}, "required": ["reasoning"]}},
-    {"name": "step_complete", "description": "Signal step done", "parameters": {"type": "object", "properties": {"summary": {"type": "string"}, "status": {"type": "string"}, "next_steps": {"type": "array"}, "final_answer": {"type": "string"}}, "required": ["summary", "status"]}},
+    {"name": "step_complete", "description": "Signal step done", "parameters": {"type": "object", "properties": {"summary": {"type": "string"}, "status": {"type": "string"}, "next_steps": {"type": "array", "items": {"type": "object", "properties": {"op": {"type": "string"}, "index": {"type": "integer"}, "title": {"type": "string"}, "description": {"type": "string"}}}}, "final_answer": {"type": "string"}}, "required": ["summary", "status"]}},
     {"name": "send_message", "description": "Message to user", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
     {"name": "list_directory", "description": "List files at path", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
     {"name": "glob", "description": "Find files by pattern", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
@@ -134,6 +134,162 @@ def expand_tool_calls(scenario: dict) -> list[dict]:
         i += 1
 
     return expanded
+
+
+def _gemma4_escape(s: str) -> str:
+    """Escape a string value for Gemma 4 tool call syntax.
+
+    Gemma 4 uses <|"|> instead of regular quotes inside tool call arguments.
+    """
+    return s.replace('"', '<|"|>')
+
+
+def _gemma4_encode_value(value) -> str:
+    """Encode a value in Gemma 4's tool call argument format.
+
+    Strings become <|"|>value<|"|>, numbers/bools stay as-is,
+    lists and dicts are recursively encoded.
+    """
+    if isinstance(value, str):
+        return f'<|"|>{_gemma4_escape(value)}<|"|>'
+    elif isinstance(value, bool):
+        return "true" if value else "false"
+    elif isinstance(value, (int, float)):
+        return str(value)
+    elif isinstance(value, list):
+        items = ",".join(_gemma4_encode_value(v) for v in value)
+        return f"[{items}]"
+    elif isinstance(value, dict):
+        pairs = ",".join(
+            f"{k}:{_gemma4_encode_value(v)}" for k, v in value.items()
+        )
+        return "{" + pairs + "}"
+    else:
+        return f'<|"|>{_gemma4_escape(str(value))}<|"|>'
+
+
+def _gemma4_tool_declarations() -> str:
+    """Build Gemma 4 tool declarations from TOOLS_SCHEMA.
+
+    Format: <|tool>declaration:name{description:<|"|>...<|"|>,parameters:{...}}<|tool|>
+    """
+    decls = []
+    for tool in TOOLS_SCHEMA:
+        name = tool["name"]
+        desc = _gemma4_escape(tool.get("description", ""))
+        params = tool.get("parameters", {})
+
+        # Build parameters in Gemma 4 format
+        props = params.get("properties", {})
+        required = params.get("required", [])
+
+        prop_parts = []
+        for pname, pinfo in props.items():
+            ptype = pinfo.get("type", "string").upper()
+            pdesc = _gemma4_escape(pinfo.get("description", ""))
+            parts = [f"type:<|\"|\u003e{ptype}<|\"|>"]
+            if pdesc:
+                parts.append(f"description:<|\"|\u003e{pdesc}<|\"|>")
+            if "enum" in pinfo:
+                enum_items = ",".join(f'<|"|>{_gemma4_escape(e)}<|"|>' for e in pinfo["enum"])
+                parts.append(f"enum:[{enum_items}]")
+            prop_parts.append(f"{pname}:{{{','.join(parts)}}}")
+
+        req_items = ",".join(f'<|"|>{r}<|"|>' for r in required)
+
+        decl = (
+            f'<|tool>declaration:{name}{{'
+            f'description:<|"|>{desc}<|"|>,'
+            f'parameters:{{properties:{{{",".join(prop_parts)}}},'
+            f'required:[{req_items}],type:<|"|>OBJECT<|"|>}}'
+            f'}}<|tool|>'
+        )
+        decls.append(decl)
+    return "".join(decls)
+
+
+def format_gemma4(scenario: dict) -> str:
+    """Format scenario in Gemma 4 native format — NO system prompt instructions.
+
+    Only tool declarations in the system turn, no behavioral instructions.
+    Uses Gemma 4's native tool_call/tool_response markers.
+    """
+    expanded = expand_tool_calls(scenario)
+    parts = []
+
+    # System turn: ONLY tool declarations, no instructions
+    tool_decls = _gemma4_tool_declarations()
+    parts.append(f"<|turn>system\n{tool_decls}<|turn|>")
+
+    for turn in expanded:
+        role = turn.get("role", "")
+
+        if role == "user":
+            parts.append(f"<|turn>user\n{turn.get('content', '')}<|turn|>")
+
+        elif role == "assistant":
+            tool_calls = turn.get("tool_calls", [])
+            if tool_calls:
+                tc = tool_calls[0]
+                name = tc["name"]
+                args = tc.get("arguments", {})
+                # Encode arguments in Gemma 4 format: key:<|"|>value<|"|>
+                arg_parts = ",".join(
+                    f"{k}:{_gemma4_encode_value(v)}"
+                    for k, v in args.items()
+                )
+                call_str = f"<|tool_call>call:{name}{{{arg_parts}}}<|tool_call|>"
+                parts.append(f"<|turn>model\n{call_str}<|turn|>")
+            else:
+                content = turn.get("content", "")
+                parts.append(f"<|turn>model\n{content}<|turn|>")
+
+        elif role == "tool":
+            # Tool response: feed back as tool_response in the model turn
+            content = turn.get("content", "")
+            # Gemma 4 puts tool_response inline in the model's turn context
+            parts.append(f"<|tool_response>{content}<|tool_response|>")
+
+    return "\n".join(parts)
+
+
+def format_gemma4_bare(scenario: dict) -> str:
+    """Format scenario for Gemma 4 with NO system turn at all.
+
+    Completely bare — no instructions, no tool declarations.
+    The model learns tool patterns purely from examples.
+    Tool calls use Gemma 4 native format.
+    """
+    expanded = expand_tool_calls(scenario)
+    parts = []
+
+    for turn in expanded:
+        role = turn.get("role", "")
+
+        if role == "user":
+            parts.append(f"<|turn>user\n{turn.get('content', '')}<|turn|>")
+
+        elif role == "assistant":
+            tool_calls = turn.get("tool_calls", [])
+            if tool_calls:
+                tc = tool_calls[0]
+                name = tc["name"]
+                args = tc.get("arguments", {})
+                arg_parts = ",".join(
+                    f"{k}:{_gemma4_encode_value(v)}"
+                    for k, v in args.items()
+                )
+                call_str = f"<|tool_call>call:{name}{{{arg_parts}}}<|tool_call|>"
+                parts.append(f"<|turn>model\n{call_str}<|turn|>")
+            else:
+                content = turn.get("content", "")
+                parts.append(f"<|turn>model\n{content}<|turn|>")
+
+        elif role == "tool":
+            content = turn.get("content", "")
+            parts.append(f"<|tool_response>{content}<|tool_response|>")
+
+    return "\n".join(parts)
 
 
 def format_qwen_native(scenario: dict) -> str:
@@ -233,6 +389,10 @@ def build_dataset(fmt: str = "qwen_native"):
 
                     if fmt == "qwen_native":
                         text = format_qwen_native(scenario)
+                    elif fmt == "gemma4":
+                        text = format_gemma4(scenario)
+                    elif fmt == "gemma4_bare":
+                        text = format_gemma4_bare(scenario)
                     elif fmt == "raw":
                         text = json.dumps(scenario, ensure_ascii=False)
                     else:
@@ -286,18 +446,28 @@ def build_dataset(fmt: str = "qwen_native"):
     # Sample check
     if train_examples:
         sample = train_examples[0]["text"]
-        tc_count = sample.count("<tool_call>")
-        im_end_after_tc = sample.count("</tool_call><|im_end|>")
-        print(f"\nSample check (first example):")
-        print(f"  Tool calls: {tc_count}")
-        print(f"  Properly closed (</tool_call><|im_end|>): {im_end_after_tc}")
-        print(f"  Match: {'YES' if tc_count == im_end_after_tc else 'NO — some tool calls not properly closed!'}")
+        if fmt.startswith("gemma4"):
+            tc_count = sample.count("<|tool_call>call:")
+            tc_closed = sample.count("<|tool_call|>")
+            print(f"\nSample check (first example):")
+            print(f"  Tool calls: {tc_count}")
+            print(f"  Properly closed (<|tool_call|>): {tc_closed}")
+            print(f"  Match: {'YES' if tc_count == tc_closed else 'NO — mismatch!'}")
+            has_system = "<|turn>system" in sample
+            print(f"  System turn: {'YES' if has_system else 'NO (bare mode)'}")
+        else:
+            tc_count = sample.count("<tool_call>")
+            im_end_after_tc = sample.count("</tool_call><|im_end|>")
+            print(f"\nSample check (first example):")
+            print(f"  Tool calls: {tc_count}")
+            print(f"  Properly closed (</tool_call><|im_end|>): {im_end_after_tc}")
+            print(f"  Match: {'YES' if tc_count == im_end_after_tc else 'NO — some tool calls not properly closed!'}")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--format", "-f", default="qwen_native",
-                        choices=["qwen_native", "raw"])
+                        choices=["qwen_native", "gemma4", "gemma4_bare", "raw"])
     args = parser.parse_args()
     build_dataset(args.format)
 
