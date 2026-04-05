@@ -34,6 +34,9 @@ from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.loop.tools import (
     ADD_NOTE_SCHEMA,
     STEP_COMPLETE_SCHEMA,
+    ADD_STEP_SCHEMA,
+    MODIFY_STEP_SCHEMA,
+    REMOVE_STEP_SCHEMA,
     build_tool_dispatch,
     build_tool_schemas,
     execute_tool_call,
@@ -382,7 +385,7 @@ class LoopEngine(AgentEngine):
             from infinidev.tools.base.context import bind_tools_to_agent
             bind_tools_to_agent(task_tools, agent.agent_id)
 
-        tool_schemas = build_tool_schemas(tools) if tools else [STEP_COMPLETE_SCHEMA]
+        tool_schemas = build_tool_schemas(tools) if tools else [ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, STEP_COMPLETE_SCHEMA]
         tool_dispatch = build_tool_dispatch(tools) if tools else {}
 
         file_tracker = FileChangeTracker()
@@ -444,7 +447,7 @@ class LoopEngine(AgentEngine):
         return ExecutionContext(
             llm_params=llm_params, manual_tc=manual_tc, is_small=is_small,
             system_prompt=system_prompt, tool_schemas=tool_schemas,
-            tool_dispatch=tool_dispatch, planning_schemas=[STEP_COMPLETE_SCHEMA],
+            tool_dispatch=tool_dispatch, planning_schemas=[ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, STEP_COMPLETE_SCHEMA],
             tools=tools, max_iterations=max_iterations, max_per_action=max_per_action,
             max_total_calls=max_total_calls, history_window=settings.LOOP_HISTORY_WINDOW,
             max_context_tokens=max_context_tokens,

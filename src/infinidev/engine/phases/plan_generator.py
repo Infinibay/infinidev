@@ -38,7 +38,7 @@ def _generate_plan(agent: Any,
     from infinidev.engine.llm_client import call_llm
     from infinidev.config.llm import get_litellm_params
     from infinidev.engine.loop.context import build_system_prompt
-    from infinidev.engine.loop.tools import STEP_COMPLETE_SCHEMA, build_tool_schemas
+    from infinidev.engine.loop.tools import STEP_COMPLETE_SCHEMA, ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, build_tool_schemas
     from infinidev.engine.formats.tool_call_parser import parse_step_complete_args
 
     answers_text = "\n".join(
@@ -72,8 +72,8 @@ def _generate_plan(agent: Any,
         identity_override=identity,
     )
 
-    # Only offer step_complete as a tool — no read/write tools
-    tools = [STEP_COMPLETE_SCHEMA]
+    # Only offer plan management + step_complete — no read/write tools
+    tools = [ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, STEP_COMPLETE_SCHEMA]
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -127,41 +127,61 @@ def _generate_plan(agent: Any,
                 _log(f"  {DIM}Round {round_num + 1}: no tool calls, stopping{RESET}")
             break
 
-        # Process step_complete calls — collect next_steps, don't execute them
+        # Build assistant message with all tool calls
+        from infinidev.engine.formats.tool_call_parser import safe_json_loads as _safe_json
+        assistant_tool_calls = []
         for tc in tool_calls:
-            if tc.function.name == "step_complete":
+            tc_id = tc.id if hasattr(tc, "id") else f"plan_{round_num}_{len(assistant_tool_calls)}"
+            assistant_tool_calls.append({
+                "id": tc_id, "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            })
+        messages.append({"role": "assistant", "tool_calls": assistant_tool_calls})
+
+        # Process each tool call
+        steps_added_this_round = 0
+        plan_done = False
+        for tc in tool_calls:
+            tc_id = tc.id if hasattr(tc, "id") else f"plan_{round_num}_{tool_calls.index(tc)}"
+            name = tc.function.name
+
+            if name == "add_step":
+                try:
+                    args = _safe_json(tc.function.arguments) if isinstance(tc.function.arguments, str) else (tc.function.arguments or {})
+                    if isinstance(args, dict):
+                        title = args.get("title", args.get("description", ""))
+                        desc = args.get("description", "")
+                        if title:
+                            collected_steps.append({
+                                "step": len(collected_steps) + 1,
+                                "title": title,
+                                "description": desc if title != desc else "",
+                                "files": [],
+                            })
+                            steps_added_this_round += 1
+                except Exception:
+                    pass
+                messages.append({"role": "tool", "tool_call_id": tc_id,
+                                 "content": f'{{"status": "added", "total_steps": {len(collected_steps)}}}'})
+
+            elif name in ("modify_step", "remove_step"):
+                messages.append({"role": "tool", "tool_call_id": tc_id,
+                                 "content": '{"status": "updated"}'})
+
+            elif name == "step_complete":
                 result = parse_step_complete_args(tc.function.arguments)
-
-                # Collect new steps
-                for op in result.next_steps:
-                    if op.op == "add":
-                        collected_steps.append({
-                            "step": len(collected_steps) + 1,
-                            "description": op.description,
-                            "files": [],
-                        })
-
-                if verbose:
-                    new_count = len(result.next_steps)
-                    _log(f"  {DIM}Round {round_num + 1}: +{new_count} steps (total: {len(collected_steps)}){RESET}")
-
-                # Add tool response to conversation
-                messages.append({"role": "assistant", "tool_calls": [
-                    {"id": tc.id if hasattr(tc, "id") else f"plan_{round_num}",
-                     "type": "function",
-                     "function": {"name": "step_complete", "arguments": tc.function.arguments}}
-                ]})
-                messages.append({"role": "tool", "tool_call_id": tc.id if hasattr(tc, "id") else f"plan_{round_num}",
-                                 "content": f"Plan updated. {len(collected_steps)} steps so far. Call step_complete again to add more, or with status='done' to finish."})
-
-                # If model said done, stop
+                messages.append({"role": "tool", "tool_call_id": tc_id,
+                                 "content": f"Plan has {len(collected_steps)} steps. Add more with add_step or finish with status='done'."})
                 if result.status == "done":
-                    if verbose:
-                        _log(f"  {DIM}Plan complete: {len(collected_steps)} steps{RESET}")
-                    break
-        else:
-            continue  # no break in inner loop → continue outer
-        break  # inner loop broke (done) → break outer too
+                    plan_done = True
+
+        if verbose and steps_added_this_round:
+            _log(f"  {DIM}Round {round_num + 1}: +{steps_added_this_round} steps (total: {len(collected_steps)}){RESET}")
+
+        if plan_done:
+            if verbose:
+                _log(f"  {DIM}Plan complete: {len(collected_steps)} steps{RESET}")
+            break
 
     if verbose:
         _log(f"  {DIM}Plan generated: {len(collected_steps)} steps{RESET}")
