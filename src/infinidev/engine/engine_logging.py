@@ -267,7 +267,7 @@ def log_plan(plan: Any) -> None:
             icon, color = "○", CYAN
         else:
             icon, color = "◌", DIM
-        log(f"    {color}{icon} {s.description[:80]}{RESET}")
+        log(f"    {color}{icon} {s.title[:80]}{RESET}")
 
 
 def log_prompt(user_prompt: str, max_section: int = 300) -> None:
