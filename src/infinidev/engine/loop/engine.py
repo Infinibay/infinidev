@@ -37,7 +37,6 @@ from infinidev.engine.loop.tools import (
     MODIFY_STEP_SCHEMA,
     REMOVE_STEP_SCHEMA,
     STEP_COMPLETE_SCHEMA,
-    THINK_SCHEMA,
     build_tool_dispatch,
     build_tool_schemas,
     execute_tool_call,
@@ -77,6 +76,7 @@ from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.llm_caller import LLMCaller, LLMCallResult, ClassifiedCalls
 from infinidev.engine.loop.tool_processor import ToolProcessor
 from infinidev.engine.loop.loop_guard import LoopGuard
+from infinidev.engine.loop.behavior_tracker import BehaviorTracker
 from infinidev.engine.loop.step_manager import StepManager, _get_settings
 
 logger = logging.getLogger(__name__)
@@ -287,6 +287,21 @@ class LoopEngine(AgentEngine):
             # ── Inner loop ──────────────────────────────────────────
             step_result = self._run_inner_loop(ctx, messages, iteration, llm_caller, tool_proc, guard)
 
+            # Track consecutive text-only iterations across the outer loop
+            action_tc = step_result.action_tool_calls
+            if action_tc == 0:
+                guard.mark_text_only_iteration()
+                if guard.text_only_iterations >= 3:
+                    _emit_log("error",
+                              f"{_RED}⚠ Model failed to produce tool calls for "
+                              f"{guard.text_only_iterations} consecutive iterations "
+                              f"— aborting task{_RESET}",
+                              project_id=ctx.project_id, agent_id=ctx.agent_id)
+                    return step_mgr.finish(ctx, "blocked", iteration,
+                                           "Model unable to produce function calls after multiple attempts.")
+            else:
+                guard.mark_productive_iteration()
+
             # ── Post-step processing ────────────────────────────────
             step_result = step_mgr.auto_split(ctx, step_result)
 
@@ -298,7 +313,7 @@ class LoopEngine(AgentEngine):
 
             step_mgr.advance_plan(ctx, step_result)
 
-            action_tool_calls = step_result._action_tool_calls if hasattr(step_result, '_action_tool_calls') else 0
+            action_tool_calls = step_result.action_tool_calls
             step_mgr.summarize_and_record(ctx, step_result, messages, action_tool_calls, iteration)
 
             if ctx.verbose:
@@ -454,7 +469,7 @@ class LoopEngine(AgentEngine):
             tool_dispatch=tool_dispatch,
             planning_schemas=[
                 ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA,
-                ADD_NOTE_SCHEMA, THINK_SCHEMA, STEP_COMPLETE_SCHEMA,
+                ADD_NOTE_SCHEMA, STEP_COMPLETE_SCHEMA,
             ],
             tools=tools, max_iterations=max_iterations, max_per_action=max_per_action,
             max_total_calls=max_total_calls, history_window=settings.LOOP_HISTORY_WINDOW,
@@ -518,6 +533,8 @@ class LoopEngine(AgentEngine):
 
         llm_caller.reset()
         guard.reset()
+        tracker = BehaviorTracker(set(ctx.state.opened_files.keys()))
+        tracker.task_has_edits = ctx.state.task_has_edits
 
         while action_tool_calls < ctx.max_per_action and ctx.state.total_tool_calls < ctx.max_total_calls:
             # Signal UI that LLM call is starting
@@ -558,7 +575,7 @@ class LoopEngine(AgentEngine):
 
                 if classified.regular:
                     action_tool_calls = self._execute_regular_tools(
-                        ctx, classified, messages, result, action_tool_calls, iteration, guard,
+                        ctx, classified, messages, result, action_tool_calls, iteration, guard, tracker,
                     )
                     if self._cancel_event.is_set():
                         break
@@ -619,14 +636,21 @@ class LoopEngine(AgentEngine):
         if step_result is None:
             step_result = StepResult(summary="Step completed.", status="continue")
 
-        # Attach tool call count for post-step processing
-        step_result._action_tool_calls = action_tool_calls  # type: ignore[attr-defined]
+        # Run end-of-step behavior checks and propagate edit flag
+        tracker.on_step_end()
+        if tracker.task_has_edits:
+            ctx.state.task_has_edits = True
+
+        # Attach metadata for post-step processing
+        step_result.action_tool_calls = action_tool_calls
+        step_result.behavior_tracker = tracker
         return step_result
 
     def _execute_regular_tools(
         self, ctx: ExecutionContext, classified: ClassifiedCalls,
         messages: list[dict[str, Any]], llm_result: LLMCallResult,
         action_tool_calls: int, iteration: int, guard: LoopGuard,
+        tracker: BehaviorTracker,
     ) -> int:
         """Execute regular tool calls and build messages. Returns updated action_tool_calls."""
         message = llm_result.message
@@ -686,6 +710,7 @@ class LoopEngine(AgentEngine):
             for tc, result in batch_results:
                 _tool_error = _extract_tool_error(result)
                 guard.on_tool_result(tc.function.name, tc.function.arguments, bool(_tool_error))
+                tracker.on_tool_call(tc.function.name, tc.function.arguments, bool(_tool_error))
 
                 if not _tool_error:
                     _update_opened_files_cache(ctx.state, tc.function.name, tc.function.arguments, result)
@@ -695,7 +720,12 @@ class LoopEngine(AgentEngine):
                 counter_tag = f"\n[Tool call {action_tool_calls + 1}/{ctx.max_per_action} for this step]"
                 if is_parallel:
                     counter_tag += " (parallel)"
+
+                # Inject behavioral feedback into tool result
+                behavior_feedback = tracker.drain_feedback()
                 result_with_counter = result + counter_tag
+                if behavior_feedback:
+                    result_with_counter += f"\n{behavior_feedback}"
 
                 if ctx.manual_tc:
                     tool_results_text.append(f"[Tool: {tc.function.name}] Result:\n{result_with_counter}")

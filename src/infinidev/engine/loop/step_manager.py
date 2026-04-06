@@ -16,6 +16,7 @@ from infinidev.engine.engine_logging import (
 )
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.loop.models import ActionRecord, StepResult
+from infinidev.engine.loop.behavior_rules import _EDIT_TOOLS, _READ_TOOLS
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
@@ -43,12 +44,10 @@ def _auto_enhance_record(record: ActionRecord, messages: list[dict]) -> ActionRe
                 except (_json.JSONDecodeError, TypeError):
                     args = {}
                 path = args.get("file_path", args.get("path", ""))
-                if fn_name in ("read_file", "partial_read") and path:
+                if fn_name in _READ_TOOLS and path:
                     if path not in files_read:
                         files_read.append(path)
-                elif fn_name in ("replace_lines", "create_file", "edit_symbol",
-                                 "add_symbol", "remove_symbol", "add_content_after_line",
-                                 "add_content_before_line") and path:
+                elif fn_name in _EDIT_TOOLS and path:
                     if path not in files_changed:
                         files_changed.append(path)
         elif msg.get("role") == "tool":
@@ -165,6 +164,14 @@ class StepManager:
         # For small models: auto-enhance record with extracted facts
         if ctx.is_small:
             record = _auto_enhance_record(record, messages)
+
+        # Merge behavior tracker data if available
+        bt = step_result.behavior_tracker
+        if bt:
+            bsum = bt.summary()
+            record.behavior_score = bsum["behavior_score"]
+            record.behavior_good = bsum["good_patterns"]
+            record.behavior_bad = bsum["bad_patterns"]
 
         ctx.state.history.append(record)
 

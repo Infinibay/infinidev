@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
 
 _MAX_SAME_TOOL_CONSECUTIVE = 3
-_MAX_TEXT_RETRIES = 5
+_MAX_TEXT_RETRIES = 3  # Hard limit per inner loop — all retries are errors
 
 
 class LoopGuard:
@@ -25,6 +25,8 @@ class LoopGuard:
 
     def __init__(self, is_small: bool = False) -> None:
         self._is_small = is_small
+        # Cross-iteration state (NOT reset by reset())
+        self.text_only_iterations = 0
         self.reset()
 
     def reset(self) -> None:
@@ -35,6 +37,14 @@ class LoopGuard:
         self.repetition_nudged = False
         self.reads_since_last_note = 0
         self._note_nudged = False
+
+    def mark_text_only_iteration(self) -> None:
+        """Called when an inner loop produced zero tool calls."""
+        self.text_only_iterations += 1
+
+    def mark_productive_iteration(self) -> None:
+        """Called when an inner loop produced at least one tool call."""
+        self.text_only_iterations = 0
 
     def on_tool_result(self, tool_name: str, args: str, had_error: bool) -> None:
         """Track a tool call for repetition/error detection."""
@@ -145,45 +155,65 @@ class LoopGuard:
     ) -> StepResult | None:
         """Handle LLM text response without tool calls.
 
+        Every text-only response is an error — the model MUST produce function
+        calls, never plain text.  After _MAX_TEXT_RETRIES error messages the
+        step is force-completed.  If the model has been text-only for multiple
+        consecutive iterations (tracked via text_only_iterations), the budget
+        is slashed so we bail out faster.
+
         Returns StepResult if retries exhausted, None to continue inner loop.
         """
         self.text_retries += 1
 
-        if self.text_retries < _MAX_TEXT_RETRIES:
-            if content:
-                _hook_manager.dispatch(_HookContext(
-                    event=_HookEvent.POST_TOOL,
-                    tool_name="think",
-                    arguments={"reasoning": content},
-                    result=content,
-                    project_id=ctx.project_id, agent_id=ctx.agent_id,
-                ))
-            messages.append({"role": "assistant", "content": content})
-            if ctx.manual_tc:
-                # For small models: include available tool names in the nudge
-                available = sorted(list(ctx.tool_dispatch.keys())[:12])
-                tools_str = ", ".join(available) if available else "read_file, step_complete"
-                nudge = (
-                    "You must respond with a JSON tool call. Exact format:\n"
-                    '{"tool_calls": [{"name": "read_file", "arguments": {"file_path": "src/main.py"}}]}\n\n'
-                    f"Available tools: {tools_str}"
-                )
-            else:
-                nudge = (
-                    "Good reasoning. Now call the appropriate tool to "
-                    "execute your plan, or call step_complete if done."
-                )
-            messages.append({"role": "user", "content": nudge})
-            return None  # continue inner loop
+        # Slash budget on repeat text-only iterations: 3 → 2 → 1
+        budget = max(1, _MAX_TEXT_RETRIES - self.text_only_iterations)
 
+        if self.text_retries > budget:
+            _emit_log(
+                "warning",
+                f"{_YELLOW}⚠ LLM returned text {self.text_retries}x without "
+                f"calling a tool — forcing step completion{_RESET}",
+                project_id=ctx.project_id, agent_id=ctx.agent_id,
+            )
+            summary = content[:197] + "..." if len(content) > 200 else content
+            return StepResult(
+                summary=summary or "Step completed (model failed to produce tool calls).",
+                status="continue",
+            )
+
+        # Dispatch thinking hook
+        if content:
+            _hook_manager.dispatch(_HookContext(
+                event=_HookEvent.POST_TOOL,
+                tool_name="think",
+                arguments={"reasoning": content},
+                result=content,
+                project_id=ctx.project_id, agent_id=ctx.agent_id,
+            ))
+        messages.append({"role": "assistant", "content": content})
+
+        # Hard error — no gentle nudging
         _emit_log(
             "warning",
-            f"{_YELLOW}⚠ LLM returned text {self.text_retries}x without "
-            f"calling a tool — moving to next step{_RESET}",
+            f"{_YELLOW}⚠ No function call detected (retry "
+            f"{self.text_retries}/{budget}){_RESET}",
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         )
-        summary = content[:197] + "..." if len(content) > 200 else content
-        return StepResult(
-            summary=summary or "Step completed (model reasoned but did not call tools).",
-            status="continue",
-        )
+        if ctx.manual_tc:
+            nudge = (
+                f"ERROR ({self.text_retries}/{budget}): Text responses are NOT "
+                f"allowed. You MUST respond with a JSON function call. "
+                f"Do NOT explain, do NOT think, just call a tool. Format:\n"
+                f'{{"tool_calls": [{{"name": "tool_name", '
+                f'"arguments": {{"param": "value"}}}}]}}'
+            )
+        else:
+            nudge = (
+                f"ERROR ({self.text_retries}/{budget}): Text responses are NOT "
+                f"allowed. You MUST respond with a function call. "
+                f"Do NOT output plain text. Call a tool now, or call "
+                f"step_complete if you have nothing to do."
+            )
+
+        messages.append({"role": "user", "content": nudge})
+        return None  # continue inner loop

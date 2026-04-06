@@ -582,6 +582,21 @@ def build_iteration_prompt(
                     f"{chr(10).join(avoid_lines)}\n</avoid>"
                 )
 
+        # Behavior summary from tracker — reinforces good patterns, warns about bad
+        all_good = [msg for r in state.history for msg in r.behavior_good]
+        all_bad = [msg for r in state.history for msg in r.behavior_bad]
+        if all_good or all_bad:
+            blines: list[str] = []
+            if all_good:
+                unique_good = list(dict.fromkeys(all_good))[-3:]
+                blines.append("KEEP DOING: " + "; ".join(unique_good))
+            if all_bad:
+                unique_bad = list(dict.fromkeys(all_bad))[-3:]
+                blines.append("STOP DOING: " + "; ".join(unique_bad))
+            total_score = sum(r.behavior_score for r in state.history)
+            blines.append(f"Behavior score: {total_score:+d}")
+            parts.append(f"<behavior-summary>\n{chr(10).join(blines)}\n</behavior-summary>")
+
     # Current action — skip for agents that don't use plans
     active = state.plan.active_step if not skip_plan else None
     if active:

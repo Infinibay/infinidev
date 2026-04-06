@@ -18,5 +18,8 @@ class ActionRecord(BaseModel):
     discovered_context: str = ""
     pending_items: str = ""
     anti_patterns: str = ""
+    behavior_score: int = 0
+    behavior_good: list[str] = Field(default_factory=list)
+    behavior_bad: list[str] = Field(default_factory=list)
 
 

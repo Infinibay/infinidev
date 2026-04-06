@@ -339,8 +339,7 @@ def build_tool_schemas(tools: list[Any], *, small_model: bool = False) -> list[d
     schemas.append(STEP_COMPLETE_SCHEMA)
     schemas.append(ADD_NOTE_SCHEMA)
     schemas.append(ADD_SESSION_NOTE_SCHEMA)
-    if not small_model:
-        schemas.append(THINK_SCHEMA)
+    # think pseudo-tool disabled — models abuse it to loop without acting
     # Plan tools (add_step, modify_step, remove_step) are real tools
     # registered in META_TOOLS — they get their schemas via tool_to_openai_schema().
 
