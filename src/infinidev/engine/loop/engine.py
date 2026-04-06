@@ -812,6 +812,23 @@ class LoopEngine(AgentEngine):
                 if is_parallel:
                     counter_tag += " (parallel)"
 
+                # Capture test-runner output so the tail_test_output meta
+                # tool can serve a filtered view without re-running the
+                # tests. Cheap: ~3 string ops per execute_command.
+                if tc.function.name == "execute_command":
+                    try:
+                        from infinidev.engine.guidance import is_test_command
+                        if is_test_command(tc.function.arguments, ctx.state):
+                            ctx.state.last_test_output = result
+                            try:
+                                import json as _json
+                                _args = _json.loads(tc.function.arguments) if tc.function.arguments else {}
+                                ctx.state.last_test_command = str(_args.get("command", ""))[:300]
+                            except Exception:
+                                ctx.state.last_test_command = tc.function.arguments[:300]
+                    except Exception:
+                        pass
+
                 # Inject behavioral feedback into tool result
                 behavior_feedback = tracker.drain_feedback()
                 result_with_counter = result + counter_tag

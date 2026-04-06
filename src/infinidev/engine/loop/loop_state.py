@@ -49,6 +49,14 @@ class LoopState(BaseModel):
     # by the built-in runner list. Stored as a list of substrings; the
     # guidance detector matches them against ``execute_command`` args.
     custom_test_commands: list[str] = Field(default_factory=list)
+    # Cached output of the most recent test runner invocation. Captured
+    # by the engine when execute_command runs and is_test_command(args)
+    # returns true. The ``tail_test_output`` meta tool reads this to
+    # give the model a filtered view (last N lines or failure-only)
+    # without re-running the tests. Empty string when no test has run
+    # yet in this task.
+    last_test_output: str = ""
+    last_test_command: str = ""
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""
