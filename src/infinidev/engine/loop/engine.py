@@ -368,8 +368,17 @@ class LoopEngine(AgentEngine):
             try:
                 _settings = _get_settings()
                 if (ctx.is_small
-                    and getattr(_settings, "LOOP_GUIDANCE_ENABLED", True)
-                    and step_result.status not in ("done", "blocked")):
+                    and getattr(_settings, "LOOP_GUIDANCE_ENABLED", True)):
+                    # We always run the detector, regardless of step
+                    # status. The original guard skipped done/blocked
+                    # steps to avoid wasting guidance on a finished
+                    # task, but that bypassed the *proactive* detectors
+                    # (e.g. first_test_run) on the very last step where
+                    # the model would still benefit from seeing the
+                    # advice if a continuation or rework loop fires.
+                    # Reactive detectors (stuck_on_*) self-suppress on
+                    # done/blocked because their patterns can't match
+                    # in a single completed step's history anyway.
                     from infinidev.engine.guidance import maybe_queue_guidance
                     queued = maybe_queue_guidance(
                         ctx.state,
