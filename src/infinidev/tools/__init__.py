@@ -9,6 +9,7 @@ from infinidev.tools.file import (
 from infinidev.tools.meta import HelpTool
 from infinidev.tools.meta.plan_tools import AddStepTool, ModifyStepTool, RemoveStepTool
 from infinidev.tools.meta.declare_test_command_tool import DeclareTestCommandTool
+from infinidev.tools.meta.tail_test_output_tool import TailTestOutputTool
 from infinidev.tools.git import (
     GitBranchTool, GitCommitTool,
     GitDiffTool, GitStatusTool,
@@ -32,7 +33,7 @@ from infinidev.tools.code_intel import (
 )
 
 FILE_TOOLS = [ReadFileTool, PartialReadTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
-META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool, DeclareTestCommandTool]
+META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool, DeclareTestCommandTool, TailTestOutputTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
@@ -63,8 +64,8 @@ SMALL_MODEL_TOOLS = [
     FindReferencesTool,
     # Plan management (3)
     AddStepTool, ModifyStepTool, RemoveStepTool,
-    # Project introspection (1)
-    DeclareTestCommandTool,
+    # Project introspection (2)
+    DeclareTestCommandTool, TailTestOutputTool,
 ]
 
 
