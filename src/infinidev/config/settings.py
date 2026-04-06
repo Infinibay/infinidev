@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     LOOP_SUMMARIZER_MAX_INPUT_TOKENS: int = 4000  # Max tokens from step messages to feed summarizer
     LOOP_SUMMARIZER_TIMEOUT: int = 30  # Seconds; falls back to raw summary on timeout
     LOOP_REQUIRE_NOTE_BEFORE_COMPLETE: bool = True  # Gate step_complete on add_note for small models
+    LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
 
     # Gather phase (pre-implementation info collection)
     GATHER_ENABLED: bool = False

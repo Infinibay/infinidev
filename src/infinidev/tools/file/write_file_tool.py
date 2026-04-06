@@ -10,7 +10,12 @@ from pydantic import BaseModel, Field
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
-from infinidev.tools.file._helpers import guard_file_access, atomic_write, record_artifact_change
+from infinidev.tools.file._helpers import (
+    guard_file_access,
+    atomic_write,
+    record_artifact_change,
+    validate_syntax_or_error,
+)
 from infinidev.tools.file.write_file_input import WriteFileInput
 
 
@@ -50,6 +55,14 @@ class WriteFileTool(InfinibayBaseTool):
                     before_hash = hashlib.sha256(f.read()).hexdigest()[:16]
             except Exception:
                 pass
+
+        # Pre-write syntax check — only on full overwrite (mode='w'), since
+        # append (mode='a') is typically used for logs/text accumulation
+        # where validating a fragment in isolation would cause false positives.
+        if mode == "w":
+            syntax_err = validate_syntax_or_error(self, file_path, content, operation="write_file")
+            if syntax_err:
+                return syntax_err
 
         # Create parent directories
         parent = os.path.dirname(file_path)

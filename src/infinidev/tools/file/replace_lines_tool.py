@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.file._helpers import guard_file_access, atomic_write, record_artifact_change
+from infinidev.tools.file._helpers import (
+    guard_file_access,
+    atomic_write,
+    record_artifact_change,
+    validate_syntax_or_error,
+)
 from infinidev.tools.file.replace_lines_input import ReplaceLinesInput
 
 
@@ -93,6 +98,12 @@ class ReplaceLinesTool(InfinibayBaseTool):
                 f"Resulting file too large: {new_size} bytes "
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
+
+        # Pre-write syntax check on the SPLICED result (not just the new
+        # content) so we catch errors at the seam between old and new lines.
+        syntax_err = validate_syntax_or_error(self, path, new_content, operation="replace_lines")
+        if syntax_err:
+            return syntax_err
 
         # Atomic write (preserve permissions)
         try:

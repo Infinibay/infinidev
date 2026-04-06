@@ -29,6 +29,53 @@ def guard_file_access(tool: InfinibayBaseTool, path: str, operation: str) -> str
     return None
 
 
+def validate_syntax_or_error(
+    tool: InfinibayBaseTool,
+    file_path: str,
+    new_content: str,
+    *,
+    operation: str = "write",
+) -> str | None:
+    """Pre-write syntax check using tree-sitter.
+
+    Runs ``code_intel.syntax_check.check_syntax`` against *new_content*
+    using the language detected from *file_path*. Returns an error-JSON
+    string (built via ``tool._error``) when the proposed content has
+    syntax errors, otherwise None. Honors the
+    ``LOOP_VALIDATE_SYNTAX_BEFORE_WRITE`` setting and silently skips
+    when tree-sitter is unavailable, the language is unsupported, or
+    the content is empty — never blocks legitimate writes on infrastructure
+    failures.
+
+    The error message lists each issue with line/column and a short
+    snippet so the model can fix and retry in a single call instead of
+    discovering the breakage from a downstream pytest failure.
+    """
+    try:
+        from infinidev.config.settings import settings
+        if not getattr(settings, "LOOP_VALIDATE_SYNTAX_BEFORE_WRITE", True):
+            return None
+    except Exception:
+        pass
+
+    try:
+        from infinidev.code_intel.syntax_check import check_syntax, format_issues
+        issues = check_syntax(new_content, file_path=file_path)
+    except Exception:
+        return None  # never block writes on a tree-sitter failure
+
+    if not issues:
+        return None
+
+    body = format_issues(issues)
+    msg = (
+        f"Refusing {operation}: the new content for {file_path} has "
+        f"{len(issues)} syntax error(s) detected by tree-sitter. Fix and retry.\n"
+        f"{body}"
+    )
+    return tool._error(msg)
+
+
 def atomic_write(file_path: str, content: str) -> None:
     """Write content to *file_path* atomically via tempfile + rename.
 

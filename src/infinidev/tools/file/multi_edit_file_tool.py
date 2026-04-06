@@ -9,7 +9,12 @@ from pydantic import BaseModel, Field
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.file._helpers import guard_file_access, atomic_write, record_artifact_change
+from infinidev.tools.file._helpers import (
+    guard_file_access,
+    atomic_write,
+    record_artifact_change,
+    validate_syntax_or_error,
+)
 from infinidev.tools.file.edit_operation import EditOperation
 from infinidev.tools.file.multi_edit_file_input import MultiEditFileInput
 
@@ -126,6 +131,11 @@ class MultiEditFileTool(InfinibayBaseTool):
                 f"Resulting file too large: {new_size} bytes "
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
+
+        # Pre-write syntax check on the post-merge result
+        syntax_err = validate_syntax_or_error(self, file_path, new_content, operation="multi_edit_file")
+        if syntax_err:
+            return syntax_err
 
         # Atomic write
         try:
