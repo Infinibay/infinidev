@@ -1,24 +1,43 @@
 """Punish very long thinking on trivially simple tasks."""
 
-from infinidev.engine.behavior.checker_base import PromptBehaviorChecker
+from __future__ import annotations
+
+from infinidev.engine.behavior.checker_base import (
+    StochasticChecker,
+    TTL_EPHEMERAL,
+    Verdict,
+)
+from infinidev.engine.behavior.eval_context import StepEvalContext
+from infinidev.engine.behavior.primitives import Confidence, confidence_to_delta
 
 
-class ChattyThinkingChecker(PromptBehaviorChecker):
+class ChattyThinkingChecker(StochasticChecker):
     name = "chatty_thinking"
     description = "Punish overly long thinking for trivial tasks"
     default_enabled = False
     delta_range = (-2, 0)
+    ttl_steps = TTL_EPHEMERAL   # one-step nuisance; don't haunt the agent
     settings_message = "Chatty thinking — punishes huge reasoning blobs on simple tasks (-2..0)"
 
-    criteria = (
-        "Punish over-long thinking on trivial work. Look at the "
-        "latest_message's 'reasoning_chars' (length of reasoning_content) and "
-        "compare to the task complexity (use 'task' and 'plan' fields):\n"
-        "- -2 if reasoning_chars > 3000 AND the task is clearly trivial "
-        "  (single read + single edit, a one-line fix, a rename, listing files).\n"
-        "- -1 if reasoning_chars > 1500 AND the task is simple.\n"
-        "- 0 if the task is complex enough to justify the thinking, or if "
-        "  reasoning is short.\n"
-        "Different from repetitive_thinking: this judges QUANTITY, not repetition.\n"
-        "Never return positive deltas for this criterion."
-    )
+    def evaluate(self, ctx: StepEvalContext) -> Verdict | None:
+        from infinidev.config.settings import settings
+
+        threshold_chars = int(
+            getattr(settings, "BEHAVIOR_CHATTY_CHAR_THRESHOLD", 2000)
+        )
+        n = len(ctx.reasoning_content or "")
+        if n < threshold_chars:
+            return None
+        # If the agent actually acted, long thinking was probably justified.
+        if ctx.action_tool_calls >= 2:
+            return None
+        # Scale length (threshold..3×threshold) → confidence (0.5..1.0)
+        excess = (n - threshold_chars) / (2 * threshold_chars)
+        conf = Confidence(
+            min(1.0, 0.5 + excess * 0.5),
+            f"{n} reasoning chars, {ctx.action_tool_calls} tool calls",
+        )
+        delta = confidence_to_delta(self.delta_range, conf, threshold=0.5)
+        if delta == 0:
+            return None
+        return Verdict(delta=delta, reason=conf.evidence)

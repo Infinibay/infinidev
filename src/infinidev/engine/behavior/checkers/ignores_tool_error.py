@@ -1,26 +1,58 @@
-"""Punish ignoring a tool error in the very next message."""
+"""Punish silently ignoring a tool failure — only fires on the direct
+response to a failed tool call (never re-fires on the same error)."""
 
-from infinidev.engine.behavior.checker_base import PromptBehaviorChecker
+from __future__ import annotations
+
+import hashlib
+
+from infinidev.engine.behavior.checker_base import (
+    StochasticChecker,
+    TTL_SHORT,
+    Verdict,
+)
+from infinidev.engine.behavior.eval_context import StepEvalContext
+from infinidev.engine.behavior.primitives import (
+    Confidence,
+    confidence_to_delta,
+    immediately_preceding_tool_error,
+    step_complete_status,
+    was_acknowledged,
+)
 
 
-class IgnoresToolErrorChecker(PromptBehaviorChecker):
+class IgnoresToolErrorChecker(StochasticChecker):
     name = "ignores_tool_error"
     description = "Punish silently ignoring a tool failure"
     default_enabled = True
     delta_range = (-3, 0)
+    ttl_steps = TTL_SHORT       # relevant for a few steps, then the agent moved on
     settings_message = "Ignores tool error — punishes carrying on as if a failed tool call worked (-3..0)"
 
-    criteria = (
-        "Punish ignoring tool errors. Inspect recent_history for the most "
-        "recent tool result. If it contains an error (the content has words "
-        "like 'error', 'failed', 'not found', 'permission denied', a "
-        "traceback, or starts with 'x ' / 'Error:'), check the latest_message:\n"
-        "- -3 if the agent completely ignores the error and proceeds as if it "
-        "  succeeded (e.g., calls step_complete with status=done, or moves on "
-        "  to an unrelated action).\n"
-        "- -2 if the agent acknowledges nothing about the failure even though "
-        "  the next action depends on the failed call's result.\n"
-        "- -1 if the agent vaguely references the failure but doesn't address it.\n"
-        "- 0 if there was no recent error, or the agent properly handled it.\n"
-        "Never return positive deltas for this criterion."
-    )
+    def evaluate(self, ctx: StepEvalContext) -> Verdict | None:
+        err, evidence = immediately_preceding_tool_error(ctx.step_messages)
+        if not err:
+            return None
+        # Acknowledgement clears the flag.
+        if was_acknowledged(
+            {
+                "raw_content": ctx.latest_content,
+                "reasoning_content": ctx.reasoning_content,
+            }
+        ):
+            return None
+        status = step_complete_status(ctx.tool_calls)
+        boost = 0.2 if status == "done" else 0.0
+        conf = Confidence(
+            min(1.0, err.value + boost),
+            f"unacknowledged error ({err.evidence})"
+            + (" + status=done" if status == "done" else ""),
+        )
+        delta = confidence_to_delta(self.delta_range, conf, threshold=0.5)
+        if delta == 0:
+            return None
+        # trigger_key fingerprints the specific tool error so the same
+        # failure can never be punished twice by this checker.
+        trigger_key = hashlib.md5(
+            evidence.encode("utf-8", errors="ignore")
+        ).hexdigest()[:16]
+        return Verdict(delta=delta, reason=conf.evidence, trigger_key=trigger_key)

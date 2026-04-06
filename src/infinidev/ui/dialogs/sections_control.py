@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
@@ -139,6 +140,19 @@ class SectionsControl(UIControl):
 
         def get_line(i):
             return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
+
+        # Report a cursor position so the enclosing Window auto-scrolls
+        # to keep the selected section visible when the list overflows.
+        cursor_row = 0
+        if self._state.sections:
+            cursor_row = max(
+                0, min(self._state.section_cursor, len(self._state.sections) - 1)
+            )
+        return UIContent(
+            get_line=get_line,
+            line_count=len(lines),
+            cursor_position=Point(x=0, y=cursor_row),
+            show_cursor=False,
+        )
 
 

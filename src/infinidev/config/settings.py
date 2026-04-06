@@ -124,6 +124,18 @@ class Settings(BaseSettings):
     # Behavior Checkers (modular punish/promote scoring after each model message)
     BEHAVIOR_CHECKERS_ENABLED: bool = False  # Master toggle
     BEHAVIOR_HISTORY_WINDOW: int = 4         # Recent messages fed to each checker
+    # "stochastic" (default, zero LLM calls) | "llm" (legacy batched judge)
+    # | "hybrid" (stochastic first, escalate low-confidence to LLM)
+    BEHAVIOR_JUDGE_MODE: str = "stochastic"
+    # "per_step" (one evaluation per completed step, default) | "per_message"
+    # (legacy: evaluate after every model message inside the inner loop)
+    BEHAVIOR_CHECK_MODE: str = "per_step"
+    # Below this confidence, hybrid mode escalates a stochastic verdict to LLM.
+    BEHAVIOR_HYBRID_CONFIDENCE_THRESHOLD: float = 0.6
+    # Cosine similarity at/above which RepetitiveThinkingChecker fires.
+    BEHAVIOR_REPETITION_COSINE_THRESHOLD: float = 0.88
+    # ChattyThinkingChecker triggers above this many reasoning characters.
+    BEHAVIOR_CHATTY_CHAR_THRESHOLD: int = 2000
     # Independent LLM endpoint for the behavior judge.
     # Each field is "" by default → falls back to the main LLM_* setting.
     # Use this to point checkers at a small/fast model (e.g. ollama/qwen2.5:3b)

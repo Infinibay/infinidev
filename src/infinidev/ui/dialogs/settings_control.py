@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEventType
@@ -155,6 +156,19 @@ class SettingsControl(UIControl):
 
         def get_line(i):
             return lines[i] if 0 <= i < len(lines) else []
-        return UIContent(get_line=get_line, line_count=len(lines))
+
+        # Report a cursor position so the enclosing Window auto-scrolls
+        # to keep the selected setting visible. Each setting row occupies
+        # 3 lines (key / value / description); anchor on the value line.
+        cursor_row = 0
+        if settings:
+            idx = max(0, min(self._state.setting_cursor, len(settings) - 1))
+            cursor_row = idx * 3 + 1
+        return UIContent(
+            get_line=get_line,
+            line_count=len(lines),
+            cursor_position=Point(x=0, y=cursor_row),
+            show_cursor=False,
+        )
 
 

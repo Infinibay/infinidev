@@ -285,6 +285,10 @@ class LoopEngine(AgentEngine):
             ))
 
             # ── Inner loop ──────────────────────────────────────────
+            # Capture the message-buffer offset *before* this step runs so
+            # POST_STEP consumers (e.g. the behavior scorer) can slice out
+            # exactly the messages produced during this step.
+            step_messages_start = len(messages)
             step_result = self._run_inner_loop(ctx, messages, iteration, llm_caller, tool_proc, guard)
 
             # Track consecutive text-only iterations across the outer loop
@@ -327,6 +331,8 @@ class LoopEngine(AgentEngine):
                     "record": ctx.state.history[-1] if ctx.state.history else None,
                     "state": ctx.state, "agent_name": ctx.agent_name,
                     "action_tool_calls": action_tool_calls,
+                    "messages": messages,
+                    "step_messages_start": step_messages_start,
                 },
                 project_id=ctx.project_id, agent_id=ctx.agent_id,
             ))

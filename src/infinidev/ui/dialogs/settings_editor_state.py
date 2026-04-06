@@ -105,7 +105,22 @@ def _build_behavior_section() -> list[tuple[str, str, str]]:
     """
     rows: list[tuple[str, str, str]] = [
         ("BEHAVIOR_CHECKERS_ENABLED", "Master toggle for behavior scoring", "bool"),
+        ("BEHAVIOR_JUDGE_MODE",
+         "Judge engine: stochastic (fast) | llm | hybrid",
+         "select:stochastic,llm,hybrid"),
+        ("BEHAVIOR_CHECK_MODE",
+         "Evaluation frequency: per_step (default) | per_message (legacy)",
+         "select:per_step,per_message"),
         ("BEHAVIOR_HISTORY_WINDOW", "Recent messages each checker sees", "int"),
+        ("BEHAVIOR_HYBRID_CONFIDENCE_THRESHOLD",
+         "Hybrid mode: escalate stochastic verdicts below this confidence (0–1)",
+         "float"),
+        ("BEHAVIOR_REPETITION_COSINE_THRESHOLD",
+         "RepetitiveThinking: cosine similarity above which to punish (0–1)",
+         "float"),
+        ("BEHAVIOR_CHATTY_CHAR_THRESHOLD",
+         "ChattyThinking: reasoning characters above which to punish",
+         "int"),
         # Independent LLM endpoint for the judge — empty = reuse main LLM_*
         ("BEHAVIOR_LLM_PROVIDER", "Behavior judge provider (empty = reuse main)",
          "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,qwen,openai_compatible"),
