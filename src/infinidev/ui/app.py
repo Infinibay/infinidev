@@ -305,6 +305,8 @@ class InfinidevApp:
         # Register UI hooks
         from infinidev.engine.hooks.ui_hooks import register_ui_hooks
         register_ui_hooks()
+        from infinidev.engine.behavior.hook import register_behavior_hooks
+        register_behavior_hooks()
 
         # Subscribe to engine events
         event_bus.subscribe(self.on_loop_event)

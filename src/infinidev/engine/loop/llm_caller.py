@@ -61,8 +61,79 @@ class LLMCaller:
         tool-call retries, and FC→manual fallback on permanent errors.
         """
         if ctx.manual_tc:
-            return self._call_manual(ctx, messages, action_tool_calls)
-        return self._call_fc(ctx, messages, is_planning, action_tool_calls)
+            result = self._call_manual(ctx, messages, action_tool_calls)
+        else:
+            result = self._call_fc(ctx, messages, is_planning, action_tool_calls)
+        self._dispatch_post_model_message(ctx, result, messages)
+        return result
+
+    @staticmethod
+    def _dispatch_post_model_message(
+        ctx: "ExecutionContext",
+        result: LLMCallResult,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """Fire POST_MODEL_MESSAGE hook so behavior checkers can score the response."""
+        # Skip retry/forced placeholders — nothing to score yet
+        if result.should_retry or result.forced_step_result is not None:
+            return
+        if result.message is None and not result.tool_calls and not result.raw_content:
+            return
+        try:
+            from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent
+            if not hook_manager.has_hooks_for(HookEvent.POST_MODEL_MESSAGE):
+                return
+            # Extract original task (first user message after the system prompt)
+            task_text = ""
+            for m in messages:
+                if m.get("role") == "user":
+                    content = m.get("content", "")
+                    if isinstance(content, str):
+                        task_text = content[:1500]
+                    break
+
+            # Snapshot of the current plan, if any
+            plan_snapshot: dict[str, Any] = {}
+            try:
+                plan = getattr(getattr(ctx, "state", None), "plan", None)
+                if plan is not None and getattr(plan, "steps", None):
+                    active = getattr(plan, "active_step", None)
+                    plan_snapshot = {
+                        "active_step_index": getattr(active, "index", None),
+                        "active_step_title": getattr(active, "title", None),
+                        "steps": [
+                            {
+                                "index": s.index,
+                                "title": s.title,
+                                "explanation": (s.explanation or "")[:160],
+                                "status": s.status,
+                            }
+                            for s in plan.steps
+                        ],
+                    }
+            except Exception:
+                plan_snapshot = {}
+
+            hook_manager.dispatch(HookContext(
+                event=HookEvent.POST_MODEL_MESSAGE,
+                project_id=ctx.project_id,
+                agent_id=ctx.agent_id,
+                metadata={
+                    "raw_content": result.raw_content,
+                    "reasoning_content": result.reasoning_content,
+                    "tool_calls": result.tool_calls,
+                    "messages": messages,
+                    "agent_name": getattr(ctx.agent, "role", ctx.agent_id),
+                    "task": task_text,
+                    "plan_snapshot": plan_snapshot,
+                },
+            ))
+        except Exception:
+            # Never break the loop if scoring fails
+            import logging
+            logging.getLogger(__name__).debug(
+                "POST_MODEL_MESSAGE dispatch failed", exc_info=True,
+            )
 
     # ── Manual TC mode ──────────────────────────────────────────────
 

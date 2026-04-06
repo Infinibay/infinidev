@@ -186,6 +186,12 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             else:
                 app._thinking_text = reasoning
 
+    elif event_type == "loop_behavior_update":
+        # Intentionally silent — verdicts are inspected via /debug → Behavior.
+        # No chat message, no log line. The BehaviorScorer already stored
+        # the event in its history when this fired.
+        pass
+
     elif event_type == "loop_log":
         level = data.get("level", "warning")
         msg = data.get("message", "")

@@ -378,6 +378,19 @@ class DialogManager:
                 state.plan_text = ""
                 state.state_info = {}
 
+        # Behavior subsystem snapshot — independent of engine state
+        try:
+            from infinidev.engine.behavior.scorer import BehaviorScorer
+            scorer = BehaviorScorer.instance()
+            state.behavior_scores = sorted(
+                [(agent_id, score) for (_pid, agent_id), score in scorer.all_scores().items()],
+                key=lambda x: x[0],
+            )
+            state.behavior_events = scorer.history()
+        except Exception:
+            state.behavior_scores = []
+            state.behavior_events = []
+
         self._app.active_dialog = "debug_panel"
         try:
             self._app.app.layout.focus(self._debug_sections_window)

@@ -95,6 +95,41 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
 }
 
 
+def _build_behavior_section() -> list[tuple[str, str, str]]:
+    """Build the Behavior Checkers section dynamically from the registry.
+
+    Each checker registered in ``engine.behavior.registry`` contributes
+    its own toggle row, with the description text coming from the
+    checker's :meth:`settings_label` (so checker authors can customize
+    what the user sees in /settings).
+    """
+    rows: list[tuple[str, str, str]] = [
+        ("BEHAVIOR_CHECKERS_ENABLED", "Master toggle for behavior scoring", "bool"),
+        ("BEHAVIOR_HISTORY_WINDOW", "Recent messages each checker sees", "int"),
+        # Independent LLM endpoint for the judge — empty = reuse main LLM_*
+        ("BEHAVIOR_LLM_PROVIDER", "Behavior judge provider (empty = reuse main)",
+         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,qwen,openai_compatible"),
+        ("BEHAVIOR_LLM_MODEL", "Behavior judge model", "select_dynamic:behavior_models"),
+        ("BEHAVIOR_LLM_BASE_URL", "Behavior judge API base URL (auto-filled)", "str"),
+        ("BEHAVIOR_LLM_API_KEY", "Behavior judge API key (auto-filled)", "str"),
+    ]
+    try:
+        from infinidev.engine.behavior.registry import (
+            _all_checker_classes, CHECKER_SETTING_KEYS,
+        )
+        for cls in _all_checker_classes():
+            key = CHECKER_SETTING_KEYS.get(cls.name)
+            if not key:
+                continue
+            rows.append((key, cls.settings_label(), "bool"))
+    except Exception:
+        pass
+    return rows
+
+
+SETTINGS_SECTIONS["Behavior Checkers"] = _build_behavior_section()
+
+
 class SettingsEditorState:
     """Full state for the interactive settings editor."""
 
@@ -109,7 +144,8 @@ class SettingsEditorState:
         self._on_save = on_save
         self._on_focus_change = on_focus_change
         self._on_edit_start = on_edit_start
-        self._ollama_models: list[str] | None = None  # cached model list
+        self._ollama_models: list[str] | None = None  # cached model list (main LLM)
+        self._behavior_models: list[str] | None = None  # cached model list (behavior judge)
         self._pending_changes: dict[str, str] = {}  # unsaved changes for cross-field deps
 
         # Dropdown picker state
@@ -176,6 +212,8 @@ class SettingsEditorState:
             return self._fetch_provider_models()
         if stype == "select_dynamic:provider_models":
             return self._fetch_provider_models()
+        if stype == "select_dynamic:behavior_models":
+            return self._fetch_behavior_models()
         if stype.startswith("select:"):
             return stype[7:].split(",")
         return []
@@ -185,6 +223,18 @@ class SettingsEditorState:
         from infinidev.config.settings import settings
         from infinidev.config.providers import get_provider
         provider_id = self._pending_changes.get("LLM_PROVIDER", settings.LLM_PROVIDER)
+        provider = get_provider(provider_id)
+        return provider.model_list_format == "free_text"
+
+    def _is_behavior_free_text_model(self) -> bool:
+        """Return True if the *behavior* provider uses free-text model input."""
+        from infinidev.config.settings import settings
+        from infinidev.config.providers import get_provider
+        provider_id = (
+            self._pending_changes.get("BEHAVIOR_LLM_PROVIDER")
+            or settings.BEHAVIOR_LLM_PROVIDER
+            or settings.LLM_PROVIDER
+        )
         provider = get_provider(provider_id)
         return provider.model_list_format == "free_text"
 
@@ -202,6 +252,37 @@ class SettingsEditorState:
         except Exception:
             self._ollama_models = []
         return self._ollama_models
+
+    def _fetch_behavior_models(self) -> list[str]:
+        """Fetch available models for the BEHAVIOR judge provider (cached).
+
+        Each field falls back to the main LLM_* setting when empty, so a
+        partially-configured behavior endpoint still gets a usable list.
+        """
+        if self._behavior_models is not None:
+            return self._behavior_models
+        try:
+            from infinidev.config.settings import settings
+            from infinidev.config.providers import fetch_models
+            provider_id = (
+                self._pending_changes.get("BEHAVIOR_LLM_PROVIDER")
+                or settings.BEHAVIOR_LLM_PROVIDER
+                or settings.LLM_PROVIDER
+            )
+            api_key = (
+                self._pending_changes.get("BEHAVIOR_LLM_API_KEY")
+                or settings.BEHAVIOR_LLM_API_KEY
+                or settings.LLM_API_KEY
+            )
+            base_url = (
+                self._pending_changes.get("BEHAVIOR_LLM_BASE_URL")
+                or settings.BEHAVIOR_LLM_BASE_URL
+                or settings.LLM_BASE_URL
+            )
+            self._behavior_models = fetch_models(provider_id, api_key, base_url)
+        except Exception:
+            self._behavior_models = []
+        return self._behavior_models
 
     def activate(self) -> None:
         """Enter/Space on current setting: toggle bool, start editing, or cycle select."""
@@ -227,12 +308,20 @@ class SettingsEditorState:
                 if self._on_edit_start:
                     self._on_edit_start()
                 return
+            if key == "BEHAVIOR_LLM_MODEL" and self._is_behavior_free_text_model():
+                self.editing = True
+                self.edit_buffer.set_document(
+                    Document(str(value)), bypass_readonly=True
+                )
+                if self._on_edit_start:
+                    self._on_edit_start()
+                return
 
             # Open dropdown picker
             options = self._get_select_options(stype)
             if not options:
                 # No models found (server down?) — fall back to text input
-                if key == "LLM_MODEL":
+                if key in ("LLM_MODEL", "BEHAVIOR_LLM_MODEL"):
                     self.editing = True
                     self.edit_buffer.set_document(
                         Document(str(value)), bypass_readonly=True
@@ -353,6 +442,15 @@ class SettingsEditorState:
                 if key in ("LLM_API_KEY", "LLM_BASE_URL"):
                     self._pending_changes[key] = value
                     self._ollama_models = None
+                    # Main creds also affect behavior fallback list
+                    self._behavior_models = None
+
+                # Behavior judge: parallel logic
+                if key == "BEHAVIOR_LLM_PROVIDER":
+                    self._on_behavior_provider_change(value)
+                if key in ("BEHAVIOR_LLM_API_KEY", "BEHAVIOR_LLM_BASE_URL"):
+                    self._pending_changes[key] = value
+                    self._behavior_models = None
 
         except Exception:
             pass
@@ -386,5 +484,50 @@ class SettingsEditorState:
 
         # Clear cached model list so it re-fetches for new provider
         self._ollama_models = None
+
+    def _on_behavior_provider_change(self, provider_id: str) -> None:
+        """Update related BEHAVIOR_LLM_* settings when the judge provider changes.
+
+        Mirrors :meth:`_on_provider_change` for the main provider, but
+        scoped to the behavior judge fields. An empty ``provider_id``
+        means "reuse main" → we clear all BEHAVIOR_LLM_* overrides so
+        the fallback path in ``get_litellm_params_for_behavior`` kicks in.
+        """
+        from infinidev.config.settings import settings, reload_all
+        from infinidev.config.providers import get_provider
+
+        # Empty provider = reset overrides; behavior judge will reuse main LLM_*
+        if not provider_id:
+            updates = {
+                "BEHAVIOR_LLM_PROVIDER": "",
+                "BEHAVIOR_LLM_MODEL": "",
+                "BEHAVIOR_LLM_BASE_URL": "",
+                "BEHAVIOR_LLM_API_KEY": "",
+            }
+            settings.save_user_settings(updates)
+            reload_all()
+            self._pending_changes.update(updates)
+            self._behavior_models = None
+            return
+
+        provider = get_provider(provider_id)
+
+        updates: dict = {}
+        if provider.default_base_url:
+            updates["BEHAVIOR_LLM_BASE_URL"] = provider.default_base_url
+        # Clear model — old model probably isn't valid for the new provider
+        updates["BEHAVIOR_LLM_MODEL"] = ""
+        # API key handling: same convention as main
+        if not provider.api_key_required:
+            updates["BEHAVIOR_LLM_API_KEY"] = "ollama"
+        else:
+            updates["BEHAVIOR_LLM_API_KEY"] = ""
+
+        if updates:
+            settings.save_user_settings(updates)
+            reload_all()
+            self._pending_changes.update(updates)
+
+        self._behavior_models = None
 
 

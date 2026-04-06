@@ -276,6 +276,8 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
     init_db()
     from infinidev.engine.hooks.ui_hooks import register_ui_hooks
     register_ui_hooks()
+    from infinidev.engine.behavior.hook import register_behavior_hooks
+    register_behavior_hooks()
 
     # Index workspace before LLM starts so code intelligence is available
     from infinidev.cli.initial_index import run_initial_index
@@ -488,6 +490,8 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
 
     from infinidev.engine.hooks.ui_hooks import register_ui_hooks
     register_ui_hooks()
+    from infinidev.engine.behavior.hook import register_behavior_hooks
+    register_behavior_hooks()
 
     click.echo(click.style("Welcome to Infinidev CLI (Classic Mode)!", fg="cyan", bold=True))
     click.echo("Type your instructions or /help for commands.")

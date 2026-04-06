@@ -36,4 +36,7 @@ class HookEvent(str, Enum):
     PRE_LLM_CALL = "pre_llm_call"
     POST_LLM_CALL = "post_llm_call"
 
+    # Model message (after each LLM response — tool call OR text-only "thinking")
+    POST_MODEL_MESSAGE = "post_model_message"
+
 

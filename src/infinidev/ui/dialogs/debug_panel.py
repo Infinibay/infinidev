@@ -13,12 +13,14 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEventType
 
-from infinidev.ui.theme import PRIMARY, ACCENT, TEXT, TEXT_MUTED, SURFACE_LIGHT
+from infinidev.ui.theme import (
+    PRIMARY, ACCENT, TEXT, TEXT_MUTED, SURFACE_LIGHT, SUCCESS, ERROR,
+)
 
 
 # ── Sections ──────────────────────────────────────────────────────────
 
-SECTIONS = ["Notes", "History", "Plan", "State"]
+SECTIONS = ["Notes", "History", "Plan", "State", "Behavior"]
 
 
 # ── State ─────────────────────────────────────────────────────────────
@@ -37,6 +39,9 @@ class DebugPanelState:
         self.history: list[Any] = []       # list of ActionRecord
         self.plan_text: str = ""
         self.state_info: dict[str, Any] = {}
+        # Behavior subsystem
+        self.behavior_scores: list[tuple[str, int]] = []   # [(agent_id, score)]
+        self.behavior_events: list[Any] = []                # list[BehaviorEvent], oldest first
 
     @property
     def current_section(self) -> str:
@@ -63,6 +68,8 @@ class DebugPanelState:
             return self._render_plan(width)
         elif section == "State":
             return self._render_state(width)
+        elif section == "Behavior":
+            return self._render_behavior(width)
         return [[(f"{TEXT_MUTED}", " (empty)")]]
 
     # ── Renderers ──
@@ -122,6 +129,61 @@ class DebugPanelState:
         for raw_line in self.plan_text.split("\n"):
             for wl in _wrap(f" {raw_line}", w):
                 lines.append([(f"{TEXT}", wl)])
+        return lines
+
+    def _render_behavior(self, w: int) -> list[list[tuple[str, str]]]:
+        import time as _time
+
+        lines: list[list[tuple[str, str]]] = []
+        lines.append([(f"bg:{PRIMARY} #ffffff bold", _pad("Behavior Scores", w))])
+        if not self.behavior_scores:
+            lines.append([(f"{TEXT_MUTED}", "  (no checkers have run yet)")])
+        else:
+            for agent_id, score in self.behavior_scores:
+                color = SUCCESS if score > 0 else (ERROR if score < 0 else TEXT_MUTED)
+                sign = "+" if score > 0 else ""
+                lines.append([
+                    (f"{TEXT}", f"  {agent_id}: "),
+                    (f"{color} bold", f"{sign}{score}"),
+                ])
+
+        lines.append([("", "")])
+        lines.append([(f"bg:{ACCENT} #ffffff bold", _pad("Verdict History (newest last)", w))])
+
+        if not self.behavior_events:
+            lines.append([(f"{TEXT_MUTED}", "  (no verdicts yet)")])
+            lines.append([(f"{TEXT_MUTED}", "  Enable in /settings → Behavior Checkers.")])
+            return lines
+
+        now = _time.time()
+        for ev in self.behavior_events:
+            ago = max(0, int(now - ev.timestamp))
+            if ago < 60:
+                ago_str = f"{ago}s ago"
+            elif ago < 3600:
+                ago_str = f"{ago // 60}m ago"
+            else:
+                ago_str = f"{ago // 3600}h ago"
+
+            sign = "+" if ev.delta > 0 else ""
+            color = SUCCESS if ev.delta > 0 else ERROR
+            score_color = SUCCESS if ev.score_after > 0 else (
+                ERROR if ev.score_after < 0 else TEXT_MUTED
+            )
+            score_sign = "+" if ev.score_after > 0 else ""
+
+            # Header line: [delta] checker — agent (ago) → score
+            header = [
+                (f"{color} bold", f"  {sign}{ev.delta:>2}"),
+                (f"{TEXT} bold", f"  {ev.checker}"),
+                (f"{TEXT_MUTED}", f"  ({ev.agent_id}, {ago_str})  →  total "),
+                (f"{score_color} bold", f"{score_sign}{ev.score_after}"),
+            ]
+            lines.append(header)
+            if ev.reason:
+                for wl in _wrap(f"      {ev.reason}", w):
+                    lines.append([(f"{TEXT_MUTED}", wl)])
+            lines.append([("", "")])
         return lines
 
     def _render_state(self, w: int) -> list[list[tuple[str, str]]]:

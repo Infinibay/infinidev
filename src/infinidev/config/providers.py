@@ -129,7 +129,10 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="http://localhost:8080/v1",
         api_key_required=False,
         base_url_editable=True,
-        model_list_format="openai",
+        # llama.cpp serves a single model from a .gguf file path; /v1/models
+        # returns a synthetic name that is not user-meaningful. Treat the
+        # model field as free-text so the user can type the actual gguf name.
+        model_list_format="free_text",
     ),
     "vllm": ProviderConfig(
         id="vllm",

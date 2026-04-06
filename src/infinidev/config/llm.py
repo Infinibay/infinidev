@@ -51,6 +51,64 @@ def _is_small_model(model: str | None = None) -> bool:
     return 0 < size < 40
 
 
+def get_litellm_params_for_behavior() -> dict[str, Any]:
+    """Build litellm params for the behavior-checker judge.
+
+    Each ``BEHAVIOR_LLM_*`` setting is optional and falls back to the
+    matching ``LLM_*`` main setting when empty. This lets users point the
+    judge at a small/fast model (e.g. ``ollama/qwen2.5:3b``) without
+    affecting the main agent. Returns the same shape as
+    :func:`get_litellm_params`.
+    """
+    model = (settings.BEHAVIOR_LLM_MODEL or "").strip() or settings.LLM_MODEL
+    if not model:
+        raise RuntimeError("No behavior model and no main LLM_MODEL configured.")
+
+    if model.startswith("ollama/"):
+        model = "ollama_chat/" + model[len("ollama/"):]
+
+    provider_id = (settings.BEHAVIOR_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
+    api_key = (settings.BEHAVIOR_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
+    base_url = (settings.BEHAVIOR_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
+
+    params: dict[str, Any] = {"model": model}
+    if api_key:
+        params["api_key"] = api_key
+
+    # Mirror the native-provider rule: only pass api_base for non-native
+    # providers, otherwise litellm routes to the wrong endpoint.
+    try:
+        from infinidev.config.providers import get_provider
+        provider = get_provider(provider_id)
+        is_native = bool(getattr(provider, "is_native", False))
+    except Exception:
+        is_native = _extract_provider(model) in {
+            "deepseek", "anthropic", "gemini", "openai", "zai",
+        }
+    if base_url and not is_native:
+        params["api_base"] = base_url
+
+    if settings.LLM_TIMEOUT:
+        params["timeout"] = float(settings.LLM_TIMEOUT)
+
+    # num_ctx only matters for Ollama-style local providers
+    if provider_id == "ollama" and settings.OLLAMA_NUM_CTX > 0:
+        params["num_ctx"] = settings.OLLAMA_NUM_CTX
+
+    from importlib.metadata import version as _pkg_version
+    try:
+        _version = _pkg_version("infinidev")
+    except Exception:
+        _version = "0.1.0"
+    params["extra_headers"] = {
+        "User-Agent": f"infinidev/{_version}",
+        "X-Client-Name": "infinidev-behavior",
+        "X-Client-Version": _version,
+    }
+
+    return params
+
+
 def get_litellm_params() -> dict[str, Any]:
     """Return kwargs suitable for ``litellm.completion(**params, messages=...)``."""
     model = settings.LLM_MODEL

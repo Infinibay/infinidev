@@ -121,6 +121,30 @@ class Settings(BaseSettings):
     # UI
     MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling
 
+    # Behavior Checkers (modular punish/promote scoring after each model message)
+    BEHAVIOR_CHECKERS_ENABLED: bool = False  # Master toggle
+    BEHAVIOR_HISTORY_WINDOW: int = 4         # Recent messages fed to each checker
+    # Independent LLM endpoint for the behavior judge.
+    # Each field is "" by default → falls back to the main LLM_* setting.
+    # Use this to point checkers at a small/fast model (e.g. ollama/qwen2.5:3b)
+    # while the main agent runs on a heavier model.
+    BEHAVIOR_LLM_PROVIDER: str = ""
+    BEHAVIOR_LLM_MODEL: str = ""
+    BEHAVIOR_LLM_BASE_URL: str = ""
+    BEHAVIOR_LLM_API_KEY: str = ""
+    BEHAVIOR_CHECKER_LAZY_WORK: bool = True
+    BEHAVIOR_CHECKER_GOOD_FOCUS: bool = False
+    BEHAVIOR_CHECKER_REPETITIVE_THINKING: bool = True
+    BEHAVIOR_CHECKER_GRACEFUL_RECOVERY: bool = True
+    BEHAVIOR_CHECKER_SMALL_SAFE_EDITS: bool = True
+    BEHAVIOR_CHECKER_IGNORES_TOOL_ERROR: bool = True
+    BEHAVIOR_CHECKER_SHELL_WHEN_TOOL_EXISTS: bool = True
+    BEHAVIOR_CHECKER_PLAN_DRIFT: bool = True
+    BEHAVIOR_CHECKER_CHATTY_THINKING: bool = False
+    BEHAVIOR_CHECKER_FAKE_COMPLETION: bool = True
+    BEHAVIOR_CHECKER_PROMPT_POLLUTION: bool = False
+    BEHAVIOR_CHECKER_PLAN_QUALITY: bool = True
+
 
 
     model_config = {"env_prefix": "INFINIDEV_"}
