@@ -78,6 +78,14 @@ from infinidev.engine.loop.tool_processor import ToolProcessor
 from infinidev.engine.loop.loop_guard import LoopGuard
 from infinidev.engine.loop.behavior_tracker import BehaviorTracker
 from infinidev.engine.loop.step_manager import StepManager, _get_settings
+from infinidev.engine.trace_log import (
+    trace_run_start as _trace_run_start,
+    trace_iteration_prompt as _trace_iter_prompt,
+    trace_llm_response as _trace_llm_response,
+    trace_plan as _trace_plan,
+    trace_step_done as _trace_step_done,
+    trace_run_end as _trace_run_end,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +264,24 @@ class LoopEngine(AgentEngine):
 
         consecutive_all_done = 0
 
+        try:
+            _trace_run_start(
+                model=str(ctx.llm_params.get("model", "?")),
+                task=ctx.desc,
+                expected=ctx.expected,
+                settings_snapshot={
+                    "is_small": ctx.is_small,
+                    "manual_tc": ctx.manual_tc,
+                    "max_iterations": ctx.max_iterations,
+                    "max_per_action": ctx.max_per_action,
+                    "max_total_calls": ctx.max_total_calls,
+                    "history_window": ctx.history_window,
+                    "max_context_tokens": ctx.max_context_tokens,
+                },
+            )
+        except Exception:
+            pass
+
         for iteration in range(ctx.start_iteration, ctx.max_iterations):
             if self._cancel_event.is_set():
                 logger.info("LoopEngine: cancelled by user")
@@ -265,6 +291,10 @@ class LoopEngine(AgentEngine):
 
             ctx.state.iteration_count = iteration + 1
             messages = self._build_iteration_messages(ctx, iteration)
+            try:
+                _trace_iter_prompt(iteration + 1, messages[0].get("content", ""), messages[1].get("content", ""))
+            except Exception:
+                pass
 
             # Log step start
             active = ctx.state.plan.active_step
@@ -323,6 +353,12 @@ class LoopEngine(AgentEngine):
             if ctx.verbose:
                 _log_step_done(iteration + 1, step_result.status, step_result.summary, action_tool_calls, ctx.state.total_tokens)
                 _log_plan(ctx.state.plan)
+
+            try:
+                _trace_step_done(iteration + 1, step_result.status, step_result.summary, action_tool_calls)
+                _trace_plan(iteration + 1, ctx.state.plan)
+            except Exception:
+                pass
 
             _hook_manager.dispatch(_HookContext(
                 event=_HookEvent.POST_STEP,
@@ -424,7 +460,13 @@ class LoopEngine(AgentEngine):
 
         if is_small and task_tools is None:
             from infinidev.tools import get_tools_for_role
+            from infinidev.tools.base.context import bind_tools_to_agent
             tools = get_tools_for_role("developer", small_model=True)
+            # CRITICAL: bind the freshly-created tools to this agent's id.
+            # Without this, tool.agent_id falls back to thread-local lookup,
+            # which is unreliable when hooks/threads change context — causing
+            # "No active plan context" errors in plan tools intermittently.
+            bind_tools_to_agent(tools, agent.agent_id)
 
         tool_schemas = build_tool_schemas(tools, small_model=is_small) if tools else [STEP_COMPLETE_SCHEMA]
         tool_dispatch = build_tool_dispatch(tools) if tools else {}
@@ -548,6 +590,18 @@ class LoopEngine(AgentEngine):
 
             result = llm_caller.call(ctx, messages, is_planning, action_tool_calls)
 
+            try:
+                _trace_llm_response(
+                    iteration + 1,
+                    reasoning=getattr(result, "reasoning_content", None),
+                    content=getattr(result, "raw_content", None) or (
+                        getattr(result.message, "content", None) if getattr(result, "message", None) else None
+                    ),
+                    tool_calls=list(getattr(result, "tool_calls", None) or []),
+                )
+            except Exception:
+                pass
+
             # Emit reasoning content in FC mode (no streaming available).
             # Send full reasoning to both THINKING panel and chat.
             if result.reasoning_content and not ctx.manual_tc:
@@ -600,16 +654,25 @@ class LoopEngine(AgentEngine):
 
                 if classified.step_complete:
                     # For small models: gate step_complete on having notes
-                    # (prevents context loss from models that never use add_note)
-                    if (ctx.is_small
+                    # (prevents context loss from models that never use add_note).
+                    # Gate ONCE per step — second attempt is always honored, so the
+                    # model can't get stuck in a "must add note → does add fake
+                    # note → blocked again" loop. Disable globally with
+                    # INFINIBAY_LOOP_REQUIRE_NOTE_BEFORE_COMPLETE=false.
+                    _require_note = getattr(_get_settings(), "LOOP_REQUIRE_NOTE_BEFORE_COMPLETE", True)
+                    if (_require_note
+                        and ctx.is_small
                         and not ctx.state.notes
                         and action_tool_calls >= 2
                         and not getattr(self, '_step_complete_gated', False)):
                         self._step_complete_gated = True
                         nudge = (
-                            "You must save notes before completing this step. "
-                            "Call add_note with file paths and findings first. "
-                            "Example: add_note(note='auth.py:42 verify_token() uses JWT')"
+                            "Hold on — before you complete this step, save the key "
+                            "facts you discovered with add_note (file paths, function "
+                            "names, line numbers, decisions). Anything not saved is "
+                            "discarded when this step ends. Example: "
+                            "add_note(note='auth.py:42 verify_token() uses JWT, no exp check'). "
+                            "Then call step_complete again — the second call will be honored."
                         )
                         if ctx.manual_tc:
                             messages.append({"role": "user", "content": nudge})

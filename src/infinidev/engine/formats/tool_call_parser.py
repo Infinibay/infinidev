@@ -97,6 +97,12 @@ def _normalize_call_list(raw: list) -> list[dict[str, Any]] | None:
     return calls if calls else None
 
 
+_WRAPPER_KEYS = frozenset({
+    "name", "arguments", "parameters", "function", "id", "type", "index",
+    "tool_call_id", "role", "content",
+})
+
+
 def _normalize_single_call(obj: dict) -> dict[str, Any] | None:
     """Normalize a single tool call dict.
 
@@ -105,6 +111,17 @@ def _normalize_single_call(obj: dict) -> dict[str, Any] | None:
     - {"function": {"name": "x", "arguments": {...}}}
     - {"function": "x", "arguments": {...}}
     - {"name": "x", "parameters": {...}}
+
+    Mis-nesting rescue (Bug #12): small models sometimes emit a parameter
+    as a SIBLING of "arguments" instead of inside it, e.g.::
+
+        {"name": "add_step",
+         "arguments": {"title": "..."},
+         "expected_output": "..."}     # ← should be inside arguments
+
+    We rescue any unknown top-level key that is not part of the standard
+    wrapper schema (``_WRAPPER_KEYS``) by folding it into ``arguments``,
+    so the tool actually receives the parameter the model intended.
     """
     name = obj.get("name")
     arguments = obj.get("arguments") or obj.get("parameters") or {}
@@ -119,6 +136,15 @@ def _normalize_single_call(obj: dict) -> dict[str, Any] | None:
 
     if not name or not isinstance(name, str):
         return None
+
+    # Rescue mis-nested params: any non-wrapper top-level key gets folded
+    # into arguments unless arguments already has that key (don't clobber).
+    if isinstance(arguments, dict):
+        for k, v in obj.items():
+            if k in _WRAPPER_KEYS:
+                continue
+            if k not in arguments:
+                arguments[k] = v
 
     return {"name": name, "arguments": arguments}
 

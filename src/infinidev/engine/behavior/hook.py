@@ -34,12 +34,22 @@ def register_behavior_hooks() -> None:
     """Register the behavior scorer. Safe to call multiple times.
 
     If called after a settings reload with a different mode, the previous
-    registration is cleared first.
+    registration is cleared first. Honors ``BEHAVIOR_CHECKERS_ENABLED`` —
+    when disabled, no hook is registered at all so the loop pays zero
+    dispatch overhead (previously the scorer was always registered and
+    only the inner work was guarded, which made the flag misleading).
     """
     global _registered_events
     if _registered_events:
         # Re-registration only matters if the mode changed — clear either way.
         unregister_behavior_hooks()
+
+    try:
+        from infinidev.config.settings import settings
+        if not getattr(settings, "BEHAVIOR_CHECKERS_ENABLED", False):
+            return
+    except Exception:
+        pass
 
     mode = _current_mode()
     if mode == "per_message":

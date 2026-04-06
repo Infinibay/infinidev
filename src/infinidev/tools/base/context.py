@@ -99,6 +99,13 @@ def set_context(
         _workspace_path_var.set(workspace_path)
 
     # ── Write to process-global dict ─────────────────────────────────────
+    # Preserves every field of any existing ToolContext, including
+    # ``loop_state``, which is set out-of-band by ``set_loop_state``. The
+    # previous implementation listed fields by hand and forgot loop_state,
+    # so any call to set_context (e.g. a second activate_context() between
+    # the analyst and develop phases of a single --prompt run) silently
+    # cleared the plan-tools' access to LoopState — leading to add_step
+    # failing with "No active plan context" mid-run.
     key = agent_id or getattr(_tls, "agent_id", None) or _agent_id_var.get()
     if key:
         with _agent_contexts_lock:
@@ -111,6 +118,7 @@ def set_context(
                 workspace_path=workspace_path if workspace_path is not None else existing.workspace_path,
                 event_id=event_id if event_id is not None else existing.event_id,
                 resume_state=resume_state if resume_state is not None else existing.resume_state,
+                loop_state=existing.loop_state,  # ← preserved across set_context
             )
 
     if agent_id or project_id or session_id:
@@ -129,11 +137,21 @@ def get_context_for_agent(agent_id: str) -> ToolContext:
 
 
 def set_loop_state(agent_id: str, loop_state: Any) -> None:
-    """Attach the LoopState to an agent's context so plan tools can access it."""
+    """Attach the LoopState to an agent's context so plan tools can access it.
+
+    Creates the context entry on demand if it doesn't already exist. The
+    previous implementation silently dropped the call when the agent's
+    ToolContext hadn't been registered yet (Bug #13: race between
+    ``agent.activate_context()`` and ``engine.execute()`` left ``loop_state``
+    unset, so the very first ``add_step`` call returned
+    "No active plan context").
+    """
     with _agent_contexts_lock:
         ctx = _agent_contexts.get(agent_id)
-        if ctx:
-            ctx.loop_state = loop_state
+        if ctx is None:
+            ctx = ToolContext(agent_id=agent_id)
+            _agent_contexts[agent_id] = ctx
+        ctx.loop_state = loop_state
 
 
 def clear_agent_context(agent_id: str) -> None:

@@ -104,8 +104,10 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "step_complete",
         "description": (
-            "Signal that the current step is complete. "
-            "You MUST call this after finishing each step. "
+            "After finishing the current step objective AND verifying the outcome "
+            "(against the step's expected_output / success criterion), run step_complete. "
+            "Do NOT call this before you have evidence the step succeeded — re-read the file, "
+            "run the test, or check the command output first. "
             "WARNING: After this call, ALL tool outputs and conversation from this step will be discarded. "
             "Only the summary and your notes (add_note) survive to the next step. "
             "Before calling this, save key facts via add_note (file paths, function names, decisions). "
@@ -267,6 +269,15 @@ ADD_STEP_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "Detailed explanation of how to approach the step (optional)",
                 },
+                "expected_output": {
+                    "type": "string",
+                    "description": (
+                        "Your own success criterion for this step — one short, verifiable "
+                        "sentence stating how you will know the step is done correctly. "
+                        "Examples: 'pytest tests/test_auth.py::test_expired passes', "
+                        "'auth.py:52 contains payload[\"exp\"] check'."
+                    ),
+                },
             },
             "required": ["title"],
         },
@@ -279,7 +290,7 @@ MODIFY_STEP_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "modify_step",
         "description": (
-            "Modify the title or explanation of an existing pending step "
+            "Modify the title, explanation, or success criterion of an existing pending step "
             "WITHOUT completing the current step. "
             "Does NOT count as a tool call."
         ),
@@ -297,6 +308,10 @@ MODIFY_STEP_SCHEMA: dict[str, Any] = {
                 "explanation": {
                     "type": "string",
                     "description": "New explanation (leave empty to keep current)",
+                },
+                "expected_output": {
+                    "type": "string",
+                    "description": "New success criterion (leave empty to keep current)",
                 },
             },
             "required": ["index"],

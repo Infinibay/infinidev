@@ -13,6 +13,11 @@ class PlanStep(BaseModel):
     index: int
     title: str
     explanation: str = ""
+    # Self-defined success criterion: a short, verifiable statement the model
+    # commits to before running the step. Used to render <expected-output> in
+    # the iteration prompt and as the post-step verification anchor. Empty if
+    # the model didn't declare one (older flows / quick steps).
+    expected_output: str = ""
     status: Literal["pending", "active", "done", "skipped"] = "pending"
 
 

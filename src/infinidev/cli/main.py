@@ -116,6 +116,7 @@ def handle_command(cmd_text: str):
         click.echo("  /think             - Enable deep analysis for the next task")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
         click.echo("  /brainstorm <problem> - Creative ideation with forced perspectives")
+        click.echo("  /refactor [scope]  - Refactor code (modularize, clean, restructure)")
         click.echo("  /init              - Explore and document the current project")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
@@ -144,6 +145,14 @@ def handle_command(cmd_text: str):
             click.echo("Usage: /brainstorm <problem description>")
             return True
         return ("brainstorm", problem)
+
+    elif cmd == "/refactor":
+        user_scope = " ".join(parts[1:]) if len(parts) > 1 else ""
+        from infinidev.ui.handlers.commands import _build_refactor_prompt
+        prompt = _build_refactor_prompt(user_scope)
+        label = f"[refactor] {user_scope}" if user_scope else "[refactor] auto-scoped"
+        click.echo(click.style(label, fg="cyan"))
+        return ("prompt", prompt)
 
     click.echo(f"Unknown command: {cmd}")
     return True
@@ -323,7 +332,17 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         detected_flow = "develop"
         task_type = "feature"
         analysis_prompt = None
-        if settings.ANALYSIS_ENABLED:
+        # Skip the analyst for obvious imperative tasks. The analyst was hijacking
+        # `--prompt` runs by wrapping the user's request in a "do NOT write files,
+        # only analyze" envelope, leaving the model in an impossible loop. If the
+        # request begins with a clear action verb, go straight to the develop flow.
+        _IMPERATIVE_PREFIXES = (
+            "create ", "add ", "fix ", "implement ", "write ", "build ",
+            "refactor ", "rename ", "delete ", "remove ", "update ", "change ",
+            "make ", "generate ", "convert ",
+        )
+        _imperative = problem.lstrip().lower().startswith(_IMPERATIVE_PREFIXES)
+        if settings.ANALYSIS_ENABLED and not _imperative:
             try:
                 from infinidev.engine.analysis.analysis_engine import AnalysisEngine
                 analyst_sp = AnalysisEngine()
@@ -527,9 +546,14 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             if not user_input.strip():
                 continue
 
+            _fallthrough_to_pipeline = False
             if user_input.startswith("/"):
                 cmd_result = handle_command(user_input)
-                if isinstance(cmd_result, tuple) and cmd_result[0] == "explore":
+                if isinstance(cmd_result, tuple) and cmd_result[0] == "prompt":
+                    # Rewrite user_input and fall through to the normal pipeline.
+                    user_input = cmd_result[1]
+                    _fallthrough_to_pipeline = True
+                elif isinstance(cmd_result, tuple) and cmd_result[0] == "explore":
                     from infinidev.config.settings import reload_all
                     reload_all()
                     from infinidev.engine.tree import TreeEngine
@@ -592,7 +616,8 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                     _gather_next_task = True
                     _use_phase_engine = True
                     click.echo(click.style("Phase mode enabled: ANALYZE → PLAN → EXECUTE. Send your task.", fg="cyan"))
-                continue
+                if not _fallthrough_to_pipeline:
+                    continue
 
             from infinidev.config.settings import reload_all
             reload_all()

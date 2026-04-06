@@ -40,15 +40,39 @@ def _get_model_size_b(model: str | None = None) -> int:
     return 0
 
 
-def _is_small_model(model: str | None = None) -> bool:
-    """Return True if the model has fewer than 40B parameters.
+_SMALL_MODEL_NAME_HINTS = (
+    # Explicit local / open-weight families that fit on consumer GPUs.
+    # Listed lowercase; matched as substrings of the model id.
+    "glm-4.7-flash", "glm-4-flash", "glm-flash",
+    "gemma2", "gemma3", "gemma4",
+    "qwen2.5-coder", "qwen3", "qwen3.5",
+    "mistral-small", "mistral-7b", "mixtral-8x7b",
+    "nemotron-3-super", "nemotron-cascade",
+    "lfm2",
+    "gpt-oss:20b",
+    # Generic "small" markers
+    ":flash", "-flash", "-mini", "-tiny", "-small", "haiku",
+)
 
-    Covers 7B, 8B, 14B, 27B, and 32B models that struggle with complex
-    tool orchestration.  Size is detected from the model name string.
-    Returns False when size cannot be determined (safe default — treat as large).
+
+def _is_small_model(model: str | None = None) -> bool:
+    """Return True if the model is in the "small" tier (<~40B effective).
+
+    Detection order:
+      1. Explicit size suffix in the name (e.g. "qwen3:9b" → 9 < 40 → True).
+      2. Substring match against ``_SMALL_MODEL_NAME_HINTS`` for known
+         local/open-weight families that don't carry a size in their tag
+         (e.g. ``glm-4.7-flash:latest`` — previously classified as large).
+      3. Default False (treat unknown as large; safer for hosted big models).
     """
-    size = _get_model_size_b(model)
-    return 0 < size < 40
+    name = (model or settings.LLM_MODEL or "").lower()
+    size = _get_model_size_b(name)
+    if 0 < size < 40:
+        return True
+    for hint in _SMALL_MODEL_NAME_HINTS:
+        if hint in name:
+            return True
+    return False
 
 
 def get_litellm_params_for_behavior() -> dict[str, Any]:

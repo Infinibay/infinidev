@@ -24,6 +24,7 @@ COMMANDS = [
     ("/explore", "Decompose and explore a complex problem"),
     ("/brainstorm", "Brainstorm ideas and solutions for a problem"),
     ("/plan", "Generate plan, review it, then execute on approval"),
+    ("/refactor", "Refactor code: modularize, clean, order, restructure"),
     ("/init", "Explore and document the current project"),
     ("/debug", "Inspect agent internals: notes, history, plan, state"),
     ("/notes", "Show agent notes (alias for /debug)"),

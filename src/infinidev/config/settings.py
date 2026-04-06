@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     LOOP_STEP_NUDGE_THRESHOLD: int = 6  # Nudge agent to call step_complete after N tool calls
     LOOP_SUMMARIZER_ENABLED: bool = True  # Use dedicated LLM call for step summaries
     LOOP_SUMMARIZER_MAX_INPUT_TOKENS: int = 4000  # Max tokens from step messages to feed summarizer
+    LOOP_SUMMARIZER_TIMEOUT: int = 30  # Seconds; falls back to raw summary on timeout
+    LOOP_REQUIRE_NOTE_BEFORE_COMPLETE: bool = True  # Gate step_complete on add_note for small models
 
     # Gather phase (pre-implementation info collection)
     GATHER_ENABLED: bool = False

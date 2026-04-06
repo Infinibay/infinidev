@@ -715,9 +715,39 @@ def build_iteration_prompt(
                 "</user-message>"
             )
 
-    # Expected output
-    if expected_output:
-        parts.append(f"<expected-output>\n{expected_output}\n</expected-output>")
+    # Expected output — prefer the active step's self-declared success criterion
+    # over any global task-level expected output. The active step's
+    # `expected_output` is something the model itself committed to when it
+    # planned the step (via add_step), so it acts as a verification anchor.
+    # The global `expected_output` (if set, e.g. by a flow that wraps the task)
+    # is rendered only as a fallback when the active step has no criterion.
+    active_step = state.plan.active_step if state.plan else None
+    step_criterion = (active_step.expected_output.strip()
+                      if active_step and active_step.expected_output else "")
+    if step_criterion:
+        parts.append(
+            "<expected-output>\n"
+            "This is the success criterion you set for the current step. "
+            "Treat it as the test the step must pass before you move on.\n\n"
+            f"  {step_criterion}\n\n"
+            "Once the step's work is done, verify this criterion with a concrete "
+            "check (read the file you edited, run the test, inspect the command "
+            "output). Only then run step_complete. If the criterion turned out to "
+            "be wrong or incomplete, use modify_step to refine it instead of "
+            "lying to yourself about a green check.\n"
+            "</expected-output>"
+        )
+    elif expected_output:
+        parts.append(
+            "<expected-output>\n"
+            "Overall task expectation (set by the caller, not by you):\n\n"
+            f"  {expected_output}\n\n"
+            "When you create steps with add_step, give each one its own "
+            "expected_output — a short, verifiable criterion you can check "
+            "before completing that step. Run step_complete only after you have "
+            "actually verified the step's outcome.\n"
+            "</expected-output>"
+        )
 
     # Context budget — inform the agent how much context remains
     # Use last_prompt_tokens (actual context window usage) not total_tokens (cumulative)

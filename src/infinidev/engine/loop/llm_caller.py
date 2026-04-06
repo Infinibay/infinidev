@@ -161,7 +161,10 @@ class LLMCaller:
                         f"{attempt}/{_MANUAL_PARSE_RETRIES}), retrying...{_RESET}",
                         project_id=ctx.project_id, agent_id=ctx.agent_id,
                     )
-                    time.sleep(1.0 * attempt)
+                    # Tight exponential backoff: 0.3s, 0.6s, 1.2s — Ollama
+                    # parse errors are usually transient and a 1s+ wall-clock
+                    # waste per retry was a noticeable chunk of step latency.
+                    time.sleep(0.3 * (2 ** (attempt - 1)))
                     continue
                 raise
 

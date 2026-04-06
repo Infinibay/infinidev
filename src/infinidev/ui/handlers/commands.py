@@ -64,6 +64,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "/settings <key> <val> Change setting\n"
         "/settings reset       Reset to defaults\n"
         "/plan <task>          Generate plan, review, then execute\n"
+        "/refactor [scope]     Refactor code (modularize, clean, restructure)\n"
         "/explore <problem>    Decompose and explore a complex problem\n"
         "/init                 Explore and document the current project\n"
         "/debug                Inspect agent: notes, history, plan, state\n"
@@ -164,6 +165,56 @@ def _cmd_init(app: InfinidevApp, parts: list[str]) -> None:
     _cmd_engine_task(app, parts, "/init", "run_init_task", "Exploring and documenting project")
 
 
+# ── /refactor ───────────────────────────────────────────────────────────
+
+REFACTOR_PROMPT = (
+    "Refactor code to improve its quality. Focus on:\n"
+    "- Modularize: split large or monolithic units into smaller, cohesive pieces.\n"
+    "- Clean: remove dead code, redundant logic, and unused imports or variables.\n"
+    "- Order: consistent naming, grouping of related code, clearer organization.\n"
+    "- Structure: better separation of concerns and clearer abstractions.\n"
+    "\n"
+    "Rules:\n"
+    "- Preserve existing behavior — this is a refactor, not a rewrite or a new feature.\n"
+    "- Do not change public APIs unless explicitly requested.\n"
+    "- Do not add new features, options, or speculative abstractions.\n"
+    "- Read files before editing them and keep changes focused and minimal.\n"
+)
+
+
+def _build_refactor_prompt(user_scope: str) -> str:
+    scope = user_scope.strip()
+    if scope:
+        return REFACTOR_PROMPT + f"\nUser-specified scope and instructions:\n{scope}\n"
+    return (
+        REFACTOR_PROMPT
+        + "\nNo specific scope was provided. Identify a small, well-scoped area of the "
+        "codebase that would most benefit from refactoring and limit the work to that area. "
+        "Do not attempt to refactor the whole codebase in one pass.\n"
+    )
+
+
+def _cmd_refactor(app: InfinidevApp, parts: list[str]) -> None:
+    """Run a refactor task through the normal engine pipeline."""
+    user_scope = " ".join(parts[1:]) if len(parts) > 1 else ""
+    prompt = _build_refactor_prompt(user_scope)
+
+    if app._engine_running:
+        app.add_message("System", "Cannot run /refactor while a task is running.", "system")
+        return
+
+    label = f"Refactoring: {user_scope}" if user_scope else "Refactoring (auto-scoped)"
+    app.add_message("System", label, "system")
+
+    app._engine_running = True
+    app._chat_history_control.show_thinking = True
+    app.invalidate()
+    app._ensure_engine()
+
+    from infinidev.ui.workers import run_in_background, run_engine_task
+    run_in_background(app, run_engine_task, app, prompt, exclusive=True)
+
+
 # ── Command dispatch table ──────────────────────────────────────────────
 
 _COMMAND_TABLE: dict[str, Any] = {
@@ -184,6 +235,7 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/plan": _cmd_plan,
     "/think": _cmd_think,
     "/init": _cmd_init,
+    "/refactor": _cmd_refactor,
 }
 
 

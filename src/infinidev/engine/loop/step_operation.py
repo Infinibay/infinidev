@@ -14,5 +14,6 @@ class StepOperation(BaseModel):
     index: int
     title: str = ""  # required for add/modify, ignored for remove
     explanation: str = ""  # optional detailed guidance (tools to use, how to approach)
+    expected_output: str = ""  # model's own success criterion for this step
 
 

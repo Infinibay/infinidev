@@ -74,7 +74,12 @@ class LoopPlan(BaseModel):
                 self.steps = [s for s in self.steps if s.index != op.index or s.status == "done"]
                 # Only add if we actually removed the old step (i.e., it wasn't done)
                 if not any(s.index == op.index and s.status == "done" for s in self.steps):
-                    self.steps.append(PlanStep(index=op.index, title=op.title, explanation=op.explanation))
+                    self.steps.append(PlanStep(
+                        index=op.index,
+                        title=op.title,
+                        explanation=op.explanation,
+                        expected_output=op.expected_output,
+                    ))
 
             elif op.op == "modify":
                 for step in self.steps:
@@ -83,6 +88,8 @@ class LoopPlan(BaseModel):
                             step.title = op.title
                         if op.explanation:
                             step.explanation = op.explanation
+                        if op.expected_output:
+                            step.expected_output = op.expected_output
                         break
 
             elif op.op == "remove":
