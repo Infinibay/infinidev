@@ -15,6 +15,8 @@ from infinidev.tools.file._helpers import (
     atomic_write,
     record_artifact_change,
     validate_syntax_or_error,
+    detect_silent_deletions,
+    deletion_warning_text,
 )
 from infinidev.tools.file.write_file_input import WriteFileInput
 
@@ -47,22 +49,34 @@ class WriteFileTool(InfinibayBaseTool):
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
 
-        # Compute before-hash if file exists
+        # Compute before-hash AND read old text (only when file exists and
+        # mode='w' — needed for the silent-deletion check below).
         before_hash = None
+        old_text = ""
         if os.path.exists(file_path):
             try:
                 with open(file_path, "rb") as f:
-                    before_hash = hashlib.sha256(f.read()).hexdigest()[:16]
+                    raw = f.read()
+                before_hash = hashlib.sha256(raw).hexdigest()[:16]
+                if mode == "w":
+                    try:
+                        old_text = raw.decode("utf-8", errors="replace")
+                    except Exception:
+                        old_text = ""
             except Exception:
                 pass
 
         # Pre-write syntax check — only on full overwrite (mode='w'), since
         # append (mode='a') is typically used for logs/text accumulation
         # where validating a fragment in isolation would cause false positives.
+        deleted_symbols: list[str] = []
         if mode == "w":
             syntax_err = validate_syntax_or_error(self, file_path, content, operation="write_file")
             if syntax_err:
                 return syntax_err
+            # Silent deletion check (only on full overwrite of an existing file)
+            if old_text:
+                deleted_symbols = detect_silent_deletions(file_path, old_text, content)
 
         # Create parent directories
         parent = os.path.dirname(file_path)
@@ -100,6 +114,9 @@ class WriteFileTool(InfinibayBaseTool):
             "action": action,
             "size_bytes": size_bytes,
         }
+        if (warn := deletion_warning_text(deleted_symbols, file_path)):
+            result["warning"] = warn
+            result["removed_symbols"] = deleted_symbols
         if reason:
             result["reason"] = reason
         return self._success(result)

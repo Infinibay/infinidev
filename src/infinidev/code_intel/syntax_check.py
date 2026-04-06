@@ -174,3 +174,111 @@ def format_issues(issues: list[SyntaxIssue], *, max_show: int = 5) -> str:
     if len(issues) > max_show:
         lines.append(f"... and {len(issues) - max_show} more issues")
     return "\n".join(lines)
+
+
+# ── Top-level symbol extraction ──────────────────────────────────────────
+#
+# Used by ``validate_no_silent_deletion`` to detect when an edit removes
+# functions or classes the model probably didn't mean to delete. Returns
+# a SET of fully-qualified names (e.g. ``"Database._execute_create_table"``)
+# so additions and removals can be compared with simple set arithmetic.
+
+# Tree-sitter node types per language that we treat as "top-level symbol".
+# Each language gets a small list of node types whose ``name`` child is the
+# symbol name. Methods inside classes get qualified with the class name.
+_PYTHON_DEF_NODES = ("function_definition", "class_definition")
+_JS_DEF_NODES = (
+    "function_declaration", "class_declaration",
+    "method_definition", "lexical_declaration",
+)
+
+
+def _node_name(node: Any, source: bytes) -> str | None:
+    """Find a node's identifier child and return its text, or None."""
+    for child in node.children:
+        if child.type in ("identifier", "type_identifier", "property_identifier"):
+            return source[child.start_byte:child.end_byte].decode("utf-8", errors="replace")
+    return None
+
+
+def _extract_python_symbols(root: Any, source: bytes) -> set[str]:
+    """Walk a Python tree and return a set of qualified symbol names."""
+    out: set[str] = set()
+
+    def walk(node: Any, parent_name: str = "") -> None:
+        if node.type in _PYTHON_DEF_NODES:
+            name = _node_name(node, source)
+            if name:
+                qual = f"{parent_name}.{name}" if parent_name else name
+                out.add(qual)
+                # Recurse into class/function body so methods are captured
+                # under the class name.
+                new_parent = qual if node.type == "class_definition" else parent_name
+                for child in node.children:
+                    if child.type == "block":
+                        for grand in child.children:
+                            walk(grand, new_parent)
+                return
+        for child in node.children:
+            walk(child, parent_name)
+
+    walk(root)
+    return out
+
+
+def _extract_js_symbols(root: Any, source: bytes) -> set[str]:
+    """Walk a JavaScript/TypeScript tree and return symbol names."""
+    out: set[str] = set()
+
+    def walk(node: Any, parent_name: str = "") -> None:
+        if node.type in _JS_DEF_NODES:
+            name = _node_name(node, source)
+            if name:
+                qual = f"{parent_name}.{name}" if parent_name else name
+                out.add(qual)
+                new_parent = qual if "class" in node.type else parent_name
+                for child in node.children:
+                    walk(child, new_parent)
+                return
+        for child in node.children:
+            walk(child, parent_name)
+
+    walk(root)
+    return out
+
+
+def extract_top_level_symbols(
+    text: str,
+    language: str | None = None,
+    file_path: str | None = None,
+) -> set[str]:
+    """Return the set of top-level symbol names defined in *text*.
+
+    Symbols nested inside a class are returned qualified
+    (``Database.execute``). Returns an empty set when the language is
+    unsupported, the parser is unavailable, or the text is empty —
+    callers must treat an empty set as "I have no information" rather
+    than "no symbols".
+    """
+    if not text:
+        return set()
+    if language is None and file_path:
+        language = detect_language(file_path)
+    if not language or language == "config":
+        return set()
+
+    parser = _load_parser(language)
+    if parser is None:
+        return set()
+
+    try:
+        source = bytes(text, "utf-8")
+        tree = parser.parse(source)
+    except Exception:
+        return set()
+
+    if language == "python":
+        return _extract_python_symbols(tree.root_node, source)
+    if language in ("javascript", "typescript"):
+        return _extract_js_symbols(tree.root_node, source)
+    return set()

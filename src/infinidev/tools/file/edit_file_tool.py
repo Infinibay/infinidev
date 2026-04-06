@@ -16,6 +16,8 @@ from infinidev.tools.file._helpers import (
     atomic_write,
     record_artifact_change,
     validate_syntax_or_error,
+    detect_silent_deletions,
+    deletion_warning_text,
 )
 from infinidev.tools.file.edit_file_input import EditFileInput
 
@@ -130,6 +132,9 @@ class EditFileTool(InfinibayBaseTool):
         if syntax_err:
             return syntax_err
 
+        # Detect silent symbol deletions (soft warning)
+        deleted_symbols = detect_silent_deletions(file_path, content, new_content)
+
         # Atomic write (preserve original permissions)
         try:
             atomic_write(file_path, new_content)
@@ -153,6 +158,9 @@ class EditFileTool(InfinibayBaseTool):
             "replacements": replacements,
             "size_bytes": new_size,
         }
+        if (warn := deletion_warning_text(deleted_symbols, file_path)):
+            result["warning"] = warn
+            result["removed_symbols"] = deleted_symbols
         if reason:
             result["reason"] = reason
         return self._success(result)

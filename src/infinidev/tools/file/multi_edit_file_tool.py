@@ -14,6 +14,8 @@ from infinidev.tools.file._helpers import (
     atomic_write,
     record_artifact_change,
     validate_syntax_or_error,
+    detect_silent_deletions,
+    deletion_warning_text,
 )
 from infinidev.tools.file.edit_operation import EditOperation
 from infinidev.tools.file.multi_edit_file_input import MultiEditFileInput
@@ -137,6 +139,9 @@ class MultiEditFileTool(InfinibayBaseTool):
         if syntax_err:
             return syntax_err
 
+        # Detect silent symbol deletions across the merged result
+        deleted_symbols = detect_silent_deletions(file_path, content, new_content)
+
         # Atomic write
         try:
             atomic_write(file_path, new_content)
@@ -160,6 +165,9 @@ class MultiEditFileTool(InfinibayBaseTool):
             "edits_applied": num_edits,
             "size_bytes": new_size,
         }
+        if (warn := deletion_warning_text(deleted_symbols, file_path)):
+            result["warning"] = warn
+            result["removed_symbols"] = deleted_symbols
         if reason:
             result["reason"] = reason
         return self._success(result)

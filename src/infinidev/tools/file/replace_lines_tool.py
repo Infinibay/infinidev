@@ -13,6 +13,8 @@ from infinidev.tools.file._helpers import (
     atomic_write,
     record_artifact_change,
     validate_syntax_or_error,
+    detect_silent_deletions,
+    deletion_warning_text,
 )
 from infinidev.tools.file.replace_lines_input import ReplaceLinesInput
 
@@ -105,6 +107,12 @@ class ReplaceLinesTool(InfinibayBaseTool):
         if syntax_err:
             return syntax_err
 
+        # Detect symbols (functions/classes/methods) that disappeared
+        # between the old and the new content. Soft signal — we still
+        # write the file, but the success response carries a warning so
+        # the model can notice and restore if it was an accident.
+        deleted_symbols = detect_silent_deletions(path, old_content, new_content)
+
         # Atomic write (preserve permissions)
         try:
             atomic_write(path, new_content)
@@ -125,12 +133,16 @@ class ReplaceLinesTool(InfinibayBaseTool):
             f"Replaced lines {start_line}-{end_line} in {path} "
             f"(-{lines_removed} +{lines_added} lines, {new_size} bytes)"
         )
-        return self._success({
+        result: dict = {
             "path": path,
             "action": "modified",
             "lines_removed": lines_removed,
             "lines_added": lines_added,
             "total_lines": len(result_lines),
             "size_bytes": new_size,
-        })
+        }
+        if (warn := deletion_warning_text(deleted_symbols, path)):
+            result["warning"] = warn
+            result["removed_symbols"] = deleted_symbols
+        return self._success(result)
 

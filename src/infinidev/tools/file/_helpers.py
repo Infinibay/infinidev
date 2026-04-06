@@ -29,6 +29,54 @@ def guard_file_access(tool: InfinibayBaseTool, path: str, operation: str) -> str
     return None
 
 
+def detect_silent_deletions(
+    file_path: str,
+    old_content: str,
+    new_content: str,
+) -> list[str]:
+    """Return a list of qualified symbol names present in old but missing
+    in new. Empty list when nothing was deleted, when the language is
+    unsupported, or when tree-sitter is unavailable.
+
+    Used to surface "you accidentally removed a function" warnings on
+    edit/replace tools. Soft signal — the caller decides whether to
+    warn or block. Never raises.
+    """
+    try:
+        from infinidev.code_intel.syntax_check import extract_top_level_symbols
+        before = extract_top_level_symbols(old_content, file_path=file_path)
+        after = extract_top_level_symbols(new_content, file_path=file_path)
+    except Exception:
+        return []
+    if not before:
+        return []  # nothing to compare against
+    removed = sorted(before - after)
+    return removed
+
+
+def deletion_warning_text(removed: list[str], file_path: str) -> str:
+    """Render a short, model-facing warning that lists deleted symbols.
+
+    Returns "" when there's nothing to warn about, so callers can
+    use truthiness directly: ``if (warn := deletion_warning_text(...)): ``.
+    """
+    if not removed:
+        return ""
+    if len(removed) == 1:
+        return (
+            f"You removed {removed[0]} from {file_path}. If this was "
+            "intentional, ignore this notice. If not, restore the "
+            "function — your edit may have collapsed too much."
+        )
+    head = ", ".join(removed[:5])
+    extra = f" (+{len(removed) - 5} more)" if len(removed) > 5 else ""
+    return (
+        f"You removed {len(removed)} symbols from {file_path}: {head}{extra}. "
+        "If this was intentional, ignore this notice. If not, restore them — "
+        "your edit may have collapsed too much."
+    )
+
+
 def validate_syntax_or_error(
     tool: InfinibayBaseTool,
     file_path: str,
