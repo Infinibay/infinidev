@@ -105,22 +105,55 @@ _LIBRARY: dict[str, GuidanceEntry] = {
     ),
     "stuck_on_tests": GuidanceEntry(
         key="stuck_on_tests",
-        title="When pytest keeps failing, READ the traceback",
+        title="When tests keep failing, READ the failure output",
         body=(
-            "If the test runs but the assertion fails, the exit_code tells "
-            "you nothing useful — the actual error message is in stdout. "
-            "Read it. Look for the line starting with 'E ' (the assertion "
-            "failure or exception) and the file:line above it (where the "
-            "test failed). Then add_note the failure mode before editing "
-            "again. Patching blindly without reading the traceback is the "
-            "main reason a small model loops on the same broken edit."
+            "exit_code tells you nothing useful — the actual error message "
+            "is in stdout/stderr. READ it. For each test framework the "
+            "key signal is in a different place:\n"
+            "  • pytest:   look for lines starting with 'E   ' and the "
+            "'FAILED' summary at the bottom\n"
+            "  • jest/vitest: look for the '●' or 'FAIL' block above each "
+            "failed test, plus the 'Expected'/'Received' diff\n"
+            "  • mocha:    look for the '✗' / 'AssertionError' lines\n"
+            "  • cargo test: look for 'thread ... panicked at' and the "
+            "expected vs actual values\n"
+            "  • go test:  look for '--- FAIL: TestX' and the lines below it\n"
+            "  • dotnet/mvn: look for the '[xUnit.net]'/'<<< FAILURE!' lines\n"
+            "After reading, add_note the EXACT failure mode (file:line + "
+            "what was expected vs actual), THEN open the relevant file, "
+            "THEN edit. Patching blindly without reading is the main "
+            "reason a small model loops on the same broken edit."
         ),
         example=(
             "1. execute_command('pytest tests/test_x.py::test_foo -v 2>&1 | tail -40')\n"
-            "2. add_note('test_foo expects status=200 but got 404 — handler missing route')\n"
-            "3. read_file('src/handler.py')  # find the route table\n"
-            "4. replace_lines(...)           # add the route\n"
+            "2. add_note('test_foo: expected 200, got 404 at handler.py:52 — route missing')\n"
+            "3. read_file('src/handler.py')\n"
+            "4. replace_lines(...)\n"
             "5. execute_command('pytest tests/test_x.py::test_foo -v')"
+        ),
+    ),
+    "same_test_output_loop": GuidanceEntry(
+        key="same_test_output_loop",
+        title="Your edits are not changing the test outcome — switch tactics",
+        body=(
+            "You have run the test runner 3+ times and the pass/fail count "
+            "is IDENTICAL each time. Your edits are not affecting the "
+            "failing test. This means EITHER (a) you are editing the wrong "
+            "file or wrong line, OR (b) the bug is somewhere you haven't "
+            "looked yet. STOP editing and do a diagnostic step: "
+            "1) isolate ONE failing test (e.g. `pytest path::name -v`, "
+            "`jest -t 'name'`, `cargo test name`, `go test -run TestName`),"
+            " 2) capture the FULL failure output (not just the exit code), "
+            "3) add_note the EXACT file:line where the error is raised "
+            "and what was expected vs actual, "
+            "4) read THAT file at THAT line. Only then edit."
+        ),
+        example=(
+            "1. execute_command('pytest tests/test_foo.py::test_one -v --tb=long 2>&1 | tail -60')\n"
+            "2. add_note('TypeError at minidb.py:92 inside _parse_values: quote_char is None')\n"
+            "3. read_file('minidb.py')   # focus on _parse_values around line 92\n"
+            "4. modify_step(index=N, expected_output='_parse_values handles empty values without crashing')\n"
+            "5. replace_lines('minidb.py', start_line=88, end_line=95, content=...)"
         ),
     ),
     "reread_loop": GuidanceEntry(
@@ -261,29 +294,209 @@ def _has_unknown_tool_loop(messages: list[dict]) -> bool:
     return sum(1 for r in results if _UNKNOWN_TOOL_RE.search(r)) >= 2
 
 
-def _has_pytest_loop_no_read(messages: list[dict]) -> bool:
-    """True iff there are 3+ pytest invocations and 0 reads of any test
-    or implementation file in between (model is patching blind)."""
+def _has_test_loop_no_read(messages: list[dict]) -> bool:
+    """True iff there are 3+ FAILING test runs and 0 reads in between.
+
+    Generalises across all runners that ``is_test_command`` recognises:
+    pytest, jest, vitest, mocha, cargo test, go test, dotnet test, mvn,
+    etc. The "all runs failed" requirement avoids false positives when
+    the model is making progress and the failure count is changing —
+    that case is either healthy iteration or, if the count is stuck,
+    ``same_test_output_loop`` catches it instead.
+    """
     calls = _tool_calls_in_messages(messages)
-    pytest_runs = sum(
+    results = _tool_results(messages)
+
+    test_runs = sum(
         1 for name, args in calls
-        if name == "execute_command" and "pytest" in args.lower()
+        if name == "execute_command" and is_test_command(args)
     )
-    if pytest_runs < 3:
+    if test_runs < 3:
         return False
-    # Did the model read_file at least once between pytest runs?
-    saw_pytest = False
-    saw_read_after_pytest = False
-    for name, _ in calls:
-        if name == "execute_command":
-            if saw_pytest:
-                # New pytest run with no read in between
-                return not saw_read_after_pytest
-            saw_pytest = True
-            saw_read_after_pytest = False
+
+    # Require at least 3 results that look like a *failing* test run.
+    failing_runs = 0
+    for r in results:
+        fp = test_outcome_fingerprint(r)
+        if fp and ("failed" in fp or "error" in fp):
+            failing_runs += 1
+    if failing_runs < 3:
+        return False
+
+    # Did the model read_file at least once between consecutive test runs?
+    saw_test = False
+    saw_read_after_test = False
+    for name, args in calls:
+        if name == "execute_command" and is_test_command(args):
+            if saw_test:
+                return not saw_read_after_test
+            saw_test = True
+            saw_read_after_test = False
         elif name in ("read_file", "partial_read"):
-            saw_read_after_pytest = True
+            saw_read_after_test = True
     return False
+
+
+# Backwards-compat alias for any code that imported the old name.
+_has_pytest_loop_no_read = _has_test_loop_no_read
+
+
+# ── Test runner detection (multi-language) ────────────────────────────────
+#
+# Detection of "the model just ran tests" must work across runners and
+# languages. We split the problem in two:
+#
+#   1. is_test_command(args)        — was this execute_command a test run?
+#   2. test_outcome_fingerprint(out)— stable hash of the run's outcome
+#
+# Both functions are intentionally permissive: they aim for HIGH RECALL
+# (don't miss real test runs) and acceptable precision. False positives
+# in the fingerprint are harmless because the same_test_output_loop
+# detector also requires the fingerprint to repeat 3 times in a row.
+
+# Substrings that indicate a test runner invocation. Matched anywhere
+# in the command line. Add more here as new runners come up.
+_TEST_RUNNER_TOKENS: tuple[str, ...] = (
+    # Python
+    "pytest", "py.test", "python -m unittest", "nose2", "trial ",
+    # JavaScript / TypeScript
+    "jest", "vitest", "mocha", "ava ", "tap ", "tape ", "node --test",
+    "npm test", "npm run test", "yarn test", "pnpm test", "bun test",
+    # Rust
+    "cargo test", "cargo nextest",
+    # Go
+    "go test",
+    # .NET
+    "dotnet test",
+    # JVM
+    "mvn test", "mvn verify", "gradle test", "gradlew test", "./gradlew test",
+    # Ruby
+    "rspec", "rake test", "minitest",
+    # PHP
+    "phpunit", "pest ",
+    # Elixir
+    "mix test",
+    # Swift
+    "swift test", "xcodebuild test",
+    # C/C++
+    "ctest", "make test", "make check",
+)
+
+
+def is_test_command(args_str: str) -> bool:
+    """True iff the execute_command arguments look like a test runner call."""
+    s = args_str.lower()
+    return any(token in s for token in _TEST_RUNNER_TOKENS)
+
+
+# A keyword that, when paired with a number nearby, signals a test
+# outcome. Order doesn't matter — we collect all (number, keyword)
+# pairs from the output and use their multiset as the fingerprint.
+_OUTCOME_KEYWORDS: tuple[str, ...] = (
+    "passed", "failed", "errors", "error",
+    "passing", "failing", "skipped", "pending",
+    "ok", "fail", "pass",
+    "total",  # jest summary line
+    "tests run", "failures",  # mvn / surefire
+    "successes", "ignored",   # cargo test
+)
+
+# Compiled in advance: matches "<int> <keyword>" or "<keyword>: <int>"
+# in either order, case-insensitive, allowing punctuation between.
+_NUMBER_KEYWORD_RE = re.compile(
+    r"(?:(\d+)\s*(?:[,;:|]\s*)?\s*("
+    + "|".join(re.escape(k) for k in _OUTCOME_KEYWORDS)
+    + r"))|(?:("
+    + "|".join(re.escape(k) for k in _OUTCOME_KEYWORDS)
+    + r")\s*:\s*(\d+))",
+    re.IGNORECASE,
+)
+
+
+def test_outcome_fingerprint(content: str) -> str | None:
+    """Extract a stable fingerprint of a test run's outcome.
+
+    Works across pytest, jest, vitest, mocha, cargo test, go test,
+    dotnet test, mvn, etc. Returns a sorted, normalised string like
+    ``"1 failed, 2 passed"`` or ``"3 passed"`` — identical outcomes
+    on different runs produce the same string. Returns None when the
+    content doesn't look like test output at all.
+    """
+    if not content:
+        return None
+    lower = content.lower()
+    # Cheap pre-filter: skip clearly-not-test content.
+    if not any(k in lower for k in ("passed", "failed", "test", "ok", "fail", "error")):
+        return None
+
+    # Collect (number:int, keyword:str) pairs from the entire output.
+    pairs: dict[str, int] = {}
+    for m in _NUMBER_KEYWORD_RE.finditer(content):
+        if m.group(1) and m.group(2):
+            num, kw = m.group(1), m.group(2)
+        elif m.group(3) and m.group(4):
+            kw, num = m.group(3), m.group(4)
+        else:
+            continue
+        try:
+            n = int(num)
+        except ValueError:
+            continue
+        kw_norm = kw.lower().strip()
+        # Normalise synonyms so different runners merge cleanly.
+        if kw_norm in ("fail", "failing", "failures"):
+            kw_norm = "failed"
+        elif kw_norm in ("pass", "passing", "successes", "ok"):
+            kw_norm = "passed"
+        elif kw_norm == "errors":
+            kw_norm = "error"
+        # Take the LAST occurrence per keyword — runners often print
+        # progress (e.g. "0 passed" then "3 passed") and the final
+        # value is the authoritative one.
+        pairs[kw_norm] = n
+
+    if not pairs:
+        return None
+    # Drop "total"=N when other counters explain everything — keeps
+    # fingerprints stable across runners that do/don't include totals.
+    keep_order = ("failed", "error", "passed", "skipped", "pending", "ignored", "total")
+    parts = [f"{pairs[k]} {k}" for k in keep_order if k in pairs]
+    if not parts:
+        return None
+    return ", ".join(parts)
+
+
+# Backwards-compat alias used elsewhere in the file. Older code paths
+# expect the pytest-specific name; the new generic implementation
+# handles pytest fine.
+_pytest_outcome_fingerprint = test_outcome_fingerprint
+
+
+def _has_same_test_output_loop(messages: list[dict]) -> bool:
+    """True iff the last 3 test runs returned identical pass/fail counts.
+
+    Works across any runner ``test_outcome_fingerprint`` recognises
+    (pytest, jest, cargo, go test, mvn, etc.). This is a stronger
+    signal than ``stuck_on_tests``: it doesn't matter whether the
+    model read files in between — if the OUTCOME of the test runner
+    didn't change after 3 attempts, the model is editing the wrong
+    thing and needs a different tactic. T3v2 (glm-4.7-flash on minidb)
+    was the canonical example: model kept editing minidb.py while
+    ``1 failed, 2 passed`` stayed identical across iterations because
+    the failing test exposed a bug the model misread.
+    """
+    fingerprints: list[str] = []
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        content = str(msg.get("content") or "")
+        fp = test_outcome_fingerprint(content)
+        if fp:
+            fingerprints.append(fp)
+    if len(fingerprints) < 3:
+        return False
+    # Same outcome 3+ times in a row at the tail end of the buffer.
+    return len(set(fingerprints[-3:])) == 1
 
 
 def _has_repeated_edit_errors(messages: list[dict]) -> bool:
@@ -342,13 +555,16 @@ def _has_stuck_on_search(messages: list[dict]) -> bool:
 # Order matters: we return the first matching pattern, and the order
 # encodes priority (most-specific / highest-confidence first).
 _DETECTORS: list[tuple[str, Any]] = [
-    ("text_only_iters", lambda m, s: _has_text_only_iters(s)),
-    ("unknown_tool",    lambda m, s: _has_unknown_tool_loop(m)),
-    ("vague_steps",     lambda m, s: _has_vague_step_spam(m)),
-    ("reread_loop",     lambda m, s: _has_reread_loop(m, s)),
-    ("stuck_on_tests",  lambda m, s: _has_pytest_loop_no_read(m)),
-    ("stuck_on_edit",   lambda m, s: _has_repeated_edit_errors(m)),
-    ("stuck_on_search", lambda m, s: _has_stuck_on_search(m)),
+    ("text_only_iters",       lambda m, s: _has_text_only_iters(s)),
+    ("unknown_tool",          lambda m, s: _has_unknown_tool_loop(m)),
+    ("vague_steps",           lambda m, s: _has_vague_step_spam(m)),
+    ("reread_loop",           lambda m, s: _has_reread_loop(m, s)),
+    # same_test_output_loop runs BEFORE stuck_on_tests because it's a
+    # stronger signal: identical outcome regardless of read activity.
+    ("same_test_output_loop", lambda m, s: _has_same_test_output_loop(m)),
+    ("stuck_on_tests",        lambda m, s: _has_test_loop_no_read(m)),
+    ("stuck_on_edit",         lambda m, s: _has_repeated_edit_errors(m)),
+    ("stuck_on_search",       lambda m, s: _has_stuck_on_search(m)),
     # NB: stuck_on_planning has no automatic detector — it's only
     # delivered explicitly via maybe_queue_guidance(force_key="stuck_on_planning")
     # because vague_steps already covers the same ground.
