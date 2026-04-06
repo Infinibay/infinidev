@@ -544,6 +544,18 @@ def build_iteration_prompt(
     # Task description
     parts.append(f"<task>\n{description}\n</task>")
 
+    # Reactive guidance — pre-baked how-to advice queued by the engine
+    # at the end of the previous step when a stuck-pattern was detected.
+    # Renders once and is consumed; the engine decides when to queue
+    # the next one. Pure prompt overhead, no LLM call upstream.
+    try:
+        from infinidev.engine.guidance import drain_pending_guidance
+        guidance_text = drain_pending_guidance(state)
+        if guidance_text:
+            parts.append(guidance_text)
+    except Exception:
+        pass
+
     # Opened files cache — files the agent has read or written recently.
     # This avoids redundant read_file calls between steps.
     if state.opened_files:

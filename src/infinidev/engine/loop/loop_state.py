@@ -36,6 +36,14 @@ class LoopState(BaseModel):
     cache_creation_tokens: int = 0   # Anthropic/DashScope/MiniMax: tokens written to cache
     cache_read_tokens: int = 0       # Anthropic/DashScope/MiniMax: tokens read from cache
     cached_tokens: int = 0           # OpenAI/DeepSeek/ZAI: cached prefix tokens
+    # Guidance system: pre-baked how-to entries delivered to small models
+    # when a stuck-pattern is detected (see ``engine.guidance``).
+    # ``pending_guidance`` holds rendered text queued by the previous step
+    # that the next prompt build will render and consume.
+    # ``guidance_given`` remembers which entry keys were already delivered
+    # so the same one is never sent twice.
+    pending_guidance: str = ""
+    guidance_given: list[str] = Field(default_factory=list)
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""

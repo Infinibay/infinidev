@@ -360,6 +360,28 @@ class LoopEngine(AgentEngine):
             except Exception:
                 pass
 
+            # Reactive guidance: at the end of each step, look at the
+            # messages produced during this step and queue pre-baked
+            # how-to advice if a stuck-pattern is detected. Only fires
+            # for small models; never costs an LLM call. The advice
+            # is rendered into the *next* iteration's prompt.
+            try:
+                _settings = _get_settings()
+                if (ctx.is_small
+                    and getattr(_settings, "LOOP_GUIDANCE_ENABLED", True)
+                    and step_result.status not in ("done", "blocked")):
+                    from infinidev.engine.guidance import maybe_queue_guidance
+                    queued = maybe_queue_guidance(
+                        ctx.state,
+                        messages[step_messages_start:],
+                        is_small=True,
+                        max_per_task=int(getattr(_settings, "LOOP_GUIDANCE_MAX_PER_TASK", 3)),
+                    )
+                    if queued and ctx.verbose:
+                        _log(f"  {_YELLOW}↪ guidance queued: {queued}{_RESET}")
+            except Exception:
+                pass
+
             _hook_manager.dispatch(_HookContext(
                 event=_HookEvent.POST_STEP,
                 metadata={

@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     LOOP_SUMMARIZER_TIMEOUT: int = 30  # Seconds; falls back to raw summary on timeout
     LOOP_REQUIRE_NOTE_BEFORE_COMPLETE: bool = True  # Gate step_complete on add_note for small models
     LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
+    LOOP_GUIDANCE_ENABLED: bool = True  # Inject pre-baked how-to advice when small models get stuck
+    LOOP_GUIDANCE_MAX_PER_TASK: int = 3  # Hard cap on guidance entries per task
 
     # Gather phase (pre-implementation info collection)
     GATHER_ENABLED: bool = False
