@@ -35,6 +35,20 @@ if TYPE_CHECKING:
 _UNKNOWN_TOOL_RE = re.compile(r"Unknown tool[: ]", re.IGNORECASE)
 _VAGUE_WARN_RE = re.compile(r"Vague step title", re.IGNORECASE)
 
+# Patterns that look like a tool call rendered as text instead of as a
+# real function call. Each one matches a JSON shape the model would
+# normally emit ONLY through the function-calling channel.
+_MALFORMED_TC_RES: tuple[re.Pattern[str], ...] = (
+    # OpenAI-style: {"tool_calls": [{"name": "...", "arguments": ...}]}
+    re.compile(r'"tool_calls"\s*:\s*\[\s*\{\s*"name"\s*:'),
+    # Bare-call style: {"name": "...", "arguments": {...}}
+    re.compile(r'\{\s*"name"\s*:\s*"[a-z_][a-z0-9_]*"\s*,\s*"arguments"\s*:'),
+    # function field variant
+    re.compile(r'"function"\s*:\s*\{\s*"name"\s*:'),
+    # XML-tag variants emitted by some chat templates
+    re.compile(r"<tool_call>|<function_call>|<\|tool_call_begin\|>|<\|tool_calls_section_begin\|>"),
+)
+
 
 # ── Message-buffer helpers ───────────────────────────────────────────────
 
@@ -64,6 +78,38 @@ def _tool_results(messages: list[dict]) -> list[str]:
 
 
 # ── Individual detectors ─────────────────────────────────────────────────
+
+def _has_malformed_tool_call(messages: list[dict]) -> bool:
+    """True iff the model emitted text that LOOKS like a tool call but
+    didn't actually call any tool.
+
+    Catches the small-model failure mode where the model writes
+    ``{"tool_calls": [...]}`` or ``{"name": "x", "arguments": {...}}``
+    as plain text inside its content/thinking instead of emitting it
+    through the function-calling channel. The engine already prints
+    ``No function call detected (retry N/3)`` for this case but the
+    model gets no actionable feedback. The matching guidance entry
+    explains the difference between writing JSON and calling a tool.
+
+    Fires when ANY assistant message in the step has content matching
+    one of the malformed-tool-call regex patterns AND that same
+    message has no real ``tool_calls``. We require at least one
+    occurrence (not 2+) because a single attempt is already a clear
+    sign the model doesn't understand the tool-calling API.
+    """
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        if msg.get("tool_calls"):
+            continue  # had real tool calls — fine
+        content = str(msg.get("content") or "")
+        if not content:
+            continue
+        for pattern in _MALFORMED_TC_RES:
+            if pattern.search(content):
+                return True
+    return False
+
 
 def _has_first_test_run(state: "LoopState") -> bool:
     """True iff the model has just run a test runner for the first time
@@ -258,8 +304,12 @@ def _has_duplicate_steps(state: "LoopState | None") -> bool:
 # same_test_output_loop runs before stuck_on_tests because it's a
 # stronger "no progress" signal independent of read activity.
 _DETECTORS: list[tuple[str, Any]] = [
-    # text_only and unknown_tool are highest priority — they signal a
-    # broken loop that nothing else can recover from.
+    # text_only, unknown_tool, malformed_tool_call are highest priority
+    # — they signal a broken loop that nothing else can recover from.
+    # malformed_tool_call sits BEFORE text_only because it's a strict
+    # subset (text-only with a JSON-shaped fragment) and the more
+    # specific guidance is more useful.
+    ("malformed_tool_call",   lambda m, s: _has_malformed_tool_call(m)),
     ("text_only_iters",       lambda m, s: _has_text_only_iters(s)),
     ("unknown_tool",          lambda m, s: _has_unknown_tool_loop(m)),
     # first_test_run is a *proactive* introduction — fires once when the

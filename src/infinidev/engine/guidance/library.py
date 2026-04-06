@@ -223,6 +223,38 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "add_note('auth flow lives in src/auth/handlers.py:42 verify()')"
         ),
     ),
+    "malformed_tool_call": GuidanceEntry(
+        key="malformed_tool_call",
+        title="You wrote a tool call as text — call the tool, don't print it",
+        body=(
+            "You emitted something like ``{\"tool_calls\": [{\"name\": ...}]}`` "
+            "or ``{\"name\": \"read_file\", \"arguments\": {...}}`` inside "
+            "your normal text/thinking output. That JSON does NOT call "
+            "the tool — it's just a string the engine throws away. To "
+            "actually run a tool you have to emit it through the "
+            "function-calling channel: stop writing tool-call JSON in "
+            "your text, and instead emit the tool call as a real "
+            "function call. The engine will then dispatch it.\n\n"
+            "If your model template doesn't expose function calling at "
+            "all, the engine falls back to manual mode and accepts "
+            "exactly one shape per response: a single JSON object "
+            "``{\"name\": \"...\", \"arguments\": {...}}`` and NOTHING ELSE "
+            "in the content. No prose around it, no markdown fences, "
+            "no nested ``tool_calls`` array, no commentary."
+        ),
+        example=(
+            "WRONG (text fragment, ignored):\n"
+            "  Let me read the file.\n"
+            "  {\"tool_calls\": [{\"name\": \"read_file\",\n"
+            "                    \"arguments\": {\"file_path\": \"x.py\"}}]}\n"
+            "\n"
+            "RIGHT (real function call):\n"
+            "  read_file(file_path=\"x.py\")\n"
+            "\n"
+            "RIGHT (manual fallback — single bare object, no prose):\n"
+            "  {\"name\": \"read_file\", \"arguments\": {\"file_path\": \"x.py\"}}"
+        ),
+    ),
     "first_test_run": GuidanceEntry(
         key="first_test_run",
         title="You just ran tests — here's the fastest way to read the result",
