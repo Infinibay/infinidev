@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
     LOOP_GUIDANCE_ENABLED: bool = True  # Inject pre-baked how-to advice when small models get stuck
     LOOP_GUIDANCE_MAX_PER_TASK: int = 3  # Hard cap on guidance entries per task
+    # Comma-separated substrings that mark project-specific test runners
+    # (e.g. "bash test.sh,make integration"). Added on top of the built-in
+    # runner list (pytest/jest/cargo/etc.) used by the guidance detector.
+    LOOP_CUSTOM_TEST_COMMANDS: str = ""
 
     # Gather phase (pre-implementation info collection)
     GATHER_ENABLED: bool = False

@@ -294,7 +294,7 @@ def _has_unknown_tool_loop(messages: list[dict]) -> bool:
     return sum(1 for r in results if _UNKNOWN_TOOL_RE.search(r)) >= 2
 
 
-def _has_test_loop_no_read(messages: list[dict]) -> bool:
+def _has_test_loop_no_read(messages: list[dict], state: "LoopState | None" = None) -> bool:
     """True iff there are 3+ FAILING test runs and 0 reads in between.
 
     Generalises across all runners that ``is_test_command`` recognises:
@@ -309,7 +309,7 @@ def _has_test_loop_no_read(messages: list[dict]) -> bool:
 
     test_runs = sum(
         1 for name, args in calls
-        if name == "execute_command" and is_test_command(args)
+        if name == "execute_command" and is_test_command(args, state)
     )
     if test_runs < 3:
         return False
@@ -327,7 +327,7 @@ def _has_test_loop_no_read(messages: list[dict]) -> bool:
     saw_test = False
     saw_read_after_test = False
     for name, args in calls:
-        if name == "execute_command" and is_test_command(args):
+        if name == "execute_command" and is_test_command(args, state):
             if saw_test:
                 return not saw_read_after_test
             saw_test = True
@@ -383,10 +383,63 @@ _TEST_RUNNER_TOKENS: tuple[str, ...] = (
 )
 
 
-def is_test_command(args_str: str) -> bool:
-    """True iff the execute_command arguments look like a test runner call."""
+def _user_test_command_tokens() -> tuple[str, ...]:
+    """Read user-declared test-command tokens from settings.
+
+    The setting ``INFINIBAY_LOOP_CUSTOM_TEST_COMMANDS`` accepts a
+    comma-separated list of substrings (e.g. ``bash test.sh,make
+    integration``). Each substring is added on top of
+    ``_TEST_RUNNER_TOKENS`` so the detector recognises project-specific
+    test runners (custom shell scripts, Makefile targets, etc.) without
+    losing the built-in defaults.
+    """
+    try:
+        from infinidev.config.settings import settings
+        raw = getattr(settings, "LOOP_CUSTOM_TEST_COMMANDS", "") or ""
+    except Exception:
+        return ()
+    return tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+
+
+def _runtime_test_command_tokens(state: "LoopState | None" = None) -> tuple[str, ...]:
+    """Read agent-declared test-command tokens from the running LoopState.
+
+    The agent can call ``declare_test_command(command_pattern)`` mid-task
+    to teach the detector about a project-specific test runner it just
+    discovered (e.g. a custom shell wrapper). Tokens are stored on the
+    LoopState in ``custom_test_commands`` so they survive iterations
+    without polluting global config.
+    """
+    if state is None:
+        return ()
+    tokens = getattr(state, "custom_test_commands", None) or []
+    return tuple(t.lower() for t in tokens if t)
+
+
+def is_test_command(args_str: str, state: "LoopState | None" = None) -> bool:
+    """True iff the execute_command arguments look like a test runner call.
+
+    Three sources contribute, in priority order (any match wins):
+      1. Built-in ``_TEST_RUNNER_TOKENS`` — pytest, jest, cargo, etc.
+      2. User-declared tokens via ``LOOP_CUSTOM_TEST_COMMANDS`` setting.
+      3. Agent-declared tokens via ``declare_test_command`` tool, stored
+         on the LoopState (passed in as *state*).
+
+    The agent and user contributions never conflict with the defaults
+    — they are additive. This means a project that uses both pytest and
+    a custom ``bash integration.sh`` script gets both detected without
+    extra work.
+    """
     s = args_str.lower()
-    return any(token in s for token in _TEST_RUNNER_TOKENS)
+    if any(token in s for token in _TEST_RUNNER_TOKENS):
+        return True
+    for token in _user_test_command_tokens():
+        if token in s:
+            return True
+    for token in _runtime_test_command_tokens(state):
+        if token in s:
+            return True
+    return False
 
 
 # A keyword that, when paired with a number nearby, signals a test
@@ -562,7 +615,7 @@ _DETECTORS: list[tuple[str, Any]] = [
     # same_test_output_loop runs BEFORE stuck_on_tests because it's a
     # stronger signal: identical outcome regardless of read activity.
     ("same_test_output_loop", lambda m, s: _has_same_test_output_loop(m)),
-    ("stuck_on_tests",        lambda m, s: _has_test_loop_no_read(m)),
+    ("stuck_on_tests",        lambda m, s: _has_test_loop_no_read(m, s)),
     ("stuck_on_edit",         lambda m, s: _has_repeated_edit_errors(m)),
     ("stuck_on_search",       lambda m, s: _has_stuck_on_search(m)),
     # NB: stuck_on_planning has no automatic detector — it's only

@@ -44,6 +44,11 @@ class LoopState(BaseModel):
     # so the same one is never sent twice.
     pending_guidance: str = ""
     guidance_given: list[str] = Field(default_factory=list)
+    # Custom test runner commands declared by the agent (or pre-loaded
+    # from settings) for projects whose test invocation isn't covered
+    # by the built-in runner list. Stored as a list of substrings; the
+    # guidance detector matches them against ``execute_command`` args.
+    custom_test_commands: list[str] = Field(default_factory=list)
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""
