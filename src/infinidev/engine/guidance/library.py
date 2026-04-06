@@ -223,6 +223,30 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "add_note('auth flow lives in src/auth/handlers.py:42 verify()')"
         ),
     ),
+    "first_test_run": GuidanceEntry(
+        key="first_test_run",
+        title="You just ran tests — here's the fastest way to read the result",
+        body=(
+            "After any execute_command that runs a test runner (pytest, "
+            "jest, vitest, mocha, cargo test, go test, rspec, node:test, "
+            "etc.), call tail_test_output(mode='structured') to get the "
+            "parsed failures as a JSON list with test_name + file + line "
+            "+ error_type + message. This is the fastest way to read "
+            "what failed across every supported runner — no shell pipes, "
+            "no scrolling, no re-running the test. Use it BEFORE deciding "
+            "your next edit, so the edit targets the right file:line."
+        ),
+        example=(
+            "1. execute_command('pytest tests/test_x.py -v')\n"
+            "2. tail_test_output(mode='structured')\n"
+            "   → {failure_count: 1, failures: [{file: 'src/x.py',\n"
+            "        line: 42, error_type: 'KeyError', message: \"'id'\"}]}\n"
+            "3. add_note('test fails: KeyError id at src/x.py:42')\n"
+            "4. read_file('src/x.py')   # focus around line 42\n"
+            "5. replace_lines(file_path='src/x.py', start_line=40, ...)\n"
+            "6. execute_command('pytest tests/test_x.py -v')   # re-verify"
+        ),
+    ),
     "duplicate_steps": GuidanceEntry(
         key="duplicate_steps",
         title="Your plan has near-duplicate steps — clean it up",

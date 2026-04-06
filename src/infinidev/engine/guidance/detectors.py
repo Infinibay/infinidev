@@ -65,6 +65,22 @@ def _tool_results(messages: list[dict]) -> list[str]:
 
 # ── Individual detectors ─────────────────────────────────────────────────
 
+def _has_first_test_run(state: "LoopState") -> bool:
+    """True iff the model has just run a test runner for the first time
+    and we haven't yet introduced ``tail_test_output``.
+
+    This is a *proactive* detector — unlike the rest of the detectors
+    which fire when something is going wrong, this one fires on a
+    benign event (the first time ``last_test_output`` is non-empty)
+    so the model learns about the structured-failure tool BEFORE it
+    gets stuck. The ``maybe_queue_guidance`` quota and the
+    ``guidance_given`` dedup ensure it never delivers more than once
+    per task and never crowds out higher-priority guidance later.
+    """
+    return bool(getattr(state, "last_test_output", "")) and \
+        "first_test_run" not in getattr(state, "guidance_given", [])
+
+
 def _has_text_only_iters(state: "LoopState", n: int = 2) -> bool:
     """True iff the model produced ``n`` consecutive iterations with no
     tool calls — measured from the running text-only counter on the
@@ -242,8 +258,14 @@ def _has_duplicate_steps(state: "LoopState | None") -> bool:
 # same_test_output_loop runs before stuck_on_tests because it's a
 # stronger "no progress" signal independent of read activity.
 _DETECTORS: list[tuple[str, Any]] = [
+    # text_only and unknown_tool are highest priority — they signal a
+    # broken loop that nothing else can recover from.
     ("text_only_iters",       lambda m, s: _has_text_only_iters(s)),
     ("unknown_tool",          lambda m, s: _has_unknown_tool_loop(m)),
+    # first_test_run is a *proactive* introduction — fires once when the
+    # model first runs a test command, so it knows about
+    # tail_test_output BEFORE getting stuck.
+    ("first_test_run",        lambda m, s: _has_first_test_run(s)),
     ("duplicate_steps",       lambda m, s: _has_duplicate_steps(s)),
     ("vague_steps",           lambda m, s: _has_vague_step_spam(m)),
     ("reread_loop",           lambda m, s: _has_reread_loop(m, s)),
