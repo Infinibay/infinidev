@@ -244,6 +244,33 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "add_note('auth flow lives in src/auth/handlers.py:42 verify()')"
         ),
     ),
+    "duplicate_steps": GuidanceEntry(
+        key="duplicate_steps",
+        title="Your plan has near-duplicate steps — clean it up",
+        body=(
+            "Several steps in your plan have nearly identical titles "
+            "(e.g. 'Read test files to understand behavior' and 'Read "
+            "test_minidb.py to understand required cases'). This usually "
+            "means you re-planned the same work without removing the "
+            "previous steps. The plan does not get smarter by accumulating "
+            "drafts — it gets noisy and the model loses track of where it "
+            "is. Use remove_step on the duplicates and modify_step to "
+            "differentiate the ones that remain. Each step should describe "
+            "a UNIQUE action with its own file:line and expected_output."
+        ),
+        example=(
+            "Plan looks like:\n"
+            "  3. Read test files to understand behavior\n"
+            "  4. Read test_minidb.py to understand cases\n"
+            "  5. Read test files to understand expected behavior\n"
+            "Fix it:\n"
+            "  remove_step(index=4)\n"
+            "  remove_step(index=5)\n"
+            "  modify_step(index=3,\n"
+            "    title='Read test_minidb.py:69-94 to list TestCreateTable assertions',\n"
+            "    expected_output='I can name each test method and what it asserts')"
+        ),
+    ),
 }
 
 
@@ -605,11 +632,64 @@ def _has_stuck_on_search(messages: list[dict]) -> bool:
     return search_calls >= 4 and read_calls == 0
 
 
+def _normalize_step_title(title: str) -> str:
+    """Lowercase + collapse whitespace + strip non-essential punctuation.
+
+    Used as the input to similarity matching so cosmetic differences
+    (capitalisation, trailing dots, double spaces) don't hide real
+    duplicates.
+    """
+    s = title.lower()
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _has_duplicate_steps(state: "LoopState | None") -> bool:
+    """True iff the current plan contains 2+ near-duplicate step titles.
+
+    Uses ``difflib.SequenceMatcher.ratio()`` over normalised titles with
+    a 0.78 threshold — high enough to ignore legitimately similar steps
+    like "Add foo() to a.py" / "Add bar() to b.py" (different filenames
+    pull the ratio below threshold) but low enough to catch the typical
+    glm-4.7-flash replanning bug where 3-4 variants of "Read test files"
+    end up in the plan together.
+
+    Considers only steps that are still ``pending`` or ``active`` —
+    completed steps are immutable noise from the model's POV.
+    """
+    if state is None or not getattr(state, "plan", None):
+        return False
+    steps = [
+        s for s in state.plan.steps
+        if getattr(s, "status", "") in ("pending", "active")
+    ]
+    if len(steps) < 3:
+        return False  # need at least 3 steps before duplication is interesting
+
+    from difflib import SequenceMatcher
+    titles = [_normalize_step_title(s.title) for s in steps]
+    duplicates = 0
+    for i in range(len(titles)):
+        for j in range(i + 1, len(titles)):
+            if not titles[i] or not titles[j]:
+                continue
+            ratio = SequenceMatcher(None, titles[i], titles[j]).ratio()
+            if ratio >= 0.78:
+                duplicates += 1
+                if duplicates >= 1:
+                    return True
+    return False
+
+
 # Order matters: we return the first matching pattern, and the order
 # encodes priority (most-specific / highest-confidence first).
 _DETECTORS: list[tuple[str, Any]] = [
     ("text_only_iters",       lambda m, s: _has_text_only_iters(s)),
     ("unknown_tool",          lambda m, s: _has_unknown_tool_loop(m)),
+    # duplicate_steps fires early because a noisy plan poisons every
+    # downstream signal — it's both cheap to fix and highest leverage.
+    ("duplicate_steps",       lambda m, s: _has_duplicate_steps(s)),
     ("vague_steps",           lambda m, s: _has_vague_step_spam(m)),
     ("reread_loop",           lambda m, s: _has_reread_loop(m, s)),
     # same_test_output_loop runs BEFORE stuck_on_tests because it's a
