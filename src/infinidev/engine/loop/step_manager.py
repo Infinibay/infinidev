@@ -198,10 +198,20 @@ class StepManager:
         if ctx.verbose:
             _log_finish(ctx.agent_name, status, iteration + 1, ctx.state.total_tool_calls, ctx.state.total_tokens)
             _log_cache_summary(ctx.state)
+            # Static-analysis latency block — printed only when the
+            # accumulator was enabled for this run via the
+            # INFINIDEV_ENABLE_SA_TIMER env var. The accumulator is
+            # off by default and the print path short-circuits when
+            # it's off, so a normal user run stays clean and pays
+            # zero overhead.
             try:
-                from infinidev.engine.static_analysis_timer import render as _sa_render
-                from infinidev.engine.engine_logging import log as _log
-                _log(_sa_render())
+                from infinidev.engine.static_analysis_timer import (
+                    is_enabled as _sa_enabled,
+                    render as _sa_render,
+                )
+                if _sa_enabled():
+                    from infinidev.engine.engine_logging import log as _log
+                    _log(_sa_render())
             except Exception:
                 pass
         _emit_loop_event("loop_finished", ctx.project_id, ctx.agent_id, {

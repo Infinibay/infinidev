@@ -5,13 +5,12 @@ run, how much wall-clock time did the static-analysis stack
 (tree-sitter syntax check, silent-deletion diff, guidance detector,
 plan validator) actually consume between LLM calls?
 
-The synthetic benchmarks in ``static_analysis`` show ~15ms per
-typical step and ~62ms per worst-case step. This module records
-the *real* number across an actual run by accumulating per-category
-elapsed time and exposing a getter the engine prints at the end.
-
-Cleanly opt-out: when ``INFINIDEV_DISABLE_SA_TIMER=1`` is set the
-``measure`` context manager is a no-op and the counters stay zero.
+OFF BY DEFAULT. The accumulator is opt-in: set the env var
+``INFINIDEV_ENABLE_SA_TIMER=1`` to turn on measurement. With the
+flag unset, ``measure`` is a no-op of nanoseconds (one env-var
+read + a yield) and the counters stay zero. This means a normal
+end-user run pays effectively zero overhead and never produces a
+benchmark report it doesn't want.
 
 The categories are:
 
@@ -55,8 +54,15 @@ def _zero_state() -> dict[str, dict[str, float]]:
 _state: dict[str, dict[str, float]] = _zero_state()
 
 
-def _is_disabled() -> bool:
-    return os.environ.get("INFINIDEV_DISABLE_SA_TIMER") == "1"
+def is_enabled() -> bool:
+    """True when the timer should record measurements.
+
+    Off by default. Enable with ``INFINIDEV_ENABLE_SA_TIMER=1`` (or
+    any of: ``true``, ``yes``, ``on`` — case insensitive). When off,
+    ``measure`` is a no-op of nanoseconds and the counters stay zero.
+    """
+    raw = os.environ.get("INFINIDEV_ENABLE_SA_TIMER", "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def reset() -> None:
@@ -69,11 +75,12 @@ def reset() -> None:
 def measure(category: str) -> Iterator[None]:
     """Time the wrapped block and add the elapsed seconds to *category*.
 
-    Unknown category names are silently ignored so adding new
-    instrumentation in a downstream module doesn't crash older
-    versions of the loop.
+    Cheap no-op when ``INFINIDEV_ENABLE_SA_TIMER`` is unset (the
+    default): one env-var read + a yield. Unknown category names are
+    silently ignored so adding new instrumentation in a downstream
+    module doesn't crash older versions of the loop.
     """
-    if _is_disabled() or category not in _state:
+    if not is_enabled() or category not in _state:
         yield
         return
     t0 = time.perf_counter()
@@ -114,4 +121,4 @@ def render(*, indent: str = "  ") -> str:
     return "\n".join(lines)
 
 
-__all__ = ["measure", "reset", "snapshot", "render"]
+__all__ = ["is_enabled", "measure", "reset", "snapshot", "render"]

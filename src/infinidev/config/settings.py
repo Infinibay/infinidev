@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
     LOOP_GUIDANCE_ENABLED: bool = True  # Inject pre-baked how-to advice when small models get stuck
     LOOP_GUIDANCE_MAX_PER_TASK: int = 3  # Hard cap on guidance entries per task
+    # NB: static-analysis latency reporting is opt-in via the
+    # INFINIDEV_ENABLE_SA_TIMER env var, not a settings field — see
+    # ``engine.static_analysis_timer.is_enabled``.
     # Comma-separated substrings that mark project-specific test runners
     # (e.g. "bash test.sh,make integration"). Added on top of the built-in
     # runner list (pytest/jest/cargo/etc.) used by the guidance detector.
