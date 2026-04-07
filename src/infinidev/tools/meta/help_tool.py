@@ -14,7 +14,7 @@ from infinidev.tools.meta.help_input import HelpInput
 # ---------------------------------------------------------------------------
 
 _CATEGORY_INDEX = {
-    "file": ["read_file", "partial_read", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "apply_patch", "list_directory", "glob", "code_search"],
+    "file": ["read_file", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "apply_patch", "list_directory", "glob", "code_search"],
     "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure", "analyze_code"],
     "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "apply_patch", "rename_symbol", "move_symbol"],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
@@ -41,11 +41,10 @@ Call help(context="<category>") for tool list, or help(context="<tool_name>") fo
     "file": """\
 FILE TOOLS — Reading and creating files
 
-  read_file(file_path, offset?, limit?)
-    Read file with numbered lines. Use offset/limit for large files.
-
-  partial_read(file_path, start_line, end_line)
-    Read a specific line range (both 1-based, inclusive).
+  read_file(file_path, start_line?, end_line?)
+    Read file with numbered lines. Pass start_line/end_line for a
+    specific range (both 1-based, inclusive). For files >800 lines
+    without a range, returns a structured skeleton.
 
   create_file(file_path, content)
     Create a new file. FAILS if the file already exists.
@@ -190,26 +189,15 @@ RETURNS: Numbered lines in format "  LINE_NUM\\tCONTENT"
 
 EXAMPLES:
   read_file(file_path="src/auth.py")
-  read_file(file_path="src/big_file.py", offset=100, limit=50)  # lines 100-149
+  read_file(file_path="src/auth.py", start_line=10, end_line=30)  # specific range
+  read_file(file_path="src/big_file.py", offset=100, limit=50)    # lines 100-149
 
 TIPS:
-  - For large files, use offset/limit or partial_read to read only what you need
+  - For large files, pass start_line/end_line to read only the part you need
+  - Files larger than ~800 lines return a structured skeleton instead of
+    raw content — use the L<n>-<m> ranges from the skeleton to zoom in
   - Line numbers in the output can be used with replace_lines for editing
   - Binary files are automatically detected and rejected""",
-
-    "partial_read": """\
-partial_read(file_path, start_line, end_line)
-
-Read a specific range of lines from a file. Both bounds are 1-based and inclusive.
-
-PARAMS:
-  file_path (str, required)  — File path
-  start_line (int, required) — First line to read (1-based)
-  end_line (int, required)   — Last line to read (1-based, inclusive)
-
-EXAMPLES:
-  partial_read(file_path="src/auth.py", start_line=10, end_line=30)
-  partial_read(file_path="src/main.py", start_line=1, end_line=5)  # just the imports""",
 
     "create_file": """\
 create_file(file_path, content)

@@ -15,12 +15,8 @@ from __future__ import annotations
 TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     # File I/O
     "read_file": (
-        "Read a file with line numbers",
-        "read_file(file_path='src/main.py')",
-    ),
-    "partial_read": (
-        "Read a specific line range of a file",
-        "partial_read(file_path='src/main.py', start_line=10, end_line=50)",
+        "Read a file with line numbers (pass start_line/end_line for a range)",
+        "read_file(file_path='src/main.py', start_line=10, end_line=50)",
     ),
     "create_file": (
         "Create a NEW file (fails if file exists)",
@@ -178,7 +174,7 @@ def build_tool_usage_section(available_tools: set[str]) -> str:
     Groups tools by category and includes usage hints.
     """
     categories = [
-        ("Reading", ["read_file", "partial_read", "list_directory", "glob",
+        ("Reading", ["read_file", "list_directory", "glob",
                      "code_search", "get_symbol_code", "list_symbols",
                      "search_symbols", "find_definition", "find_references",
                      "project_structure", "analyze_code"]),

@@ -43,7 +43,7 @@ def _format_head_tail_preview(
     (unsupported language, parse failure, no symbols at all). Same shape
     as the structured skeleton: tells the model the file is huge, shows
     a small head and tail so it can recognise the file type, and ends
-    with the same "use partial_read" hint.
+    with the same "use read_file with a line range" hint.
     """
     head_lines = all_lines[:_FALLBACK_HEAD_LINES]
     tail_start = max(_FALLBACK_HEAD_LINES, total_lines - _FALLBACK_TAIL_LINES)
@@ -76,18 +76,18 @@ def _format_head_tail_preview(
         "  This file is too large to load in full. To inspect specific parts,"
     )
     out.append(
-        "  call partial_read with explicit start_line and end_line."
+        "  call read_file again with explicit start_line and end_line."
     )
     out.append("")
     out.append(
-        "  • partial_read(file_path=..., start_line=N, end_line=M)"
+        "  • read_file(file_path=..., start_line=N, end_line=M)"
     )
     out.append(
         "      → read a specific line range, e.g. (1, 200) or (500, 700)."
     )
     out.append("")
     out.append(
-        "  Pick the line range you actually need and call partial_read. "
+        "  Pick the line range you actually need and call read_file with it. "
         "Don't try to read the whole file."
     )
     return "\n".join(out)
@@ -152,10 +152,11 @@ class ReadFileTool(InfinibayBaseTool):
     name: str = "read_file"
     description: str = (
         "Read file contents with line numbers. Auto-indexes for code "
-        "intelligence. For files larger than ~800 lines, returns a "
-        "structured skeleton (classes, methods, functions, line ranges) "
-        "instead of the full content — use partial_read or "
-        "get_symbol_code to zoom in on specific parts."
+        "intelligence. Accepts start_line/end_line for partial reads. "
+        "For files larger than ~800 lines, returns a structured "
+        "skeleton (classes, methods, functions, line ranges) instead "
+        "of the full content — call again with start_line/end_line, "
+        "or use get_symbol_code, to zoom in on specific parts."
     )
     args_schema: Type[BaseModel] = ReadFileInput
 
@@ -267,7 +268,8 @@ class ReadFileTool(InfinibayBaseTool):
             # without burning context. Return a structured skeleton built
             # from tree-sitter (when the language is supported) or a
             # head+tail preview (otherwise). Both end with an explicit
-            # hint pointing the model at partial_read / get_symbol_code,
+            # hint pointing the model at read_file(start_line, end_line)
+            # or get_symbol_code,
             # because small models don't discover those tools on their own.
             try:
                 from infinidev.code_intel.syntax_check import (

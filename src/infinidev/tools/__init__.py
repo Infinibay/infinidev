@@ -3,7 +3,7 @@
 from infinidev.tools.file import (
     ReadFileTool, WriteFileTool, EditFileTool, MultiEditFileTool,
     ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool,
-    CreateFileTool, ReplaceLinesTool, PartialReadTool,
+    CreateFileTool, ReplaceLinesTool,
     AddContentAfterLineTool, AddContentBeforeLineTool,
 )
 from infinidev.tools.meta import HelpTool
@@ -33,7 +33,7 @@ from infinidev.tools.code_intel import (
     FindSimilarMethodsTool, SearchByDocstringTool,
 )
 
-FILE_TOOLS = [ReadFileTool, PartialReadTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
+FILE_TOOLS = [ReadFileTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
 META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool, DeclareTestCommandTool, TailTestOutputTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]

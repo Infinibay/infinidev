@@ -419,6 +419,13 @@ _TOOL_ALIASES: dict[str, str] = {
     "remove_method": "remove_symbol",
     "write_file": "create_file",
     "find_definition": "search_symbols",
+    # partial_read was a 6-line wrapper that just delegated to read_file
+    # with offset/limit. read_file now accepts start_line/end_line as
+    # native parameters, so the wrapper added zero value. Aliased here
+    # for any model that learned the old name; the parameter mapping
+    # below converts (start_line, end_line) to read_file's signature
+    # without the model needing to know.
+    "partial_read": "read_file",
 }
 
 

@@ -47,8 +47,8 @@ class Agent:
     def use_tools(self):
         # Before first edit, call help("edit") to learn the workflow
         # Reading
-        read_file(path)                   # full file with line numbers
-        partial_read(path, start, end)    # specific range
+        read_file(path)                                # full file with line numbers
+        read_file(path, start_line=N, end_line=M)      # specific range
         get_symbol_code(symbol)           # source by name
         list_directory() | glob() | code_search()  # explore
 

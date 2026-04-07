@@ -369,8 +369,9 @@ def extract_top_level_symbols(
 # When a file is too large to inline in a model's context, we return a
 # structured skeleton instead: imports, globals, classes (with their
 # methods), and free functions, each with line ranges and a short doc
-# extracted from the source. The model then uses partial_read or
-# get_symbol_code to zoom in on the parts it actually needs — the same
+# extracted from the source. The model then uses read_file with a
+# line range or get_symbol_code to zoom in on the parts it actually
+# needs — the same
 # workflow a human uses with ctags or an outline panel.
 #
 # This sits next to extract_top_level_symbols on purpose: both walk the
@@ -929,7 +930,7 @@ def render_skeleton_text(
     )
     out.append("")
     out.append(
-        "  • partial_read(file_path=..., start_line=N, end_line=M)"
+        "  • read_file(file_path=..., start_line=N, end_line=M)"
     )
     out.append(
         "      → read a specific line range. Use the L<start>-<end> values above."
@@ -938,7 +939,7 @@ def render_skeleton_text(
         "  • get_symbol_code(file_path=..., name='ClassName.methodName')"
     )
     out.append(
-        "      → read one symbol's full code. Cheaper than partial_read when"
+        "      → read one symbol's full code. Cheaper than a line range when"
     )
     out.append(
         "        you only care about one method."

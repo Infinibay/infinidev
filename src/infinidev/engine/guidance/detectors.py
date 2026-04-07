@@ -345,29 +345,42 @@ def _has_stop_planning_start_coding(state: "LoopState | None") -> bool:
     """True iff the model has planned extensively but written nothing.
 
     The pattern we're catching (observed empirically with gemma4:26b
-    against minidb-full): the model creates 5+ plan steps, keeps
-    modifying them, and NEVER calls a write tool. The plan grows
-    while the file at the centre of the task stays at its template
-    default. ``duplicate_steps`` partially covers this but from a
-    different angle — it catches "you replanned the same thing" while
-    this detector catches "you planned a LOT and never started".
+    against minidb-full): the model creates a plan, then in subsequent
+    iterations keeps adding/modifying more steps and NEVER calls a
+    write tool. The plan grows while the file at the centre of the
+    task stays at its template default.
 
-    Fires when:
+    IMPORTANT distinction (the nuance that makes this detector
+    correct): adding 5+ steps during the FIRST iteration is the
+    initial planning phase, which is legitimate. Adding more steps in
+    iteration 2+ without having edited anything is procrastination.
+    We gate on ``iteration_count >= 2`` to enforce this — the
+    detector cannot fire during the initial planning step where the
+    model is supposed to be building its plan from scratch.
+
+    Fires when ALL of:
       * the agent has ``task_has_edits == False`` (no create/replace
         has succeeded yet this task), AND
+      * we are in iteration 2 or later (past the initial planning
+        step — adding many steps in iteration 1 is normal), AND
       * the plan has at least 5 concrete steps (done + pending +
         active, excluding skipped), AND
-      * the total tool-call count is ≥ 8 (so we only fire after the
-        model has had enough rope to have written something by now —
-        planning 5 steps in the first 3 tool calls is legitimate).
+      * the total tool-call count is ≥ 8 (the model has had enough
+        rope to have written something by now — short tasks where
+        the first 3 tool calls are all add_step are legitimate
+        exploration of an unfamiliar codebase).
 
-    The 3-condition AND is intentional: each individual signal is
-    weak, but together they form a clear "procrastinating via planning"
-    signature that's almost impossible to produce legitimately.
+    The 4-condition AND is intentional: each individual signal is
+    weak, but together they form a clear "procrastinating via planning
+    in execute mode" signature that's almost impossible to produce
+    legitimately. The iteration gate is the most important of the
+    four because it embodies the planning-vs-execute distinction.
     """
     if state is None:
         return False
     if getattr(state, "task_has_edits", False):
+        return False
+    if getattr(state, "iteration_count", 0) < 2:
         return False
     plan = getattr(state, "plan", None)
     if plan is None:

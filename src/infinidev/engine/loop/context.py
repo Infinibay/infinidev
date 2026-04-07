@@ -65,8 +65,7 @@ The file reading and writing tools work DIFFERENTLY from what you may expect.
 Call help(tool_name) anytime you are unsure how to use a specific tool.
 
 ### Reading
-- **read_file**(path): Read entire file with line numbers. Auto-indexes for code intelligence.
-- **partial_read**(path, start_line, end_line): Read a specific line range.
+- **read_file**(path, start_line?, end_line?): Read a file with line numbers. Pass start_line/end_line for a specific range. Files larger than ~800 lines return a structured skeleton instead of raw content. Auto-indexes for code intelligence.
 - **get_symbol_code**(symbol): Get source code of a symbol by name.
 - **list_directory** / **glob** / **code_search**: Explore the codebase.
 

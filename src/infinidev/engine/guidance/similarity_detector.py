@@ -391,7 +391,8 @@ def _render_similarity_guidance(
     lines.append("## What to do")
     lines.append("")
     lines.append(
-        "1. Read the existing method with get_symbol_code or partial_read."
+        "1. Read the existing method with get_symbol_code or "
+        "read_file(start_line=..., end_line=...)."
     )
     lines.append(
         "2. If they do the same thing, call the existing one from your new "
