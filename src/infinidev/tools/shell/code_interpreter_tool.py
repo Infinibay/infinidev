@@ -18,16 +18,8 @@ from infinidev.tools.shell.code_interpreter_input import CodeInterpreterInput
 class CodeInterpreterTool(InfinibayBaseTool):
     name: str = "code_interpreter"
     description: str = (
-        "Execute Python code for data analysis, computation, validation, "
-        "or prototyping. Code runs in a sandboxed subprocess and "
-        "returns stdout, stderr, and exit code. For most queries about "
-        "the codebase, prefer the dedicated tools (iter_symbols, "
-        "find_references, find_similar_methods, search_symbols, etc.) — "
-        "they are simpler than writing Python. Use code_interpreter "
-        "only when you need a custom computation that no single tool "
-        "can express, e.g. multi-step set arithmetic over query "
-        "results. The parameter is named 'code' (NOT 'command' or "
-        "'script')."
+        "Run Python code in a sandbox. Use `help` tool for details, "
+        "pre-imported helpers, and examples."
     )
     args_schema: Type[BaseModel] = CodeInterpreterInput
 
@@ -163,11 +155,28 @@ class CodeInterpreterTool(InfinibayBaseTool):
                 f"Code interpreter: {len(code)} chars, exit={result['exit_code']}"
             )
 
+            # Post-execution capability hint. The schema description is
+            # intentionally one line so the tool list stays scannable;
+            # the model only learns about the bridge AFTER it has used
+            # the tool once. Showing the hint as part of the result is
+            # the most effective teaching moment: the model just saw
+            # its own output, knows the tool works, and now learns
+            # what else it could ask for next time.
+            hint = (
+                "[hint] code_interpreter has 13 pre-imported code-intelligence "
+                "helpers in globals (no import needed): project_stats, "
+                "iter_symbols, find_symbols, find_definitions, find_references, "
+                "list_file_symbols, get_source, find_similar, search_by_intent, "
+                "extract_skeleton, list_files, find_files, code_search. "
+                "Use `help` tool with context='code_interpreter' for signatures and examples."
+            )
+
             return self._success({
                 "exit_code": result["exit_code"],
                 "stdout": stdout,
                 "stderr": stderr,
                 "success": result["exit_code"] == 0,
+                "hint": hint,
             })
 
         except Exception as e:

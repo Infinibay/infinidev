@@ -110,7 +110,12 @@ def execute_with_retry(
             conn = get_pooled_connection(db_path)
             try:
                 return fn(conn)
-            except sqlite3.OperationalError as e:
+            except sqlite3.DatabaseError as e:
+                # DatabaseError is the parent of OperationalError AND
+                # the class raised for header corruption ("disk image
+                # is malformed", "file is not a database"). Catching
+                # the parent lets one branch handle both busy-retry
+                # and stale-cache recovery.
                 err_msg = str(e).lower()
                 if ("locked" in err_msg or "busy" in err_msg) and attempt < max_retries - 1:
                     # Roll back any in-progress txn before retrying so
@@ -121,6 +126,26 @@ def execute_with_retry(
                         pass
                     delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
                     time.sleep(delay)
+                    continue
+                # Stale-cache recovery: a subprocess (e.g. an external
+                # reindex via execute_command) can mutate the DB file
+                # under our cached file handle, leaving it pointing at
+                # bytes that no longer parse as a SQLite header. The
+                # symptoms are "file is not a database" or "disk image
+                # is malformed" — both are recoverable by evicting the
+                # cached connection and reopening once.
+                stale = (
+                    "not a database" in err_msg
+                    or "disk image is malformed" in err_msg
+                    or "no such table" in err_msg
+                )
+                if stale and attempt < max_retries - 1:
+                    try:
+                        conn.close()
+                    except sqlite3.Error:
+                        pass
+                    _conn_cache.conn = None
+                    _conn_cache.path = None
                     continue
                 # Any other error: rollback + evict the cached
                 # connection so the next caller doesn't inherit a

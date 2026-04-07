@@ -73,11 +73,8 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "execute_command(command='python -m pytest tests/ -x -q')",
     ),
     "code_interpreter": (
-        "Run a Python script for custom computations and data "
-        "processing. Call explain_tool('code_interpreter') for the "
-        "full list of pre-imported helpers and examples",
-        "code_interpreter(code='import json\\nwith open(\"data.json\") as f:\\n"
-        "    data = json.load(f)\\nprint(len(data))')",
+        "Run Python code in a sandbox. Use `help` tool for details.",
+        "code_interpreter(code='print(2+2)')",
     ),
     "iter_symbols": (
         "Walk all indexed symbols (no search term needed)",
