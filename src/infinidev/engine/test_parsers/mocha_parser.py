@@ -28,6 +28,26 @@ _ERROR_RE = re.compile(r"^\s*([A-Z]\w*Error)\s*:\s*(.+)$", re.MULTILINE)
 class MochaParser(TestParser):
     runner_name = "mocha"
 
+    command_tokens = ("mocha", "npx mocha")
+
+    flags_with_arg = (
+        "-g", "--grep",
+        "-f", "--fgrep",
+        "-r", "--require",
+        "--reporter", "-R",
+        "--timeout", "-t",
+        "--retries",
+        "--config",
+    )
+
+    flags_no_arg = (
+        "--watch", "--no-watch",
+        "--bail", "--no-bail",
+        "--inspect", "--inspect-brk",
+        "--exit", "--no-exit",
+        "--invert", "--check-leaks",
+    )
+
     def detect(self, content: str) -> bool:
         return bool(content) and bool(re.search(r"^\s*\d+\s+failing", content, re.MULTILINE))
 

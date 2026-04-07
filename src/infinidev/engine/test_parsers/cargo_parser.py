@@ -35,6 +35,23 @@ _PANIC_MULTILINE_RE = re.compile(
 class CargoTestParser(TestParser):
     runner_name = "cargo"
 
+    command_tokens = ("cargo test", "cargo nextest")
+
+    flags_with_arg = (
+        "--filter", "--package", "-p",
+        "--features", "--target", "--manifest-path",
+        "--test", "--bench", "--example",
+        "--exclude", "--profile",
+    )
+
+    flags_no_arg = (
+        "--release", "--quiet", "-q",
+        "--no-fail-fast", "--no-run",
+        "--all-features", "--no-default-features",
+        "--workspace", "--all-targets",
+        "--locked", "--frozen", "--offline",
+    )
+
     def detect(self, content: str) -> bool:
         if not content:
             return False

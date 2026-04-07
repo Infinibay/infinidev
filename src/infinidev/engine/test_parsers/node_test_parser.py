@@ -46,6 +46,22 @@ _STACK_LOCATION_BARE_RE = re.compile(
 class NodeTestParser(TestParser):
     runner_name = "node-test"
 
+    command_tokens = ("node --test", "node:test")
+
+    flags_with_arg = (
+        "--test-name-pattern",
+        "--test-reporter",
+        "--test-reporter-destination",
+        "--test-concurrency",
+        "--test-timeout",
+    )
+
+    flags_no_arg = (
+        "--test-only",
+        "--test-skip-pattern",
+        "--watch",
+    )
+
     def detect(self, content: str) -> bool:
         if not content:
             return False

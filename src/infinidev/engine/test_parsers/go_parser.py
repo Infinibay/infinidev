@@ -33,6 +33,23 @@ _NEXT_HEADER_RE = re.compile(
 class GoTestParser(TestParser):
     runner_name = "go"
 
+    command_tokens = ("go test",)
+
+    flags_with_arg = (
+        "-run", "-test.run",
+        "-bench", "-test.bench",
+        "-count", "-test.count",
+        "-timeout", "-test.timeout",
+        "-tags", "-coverpkg", "-coverprofile",
+    )
+
+    flags_no_arg = (
+        "-v", "-test.v",
+        "-race", "-cover", "-short",
+        "-failfast", "-test.failfast",
+        "-json", "-test.json",
+    )
+
     def detect(self, content: str) -> bool:
         return bool(content) and "--- FAIL:" in content
 

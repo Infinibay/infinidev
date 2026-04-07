@@ -1,26 +1,31 @@
 """Multi-language test-runner detection and outcome fingerprinting.
 
-Two reusable primitives used by the stuck-pattern detectors:
+Three primitives used by the stuck-pattern detectors:
 
   * :func:`is_test_command` — was this ``execute_command`` invocation
-    a test runner call? Recognises 16+ runners across Python, JS/TS,
-    Rust, Go, .NET, JVM, Ruby, PHP, Elixir, Swift, C/C++. Three sources
-    of tokens contribute and combine additively:
-    1. ``_TEST_RUNNER_TOKENS`` — built-in defaults
-    2. ``LOOP_CUSTOM_TEST_COMMANDS`` setting — user-declared, persistent
-    3. ``state.custom_test_commands`` — agent-declared via the
+    a test runner call? Built-in coverage comes from each
+    :class:`~infinidev.engine.test_parsers.base.TestParser` subclass:
+    every parser declares its own ``command_tokens``, so adding a new
+    runner is one new file in ``test_parsers/`` and this module never
+    needs to know. Two user-overridable sources contribute additively:
+    1. ``LOOP_CUSTOM_TEST_COMMANDS`` setting — user-declared, persistent
+    2. ``state.custom_test_commands`` — agent-declared via the
        ``declare_test_command`` tool, scoped to the current task
 
   * :func:`test_outcome_fingerprint` — extract a stable, normalised
     string from a runner's stdout (e.g. ``"1 failed, 2 passed"``) so
     different runners producing the same outcome get the same
-    fingerprint and identical outcomes can be compared with set
-    operations.
+    fingerprint and identical outcomes can be compared.
 
-Both functions are intentionally permissive (high recall, acceptable
+  * :func:`normalize_test_command` — strip the runner's cosmetic flags
+    while keeping the positional targets, so two runs of the same test
+    set produce the same key. Delegates to the parser whose
+    ``command_tokens`` matches — every parser knows its own flag table.
+
+All three are intentionally permissive (high recall, acceptable
 precision). False positives in the fingerprint are harmless because
-the downstream detectors require a fingerprint to repeat 3 times in
-a row before firing.
+the downstream detectors require additional structural conditions
+before they fire.
 """
 
 from __future__ import annotations
@@ -28,37 +33,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from infinidev.engine.test_parsers import _PARSERS
+
 if TYPE_CHECKING:
     from infinidev.engine.loop.models import LoopState
-
-
-# ── Built-in runner tokens ───────────────────────────────────────────────
-
-_TEST_RUNNER_TOKENS: tuple[str, ...] = (
-    # Python
-    "pytest", "py.test", "python -m unittest", "nose2", "trial ",
-    # JavaScript / TypeScript
-    "jest", "vitest", "mocha", "ava ", "tap ", "tape ", "node --test",
-    "npm test", "npm run test", "yarn test", "pnpm test", "bun test",
-    # Rust
-    "cargo test", "cargo nextest",
-    # Go
-    "go test",
-    # .NET
-    "dotnet test",
-    # JVM
-    "mvn test", "mvn verify", "gradle test", "gradlew test", "./gradlew test",
-    # Ruby
-    "rspec", "rake test", "minitest",
-    # PHP
-    "phpunit", "pest ",
-    # Elixir
-    "mix test",
-    # Swift
-    "swift test", "xcodebuild test",
-    # C/C++
-    "ctest", "make test", "make check",
-)
+    from infinidev.engine.test_parsers.base import TestParser
 
 
 # ── Token sources ────────────────────────────────────────────────────────
@@ -95,63 +74,59 @@ def is_test_command(args_str: str, state: "LoopState | None" = None) -> bool:
     pytest detection. A project that uses both pytest and a custom
     shell wrapper gets both recognised.
     """
+    if not args_str:
+        return False
     s = args_str.lower()
-    if any(token in s for token in _TEST_RUNNER_TOKENS):
-        return True
+    # 1. Built-in runners — each TestParser subclass owns its tokens.
+    for parser in _PARSERS:
+        if parser.matches_command(args_str):
+            return True
+    # 2. User-declared via setting.
     for token in _user_test_command_tokens():
         if token in s:
             return True
+    # 3. Agent-declared via tool.
     for token in _runtime_test_command_tokens(state):
         if token in s:
             return True
     return False
 
 
-# Flags that vary cosmetically between runs of the same test set
-# without changing what's being tested. Stripping them lets the
-# regression detector see "same target set, different verbosity" as
-# the same key. Order matters: flags with arguments are dropped
-# together with their argument.
-# All values are lowercased so the comparison against ``token.lower()``
-# inside ``normalize_test_command`` matches camelCase flag names too.
-_FLAGS_WITH_ARG: tuple[str, ...] = (
-    "--tb", "--maxfail", "--cov", "--rootdir", "--config-file",
-    "--ignore", "-k", "-m", "-c", "-x",  # short forms
-    "--testnamepattern", "--testpathpattern",  # jest
-    "-run", "-test.run",  # go test
-    "--filter",  # cargo / dotnet
-)
-_FLAGS_NO_ARG: tuple[str, ...] = (
-    "-v", "-vv", "-vvv", "-q", "-qq", "--quiet", "--verbose",
-    "-s", "--no-header", "--no-summary", "--tb=long", "--tb=short", "--tb=line",
-    "--color", "--no-color", "--full-trace", "--showlocals",
-    "--watch", "--watchAll", "--no-watch",
-    "--release", "--no-fail-fast",  # cargo
-    "-race", "-cover", "-v",  # go
-    "-r",
-)
+def _parser_for_command(cmd: str) -> "TestParser | None":
+    """Return the registered TestParser whose command_tokens match *cmd*.
+
+    Used by ``normalize_test_command`` to delegate flag stripping to
+    the right runner. Returns the FIRST match — parser order in the
+    ``test_parsers`` registry decides ties.
+    """
+    if not cmd:
+        return None
+    for parser in _PARSERS:
+        if parser.matches_command(cmd):
+            return parser
+    return None
 
 
 def normalize_test_command(cmd: str) -> str:
     """Reduce a test command to its 'what is being tested' essence.
 
-    Strips flags (verbosity, coverage, output format, watch mode, ...)
-    while keeping the runner name and the positional targets (file
-    paths, test ids, test names). Two commands that test the same
-    set of things produce the same normalised key:
+    Two commands that test the same set of things produce the same
+    normalised key::
 
-      pytest test_x.py::test_a -v       → "pytest test_x.py::test_a"
+      pytest test_x.py::test_a -v        → "pytest test_x.py::test_a"
       pytest test_x.py::test_a --tb=long → "pytest test_x.py::test_a"
       cd /tmp && pytest test_x.py::test_a → "pytest test_x.py::test_a"
 
-    Two commands that test DIFFERENT things stay distinct:
+    Two commands that test DIFFERENT things stay distinct::
 
       pytest test_x.py → "pytest test_x.py"
       pytest test_y.py → "pytest test_y.py"
 
-    The detector uses the result as a dict key, so equality matters,
-    not similarity. Returns the lowercased, whitespace-collapsed
-    command on any failure mode.
+    Flag-stripping logic lives on each runner's TestParser subclass —
+    this function just identifies which parser owns the command via
+    ``command_tokens`` and delegates. Falls back to the lowercased
+    command (with the cd prelude stripped) when no registered parser
+    matches.
     """
     if not cmd:
         return ""
@@ -161,32 +136,12 @@ def normalize_test_command(cmd: str) -> str:
     if s.lower().startswith("cd ") and "&&" in s:
         s = s.split("&&", 1)[1].strip()
 
-    parts = s.split()
-    if not parts:
-        return ""
-
-    out: list[str] = []
-    skip_next = False
-    for tok in parts:
-        if skip_next:
-            skip_next = False
-            continue
-        low = tok.lower()
-        # Drop flags with an attached value (e.g. --tb=long, -k expr,
-        # -m mark) — both joined with = and split by whitespace.
-        is_flag_with_arg = any(low.startswith(f + "=") for f in _FLAGS_WITH_ARG)
-        is_bare_flag_with_arg = low in _FLAGS_WITH_ARG
-        is_no_arg_flag = low in _FLAGS_NO_ARG
-        if is_flag_with_arg or is_no_arg_flag:
-            continue
-        if is_bare_flag_with_arg:
-            skip_next = True  # also drop the value that follows
-            continue
-        # Drop bash redirection / pipe noise.
-        if tok in ("2>&1", "|", ">>", ">"):
-            break  # everything after a pipe is post-processing, not test selection
-        out.append(tok)
-    return " ".join(out).lower()
+    parser = _parser_for_command(s)
+    if parser is not None:
+        return parser.normalize_command(s)
+    # Unknown runner (probably custom test command from setting/tool):
+    # just lowercase + collapse whitespace, no flag stripping.
+    return " ".join(s.split()).lower()
 
 
 # ── Outcome fingerprint ──────────────────────────────────────────────────

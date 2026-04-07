@@ -31,6 +31,30 @@ _SUMMARY_RE = re.compile(r"^FAILED\s+(\S+::\S+)\s*-\s*(.+)$", re.MULTILINE)
 class PytestParser(TestParser):
     runner_name = "pytest"
 
+    command_tokens = (
+        "pytest",
+        "py.test",
+        "python -m pytest",
+        "python -m unittest",
+        "nose2",
+        "trial ",
+    )
+
+    flags_with_arg = (
+        "--tb", "--maxfail", "--cov", "--rootdir", "--config-file",
+        "--ignore", "--ignore-glob", "--deselect",
+        "-k", "-m", "-c", "-x", "-p", "-o",
+    )
+
+    flags_no_arg = (
+        "-v", "-vv", "-vvv", "-q", "-qq",
+        "--quiet", "--verbose", "-s", "--no-header", "--no-summary",
+        "--tb=long", "--tb=short", "--tb=line", "--tb=auto", "--tb=no",
+        "--color", "--no-color", "--full-trace", "--showlocals",
+        "--lf", "--ff", "--nf", "--sw", "--stepwise",
+        "--exitfirst", "-r",
+    )
+
     def detect(self, content: str) -> bool:
         if not content:
             return False

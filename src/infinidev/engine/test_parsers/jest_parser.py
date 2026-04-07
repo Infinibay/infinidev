@@ -39,6 +39,29 @@ _FILE_LOCATION_RE = re.compile(
 class JestParser(TestParser):
     runner_name = "jest"
 
+    command_tokens = (
+        "jest", "vitest",
+        "npx jest", "npx vitest",
+        "npm test", "npm run test", "yarn test", "pnpm test", "bun test",
+    )
+
+    flags_with_arg = (
+        "--testnamepattern", "--testpathpattern", "-t",
+        "--config", "--rootdir", "--projects",
+        "--reporters", "--coverage-reporters",
+        "--max-workers", "-c",
+    )
+
+    flags_no_arg = (
+        "--watch", "--watchall", "--no-watch",
+        "--coverage", "--no-coverage",
+        "--verbose", "--silent",
+        "--ci", "--bail",
+        "--no-cache",
+        "--listTests",
+        "--passwithnotests",
+    )
+
     def detect(self, content: str) -> bool:
         if not content:
             return False

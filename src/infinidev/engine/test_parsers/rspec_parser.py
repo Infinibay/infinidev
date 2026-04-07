@@ -56,6 +56,28 @@ _ERROR_TYPE_RE = re.compile(
 class RSpecParser(TestParser):
     runner_name = "rspec"
 
+    command_tokens = ("rspec", "rake test", "minitest", "bundle exec rspec")
+
+    flags_with_arg = (
+        "-e", "--example",
+        "-t", "--tag",
+        "-f", "--format",
+        "-o", "--out",
+        "-p", "--profile",
+        "--seed", "--order",
+        "-r", "--require",
+        "-c", "--color",
+    )
+
+    flags_no_arg = (
+        "--fail-fast", "--no-fail-fast",
+        "--dry-run",
+        "--bisect",
+        "--backtrace", "-b",
+        "--color",
+        "--no-profile",
+    )
+
     def detect(self, content: str) -> bool:
         if not content:
             return False
