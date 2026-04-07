@@ -35,7 +35,13 @@ class JavaScriptParser:
         if node.type == "function_declaration":
             symbols.append(self._parse_function(node, source, fp, parent))
 
-        elif node.type == "class_declaration":
+        elif node.type in ("class_declaration", "abstract_class_declaration"):
+            # ``abstract_class_declaration`` is the TypeScript-specific node
+            # type for ``abstract class Foo {}``. The body extraction and
+            # name handling are identical to a regular class — the only
+            # difference is the wrapper type. Treating both the same lets
+            # abstract classes' methods get parent_symbol propagation
+            # without duplicating any walker logic.
             sym = self._parse_class(node, source, fp, parent)
             symbols.append(sym)
             for child in node.children:

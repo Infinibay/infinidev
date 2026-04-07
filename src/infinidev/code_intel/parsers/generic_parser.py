@@ -93,17 +93,24 @@ def _signature_first_line(node: Node, source: bytes, max_len: int = 200) -> str:
 _NAME_NODE_TYPES: tuple[str, ...] = (
     "identifier", "type_identifier", "property_identifier",
     "field_identifier", "constant", "variable_name",
-    "name", "simple_identifier",
+    "name", "simple_identifier", "word",
 )
 
 # Methods/functions in these languages have their NAME as a child of
 # type "identifier" specifically — distinct from type_identifier which
 # is the return type. The map says "for this node type, ONLY accept
 # these exact child types as the name".
+#
+# PHP method_declaration uses "name" (not "identifier") for the method
+# name AND has no return type before it, so accepting both "identifier"
+# (Java/C#) and "name" (PHP) covers both grammars without confusion —
+# in Java, the first "name" child doesn't exist (the return type is a
+# type_identifier), so the loop falls through to "identifier" which is
+# the actual name. In PHP, the loop finds "name" first and returns.
 _NAME_TYPES_BY_NODE: dict[str, tuple[str, ...]] = {
-    # Java: method_declaration → modifiers + type + identifier + formal_parameters
-    "method_declaration": ("identifier",),
-    "constructor_declaration": ("identifier",),
+    # Java/PHP: method_declaration → various shapes
+    "method_declaration": ("identifier", "name"),
+    "constructor_declaration": ("identifier", "name"),
     # C#: same shape as Java for methods
     "local_function_statement": ("identifier",),
     # Go: method_declaration has a "field_identifier" name child
@@ -111,20 +118,65 @@ _NAME_TYPES_BY_NODE: dict[str, tuple[str, ...]] = {
     # Function declarations in Go use "identifier"
     # Kotlin: function_declaration → modifiers + simple_identifier + parameters
     "function_declaration": ("identifier", "simple_identifier", "field_identifier"),
+    # Bash: function_definition → "function"? word ( ) compound_statement
+    # The name is a "word" child, no other identifier types appear.
+    "function_definition": ("identifier", "word", "name"),
 }
 
 
+# Node types that mark the parameter list of a method/function. The
+# identifier IMMEDIATELY before any of these is the method name —
+# this rule handles the awkward case in Java/C# where the return type
+# is also an identifier (e.g. ``public T Get(...)`` where T is a
+# generic parameter, not a type_identifier).
+_PARAM_LIST_TYPES: frozenset[str] = frozenset({
+    "parameter_list", "formal_parameters", "parameters",
+})
+
+# Node types whose name should be resolved by the
+# "identifier-just-before-parameters" rule rather than by the BFS
+# fallback. These are always direct children of the def node.
+_DEF_NODES_PARAM_RULE: frozenset[str] = frozenset({
+    "method_declaration", "constructor_declaration",
+    "function_declaration", "function_definition",
+    "function_item", "local_function_statement",
+})
+
+
 def _extract_name(node: Node, source: bytes, max_depth: int = 3) -> str:
-    """Find the first identifier-like child of *node*, BFS to a small depth.
+    """Find the symbol name for a definition node.
 
-    For node types in :data:`_NAME_TYPES_BY_NODE`, only the listed
-    child types are accepted — this fixes Java/C# where the first
-    type-like child is the return type, not the method name.
+    Two strategies, in priority order:
 
-    The depth cap prevents grabbing an identifier from a function
-    body (way down the tree) when the actual name is in the header
-    (depth 1-2).
+      1. **Param-rule** (def-like nodes): walk the direct children of
+         *node* in source order. The identifier-like child that
+         immediately precedes a ``parameter_list``/``formal_parameters``/
+         ``parameters`` node IS the method name. This handles the
+         Java/C# generic-return case (``public T Get(int i)``) where
+         the return type is itself a plain identifier and would
+         otherwise be picked up first by the BFS.
+
+      2. **BFS fallback** (everything else): walk children breadth-first
+         to a small depth, returning the first match against the
+         accepted-types set for this node type.
+
+    The BFS depth cap prevents grabbing an identifier from a function
+    body (way down the tree) when the actual name is in the header.
     """
+    if node.type in _DEF_NODES_PARAM_RULE:
+        accepted = _NAME_TYPES_BY_NODE.get(node.type, _NAME_NODE_TYPES)
+        last_ident = ""
+        for child in node.children:
+            if child.type in _PARAM_LIST_TYPES:
+                if last_ident:
+                    return last_ident
+                break
+            if child.type in accepted:
+                last_ident = _node_text(child, source)
+        if last_ident:
+            return last_ident
+        # Fall through to BFS if no parameter list was found.
+
     accepted = _NAME_TYPES_BY_NODE.get(node.type, _NAME_NODE_TYPES)
     queue: list[tuple[Node, int]] = [(node, 0)]
     while queue:
