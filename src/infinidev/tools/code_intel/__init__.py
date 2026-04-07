@@ -13,6 +13,7 @@ from infinidev.tools.code_intel.analyze_code import AnalyzeCodeTool
 from infinidev.tools.code_intel.rename_symbol import RenameSymbolTool
 from infinidev.tools.code_intel.move_symbol import MoveSymbolTool
 from infinidev.tools.code_intel.find_similar_methods_tool import FindSimilarMethodsTool
+from infinidev.tools.code_intel.search_by_docstring_tool import SearchByDocstringTool
 
 # Backward-compat aliases
 EditMethodTool = EditSymbolTool
@@ -28,4 +29,5 @@ __all__ = [
     "AnalyzeCodeTool",
     "RenameSymbolTool", "MoveSymbolTool",
     "FindSimilarMethodsTool",
+    "SearchByDocstringTool",
 ]

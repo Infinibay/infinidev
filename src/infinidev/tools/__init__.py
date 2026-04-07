@@ -30,7 +30,7 @@ from infinidev.tools.code_intel import (
     EditSymbolTool, AddSymbolTool, RemoveSymbolTool,
     EditMethodTool, AddMethodTool, RemoveMethodTool,  # backward-compat aliases
     AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool,
-    FindSimilarMethodsTool,
+    FindSimilarMethodsTool, SearchByDocstringTool,
 )
 
 FILE_TOOLS = [ReadFileTool, PartialReadTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
@@ -46,7 +46,7 @@ KNOWLEDGE_TOOLS = [
 ]
 CHAT_TOOLS = [SendMessageTool]
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
-CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool, FindSimilarMethodsTool]
+CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool, FindSimilarMethodsTool, SearchByDocstringTool]
 
 # Curated subset for small models (<25B) — tools with simple schemas
 SMALL_MODEL_TOOLS = [
@@ -60,9 +60,9 @@ SMALL_MODEL_TOOLS = [
     ExecuteCommandTool,
     # Knowledge (2)
     RecordFindingTool, SearchFindingsTool,
-    # Code intelligence (5)
+    # Code intelligence (6)
     SearchSymbolsTool, GetSymbolCodeTool, EditSymbolTool,
-    FindReferencesTool, FindSimilarMethodsTool,
+    FindReferencesTool, FindSimilarMethodsTool, SearchByDocstringTool,
     # Plan management (3)
     AddStepTool, ModifyStepTool, RemoveStepTool,
     # Project introspection (2)

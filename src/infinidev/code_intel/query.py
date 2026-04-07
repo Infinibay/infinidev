@@ -239,6 +239,107 @@ def search_symbols(
     return execute_with_retry(_query) or []
 
 
+def search_by_docstring(
+    project_id: int,
+    query: str,
+    *,
+    kind: str | None = None,
+    limit: int = 20,
+) -> list[tuple[Symbol, float]]:
+    """Find symbols by what their docstring/signature SAYS they do.
+
+    Complements :func:`search_symbols` (which is name-based) with an
+    intent-based search: instead of "find me everything called
+    parseTime", you ask "find me anything that mentions parsing
+    timestamps" and the symbol with that phrase in its docstring wins.
+
+    Backed by the existing ``ci_symbols_fts`` virtual table — same
+    FTS5 index that powers ``search_symbols``, but here we MATCH
+    against the ``docstring`` and ``signature`` columns specifically
+    and rank by BM25. The triggers on ``ci_symbols`` keep the index
+    fresh on every (re)indexing pass, so callers don't need to do
+    anything special.
+
+    Returns a list of ``(Symbol, bm25_rank)`` tuples sorted by
+    relevance — lower BM25 score = better match (FTS5 convention).
+    Caller can ignore the rank and just use the order, or display it
+    for debugging.
+
+    *kind* filters to a specific symbol kind (``"function"``,
+    ``"method"``, ``"class"``). Useful for "find me a method that does
+    X" vs "find me any code that mentions X".
+    """
+    def _q(conn: sqlite3.Connection):
+        cleaned = query.replace('"', '').strip()
+        if not cleaned:
+            return []
+
+        # Each token gets a wildcard prefix so partial words match.
+        # We OR them together inside the docstring/signature columns
+        # so the model doesn't have to remember the exact wording.
+        tokens = [t for t in cleaned.split() if t]
+        if not tokens:
+            return []
+        # FTS5 column-restricted query: only search docstring + signature.
+        # The {docstring signature ...} prefix limits the MATCH to those
+        # columns; otherwise FTS would also match against `name` and
+        # we'd get name-based hits polluting the intent-based ranking.
+        fts_query = "{docstring signature} : (" + " OR ".join(f'"{t}"*' for t in tokens) + ")"
+
+        conditions = ["s.project_id = ?"]
+        params: list[Any] = []
+        if kind:
+            conditions.append("s.kind = ?")
+            params.append(kind)
+
+        sql = f"""\
+            SELECT s.*, bm25(ci_symbols_fts) AS rank
+            FROM ci_symbols_fts
+            JOIN ci_symbols s ON s.id = ci_symbols_fts.rowid
+            WHERE ci_symbols_fts MATCH ?
+              AND {' AND '.join(conditions)}
+            ORDER BY rank
+            LIMIT ?
+        """
+        full_params = [fts_query, project_id] + params + [limit]
+        try:
+            rows = conn.execute(sql, full_params).fetchall()
+        except Exception:
+            # If the column-restricted syntax fails (older FTS5 builds),
+            # fall back to a plain MATCH and post-filter — slower but
+            # works on every SQLite version.
+            simple_fts = " OR ".join(f'"{t}"*' for t in tokens)
+            sql2 = f"""\
+                SELECT s.*, bm25(ci_symbols_fts) AS rank
+                FROM ci_symbols_fts
+                JOIN ci_symbols s ON s.id = ci_symbols_fts.rowid
+                WHERE ci_symbols_fts MATCH ?
+                  AND {' AND '.join(conditions)}
+                  AND (s.docstring != '' OR s.signature != '')
+                ORDER BY rank
+                LIMIT ?
+            """
+            try:
+                rows = conn.execute(sql2, [simple_fts, project_id] + params + [limit]).fetchall()
+            except Exception:
+                return []
+
+        out: list[tuple[Symbol, float]] = []
+        for r in rows:
+            try:
+                sym = _row_to_symbol(r)
+            except Exception:
+                continue
+            try:
+                rank = float(r["rank"])
+            except (KeyError, IndexError, TypeError, ValueError):
+                rank = 0.0
+            out.append((sym, rank))
+        return out
+
+    return execute_with_retry(_q) or []
+
+
 def find_imports_of(
     project_id: int,
     name: str,
