@@ -81,6 +81,46 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "      )"
         ),
     ),
+    "python_env_mismatch": GuidanceEntry(
+        key="python_env_mismatch",
+        title="ImportError from python/pytest? It is almost certainly a virtualenv mismatch",
+        body=(
+            "When `python -c \"import X\"` or `pytest ...` raises "
+            "ImportError / ModuleNotFoundError immediately after a "
+            "successful `pip install`, the install and the import are "
+            "almost certainly hitting different Python environments. "
+            "Reinstalling deps will NOT help — the package IS installed, "
+            "just in the wrong venv. STOP installing things and check "
+            "the environment first.\n\n"
+            "Run `which python && python --version && python -c "
+            "\"import sys; print(sys.executable, sys.path[:3])\"` to see "
+            "exactly which interpreter is running. If it points at the "
+            "agent's host venv (e.g. /home/.../infinidev/.venv), the "
+            "project's local venv probably exists at "
+            "`<repo>/.venv/bin/python` or `<repo>/venv/bin/python` — "
+            "use that absolute path instead. Many projects also expect "
+            "`tox -e py` or `python -m pytest` from inside their own "
+            "venv — read setup.cfg / pyproject.toml / tox.ini before "
+            "guessing.\n\n"
+            "If no project venv exists, the model can usually proceed "
+            "without running tests at all: read the relevant code, "
+            "make the fix, and rely on a static read of the failing "
+            "test file to verify the change matches expectations. Do "
+            "NOT spend the step budget debugging the host environment."
+        ),
+        example=(
+            "1. execute_command('which python && python -c \"import sys; "
+            "print(sys.executable)\"')\n"
+            "   → /home/andres/infinidev/.venv/bin/python\n"
+            "2. execute_command('ls -d ./.venv ./venv 2>/dev/null')\n"
+            "   → ./venv\n"
+            "3. execute_command('./venv/bin/python -c \"import flask; "
+            "print(flask.__version__)\"')\n"
+            "   → 2.0.1   (correct env)\n"
+            "4. From here on, prefix all python invocations with "
+            "./venv/bin/python instead of bare `python`."
+        ),
+    ),
     "stuck_on_edit": GuidanceEntry(
         key="stuck_on_edit",
         title="How to edit existing files in this project",

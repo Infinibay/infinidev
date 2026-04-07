@@ -316,6 +316,64 @@ def _has_reread_loop(messages: list[dict], state: "LoopState") -> bool:
     return any(c >= 3 for c in counts.values())
 
 
+def _has_python_env_mismatch(messages: list[dict]) -> bool:
+    """True iff a recent ``execute_command`` ran ``python``/``python3``
+    and the result contains an import error.
+
+    Catches the failure mode where the model runs ``python -c "import X"``
+    or ``pytest ...`` against the wrong virtual environment — the host
+    venv has different deps than the project's venv, so imports raise
+    ``ImportError`` / ``ModuleNotFoundError`` even after the model
+    "successfully" ran ``pip install -e .`` somewhere else. The model
+    typically interprets the failure as "missing dep" and falls into a
+    pip-install-then-import loop that wastes the entire step budget.
+
+    Single occurrence is enough to suggest the env hint — better to
+    prevent the loop than wait for it. The detector pairs each
+    assistant tool call with the immediately following tool result so
+    a stale match from N steps ago doesn't fire on the wrong run.
+    """
+    pairs: list[tuple[str, str]] = []
+    pending: list[str] = []  # commands awaiting their tool result
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                name = fn.get("name") or ""
+                if name != "execute_command":
+                    continue
+                raw = fn.get("arguments") or "{}"
+                try:
+                    args = json.loads(raw) if isinstance(raw, str) else raw
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                cmd = (args or {}).get("command", "") if isinstance(args, dict) else ""
+                if not cmd:
+                    continue
+                pending.append(cmd)
+        elif role == "tool" and pending:
+            content = str(msg.get("content") or "")
+            cmd = pending.pop(0)
+            pairs.append((cmd, content))
+
+    _import_error_markers = (
+        "importerror",
+        "modulenotfounderror",
+        "no module named",
+        "importerror while loading conftest",
+    )
+    _python_command_re = re.compile(r"\b(python|python3|pytest|py\.test)\b")
+
+    for cmd, result in pairs:
+        if not _python_command_re.search(cmd):
+            continue
+        low = result.lower()
+        if any(marker in low for marker in _import_error_markers):
+            return True
+    return False
+
+
 def _has_stuck_on_search(messages: list[dict]) -> bool:
     """True iff 4+ search/glob/list_directory calls with 0 read_file."""
     search_calls = 0
@@ -483,6 +541,11 @@ _DETECTORS: list[tuple[str, Any]] = [
     ("stuck_on_tests",        lambda m, s: _has_test_loop_no_read(m, s)),
     ("stuck_on_edit",         lambda m, s: _has_repeated_edit_errors(m)),
     ("stuck_on_search",       lambda m, s: _has_stuck_on_search(m)),
+    # python_env_mismatch fires the first time the model runs python/
+    # pytest and gets an ImportError back. The single-occurrence trigger
+    # prevents the dev-env-debug rabbit hole that we observed eat the
+    # entire 900s budget on pallets/flask-4045 (2026-04-07).
+    ("python_env_mismatch",   lambda m, s: _has_python_env_mismatch(m)),
     # NB: stuck_on_planning has no automatic detector — it's only
     # delivered explicitly via ``maybe_queue_guidance(force_key=...)``.
 ]
