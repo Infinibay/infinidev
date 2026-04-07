@@ -41,6 +41,10 @@ dependencies = [
     "tree-sitter-typescript>=0.23.2",
     "tree-sitter-c>=0.24.1",
     "yappi>=1.6.0",
+    "tree-sitter-ruby>=0.23.1",
+    "tree-sitter-c-sharp>=0.23.1",
+    "tree-sitter-php>=0.24.1",
+    "tree-sitter-kotlin>=1.1.0",
 ]
 
 [project.scripts]

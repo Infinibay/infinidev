@@ -17,6 +17,81 @@ _TEXT_SAFE = frozenset(
     | set(range(0x80, 0x100))     # high bytes (UTF-8 continuations, Latin-1)
 )
 
+# Files larger than this (in lines) get a structured skeleton instead of
+# the raw content when read without an explicit line range. The threshold
+# is intentionally conservative — even modern small models start to
+# struggle around the 1k-line mark, and Claude Opus refuses to inline
+# anything bigger than ~30k tokens worth of code.
+_LARGE_FILE_LINE_THRESHOLD = 800
+
+# Head/tail preview sizes for files in unsupported languages (where the
+# tree-sitter skeleton extractor can't help).
+_FALLBACK_HEAD_LINES = 60
+_FALLBACK_TAIL_LINES = 30
+
+
+def _format_head_tail_preview(
+    all_lines: list[str],
+    *,
+    file_path: str,
+    total_lines: int,
+    total_bytes: int,
+) -> str:
+    """Render a head+tail preview for files that have no tree-sitter skeleton.
+
+    Used as the fallback when ``extract_file_skeleton`` returns nothing
+    (unsupported language, parse failure, no symbols at all). Same shape
+    as the structured skeleton: tells the model the file is huge, shows
+    a small head and tail so it can recognise the file type, and ends
+    with the same "use partial_read" hint.
+    """
+    head_lines = all_lines[:_FALLBACK_HEAD_LINES]
+    tail_start = max(_FALLBACK_HEAD_LINES, total_lines - _FALLBACK_TAIL_LINES)
+    tail_lines = all_lines[tail_start:] if tail_start < total_lines else []
+
+    out: list[str] = []
+    out.append("⚠ FILE TOO LARGE TO READ IN FULL — returning head+tail preview.")
+    out.append(f"  file:  {file_path}")
+    out.append(f"  size:  {total_lines} lines, {total_bytes} bytes")
+    out.append(
+        "  note:  no tree-sitter skeleton available for this file type — "
+        "showing first and last lines only."
+    )
+    out.append("")
+    out.append(f"── First {len(head_lines)} lines ──")
+    for i, line in enumerate(head_lines, start=1):
+        out.append(f"{i:>6}\t{line.rstrip()}")
+    if tail_lines:
+        out.append("")
+        out.append(
+            f"  ... ({tail_start - _FALLBACK_HEAD_LINES} lines hidden) ..."
+        )
+        out.append("")
+        out.append(f"── Last {len(tail_lines)} lines ──")
+        for i, line in enumerate(tail_lines, start=tail_start + 1):
+            out.append(f"{i:>6}\t{line.rstrip()}")
+    out.append("")
+    out.append("── How to read this file ──")
+    out.append(
+        "  This file is too large to load in full. To inspect specific parts,"
+    )
+    out.append(
+        "  call partial_read with explicit start_line and end_line."
+    )
+    out.append("")
+    out.append(
+        "  • partial_read(file_path=..., start_line=N, end_line=M)"
+    )
+    out.append(
+        "      → read a specific line range, e.g. (1, 200) or (500, 700)."
+    )
+    out.append("")
+    out.append(
+        "  Pick the line range you actually need and call partial_read. "
+        "Don't try to read the whole file."
+    )
+    return "\n".join(out)
+
 
 def _is_binary_file(file_path: str, sample_size: int = 8192) -> bool:
     """Detect whether *file_path* is a binary file by content heuristics.
@@ -75,7 +150,13 @@ def _is_binary_file(file_path: str, sample_size: int = 8192) -> bool:
 
 class ReadFileTool(InfinibayBaseTool):
     name: str = "read_file"
-    description: str = "Read file contents with line numbers. Auto-indexes for code intelligence."
+    description: str = (
+        "Read file contents with line numbers. Auto-indexes for code "
+        "intelligence. For files larger than ~800 lines, returns a "
+        "structured skeleton (classes, methods, functions, line ranges) "
+        "instead of the full content — use partial_read or "
+        "get_symbol_code to zoom in on specific parts."
+    )
     args_schema: Type[BaseModel] = ReadFileInput
 
     def _run(
@@ -180,6 +261,43 @@ class ReadFileTool(InfinibayBaseTool):
                 numbered.append(f"{i:>6}\t{line.rstrip()}")
             content = "\n".join(numbered)
             desc = f"lines {start + 1}-{min(end, total_lines)} of {total_lines}"
+        elif total_lines > _LARGE_FILE_LINE_THRESHOLD:
+            # ── Large-file skeleton mode ──────────────────────────────
+            # The model asked for the whole file but it's too big to inline
+            # without burning context. Return a structured skeleton built
+            # from tree-sitter (when the language is supported) or a
+            # head+tail preview (otherwise). Both end with an explicit
+            # hint pointing the model at partial_read / get_symbol_code,
+            # because small models don't discover those tools on their own.
+            try:
+                from infinidev.code_intel.syntax_check import (
+                    extract_file_skeleton, render_skeleton_text,
+                )
+                skeleton, language = extract_file_skeleton(
+                    "".join(all_lines), file_path=file_path,
+                )
+            except Exception:
+                skeleton, language = [], ""
+            if skeleton:
+                content = render_skeleton_text(
+                    skeleton,
+                    file_path=file_path,
+                    total_lines=total_lines,
+                    total_bytes=file_size,
+                    language=language or "",
+                )
+                desc = (
+                    f"skeleton ({len(skeleton)} symbols, "
+                    f"{total_lines}-line file)"
+                )
+            else:
+                content = _format_head_tail_preview(
+                    all_lines,
+                    file_path=file_path,
+                    total_lines=total_lines,
+                    total_bytes=file_size,
+                )
+                desc = f"head+tail preview ({total_lines}-line file)"
         else:
             # Full read — still add line numbers for consistency
             numbered = []
