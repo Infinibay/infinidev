@@ -86,7 +86,10 @@ class AddStepTool(InfinibayBaseTool):
         )
         plan.apply_operations([op])
         result: dict = {"status": "added", "index": index, "total_steps": len(plan.steps)}
-        if not _looks_concrete(title):
+        from infinidev.engine.static_analysis_timer import measure
+        with measure("plan_validate"):
+            _vague = not _looks_concrete(title)
+        if _vague:
             result["warning"] = (
                 "Vague step title — name a file path, function(), or file:line so "
                 "the step is locatable. You can refine it with modify_step."

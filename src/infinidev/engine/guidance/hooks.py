@@ -46,24 +46,26 @@ def maybe_queue_guidance(
       * no pattern matches,
       * the matching pattern was already delivered earlier in the task.
     """
-    if not is_small:
-        return None
-    if state.pending_guidance:
-        return None
-    if len(state.guidance_given) >= max_per_task:
-        return None
+    from infinidev.engine.static_analysis_timer import measure
+    with measure("guidance"):
+        if not is_small:
+            return None
+        if state.pending_guidance:
+            return None
+        if len(state.guidance_given) >= max_per_task:
+            return None
 
-    key = detect_stuck_pattern(messages, state)
-    if not key or key in state.guidance_given:
-        return None
+        key = detect_stuck_pattern(messages, state)
+        if not key or key in state.guidance_given:
+            return None
 
-    entry = get_entry(key)
-    if not entry:
-        return None
+        entry = get_entry(key)
+        if not entry:
+            return None
 
-    state.pending_guidance = entry.render()
-    state.guidance_given.append(key)
-    return key
+        state.pending_guidance = entry.render()
+        state.guidance_given.append(key)
+        return key
 
 
 def drain_pending_guidance(state: "LoopState") -> str:

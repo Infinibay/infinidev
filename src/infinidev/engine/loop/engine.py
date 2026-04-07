@@ -264,6 +264,14 @@ class LoopEngine(AgentEngine):
 
         consecutive_all_done = 0
 
+        # Reset the static-analysis latency accumulator at the start of
+        # each run so the final summary reports just this task's costs.
+        try:
+            from infinidev.engine.static_analysis_timer import reset as _sa_reset
+            _sa_reset()
+        except Exception:
+            pass
+
         try:
             _trace_run_start(
                 model=str(ctx.llm_params.get("model", "?")),

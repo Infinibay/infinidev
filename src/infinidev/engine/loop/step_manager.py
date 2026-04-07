@@ -198,6 +198,12 @@ class StepManager:
         if ctx.verbose:
             _log_finish(ctx.agent_name, status, iteration + 1, ctx.state.total_tool_calls, ctx.state.total_tokens)
             _log_cache_summary(ctx.state)
+            try:
+                from infinidev.engine.static_analysis_timer import render as _sa_render
+                from infinidev.engine.engine_logging import log as _log
+                _log(_sa_render())
+            except Exception:
+                pass
         _emit_loop_event("loop_finished", ctx.project_id, ctx.agent_id, {
             "agent_id": ctx.agent_id, "agent_name": ctx.agent_name,
             "status": status, "iterations": iteration + 1,

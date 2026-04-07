@@ -42,16 +42,18 @@ def detect_silent_deletions(
     edit/replace tools. Soft signal — the caller decides whether to
     warn or block. Never raises.
     """
-    try:
-        from infinidev.code_intel.syntax_check import extract_top_level_symbols
-        before = extract_top_level_symbols(old_content, file_path=file_path)
-        after = extract_top_level_symbols(new_content, file_path=file_path)
-    except Exception:
-        return []
-    if not before:
-        return []  # nothing to compare against
-    removed = sorted(before - after)
-    return removed
+    from infinidev.engine.static_analysis_timer import measure
+    with measure("silent_deletion"):
+        try:
+            from infinidev.code_intel.syntax_check import extract_top_level_symbols
+            before = extract_top_level_symbols(old_content, file_path=file_path)
+            after = extract_top_level_symbols(new_content, file_path=file_path)
+        except Exception:
+            return []
+        if not before:
+            return []  # nothing to compare against
+        removed = sorted(before - after)
+        return removed
 
 
 def deletion_warning_text(removed: list[str], file_path: str) -> str:
@@ -106,22 +108,24 @@ def validate_syntax_or_error(
     except Exception:
         pass
 
-    try:
-        from infinidev.code_intel.syntax_check import check_syntax, format_issues
-        issues = check_syntax(new_content, file_path=file_path)
-    except Exception:
-        return None  # never block writes on a tree-sitter failure
+    from infinidev.engine.static_analysis_timer import measure
+    with measure("syntax_check"):
+        try:
+            from infinidev.code_intel.syntax_check import check_syntax, format_issues
+            issues = check_syntax(new_content, file_path=file_path)
+        except Exception:
+            return None  # never block writes on a tree-sitter failure
 
-    if not issues:
-        return None
+        if not issues:
+            return None
 
-    body = format_issues(issues)
-    msg = (
-        f"Refusing {operation}: the new content for {file_path} has "
-        f"{len(issues)} syntax error(s) detected by tree-sitter. Fix and retry.\n"
-        f"{body}"
-    )
-    return tool._error(msg)
+        body = format_issues(issues)
+        msg = (
+            f"Refusing {operation}: the new content for {file_path} has "
+            f"{len(issues)} syntax error(s) detected by tree-sitter. Fix and retry.\n"
+            f"{body}"
+        )
+        return tool._error(msg)
 
 
 def atomic_write(file_path: str, content: str) -> None:
