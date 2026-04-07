@@ -514,16 +514,130 @@ EXAMPLES:
     "code_interpreter": """\
 code_interpreter(code, libraries_used?, timeout?)
 
-Execute Python code snippets in an isolated environment.
+Execute Python code snippets in an isolated subprocess. Beyond plain
+data analysis, this tool gives you read-only access to the project's
+code intelligence index — a curated set of query functions is
+pre-imported automatically so your script can call them directly
+without any import statement.
 
 PARAMS:
   code (str, required)                — Python code to execute
-  libraries_used (list[str], optional) — Libraries to make available (pip-installed if needed)
-  timeout (int, optional)              — Timeout in seconds. Default: 120.
+  libraries_used (list[str], optional) — Libraries to make available
+  timeout (int, optional)              — Timeout seconds. Default: 120.
+
+PRE-IMPORTED BRIDGE FUNCTIONS (read-only, safe):
+
+  find_symbols(query, kind="", limit=50) -> list[dict]
+    FTS5 name search. Returns matched symbols as dicts with
+    name, qualified_name, kind, file_path, line_start, line_end,
+    signature, docstring, parent_symbol, visibility, language.
+
+  find_definitions(name, kind="") -> list[dict]
+    Accepts bare names ("connectToVm") OR dotted names
+    ("VirtioSocketWatcherService.connectToVm"). Returns every
+    place the symbol is defined.
+
+  find_references(name, file_path="", ref_kind="", limit=200) -> list[dict]
+    Every call/usage of a symbol. ref_kind="call" for method
+    invocations, "usage" for reads, "" for all.
+
+  list_file_symbols(file_path, kind="") -> list[dict]
+    Every symbol defined in one file. file_path can be relative
+    to the workspace or absolute.
+
+  iter_symbols(kind="", parent="", language="", file_path="",
+               limit=5000) -> list[dict]
+    Direct SELECT on ci_symbols — use this when you want to WALK
+    all symbols and filter in Python. Each filter is optional.
+    Ideal for "count methods per class", "find all TS functions",
+    "list every method of class Foo". Do NOT use find_symbols
+    with an empty query — that's FTS5 and requires a search term.
+
+  get_source(qualified_name, file_path="") -> str
+    Source code of a symbol as a numbered string. Empty string
+    if not found.
+
+  find_similar(qualified_name, file_path="", threshold=0.7,
+               limit=10) -> list[dict]
+    Jaccard-based body similarity. Results include a similarity
+    score in [0, 1] and an is_exact_dup flag for copy-paste.
+
+  search_by_intent(query, kind="", limit=20) -> list[dict]
+    Natural-language search over docstrings + signatures via
+    FTS5 BM25. Use when you know what the code should DO but
+    not what it's called. Each result has a "bm25" score
+    (lower = better match).
+
+  extract_skeleton(file_path) -> dict
+    Tree-sitter structural skeleton of a file. Returns
+    {file_path, language, total_lines, total_bytes, symbols}.
+
+  list_files(language="") -> list[str]
+    Every indexed file. Filter by language ("typescript", "python",
+    etc.) or leave empty for all.
+
+  project_stats() -> dict
+    Summary: total_files, total_symbols, symbols_by_kind,
+    total_references, total_method_bodies, languages. Good first
+    call in any analysis script to orient yourself.
 
 EXAMPLES:
+
+  # Plain Python — no bridge functions
   code_interpreter(code="print(2 + 2)")
-  code_interpreter(code="import pandas as pd\\ndf = pd.read_csv('data.csv')\\nprint(df.head())", libraries_used=["pandas"])""",
+
+  # "How many methods per class?"
+  code_interpreter(code=\"\"\"
+from collections import Counter
+methods = iter_symbols(kind="method")
+by_class = Counter(m["parent_symbol"] for m in methods if m["parent_symbol"])
+for name, n in by_class.most_common(10):
+    print(f"{n:3}  {name}")
+\"\"\")
+
+  # "Which methods call connect but never disconnect?"
+  code_interpreter(code=\"\"\"
+connect_callers = {
+    f"{r['file_path']}:{r['line']}" for r in find_references("connect", ref_kind="call")
+}
+disconnect_callers = {
+    f"{r['file_path']}:{r['line']}" for r in find_references("disconnect", ref_kind="call")
+}
+lifecycle_bugs = connect_callers - disconnect_callers
+print(f"{len(lifecycle_bugs)} callers of connect without a matching disconnect")
+for loc in list(lifecycle_bugs)[:10]:
+    print(f"  {loc}")
+\"\"\")
+
+  # "What does ResponseMessage look like, and who uses it?"
+  code_interpreter(code=\"\"\"
+defs = find_definitions("ResponseMessage")
+print(f"Defined in {len(defs)} place(s):")
+for d in defs:
+    print(f"  {d['file_path']}:{d['line_start']}")
+refs = find_references("ResponseMessage", limit=20)
+print(f"Referenced {len(refs)} times across the project")
+\"\"\")
+
+  # "Find duplicate method bodies in the codebase"
+  code_interpreter(code=\"\"\"
+# pick any method you want to compare against
+matches = find_similar("VirtioSocketWatcherService.connectToVm", threshold=0.8)
+for m in matches:
+    tag = "EXACT" if m["is_exact_dup"] else f"{m['similarity']:.0%}"
+    print(f"[{tag}] {m['qualified_name']} @ {m['file_path']}:{m['line_start']}")
+\"\"\")
+
+TIPS:
+
+  * Call project_stats() first in any analysis script to see
+    what's in the index before querying.
+  * iter_symbols is the RIGHT tool for "walk all X". find_symbols
+    requires a search query.
+  * All bridge functions return plain dicts. JSON-serialise them
+    with json.dumps() if you want to print tables.
+  * The bridge is read-only — it cannot mutate anything. To edit
+    files, exit the script and use create_file/replace_lines.""",
 
     "record_finding": """\
 record_finding(title, content, finding_type?, confidence?, tags?, sources?)
