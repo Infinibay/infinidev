@@ -18,22 +18,16 @@ from infinidev.tools.shell.code_interpreter_input import CodeInterpreterInput
 class CodeInterpreterTool(InfinibayBaseTool):
     name: str = "code_interpreter"
     description: str = (
-        "Execute Python code in a sandboxed subprocess. The script has "
-        "read-only access to the project's code intelligence index via "
-        "13 bridge functions that are ALREADY DEFINED in the script's "
-        "global namespace — you do NOT need to import them, and you "
-        "MUST NOT redefine them. Just call them directly: "
-        "project_stats(), iter_symbols(kind='method'), "
-        "find_references('foo'), find_similar('X.bar'), "
-        "search_by_intent('parse timestamps'), code_search('TODO'), "
-        "etc. When the script starts, a marker is printed to stderr "
-        "confirming which bridge functions are live — if you don't see "
-        "that marker your environment is broken. Use this tool when you "
-        "need to COMBINE queries ('methods that call both X and Y', "
-        "'rank classes by method count', 'find duplicate bodies') or "
-        "iterate over results in Python. Call explain_tool("
-        "'code_interpreter') for the full list + examples per function. "
-        "Returns stdout, stderr, and exit code."
+        "Execute Python code for data analysis, computation, validation, "
+        "or prototyping. Code runs in a sandboxed subprocess and "
+        "returns stdout, stderr, and exit code. For most queries about "
+        "the codebase, prefer the dedicated tools (iter_symbols, "
+        "find_references, find_similar_methods, search_symbols, etc.) — "
+        "they are simpler than writing Python. Use code_interpreter "
+        "only when you need a custom computation that no single tool "
+        "can express, e.g. multi-step set arithmetic over query "
+        "results. The parameter is named 'code' (NOT 'command' or "
+        "'script')."
     )
     args_schema: Type[BaseModel] = CodeInterpreterInput
 

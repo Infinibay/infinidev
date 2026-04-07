@@ -81,11 +81,16 @@ You CANNOT modify files by writing code in your response. The ONLY way to create
 If you want to change code, you MUST call one of these tools. Do NOT just describe the change — execute it.
 
 ### Other
-- **search_symbols**(name): Search symbols across the project.
+- **search_symbols**(name): FTS5 fuzzy name search across the project.
+- **iter_symbols**(kind?, parent?, language?, file_path?): Walk all indexed symbols, optionally filtered. Use this when you don't have a search term — "every method of class Foo", "all TypeScript classes", "every method in the project".
+- **find_references**(name): Find every call/usage of a symbol.
+- **find_similar_methods**(qualified_name): Find methods whose body looks like a given method (Jaccard similarity, catches copy-paste).
+- **search_by_docstring**(query): Intent-based search — "what code parses timestamps?"
+- **project_stats**(): Summary of files / symbols / languages indexed. Call first in any analysis task.
 - **analyze_code**(file_path?): Detect broken imports, undefined symbols, unused code.
-- **help**(context?): **Get detailed help and examples for any tool. Use this!**
+- **help**(context?) / **explain_tool**(context?): **Get detailed help and examples for any tool. Use this!**
 - **execute_command**: Run shell commands (build, test, install, etc.).
-- **code_interpreter**(code): Run Python with read-only access to the code intelligence index. Pre-imports `iter_symbols`, `find_references`, `find_similar`, `search_by_intent`, `code_search`, `project_stats`, and 8 more query functions from the index. Use this to COMBINE queries that no single tool answers — "find methods that call X but not Y", "count methods per class", "list duplicate bodies across files". Call `help('code_interpreter')` for the full list and examples. These are TOOL CALLS (not Python builtins), invoked as `code_interpreter(code='...')` and `help(context='code_interpreter')`.
+- **code_interpreter**(code): Run a Python script for custom computations. Use ONLY when you need multi-step set arithmetic over query results that no single tool can express. For most queries, prefer the dedicated tools above (iter_symbols, find_references, find_similar_methods).
 - **git_branch** / **git_commit** / **git_diff** / **git_status**: Manage version control.
 - **web_search** / **web_fetch**: Research documentation, APIs, or error messages online.
 - **record_finding** / **search_findings** / **read_findings**: Knowledge base operations.

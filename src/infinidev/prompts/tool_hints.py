@@ -73,13 +73,18 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "execute_command(command='python -m pytest tests/ -x -q')",
     ),
     "code_interpreter": (
-        "Run Python with read-only access to the code intelligence index "
-        "(iter_symbols, find_references, find_similar, search_by_intent, "
-        "code_search, etc. are pre-imported). Use for combined queries "
-        "that no single tool answers — see help('code_interpreter')",
-        "code_interpreter(code='from collections import Counter\\n"
-        "methods = iter_symbols(kind=\"method\")\\n"
-        "print(Counter(m[\"parent_symbol\"] for m in methods).most_common(5))')",
+        "Run a Python script for custom computations. Prefer dedicated "
+        "tools (iter_symbols, find_references, find_similar_methods) "
+        "for normal queries — use this only when no single tool fits",
+        "code_interpreter(code='print(2 + 2)')",
+    ),
+    "iter_symbols": (
+        "Walk all indexed symbols (no search term needed)",
+        "iter_symbols(kind='method', parent='UserService')",
+    ),
+    "project_stats": (
+        "Summary of files / symbols / languages in the index",
+        "project_stats()",
     ),
     # Web
     "web_search": (

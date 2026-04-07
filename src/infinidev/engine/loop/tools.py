@@ -504,7 +504,9 @@ def execute_tool_call(
         return json.dumps({"error": f"Expected dict arguments, got {type(args).__name__}"})
 
     # Auto-correct common parameter name aliases that LLMs frequently use.
-    # Maps (tool_name, wrong_param) -> correct_param.
+    # Maps wrong_param -> correct_param. Applied globally to all tools
+    # because the wrong names listed here never collide with any real
+    # parameter.
     _PARAM_ALIASES = {
         "old_str": "old_string",
         "new_str": "new_string",
@@ -530,6 +532,20 @@ def execute_tool_call(
         "new_body": "new_code",
     }
 
+    # Per-tool aliases — aplied BEFORE the global ones. Used when a
+    # wrong param name would collide with a real param somewhere else
+    # (e.g. ``command`` is the correct param for execute_command but
+    # the wrong one for code_interpreter, where the model meant ``code``).
+    # Only the listed tool gets the rewrite.
+    _TOOL_SPECIFIC_PARAM_ALIASES = {
+        "code_interpreter": {
+            "command": "code",
+            "script": "code",
+            "python": "code",
+            "source": "code",
+        },
+    }
+
     # Validate kwargs against _run() signature — reject unknown parameters
     # so the LLM learns the correct schema instead of silently losing data.
     try:
@@ -540,8 +556,22 @@ def execute_tool_call(
         )
         if not accepts_var_kw:
             allowed = set(sig.parameters.keys())
-            # Try to fix unknown params via aliases before rejecting
+            # Apply tool-specific aliases first (they take priority
+            # over the global ones because they exist precisely for
+            # cases where a global alias would be wrong).
+            tool_aliases = _TOOL_SPECIFIC_PARAM_ALIASES.get(name, {})
             fixed = {}
+            for key, value in list(args.items()):
+                if key not in allowed and key in tool_aliases:
+                    correct = tool_aliases[key]
+                    if correct in allowed and correct not in args:
+                        logger.info(
+                            "Tool %s: auto-corrected param '%s' -> '%s' (per-tool alias)",
+                            name, key, correct,
+                        )
+                        fixed[correct] = value
+                        del args[key]
+            # Then global aliases
             for key, value in list(args.items()):
                 if key not in allowed and key in _PARAM_ALIASES:
                     correct = _PARAM_ALIASES[key]
@@ -559,12 +589,21 @@ def execute_tool_call(
             extra = set(args.keys()) - allowed
             if extra:
                 logger.warning("Tool %s: unexpected kwargs %s", name, extra)
+                # Stronger error message — small models that see
+                # "does not accept parameter" tend to conclude "tool
+                # doesn't exist". The phrasing below makes it
+                # IMPOSSIBLE to misread: the tool exists, the call
+                # was almost right, fix the param and retry.
                 return json.dumps({
                     "error": (
-                        f"Tool '{name}' does not accept parameter(s): "
-                        f"{', '.join(sorted(extra))}. "
-                        f"Valid parameters are: {', '.join(sorted(allowed))}. "
-                        f"Re-call the tool with the correct parameter names."
+                        f"Tool '{name}' EXISTS and is callable — your "
+                        f"call was rejected only because of wrong "
+                        f"parameter name(s): {', '.join(sorted(extra))}. "
+                        f"The valid parameter names for this tool are: "
+                        f"{', '.join(sorted(allowed))}. Re-call the same "
+                        f"tool with the corrected parameter name(s) — "
+                        f"do NOT switch to a different tool, do NOT "
+                        f"conclude the tool is unavailable."
                     ),
                 })
     except (ValueError, TypeError):
