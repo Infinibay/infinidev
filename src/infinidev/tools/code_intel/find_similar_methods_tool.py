@@ -94,12 +94,31 @@ class FindSimilarMethodsTool(InfinibayBaseTool):
 
         target_path = file_path or None
         target = fetch_fingerprint(project_id, qualified_name, target_path)
+        if target is None and "." not in qualified_name:
+            # Bare-name fallback: resolve via find_definition (which now
+            # understands both bare and qualified names) to recover the
+            # canonical qualified_name, then re-query the fingerprint
+            # store. Lets the model pass `connectToVm` and still get
+            # results without having to remember the class prefix.
+            from infinidev.code_intel.query import find_definition
+            defs = find_definition(project_id, qualified_name, kind="method")
+            if not defs:
+                defs = find_definition(project_id, qualified_name, kind="function")
+            if defs:
+                # Try each candidate's qualified_name in priority order
+                # (find_definition already sorts function/method first).
+                for d in defs[:5]:
+                    target = fetch_fingerprint(project_id, d.qualified_name, d.file_path)
+                    if target is not None:
+                        qualified_name = d.qualified_name
+                        break
         if target is None:
             return self._error(
                 f"No fingerprint for '{qualified_name}'"
                 + (f" in {file_path}" if file_path else "")
-                + ". The method may not be indexed yet — try read_file on its "
-                "containing file first, or check the qualified name spelling."
+                + ". The method may not be indexed yet (try read_file on its "
+                "containing file first), it may be too small to fingerprint "
+                "(skipped under 6 lines), or you may have a typo in the name."
             )
 
         hits = find_similar(

@@ -88,7 +88,13 @@ class JavaScriptParser:
         name = ""
         bases = ""
         for child in node.children:
-            if child.type == "identifier":
+            # TypeScript uses "type_identifier" for the class name; vanilla
+            # JS uses "identifier". Accept both — without this, every
+            # TS class produces ``name=""`` and every method inside it
+            # gets ``parent_symbol=""``, which silently breaks
+            # ``get_symbol_code('Class.method')`` and every other tool
+            # that resolves dotted names.
+            if child.type in ("identifier", "type_identifier"):
                 name = _node_text(child, source)
             elif child.type == "class_heritage":
                 bases = _node_text(child, source)

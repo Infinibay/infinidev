@@ -65,15 +65,88 @@ def find_definition(
     file_hint: str | None = None,
     limit: int = 20,
 ) -> list[Symbol]:
-    """Find where a symbol is defined."""
+    """Find where a symbol is defined.
+
+    Accepts both bare names (``connectToVm``) and qualified dotted
+    names (``VirtioSocketWatcherService.connectToVm``). When the input
+    contains a dot, the query first tries an exact match on
+    ``qualified_name``; if that returns nothing, it falls back to
+    splitting on the LAST dot and matching ``parent_symbol = X AND
+    name = Y``. This second pass exists because some indexers populate
+    qualified_name as just the bare name even for class methods (a
+    historical bug we're cleaning up). The bare-name fallback at the
+    end keeps backwards compatibility with callers that already pass
+    short names.
+    """
     def _query(conn: sqlite3.Connection):
+        # Pass 1: input contains a dot → treat as qualified name.
+        if "." in name:
+            sql_qual = f"""
+                SELECT * FROM ci_symbols
+                WHERE project_id = ? AND qualified_name = ?
+                {f"AND kind = ?" if kind else ""}
+                ORDER BY
+                    CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
+                    file_path
+                LIMIT ?
+            """
+            params_qual: list[Any] = [project_id, name]
+            if kind:
+                params_qual.append(kind)
+            params_qual.append(limit)
+            rows = conn.execute(sql_qual, params_qual).fetchall()
+            if rows:
+                return [_row_to_symbol(r) for r in rows]
+
+            # Pass 2: split on the LAST dot — last segment is the
+            # symbol name, prefix is the parent. Lets us match
+            # `VirtioSocketWatcherService.connectToVm` against
+            # `(parent_symbol='VirtioSocketWatcherService',
+            #   name='connectToVm')` even when qualified_name was
+            # only populated as the bare name.
+            parent_part, _, leaf = name.rpartition(".")
+            sql_parent = f"""
+                SELECT * FROM ci_symbols
+                WHERE project_id = ?
+                  AND parent_symbol = ?
+                  AND name = ?
+                {f"AND kind = ?" if kind else ""}
+                ORDER BY
+                    CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
+                    file_path
+                LIMIT ?
+            """
+            params_parent: list[Any] = [project_id, parent_part, leaf]
+            if kind:
+                params_parent.append(kind)
+            params_parent.append(limit)
+            rows = conn.execute(sql_parent, params_parent).fetchall()
+            if rows:
+                return [_row_to_symbol(r) for r in rows]
+
+            # Pass 3: bare leaf only — last-resort fuzzy match.
+            sql_leaf = f"""
+                SELECT * FROM ci_symbols
+                WHERE project_id = ? AND name = ?
+                {f"AND kind = ?" if kind else ""}
+                ORDER BY
+                    CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
+                    file_path
+                LIMIT ?
+            """
+            params_leaf: list[Any] = [project_id, leaf]
+            if kind:
+                params_leaf.append(kind)
+            params_leaf.append(limit)
+            rows = conn.execute(sql_leaf, params_leaf).fetchall()
+            return [_row_to_symbol(r) for r in rows]
+
+        # No dot — original bare-name search.
         conditions = ["project_id = ?", "name = ?"]
         params: list[Any] = [project_id, name]
-
         if kind:
             conditions.append("kind = ?")
             params.append(kind)
-
         sql = f"""\
             SELECT * FROM ci_symbols
             WHERE {' AND '.join(conditions)}
