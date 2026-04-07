@@ -327,7 +327,10 @@ class LoopEngine(AgentEngine):
             # POST_STEP consumers (e.g. the behavior scorer) can slice out
             # exactly the messages produced during this step.
             step_messages_start = len(messages)
-            step_result = self._run_inner_loop(ctx, messages, iteration, llm_caller, tool_proc, guard)
+            step_result = self._run_inner_loop(
+                ctx, messages, iteration, llm_caller, tool_proc, guard,
+                step_messages_start=step_messages_start,
+            )
 
             # Track consecutive text-only iterations across the outer loop
             action_tc = step_result.action_tool_calls
@@ -611,10 +614,17 @@ class LoopEngine(AgentEngine):
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],
         iteration: int,
         llm_caller: LLMCaller, tool_proc: ToolProcessor, guard: LoopGuard,
+        *,
+        step_messages_start: int = 0,
     ) -> StepResult:
         """Run the inner tool-calling loop for one step.
 
         Returns the StepResult for this step.
+
+        *step_messages_start* is the index into *messages* where this
+        step's contribution begins. Used by the mid-step guidance
+        check so detectors see only the current step's history, not
+        the cumulative conversation.
         """
         step_result: StepResult | None = None
         action_tool_calls = 0
@@ -705,6 +715,32 @@ class LoopEngine(AgentEngine):
                         break
                     guard.check_error_circuit_breaker(ctx, messages)
                     guard.check_note_discipline(ctx, messages)
+
+                    # A2 — Mid-step guidance. Run detectors right after
+                    # each successful tool execution so patterns like
+                    # same_test_output_loop, regression_after_edit, and
+                    # the dynamic similarity_after_write detector can
+                    # fire on the NEXT LLM call rather than waiting for
+                    # end-of-step. The same cap (`max_per_task`) and the
+                    # same guidance_given set apply across mid-step and
+                    # end-of-step calls — they share state — so guidance
+                    # is never emitted twice.
+                    try:
+                        _g_settings = _get_settings()
+                        if (ctx.is_small
+                            and getattr(_g_settings, "LOOP_GUIDANCE_ENABLED", True)
+                            and not ctx.state.pending_guidance):
+                            from infinidev.engine.guidance import maybe_queue_guidance
+                            queued = maybe_queue_guidance(
+                                ctx.state,
+                                messages[step_messages_start:],
+                                is_small=True,
+                                max_per_task=int(getattr(_g_settings, "LOOP_GUIDANCE_MAX_PER_TASK", 3)),
+                            )
+                            if queued and ctx.verbose:
+                                _log(f"  {_YELLOW}↪ guidance queued mid-step: {queued}{_RESET}")
+                    except Exception:
+                        pass
                 elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks :
                     # Only pseudo-tools, no regular tools
                     self._build_pseudo_only_messages(ctx, classified, messages, result)
