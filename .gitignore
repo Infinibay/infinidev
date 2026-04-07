@@ -18,6 +18,9 @@ venv/
 # Infinidev local data
 .infinidev/
 
+# Local-only working notes (kept untracked on purpose)
+TODO.md
+
 # IDE
 .vscode/
 .idea/
