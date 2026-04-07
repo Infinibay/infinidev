@@ -10,6 +10,61 @@ empirical observation that motivated it.
 
 ---
 
+## Session 2 update — what shipped after the original TODO
+
+This section is an update at the top of the document. The original
+"Top 3 to do first" + sections A/B/C/D/E below remain valid as
+historical context, but most of the high-value items have shipped.
+What's actually still open is at the bottom of this section.
+
+### Shipped this session (11 commits)
+
+| # | Commit | What |
+|---|---|---|
+| 1 | `6534e9d` | **A4** — auto-extract structured failures from test runner output. The failures appear inline with the raw stdout the model is already going to read. |
+| 2 | `7149625` | **Orchestration package** — unified TUI/classic/single-prompt into one `engine.orchestration.run_task`. Killed the three duplicated pipelines, removed `cli/phases.py`, added `OrchestrationHooks` Protocol. The TUI's `run_plan_task` no longer reaches into `engine/phases/` privates. Net: ~+1241 / -813 LOC. |
+| 3 | `0d99eb8` | **`read_file` skeleton mode** for files >800 lines. Tree-sitter walker driven by per-language config. Supports python, javascript, typescript, tsx, go, rust, java, c, cpp, ruby, csharp, php, kotlin, bash. Validated empirically on `VirtioSocketWatcherService.ts` (4245 LOC → 9.6 KB skeleton, 94% reduction). |
+| 4 | `1d0065e` | **`method_index` + `find_similar_methods` tool**. Per-method normalized fingerprints in `ci_method_bodies`. Catches copy-paste duplicates and near-duplicates via Jaccard. 1235 method fingerprints indexed in 7.6s on the backend; **44 exact-duplicate methods detected** on first pass. |
+| 5 | `c014d82` | **`FEATURE.md`** — 1092-line complete feature reference, organised by layer. |
+| 6 | `445f9e0` | **`search_by_docstring` tool** — intent-based search via FTS5 BM25. Find code by what it DOES, not what it's CALLED. Reuses the existing `ci_symbols_fts` table; zero new indexes. |
+| 7 | `6319679` | **`similarity_after_write` dynamic detector**. After every write, the indexer re-runs and the new detector queries `ci_method_bodies` with threshold 0.85. If the model just wrote code that duplicates code elsewhere, guidance fires on the next prompt with the specific (target, match) pairs. Latency: median **0.1ms** per file (was 167ms before optimisations). |
+| 8 | `396ff36` | **Logs silenciosos por defecto.** Real users see zero log output unless they explicitly opt in via `INFINIDEV_LOG_FILE`, `INFINIDEV_LOG_LEVEL`, or `INFINIDEV_LOG_STDERR`. The TUI's manual stderr-handler-scrub is gone — TUI is safe by construction now. |
+| 9 | `5bade72` | **A2** — `maybe_queue_guidance` runs mid-step inside the inner loop, not just at end-of-step. Detectors fire on the next LLM call instead of waiting for the step to close. Multiplies the value of every existing detector. |
+| 10 | `516e062` | **A1** — `stop_planning_start_coding` detector. Catches "planned a lot, edited nothing". Currently has the historical 5-step heuristic + iteration_count gate; **needs the rate-based refinement** (see Open Items below). |
+| 11 | `a826a36` | **Removed `partial_read`** wrapper. Was a 6-line delegate to `read_file` with offset/limit. Aliased to `read_file` so any model that learned the old name still gets routed correctly. Cleaned all model-facing references. |
+
+### Decisions made this session that are settled
+
+- The model serves the user. The product is the user's. ✓ (preserved from session 1)
+- The pipeline is unified across all entry points (TUI, classic, --prompt) — never duplicate it. New decision.
+- Logs are opt-in. Never spam stderr by default. Never write log files the user didn't ask for. New decision.
+- Tools that only wrap another tool (`partial_read`, future cases) get deleted; their name becomes an alias in `_TOOL_ALIASES`. New decision.
+- Dynamic guidance entries (like `similarity_after_write`) run BEFORE the static dispatch in `maybe_queue_guidance`. They produce their own rendered text. New pattern.
+- The `find existing code` trilogy is now complete: `search_symbols` (by name), `search_by_docstring` (by intent), `find_similar_methods` (by body). Three orthogonal axes. New design.
+
+### Open items — what's actually still pending
+
+**A1 rate-based refinement (high priority)** — the current `_has_stop_planning_start_coding` detector uses "≥5 concrete steps total". User clarified the correct heuristic is **rate**, not absolute count: "está bien añadir steps, el problema es agregar 10 steps en un mismo step". Fix: count `add_step` tool calls in the current step's message slice (`messages[step_messages_start:]`) and fire when that count exceeds ~8 in a single step AND `task_has_edits == False`. ~25 LOC rewrite of the detector + new unit tests. Cleaner than the absolute-count heuristic and avoids penalising legitimate planning during the first iteration.
+
+**`task_drift` detector** — observed in session 1: qwen3.5:9b on backend-refactor invented "implement JWT auth" tasks instead of refactoring `VirtioSocketWatcherService.ts`. The skeleton mode (commit 3) probably mitigates this a lot, but a second line of defense would help on really distractor-heavy repos. Heuristic: compare nouns/verbs in the user task vs the active plan steps, fire if the plan introduces concepts not in the original task. ~50 LOC.
+
+**Re-run the experiment** — qwen3.5:9b vs `VirtioSocketWatcherService.ts` with all session 2 features active (A1, A2, A4, skeleton, method_index, similarity warning, search_by_docstring, silent logs). Compare against the session 1 result (task drift, 0 bytes written). The data will tell us whether the remaining detectors (`task_drift`, anything else) are actually needed or whether the system is now self-correcting on this task.
+
+**Tests for the new modules (hygiene)**
+  - `tests/test_method_index.py` — body normalisation, hash collisions, Jaccard, find_similar query, monolith skip.
+  - `tests/test_skeleton.py` — extract_file_skeleton + render_skeleton_text against fixtures for each supported language.
+  - `tests/test_orchestration.py` — `run_task` happy path + each hook callback in isolation.
+  - `tests/test_similarity_detector.py` — the new dynamic guidance path.
+  - All ~600 LOC across 4 files. Worth doing in one batch before adding more features on top.
+
+**Cleanup of zombi tool wrappers (low priority)** — `partial_read` was the obvious one but `find_definition.py`, `add_method.py`, `edit_method.py`, `remove_method.py` are also probably wrappers that delegate to the `_tool.py` versions. A grep-and-clean sweep would reduce surface area. Each is a self-contained ~30 LOC delete + alias addition.
+
+**Recover malformed tool calls instead of just warning (B5 in original TODO)** — still pending, still ~50 LOC. The detector fires correctly now (and after A2, mid-step), but the malformed call itself is discarded — could try to extract the embedded JSON-shaped tool call from the assistant `content` field and inject it as if it had been emitted properly. Risk: false positives on commented-out example JSON.
+
+**Provider FC capability sniff at startup (B6)** — still pending. Test FC with a tiny call at startup; if it returns empty 3 times, log a warning telling the user the model has broken function-calling on this provider. Now that logging is opt-in, this needs to surface via the UI banner instead of the log stream.
+
+---
+
 ## 0 — Context: where we came from this session
 
 **Read this first if you're picking up after a break.** Understanding
