@@ -219,6 +219,45 @@ class JavaScriptParser:
                         column=node.start_point[1], context=context.strip()[:200],
                         ref_kind=ref_kind, language="javascript",
                     ))
+        elif node.type == "property_identifier":
+            # Method/property access through a member_expression:
+            #   this.connect(), obj.foo, console.log(), svc.start()
+            #
+            # The earlier version only walked plain "identifier" nodes,
+            # which are always the BASE of a dotted path — never the
+            # method name after the dot. Result: zero references to
+            # method calls in class-heavy code (the Virtio audit showed
+            # 0 hits for connectToVm on a 4245-line file that calls
+            # it 6+ times). Fix: also record property_identifier nodes,
+            # classifying them as "call" when the surrounding
+            # member_expression is the callee of a call_expression,
+            # and "usage" otherwise (property read).
+            #
+            # Definitions (method_definition → property_identifier) are
+            # already excluded via the defs set populated in
+            # _collect_defs.
+            loc = (node.start_point[0], node.start_point[1])
+            if loc not in defs:
+                name = _node_text(node, source)
+                if len(name) >= 2:
+                    line_num = node.start_point[0]
+                    context = lines[line_num] if line_num < len(lines) else ""
+                    ref_kind = "usage"
+                    # The property_identifier lives inside a
+                    # member_expression. The member_expression in turn
+                    # may be the FIRST child of a call_expression if
+                    # this is a method call. Walk up two levels to
+                    # detect the call case.
+                    parent = node.parent
+                    if parent and parent.type == "member_expression":
+                        gp = parent.parent
+                        if gp and gp.type == "call_expression" and parent == gp.children[0]:
+                            ref_kind = "call"
+                    refs.append(Reference(
+                        name=name, file_path=fp, line=line_num + 1,
+                        column=node.start_point[1], context=context.strip()[:200],
+                        ref_kind=ref_kind, language="javascript",
+                    ))
         for child in node.children:
             self._walk_refs(child, source, fp, refs, defs, lines)
 
