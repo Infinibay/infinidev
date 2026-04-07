@@ -42,21 +42,23 @@ def execute_with_retry(
     if base_delay is None:
         base_delay = settings.RETRY_BASE_DELAY
 
-    for attempt in range(max_retries):
-        conn = get_connection(db_path)
-        try:
-            result = fn(conn)
-            return result
-        except sqlite3.OperationalError as e:
-            err_msg = str(e).lower()
-            if ("locked" in err_msg or "busy" in err_msg) and attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
-                time.sleep(delay)
-                continue
-            raise
-        finally:
-            conn.close()
-    raise sqlite3.OperationalError(f"Database busy after {max_retries} retries")
+    from infinidev.engine.static_analysis_timer import measure as _sa_measure
+    with _sa_measure("db_write"):
+        for attempt in range(max_retries):
+            conn = get_connection(db_path)
+            try:
+                result = fn(conn)
+                return result
+            except sqlite3.OperationalError as e:
+                err_msg = str(e).lower()
+                if ("locked" in err_msg or "busy" in err_msg) and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                    time.sleep(delay)
+                    continue
+                raise
+            finally:
+                conn.close()
+        raise sqlite3.OperationalError(f"Database busy after {max_retries} retries")
 
 class DBConnection:
     """Context manager for database connections."""

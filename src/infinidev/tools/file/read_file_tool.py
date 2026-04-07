@@ -158,8 +158,10 @@ class ReadFileTool(InfinibayBaseTool):
             )
 
         try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                all_lines = f.readlines()
+            from infinidev.engine.static_analysis_timer import measure as _sa_measure
+            with _sa_measure("tool_io"):
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    all_lines = f.readlines()
         except PermissionError:
             return self._error(f"Permission denied: {file_path}")
         except Exception as e:

@@ -86,15 +86,17 @@ class ExecuteCommandTool(InfinibayBaseTool):
         effective_timeout = timeout if timeout > 0 else None
 
         try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=effective_timeout,
-                cwd=cwd,
-                env=run_env,
-            )
+            from infinidev.engine.static_analysis_timer import measure as _sa_measure
+            with _sa_measure("subprocess_exec"):
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=effective_timeout,
+                    cwd=cwd,
+                    env=run_env,
+                )
             
             return self._success({
                 "exit_code": result.returncode,

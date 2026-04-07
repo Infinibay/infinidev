@@ -53,15 +53,22 @@ def _ts() -> str:
 def _w(text: str) -> None:
     if not _is_enabled():
         return
-    with _LOCK:
-        _open()
-        if _HANDLE is None:
-            return
-        try:
-            _HANDLE.write(text)
-            _HANDLE.write("\n")
-        except Exception as exc:  # pragma: no cover - tracing must never raise
-            print(f"[trace_log] write failed: {exc}", file=sys.stderr)
+    try:
+        from infinidev.engine.static_analysis_timer import measure as _sa_measure
+        _ctx = _sa_measure("trace_log")
+    except Exception:
+        from contextlib import nullcontext
+        _ctx = nullcontext()
+    with _ctx:
+        with _LOCK:
+            _open()
+            if _HANDLE is None:
+                return
+            try:
+                _HANDLE.write(text)
+                _HANDLE.write("\n")
+            except Exception as exc:  # pragma: no cover - tracing must never raise
+                print(f"[trace_log] write failed: {exc}", file=sys.stderr)
 
 
 def _banner(char: str, label: str) -> str:

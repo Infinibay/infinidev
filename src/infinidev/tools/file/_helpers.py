@@ -134,22 +134,24 @@ def atomic_write(file_path: str, content: str) -> None:
     Preserves the original file's permission bits if the file already exists.
     Raises on failure (caller should handle PermissionError, etc.).
     """
-    dir_name = os.path.dirname(file_path) or "."
-    original_mode = os.stat(file_path).st_mode if os.path.exists(file_path) else None
+    from infinidev.engine.static_analysis_timer import measure as _sa_measure
+    with _sa_measure("tool_io"):
+        dir_name = os.path.dirname(file_path) or "."
+        original_mode = os.stat(file_path).st_mode if os.path.exists(file_path) else None
 
-    fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".infinibay_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        if original_mode is not None:
-            os.chmod(tmp_path, stat.S_IMODE(original_mode))
-        os.replace(tmp_path, file_path)
-    except Exception:
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".infinibay_")
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            if original_mode is not None:
+                os.chmod(tmp_path, stat.S_IMODE(original_mode))
+            os.replace(tmp_path, file_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
 
 def record_artifact_change(
