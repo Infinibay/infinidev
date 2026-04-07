@@ -36,6 +36,7 @@ from infinidev.engine.guidance.library import GuidanceEntry, get_entry
 from infinidev.engine.guidance.test_runners import (
     is_test_command,
     test_outcome_fingerprint,
+    normalize_test_command,
 )
 from infinidev.engine.guidance.detectors import detect_stuck_pattern
 from infinidev.engine.guidance.hooks import (
@@ -48,6 +49,7 @@ __all__ = [
     "get_entry",
     "is_test_command",
     "test_outcome_fingerprint",
+    "normalize_test_command",
     "detect_stuck_pattern",
     "maybe_queue_guidance",
     "drain_pending_guidance",

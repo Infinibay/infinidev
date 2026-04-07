@@ -57,6 +57,24 @@ class LoopState(BaseModel):
     # yet in this task.
     last_test_output: str = ""
     last_test_command: str = ""
+    # Per-test-command outcome history. Keyed by the *normalised* test
+    # command (positional targets without flags) so two runs of the
+    # same test set are recognised as comparable even if the model
+    # added/removed -v / --tb=long / etc. The value is the LAST TWO
+    # outcome fingerprint strings — one for "before the edit" and
+    # one for "after the edit" — so the regression_after_edit
+    # detector can compare them directly.
+    #
+    # Comparing across DIFFERENT commands (e.g. pytest test_a.py vs
+    # pytest test_b.py) is explicitly never done — the dict structure
+    # plus the 2-entry-per-key history makes it impossible to confuse
+    # an unrelated test run with a regression.
+    test_outcome_history: dict[str, list[str]] = Field(default_factory=dict)
+    # Sticky flag set the moment the regression detector observes a
+    # regression for the first time in this task. The detector checks
+    # this and self-suppresses on subsequent steps so the model isn't
+    # spammed with the same advice.
+    regression_signaled: bool = False
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""

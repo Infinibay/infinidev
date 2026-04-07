@@ -255,6 +255,42 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "  {\"name\": \"read_file\", \"arguments\": {\"file_path\": \"x.py\"}}"
         ),
     ),
+    "regression_after_edit": GuidanceEntry(
+        key="regression_after_edit",
+        title="Your last edit broke a test that was previously passing",
+        body=(
+            "You just ran the same test command twice and the second "
+            "result has more failures than the first. Whatever you "
+            "edited between the two runs broke a test that was working. "
+            "This is the most expensive class of mistake — you destroyed "
+            "real progress and replaced it with a problem that didn't "
+            "exist before.\n\n"
+            "Stop editing forward. Recover the previous state of the "
+            "file you just modified:\n"
+            "  1. Read the file you just edited and identify the lines "
+            "you changed in the last edit.\n"
+            "  2. Run tail_test_output(mode='structured') to see WHICH "
+            "test newly fails and on what file:line.\n"
+            "  3. If the new failure points to a line you just touched, "
+            "revert that hunk (replace_lines back to the previous content) "
+            "and re-think the change more carefully.\n"
+            "  4. If the new failure is in a DIFFERENT file, the edit "
+            "had a side effect — read the new failing file and trace why."
+        ),
+        example=(
+            "before edit: pytest test_minidb.py → 1 failed, 1 passed\n"
+            "after  edit: pytest test_minidb.py → 2 failed, 0 passed   ← regression\n"
+            "\n"
+            "1. tail_test_output(mode='structured')\n"
+            "   → newly failing: TestCreateTable.test_create_simple at minidb.py:84\n"
+            "2. read_file('minidb.py')   # focus around line 84\n"
+            "3. The line you just changed is the problem — revert it.\n"
+            "4. replace_lines('minidb.py', start_line=82, end_line=86,\n"
+            "                 content=<the previous working version>)\n"
+            "5. execute_command('pytest test_minidb.py')   # confirm 1/2 again\n"
+            "6. THEN reattempt the original fix more carefully."
+        ),
+    ),
     "first_test_run": GuidanceEntry(
         key="first_test_run",
         title="You just ran tests — here's the fastest way to read the result",

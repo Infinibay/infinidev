@@ -823,18 +823,42 @@ class LoopEngine(AgentEngine):
 
                 # Capture test-runner output so the tail_test_output meta
                 # tool can serve a filtered view without re-running the
-                # tests. Cheap: ~3 string ops per execute_command.
+                # tests. Also record the outcome fingerprint per
+                # *normalised* test command so the regression_after_edit
+                # detector can compare apples to apples (same target set,
+                # different time) instead of mixing unrelated test runs.
                 if tc.function.name == "execute_command":
                     try:
-                        from infinidev.engine.guidance import is_test_command
+                        from infinidev.engine.guidance import (
+                            is_test_command,
+                            test_outcome_fingerprint,
+                            normalize_test_command,
+                        )
                         if is_test_command(tc.function.arguments, ctx.state):
                             ctx.state.last_test_output = result
                             try:
                                 import json as _json
                                 _args = _json.loads(tc.function.arguments) if tc.function.arguments else {}
-                                ctx.state.last_test_command = str(_args.get("command", ""))[:300]
+                                cmd_str = str(_args.get("command", ""))
                             except Exception:
-                                ctx.state.last_test_command = tc.function.arguments[:300]
+                                cmd_str = tc.function.arguments
+                            ctx.state.last_test_command = cmd_str[:300]
+                            # Record the outcome under the normalised
+                            # command key so regression_after_edit can
+                            # compare against the previous run of the
+                            # SAME target set. We keep the LAST TWO
+                            # entries per command — older history is
+                            # dropped to keep state small. Identical
+                            # consecutive outcomes are not duplicated
+                            # (e.g. running the same test twice in a
+                            # row without an edit between).
+                            new_fp = test_outcome_fingerprint(result)
+                            if new_fp:
+                                key = normalize_test_command(cmd_str)
+                                history = ctx.state.test_outcome_history.get(key, [])
+                                if not history or history[-1] != new_fp:
+                                    history.append(new_fp)
+                                    ctx.state.test_outcome_history[key] = history[-2:]
                     except Exception:
                         pass
 

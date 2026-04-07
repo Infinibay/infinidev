@@ -111,6 +111,83 @@ def _has_malformed_tool_call(messages: list[dict]) -> bool:
     return False
 
 
+_FAIL_COUNT_RE = re.compile(r"(\d+)\s+(?:failed|error)", re.IGNORECASE)
+_PASS_COUNT_RE = re.compile(r"(\d+)\s+passed", re.IGNORECASE)
+
+
+def _outcome_counts(fp: str) -> tuple[int, int]:
+    """Return ``(failed, passed)`` extracted from a fingerprint string.
+
+    The fingerprints produced by ``test_outcome_fingerprint`` look like
+    ``"1 failed, 2 passed"`` or ``"3 passed"``. We use this to compare
+    two outcomes for the same test command and decide whether the
+    second one is strictly worse.
+    """
+    failed = 0
+    passed = 0
+    for m in _FAIL_COUNT_RE.finditer(fp):
+        try:
+            failed += int(m.group(1))
+        except ValueError:
+            pass
+    for m in _PASS_COUNT_RE.finditer(fp):
+        try:
+            passed += int(m.group(1))
+        except ValueError:
+            pass
+    return failed, passed
+
+
+def _is_regression(old_fp: str, new_fp: str) -> bool:
+    """True iff *new_fp* is strictly worse than *old_fp* for the same
+    test command — more failures, or fewer passes.
+
+    Equal counts → False (no change). Improvement → False. Only a
+    drop in passing tests OR a rise in failing tests counts.
+    """
+    old_failed, old_passed = _outcome_counts(old_fp)
+    new_failed, new_passed = _outcome_counts(new_fp)
+    if new_failed > old_failed:
+        return True
+    if new_passed < old_passed and new_passed + new_failed >= old_passed:
+        # Don't trip on tests that simply weren't collected this time
+        # (run with a smaller filter): require that the totals are
+        # comparable (new total ≥ old passed) before claiming a regression.
+        return True
+    return False
+
+
+def _has_regression_after_edit(state: "LoopState | None") -> bool:
+    """True iff the last test run for some command produced a strictly
+    worse outcome than the previous run of the SAME command.
+
+    The engine populates ``state.test_outcome_history`` as
+    ``{normalised_command: [prev_fp, latest_fp]}``. We walk every key
+    and ask whether the latest is worse than the previous. Only the
+    SAME command is compared, so two unrelated test files can never
+    cause a false positive.
+
+    Self-suppresses via ``state.regression_signaled`` so the model is
+    warned at most once per task — repeated regressions across many
+    edits don't spam guidance.
+    """
+    if state is None:
+        return False
+    if getattr(state, "regression_signaled", False):
+        return False
+    history = getattr(state, "test_outcome_history", None) or {}
+    for cmd, fps in history.items():
+        if not isinstance(fps, list) or len(fps) < 2:
+            continue
+        if _is_regression(fps[-2], fps[-1]):
+            try:
+                state.regression_signaled = True
+            except Exception:
+                pass
+            return True
+    return False
+
+
 def _has_first_test_run(state: "LoopState") -> bool:
     """True iff the model has just run a test runner for the first time
     and we haven't yet introduced ``tail_test_output``.
@@ -312,6 +389,11 @@ _DETECTORS: list[tuple[str, Any]] = [
     ("malformed_tool_call",   lambda m, s: _has_malformed_tool_call(m)),
     ("text_only_iters",       lambda m, s: _has_text_only_iters(s)),
     ("unknown_tool",          lambda m, s: _has_unknown_tool_loop(m)),
+    # regression_after_edit fires the first time an edit makes a
+    # previously-passing test fail. It must run BEFORE first_test_run
+    # so the model gets the more specific advice when a regression
+    # happens on its very first test run after an edit.
+    ("regression_after_edit", lambda m, s: _has_regression_after_edit(s)),
     # first_test_run is a *proactive* introduction — fires once when the
     # model first runs a test command, so it knows about
     # tail_test_output BEFORE getting stuck.

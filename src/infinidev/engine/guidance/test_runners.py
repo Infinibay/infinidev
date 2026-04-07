@@ -107,6 +107,88 @@ def is_test_command(args_str: str, state: "LoopState | None" = None) -> bool:
     return False
 
 
+# Flags that vary cosmetically between runs of the same test set
+# without changing what's being tested. Stripping them lets the
+# regression detector see "same target set, different verbosity" as
+# the same key. Order matters: flags with arguments are dropped
+# together with their argument.
+# All values are lowercased so the comparison against ``token.lower()``
+# inside ``normalize_test_command`` matches camelCase flag names too.
+_FLAGS_WITH_ARG: tuple[str, ...] = (
+    "--tb", "--maxfail", "--cov", "--rootdir", "--config-file",
+    "--ignore", "-k", "-m", "-c", "-x",  # short forms
+    "--testnamepattern", "--testpathpattern",  # jest
+    "-run", "-test.run",  # go test
+    "--filter",  # cargo / dotnet
+)
+_FLAGS_NO_ARG: tuple[str, ...] = (
+    "-v", "-vv", "-vvv", "-q", "-qq", "--quiet", "--verbose",
+    "-s", "--no-header", "--no-summary", "--tb=long", "--tb=short", "--tb=line",
+    "--color", "--no-color", "--full-trace", "--showlocals",
+    "--watch", "--watchAll", "--no-watch",
+    "--release", "--no-fail-fast",  # cargo
+    "-race", "-cover", "-v",  # go
+    "-r",
+)
+
+
+def normalize_test_command(cmd: str) -> str:
+    """Reduce a test command to its 'what is being tested' essence.
+
+    Strips flags (verbosity, coverage, output format, watch mode, ...)
+    while keeping the runner name and the positional targets (file
+    paths, test ids, test names). Two commands that test the same
+    set of things produce the same normalised key:
+
+      pytest test_x.py::test_a -v       → "pytest test_x.py::test_a"
+      pytest test_x.py::test_a --tb=long → "pytest test_x.py::test_a"
+      cd /tmp && pytest test_x.py::test_a → "pytest test_x.py::test_a"
+
+    Two commands that test DIFFERENT things stay distinct:
+
+      pytest test_x.py → "pytest test_x.py"
+      pytest test_y.py → "pytest test_y.py"
+
+    The detector uses the result as a dict key, so equality matters,
+    not similarity. Returns the lowercased, whitespace-collapsed
+    command on any failure mode.
+    """
+    if not cmd:
+        return ""
+    s = cmd.strip()
+    # Drop a leading "cd ... &&" prelude — the working directory
+    # doesn't change which tests run.
+    if s.lower().startswith("cd ") and "&&" in s:
+        s = s.split("&&", 1)[1].strip()
+
+    parts = s.split()
+    if not parts:
+        return ""
+
+    out: list[str] = []
+    skip_next = False
+    for tok in parts:
+        if skip_next:
+            skip_next = False
+            continue
+        low = tok.lower()
+        # Drop flags with an attached value (e.g. --tb=long, -k expr,
+        # -m mark) — both joined with = and split by whitespace.
+        is_flag_with_arg = any(low.startswith(f + "=") for f in _FLAGS_WITH_ARG)
+        is_bare_flag_with_arg = low in _FLAGS_WITH_ARG
+        is_no_arg_flag = low in _FLAGS_NO_ARG
+        if is_flag_with_arg or is_no_arg_flag:
+            continue
+        if is_bare_flag_with_arg:
+            skip_next = True  # also drop the value that follows
+            continue
+        # Drop bash redirection / pipe noise.
+        if tok in ("2>&1", "|", ">>", ">"):
+            break  # everything after a pipe is post-processing, not test selection
+        out.append(tok)
+    return " ".join(out).lower()
+
+
 # ── Outcome fingerprint ──────────────────────────────────────────────────
 
 # Keywords that, when paired with a number nearby, signal a test
@@ -179,4 +261,4 @@ def test_outcome_fingerprint(content: str) -> str | None:
     return ", ".join(parts)
 
 
-__all__ = ["is_test_command", "test_outcome_fingerprint"]
+__all__ = ["is_test_command", "test_outcome_fingerprint", "normalize_test_command"]
