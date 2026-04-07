@@ -591,15 +591,17 @@ class LoopEngine(AgentEngine):
         # Drain any user messages injected mid-task
         injected = self._drain_user_messages()
 
-        user_prompt = build_iteration_prompt(
-            ctx.desc, ctx.expected, effective_state,
-            project_knowledge=self._project_knowledge if iteration == ctx.start_iteration else None,
-            max_context_tokens=ctx.max_context_tokens,
-            session_notes=self.session_notes if self.session_notes else None,
-            user_messages=injected if injected else None,
-            skip_plan=ctx.skip_plan,
-            small_model=ctx.is_small,
-        )
+        from infinidev.engine.static_analysis_timer import measure as _sa_measure
+        with _sa_measure("prompt_build"):
+            user_prompt = build_iteration_prompt(
+                ctx.desc, ctx.expected, effective_state,
+                project_knowledge=self._project_knowledge if iteration == ctx.start_iteration else None,
+                max_context_tokens=ctx.max_context_tokens,
+                session_notes=self.session_notes if self.session_notes else None,
+                user_messages=injected if injected else None,
+                skip_plan=ctx.skip_plan,
+                small_model=ctx.is_small,
+            )
         return [
             {"role": "system", "content": ctx.system_prompt},
             {"role": "user", "content": user_prompt},
@@ -623,11 +625,27 @@ class LoopEngine(AgentEngine):
         tracker = BehaviorTracker(set(ctx.state.opened_files.keys()))
         tracker.task_has_edits = ctx.state.task_has_edits
 
+        # Tracks the wall-clock time of the previous LLM call's return
+        # so we can measure the python-only gap until the next call.
+        # None means "no previous call yet in this step".
+        import time as _time
+        from infinidev.engine.static_analysis_timer import add_elapsed as _sa_add
+        _last_llm_call_end: float | None = None
+
         while action_tool_calls < ctx.max_per_action and ctx.state.total_tool_calls < ctx.max_total_calls:
+            # If a previous LLM call ran in this step, record how much
+            # wall-clock elapsed between its return and now (the moment
+            # right before we dispatch the next one). This is the
+            # "between LLM calls" cost the user sees on the GPU monitor
+            # as idle GPU time.
+            if _last_llm_call_end is not None:
+                _sa_add("between_llm_calls", _time.perf_counter() - _last_llm_call_end)
+
             # Signal UI that LLM call is starting
             _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {})
 
             result = llm_caller.call(ctx, messages, is_planning, action_tool_calls)
+            _last_llm_call_end = _time.perf_counter()
 
             try:
                 _trace_llm_response(

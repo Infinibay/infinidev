@@ -188,12 +188,19 @@ class ReadFileTool(InfinibayBaseTool):
 
         self._log_tool_usage(f"Read {file_path} ({desc})")
 
-        # Auto-index the file for code intelligence (best-effort)
+        # Auto-index the file for code intelligence (best-effort).
+        # Wrapped in the static-analysis timer so we can attribute the
+        # indexing cost separately from "actual" syntax_check work —
+        # ensure_indexed parses the file with tree-sitter, populates
+        # the symbol DB, and can be one of the bigger non-LLM costs
+        # in a step on large source files.
         try:
             from infinidev.code_intel.smart_index import ensure_indexed
+            from infinidev.engine.static_analysis_timer import measure as _sa_measure
             project_id = self.project_id
             if project_id:
-                ensure_indexed(project_id, file_path)
+                with _sa_measure("file_indexing"):
+                    ensure_indexed(project_id, file_path)
         except Exception:
             pass  # Never fail a read because of indexing
 

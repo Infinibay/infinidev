@@ -75,21 +75,23 @@ class HookManager:
         Returns the (possibly modified) context.  Short-circuits if a
         hook sets ``ctx.skip = True``.
         """
-        with self._lock:
-            entries = list(self._hooks.get(ctx.event, []))
-        for entry in entries:
-            try:
-                entry.callback(ctx)
-            except Exception:
-                logger.warning(
-                    "Hook %r failed on %s",
-                    entry.name,
-                    ctx.event,
-                    exc_info=True,
-                )
-            if ctx.skip:
-                break
-        return ctx
+        from infinidev.engine.static_analysis_timer import measure as _sa_measure
+        with _sa_measure("hook_dispatch"):
+            with self._lock:
+                entries = list(self._hooks.get(ctx.event, []))
+            for entry in entries:
+                try:
+                    entry.callback(ctx)
+                except Exception:
+                    logger.warning(
+                        "Hook %r failed on %s",
+                        entry.name,
+                        ctx.event,
+                        exc_info=True,
+                    )
+                if ctx.skip:
+                    break
+            return ctx
 
     @property
     def has_hooks(self) -> bool:

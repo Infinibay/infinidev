@@ -39,7 +39,34 @@ from typing import Iterator
 # Categories the engine measures. Order is the display order in
 # ``render``. Adding a new category is one new key here + one new
 # ``with measure("name"):`` block at the call site.
+#
+# The categories split into two layers:
+#
+#   * **between_llm_calls** — wall-clock from "LLM call returned" to
+#     "next LLM call dispatched". The grand total of Python work the
+#     engine does in between model invocations. Used to answer the
+#     question "the GPU was idle for 2 seconds — where did Python go?"
+#
+#   * The rest are **finer attributions** of what happens INSIDE
+#     between_llm_calls. They will sum to less than between_llm_calls
+#     (the difference is unattributed "everything else" work). The
+#     biggest non-static-analysis suspects:
+#
+#       - prompt_build      — build_iteration_prompt (smart context,
+#                             opened-files cache, plan rendering, ...)
+#       - summarizer_llm    — the dedicated step summarizer LLM call
+#                             (this one IS GPU-bound; isolating it
+#                             from the "Python overhead" buckets)
+#       - hook_dispatch     — _hook_manager.dispatch wall time
+#       - file_indexing     — tree-sitter auto-indexing on read_file
+#                             (separate from syntax_check; this one
+#                             happens during reads, not writes)
 _CATEGORIES: tuple[str, ...] = (
+    "between_llm_calls",
+    "prompt_build",
+    "summarizer_llm",
+    "hook_dispatch",
+    "file_indexing",
     "syntax_check",
     "silent_deletion",
     "guidance",
@@ -93,6 +120,26 @@ def measure(category: str) -> Iterator[None]:
         bucket["calls"] = int(bucket["calls"]) + 1
 
 
+def add_elapsed(category: str, seconds: float) -> None:
+    """Manually add a measurement to *category*.
+
+    Used by call sites that can't easily wrap their code in a
+    ``with measure(...)`` block — typically because the start and end
+    points sit in different control-flow paths (e.g. measuring the
+    gap BETWEEN two iterations of a while loop). The caller takes its
+    own ``time.perf_counter()`` deltas and pushes them here.
+
+    No-op when the timer is disabled or when the category is unknown.
+    """
+    if not is_enabled():
+        return
+    bucket = _state.get(category)
+    if bucket is None:
+        return
+    bucket["total_s"] += float(seconds)
+    bucket["calls"] = int(bucket["calls"]) + 1
+
+
 def snapshot() -> dict[str, dict[str, float]]:
     """Return a copy of the current accumulators (for tests / programmatic use)."""
     return {cat: dict(values) for cat, values in _state.items()}
@@ -121,4 +168,4 @@ def render(*, indent: str = "  ") -> str:
     return "\n".join(lines)
 
 
-__all__ = ["is_enabled", "measure", "reset", "snapshot", "render"]
+__all__ = ["is_enabled", "measure", "add_elapsed", "reset", "snapshot", "render"]

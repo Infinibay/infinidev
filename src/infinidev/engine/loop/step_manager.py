@@ -145,7 +145,9 @@ class StepManager:
         )
         if _summarizer_on:
             try:
-                structured = _summarize_step(messages, ctx.desc, ctx.state, step_result, ctx.llm_params)
+                from infinidev.engine.static_analysis_timer import measure as _sa_measure
+                with _sa_measure("summarizer_llm"):
+                    structured = _summarize_step(messages, ctx.desc, ctx.state, step_result, ctx.llm_params)
                 record = ActionRecord(
                     step_index=step_index,
                     summary=structured.get("summary", step_result.summary),
