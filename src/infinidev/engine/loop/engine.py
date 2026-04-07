@@ -766,6 +766,22 @@ class LoopEngine(AgentEngine):
         tracker.on_step_end()
         if tracker.task_has_edits:
             ctx.state.task_has_edits = True
+        # Propagate the set of files edited in this step into the
+        # loop state so the ``similarity_after_write`` detector can
+        # check the freshly-reindexed methods against the rest of the
+        # project. The list is cleared by the detector itself after
+        # consuming it, so guidance fires at most once per write burst.
+        if tracker.files_edited:
+            # Skip files we've already warned about in this task.
+            warned = set(ctx.state.similarity_warned_files)
+            new_paths = [p for p in tracker.files_edited if p not in warned]
+            if new_paths:
+                # Dedup while preserving order.
+                existing = set(ctx.state.recently_written_files)
+                for p in new_paths:
+                    if p not in existing:
+                        ctx.state.recently_written_files.append(p)
+                        existing.add(p)
 
         # Attach metadata for post-step processing
         step_result.action_tool_calls = action_tool_calls

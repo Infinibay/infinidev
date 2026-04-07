@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from infinidev.engine.guidance.detectors import detect_stuck_pattern
 from infinidev.engine.guidance.library import get_entry
+from infinidev.engine.guidance.similarity_detector import check_similarity_after_write
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.models import LoopState
@@ -54,6 +55,21 @@ def maybe_queue_guidance(
             return None
         if len(state.guidance_given) >= max_per_task:
             return None
+
+        # Dynamic detector first: similarity_after_write produces its
+        # own rendered text (specific method names, file paths, line
+        # ranges) and must run BEFORE the static dispatch. It
+        # self-manages its de-dup via ``state.similarity_warned_files``
+        # so we only gate it on the "already given this task?" check.
+        if "similarity_after_write" not in state.guidance_given:
+            try:
+                dyn_text = check_similarity_after_write(state)
+            except Exception:
+                dyn_text = None
+            if dyn_text:
+                state.pending_guidance = dyn_text
+                state.guidance_given.append("similarity_after_write")
+                return "similarity_after_write"
 
         key = detect_stuck_pattern(messages, state)
         if not key or key in state.guidance_given:

@@ -75,6 +75,26 @@ class LoopState(BaseModel):
     # this and self-suppresses on subsequent steps so the model isn't
     # spammed with the same advice.
     regression_signaled: bool = False
+    # Paths of files written in the current step (create_file,
+    # replace_lines, edit_file, multi_edit_file, apply_patch,
+    # add_content_*). Consumed by the
+    # ``similarity_after_write`` detector, which checks whether any
+    # of the freshly-indexed methods look suspiciously similar to
+    # methods elsewhere in the project — if so, guidance is queued
+    # pointing the model at ``find_similar_methods`` so it can
+    # consolidate instead of reimplementing.
+    #
+    # The list is cleared every time the detector runs so guidance
+    # fires at most once per write burst. Duplicates are allowed (a
+    # file written twice in one step counts once via set dedup inside
+    # the detector).
+    recently_written_files: list[str] = Field(default_factory=list)
+    # Sticky per-file set: once the similarity detector has warned
+    # about a given file's methods, it won't warn again for the same
+    # file in this task. Prevents the model from seeing the same
+    # "this looks like X.y" message every time it edits the same
+    # method. Reset by clearing the state (i.e. between tasks).
+    similarity_warned_files: list[str] = Field(default_factory=list)
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""
