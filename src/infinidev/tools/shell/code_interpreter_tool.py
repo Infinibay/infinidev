@@ -18,19 +18,21 @@ from infinidev.tools.shell.code_interpreter_input import CodeInterpreterInput
 class CodeInterpreterTool(InfinibayBaseTool):
     name: str = "code_interpreter"
     description: str = (
-        "Execute Python code for data analysis, computation, validation, "
-        "prototyping, or custom code-intelligence queries. The script "
-        "runs in a sandboxed subprocess and has read-only access to "
-        "the project's symbol index via ``infinidev.code_intel."
-        "interpreter_api`` — which exposes find_symbols, find_references, "
-        "find_definitions, list_file_symbols, iter_symbols, get_source, "
-        "find_similar, search_by_intent, extract_skeleton, list_files, "
-        "project_stats. These are pre-imported automatically; just call "
-        "them. Use this tool when you need to COMBINE queries ('find "
-        "methods that call both X and Y', 'rank classes by method count', "
-        "'trace callers two levels out') or iterate over results in "
-        "Python. Call help('code_interpreter') for detailed usage, "
-        "examples, and the full signature of each bridge function. "
+        "Execute Python code in a sandboxed subprocess. The script has "
+        "read-only access to the project's code intelligence index via "
+        "13 bridge functions that are ALREADY DEFINED in the script's "
+        "global namespace — you do NOT need to import them, and you "
+        "MUST NOT redefine them. Just call them directly: "
+        "project_stats(), iter_symbols(kind='method'), "
+        "find_references('foo'), find_similar('X.bar'), "
+        "search_by_intent('parse timestamps'), code_search('TODO'), "
+        "etc. When the script starts, a marker is printed to stderr "
+        "confirming which bridge functions are live — if you don't see "
+        "that marker your environment is broken. Use this tool when you "
+        "need to COMBINE queries ('methods that call both X and Y', "
+        "'rank classes by method count', 'find duplicate bodies') or "
+        "iterate over results in Python. Call explain_tool("
+        "'code_interpreter') for the full list + examples per function. "
         "Returns stdout, stderr, and exit code."
     )
     args_schema: Type[BaseModel] = CodeInterpreterInput
@@ -88,12 +90,35 @@ class CodeInterpreterTool(InfinibayBaseTool):
         # package (misconfigured venv). In that case the bootstrap is
         # a silent no-op and the model's script runs without the
         # bridge, same as before this commit.
+        # The bootstrap header is prepended to every script the model
+        # submits. It imports the read-only bridge functions into the
+        # global namespace AND prints a visible proof-of-life marker
+        # to STDOUT as its first line. The marker serves two purposes:
+        #
+        #   1. Model confidence: on the last experiment we saw the
+        #      model ignore the bootstrap and DEFINE iter_symbols
+        #      itself — because it had no empirical evidence that the
+        #      import worked. With the marker, the model sees in its
+        #      own tool result "[infinidev bridge: 13 functions live]"
+        #      before any of its own output, so it knows the functions
+        #      are real and ready to call.
+        #   2. Operator debugging: if a future environment breaks the
+        #      import (misconfigured venv, missing dep), the marker
+        #      switches to "[infinidev bridge: FAILED — <exc>]" and
+        #      the failure is loud instead of silent.
+        #
+        # Why stdout and not stderr: models attend most to stdout
+        # (that's where their own print() output goes), so placing
+        # the marker there guarantees it's on the main stream the
+        # model reads first. A clear [BRIDGE: ...] prefix keeps it
+        # visually distinct from the script's own data.
         _BOOTSTRAP_HEADER = (
             "# ── infinidev code_interpreter bootstrap ─────────────────\n"
-            "# Pre-imports the read-only code-intelligence API so the\n"
-            "# names below are available without an explicit import.\n"
-            "# The bridge reads project_id and workspace from env vars\n"
-            "# set by the tool; you never need to pass them.\n"
+            "# The 13 functions listed below are ALREADY DEFINED in\n"
+            "# your script's global namespace. Call them directly — do\n"
+            "# NOT import them, do NOT redefine them, do NOT wrap them.\n"
+            "# They read the project_id and workspace from env vars set\n"
+            "# by the tool; you never need to pass them.\n"
             "try:\n"
             "    from infinidev.code_intel.interpreter_api import (\n"
             "        find_symbols, find_definitions, find_references,\n"
@@ -101,8 +126,20 @@ class CodeInterpreterTool(InfinibayBaseTool):
             "        find_similar, search_by_intent, extract_skeleton,\n"
             "        list_files, find_files, code_search, project_stats,\n"
             "    )\n"
-            "except ImportError:\n"
-            "    pass\n"
+            "    print(\n"
+            "        '[BRIDGE: 13 functions live — project_stats, '\n"
+            "        'iter_symbols, find_symbols, find_definitions, '\n"
+            "        'find_references, list_file_symbols, get_source, '\n"
+            "        'find_similar, search_by_intent, extract_skeleton, '\n"
+            "        'list_files, find_files, code_search. '\n"
+            "        'CALL THEM DIRECTLY — they are already in globals, '\n"
+            "        'do NOT define them yourself]'\n"
+            "    )\n"
+            "except ImportError as _bridge_err:\n"
+            "    print(\n"
+            "        f'[BRIDGE: FAILED to import — {_bridge_err}. '\n"
+            "        f'Code-intelligence queries unavailable this script.]'\n"
+            "    )\n"
             "# ── end bootstrap ─────────────────────────────────────────\n"
         )
 
