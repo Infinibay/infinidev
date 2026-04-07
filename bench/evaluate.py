@@ -48,13 +48,31 @@ def print_summary(predictions: list[dict]) -> None:
     print(f"{'='*60}\n")
 
 
-def run_swebench_eval(predictions_path: Path, dataset: str = "princeton-nlp/SWE-bench_Lite") -> None:
-    """Run official SWE-bench evaluation.
+def run_swebench_eval(
+    predictions_path: Path,
+    dataset: str = "princeton-nlp/SWE-bench_Lite",
+    split: str = "test",
+    run_id: str = "infinidev_eval",
+    max_workers: int = 1,
+    timeout: int = 1800,
+) -> None:
+    """Run official SWE-bench evaluation via the swebench CLI.
 
-    Requires: pip install swebench
+    Spawns ``python -m swebench.harness.run_evaluation`` as a
+    subprocess instead of importing main(): the swebench 4.x ``main()``
+    function takes positional arguments and isn't argv-parseable
+    in-process. The subprocess approach is also better isolated —
+    swebench mutates global state heavily.
+
+    Requires: ``pip install swebench`` and either Docker or Podman
+    with the docker-socket compatibility layer enabled. When using
+    Podman, set ``DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock``
+    in your environment before invoking this script.
     """
+    import subprocess
+
     try:
-        from swebench.harness.run_evaluation import main as swebench_main
+        import swebench  # noqa: F401
     except ImportError:
         log.error(
             "swebench not installed. Install with:\n"
@@ -63,35 +81,34 @@ def run_swebench_eval(predictions_path: Path, dataset: str = "princeton-nlp/SWE-
         )
         sys.exit(1)
 
-    # Convert JSONL predictions to the format swebench expects
-    predictions = load_predictions(predictions_path)
+    log.info("Running SWE-bench evaluation on %s...", predictions_path)
+    log.info("Dataset=%s split=%s run_id=%s", dataset, split, run_id)
 
-    # swebench expects a JSON file with list of predictions
-    eval_input = predictions_path.parent / "predictions_eval.json"
-    with open(eval_input, "w") as f:
-        json.dump(predictions, f, indent=2)
-
-    log.info("Running SWE-bench evaluation on %d predictions...", len(predictions))
-    log.info("This may take a while as it applies and tests each patch.")
-
-    sys.argv = [
-        "run_evaluation",
-        "--predictions_path", str(eval_input),
-        "--swe_bench_tasks", dataset,
-        "--log_level", "INFO",
-        "--timeout", "900",
+    cmd = [
+        sys.executable, "-m", "swebench.harness.run_evaluation",
+        "--dataset_name", dataset,
+        "--split", split,
+        "--predictions_path", str(predictions_path),
+        "--max_workers", str(max_workers),
+        "--run_id", run_id,
+        "--timeout", str(timeout),
     ]
+    log.info("Command: %s", " ".join(cmd))
 
-    try:
-        swebench_main()
-    except SystemExit:
-        pass
+    proc = subprocess.run(cmd)
+    if proc.returncode != 0:
+        log.error("swebench evaluator exited with code %d", proc.returncode)
+        sys.exit(proc.returncode)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Infinidev SWE-bench predictions")
     parser.add_argument("--predictions", default="bench/predictions.jsonl", help="Predictions JSONL file")
     parser.add_argument("--dataset", default="princeton-nlp/SWE-bench_Lite", help="SWE-bench dataset")
+    parser.add_argument("--split", default="test", help="Dataset split")
+    parser.add_argument("--run-id", default="infinidev_eval", help="swebench run identifier")
+    parser.add_argument("--max-workers", type=int, default=1, help="Parallel evaluator workers")
+    parser.add_argument("--timeout", type=int, default=1800, help="Per-instance test timeout (seconds)")
     parser.add_argument("--summary-only", action="store_true", help="Only show prediction summary, don't run eval")
     args = parser.parse_args()
 
@@ -112,7 +129,14 @@ def main():
             print(f"  [{status}] {p['instance_id']}")
         return
 
-    run_swebench_eval(predictions_path, args.dataset)
+    run_swebench_eval(
+        predictions_path,
+        dataset=args.dataset,
+        split=args.split,
+        run_id=args.run_id,
+        max_workers=args.max_workers,
+        timeout=args.timeout,
+    )
 
 
 if __name__ == "__main__":
