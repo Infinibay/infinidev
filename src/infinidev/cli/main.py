@@ -23,21 +23,66 @@ from infinidev.engine.analysis.analysis_engine import AnalysisEngine
 from infinidev.engine.analysis.review_engine import ReviewEngine
 import infinidev.prompts.flows  # noqa: F401 — registers flows
 
-# Configure logging (ensure base dir exists before creating file handler)
+# ── Logging setup ────────────────────────────────────────────────────────
+#
+# The default is SILENCE. Real users should never see log spam on stderr
+# or find log files accumulating on disk they didn't ask for. Logging is
+# opt-in through two env vars:
+#
+#   INFINIDEV_LOG_FILE=<path>   → write logs to this file (any non-empty value)
+#   INFINIDEV_LOG_LEVEL=<lvl>   → DEBUG | INFO | WARNING | ERROR (default: WARNING)
+#   INFINIDEV_LOG_STDERR=1      → also stream logs to stderr (off by default)
+#
+# Without any of these set, the root logger has a single NullHandler and
+# nothing is emitted anywhere. Third-party libraries that log at INFO
+# (httpx, litellm, openai, ...) are still clamped to ERROR as a safety
+# net in case something slips through.
 DEFAULT_BASE_DIR.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[logging.FileHandler(DEFAULT_BASE_DIR / "infinidev.log"), logging.StreamHandler(sys.stderr)]
-)
-# Silence noisy third-party loggers
+
+_log_level_name = os.environ.get("INFINIDEV_LOG_LEVEL", "").strip().upper()
+_log_level = getattr(logging, _log_level_name, None) if _log_level_name else logging.WARNING
+if not isinstance(_log_level, int):
+    _log_level = logging.WARNING
+
+_log_file_path = os.environ.get("INFINIDEV_LOG_FILE", "").strip()
+_log_stderr = os.environ.get("INFINIDEV_LOG_STDERR", "").strip() not in ("", "0", "false", "False")
+
+_handlers: list[logging.Handler] = []
+if _log_file_path:
+    try:
+        _handlers.append(logging.FileHandler(_log_file_path))
+    except Exception:
+        # If the file can't be opened, fall through to NullHandler —
+        # we must never crash a user's session because of logging.
+        pass
+if _log_stderr:
+    _handlers.append(logging.StreamHandler(sys.stderr))
+
+_root = logging.getLogger()
+# Wipe any handlers an imported library may have attached during its
+# own module-level side effects, then install ours (or a NullHandler).
+_root.handlers.clear()
+if _handlers:
+    _root.setLevel(_log_level)
+    for _h in _handlers:
+        _h.setFormatter(logging.Formatter("%(message)s"))
+        _root.addHandler(_h)
+else:
+    # Silent default — absorb every log record.
+    _root.setLevel(logging.CRITICAL)
+    _root.addHandler(logging.NullHandler())
+
+# Clamp noisy third-party loggers to ERROR unconditionally, as a
+# safety net even when the user does enable logging. If someone wants
+# the full firehose they can override per-logger.
 for _noisy in ("httpx", "httpcore", "litellm", "LiteLLM", "litellm.utils",
                "litellm.llms", "litellm.main", "litellm.cost_calculator",
                "litellm.litellm_core_utils", "litellm.router",
                "openai", "openai._base_client"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
-# Suppress litellm's own verbose/debug output
+# Suppress litellm's own verbose/debug output regardless of log
+# settings — its internal prints bypass the logging module.
 import litellm
 litellm.suppress_debug_info = True
 litellm.set_verbose = False
@@ -414,11 +459,10 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         return
 
     if not (no_tui or classic):
-        # TUI mode: remove the stderr handler so log output doesn't corrupt
-        # the terminal.  File logging is preserved.
-        root = logging.getLogger()
-        root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)
-                         or getattr(h, 'stream', None) is not sys.stderr]
+        # TUI mode. The stderr handler scrub that used to live here is
+        # gone — stderr logging is now opt-in only (INFINIDEV_LOG_STDERR=1)
+        # so the TUI is safe by default. If a user deliberately enabled
+        # stderr logging AND then started the TUI, that's on them.
         if profile:
             click.echo(click.style("Profiling enabled — profile will be saved on exit.", fg="yellow"), err=True)
         from infinidev.ui.app import run_tui
