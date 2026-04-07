@@ -376,6 +376,52 @@ def init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_diag_file ON ci_diagnostics(project_id, file_path)")
 
+        # Code intelligence: per-method body fingerprints for fuzzy
+        # similarity search across the project. Populated by the
+        # ``code_intel.method_index`` module immediately after
+        # ``store_file_symbols`` runs, so it stays in sync with the
+        # symbol index without a separate background pass.
+        #
+        # Why a separate table instead of columns on ci_symbols:
+        #   * Most ci_symbols rows are imports, fields, properties —
+        #     things with no body to fingerprint. Adding two TEXT
+        #     columns to ci_symbols would make every row pay for a
+        #     feature 90% of rows can't use.
+        #   * Similarity search has its own index requirements
+        #     (idx_method_bodies_hash for exact-dup, idx_method_bodies_qual
+        #     for "fetch THIS method"), unrelated to the symbol indexes.
+        #   * The table can be cleared and rebuilt independently of
+        #     ci_symbols if the normalization scheme changes.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ci_method_bodies (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id    INTEGER NOT NULL,
+                file_path     TEXT NOT NULL,
+                qualified_name TEXT NOT NULL,
+                kind          TEXT NOT NULL,    -- 'function' | 'method'
+                line_start    INTEGER NOT NULL,
+                line_end      INTEGER NOT NULL,
+                body_size     INTEGER NOT NULL, -- in lines (after stripping comments)
+                body_hash     TEXT NOT NULL,    -- normalized sha256[:16] for exact-dup
+                body_norm     TEXT NOT NULL,    -- space-separated normalized tokens (for Jaccard)
+                language      TEXT NOT NULL,
+                indexed_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, file_path, qualified_name)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_method_bodies_hash "
+            "ON ci_method_bodies(project_id, body_hash)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_method_bodies_qual "
+            "ON ci_method_bodies(project_id, qualified_name)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_method_bodies_file "
+            "ON ci_method_bodies(project_id, file_path)"
+        )
+
         # Create a default project if none exists
         row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
         if not row:

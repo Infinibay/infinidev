@@ -104,6 +104,16 @@ def index_file(project_id: int, file_path: str) -> int:
     ci_index.store_file_symbols(project_id, file_path, symbols, references, imports)
     ci_index.mark_file_indexed(project_id, file_path, language, content_hash, len(symbols))
 
+    # Method body fingerprints — populates ci_method_bodies for the
+    # find_similar_methods tool. Runs after store_file_symbols because
+    # it reads the freshly inserted ci_symbols rows for line ranges.
+    # Best-effort: any failure here must not block the main index.
+    try:
+        from infinidev.code_intel.method_index import index_methods_for_file
+        index_methods_for_file(project_id, file_path, content, language)
+    except Exception as exc:
+        logger.debug("method_index hook failed for %s: %s", file_path, exc)
+
     return len(symbols)
 
 
