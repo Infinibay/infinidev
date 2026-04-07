@@ -341,40 +341,58 @@ def _normalize_step_title(title: str) -> str:
     return s
 
 
-def _has_stop_planning_start_coding(state: "LoopState | None") -> bool:
-    """True iff the model has planned extensively but written nothing.
+# Threshold for the rate-based stop_planning_start_coding detector.
+# In a single outer-loop step (between two step_complete calls), the
+# model may emit several inner LLM calls; each can issue multiple
+# add_step tool calls. 8 add_step calls in ONE step is the point
+# where "organic plan refinement" becomes "bombing the plan queue" —
+# below this, legitimate replanning after discovery is common and
+# should not be penalised.
+_STOP_PLANNING_ADD_STEP_THRESHOLD = 8
+
+
+def _has_stop_planning_start_coding(
+    messages: list[dict], state: "LoopState | None"
+) -> bool:
+    """True iff the model is procrastinating via add_step in the current step.
 
     The pattern we're catching (observed empirically with gemma4:26b
-    against minidb-full): the model creates a plan, then in subsequent
-    iterations keeps adding/modifying more steps and NEVER calls a
-    write tool. The plan grows while the file at the centre of the
+    against minidb-full and discussed at length during session 2):
+    the model enters an execute iteration, keeps emitting ``add_step``
+    calls instead of editing code, and never actually touches a file.
+    The plan grows turn over turn while the file at the centre of the
     task stays at its template default.
 
-    IMPORTANT distinction (the nuance that makes this detector
-    correct): adding 5+ steps during the FIRST iteration is the
-    initial planning phase, which is legitimate. Adding more steps in
-    iteration 2+ without having edited anything is procrastination.
-    We gate on ``iteration_count >= 2`` to enforce this — the
-    detector cannot fire during the initial planning step where the
-    model is supposed to be building its plan from scratch.
+    **Rate-based, not count-based.** The earlier version of this
+    detector checked the total number of plan steps, which penalised
+    legitimate planning in the first iteration and failed to trigger
+    on the actual pattern. The user pointed out that "agregar steps
+    está bien, agregar 10 steps en un mismo step no" — the signal is
+    the RATE of additions inside a single outer-loop step, not the
+    cumulative plan size.
 
     Fires when ALL of:
-      * the agent has ``task_has_edits == False`` (no create/replace
-        has succeeded yet this task), AND
-      * we are in iteration 2 or later (past the initial planning
-        step — adding many steps in iteration 1 is normal), AND
-      * the plan has at least 5 concrete steps (done + pending +
-        active, excluding skipped), AND
-      * the total tool-call count is ≥ 8 (the model has had enough
-        rope to have written something by now — short tasks where
-        the first 3 tool calls are all add_step are legitimate
-        exploration of an unfamiliar codebase).
+      * ``task_has_edits == False`` (no successful write yet this task),
+      * ``iteration_count >= 2`` (past the initial planning step —
+        the model is supposed to add many steps in iteration 1 when
+        building the plan from scratch; punishing that would be
+        wrong),
+      * the current step's message slice contains at least
+        :data:`_STOP_PLANNING_ADD_STEP_THRESHOLD` ``add_step`` tool
+        calls. The message slice is passed pre-sliced by the
+        dispatcher (``messages[step_messages_start:]``) so it already
+        reflects only the current step's contribution.
 
-    The 4-condition AND is intentional: each individual signal is
-    weak, but together they form a clear "procrastinating via planning
-    in execute mode" signature that's almost impossible to produce
-    legitimately. The iteration gate is the most important of the
-    four because it embodies the planning-vs-execute distinction.
+    Why counting in the message slice beats looking at the plan:
+      * Honours legitimate replanning: if the model added a step,
+        ran some tool calls, realised something new and added 1-2
+        more steps in the same inner loop, that's 3 add_step calls
+        — well under the threshold. No fire, no false positive.
+      * Honours legitimate planning: in iteration 1 (initial plan
+        building) the gate short-circuits before the count matters.
+      * Catches the actual bad pattern: a model bombing the plan
+        queue emits 8-15 add_steps in quick succession without
+        interleaving any file reads or writes.
     """
     if state is None:
         return False
@@ -382,18 +400,14 @@ def _has_stop_planning_start_coding(state: "LoopState | None") -> bool:
         return False
     if getattr(state, "iteration_count", 0) < 2:
         return False
-    plan = getattr(state, "plan", None)
-    if plan is None:
-        return False
-    concrete_steps = [
-        s for s in plan.steps
-        if getattr(s, "status", "") in ("done", "active", "pending")
-    ]
-    if len(concrete_steps) < 5:
-        return False
-    if getattr(state, "total_tool_calls", 0) < 8:
-        return False
-    return True
+
+    # Count add_step tool calls in the current step's message slice.
+    # _tool_calls_in_messages walks only assistant messages and
+    # extracts (name, args) tuples — anything else in the slice
+    # (tool results, nudges, user messages) is skipped.
+    tool_calls = _tool_calls_in_messages(messages)
+    add_step_count = sum(1 for name, _ in tool_calls if name == "add_step")
+    return add_step_count >= _STOP_PLANNING_ADD_STEP_THRESHOLD
 
 
 def _has_duplicate_steps(state: "LoopState | None") -> bool:
@@ -454,10 +468,14 @@ _DETECTORS: list[tuple[str, Any]] = [
     # tail_test_output BEFORE getting stuck.
     ("first_test_run",        lambda m, s: _has_first_test_run(s)),
     # stop_planning_start_coding fires before duplicate_steps because
-    # the "planned 5+, edited 0" signature is the more actionable
-    # message — once we've established the model is procrastinating
-    # via planning, the duplicate-step warning is redundant noise.
-    ("stop_planning_start_coding", lambda m, s: _has_stop_planning_start_coding(s)),
+    # the "8+ add_step in one step, 0 edits" signature is the more
+    # actionable message — once we've established the model is
+    # procrastinating via planning, the duplicate-step warning is
+    # redundant noise. The detector is rate-based: it counts
+    # ``add_step`` calls in the current step's message slice, not the
+    # total plan size, so legitimate planning in iter 1 and
+    # legitimate replanning in later iters never trigger it.
+    ("stop_planning_start_coding", lambda m, s: _has_stop_planning_start_coding(m, s)),
     ("duplicate_steps",       lambda m, s: _has_duplicate_steps(s)),
     ("vague_steps",           lambda m, s: _has_vague_step_spam(m)),
     ("reread_loop",           lambda m, s: _has_reread_loop(m, s)),
