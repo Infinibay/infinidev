@@ -426,6 +426,13 @@ _TOOL_ALIASES: dict[str, str] = {
     # below converts (start_line, end_line) to read_file's signature
     # without the model needing to know.
     "partial_read": "read_file",
+    # ``help`` collides with Python's builtin ``help()`` which confuses
+    # the model — in the bridge experiment, qwen tried to run
+    # ``python3 -c "help('code_interpreter')"`` three times instead of
+    # calling the help tool. ``explain_tool`` is the unambiguous name
+    # we recommend in the new system prompt; the alias keeps the old
+    # name working so existing prompts don't break.
+    "explain_tool": "help",
 }
 
 
