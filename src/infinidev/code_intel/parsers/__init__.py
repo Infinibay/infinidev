@@ -47,7 +47,18 @@ EXTENSIONS: dict[str, str] = {
 
 
 def get_parser(language: str) -> LanguageParser | None:
-    """Return the parser for a language, or None if unsupported."""
+    """Return the parser for a language, or None if unsupported.
+
+    Returns a dedicated parser for the 5 languages with bespoke
+    extractors (Python, JavaScript, TypeScript, Rust, C). Falls back
+    to :class:`GenericParser` for any language listed in
+    ``GENERIC_LANGUAGES`` (Go, Java, Ruby, C#, PHP, Kotlin, Bash,
+    C++, TSX) — those go through the config-driven walker that
+    reuses the same per-language node-type tables the file-skeleton
+    extractor maintains. The generic parser does symbols + imports
+    but not references; that's an acceptable tradeoff for unblocking
+    9 languages with one module.
+    """
     if language == "python":
         from infinidev.code_intel.parsers.python_parser import PythonParser
         return PythonParser()
@@ -63,6 +74,10 @@ def get_parser(language: str) -> LanguageParser | None:
     if language == "c":
         from infinidev.code_intel.parsers.c_parser import CParser
         return CParser()
+    # Generic fallback for the long tail of languages.
+    from infinidev.code_intel.parsers.generic_parser import GenericParser, GENERIC_LANGUAGES
+    if language in GENERIC_LANGUAGES:
+        return GenericParser(language)
     return None
 
 

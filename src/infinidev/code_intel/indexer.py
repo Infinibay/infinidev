@@ -200,7 +200,16 @@ def index_directory(
 
 
 def _get_ts_language(language: str):
-    """Get the tree-sitter Language object for a language name."""
+    """Get the tree-sitter Language object for a language name.
+
+    Routes the dedicated grammars (python, js, ts, rust, c) to their
+    bespoke imports, and delegates the long-tail languages (go, java,
+    ruby, csharp, php, kotlin, bash, cpp, tsx) to the centralised
+    loader registry in ``code_intel/syntax_check.py``. The centralised
+    registry is the same one the file-skeleton extractor uses, so
+    the indexer and the skeleton extractor stay in lockstep — adding
+    a new language is one entry in that registry, not two.
+    """
     from tree_sitter import Language
 
     try:
@@ -221,4 +230,18 @@ def _get_ts_language(language: str):
             return Language(ts.language())
     except ImportError:
         logger.warning("tree-sitter grammar not installed for %s", language)
+        return None
+
+    # Long-tail languages — go through the shared loader registry that
+    # also powers the skeleton extractor. Returning None for an unknown
+    # language is the same contract as the original code path, so the
+    # indexer treats it as "skip this file".
+    try:
+        from infinidev.code_intel.syntax_check import _load_parser
+        parser = _load_parser(language)
+        if parser is not None:
+            # _load_parser returns a Parser; extract its language attribute.
+            return getattr(parser, "language", None)
+    except Exception:
+        pass
     return None
