@@ -48,7 +48,7 @@ useful for real software-engineering tasks**. Every architectural
 decision flows from this constraint.
 
 It is the CLI evolution of the original Infinibay multi-agent system.
-The web prototype lives in `research_copy/` and is no longer part of
+The web prototype lives in `Infinibay/research` and is no longer part of
 the active product.
 
 The two things that make Infinidev different from a generic
