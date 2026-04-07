@@ -341,6 +341,48 @@ def _normalize_step_title(title: str) -> str:
     return s
 
 
+def _has_stop_planning_start_coding(state: "LoopState | None") -> bool:
+    """True iff the model has planned extensively but written nothing.
+
+    The pattern we're catching (observed empirically with gemma4:26b
+    against minidb-full): the model creates 5+ plan steps, keeps
+    modifying them, and NEVER calls a write tool. The plan grows
+    while the file at the centre of the task stays at its template
+    default. ``duplicate_steps`` partially covers this but from a
+    different angle — it catches "you replanned the same thing" while
+    this detector catches "you planned a LOT and never started".
+
+    Fires when:
+      * the agent has ``task_has_edits == False`` (no create/replace
+        has succeeded yet this task), AND
+      * the plan has at least 5 concrete steps (done + pending +
+        active, excluding skipped), AND
+      * the total tool-call count is ≥ 8 (so we only fire after the
+        model has had enough rope to have written something by now —
+        planning 5 steps in the first 3 tool calls is legitimate).
+
+    The 3-condition AND is intentional: each individual signal is
+    weak, but together they form a clear "procrastinating via planning"
+    signature that's almost impossible to produce legitimately.
+    """
+    if state is None:
+        return False
+    if getattr(state, "task_has_edits", False):
+        return False
+    plan = getattr(state, "plan", None)
+    if plan is None:
+        return False
+    concrete_steps = [
+        s for s in plan.steps
+        if getattr(s, "status", "") in ("done", "active", "pending")
+    ]
+    if len(concrete_steps) < 5:
+        return False
+    if getattr(state, "total_tool_calls", 0) < 8:
+        return False
+    return True
+
+
 def _has_duplicate_steps(state: "LoopState | None") -> bool:
     """True iff the current plan has 2+ near-duplicate step titles.
 
@@ -398,6 +440,11 @@ _DETECTORS: list[tuple[str, Any]] = [
     # model first runs a test command, so it knows about
     # tail_test_output BEFORE getting stuck.
     ("first_test_run",        lambda m, s: _has_first_test_run(s)),
+    # stop_planning_start_coding fires before duplicate_steps because
+    # the "planned 5+, edited 0" signature is the more actionable
+    # message — once we've established the model is procrastinating
+    # via planning, the duplicate-step warning is redundant noise.
+    ("stop_planning_start_coding", lambda m, s: _has_stop_planning_start_coding(s)),
     ("duplicate_steps",       lambda m, s: _has_duplicate_steps(s)),
     ("vague_steps",           lambda m, s: _has_vague_step_spam(m)),
     ("reread_loop",           lambda m, s: _has_reread_loop(m, s)),

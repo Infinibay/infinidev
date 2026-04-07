@@ -35,6 +35,34 @@ class GuidanceEntry:
 
 
 _LIBRARY: dict[str, GuidanceEntry] = {
+    "stop_planning_start_coding": GuidanceEntry(
+        key="stop_planning_start_coding",
+        title="Stop planning, start opening files",
+        body=(
+            "You have created multiple plan steps but you have not "
+            "written or modified a single file yet. Planning more is "
+            "procrastination. Pick the file your active step names, "
+            "call read_file or list_symbols on it, then make the actual "
+            "change with replace_lines, create_file, or edit_symbol. "
+            "Tests, refactors, and features all require BYTES landing "
+            "on disk — a perfect plan with zero edits ships nothing. "
+            "If you genuinely don't know what file to touch yet, your "
+            "active step is too vague — rewrite it with a concrete file "
+            "path and call read_file on that path right now."
+        ),
+        example=(
+            "BAD pattern (what you are doing now):\n"
+            "  add_step(title='Plan refactoring approach')\n"
+            "  add_step(title='Identify cohesive groups')\n"
+            "  add_step(title='Design new module structure')\n"
+            "  add_step(title='Document the changes')\n"
+            "  ... 0 edits to any file ...\n\n"
+            "GOOD pattern:\n"
+            "  read_file('app/services/Foo.ts')   # see the actual code\n"
+            "  replace_lines(file_path='app/services/Foo.ts',\n"
+            "                start_line=42, end_line=58, content='...')"
+        ),
+    ),
     "stuck_on_planning": GuidanceEntry(
         key="stuck_on_planning",
         title="How to write a concrete plan step",
