@@ -57,8 +57,8 @@ SMALL_MODEL_TOOLS = [
     ListDirectoryTool, CodeSearchTool, GlobTool,
     # Git (3)
     GitCommitTool, GitDiffTool, GitStatusTool,
-    # Shell (1)
-    ExecuteCommandTool,
+    # Shell (2)
+    ExecuteCommandTool, CodeInterpreterTool,
     # Knowledge (2)
     RecordFindingTool, SearchFindingsTool,
     # Code intelligence (8)

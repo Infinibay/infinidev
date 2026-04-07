@@ -381,10 +381,25 @@ def _sanitize_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
+_SMALL_MODEL_DESCRIPTIONS: dict[str, str] = {
+    # Hand-tuned compact descriptions for small models. Used in place
+    # of the rich docstring (which would otherwise get truncated to
+    # 120 chars and lose its key signal). Each entry must keep the
+    # *callable* name and the most important capability hint within
+    # the budget; everything else moves to `help`.
+    "code_interpreter": (
+        "Run Python in sandbox. 13 code-intel helpers pre-imported "
+        "(iter_symbols, find_references, ...). help('code_interpreter')."
+    ),
+}
+
+
 def _simplify_schema_for_small(schema: dict[str, Any]) -> dict[str, Any]:
     """Simplify a tool schema for small models (<40B).
 
-    - Shortens descriptions to ≤120 chars
+    - Replaces description with a hand-tuned short version when
+      available in ``_SMALL_MODEL_DESCRIPTIONS``; otherwise truncates
+      to ≤120 chars.
     - Removes 'explore' from step_complete status enum
     - Strips optional parameter descriptions to save tokens
     """
@@ -392,10 +407,15 @@ def _simplify_schema_for_small(schema: dict[str, Any]) -> dict[str, Any]:
     schema = copy.deepcopy(schema)
     func = schema.get("function", {})
 
-    # Shorten description
-    desc = func.get("description", "")
-    if len(desc) > 120:
-        func["description"] = desc[:117] + "..."
+    # Description: prefer hand-tuned short version, else truncate
+    name = func.get("name", "")
+    short_desc = _SMALL_MODEL_DESCRIPTIONS.get(name)
+    if short_desc:
+        func["description"] = short_desc
+    else:
+        desc = func.get("description", "")
+        if len(desc) > 120:
+            func["description"] = desc[:117] + "..."
 
     # Remove 'explore' status from step_complete (confuses small models)
     if func.get("name") == "step_complete":

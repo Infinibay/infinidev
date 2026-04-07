@@ -6,7 +6,7 @@ import sqlite3
 from typing import Any
 
 from infinidev.code_intel.models import Symbol, Reference, Import
-from infinidev.tools.base.db import execute_with_retry
+from infinidev.code_intel._db import execute_with_retry
 
 
 def get_file_hash(project_id: int, file_path: str) -> str | None:

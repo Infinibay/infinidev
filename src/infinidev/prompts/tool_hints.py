@@ -73,8 +73,10 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "execute_command(command='python -m pytest tests/ -x -q')",
     ),
     "code_interpreter": (
-        "Run Python code in a sandbox. Use `help` tool for details.",
-        "code_interpreter(code='print(2+2)')",
+        "Run Python code in a sandbox. Great for analyzing, parsing, "
+        "or querying the codebase (count methods, measure spans, aggregate "
+        "symbols). 13 code-intel helpers pre-imported — use `help` tool for details.",
+        "code_interpreter(code='rows = iter_symbols(kind=\"method\", parent=\"Foo\")\\nprint(len(rows))')",
     ),
     "iter_symbols": (
         "Walk all indexed symbols (no search term needed)",

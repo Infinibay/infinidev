@@ -194,6 +194,59 @@ def _build_refactor_prompt(user_scope: str) -> str:
     )
 
 
+def _cmd_reindex(app: InfinidevApp, parts: list[str]) -> None:
+    """Re-index the current workspace's code intelligence index.
+
+    `--full` (or `-f`) clears the existing index for project 1 first,
+    forcing every file to be re-parsed from scratch. Without it the
+    reindex is incremental — files whose content hash hasn't changed
+    are skipped. Mirrors the same logic as the classic CLI's /reindex
+    handler in cli/main.py so the TUI and classic mode behave the same.
+    """
+    if app._engine_running:
+        app.add_message("System", "Cannot reindex while a task is running.", "system")
+        return
+
+    full = any(a in ("--full", "-f") for a in parts[1:])
+    import os as _os
+    from infinidev.code_intel.indexer import index_directory
+    from infinidev.tools.base.context import get_current_workspace_path
+    from infinidev.tools.base.db import execute_with_retry
+
+    workdir = get_current_workspace_path() or _os.getcwd()
+
+    if full:
+        app.add_message("System", "Clearing existing index for project 1...", "system")
+
+        def _clear(conn):
+            conn.execute("DELETE FROM ci_files WHERE project_id = 1")
+            conn.execute("DELETE FROM ci_symbols WHERE project_id = 1")
+            conn.execute("DELETE FROM ci_references WHERE project_id = 1")
+            conn.execute("DELETE FROM ci_imports WHERE project_id = 1")
+            conn.execute("DELETE FROM ci_method_bodies WHERE project_id = 1")
+            conn.commit()
+
+        try:
+            execute_with_retry(_clear)
+        except Exception as exc:
+            app.add_message("System", f"Clear failed: {exc}", "system")
+            return
+
+    app.add_message("System", f"Indexing {workdir} ...", "system")
+    try:
+        stats = index_directory(1, workdir)
+        app.add_message(
+            "System",
+            f"Done: {stats['files_indexed']} files indexed, "
+            f"{stats['symbols_total']} symbols, "
+            f"{stats['files_skipped']} skipped, "
+            f"{stats['elapsed_ms']}ms",
+            "system",
+        )
+    except Exception as exc:
+        app.add_message("System", f"Index failed: {exc}", "system")
+
+
 def _cmd_refactor(app: InfinidevApp, parts: list[str]) -> None:
     """Run a refactor task through the normal engine pipeline."""
     user_scope = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -236,6 +289,7 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/think": _cmd_think,
     "/init": _cmd_init,
     "/refactor": _cmd_refactor,
+    "/reindex": _cmd_reindex,
 }
 
 

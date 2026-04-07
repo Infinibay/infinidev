@@ -75,7 +75,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Iterable
 
-from infinidev.tools.base.db import execute_with_retry
+from infinidev.code_intel._db import execute_with_retry
 
 logger = logging.getLogger(__name__)
 

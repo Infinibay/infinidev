@@ -379,7 +379,7 @@ def iter_symbols(
         for name, n in by_class.most_common(10):
             print(f"{n:3}  {name}")
     """
-    from infinidev.tools.base.db import execute_with_retry
+    from infinidev.code_intel._db import execute_with_retry
     import sqlite3
 
     if file_path and not os.path.isabs(file_path):
@@ -450,7 +450,7 @@ def list_files(language: str = "") -> list[str]:
     haven't been indexed yet; call ``/reindex`` first if you want a
     full list.
     """
-    from infinidev.tools.base.db import execute_with_retry
+    from infinidev.code_intel._db import execute_with_retry
     import sqlite3
 
     def _q(conn: sqlite3.Connection):
@@ -638,7 +638,7 @@ def project_stats() -> dict:
     Meant as a "what's here?" probe the model runs at the start of
     an analysis script to orient itself.
     """
-    from infinidev.tools.base.db import execute_with_retry
+    from infinidev.code_intel._db import execute_with_retry
     import sqlite3
 
     def _q(conn: sqlite3.Connection):

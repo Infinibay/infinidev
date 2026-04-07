@@ -129,7 +129,7 @@ def _resolve_local(
     # Check ci_files for indexed files matching the module path
     try:
         from infinidev.code_intel.index import get_file_hash
-        from infinidev.tools.base.db import execute_with_retry
+        from infinidev.code_intel._db import execute_with_retry
 
         # Search for file paths ending with the module pattern
         module_suffix = os.sep.join(parts) + ".py"

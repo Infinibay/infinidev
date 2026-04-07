@@ -10,7 +10,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 
-from infinidev.tools.base.db import execute_with_retry
+from infinidev.code_intel._db import execute_with_retry
 
 logger = logging.getLogger(__name__)
 

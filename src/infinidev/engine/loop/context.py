@@ -90,7 +90,7 @@ If you want to change code, you MUST call one of these tools. Do NOT just descri
 - **analyze_code**(file_path?): Detect broken imports, undefined symbols, unused code.
 - **help**(context?) / **explain_tool**(context?): **Get detailed help and examples for any tool. Use this!**
 - **execute_command**: Run shell commands (build, test, install, etc.).
-- **code_interpreter**(code): Run Python code in a sandbox. Use `help` tool for details.
+- **code_interpreter**(code): Run Python code in a sandbox. Great for analyzing/parsing/querying the codebase (count methods, measure spans, aggregate symbols). 13 code-intel helpers pre-imported — use `help` tool for details.
 - **git_branch** / **git_commit** / **git_diff** / **git_status**: Manage version control.
 - **web_search** / **web_fetch**: Research documentation, APIs, or error messages online.
 - **record_finding** / **search_findings** / **read_findings**: Knowledge base operations.

@@ -6,7 +6,7 @@ import sqlite3
 from typing import Any
 
 from infinidev.code_intel.models import Symbol, SymbolKind, Reference, Import
-from infinidev.tools.base.db import execute_with_retry
+from infinidev.code_intel._db import execute_with_retry
 
 
 def _row_to_symbol(row: sqlite3.Row) -> Symbol:

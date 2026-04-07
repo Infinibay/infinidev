@@ -18,8 +18,11 @@ from infinidev.tools.shell.code_interpreter_input import CodeInterpreterInput
 class CodeInterpreterTool(InfinibayBaseTool):
     name: str = "code_interpreter"
     description: str = (
-        "Run Python code in a sandbox. Use `help` tool for details, "
-        "pre-imported helpers, and examples."
+        "Run Python code in a sandbox. Great for analyzing, parsing, "
+        "or querying the codebase (e.g. count methods, measure line "
+        "spans, aggregate symbols, custom set arithmetic). Comes with "
+        "13 pre-imported code-intelligence helpers — use `help` tool "
+        "with context='code_interpreter' for the full list and examples."
     )
     args_schema: Type[BaseModel] = CodeInterpreterInput
 

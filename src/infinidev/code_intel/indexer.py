@@ -156,7 +156,7 @@ def reindex_file(project_id: int, file_path: str) -> int:
         )
         conn.commit()
 
-    from infinidev.tools.base.db import execute_with_retry
+    from infinidev.code_intel._db import execute_with_retry
     execute_with_retry(_clear_hash)
 
     return index_file(project_id, file_path)
