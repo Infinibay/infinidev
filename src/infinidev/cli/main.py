@@ -529,6 +529,13 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, pro
     if profile and profiler.report_path:
         click.echo(click.style(f"\nProfile saved to: {profiler.report_path}", fg="cyan"))
 
+    # Bypass interpreter finalisation to dodge a gRPC SIGSEGV. See
+    # _fast_exit_workaround() below for the full diagnosis. By the
+    # time we reach this point, the session is durable on disk
+    # (DB committed, settings flushed, logs written) so cutting
+    # straight to os._exit is safe.
+    _fast_exit_workaround()
+
 
 def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool):
     """Inner dispatch — runs inside the profiler context manager."""
@@ -683,6 +690,43 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             _q.stop()
         except Exception:
             pass
+
+def _fast_exit_workaround() -> None:
+    """Bypass Python interpreter finalisation to dodge a gRPC SIGSEGV.
+
+    Diagnosed 2026-04-07: every CLI run that touched a real workspace
+    crashed with SIGSEGV during shutdown (exit code 139 / -11). The
+    fault handler dump pointed to a non-Python thread (no Python frame)
+    while the loaded extension list included ``grpc._cython.cygrpc``.
+
+    Root cause: ``opentelemetry.exporter.otlp.proto.grpc`` is pulled
+    in transitively (via litellm/chromadb/etc), and importing that
+    module spawns a background C++ thread inside grpc to keep its
+    channels alive. When Python's interpreter starts ``Py_Finalize``
+    on a clean exit, that thread is still running and races with
+    the freeing of Python objects it referenced — classic
+    grpc/grpc#28632 territory.
+
+    Setting ``OTEL_*`` env vars does NOT fix it because the thread
+    is created at IMPORT time, not at first export. The standard
+    community workaround is to skip ``Py_Finalize`` entirely by
+    calling ``os._exit(0)`` after our own cleanup runs. Atexit
+    handlers and __del__ methods are NOT executed by ``os._exit``,
+    so we have to make sure the CLI's own teardown (saving session
+    state, flushing logs, closing DB connections) is already
+    complete before this fires. The CLI does that synchronously
+    inside ``main()`` already, so by the time we reach this point
+    everything we care about is durable on disk.
+    """
+    import os as _os
+    import sys as _sys
+    try:
+        _sys.stdout.flush()
+        _sys.stderr.flush()
+    except Exception:
+        pass
+    _os._exit(0)
+
 
 if __name__ == "__main__":
     main()
