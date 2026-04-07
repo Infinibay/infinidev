@@ -23,6 +23,101 @@ def _get_docstring(node: Node, source: bytes) -> str:
     return ""
 
 
+def _find_enclosing_name(node: Node, source: bytes) -> str:
+    """Walk up from *node* to find the nearest named enclosing scope.
+
+    Used by the JS/TS parser to rescue methods defined inside object
+    literals — things like::
+
+        const migration = {
+            up() { ... },
+            down() { ... },
+        }
+
+        export function createHelpers() {
+            return {
+                isAuthenticated() { ... },
+                hasRole() { ... },
+            }
+        }
+
+    Tree-sitter treats these ``method_definition`` nodes as children
+    of an ``object`` rather than a ``class_body``, so the default
+    walker leaves them with ``parent_symbol=""``. This helper walks
+    up from the method node looking for the nearest ancestor that
+    names a scope:
+
+      * **variable_declarator** — ``const foo = { ... }``. Return the
+        first identifier child (``foo``).
+      * **function_declaration** — factory that returns an object.
+        Return the function's identifier child.
+      * **pair** — ``{ foo: { bar() {} } }``. Return the key's text
+        (``foo``) as the parent name for ``bar``.
+      * **assignment_expression** — ``module.exports = { ... }`` or
+        similar. Return the left-hand side's identifier text.
+
+    Returns ``""`` when no named ancestor is found (e.g. an anonymous
+    object literal passed as a function argument — there's genuinely
+    no sensible parent name for those).
+    """
+    current = node.parent
+    while current is not None:
+        t = current.type
+
+        if t == "variable_declarator":
+            for child in current.children:
+                if child.type in ("identifier", "property_identifier"):
+                    return _node_text(child, source)
+            return ""
+
+        if t == "function_declaration":
+            for child in current.children:
+                if child.type == "identifier":
+                    return _node_text(child, source)
+            return ""
+
+        if t == "pair":
+            # Object key:value pair. The first child is the key —
+            # could be a string, identifier, or property_identifier.
+            for child in current.children:
+                if child.type in ("property_identifier", "identifier"):
+                    return _node_text(child, source)
+                if child.type == "string":
+                    # Strip the surrounding quotes for clean parent names.
+                    return _node_text(child, source).strip('"\'`')
+            return ""
+
+        if t == "assignment_expression":
+            # LHS is the first child. Could be an identifier
+            # (``foo = {}``) or a member_expression
+            # (``module.exports = {}``).
+            if current.children:
+                lhs = current.children[0]
+                if lhs.type == "identifier":
+                    return _node_text(lhs, source)
+                if lhs.type == "member_expression":
+                    # Use the last property_identifier — for
+                    # ``module.exports = {}`` that's "exports".
+                    last_prop = ""
+                    for sub in lhs.children:
+                        if sub.type == "property_identifier":
+                            last_prop = _node_text(sub, source)
+                    return last_prop
+            return ""
+
+        # Don't walk through another class — a method_definition that
+        # sits inside a class_body should have been handled by the
+        # caller with parent=ClassName. If we reach a class_declaration
+        # while walking up, something went wrong upstream — return
+        # empty so we don't produce a weird qualified name.
+        if t in ("class_declaration", "abstract_class_declaration"):
+            return ""
+
+        current = current.parent
+
+    return ""
+
+
 class JavaScriptParser:
     """Extract symbols, references, and imports from JavaScript source."""
 
@@ -50,7 +145,38 @@ class JavaScriptParser:
             return
 
         elif node.type == "method_definition":
-            symbols.append(self._parse_method(node, source, fp, parent))
+            # A method_definition node can appear in three contexts:
+            #
+            #   1. Inside a class_body — handled via the class_declaration
+            #      branch above which recurses with parent=ClassName.
+            #      By the time we reach this branch, ``parent`` is already
+            #      set correctly by the caller.
+            #
+            #   2. Inside an object literal assigned to a const or
+            #      returned from a factory:
+            #        const migration = { up() {}, down() {} }
+            #        return { isAuthenticated() {} }
+            #      These appear in an ``object`` node, not a class_body.
+            #      The walker reaches them via default recursion with
+            #      parent="" — which leaves every method orphaned.
+            #
+            #   3. Inside an anonymous class expression assigned to
+            #      a variable — same problem as #2.
+            #
+            # Fix: when ``parent`` is empty at this point, walk UP the
+            # tree to find the nearest NAMED enclosing scope and use
+            # its name as the parent. Named scopes are:
+            #   • variable_declarator (``const foo = { ... }``)
+            #   • function_declaration (factory returning the object)
+            #   • pair (``{ foo: { bar() {} } }`` — use the key name)
+            #
+            # This closes the 3 % gap we saw against the backend-refactor
+            # index, where factory functions and migration templates
+            # produced methods with parent_symbol="".
+            effective_parent = parent
+            if not effective_parent:
+                effective_parent = _find_enclosing_name(node, source)
+            symbols.append(self._parse_method(node, source, fp, effective_parent))
 
         elif node.type in ("lexical_declaration", "variable_declaration"):
             for child in node.children:

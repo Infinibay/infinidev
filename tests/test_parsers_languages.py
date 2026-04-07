@@ -445,6 +445,48 @@ class Container<T> {
         assert "Container" in names_of(symbols)
         assert {"push", "pop"} <= methods_of(symbols, "Container")
 
+    def test_object_literal_methods(self):
+        """Object literal methods get a parent via walk-up rescue.
+
+        Three real-world patterns from backend-refactor:
+          * ``const migration = { up() {}, down() {} }`` — const
+            with methods. Parent should be ``migration``.
+          * ``function factory() { return { foo() {} } }`` — factory
+            returning an object. Parent should be ``factory``.
+          * ``const obj = { create() {} }`` — plain object literal.
+            Parent should be ``obj``.
+
+        Before the ``_find_enclosing_name`` walk-up was added, all
+        three produced methods with ``parent_symbol=""``, which broke
+        ``get_symbol_code('obj.create')`` and every dotted-name tool.
+        """
+        code = """
+export const migration = {
+    id: 'foo',
+    async up() { return null; },
+    async down() { return null; },
+};
+
+export function createHelpers() {
+    return {
+        isAuthenticated() { return true; },
+        hasRole(role: string) { return true; },
+    };
+}
+
+const obj = {
+    create() { return 42; },
+};
+"""
+        symbols, _ = parse("typescript", code)
+        # Each method should have the enclosing scope as parent
+        by_name = {s.name: s for s in symbols if s.kind == SymbolKind.method}
+        assert by_name.get("up") and by_name["up"].parent_symbol == "migration"
+        assert by_name.get("down") and by_name["down"].parent_symbol == "migration"
+        assert by_name.get("isAuthenticated") and by_name["isAuthenticated"].parent_symbol == "createHelpers"
+        assert by_name.get("hasRole") and by_name["hasRole"].parent_symbol == "createHelpers"
+        assert by_name.get("create") and by_name["create"].parent_symbol == "obj"
+
     def test_abstract_class(self):
         code = """
 abstract class Shape {
