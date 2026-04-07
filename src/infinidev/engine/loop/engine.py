@@ -885,6 +885,31 @@ class LoopEngine(AgentEngine):
                                 if not history or history[-1] != new_fp:
                                     history.append(new_fp)
                                     ctx.state.test_outcome_history[key] = history[-2:]
+                            # A4 — Auto-tail_test_output: parse structured
+                            # failures from the captured output and append
+                            # them inline to the tool result. This puts the
+                            # parsed failure list right next to the raw
+                            # stdout the model is already going to read,
+                            # so it doesn't have to discover the
+                            # tail_test_output meta tool on its own. Zero
+                            # extra LLM call. Returns [] on success or
+                            # when no parser recognises the format.
+                            try:
+                                from infinidev.engine.test_parsers import parse_test_failures
+                                _failures = parse_test_failures(result)
+                            except Exception:
+                                _failures = []
+                            if _failures:
+                                import json as _json2
+                                _max = 8  # cap to keep prompt small
+                                _payload = [f.to_dict() for f in _failures[:_max]]
+                                _suffix = (
+                                    f"\n\n[auto-extracted structured_failures "
+                                    f"({len(_failures)} total"
+                                    f"{', showing first ' + str(_max) if len(_failures) > _max else ''}):]\n"
+                                    + _json2.dumps(_payload, indent=2)
+                                )
+                                result = result + _suffix
                     except Exception:
                         pass
 
