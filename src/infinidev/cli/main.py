@@ -148,6 +148,46 @@ def handle_command(cmd_text: str):
     elif cmd in ("/exit", "/quit"):
         click.echo("Goodbye!")
         sys.exit(0)
+    elif cmd == "/reindex":
+        # Reindex the current workspace's code intelligence index.
+        # `--full` (or `-f`) clears the existing index for this project
+        # first, forcing every file to be re-parsed from scratch. Useful
+        # after upgrading the indexer / fixing a parser bug — incremental
+        # indexing skips files whose content hash hasn't changed, so
+        # those files would never benefit from the new logic without a
+        # full clear.
+        full = any(a in ("--full", "-f") for a in parts[1:])
+        from infinidev.code_intel.indexer import index_directory
+        from infinidev.tools.base.context import get_current_workspace_path
+        from infinidev.tools.base.db import execute_with_retry
+        workdir = get_current_workspace_path() or os.getcwd()
+        if full:
+            click.echo(click.style(f"Clearing existing index for project 1...", dim=True))
+            def _clear(conn):
+                conn.execute("DELETE FROM ci_files WHERE project_id = 1")
+                conn.execute("DELETE FROM ci_symbols WHERE project_id = 1")
+                conn.execute("DELETE FROM ci_references WHERE project_id = 1")
+                conn.execute("DELETE FROM ci_imports WHERE project_id = 1")
+                conn.execute("DELETE FROM ci_method_bodies WHERE project_id = 1")
+                conn.commit()
+            try:
+                execute_with_retry(_clear)
+            except Exception as exc:
+                click.echo(click.style(f"Clear failed: {exc}", fg="red"))
+                return True
+        click.echo(click.style(f"Indexing {workdir} ...", dim=True))
+        try:
+            stats = index_directory(1, workdir)
+            click.echo(click.style(
+                f"Done: {stats['files_indexed']} files indexed, "
+                f"{stats['symbols_total']} symbols, "
+                f"{stats['files_skipped']} skipped, "
+                f"{stats['elapsed_ms']}ms",
+                fg="green",
+            ))
+        except Exception as exc:
+            click.echo(click.style(f"Index failed: {exc}", fg="red"))
+        return True
     elif cmd == "/help":
         click.echo(click.style("Available commands:", bold=True))
         click.echo("  /models            - Show current model configuration")
@@ -158,6 +198,7 @@ def handle_command(cmd_text: str):
         click.echo("  /settings reset    - Reset to defaults")
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
+        click.echo("  /reindex [--full]  - Re-index the workspace (--full clears DB first)")
         click.echo("  /think             - Enable deep analysis for the next task")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
         click.echo("  /brainstorm <problem> - Creative ideation with forced perspectives")
