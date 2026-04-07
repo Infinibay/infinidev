@@ -473,6 +473,158 @@ def list_files(language: str = "") -> list[str]:
     return [r[0] for r in rows]
 
 
+def code_search(
+    pattern: str,
+    language: str = "",
+    file_glob: str = "",
+    case_insensitive: bool = True,
+    limit: int = 100,
+) -> list[dict]:
+    """Full-text search over the CONTENT of source files (ripgrep-backed).
+
+    Complements :func:`find_symbols` (name search) and
+    :func:`search_by_intent` (docstring search): use this when you
+    need to find a literal string inside source — ``TODO`` comments,
+    magic numbers, specific import paths, error messages that aren't
+    exposed as symbols, etc.
+
+    *pattern* is a regex (Python/ripgrep syntax). Literal strings
+    work as-is; add anchors or character classes for precision.
+    *language* restricts by detected language (``"typescript"``,
+    ``"python"``, ...). *file_glob* is a fnmatch pattern against the
+    file basename (``"*.test.ts"``).
+
+    Returns a list of ``{file_path, line, text, match}`` dicts. Each
+    entry is ONE matching line. *limit* caps the total across files.
+
+    The function uses ripgrep if installed (fast, ~5k lines/s per
+    core), falling back to a pure-Python scan otherwise (slower but
+    dependency-free).
+    """
+    import fnmatch
+    import subprocess
+    import re
+
+    if not pattern:
+        return []
+
+    # Build the candidate file list from the index to stay consistent
+    # with the rest of the bridge. We want to scan only files the
+    # indexer has seen so users don't get surprised by results in
+    # node_modules / .venv / build artefacts that the index already
+    # skips.
+    candidates = list_files(language=language)
+    if file_glob:
+        candidates = [f for f in candidates if fnmatch.fnmatch(os.path.basename(f), file_glob)]
+    if not candidates:
+        return []
+
+    # Try ripgrep first for performance.
+    import shutil
+    rg = shutil.which("rg")
+    if rg and len(candidates) > 5:
+        try:
+            # --with-filename, --line-number, --no-heading produces
+            # one result per line, parseable format. --max-count
+            # keeps per-file output reasonable.
+            args = [
+                rg, "--no-heading", "--line-number", "--with-filename",
+                "--max-count", "20",
+            ]
+            if case_insensitive:
+                args.append("--ignore-case")
+            args.append(pattern)
+            args.extend(candidates[:500])  # rg's arg limit is generous
+            result = subprocess.run(
+                args, capture_output=True, text=True, timeout=20,
+            )
+            hits: list[dict] = []
+            for line in result.stdout.splitlines():
+                # format: file:line:content
+                parts = line.split(":", 2)
+                if len(parts) != 3:
+                    continue
+                fp, ln, text = parts
+                try:
+                    ln_int = int(ln)
+                except ValueError:
+                    continue
+                hits.append({
+                    "file_path": fp,
+                    "line": ln_int,
+                    "text": text[:300],
+                    "match": pattern,
+                })
+                if len(hits) >= limit:
+                    break
+            return hits
+        except Exception:
+            pass  # Fall through to Python scan
+
+    # Python fallback — slower but works without rg. Cap candidates
+    # aggressively to keep the worst case bounded.
+    try:
+        flags = re.IGNORECASE if case_insensitive else 0
+        rex = re.compile(pattern, flags)
+    except re.error:
+        return []
+
+    hits = []
+    for fp in candidates[:200]:
+        try:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                for i, line in enumerate(f, start=1):
+                    if rex.search(line):
+                        hits.append({
+                            "file_path": fp,
+                            "line": i,
+                            "text": line.rstrip("\n")[:300],
+                            "match": pattern,
+                        })
+                        if len(hits) >= limit:
+                            return hits
+        except Exception:
+            continue
+    return hits
+
+
+def find_files(
+    pattern: str = "",
+    language: str = "",
+    limit: int = 200,
+) -> list[str]:
+    """Glob-style fuzzy filename search over the indexed files.
+
+    *pattern* is an ``fnmatch`` glob applied to the BASENAME of
+    each indexed file. Accepts ``*``, ``?``, and ``[...]``.
+    Common use cases:
+
+      * ``"*Service.ts"`` — every file ending in ``Service.ts``
+      * ``"test_*.py"`` — every Python test file
+      * ``"auth*"`` — every filename starting with ``auth``
+      * ``""`` — every indexed file (equivalent to list_files)
+
+    Additionally filters by *language* when specified. Returns
+    absolute paths sorted alphabetically, capped at *limit*.
+
+    Complements :func:`list_files` (which only filters by language):
+    this one does glob-style pattern matching on the filename itself
+    so the script can narrow down to "the service files", "the test
+    files", etc. without writing the pattern-match in Python.
+    """
+    import fnmatch
+
+    all_files = list_files(language=language)
+    if not pattern or pattern == "*":
+        return all_files[:limit]
+
+    matches = [
+        f for f in all_files
+        if fnmatch.fnmatch(os.path.basename(f), pattern)
+    ]
+    return matches[:limit]
+
+
 def project_stats() -> dict:
     """Summary statistics for the current project's index.
 
@@ -537,5 +689,7 @@ __all__ = [
     "search_by_intent",
     "extract_skeleton",
     "list_files",
+    "find_files",
+    "code_search",
     "project_stats",
 ]

@@ -99,7 +99,7 @@ class CodeInterpreterTool(InfinibayBaseTool):
             "        find_symbols, find_definitions, find_references,\n"
             "        list_file_symbols, iter_symbols, get_source,\n"
             "        find_similar, search_by_intent, extract_skeleton,\n"
-            "        list_files, project_stats,\n"
+            "        list_files, find_files, code_search, project_stats,\n"
             "    )\n"
             "except ImportError:\n"
             "    pass\n"

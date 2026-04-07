@@ -514,79 +514,47 @@ EXAMPLES:
     "code_interpreter": """\
 code_interpreter(code, libraries_used?, timeout?)
 
-Execute Python code snippets in an isolated subprocess. Beyond plain
-data analysis, this tool gives you read-only access to the project's
-code intelligence index — a curated set of query functions is
-pre-imported automatically so your script can call them directly
-without any import statement.
+Execute Python code in an isolated subprocess. Beyond plain data
+analysis, the script has read-only access to the project's code
+intelligence index via 11 pre-imported bridge functions.
 
 PARAMS:
   code (str, required)                — Python code to execute
   libraries_used (list[str], optional) — Libraries to make available
   timeout (int, optional)              — Timeout seconds. Default: 120.
 
-PRE-IMPORTED BRIDGE FUNCTIONS (read-only, safe):
+BRIDGE FUNCTIONS (pre-imported, read-only, all return plain dicts):
 
-  find_symbols(query, kind="", limit=50) -> list[dict]
-    FTS5 name search. Returns matched symbols as dicts with
-    name, qualified_name, kind, file_path, line_start, line_end,
-    signature, docstring, parent_symbol, visibility, language.
+  find_symbols(query, kind, limit)        FTS name search
+  find_definitions(name, kind)            dotted-name resolution
+  find_references(name, file_path,        all callers/usages
+                  ref_kind, limit)
+  list_file_symbols(file_path, kind)      per-file inventory
+  iter_symbols(kind, parent, language,    walk all symbols (use this
+               file_path, limit)          instead of find_symbols for
+                                          "all X" queries)
+  get_source(qualified_name, file_path)   numbered source of a symbol
+  find_similar(qualified_name, file_path, Jaccard body similarity
+               threshold, limit)
+  search_by_intent(query, kind, limit)    BM25 over docstrings
+  extract_skeleton(file_path)             tree-sitter file skeleton
+  list_files(language)                    indexed files by language
+  find_files(pattern, language, limit)    glob-style filename search
+  code_search(pattern, language,          full-text search over file
+              file_glob, case_insensitive, CONTENT (ripgrep-backed)
+              limit)
+  project_stats()                         summary (call first!)
 
-  find_definitions(name, kind="") -> list[dict]
-    Accepts bare names ("connectToVm") OR dotted names
-    ("VirtioSocketWatcherService.connectToVm"). Returns every
-    place the symbol is defined.
+FOR PER-FUNCTION DETAILS call:
+  help("code_interpreter.find_symbols")
+  help("code_interpreter.find_references")
+  help("code_interpreter.iter_symbols")
+  ...etc — every bridge function has its own entry with signature,
+  semantics, examples, and common pitfalls.
 
-  find_references(name, file_path="", ref_kind="", limit=200) -> list[dict]
-    Every call/usage of a symbol. ref_kind="call" for method
-    invocations, "usage" for reads, "" for all.
+QUICK EXAMPLES:
 
-  list_file_symbols(file_path, kind="") -> list[dict]
-    Every symbol defined in one file. file_path can be relative
-    to the workspace or absolute.
-
-  iter_symbols(kind="", parent="", language="", file_path="",
-               limit=5000) -> list[dict]
-    Direct SELECT on ci_symbols — use this when you want to WALK
-    all symbols and filter in Python. Each filter is optional.
-    Ideal for "count methods per class", "find all TS functions",
-    "list every method of class Foo". Do NOT use find_symbols
-    with an empty query — that's FTS5 and requires a search term.
-
-  get_source(qualified_name, file_path="") -> str
-    Source code of a symbol as a numbered string. Empty string
-    if not found.
-
-  find_similar(qualified_name, file_path="", threshold=0.7,
-               limit=10) -> list[dict]
-    Jaccard-based body similarity. Results include a similarity
-    score in [0, 1] and an is_exact_dup flag for copy-paste.
-
-  search_by_intent(query, kind="", limit=20) -> list[dict]
-    Natural-language search over docstrings + signatures via
-    FTS5 BM25. Use when you know what the code should DO but
-    not what it's called. Each result has a "bm25" score
-    (lower = better match).
-
-  extract_skeleton(file_path) -> dict
-    Tree-sitter structural skeleton of a file. Returns
-    {file_path, language, total_lines, total_bytes, symbols}.
-
-  list_files(language="") -> list[str]
-    Every indexed file. Filter by language ("typescript", "python",
-    etc.) or leave empty for all.
-
-  project_stats() -> dict
-    Summary: total_files, total_symbols, symbols_by_kind,
-    total_references, total_method_bodies, languages. Good first
-    call in any analysis script to orient yourself.
-
-EXAMPLES:
-
-  # Plain Python — no bridge functions
-  code_interpreter(code="print(2 + 2)")
-
-  # "How many methods per class?"
+  # "Count methods per class"
   code_interpreter(code=\"\"\"
 from collections import Counter
 methods = iter_symbols(kind="method")
@@ -595,49 +563,416 @@ for name, n in by_class.most_common(10):
     print(f"{n:3}  {name}")
 \"\"\")
 
-  # "Which methods call connect but never disconnect?"
+  # "What does ResponseMessage look like and who uses it?"
   code_interpreter(code=\"\"\"
-connect_callers = {
-    f"{r['file_path']}:{r['line']}" for r in find_references("connect", ref_kind="call")
-}
-disconnect_callers = {
-    f"{r['file_path']}:{r['line']}" for r in find_references("disconnect", ref_kind="call")
-}
-lifecycle_bugs = connect_callers - disconnect_callers
-print(f"{len(lifecycle_bugs)} callers of connect without a matching disconnect")
-for loc in list(lifecycle_bugs)[:10]:
-    print(f"  {loc}")
-\"\"\")
-
-  # "What does ResponseMessage look like, and who uses it?"
-  code_interpreter(code=\"\"\"
-defs = find_definitions("ResponseMessage")
-print(f"Defined in {len(defs)} place(s):")
-for d in defs:
-    print(f"  {d['file_path']}:{d['line_start']}")
-refs = find_references("ResponseMessage", limit=20)
-print(f"Referenced {len(refs)} times across the project")
-\"\"\")
-
-  # "Find duplicate method bodies in the codebase"
-  code_interpreter(code=\"\"\"
-# pick any method you want to compare against
-matches = find_similar("VirtioSocketWatcherService.connectToVm", threshold=0.8)
-for m in matches:
-    tag = "EXACT" if m["is_exact_dup"] else f"{m['similarity']:.0%}"
-    print(f"[{tag}] {m['qualified_name']} @ {m['file_path']}:{m['line_start']}")
+for d in find_definitions("ResponseMessage"):
+    print(f"{d['file_path']}:{d['line_start']}")
+print(f"Used {len(find_references('ResponseMessage'))} places")
 \"\"\")
 
 TIPS:
 
-  * Call project_stats() first in any analysis script to see
-    what's in the index before querying.
-  * iter_symbols is the RIGHT tool for "walk all X". find_symbols
-    requires a search query.
-  * All bridge functions return plain dicts. JSON-serialise them
-    with json.dumps() if you want to print tables.
-  * The bridge is read-only — it cannot mutate anything. To edit
-    files, exit the script and use create_file/replace_lines.""",
+  * Call project_stats() FIRST in any analysis script to orient.
+  * iter_symbols is the right tool for "walk all X".
+    find_symbols needs a search query — do NOT pass "" to it.
+  * Bridge is read-only. Use create_file / replace_lines to edit.
+  * Each bridge function has a dedicated help entry —
+    call help("code_interpreter.function_name") for details.""",
+
+    # ── Per-function help entries for the code_interpreter bridge ────────
+    #
+    # Each entry documents ONE function of the read-only API with its
+    # signature, semantics, params, and a focused example. Keeps the
+    # overview short while still letting the model do
+    # ``help("code_interpreter.find_similar")`` to get ~150 tokens of
+    # targeted documentation instead of the 1300-token overview dump.
+
+    "code_interpreter.find_symbols": """\
+find_symbols(query: str, kind: str = "", limit: int = 50) -> list[dict]
+
+FTS5 name search across the project's symbol index. Returns matched
+symbols as plain dicts sorted with exact-name matches first.
+
+PARAMS:
+  query (str, required)   — search text. Supports prefix match and
+                             multi-word queries. REQUIRED and non-empty
+                             — use iter_symbols() if you want to walk
+                             all symbols without a search term.
+  kind  (str, optional)   — filter: "function", "method", "class",
+                             "interface", "enum", "variable", etc.
+  limit (int, default 50) — max results to return.
+
+RETURNS: list[dict] with keys: name, qualified_name, kind, file_path,
+line_start, line_end, signature, docstring, parent_symbol,
+visibility, is_async, is_static, is_abstract, language.
+
+EXAMPLE:
+  matches = find_symbols("connectTo", kind="method")
+  for m in matches:
+      print(f"{m['qualified_name']} @ {m['file_path']}:{m['line_start']}")
+
+WHEN TO USE: you know the name (or a prefix) and want to find it.
+WHEN NOT TO USE: you want every method of the project — use
+iter_symbols(kind="method") instead.""",
+
+    "code_interpreter.find_definitions": """\
+find_definitions(name: str, kind: str = "") -> list[dict]
+
+Find every place a symbol is defined. Accepts both bare names and
+dotted qualified names — the query layer handles both shapes.
+
+PARAMS:
+  name (str, required)  — either "connectToVm" (bare) or
+                          "VirtioSocketWatcherService.connectToVm"
+                          (qualified). Dotted names are resolved via
+                          three-pass lookup: exact qualified_name →
+                          (parent_symbol, name) split → bare leaf.
+  kind (str, optional)  — "function", "method", "class", etc.
+
+RETURNS: list[dict] — same shape as find_symbols results. One entry
+per definition (usually one, multiple only for overloads).
+
+EXAMPLE:
+  defs = find_definitions("VirtioSocketWatcherService.connectToVm")
+  for d in defs:
+      print(f"{d['file_path']}:{d['line_start']}-{d['line_end']}")
+
+WHEN TO USE: you want "where is this defined?" with a potentially
+qualified name. Cleaner than find_symbols because it filters out
+usage-only hits.""",
+
+    "code_interpreter.find_references": """\
+find_references(name: str, file_path: str = "", ref_kind: str = "",
+                limit: int = 200) -> list[dict]
+
+Find every call, usage, or reference to a symbol across the project.
+
+PARAMS:
+  name      (str, required)    — bare symbol name (e.g. "connectToVm").
+  file_path (str, optional)    — narrow to one file.
+  ref_kind  (str, optional)    — "call" (method invocations), "usage"
+                                  (property reads / type annotations),
+                                  "import" (import references), "" for
+                                  all. Default "".
+  limit     (int, default 200) — cap on results.
+
+RETURNS: list[dict] with keys: name, file_path, line, column, context,
+ref_kind, language. ``context`` is the source line the reference sits
+on, trimmed to 200 chars.
+
+EXAMPLE:
+  # "How is connectToVm called from each file?"
+  from collections import Counter
+  calls = find_references("connectToVm", ref_kind="call")
+  by_file = Counter(c["file_path"] for c in calls)
+  for path, n in by_file.most_common():
+      print(f"{n:3}  {path}")
+
+WHEN TO USE: "who calls X?", "where is X used?", impact analysis
+before a rename or delete. The sibling find_definitions answers
+"where is X defined?".""",
+
+    "code_interpreter.list_file_symbols": """\
+list_file_symbols(file_path: str, kind: str = "") -> list[dict]
+
+Return every symbol defined in one specific file, optionally
+filtered by kind.
+
+PARAMS:
+  file_path (str, required)  — absolute or relative to workspace.
+                                Resolved against the workspace root
+                                if relative.
+  kind      (str, optional)  — "method", "class", "function", etc.
+
+RETURNS: list[dict] — same shape as find_symbols results, sorted by
+line_start.
+
+EXAMPLE:
+  # "What methods does VirtioSocketWatcherService have?"
+  syms = list_file_symbols(
+      "app/services/VirtioSocketWatcherService.ts", kind="method"
+  )
+  for s in syms:
+      print(f"  L{s['line_start']:>5}  {s['qualified_name']}")
+
+WHEN TO USE: per-file inventory. Cheaper than read_file for files
+where you only need the shape, not the contents.""",
+
+    "code_interpreter.iter_symbols": """\
+iter_symbols(kind: str = "", parent: str = "", language: str = "",
+             file_path: str = "", limit: int = 5000) -> list[dict]
+
+Walk the full set of indexed symbols, optionally filtered. Direct
+SELECT on ci_symbols — the right tool for iteration when you don't
+have a search query.
+
+PARAMS:
+  kind      (str, optional)    — "method", "class", "function", etc.
+  parent    (str, optional)    — exact match on parent_symbol. Use
+                                  "" for top-level symbols.
+  language  (str, optional)    — "typescript", "python", etc.
+  file_path (str, optional)    — restrict to one file.
+  limit     (int, default 5000)— max results. High default because
+                                  iteration is the primary use case.
+
+All filters are AND'd together. Returns plain dicts (same shape as
+find_symbols) sorted by file_path then line_start.
+
+EXAMPLE:
+  # "Rank classes by method count"
+  from collections import Counter
+  methods = iter_symbols(kind="method")
+  by_class = Counter(m["parent_symbol"] for m in methods if m["parent_symbol"])
+  for name, n in by_class.most_common(10):
+      print(f"{n:3}  {name}")
+
+  # "Every TypeScript function at the top level"
+  top_funcs = iter_symbols(kind="function", language="typescript", parent="")
+
+WHEN TO USE: "all methods", "all classes in X language", "every
+method of class Foo". find_symbols is a SEARCH tool; this is an
+ITERATION tool.
+
+WHEN NOT TO USE: you know the name or a prefix — use find_symbols
+(FTS5 is much faster for substring matching).""",
+
+    "code_interpreter.get_source": """\
+get_source(qualified_name: str, file_path: str = "") -> str
+
+Return the source code of a symbol as a numbered string (same shape
+as read_file output). Empty string when the symbol isn't indexed.
+
+PARAMS:
+  qualified_name (str, required) — bare or dotted name
+                                   ("connectToVm" or
+                                   "Service.connectToVm").
+  file_path      (str, optional) — disambiguator when two files
+                                   have a symbol with the same name.
+
+RETURNS: numbered source as one string with ``N\\tline`` per line,
+or ``""`` on miss.
+
+EXAMPLE:
+  src = get_source("VirtioSocketWatcherService.connectToVm")
+  print(src[:500])  # first few lines
+
+WHEN TO USE: you have a specific qualified name and want the code.
+Cheaper than read_file + partial_read because it computes the exact
+line range from the symbol index.""",
+
+    "code_interpreter.find_similar": """\
+find_similar(qualified_name: str, file_path: str = "",
+             threshold: float = 0.7, limit: int = 10) -> list[dict]
+
+Return methods whose body looks like a given method's body, via
+normalized-token Jaccard similarity over the method index.
+
+PARAMS:
+  qualified_name (str, required) — the target method (bare or
+                                   qualified). Must be indexed.
+  file_path      (str, optional) — disambiguator.
+  threshold      (float, 0.7)    — minimum similarity in [0, 1].
+                                   Raise to 0.85 for near-duplicates
+                                   only, lower to 0.5 for loose matches.
+  limit          (int, 10)       — max results.
+
+RETURNS: list[dict] with keys: qualified_name, file_path, line_start,
+line_end, body_size, similarity, is_exact_dup (true when the
+normalized body hash matches — copy-paste), language.
+
+EXAMPLE:
+  # "Find copy-paste duplicates of connectToVm"
+  for m in find_similar("connectToVm", threshold=0.85):
+      tag = "EXACT" if m["is_exact_dup"] else f"{m['similarity']:.0%}"
+      print(f"[{tag}] {m['qualified_name']} @ {m['file_path']}:{m['line_start']}")
+
+WHEN TO USE: refactoring audit, duplicate detection, "did I write
+this before?", test discovery via similar known-good tests.
+
+NOTE: methods smaller than 6 normalized lines are skipped by the
+fingerprint indexer to keep trivial getter duplicates out of the
+results. find_similar on a 3-line method may return nothing.""",
+
+    "code_interpreter.search_by_intent": """\
+search_by_intent(query: str, kind: str = "", limit: int = 20) -> list[dict]
+
+Find symbols by what they DO, not what they're CALLED. Uses FTS5
+BM25 ranking over the docstring + signature columns of the symbol
+index.
+
+PARAMS:
+  query (str, required)   — natural-language phrase like "parse
+                             timestamp", "validate email format",
+                             "retry with backoff".
+  kind  (str, optional)   — "method", "class", "function", etc.
+  limit (int, default 20) — max results.
+
+RETURNS: list[dict] — same shape as find_symbols results plus a
+``bm25`` field (lower = better match, FTS5 convention).
+
+EXAMPLE:
+  # "Is there a function that parses timestamps already?"
+  hits = search_by_intent("parse timestamp", kind="function", limit=5)
+  for h in hits:
+      print(f"[bm25={h['bm25']:.2f}] {h['qualified_name']}  — {h.get('docstring', '')[:60]}")
+
+WHEN TO USE: you know what the code should do but not its name.
+find_symbols is name-based; this is intent-based.
+
+NOTE: depends on symbols actually having docstrings. For projects
+that don't document their code, use find_symbols or code_search
+instead.""",
+
+    "code_interpreter.extract_skeleton": """\
+extract_skeleton(file_path: str) -> dict
+
+Return the tree-sitter structural skeleton of a single file —
+classes, methods, functions, and globals with their line ranges.
+Same structure as the large-file skeleton mode of read_file.
+
+PARAMS:
+  file_path (str, required) — absolute or relative to workspace.
+
+RETURNS: dict with keys:
+  file_path      — echoed back
+  language       — detected language (or "")
+  total_lines    — line count
+  total_bytes    — file size
+  symbols        — list[dict] with kind, name, line_start,
+                   line_end, doc for each top-level entry
+
+EXAMPLE:
+  sk = extract_skeleton("app/services/Foo.ts")
+  print(f"{sk['language']} file, {sk['total_lines']} lines")
+  for s in sk['symbols']:
+      if s['kind'] == 'class':
+          print(f"  class {s['name']}  L{s['line_start']}-{s['line_end']}")
+
+WHEN TO USE: you want the structural overview of a specific file
+without touching its contents. Runs fresh against the file on
+disk, not the index — so it reflects the current state even if
+the indexer hasn't caught up yet.""",
+
+    "code_interpreter.list_files": """\
+list_files(language: str = "") -> list[str]
+
+Return every indexed file in the project, optionally filtered by
+language. Returns absolute paths sorted alphabetically.
+
+PARAMS:
+  language (str, optional) — "typescript", "python", "rust", etc.
+                              Empty string means all languages.
+
+RETURNS: list[str] — absolute file paths.
+
+EXAMPLE:
+  # "Iterate every TypeScript file and count its methods"
+  for fp in list_files(language="typescript")[:20]:
+      methods = list_file_symbols(fp, kind="method")
+      print(f"{len(methods):4}  {fp.split('/')[-1]}")
+
+WHEN TO USE: orchestration — you want to walk the project and do
+something per file. Skips files that haven't been indexed yet; run
+/reindex first for a complete list.""",
+
+    "code_interpreter.find_files": """\
+find_files(pattern: str = "", language: str = "", limit: int = 200) -> list[str]
+
+Glob-style fuzzy filename search over the indexed files. Accepts
+standard ``fnmatch`` patterns (``*``, ``?``, ``[...]``) against the
+file BASENAME.
+
+PARAMS:
+  pattern  (str, optional)    — glob pattern. Examples:
+                                 "*Service.ts", "test_*.py",
+                                 "auth*". Empty matches all files.
+  language (str, optional)    — restrict by language.
+  limit    (int, default 200) — max results.
+
+RETURNS: list[str] — absolute paths sorted alphabetically.
+
+EXAMPLES:
+  # "All service files in TypeScript"
+  services = find_files("*Service.ts", language="typescript")
+
+  # "All test files matching a specific module"
+  auth_tests = find_files("*auth*test*")
+
+WHEN TO USE: you know the filename shape but not the full path.
+Complements list_files (language filter only) with glob-style
+pattern matching on the basename.""",
+
+    "code_interpreter.code_search": """\
+code_search(pattern: str, language: str = "", file_glob: str = "",
+            case_insensitive: bool = True, limit: int = 100) -> list[dict]
+
+Full-text search over the CONTENT of source files. Ripgrep-backed
+when available, Python fallback otherwise. Use this for literal
+text search — things like TODO comments, magic numbers, specific
+imports, error message strings — that aren't exposed as symbols
+and wouldn't match a name-based search.
+
+PARAMS:
+  pattern          (str, required)  — regex pattern. Literal strings
+                                       work as-is; add anchors /
+                                       character classes for precision.
+  language         (str, optional)  — restrict by language.
+  file_glob        (str, optional)  — fnmatch glob on the file basename
+                                       (e.g. "*.test.ts").
+  case_insensitive (bool, True)     — case-insensitive match.
+  limit            (int, 100)       — cap on total matches.
+
+RETURNS: list[dict] with keys: file_path, line, text, match. Each
+entry is ONE matching line, trimmed to 300 chars.
+
+EXAMPLES:
+  # "Every TODO in TypeScript files"
+  todos = code_search("TODO", language="typescript")
+  for t in todos[:10]:
+      print(f"{t['file_path']}:{t['line']}  {t['text']}")
+
+  # "Who still imports from the deprecated package?"
+  hits = code_search("from '@deprecated/", language="typescript")
+  print(f"{len(hits)} remaining deprecated imports")
+
+  # "Any hardcoded API URLs?"
+  urls = code_search(r"https://\\S+", file_glob="*.ts")
+
+WHEN TO USE: find_symbols searches NAMES. search_by_intent searches
+DOCSTRINGS. code_search searches CONTENT. Pick the one that matches
+what you know about what you're looking for.
+
+WHEN NOT TO USE: you want to find a method by name — find_symbols
+is much faster. You want a symbol whose docstring mentions X —
+search_by_intent is cleaner.""",
+
+    "code_interpreter.project_stats": """\
+project_stats() -> dict
+
+Summary statistics for the current project's code intelligence
+index. Meant as a "what's here?" probe the script runs at the
+start of any analysis to orient itself.
+
+PARAMS: none.
+
+RETURNS: dict with keys:
+  total_files        — number of files in ci_files
+  total_symbols      — number of rows in ci_symbols
+  symbols_by_kind    — dict mapping kind → count
+                       (e.g. {"method": 1387, "class": 327})
+  total_references   — number of rows in ci_references
+  total_method_bodies— number of fingerprints in ci_method_bodies
+  languages          — sorted list of distinct languages seen
+
+EXAMPLE:
+  stats = project_stats()
+  print(f"Project: {stats['total_files']} files, {stats['total_symbols']} symbols")
+  print(f"Languages: {', '.join(stats['languages'])}")
+  print(f"Kinds: {stats['symbols_by_kind']}")
+
+WHEN TO USE: the first line of any analysis script. Tells you
+immediately whether the index is populated, what languages are
+present, and what kinds of symbols are available to query.""",
 
     "record_finding": """\
 record_finding(title, content, finding_type?, confidence?, tags?, sources?)
