@@ -295,6 +295,15 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         on_progress=lambda msg: click.echo(click.style(f"  {msg}", dim=True)),
     )
 
+    # Start the background indexing queue and register it process-wide
+    # so read_file_tool can enqueue async indexing instead of blocking.
+    # Same pattern as the interactive classic-mode loop below.
+    from infinidev.cli.index_queue import IndexQueue
+    from infinidev.code_intel.background_indexer import set_global_queue
+    _sp_index_queue = IndexQueue(project_id=1)
+    _sp_index_queue.start()
+    set_global_queue(_sp_index_queue)
+
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())
 
@@ -503,9 +512,14 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     # Start background indexing queue (no file watcher in classic mode —
     # watchfiles' Rust backend writes debug spam to stdout that can't be
     # suppressed. Files are indexed on-demand via read_file instead.)
+    # Register the queue in the process-wide ``background_indexer``
+    # registry so ``read_file_tool`` and other callers can enqueue
+    # without importing CLI internals.
     from infinidev.cli.index_queue import IndexQueue
+    from infinidev.code_intel.background_indexer import set_global_queue
     _index_queue = IndexQueue(project_id=1)
     _index_queue.start()
+    set_global_queue(_index_queue)
 
     from infinidev.engine.hooks.ui_hooks import register_ui_hooks
     register_ui_hooks()

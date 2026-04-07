@@ -191,18 +191,24 @@ class ReadFileTool(InfinibayBaseTool):
         self._log_tool_usage(f"Read {file_path} ({desc})")
 
         # Auto-index the file for code intelligence (best-effort).
-        # Wrapped in the static-analysis timer so we can attribute the
-        # indexing cost separately from "actual" syntax_check work —
-        # ensure_indexed parses the file with tree-sitter, populates
-        # the symbol DB, and can be one of the bigger non-LLM costs
-        # in a step on large source files.
+        # Goes through ``background_indexer.enqueue_or_sync``: if the
+        # process has a running IndexQueue (registered by cli.main at
+        # startup), this is a non-blocking ``queue.put`` of ~µs and the
+        # worker thread does the actual ensure_indexed off the hot path.
+        # Without a queue (tests, scripts, isolated tool calls) it
+        # falls back to synchronous ensure_indexed so behaviour matches
+        # the pre-async version exactly.
+        #
+        # Wrapped in the static-analysis timer for visibility — when the
+        # queue is active the file_indexing bucket should drop to ~µs/call
+        # because the actual parse is happening on a worker thread.
         try:
-            from infinidev.code_intel.smart_index import ensure_indexed
+            from infinidev.code_intel.background_indexer import enqueue_or_sync
             from infinidev.engine.static_analysis_timer import measure as _sa_measure
             project_id = self.project_id
             if project_id:
                 with _sa_measure("file_indexing"):
-                    ensure_indexed(project_id, file_path)
+                    enqueue_or_sync(project_id, file_path)
         except Exception:
             pass  # Never fail a read because of indexing
 
