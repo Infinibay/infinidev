@@ -393,6 +393,44 @@ def _bootstrap_single_prompt_runtime() -> None:
     _q.start()
     set_global_queue(_q)
 
+    # File watcher — catches every modification to the workspace,
+    # including shell commands (``sed ... > file.ts``), external
+    # editors, IDE saves, and ``git checkout``. Routes changes to the
+    # background index queue; the indexer's file-integrity hook then
+    # pushes a notification to the engine if the new content is broken.
+    # This is the single-source-of-truth for "something changed on disk"
+    # — direct file tool writes ALSO trigger the queue explicitly so
+    # the 500 ms debounce of ``watchfiles`` doesn't leave the index
+    # stale between a replace_lines call and the next get_symbol_code.
+    # The dual trigger is safe because ``ensure_indexed`` short-circuits
+    # on unchanged content hashes.
+    try:
+        from infinidev.cli.file_watcher import FileWatcher, WATCHFILES_AVAILABLE
+        if WATCHFILES_AVAILABLE:
+            import os as _os
+            workspace = _os.getcwd()
+
+            def _index_on_change(changed_path: str) -> None:
+                try:
+                    from infinidev.code_intel.background_indexer import enqueue_or_sync
+                    enqueue_or_sync(1, changed_path)
+                except Exception:
+                    pass
+
+            _watcher = FileWatcher(
+                workspace=workspace,
+                callback=lambda _p: None,  # no visual callback in classic
+                index_callback=_index_on_change,
+            )
+            _watcher.start()
+            # Stash on the IndexQueue so _run_main can stop it on exit.
+            setattr(_q, "_file_watcher", _watcher)
+    except Exception:
+        # File watcher is best-effort. If watchfiles isn't installed
+        # or the start fails, classic mode still works — it just
+        # misses shell-bypass detection.
+        pass
+
 
 def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None:
     """Run a single prompt non-interactively and exit.

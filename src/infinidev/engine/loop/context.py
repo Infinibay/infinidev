@@ -555,6 +555,43 @@ def build_iteration_prompt(
     except Exception:
         pass
 
+    # File integrity notifications — the single source of truth for
+    # "some file on disk is now syntactically broken". Populated by
+    # the indexer on every successful parse, via one of three trigger
+    # paths: (a) direct file tool writes, (b) the file watcher for
+    # shell / external / IDE edits, (c) manual ``/reindex``. The
+    # queue dedups by file path so a single breakage yields a single
+    # warning; auto-heals when the file becomes valid again. See
+    # ``code_intel.file_change_notifications`` for the full contract.
+    try:
+        from infinidev.code_intel.file_change_notifications import (
+            drain_pending_notifications,
+        )
+        notifications = drain_pending_notifications()
+        if notifications:
+            lines = ["<file-integrity-warning>"]
+            lines.append(
+                "The following files on disk are currently in a "
+                "syntactically broken state. Something (a shell "
+                "command, an external editor, or one of your own "
+                "edits) left them with tree-sitter parse errors. "
+                "Read each file, understand what went wrong, and "
+                "fix it with replace_lines or create_file before "
+                "doing anything else — downstream tools that read "
+                "these files will see garbage."
+            )
+            lines.append("")
+            for n in notifications[:5]:
+                lines.append(f"  {n.render()}")
+            if len(notifications) > 5:
+                lines.append(
+                    f"  ... and {len(notifications) - 5} more broken file(s)."
+                )
+            lines.append("</file-integrity-warning>")
+            parts.append("\n".join(lines))
+    except Exception:
+        pass
+
     # Opened files cache — files the agent has read or written recently.
     # This avoids redundant read_file calls between steps.
     if state.opened_files:

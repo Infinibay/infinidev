@@ -114,6 +114,33 @@ def index_file(project_id: int, file_path: str) -> int:
     except Exception as exc:
         logger.debug("method_index hook failed for %s: %s", file_path, exc)
 
+    # File integrity check — the single-source-of-truth for "did a
+    # change on disk leave this file in a broken syntactic state?".
+    # This fires on EVERY path that calls index_file: direct writes
+    # by file tools (create_file, replace_lines, etc.), the background
+    # file watcher when an external edit or shell redirect lands, and
+    # the /reindex slash command. Because ``ensure_indexed`` short-
+    # circuits on unchanged content hashes, the check only runs when
+    # something actually changed — no duplicate work across trigger
+    # paths.
+    #
+    # On valid content, ``push_notification`` with an empty list
+    # auto-heals the queue for this file. On broken content, it pushes
+    # a dedup'd entry the engine will drain into the next prompt.
+    # Best-effort — never let a check_syntax bug break the indexer.
+    try:
+        from infinidev.code_intel.syntax_check import check_syntax
+        from infinidev.code_intel.file_change_notifications import push_notification
+        try:
+            text = content.decode("utf-8", errors="replace")
+        except Exception:
+            text = ""
+        if text:
+            issues = check_syntax(text, file_path=file_path)
+            push_notification(file_path, language, issues)
+    except Exception as exc:
+        logger.debug("integrity check failed for %s: %s", file_path, exc)
+
     return len(symbols)
 
 

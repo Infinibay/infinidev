@@ -97,14 +97,14 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     cwd=cwd,
                     env=run_env,
                 )
-            
+
             return self._success({
                 "exit_code": result.returncode,
                 "stdout": result.stdout[-10000:] if result.stdout else "",
                 "stderr": result.stderr[-5000:] if result.stderr else "",
                 "success": result.returncode == 0,
             })
-            
+
         except subprocess.TimeoutExpired:
             return self._error(f"Command timed out after {timeout}s")
         except Exception as e:
