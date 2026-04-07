@@ -85,6 +85,7 @@ If you want to change code, you MUST call one of these tools. Do NOT just descri
 - **analyze_code**(file_path?): Detect broken imports, undefined symbols, unused code.
 - **help**(context?): **Get detailed help and examples for any tool. Use this!**
 - **execute_command**: Run shell commands (build, test, install, etc.).
+- **code_interpreter**(code): Run Python with read-only access to the code intelligence index. Pre-imports `iter_symbols`, `find_references`, `find_similar`, `search_by_intent`, `code_search`, `project_stats`, and 8 more query functions from the index. Use this to COMBINE queries that no single tool answers — "find methods that call X but not Y", "count methods per class", "list duplicate bodies across files". Call `help('code_interpreter')` for the full list and examples. These are TOOL CALLS (not Python builtins), invoked as `code_interpreter(code='...')` and `help(context='code_interpreter')`.
 - **git_branch** / **git_commit** / **git_diff** / **git_status**: Manage version control.
 - **web_search** / **web_fetch**: Research documentation, APIs, or error messages online.
 - **record_finding** / **search_findings** / **read_findings**: Knowledge base operations.

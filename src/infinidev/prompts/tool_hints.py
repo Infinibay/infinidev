@@ -72,6 +72,15 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Run a shell command",
         "execute_command(command='python -m pytest tests/ -x -q')",
     ),
+    "code_interpreter": (
+        "Run Python with read-only access to the code intelligence index "
+        "(iter_symbols, find_references, find_similar, search_by_intent, "
+        "code_search, etc. are pre-imported). Use for combined queries "
+        "that no single tool answers — see help('code_interpreter')",
+        "code_interpreter(code='from collections import Counter\\n"
+        "methods = iter_symbols(kind=\"method\")\\n"
+        "print(Counter(m[\"parent_symbol\"] for m in methods).most_common(5))')",
+    ),
     # Web
     "web_search": (
         "Search the web for documentation, APIs, or solutions",
@@ -181,7 +190,7 @@ def build_tool_usage_section(available_tools: set[str]) -> str:
         ("Writing", ["create_file", "replace_lines", "edit_symbol",
                      "add_symbol", "remove_symbol", "add_content_after_line",
                      "add_content_before_line", "apply_patch"]),
-        ("Execution", ["execute_command"]),
+        ("Execution", ["execute_command", "code_interpreter"]),
         ("Git", ["git_branch", "git_commit", "git_diff", "git_status"]),
         ("Web", ["web_search", "web_fetch"]),
         ("Knowledge", ["record_finding", "search_findings", "read_findings"]),
