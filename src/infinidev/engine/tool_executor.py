@@ -65,9 +65,34 @@ def reindex_if_enabled(file_path: str) -> None:
 # ── Opened files cache management ─────────────────────────────────────────
 
 
+def _evict_symbol_cache(state: LoopState) -> None:
+    """Drop every ``[symbol] X`` entry from the opened-files cache.
+
+    Called whenever an edit happens to a file the model previously
+    inspected via ``get_symbol_code``. We don't track which symbols
+    came from which file in the cache key (that would require
+    extending the OpenedFile model), so we evict pessimistically:
+    on any edit, all cached symbol bodies are dropped. This is
+    correct (no stale code in cache) and cheap in the common case
+    (the model rarely has more than 3-5 symbols cached at once).
+    """
+    stale = [k for k in state.opened_files if k.startswith("[symbol] ")]
+    for k in stale:
+        state.opened_files.pop(k, None)
+
+
 def _reread_and_cache(state: LoopState, path: str) -> None:
-    """Re-read a file from disk and refresh the opened files cache."""
+    """Re-read a file from disk and refresh the opened files cache.
+
+    Also evicts every cached symbol body — those came from a tool
+    call BEFORE this edit and may now reflect stale source. The
+    next ``get_symbol_code`` call will fetch the fresh version.
+    The eviction runs unconditionally (even if the file re-read
+    fails) because we KNOW an edit was just attempted; conservatism
+    here prevents the model from acting on stale cached source.
+    """
     import os as _os
+    _evict_symbol_cache(state)
     try:
         if _os.path.isfile(path):
             with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -99,6 +124,11 @@ def update_opened_files_cache(
     """Update the opened files cache based on tool calls.
 
     Dispatches to tool-specific handlers via ``_CACHE_HANDLERS``.
+
+    Most handlers key the cache by file path, so we extract ``path``
+    upfront for their convenience. But some tools (e.g.
+    ``get_symbol_code``) key by symbol name instead — those handlers
+    receive ``path=None`` and pull what they need from ``args``.
     """
     import os as _os
 
@@ -109,18 +139,20 @@ def update_opened_files_cache(
     if not isinstance(args, dict):
         return
 
-    path = args.get("path")
-    if not path:
+    handler = _CACHE_HANDLERS.get(tool_name)
+    if not handler:
         return
 
     from infinidev.tools.base.context import get_current_workspace_path
     ws = get_current_workspace_path() or _os.getcwd()
-    if not _os.path.isabs(path):
+
+    # Path is a convenience for handlers that key by file. Symbol-based
+    # handlers get None and use args["name"] / args["symbol"] instead.
+    path = args.get("path") or args.get("file_path")
+    if path and not _os.path.isabs(path):
         path = _os.path.normpath(_os.path.join(ws, path))
 
-    handler = _CACHE_HANDLERS.get(tool_name)
-    if handler:
-        handler(state, path, args, result, ws)
+    handler(state, path, args, result, ws)
 
 
 def _cache_read(state, path, args, result, ws):
@@ -210,6 +242,30 @@ def _cache_code_search(state, path, args, result, ws):
         state.cache_file(f"[search] {query}", result)
 
 
+def _cache_get_symbol_code(state, path, args, result, ws):
+    """Cache the source body of a symbol so the next step can read it
+    from the prompt instead of re-issuing get_symbol_code.
+
+    Diagnosed 2026-04-07: small models routinely re-fetch the same
+    symbol across consecutive steps because the raw tool output is
+    discarded between steps and step summaries can't fit ~600 tokens
+    of source code. Caching the body under a stable key
+    (``[symbol] qualified_name``) lets the prompt builder include it
+    in the next ``<opened-files>`` block — same TTL/eviction rules as
+    file content, same edit-invalidation guarantees (because any
+    edit_symbol/replace_lines on the underlying file evicts ALL
+    cached entries for that file via _cache_symbol_edit).
+    """
+    name = args.get("name") or args.get("symbol") or args.get("qualified_name", "")
+    if not name:
+        return
+    if not result or result.strip().startswith('{"error'):
+        return
+    # The model expects to find this entry by symbol name, so use a
+    # distinctive prefix that won't collide with any real file path.
+    state.cache_file(f"[symbol] {name}", result)
+
+
 # Dispatch table: tool_name → handler function
 _CACHE_HANDLERS = {
     "read_file": _cache_read,
@@ -230,6 +286,7 @@ _CACHE_HANDLERS = {
     "list_directory": _cache_list_dir,
     "glob": _cache_glob,
     "code_search": _cache_code_search,
+    "get_symbol_code": _cache_get_symbol_code,
 }
 
 
