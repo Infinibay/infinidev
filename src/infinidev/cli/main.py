@@ -277,169 +277,95 @@ def handle_settings_command(parts: list[str]):
                 click.echo(click.style(f"Unknown setting: {setting_key}", fg="yellow"))
 
 
-def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None:
-    """Run a single prompt non-interactively and exit.
+_IMPERATIVE_PREFIXES = (
+    "create ", "add ", "fix ", "implement ", "write ", "build ",
+    "refactor ", "rename ", "delete ", "remove ", "update ", "change ",
+    "make ", "generate ", "convert ",
+)
 
-    Supports /explore and /brainstorm prefixes, otherwise runs as develop flow.
-    """
+
+def _bootstrap_single_prompt_runtime() -> None:
+    """Side effects shared by every classic entry point: DB init, ui/behavior
+    hook registration, initial index, background indexer queue. Pulled out so
+    both ``--prompt`` and the interactive ``_run_main`` setup do this exactly
+    once and never drift apart."""
     init_db()
     from infinidev.engine.hooks.ui_hooks import register_ui_hooks
     register_ui_hooks()
     from infinidev.engine.behavior.hook import register_behavior_hooks
     register_behavior_hooks()
 
-    # Index workspace before LLM starts so code intelligence is available
     from infinidev.cli.initial_index import run_initial_index
     run_initial_index(
         project_id=1,
         on_progress=lambda msg: click.echo(click.style(f"  {msg}", dim=True)),
     )
 
-    # Start the background indexing queue and register it process-wide
-    # so read_file_tool can enqueue async indexing instead of blocking.
-    # Same pattern as the interactive classic-mode loop below.
     from infinidev.cli.index_queue import IndexQueue
     from infinidev.code_intel.background_indexer import set_global_queue
-    _sp_index_queue = IndexQueue(project_id=1)
-    _sp_index_queue.start()
-    set_global_queue(_sp_index_queue)
+    _q = IndexQueue(project_id=1)
+    _q.start()
+    set_global_queue(_q)
+
+
+def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None:
+    """Run a single prompt non-interactively and exit.
+
+    Thin adapter over :func:`engine.orchestration.run_task` /
+    :func:`run_flow_task`. Uses :class:`NonInteractiveHooks` so the
+    pipeline never blocks waiting for user input. Imperative tasks
+    (action-verb prompts like "refactor X" or "create Y") skip the
+    analyst, which historically wrapped them in an "analyze only" envelope
+    and made the loop run in circles."""
+    from infinidev.engine.orchestration import (
+        run_task, run_flow_task, NonInteractiveHooks,
+    )
+
+    _bootstrap_single_prompt_runtime()
 
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())
+    hooks = NonInteractiveHooks()
+    engine = LoopEngine()
 
-    # Determine mode from prompt prefix
+    # /explore and /brainstorm prefixes bypass the full pipeline and run
+    # the TreeEngine directly with no analysis or review.
     if prompt_text.startswith("/explore "):
-        mode = "explore"
         problem = prompt_text[len("/explore "):]
-    elif prompt_text.startswith("/brainstorm "):
-        mode = "brainstorm"
-        problem = prompt_text[len("/brainstorm "):]
-    else:
-        mode = "develop"
-        problem = prompt_text
-
-    from infinidev.engine.flows import get_flow_config
-    from infinidev.prompts.flows import get_flow_identity
-    from infinidev.engine.tree import TreeEngine
-
-    if mode in ("explore", "brainstorm"):
-        flow_config = get_flow_config(mode)
-        agent._system_prompt_identity = get_flow_identity(mode)
-        agent.backstory = flow_config.backstory
-        agent.activate_context(session_id=session_id)
-        try:
-            tree_engine = TreeEngine()
-            result = tree_engine.execute(
-                agent=agent,
-                task_prompt=(problem, flow_config.expected_output),
-                mode=mode,
-            )
-        finally:
-            agent.deactivate()
-    else:
-        # Analysis phase for single-prompt mode (non-interactive)
-        detected_flow = "develop"
-        task_type = "feature"
-        analysis_prompt = None
-        # Skip the analyst for obvious imperative tasks. The analyst was hijacking
-        # `--prompt` runs by wrapping the user's request in a "do NOT write files,
-        # only analyze" envelope, leaving the model in an impossible loop. If the
-        # request begins with a clear action verb, go straight to the develop flow.
-        _IMPERATIVE_PREFIXES = (
-            "create ", "add ", "fix ", "implement ", "write ", "build ",
-            "refactor ", "rename ", "delete ", "remove ", "update ", "change ",
-            "make ", "generate ", "convert ",
+        result = run_flow_task(
+            agent=agent, flow="explore",
+            task_prompt=(problem, ""),  # expected_output picked up from flow_config
+            session_id=session_id, engine=engine, hooks=hooks,
+            use_tree_engine=True,
         )
-        _imperative = problem.lstrip().lower().startswith(_IMPERATIVE_PREFIXES)
-        if settings.ANALYSIS_ENABLED and not _imperative:
-            try:
-                from infinidev.engine.analysis.analysis_engine import AnalysisEngine
-                analyst_sp = AnalysisEngine()
-                click.echo(click.style("Analyzing request...", fg="cyan", dim=True))
-                analysis = analyst_sp.analyze(problem)
-                if analysis.flow and analysis.flow != "done":
-                    detected_flow = analysis.flow
-                if hasattr(analysis, 'specification'):
-                    task_type = analysis.specification.get("task_type", "feature")
-                analysis_prompt = analysis.build_flow_prompt()
-                click.echo(click.style(f"  Flow: {detected_flow}, Type: {task_type}", fg="cyan", dim=True))
-            except Exception as exc:
-                click.echo(click.style(f"  Analysis failed: {exc}", fg="yellow", dim=True))
+        click.echo(result or "Done.")
+        return
+    if prompt_text.startswith("/brainstorm "):
+        problem = prompt_text[len("/brainstorm "):]
+        result = run_flow_task(
+            agent=agent, flow="brainstorm",
+            task_prompt=(problem, ""),
+            session_id=session_id, engine=engine, hooks=hooks,
+            use_tree_engine=True,
+        )
+        click.echo(result or "Done.")
+        return
 
-        flow_config = get_flow_config(detected_flow)
-        agent._system_prompt_identity = get_flow_identity(detected_flow)
-        agent.backstory = flow_config.backstory
-        agent.activate_context(session_id=session_id)
-
-        # Use analysis-enhanced prompt if available
-        if analysis_prompt:
-            task_prompt_sp = analysis_prompt
-        else:
-            task_prompt_sp = (problem, flow_config.expected_output)
-
-        # Gather phase for single-prompt mode
-        if settings.GATHER_ENABLED:
-            try:
-                from infinidev.gather import run_gather
-                click.echo(click.style("Gathering context...", fg="cyan", dim=True))
-                brief = run_gather(problem, [], None, agent)
-                desc, expected = task_prompt_sp
-                task_prompt_sp = (brief.render() + "\n\n" + desc, expected)
-                click.echo(click.style(f"  {brief.summary()}", fg="cyan", dim=True))
-            except Exception as exc:
-                click.echo(click.style(f"  Gather failed: {exc}", fg="yellow", dim=True))
-
-        try:
-            if use_phase_engine:
-                from infinidev.engine.phases.phase_engine import PhaseEngine
-                phase_eng = PhaseEngine()
-                result = phase_eng.execute(
-                    agent=agent,
-                    task_prompt=task_prompt_sp,
-                    task_type=task_type,
-                    verbose=True,
-                )
-                engine = phase_eng  # for has_file_changes() check below
-            else:
-                engine = LoopEngine()
-                result = engine.execute(
-                    agent=agent,
-                    task_prompt=task_prompt_sp,
-                    verbose=True,
-                )
-        finally:
-            agent.deactivate()
-
-        # Code review phase for single-prompt mode (with rework loop)
-        if settings.REVIEW_ENABLED and engine.has_file_changes():
-            click.echo(click.style("\nRunning code review...", fg="magenta", dim=True))
-            from infinidev.engine.analysis.review_engine import run_review_rework_loop
-
-            def _sp_review_status(level: str, msg: str) -> None:
-                if level == "verification_pass":
-                    click.echo(click.style(f"Verification: PASS. {msg}", fg="green", dim=True))
-                elif level == "verification_fail":
-                    click.echo(click.style(f"Verification: FAIL. {msg}", fg="red"))
-                    click.echo(click.style("Re-running developer to fix test failures...", fg="magenta", dim=True))
-                elif level == "approved":
-                    click.echo(click.style(f"Code review: APPROVED. {msg}", fg="green", dim=True))
-                elif level == "rejected":
-                    click.echo(click.style(msg, fg="red"))
-                    click.echo(click.style("Re-running developer to fix review issues...", fg="magenta", dim=True))
-                elif level == "max_reviews":
-                    click.echo(click.style("Max review rounds reached — stopping.", fg="yellow", dim=True))
-
-            result, _ = run_review_rework_loop(
-                engine=engine,
-                agent=agent,
-                session_id=session_id,
-                task_prompt=task_prompt_sp,
-                initial_result=result or "",
-                reviewer=ReviewEngine(),
-                recent_messages=get_recent_summaries(session_id, limit=5),
-                on_status=_sp_review_status,
-            )
-
+    # Develop flow — full pipeline. Imperative bypass: skip the analyst
+    # for obvious action-verb tasks (see _IMPERATIVE_PREFIXES). The
+    # gather phase still runs if globally enabled.
+    _imperative = prompt_text.lstrip().lower().startswith(_IMPERATIVE_PREFIXES)
+    result = run_task(
+        agent=agent,
+        user_input=prompt_text,
+        session_id=session_id,
+        engine=engine,
+        analyst=AnalysisEngine(),
+        reviewer=ReviewEngine(),
+        hooks=hooks,
+        use_phase_engine=use_phase_engine,
+        skip_analysis=_imperative,
+    )
     click.echo(result or "Done.")
 
 
@@ -499,48 +425,31 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         run_tui()
         return
 
-    # Classic mode (the original while True loop)
-    init_db()
+    # Classic interactive mode — thin adapter around the unified pipeline.
+    _bootstrap_single_prompt_runtime()
 
-    # Index workspace before LLM starts so code intelligence is available
-    from infinidev.cli.initial_index import run_initial_index
-    run_initial_index(
-        project_id=1,
-        on_progress=lambda msg: click.echo(click.style(f"  {msg}", dim=True)),
+    from infinidev.engine.orchestration import (
+        run_task, run_flow_task, ClickHooks,
     )
-
-    # Start background indexing queue (no file watcher in classic mode —
-    # watchfiles' Rust backend writes debug spam to stdout that can't be
-    # suppressed. Files are indexed on-demand via read_file instead.)
-    # Register the queue in the process-wide ``background_indexer``
-    # registry so ``read_file_tool`` and other callers can enqueue
-    # without importing CLI internals.
-    from infinidev.cli.index_queue import IndexQueue
-    from infinidev.code_intel.background_indexer import set_global_queue
-    _index_queue = IndexQueue(project_id=1)
-    _index_queue.start()
-    set_global_queue(_index_queue)
-
-    from infinidev.engine.hooks.ui_hooks import register_ui_hooks
-    register_ui_hooks()
-    from infinidev.engine.behavior.hook import register_behavior_hooks
-    register_behavior_hooks()
+    from infinidev.db.service import store_conversation_turn
 
     click.echo(click.style("Welcome to Infinidev CLI (Classic Mode)!", fg="cyan", bold=True))
     click.echo("Type your instructions or /help for commands.")
-    
+
     session = PromptSession(history=FileHistory(str(DEFAULT_BASE_DIR / "history")))
-    
-    # Create the agent
+
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())
     engine = LoopEngine()
     analyst = AnalysisEngine()
     reviewer = ReviewEngine()
+    hooks = ClickHooks(session=session)
     _gather_next_task = False
     _use_phase_engine = False
 
-    # Register permission handler for classic CLI
+    # Permission handler — kept inline because click.confirm() needs the
+    # caller's stdin. Could be moved to ClickHooks later if more permission
+    # surfaces appear, but one callsite doesn't earn an abstraction yet.
     def _classic_permission_handler(tool_name: str, description: str, details: str) -> bool:
         click.echo(click.style(f"\n⚠ Permission required: {description}", fg="yellow", bold=True))
         click.echo(click.style(f"  {details}", fg="yellow"))
@@ -548,11 +457,6 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
 
     from infinidev.tools.permission import set_permission_handler
     set_permission_handler(_classic_permission_handler)
-
-    from infinidev.cli.phases import (
-        run_analysis_phase, run_gather_phase,
-        run_execution_phase, run_review_phase,
-    )
 
     while True:
         try:
@@ -563,111 +467,80 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             _fallthrough_to_pipeline = False
             if user_input.startswith("/"):
                 cmd_result = handle_command(user_input)
+
                 if isinstance(cmd_result, tuple) and cmd_result[0] == "prompt":
-                    # Rewrite user_input and fall through to the normal pipeline.
+                    # /refactor and friends — rewrite user_input and fall through.
                     user_input = cmd_result[1]
                     _fallthrough_to_pipeline = True
-                elif isinstance(cmd_result, tuple) and cmd_result[0] == "explore":
-                    from infinidev.config.settings import reload_all
-                    reload_all()
-                    from infinidev.engine.tree import TreeEngine
-                    from infinidev.engine.flows import get_flow_config
-                    from infinidev.prompts.flows import get_flow_identity
-                    click.echo(click.style(f"[explore] Exploring: {cmd_result[1]}", fg="yellow"))
-                    flow_config = get_flow_config("explore")
-                    agent._system_prompt_identity = get_flow_identity("explore")
-                    agent.backstory = flow_config.backstory
-                    agent.activate_context(session_id=session_id)
-                    try:
-                        result = TreeEngine().execute(agent=agent, task_prompt=(cmd_result[1], flow_config.expected_output), verbose=True)
-                        if not result or not result.strip():
-                            result = "Exploration complete (no synthesis produced)."
-                    finally:
-                        agent.deactivate()
-                    click.echo(click.style("\nExploration Result:", fg="green", bold=True))
+
+                elif isinstance(cmd_result, tuple) and cmd_result[0] in ("explore", "brainstorm"):
+                    flow_name, problem = cmd_result
+                    click.echo(click.style(f"[{flow_name}] {problem}", fg="yellow"))
+                    result = run_flow_task(
+                        agent=agent, flow=flow_name,
+                        task_prompt=(problem, ""),
+                        session_id=session_id, engine=engine, hooks=hooks,
+                        use_tree_engine=True,
+                    )
+                    click.echo(click.style(f"\n{flow_name.title()} Result:", fg="green", bold=True))
                     click.echo(result)
                     continue
-                elif isinstance(cmd_result, tuple) and cmd_result[0] == "brainstorm":
-                    from infinidev.config.settings import reload_all
-                    reload_all()
-                    from infinidev.engine.tree import TreeEngine
-                    from infinidev.engine.flows import get_flow_config
-                    from infinidev.prompts.flows import get_flow_identity
-                    click.echo(click.style(f"[brainstorm] Brainstorming: {cmd_result[1]}", fg="magenta"))
-                    flow_config = get_flow_config("brainstorm")
-                    agent._system_prompt_identity = get_flow_identity("brainstorm")
-                    agent.backstory = flow_config.backstory
-                    agent.activate_context(session_id=session_id)
-                    try:
-                        result = TreeEngine().execute(agent=agent, task_prompt=(cmd_result[1], flow_config.expected_output), mode="brainstorm")
-                        if not result or not result.strip():
-                            result = "Brainstorm complete (no synthesis produced)."
-                    finally:
-                        agent.deactivate()
-                    click.echo(click.style("\nBrainstorm Result:", fg="magenta", bold=True))
-                    click.echo(result)
-                    continue
+
                 elif cmd_result == "init":
-                    from infinidev.prompts.init_project import INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT
-                    from infinidev.engine.flows import get_flow_config
-                    from infinidev.prompts.flows import get_flow_identity
-                    from infinidev.config.settings import reload_all
-                    reload_all()
+                    from infinidev.prompts.init_project import (
+                        INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT,
+                    )
                     click.echo(click.style("[init] Exploring and documenting project...", fg="yellow"))
-                    flow_config = get_flow_config("document")
-                    agent._system_prompt_identity = get_flow_identity("document")
-                    agent.backstory = flow_config.backstory
-                    agent.activate_context(session_id=session_id)
-                    try:
-                        result = engine.execute(agent=agent, task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT), verbose=True)
-                        if not result or not result.strip():
-                            result = "Project initialization complete."
-                    finally:
-                        agent.deactivate()
+                    result = run_flow_task(
+                        agent=agent, flow="document",
+                        task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
+                        session_id=session_id, engine=engine, hooks=hooks,
+                    )
                     click.echo(click.style("\nInit Result:", fg="green", bold=True))
                     click.echo(result)
+                    continue
+
                 elif cmd_result == "think":
                     _gather_next_task = True
                     _use_phase_engine = True
-                    click.echo(click.style("Phase mode enabled: ANALYZE → PLAN → EXECUTE. Send your task.", fg="cyan"))
+                    click.echo(click.style(
+                        "Phase mode enabled: ANALYZE → PLAN → EXECUTE. Send your task.",
+                        fg="cyan",
+                    ))
+
                 if not _fallthrough_to_pipeline:
                     continue
 
+            # Reload settings between turns so /settings changes apply
+            # on the next task. The pipeline itself does NOT reload.
             from infinidev.config.settings import reload_all
             reload_all()
 
-            # ── Pipeline: analysis → gather → execute → review ──
-            task_prompt, analysis, flow = run_analysis_phase(user_input, analyst, session)
-            if flow in ("done", "cancelled"):
-                continue
+            store_conversation_turn(session_id, "user", user_input)
 
-            # Configure agent with flow
-            from infinidev.engine.flows import get_flow_config
-            from infinidev.prompts.flows import get_flow_identity
-            flow_config = get_flow_config(flow)
-            agent._system_prompt_identity = get_flow_identity(flow)
-            agent.backstory = flow_config.backstory
-
-            if flow == "develop":
-                task_prompt = run_gather_phase(
-                    user_input, agent, task_prompt, analysis,
-                    session_id, force_gather=_gather_next_task,
-                )
-            _gather_next_task = False
-
-            result = run_execution_phase(
-                agent, engine, task_prompt, flow, analysis,
-                session_id, use_phase_engine=_use_phase_engine,
+            result = run_task(
+                agent=agent,
+                user_input=user_input,
+                session_id=session_id,
+                engine=engine,
+                analyst=analyst,
+                reviewer=reviewer,
+                hooks=hooks,
+                use_phase_engine=_use_phase_engine,
+                force_gather=_gather_next_task,
             )
+            _gather_next_task = False
             _use_phase_engine = False
 
-            result = run_review_phase(
-                engine, agent, session_id, task_prompt,
-                result, reviewer, flow, flow_config,
+            store_conversation_turn(
+                session_id, "assistant",
+                result or "",
+                (result or "")[:200],
             )
 
-            click.echo(click.style("\nFinal Result:", fg="green", bold=True))
-            click.echo(result)
+            if result:
+                click.echo(click.style("\nFinal Result:", fg="green", bold=True))
+                click.echo(result)
 
         except KeyboardInterrupt:
             continue
@@ -677,8 +550,16 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             click.echo(click.style(f"Error: {e}", fg="red"))
             logging.exception("Error in main loop")
 
-    # Cleanup background services
-    _index_queue.stop()
+    # Cleanup background services — the IndexQueue was started inside
+    # _bootstrap_single_prompt_runtime() and registered globally; fetch
+    # it through the public accessor and stop it on exit.
+    from infinidev.code_intel.background_indexer import get_global_queue
+    _q = get_global_queue()
+    if _q is not None:
+        try:
+            _q.stop()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, Callable
 
 from infinidev.engine.loop import LoopEngine
 from infinidev.engine.test_checkpoint import TestCheckpoint
@@ -187,6 +187,102 @@ class PhaseEngine:
             else:
                 break
 
+        return result
+
+    # ── Public: plan-review interactive flow ────────────────────────────
+
+    def execute_with_plan_review(
+        self,
+        *,
+        agent: Any,
+        task_description: str,
+        expected_output: str = "Complete the task.",
+        on_plan_ready: Callable[[list[dict]], tuple[str, str]],
+        on_step_start: Callable[[int, int, list, list], None] | None = None,
+        verbose: bool = True,
+    ) -> str:
+        """Run the phase pipeline with a human-in-the-loop plan review.
+
+        This is the supported public entry point for the ``/plan`` flow
+        in the TUI (and any future caller that wants the same behaviour).
+        It replaces direct calls to the underscore-prefixed phase
+        functions (``_classify``, ``_investigate_iteratively``,
+        ``_generate_plan``, ``_execute_plan``) that the TUI worker used
+        to make — those are now considered private to this module.
+
+        The pipeline:
+            1. **Classify** the task to pick a depth profile.
+            2. **Investigate** the codebase iteratively.
+            3. **Plan + review loop**: generate a plan, hand it to
+               *on_plan_ready*, and act on the verdict:
+                 * ``("approve", "")``  → break out of the loop and execute.
+                 * ``("cancel", "")``   → return ``"Plan cancelled."`` immediately.
+                 * ``("feedback", txt)`` → re-generate the plan with the
+                   user feedback appended to the task description.
+            4. **Execute** the approved plan, optionally calling
+               *on_step_start* before each step starts so a UI can refresh.
+
+        *on_plan_ready* MUST be safe to call from a worker thread. The
+        intended pattern is for the caller to block on a UI event and
+        return only once the user has answered — the TUI does this with
+        ``threading.Event``; a CLI could use ``input()``.
+        """
+        from infinidev.gather.models import DEPTH_CONFIGS
+
+        # Init test checkpoint
+        from infinidev.tools.base.context import get_current_workspace_path
+        workdir = get_current_workspace_path()
+        self._test_checkpoint = TestCheckpoint(None, workdir)
+
+        # 1. Classify
+        classification = self._classify(agent, task_description, verbose)
+        depth_config = DEPTH_CONFIGS.get(classification.depth)
+        task_type = classification.ticket_type.value
+        strategy = get_strategy(task_type)
+
+        # 2. Investigate
+        strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
+        answers, all_notes = _investigate_iteratively(
+            agent, task_description, strategy, None, verbose=verbose,
+            max_questions=depth_config.questions_max,
+            skip_investigate=depth_config.skip_investigate,
+        )
+
+        # 3. Plan + review loop
+        feedback_context = ""
+        strategy.plan_min_steps = depth_config.plan_min_steps
+
+        plan_steps: list[dict] = []
+        while True:
+            plan_desc = task_description
+            if feedback_context:
+                plan_desc += f"\n\n## USER FEEDBACK ON PREVIOUS PLAN\n{feedback_context}"
+
+            plan_steps = _generate_plan(
+                agent, plan_desc, answers, all_notes, strategy, None, verbose=verbose,
+            )
+            if not plan_steps:
+                return "Failed to generate a plan."
+
+            verdict, feedback = on_plan_ready(plan_steps)
+
+            if verdict == "approve":
+                break
+            if verdict == "cancel":
+                return "Plan cancelled."
+            # "feedback" → loop back with feedback context
+            feedback_context = feedback
+
+        # 4. Execute (single round here — the auto re-plan loop in
+        # `execute()` is intentionally not used in plan-review mode
+        # because the user has already approved this plan and a silent
+        # re-plan would surprise them).
+        result, last_engine = _execute_plan(
+            agent, task_description, expected_output,
+            answers, all_notes, plan_steps, strategy, None, depth_config,
+            verbose=verbose, on_step_start=on_step_start,
+        )
+        self._last_engine = last_engine
         return result
 
     # ── Classify ─────────────────────────────────────────────────
