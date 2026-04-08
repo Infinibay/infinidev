@@ -546,9 +546,22 @@ _DETECTORS: list[tuple[str, Any]] = [
     # prevents the dev-env-debug rabbit hole that we observed eat the
     # entire 900s budget on pallets/flask-4045 (2026-04-07).
     ("python_env_mismatch",   lambda m, s: _has_python_env_mismatch(m)),
+    # Fingerprint anti-pattern matcher — runs LAST as a catch-all.
+    # Returns the matched advice key directly (a str) instead of a
+    # bool, so the loop below routes it through the str branch.
+    # A single entry covers ~20 anti-patterns from
+    # ``fingerprint.ANTI_PATTERNS``. Adding a new pattern is one line
+    # in fingerprint.py — no changes needed here.
+    ("@fingerprint_router",   lambda m, s: _fingerprint_router(m, s)),
     # NB: stuck_on_planning has no automatic detector — it's only
     # delivered explicitly via ``maybe_queue_guidance(force_key=...)``.
 ]
+
+
+def _fingerprint_router(messages: list[dict], state: "LoopState | None") -> str | None:
+    """Lazy import wrapper around the fingerprint anti-pattern matcher."""
+    from infinidev.engine.guidance.fingerprint import detect_fingerprint_antipattern
+    return detect_fingerprint_antipattern(messages, state)
 
 
 def detect_stuck_pattern(messages: list[dict], state: "LoopState") -> str | None:
@@ -557,10 +570,19 @@ def detect_stuck_pattern(messages: list[dict], state: "LoopState") -> str | None
     *messages* should be the slice of the message buffer that belongs
     to the just-finished step (e.g. ``messages[step_messages_start:]``).
     A detector failure never crashes the loop — it's caught and skipped.
+
+    Detector functions can return either ``bool`` (legacy hand-coded
+    detectors with a fixed key) or ``str`` (router detectors that
+    pick the matching advice key dynamically). When a router returns
+    a string, that string IS the result and the registered key in
+    ``_DETECTORS`` is ignored.
     """
     for key, fn in _DETECTORS:
         try:
-            if fn(messages, state):
+            result = fn(messages, state)
+            if isinstance(result, str) and result:
+                return result
+            if result is True:
                 return key
         except Exception:
             continue

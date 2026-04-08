@@ -81,6 +81,41 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "      )"
         ),
     ),
+    "stop_reading": GuidanceEntry(
+        key="stop_reading",
+        title="Stop exploring — start editing",
+        body=(
+            "Your fingerprint for this step shows lots of reads, "
+            "lookups, or get_symbol_code calls and ZERO edits. The "
+            "model that wins this kind of task is the one that "
+            "commits to a fix early and iterates on it, not the one "
+            "that keeps gathering more context.\n\n"
+            "What to do RIGHT NOW:\n"
+            "  1. Re-read your own notes / discovered_context. You "
+            "     probably already know enough.\n"
+            "  2. Pick the SMALLEST plausible change you could make.\n"
+            "  3. Make it with replace_lines / edit_symbol / "
+            "     create_file. Even a wrong first attempt is more "
+            "     useful than another read — the test failure that "
+            "     follows will tell you what's actually wrong.\n"
+            "  4. Run the relevant test (or static check) and let "
+            "     the result drive the next iteration.\n\n"
+            "Things you should NOT do:\n"
+            "  - read_file on a file you've already opened in this task\n"
+            "  - get_symbol_code on a symbol whose source is in <opened-files>\n"
+            "  - search_symbols / find_references for terms you've already searched\n"
+            "  - add_step to break the work down further — your plan is fine, EXECUTE it"
+        ),
+        example=(
+            "If your last 8 tool calls were:\n"
+            "  read_file, get_symbol_code, get_symbol_code, "
+            "read_file, code_search, get_symbol_code, list_symbols, "
+            "read_file\n\n"
+            "...your next call MUST be one of:\n"
+            "  replace_lines / edit_symbol / create_file / add_symbol\n"
+            "or step_complete with status='blocked' if you genuinely cannot proceed."
+        ),
+    ),
     "python_env_mismatch": GuidanceEntry(
         key="python_env_mismatch",
         title="ImportError from python/pytest? It is almost certainly a virtualenv mismatch",
