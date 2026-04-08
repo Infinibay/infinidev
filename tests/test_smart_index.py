@@ -9,8 +9,14 @@ from infinidev.code_intel.resolve import resolve_symbol, ResolveResult
 
 
 @pytest.fixture
-def temp_python_file(tmp_path):
-    """Create a temporary Python file for testing."""
+def temp_python_file(tmp_path, temp_db):
+    """Create a temporary Python file for testing.
+
+    Depends on ``temp_db`` so each test gets an isolated code-intel DB
+    — otherwise the user's real ~/.infinidev/infinidev.db accumulates
+    symbols across test runs and ``resolve_symbol`` finds 20 copies of
+    ``helper_func`` instead of the one this test just created.
+    """
     code = '''\
 class Calculator:
     def __init__(self):

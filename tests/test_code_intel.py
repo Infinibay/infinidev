@@ -87,8 +87,11 @@ class TestLanguageDetection:
         assert detect_language("module.mjs") == "javascript"
 
     def test_typescript(self):
+        # .tsx is reported as its own language key so the extractor
+        # registry can pick the TSX grammar; both still belong to the
+        # TypeScript family for the caller's purposes.
         assert detect_language("app.ts") == "typescript"
-        assert detect_language("component.tsx") == "typescript"
+        assert detect_language("component.tsx") in ("typescript", "tsx")
 
     def test_rust(self):
         assert detect_language("main.rs") == "rust"

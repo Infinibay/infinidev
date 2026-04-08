@@ -16,6 +16,8 @@ import sys
 import time
 from typing import Any
 
+from dataclasses import dataclass
+
 from infinidev.engine.base import AgentEngine
 from infinidev.engine.tree.context import (
     INIT_TREE_SCHEMA,
@@ -70,14 +72,19 @@ def _emit_tree_event(
 
 # ── Pretty logging ──────────────────────────────────────────────────────────
 
-_DIM = "\033[2m"
-_BOLD = "\033[1m"
-_RESET = "\033[0m"
-_CYAN = "\033[36m"
-_GREEN = "\033[32m"
-_YELLOW = "\033[33m"
-_RED = "\033[31m"
-_MAGENTA = "\033[35m"
+# ANSI codes are defined once in ``engine/engine_logging.py``.
+# Re-imported here under the legacy ``_``-prefixed names because
+# tree/brainstorm.py imports them from this module.
+from infinidev.engine.engine_logging import (
+    DIM as _DIM,
+    BOLD as _BOLD,
+    RESET as _RESET,
+    CYAN as _CYAN,
+    GREEN as _GREEN,
+    YELLOW as _YELLOW,
+    RED as _RED,
+    MAGENTA as _MAGENTA,
+)
 
 
 def _log(msg: str) -> None:
@@ -88,6 +95,29 @@ def _log(msg: str) -> None:
 # LLM calling — imported from canonical module (includes retry, hooks,
 # thinking suppression, JSON mode, and malformed tool call handling)
 from infinidev.engine.llm_client import call_llm as _call_llm
+
+
+@dataclass
+class TreeExecutionContext:
+    """Runtime context for a single ``TreeEngine`` execution.
+
+    Bundles the handful of values every mode (explore / brainstorm)
+    needs to call the LLM and execute tools. Previously a raw dict —
+    switched to a dataclass so the IDE can autocomplete fields and
+    rename is refactor-safe. Legacy ``ctx["key"]`` access still works
+    via ``__getitem__`` to avoid touching every call site on day one.
+    """
+
+    llm_params: dict[str, Any]
+    manual_tc: bool
+    project_id: int
+    agent_id: str
+    tool_dispatch: dict[str, Any]
+    regular_schemas: list[dict[str, Any]]
+    system_prompt: str
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
 
 
 # Manual tool call parsing — imported from canonical module
@@ -619,7 +649,7 @@ class TreeEngine(AgentEngine):
         agent: Any,
         task_tools: list | None,
         flow: str = "explore",
-    ) -> dict[str, Any]:
+    ) -> TreeExecutionContext:
         """Common setup for both modes."""
         llm_params = get_litellm_params()
         if llm_params is None:
@@ -644,15 +674,15 @@ class TreeEngine(AgentEngine):
             session_summaries=getattr(agent, "_session_summaries", None),
         )
 
-        return {
-            "llm_params": llm_params,
-            "manual_tc": manual_tc,
-            "project_id": getattr(agent, "project_id", 1),
-            "agent_id": getattr(agent, "agent_id", "tree_agent"),
-            "tool_dispatch": tool_dispatch,
-            "regular_schemas": regular_schemas,
-            "system_prompt": system_prompt,
-        }
+        return TreeExecutionContext(
+            llm_params=llm_params,
+            manual_tc=manual_tc,
+            project_id=getattr(agent, "project_id", 1),
+            agent_id=getattr(agent, "agent_id", "tree_agent"),
+            tool_dispatch=tool_dispatch,
+            regular_schemas=regular_schemas,
+            system_prompt=system_prompt,
+        )
 
     def _build_tree_from_init(
         self,

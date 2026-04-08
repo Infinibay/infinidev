@@ -70,6 +70,15 @@ from infinidev.engine.tool_executor import (
     WRITE_TOOLS as _WRITE_TOOLS,
 )
 
+from infinidev.config.llm import get_litellm_params, _is_small_model
+from infinidev.config.model_capabilities import get_model_capabilities
+from infinidev.config.settings import settings
+from infinidev.tools.base.context import (
+    bind_tools_to_agent,
+    get_context_for_agent,
+    set_loop_state,
+)
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.guidance_handler import GuidanceHandler
 from infinidev.engine.loop.model_context import _get_model_max_context
@@ -259,12 +268,10 @@ class LoopEngine(AgentEngine):
             return {}
         result = {}
         for path in self._last_file_tracker.get_all_paths():
-            try:
+            with best_effort("failed to read tracked file %s", path):
                 if _os.path.isfile(path) and _os.path.getsize(path) <= _MAX_TRACK_FILE_SIZE:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         result[path] = f.read()
-            except Exception:
-                pass
         return result
 
     def execute(
@@ -327,7 +334,6 @@ class LoopEngine(AgentEngine):
         self._last_state = ctx.state  # Make state available for live introspection
 
         # Attach loop state to tool context so plan tools can modify the plan
-        from infinidev.tools.base.context import set_loop_state
         set_loop_state(ctx.agent_id, ctx.state)
         _hook_manager.dispatch(_HookContext(
             event=_HookEvent.LOOP_START,
@@ -339,13 +345,11 @@ class LoopEngine(AgentEngine):
 
         # Reset the static-analysis latency accumulator at the start of
         # each run so the final summary reports just this task's costs.
-        try:
+        with best_effort("static_analysis_timer reset failed"):
             from infinidev.engine.static_analysis_timer import reset as _sa_reset
             _sa_reset()
-        except Exception:
-            pass
 
-        try:
+        with best_effort("_trace_run_start failed"):
             _trace_run_start(
                 model=str(ctx.llm_params.get("model", "?")),
                 task=ctx.desc,
@@ -360,8 +364,6 @@ class LoopEngine(AgentEngine):
                     "max_context_tokens": ctx.max_context_tokens,
                 },
             )
-        except Exception:
-            pass
 
         for iteration in range(ctx.start_iteration, ctx.max_iterations):
             if self._cancel_event.is_set():
@@ -372,10 +374,8 @@ class LoopEngine(AgentEngine):
 
             ctx.state.iteration_count = iteration + 1
             messages = self._build_iteration_messages(ctx, iteration)
-            try:
+            with best_effort("_trace_iter_prompt failed"):
                 _trace_iter_prompt(iteration + 1, messages[0].get("content", ""), messages[1].get("content", ""))
-            except Exception:
-                pass
 
             # Log step start
             active = ctx.state.plan.active_step
@@ -517,10 +517,6 @@ class LoopEngine(AgentEngine):
         self, agent: Any, task_prompt: tuple[str, str], **kwargs: Any,
     ) -> ExecutionContext:
         """Build ExecutionContext from agent, task_prompt, and overrides."""
-        from infinidev.config.llm import get_litellm_params, _is_small_model
-        from infinidev.config.settings import settings
-        from infinidev.config.model_capabilities import get_model_capabilities
-
         llm_params = get_litellm_params()
         if llm_params is None:
             raise RuntimeError("LoopEngine requires LiteLLM parameters. Ensure INFINIDEV_LLM_MODEL is set.")
@@ -537,7 +533,6 @@ class LoopEngine(AgentEngine):
         task_tools = kwargs.get('task_tools')
         tools = task_tools if task_tools is not None else getattr(agent, "tools", [])
         if task_tools is not None:
-            from infinidev.tools.base.context import bind_tools_to_agent
             bind_tools_to_agent(task_tools, agent.agent_id)
 
         file_tracker = FileChangeTracker()
@@ -553,7 +548,6 @@ class LoopEngine(AgentEngine):
 
         if is_small and task_tools is None:
             from infinidev.tools import get_tools_for_role
-            from infinidev.tools.base.context import bind_tools_to_agent
             tools = get_tools_for_role("developer", small_model=True)
             # CRITICAL: bind the freshly-created tools to this agent's id.
             # Without this, tool.agent_id falls back to thread-local lookup,
@@ -583,7 +577,6 @@ class LoopEngine(AgentEngine):
         event_id = kwargs.get('event_id')
         resume_state = kwargs.get('resume_state')
         if event_id is None or resume_state is None:
-            from infinidev.tools.base.context import get_context_for_agent
             tool_ctx = get_context_for_agent(agent.agent_id)
             if tool_ctx:
                 event_id = event_id or tool_ctx.event_id

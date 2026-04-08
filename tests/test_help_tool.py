@@ -60,7 +60,13 @@ class TestHelpTool:
         assert "read_file" in result
 
     def test_substring_match(self, bound_tool):
-        """Finds help via substring matching."""
+        """Finds help via substring matching.
+
+        Uses ``symbol`` as the query because it appears in several tool
+        names (``search_symbols``, ``get_symbol_code``, ``edit_symbol``)
+        after the partial_read alias was removed — a distinctive enough
+        root that substring matching still has something to land on.
+        """
         tool = bound_tool(HelpTool)
-        result = tool._run(context="partial")
-        assert "partial_read" in result
+        result = tool._run(context="symbol")
+        assert "search_symbols" in result or "get_symbol_code" in result

@@ -55,15 +55,23 @@ class TestExecuteWithRetry:
             execute_with_retry(_always_locked, max_retries=3, base_delay=0.001)
 
     def test_non_retryable_error_raises_immediately(self, temp_db):
-        """Non-lock errors propagate without retry."""
+        """Non-lock, non-stale errors propagate without retry.
+
+        ``IntegrityError`` is the canonical non-retryable failure:
+        integrity violations never become "not violated" by waiting,
+        so retrying is pointless. ``OperationalError("no such table")``
+        is *also* retryable now because a subprocess reindex can
+        invalidate the cached connection — see _db.py:110 for the
+        stale-cache recovery path.
+        """
         call_count = 0
 
         def _bad_sql(conn):
             nonlocal call_count
             call_count += 1
-            raise sqlite3.OperationalError("no such table: nonexistent")
+            raise sqlite3.IntegrityError("UNIQUE constraint failed")
 
-        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
             execute_with_retry(_bad_sql, max_retries=5, base_delay=0.001)
         assert call_count == 1  # No retries
 

@@ -524,39 +524,9 @@ def build_iteration_prompt(
     """
     parts: list[str] = []
 
-    # Smart context summarizer — skip for small models (redundant with notes)
-    if not small_model:
-        summarizer = SmartContextSummarizer()
-        smart_summary = summarizer.generate_summary(state)
-        if smart_summary:
-            parts.append(
-                "<smart-context-summary>\n"
-                f"Loop progress summary:\n{smart_summary}\n</smart-context-summary>"
-            )
-
-    # Project knowledge (auto-injected from DB)
-    if project_knowledge:
-        kb_lines = []
-        for f in project_knowledge:
-            kb_lines.append(f"- [{f['finding_type']}] {f['topic']}: {f['content']}")
-        parts.append(
-            "<project-knowledge>\n"
-            "Known facts about this project (from previous sessions):\n"
-            + "\n".join(kb_lines)
-            + "\n</project-knowledge>"
-        )
-
-    # Workspace context — tell the LLM where it is working
-    from infinidev.tools.base.context import get_current_workspace_path
-    workspace = get_current_workspace_path() or ""
-    if not workspace:
-        import os
-        workspace = os.getcwd()
-    if workspace:
-        parts.append(
-            f"<workspace>\nCurrent working directory: {workspace}\n"
-            "All relative file paths are resolved against this directory.\n</workspace>"
-        )
+    _append_if(parts, _render_smart_summary(state, small_model))
+    _append_if(parts, _render_project_knowledge(project_knowledge))
+    _append_if(parts, _render_workspace())
 
     # Task description
     parts.append(f"<task>\n{description}\n</task>")
@@ -610,42 +580,9 @@ def build_iteration_prompt(
     except Exception:
         pass
 
-    # Opened files cache — files the agent has read or written recently.
-    # This avoids redundant read_file calls between steps.
-    if state.opened_files:
-        file_sections = []
-        for path, of in state.opened_files.items():
-            if of.pinned:
-                label = f"### {path} (written by you — pinned)\n```\n{of.content}\n```"
-            else:
-                label = f"### {path} (expires in {of.ttl} tool calls)\n```\n{of.content}\n```"
-            file_sections.append(label)
-        parts.append(
-            "<opened-files>\n"
-            "IMPORTANT: These files are already loaded and up-to-date. "
-            "Do NOT call read_file on them — the content below IS the current file content. "
-            "After you edit a file, it is automatically refreshed here.\n\n"
-            + "\n\n".join(file_sections)
-            + "\n</opened-files>"
-        )
-
-    # Session notes (persist across tasks in the same session)
-    if session_notes:
-        sn_lines = [f"{i+1}. {n}" for i, n in enumerate(session_notes)]
-        parts.append(
-            "<session-notes>\nNotes from previous tasks in this session:\n"
-            + "\n".join(sn_lines)
-            + "\n</session-notes>"
-        )
-
-    # Notes (persistent scratchpad across iterations)
-    if state.notes:
-        note_lines = [f"{i+1}. {n}" for i, n in enumerate(state.notes)]
-        parts.append(
-            "<notes>\nYour notes from previous steps:\n"
-            + "\n".join(note_lines)
-            + "\n</notes>"
-        )
+    _append_if(parts, _render_opened_files(state))
+    _append_if(parts, _render_session_notes(session_notes))
+    _append_if(parts, _render_notes(state))
     # Note-taking nudges — two tiers: a gentle reminder when recent
     # tool calls haven't produced a note, and a stronger warning when a
     # step completed without ANY notes at all.
@@ -826,6 +763,115 @@ def build_iteration_prompt(
 
 
 # ── iteration prompt helpers ──────────────────────────────────────────────
+
+
+def _append_if(parts: list[str], block: str) -> None:
+    """Append ``block`` to ``parts`` only if it's non-empty.
+
+    Lets the body of ``build_iteration_prompt`` be a flat list of
+    ``_append_if(parts, _render_X(...))`` calls instead of an
+    ``if X: parts.append(...)`` forest.
+    """
+    if block:
+        parts.append(block)
+
+
+def _render_smart_summary(state: LoopState, small_model: bool) -> str:
+    """Smart context summary — skipped for small models (redundant with notes)."""
+    if small_model:
+        return ""
+    summarizer = SmartContextSummarizer()
+    smart_summary = summarizer.generate_summary(state)
+    if not smart_summary:
+        return ""
+    return (
+        "<smart-context-summary>\n"
+        f"Loop progress summary:\n{smart_summary}\n</smart-context-summary>"
+    )
+
+
+def _render_project_knowledge(project_knowledge: list[dict] | None) -> str:
+    """Auto-injected facts from the project knowledge DB."""
+    if not project_knowledge:
+        return ""
+    kb_lines = [
+        f"- [{f['finding_type']}] {f['topic']}: {f['content']}"
+        for f in project_knowledge
+    ]
+    return (
+        "<project-knowledge>\n"
+        "Known facts about this project (from previous sessions):\n"
+        + "\n".join(kb_lines)
+        + "\n</project-knowledge>"
+    )
+
+
+def _render_workspace() -> str:
+    """Tell the LLM which directory relative paths resolve against."""
+    from infinidev.tools.base.context import get_current_workspace_path
+    workspace = get_current_workspace_path() or ""
+    if not workspace:
+        import os
+        workspace = os.getcwd()
+    if not workspace:
+        return ""
+    return (
+        f"<workspace>\nCurrent working directory: {workspace}\n"
+        "All relative file paths are resolved against this directory.\n</workspace>"
+    )
+
+
+def _render_opened_files(state: LoopState) -> str:
+    """Files the agent has read or written recently, with TTL labels.
+
+    The ``<opened-files>`` block is the mechanism that lets the model
+    avoid redundant ``read_file`` calls between steps — the content IS
+    the current file content (refreshed on every edit via the cache
+    handlers in ``tool_executor.py``). Pinned entries are written-by-
+    model files; the TTL number on unpinned entries counts down to
+    eviction as more tool calls happen.
+    """
+    if not state.opened_files:
+        return ""
+    file_sections: list[str] = []
+    for path, of in state.opened_files.items():
+        if of.pinned:
+            label = f"### {path} (written by you — pinned)\n```\n{of.content}\n```"
+        else:
+            label = f"### {path} (expires in {of.ttl} tool calls)\n```\n{of.content}\n```"
+        file_sections.append(label)
+    return (
+        "<opened-files>\n"
+        "IMPORTANT: These files are already loaded and up-to-date. "
+        "Do NOT call read_file on them — the content below IS the current file content. "
+        "After you edit a file, it is automatically refreshed here.\n\n"
+        + "\n\n".join(file_sections)
+        + "\n</opened-files>"
+    )
+
+
+def _render_session_notes(session_notes: list[str] | None) -> str:
+    """Notes that persist across tasks within the same CLI session."""
+    if not session_notes:
+        return ""
+    lines = [f"{i+1}. {n}" for i, n in enumerate(session_notes)]
+    return (
+        "<session-notes>\nNotes from previous tasks in this session:\n"
+        + "\n".join(lines)
+        + "\n</session-notes>"
+    )
+
+
+def _render_notes(state: LoopState) -> str:
+    """The scratchpad notes the model has saved via ``add_note`` this task."""
+    if not state.notes:
+        return ""
+    lines = [f"{i+1}. {n}" for i, n in enumerate(state.notes)]
+    return (
+        "<notes>\nYour notes from previous steps:\n"
+        + "\n".join(lines)
+        + "\n</notes>"
+    )
 
 
 def _render_note_nudge(state: LoopState, small_model: bool) -> str:
