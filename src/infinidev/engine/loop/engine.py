@@ -651,6 +651,33 @@ class LoopEngine(AgentEngine):
             if _last_llm_call_end is not None:
                 _sa_add("between_llm_calls", _time.perf_counter() - _last_llm_call_end)
 
+            # Drain user messages BETWEEN LLM calls within a step. The
+            # outer iteration drain (in _build_iteration_messages) only
+            # fires at step boundaries, which can be 1-3 minutes apart
+            # for long inner loops. Draining here gives the user
+            # near-immediate visibility of mid-step messages — the next
+            # LLM call will see the message as the most recent ``user``
+            # turn in the conversation, and the strong wording in the
+            # ``<urgent-user-message>`` block (rendered in the iteration
+            # prompt) primes the model to acknowledge before continuing.
+            #
+            # We append a fresh ``user`` turn rather than rebuilding the
+            # whole iteration prompt: the in-flight conversation context
+            # is preserved, and the model sees the new message as a
+            # natural follow-up.
+            mid_step_msgs = self._drain_user_messages()
+            if mid_step_msgs:
+                for _m in mid_step_msgs:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "URGENT — I just sent this while you were "
+                            "working. Acknowledge it with `send_message` "
+                            "as your VERY NEXT tool call before continuing "
+                            f"your current step:\n\n{_m}"
+                        ),
+                    })
+
             # Signal UI that LLM call is starting
             _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {})
 

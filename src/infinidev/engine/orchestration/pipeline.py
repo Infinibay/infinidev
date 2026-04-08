@@ -146,6 +146,18 @@ def _run_analysis_phase(
     if skip_analysis or not _settings.ANALYSIS_ENABLED:
         return (user_input, "Complete the task and report findings."), None, "develop"
 
+    # Conversational fast-path: pure-Python pattern match for trivial
+    # input (greetings, thanks, status checks). Synthesises a "done"
+    # AnalysisResult and skips the analyst entirely. ~0 ms vs the
+    # 5-30 s the analyst would take.
+    from infinidev.engine.orchestration.conversational_fastpath import (
+        try_conversational_fastpath,
+    )
+    fastpath = try_conversational_fastpath(user_input)
+    if fastpath is not None:
+        hooks.notify("Infinidev", fastpath.reason, "agent")
+        return (user_input, ""), fastpath, "done"
+
     analyst.reset()
     hooks.on_status("info", "Analyzing request...")
     analysis = analyst.analyze(user_input, session_summaries=session_summaries)

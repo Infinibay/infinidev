@@ -52,12 +52,11 @@ def test_a_hola_responds_quickly():
 
         t0 = time.perf_counter()
         s.send("Hola")
-        # Look for ANY assistant-side text response (the agent line
-        # in the chat panel typically starts with the agent name or
-        # a known prefix). The exact pattern depends on the TUI
-        # rendering — adjust as needed.
+        # Look for the exact text of the hardcoded fast-path reply.
+        # Using a unique substring guarantees we're matching the
+        # assistant reply, not the TTY echo of the user typing "Hola".
         try:
-            s.wait_for(r"(Hola|Hi|Hello|Buenas|Hey)", timeout=15)
+            s.wait_for(r"En qu[ée] te puedo ayudar", timeout=15)
         except pexpect.TIMEOUT:
             elapsed = time.perf_counter() - t0
             pytest.fail(

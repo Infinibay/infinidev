@@ -758,15 +758,31 @@ def build_iteration_prompt(
             lines = [f"{s.index}. {s.title}" for s in next_steps]
             parts.append(f"<next-actions>\n{chr(10).join(lines)}\n</next-actions>")
 
-    # User messages injected mid-task (live guidance from the user)
+    # User messages injected mid-task (live guidance from the user).
+    # The user is a human watching the agent work in a live session.
+    # Silence is rude — they expect an acknowledgement BEFORE the
+    # agent goes back to whatever it was doing. The wording below is
+    # deliberately strong because models otherwise just fold the
+    # message into their thinking and never tell the user they saw it.
     if user_messages:
         for msg in user_messages:
             parts.append(
-                "<user-message>\n"
-                "IMPORTANT — The user sent this message while you are working. "
-                "Read it carefully and adjust your approach accordingly.\n\n"
-                f"{msg}\n"
-                "</user-message>"
+                "<urgent-user-message>\n"
+                "The user just sent this message WHILE you were working:\n\n"
+                f"  \"{msg}\"\n\n"
+                "YOUR VERY NEXT TOOL CALL MUST BE `send_message` with a brief "
+                "(1-2 sentence) acknowledgement. Tell the user you saw their "
+                "message and what you'll do about it. Examples:\n"
+                "  send_message(message=\"Got it — I'll finish this edit and "
+                "then look into your question.\")\n"
+                "  send_message(message=\"Recibido. Pauso lo que estaba "
+                "haciendo y voy a esto primero.\")\n\n"
+                "ONLY AFTER sending the acknowledgement, continue your work. "
+                "If the user is changing the task or asking you to stop, also "
+                "call `modify_step` / `step_complete` with the new direction. "
+                "Do NOT silently fold this message into your thinking — the "
+                "user is waiting to hear from you.\n"
+                "</urgent-user-message>"
             )
 
     # Expected output — prefer the active step's self-declared success criterion
