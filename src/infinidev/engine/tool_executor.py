@@ -156,13 +156,17 @@ def update_opened_files_cache(
 
 
 def _is_error_result(result: Any) -> bool:
-    """True if a tool result is missing or encodes an error payload.
+    """True if a tool result is missing, empty, or encodes an error payload.
 
     Centralized so every cache handler uses the same guard — previously
     each site did ``result and not result.strip().startswith('{"error')``
-    which crashes if a tool returns ``None`` or a non-string (e.g. dict).
+    which crashes if a tool returns ``None`` or a non-string. The empty
+    check (``not result``) preserves the original truthy semantics: an
+    empty string was never cached as a successful read.
     """
-    return not isinstance(result, str) or result.strip().startswith('{"error')
+    if not isinstance(result, str) or not result:
+        return True
+    return result.strip().startswith('{"error')
 
 
 def _cache_read(state, path, args, result, ws):

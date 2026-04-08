@@ -916,7 +916,7 @@ class LoopEngine(AgentEngine):
         3. Parse structured failures and append them inline to the
            result so the model sees them next to the raw stdout.
         """
-        try:
+        with best_effort("test command capture failed for %s", arguments[:80]):
             from infinidev.engine.guidance import (
                 is_test_command,
                 test_outcome_fingerprint,
@@ -958,8 +958,6 @@ class LoopEngine(AgentEngine):
                     + _json2.dumps(payload, indent=2)
                 )
                 result = result + suffix
-        except Exception:
-            pass
 
         return result
 

@@ -267,7 +267,6 @@ def format_issues(issues: list[SyntaxIssue], *, max_show: int = 5) -> str:
 # Re-exported here under their legacy names so existing call sites
 # (``_extract_python_symbols`` etc.) keep working unchanged.
 from infinidev.code_intel.extractors import (
-    LANGUAGE_EXTRACTORS as _LANGUAGE_EXTRACTORS,
     extract_python_symbols as _extract_python_symbols,
     extract_js_symbols as _extract_js_symbols,
 )

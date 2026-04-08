@@ -51,9 +51,17 @@ class IndexQueue:
                 logger.debug("IndexQueue: failed to index %s: %s", path, exc)
 
     def start(self) -> None:
-        """Start the background worker thread."""
+        """Start the background worker thread.
+
+        Resets ``_stopped`` under the lock so a stop→start→stop cycle
+        works correctly: without the reset, the second ``stop()`` would
+        early-return as a no-op and never join the new worker, leaving
+        a thread alive past ``os._exit``.
+        """
         if self._worker and self._worker.is_alive():
             return
+        with self._stop_lock:
+            self._stopped = False
         self._stop.clear()
         self._worker = Thread(target=self._process, daemon=True, name="index-queue")
         self._worker.start()
