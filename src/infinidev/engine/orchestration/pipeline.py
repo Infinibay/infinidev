@@ -146,17 +146,28 @@ def _run_analysis_phase(
     if skip_analysis or not _settings.ANALYSIS_ENABLED:
         return (user_input, "Complete the task and report findings."), None, "develop"
 
-    # Conversational fast-path: pure-Python pattern match for trivial
-    # input (greetings, thanks, status checks). Synthesises a "done"
-    # AnalysisResult and skips the analyst entirely. ~0 ms vs the
-    # 5-30 s the analyst would take.
+    # Pre-planning preamble: ALWAYS speak first. A single small LLM
+    # call uses a forced ``respond`` tool to (1) write a short reply
+    # to the user and (2) decide whether the heavy planning pipeline
+    # should run. The reply is shown immediately so the user gets
+    # feedback within ~1-2 seconds on every turn — for greetings the
+    # pipeline short-circuits, for real tasks the analyst still runs
+    # but with the user already informed that work is starting.
     from infinidev.engine.orchestration.conversational_fastpath import (
         try_conversational_fastpath,
     )
-    fastpath = try_conversational_fastpath(user_input)
-    if fastpath is not None:
-        hooks.notify("Infinidev", fastpath.reason, "agent")
-        return (user_input, ""), fastpath, "done"
+    preamble = try_conversational_fastpath(
+        user_input, session_summaries=session_summaries,
+    )
+    if preamble is not None:
+        preamble_result, preamble_reply, continue_planning = preamble
+        # Always show the user-facing reply immediately.
+        hooks.notify("Infinidev", preamble_reply, "agent")
+        if not continue_planning:
+            # Pure conversation — short-circuit the pipeline here.
+            return (user_input, ""), preamble_result, "done"
+        # Real work — fall through to the analyst with the reply
+        # already on screen so the user knows the agent is working.
 
     analyst.reset()
     hooks.on_status("info", "Analyzing request...")

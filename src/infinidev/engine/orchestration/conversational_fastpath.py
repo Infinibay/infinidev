@@ -1,117 +1,126 @@
-"""Heuristic conversational fast-path for the orchestration pipeline.
+"""Pre-planning preamble: the agent ALWAYS speaks before working.
 
-The full ``_run_analysis_phase`` makes an LLM call (the analyst) on
-every user turn. For trivial input — greetings, thanks, "are you
-there?" — that call adds 5-30 seconds of latency before the user sees
-anything. The fast-path here intercepts those inputs with pure-Python
-matching and synthesises an :class:`AnalysisResult` with
-``flow="done"`` and a hardcoded reply, skipping the analyst entirely.
+Every user turn enters the pipeline through this module. A single
+small LLM call ("the preamble") does TWO things in one shot:
+
+  1. Produce a short user-facing reply (1-3 sentences). The reply
+     is shown immediately so the user always knows the agent saw
+     them — no matter whether the message is a greeting, a task,
+     or a context-aware follow-up.
+
+  2. Decide whether more work is needed. If the message is purely
+     conversational ("Hola", "thanks for the fix"), the preamble
+     short-circuits the pipeline with ``flow="done"``. Otherwise
+     the pipeline continues into the analyst → gather → execute.
+
+This is the same architecture a human collaborator uses: hear the
+request, say "OK, let me check that", then start working. The user
+never waits in silence — and the response itself doubles as the
+classification.
 
 Design rules:
 
-1. **Pure heuristics, zero LLM**. The whole point is sub-100 ms.
-   If a case is ambiguous, FALL THROUGH — never guess. The full
-   pipeline catches the cases this misses.
-2. **Bilingual**. The agent is used in both English and Spanish.
-   Patterns and replies live in pairs.
-3. **Anchored matching**. We match the WHOLE normalised input
-   against patterns, not substrings — otherwise "fix the hello
-   world bug" would trigger the "hello" rule.
-4. **No conversational memory needed**. v1 only handles inputs
-   that have a context-free correct reply. "Thanks for that" needs
-   memory, so it falls through to the analyst.
+1. **Always speaks first**. The preamble runs on EVERY non-empty
+   input that hasn't been bypassed by ``skip_analysis``. There is
+   no fast/slow path — there's just one path that responds, then
+   decides.
+
+2. **Tight prompt budget**. The system prompt is ~150 tokens —
+   an order of magnitude smaller than the analyst. With a small
+   non-thinking model the call lands in 0.5-2 s.
+
+3. **Context-aware**. Recent session summaries are inlined so
+   "thanks for the fix" gets a contextual reply ("you're welcome,
+   glad the auth fix worked") instead of a generic one.
+
+4. **Falls open on error**. Any exception in the preamble call
+   makes the pipeline fall through to the analyst, so the user
+   still gets a reply via the slower path.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import Optional
 
 from infinidev.engine.analysis.analysis_result import AnalysisResult
 
-
-# ─────────────────────────────────────────────────────────────────────────
-# Patterns
-# ─────────────────────────────────────────────────────────────────────────
-#
-# Each entry is (pattern, reply). The pattern is a regex anchored
-# (^...$) against the normalised input. The reply is the literal
-# string we send back through ``analysis.reason``.
-#
-# Patterns are evaluated in order; first match wins. Order them so
-# the more specific patterns come before the more general ones.
-
-_PATTERNS: list[tuple[str, str]] = [
-    # ── Greetings ────────────────────────────────────────────────────
-    (
-        r"^(hi|hello|hey|hola|hola+|buenas|buenas? d[ií]as|buenas? "
-        r"tardes|buenas? noches|hi there|hello there|hey there|"
-        r"good (morning|afternoon|evening))[!.\s]*$",
-        "¡Hola! ¿En qué te puedo ayudar?",
-    ),
-
-    # ── Status checks ────────────────────────────────────────────────
-    (
-        r"^(are you (there|alive|awake|ready|working)|"
-        r"est[áa]s (ah[íi]|listo|despierto|funcionando)|"
-        r"hay alguien( ah[íi])?|"
-        r"ping|ping\?)[!.?\s]*$",
-        "Sí, acá estoy. Decime qué necesitás.",
-    ),
-
-    # ── Thanks (without specific reference — generic) ────────────────
-    (
-        r"^(thanks|thank you|thx|ty|gracias|muchas gracias|"
-        r"thanks!|cheers)[!.\s]*$",
-        "¡De nada! Si necesitás algo más, decime.",
-    ),
-
-    # ── Goodbyes ─────────────────────────────────────────────────────
-    (
-        r"^(bye|goodbye|see you( later)?|cya|cu|"
-        r"chau|chao|adi[óo]s|hasta luego|nos vemos|"
-        r"see ya|later|au revoir)[!.\s]*$",
-        "¡Chau! Cuando me necesites, acá estoy.",
-    ),
-
-    # ── Small affirmations / acknowledgements ────────────────────────
-    (
-        r"^(ok|okay|okey|vale|dale|listo|sounds good|got it|"
-        r"perfect|perfecto|great|genial|excelente|cool)[!.\s]*$",
-        "Listo. ¿Pasamos a algo más?",
-    ),
-
-    # ── Self-identity questions ──────────────────────────────────────
-    (
-        r"^(who are you|what are you|qu[ée]n eres|qu[ée]n sos|"
-        r"qu[ée] eres|qu[ée] sos|what is this|qu[ée] es esto)[?.!\s]*$",
-        "Soy Infinidev, un asistente de programación que corre en tu "
-        "máquina con modelos locales. Decime una tarea (un bug, una "
-        "feature, una pregunta sobre el código) y la ataco.",
-    ),
-
-    # ── "What can you do" ────────────────────────────────────────────
-    (
-        r"^(what can you do|qu[ée] pod[ée]s hacer|qu[ée] sabes hacer|"
-        r"help me|help|ayuda|how do you work|c[óo]mo funcionas)[?.!\s]*$",
-        "Puedo leer tu código, buscar símbolos, hacer ediciones "
-        "quirúrgicas, correr tests, y razonar sobre arquitectura. "
-        "Decime una tarea concreta — por ejemplo: \"arregla el bug "
-        "de auth en src/auth.py\" o \"añadí logging a la función X\" — "
-        "y voy paso a paso. Para ver más comandos del CLI: /help.",
-    ),
-]
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Compiled regex cache (built once at import time)
+# Prompt
 # ─────────────────────────────────────────────────────────────────────────
 
 
-_COMPILED: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(pattern, re.IGNORECASE), reply)
-    for pattern, reply in _PATTERNS
-]
+_PREAMBLE_SYSTEM_PROMPT = """You are the first responder of a coding assistant.
+
+Every user message hits you BEFORE the heavy planning machinery runs. \
+You have exactly ONE tool available: ``respond``. You MUST call it \
+exactly once per turn. Do not write prose, do not think out loud, do \
+not ask for other tools — just call ``respond`` immediately.
+
+When you call ``respond`` you give two arguments:
+
+  - ``reply``: a short user-facing message (1-3 sentences max) that
+    directly addresses what the user said, in their language
+    (Spanish or English).
+
+      * For greetings / thanks / smalltalk: reply conversationally.
+      * For real work requests: say in one sentence what you're
+        about to start doing. The planning pipeline behind you will
+        handle the actual file reads, edits, and tool calls — you
+        are just announcing the work.
+      * When recent session context is provided, USE it. For
+        "gracias" reference what you actually did; for "did that
+        work?" reference the change.
+
+  - ``continue_planning``: a boolean.
+      * ``true`` if real work is needed (file inspection, edits,
+        tests, refactor, code question that needs the codebase).
+      * ``false`` for pure conversation (greetings, thanks,
+        goodbyes, smalltalk, simple questions about you).
+
+Be DECISIVE. Call ``respond`` on your very first action."""
+
+
+# The single tool the preamble model is allowed to call. Forcing
+# function-calling rather than free-form JSON parsing eliminates
+# most format-drift errors small models make on structured output.
+_RESPOND_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "respond",
+        "description": (
+            "Send a short reply to the user AND decide whether the "
+            "planning pipeline should continue. This is the only "
+            "tool you may call."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reply": {
+                    "type": "string",
+                    "description": (
+                        "Your user-facing message, 1-3 sentences max. "
+                        "Match the user's language (Spanish or English)."
+                    ),
+                },
+                "continue_planning": {
+                    "type": "boolean",
+                    "description": (
+                        "true if real work is needed (file edits, "
+                        "tests, refactor, code questions); false for "
+                        "pure conversation (greetings, thanks, etc.)."
+                    ),
+                },
+            },
+            "required": ["reply", "continue_planning"],
+        },
+    },
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -119,40 +128,216 @@ _COMPILED: list[tuple[re.Pattern[str], str]] = [
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _normalise(text: str) -> str:
-    """Strip whitespace and collapse internal runs of whitespace."""
-    return re.sub(r"\s+", " ", text.strip())
+_MAX_PREAMBLE_LEN = 1500
+"""Inputs longer than this skip the preamble entirely and go straight
+to the analyst. Below this threshold the LLM call is worth the cost;
+above it the message is obviously a real task spec and the preamble
+adds latency without changing the outcome."""
 
 
-# Maximum length of input we'll even consider for fast-path matching.
-# Anything longer is almost certainly a real task, even if it starts
-# with "hi". This is the main false-positive guard.
-_MAX_FASTPATH_LEN = 60
+def try_conversational_fastpath(
+    user_input: str,
+    session_summaries: Optional[list[str]] = None,
+) -> Optional[tuple[AnalysisResult, str, bool]]:
+    """Run the preamble call and return its decision.
 
+    Returns:
+        ``None`` to skip the preamble (input empty / too long /
+        LLM call failed). The pipeline should continue to the
+        normal analyst.
 
-def try_conversational_fastpath(user_input: str) -> Optional[AnalysisResult]:
-    """Return a synthesised AnalysisResult or None.
-
-    Returns ``None`` for any input that doesn't match a pattern, or
-    is too long to be plausibly conversational. The caller should
-    fall through to the normal analyst pipeline in that case.
+        ``(analysis_result, reply, continue_planning)`` otherwise.
+        The caller should:
+          - Always notify the user with ``reply``.
+          - If ``continue_planning=False``, return immediately with
+            ``flow="done"`` using the synthesised analysis_result.
+          - If ``continue_planning=True``, fall through to the
+            analyst with the reply already shown to the user.
     """
-    if not user_input:
+    if not user_input or not user_input.strip():
         return None
 
-    text = _normalise(user_input)
-    if len(text) > _MAX_FASTPATH_LEN:
+    if len(user_input) > _MAX_PREAMBLE_LEN:
         return None
 
-    for compiled, reply in _COMPILED:
-        if compiled.match(text):
-            return AnalysisResult(
-                action="passthrough",
-                original_input=user_input,
-                reason=reply,
-                flow="done",
-            )
+    try:
+        return _preamble_via_llm(user_input, session_summaries)
+    except Exception as exc:
+        logger.debug("Preamble call failed (falling through): %s", exc)
+        return None
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# LLM call
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _preamble_via_llm(
+    user_input: str,
+    session_summaries: Optional[list[str]],
+) -> Optional[tuple[AnalysisResult, str, bool]]:
+    """Run the preamble LLM call and parse its response."""
+    import litellm
+
+    from infinidev.config.llm import get_litellm_params_for_behavior
+
+    params = get_litellm_params_for_behavior()
+
+    user_lines: list[str] = []
+    if session_summaries:
+        recent = [s for s in session_summaries[-3:] if s]
+        if recent:
+            user_lines.append("RECENT SESSION CONTEXT:")
+            for s in recent:
+                user_lines.append(f"  - {s}")
+            user_lines.append("")
+    user_lines.append("USER MESSAGE:")
+    user_lines.append(user_input.strip())
+
+    messages = [
+        {"role": "system", "content": _PREAMBLE_SYSTEM_PROMPT},
+        {"role": "user", "content": "\n".join(user_lines)},
+    ]
+
+    # Force the model into the single ``respond`` tool. With
+    # function-calling enabled and ``tool_choice`` pinned to that
+    # one tool, the model can't drift into prose, can't think out
+    # loud (most providers serialise reasoning into the tool call
+    # arguments directly), and produces a guaranteed-shape result
+    # without any free-form JSON parsing.
+    call_kwargs = dict(params)
+    call_kwargs["messages"] = messages
+    call_kwargs["tools"] = [_RESPOND_TOOL]
+    call_kwargs["tool_choice"] = {
+        "type": "function",
+        "function": {"name": "respond"},
+    }
+    call_kwargs["max_tokens"] = 1500
+    call_kwargs["temperature"] = 0.3
+    call_kwargs.setdefault("stream", False)
+    # Hint thinking models to skip chain-of-thought; ignored when
+    # the chat template doesn't honour the kwarg.
+    extra_body = dict(call_kwargs.get("extra_body") or {})
+    chat_template_kwargs = dict(extra_body.get("chat_template_kwargs") or {})
+    chat_template_kwargs.setdefault("enable_thinking", False)
+    chat_template_kwargs.setdefault("thinking", False)
+    extra_body["chat_template_kwargs"] = chat_template_kwargs
+    call_kwargs["extra_body"] = extra_body
+
+    response = litellm.completion(**call_kwargs)
+    parsed = _extract_tool_args(response)
+    if parsed is None:
+        # Tool call missing — fall back to scanning the message
+        # content / reasoning for an inline JSON object. Some local
+        # models ignore tool_choice and emit content instead.
+        raw = _extract_text(response)
+        if not raw:
+            return None
+        parsed = _parse_preamble_json(raw)
+        if parsed is None:
+            return None
+
+    reply = (parsed.get("reply") or "").strip()
+    continue_flag = bool(parsed.get("continue_planning", parsed.get("continue", True)))
+    if not reply:
+        return None
+
+    flow = "develop" if continue_flag else "done"
+    result = AnalysisResult(
+        action="passthrough",
+        original_input=user_input,
+        reason=reply,
+        flow=flow,
+    )
+    return result, reply, continue_flag
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Response parsing
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _extract_tool_args(response) -> Optional[dict]:
+    """Pull the ``respond`` tool arguments out of a tool-call response.
+
+    Returns the parsed argument dict or None when the model didn't
+    actually call a tool. We accept any tool name (not strict
+    matching on ``respond``) so that minor disagreements between
+    provider serialisations don't break the parser — the parameters
+    are what we care about.
+    """
+    try:
+        msg = response.choices[0].message
+        tool_calls = getattr(msg, "tool_calls", None) or []
+        if not tool_calls:
+            return None
+        tc = tool_calls[0]
+        fn = getattr(tc, "function", None)
+        if fn is None:
+            return None
+        raw_args = getattr(fn, "arguments", None) or "{}"
+        if isinstance(raw_args, dict):
+            return raw_args
+        try:
+            obj = json.loads(raw_args)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+    except Exception:
+        pass
+    return None
+
+
+def _extract_text(response) -> str:
+    """Pull the assistant text out of a litellm completion response.
+
+    Falls back to ``reasoning_content`` when ``content`` is empty —
+    thinking models that hit the token limit during their internal
+    chain-of-thought leave ``content`` empty but still emit the JSON
+    decision somewhere in their reasoning trace. Scanning the
+    reasoning lets the parser still find it.
+    """
+    try:
+        msg = response.choices[0].message
+        content = (getattr(msg, "content", None) or "").strip()
+        if content:
+            return content
+        reasoning = (getattr(msg, "reasoning_content", None) or "").strip()
+        return reasoning
+    except Exception:
+        return ""
+
+
+# Loose JSON extractor: finds the FIRST {...} blob in the text and
+# parses it. Tolerant to leading/trailing prose, markdown fences,
+# stray commentary — small models sometimes ignore the "JSON only"
+# instruction in the prompt.
+_JSON_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
+
+
+def _parse_preamble_json(raw: str) -> Optional[dict]:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    for match in _JSON_RE.finditer(raw):
+        try:
+            obj = json.loads(match.group(0))
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
     return None
 
 
