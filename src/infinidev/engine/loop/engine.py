@@ -667,6 +667,13 @@ class LoopEngine(AgentEngine):
             # natural follow-up.
             mid_step_msgs = self._drain_user_messages()
             if mid_step_msgs:
+                _emit_log(
+                    "info",
+                    f"⚡ mid-step user message drained "
+                    f"({len(mid_step_msgs)} msg(s)) — injecting before "
+                    f"next LLM call",
+                    project_id=ctx.project_id, agent_id=ctx.agent_id,
+                )
                 for _m in mid_step_msgs:
                     messages.append({
                         "role": "user",
@@ -801,6 +808,61 @@ class LoopEngine(AgentEngine):
                                              "content": nudge})
                         continue  # Don't break — let model add notes first
                     self._step_complete_gated = False
+
+                    # Mid-step user message arrived during the LLM
+                    # call we just finished? Don't honor step_complete
+                    # yet — the user is waiting for an immediate
+                    # response and the very next thing they should
+                    # see is an acknowledgement, not a step boundary.
+                    #
+                    # The drain at the top of this while loop only
+                    # catches messages that arrived BEFORE the LLM
+                    # call. Messages enqueued WHILE the model was
+                    # generating land here. If we ``break`` now,
+                    # they'd sit in the queue until the next outer
+                    # iteration's drain — i.e. the next step — which
+                    # is exactly the latency the user asked us to
+                    # eliminate.
+                    #
+                    # We inject the message AS A TOOL RESULT on the
+                    # step_complete tool_call_id (same pattern as
+                    # the note-discipline gate above). The model
+                    # already saw an "acknowledged" tool result for
+                    # step_complete from _execute_regular_tools /
+                    # _build_pseudo_only_messages, but a second tool
+                    # result on the same id reads as "your previous
+                    # close was overridden by this feedback" — which
+                    # is exactly the framing we want. Following the
+                    # tool-result is the model's natural mode after
+                    # a tool call, so this format gets honored far
+                    # more often than a bare user-role message.
+                    late_msgs = self._drain_user_messages()
+                    if late_msgs:
+                        _emit_log(
+                            "info",
+                            f"⚡ late mid-step user message drained "
+                            f"({len(late_msgs)} msg(s)) — overriding "
+                            f"step_complete, forcing one more LLM call",
+                            project_id=ctx.project_id, agent_id=ctx.agent_id,
+                        )
+                        for _m in late_msgs:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": classified.step_complete.id,
+                                "content": (
+                                    "step_complete REJECTED — the user "
+                                    "just spoke while you were finishing "
+                                    "your last action. You MUST "
+                                    "acknowledge them BEFORE completing "
+                                    "this step. Call `send_message` with "
+                                    "a brief (1-2 sentence) reply that "
+                                    "addresses what they said, then call "
+                                    "step_complete again. The user's "
+                                    f"message was:\n\n{_m}"
+                                ),
+                            })
+                        continue  # Re-enter the loop, don't break.
+
                     step_result = _parse_step_complete_args(classified.step_complete.function.arguments)
                     break
             else:

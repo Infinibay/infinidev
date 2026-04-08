@@ -444,6 +444,51 @@ def store_conversation_turn(
     execute_with_retry(_insert)
 
 
+def get_recent_turns_full(
+    session_id: str, limit: int = 6, max_chars_per_turn: int = 2000
+) -> list[tuple[str, str]]:
+    """Return the most recent turns as ``(role, content)`` pairs.
+
+    Unlike :func:`get_recent_summaries` (which returns the truncated
+    200-char ``summary`` snapshot used by the loop engine's compact
+    history), this returns the *full* content of each turn, capped
+    per-turn at ``max_chars_per_turn`` so a single huge assistant reply
+    can't blow the caller's prompt budget.
+
+    Used by the pre-analysis preamble: deciding whether a user message
+    is "answerable from memory" requires actually seeing what the
+    agent just said, not a 200-char fragment of it. The preamble would
+    otherwise hallucinate elaborations of recommendations it can't
+    actually see.
+    """
+    def _query(conn):
+        rows = conn.execute(
+            """\
+            SELECT role, content
+            FROM conversation_turns
+            WHERE session_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (session_id, limit),
+        ).fetchall()
+        results: list[tuple[str, str]] = []
+        for row in reversed(rows):
+            content = row["content"] or ""
+            if not content:
+                continue
+            if len(content) > max_chars_per_turn:
+                # Keep head + tail so the model sees the opening
+                # framing AND the closing recommendations, not just
+                # the first half.
+                head = content[: max_chars_per_turn // 2]
+                tail = content[-(max_chars_per_turn // 2) :]
+                content = f"{head}\n\n[...truncated middle...]\n\n{tail}"
+            results.append((row["role"], content))
+        return results
+    return execute_with_retry(_query) or []
+
+
 def get_recent_summaries(session_id: str, limit: int = 10) -> list[str]:
     """Return the most recent conversation summaries for a session."""
     def _query(conn):

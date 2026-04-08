@@ -46,7 +46,8 @@ class OrchestrationHooks(Protocol):
     # ── Status / phase tracking ──────────────────────────────────────────
     def on_phase(self, phase: str) -> None:
         """Pipeline entered a new phase. *phase* is one of:
-        ``"analysis"``, ``"gather"``, ``"execute"``, ``"review"``, ``"idle"``.
+        ``"preamble"``, ``"analysis"``, ``"gather"``, ``"execute"``,
+        ``"review"``, ``"idle"``.
         UIs use this to update an "Actions" indicator."""
 
     def on_status(self, level: str, msg: str) -> None:
@@ -118,6 +119,66 @@ def _format_spec(spec: dict) -> str:
 # Phase implementations — pure functions, take hooks as parameter
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+def _run_preamble_phase(
+    *,
+    user_input: str,
+    session_summaries: list[str],
+    session_id: str,
+    hooks: OrchestrationHooks,
+) -> tuple[Any, str] | None:
+    """Pre-analysis phase: ALWAYS runs, cannot be disabled.
+
+    A single restricted LLM call (only ``step_complete`` is exposed,
+    with a custom prompt that has zero loop-engine protocol) decides
+    whether the user's message is a conversational reply or real work.
+
+    Returns:
+        * ``None`` when the call failed or no decision could be made —
+          caller falls through to the normal analyst.
+        * ``(analysis_result, "done")`` when the model picked
+          ``status="done"``. The reply has already been shown to the
+          user via ``hooks.notify``; the pipeline must short-circuit.
+        * ``(None, "continue")`` when the model picked
+          ``status="continue"``. The "I'm starting X" preview has
+          already been shown; the pipeline continues with analysis →
+          gather → execute → review.
+
+    This phase is intentionally NOT gated by ``ANALYSIS_ENABLED`` or
+    ``skip_analysis``. The product decision is that every user turn
+    must get an immediate, in-language acknowledgement before any
+    heavy machinery runs. The custom prompt + restricted toolset live
+    in ``conversational_fastpath.py``.
+    """
+    from infinidev.engine.orchestration.conversational_fastpath import (
+        try_conversational_fastpath,
+    )
+    decision = try_conversational_fastpath(
+        user_input,
+        session_summaries=session_summaries,
+        session_id=session_id,
+    )
+    if decision is None:
+        return None
+    analysis_result, reply, continue_planning = decision
+    if continue_planning:
+        # Real work ahead (analyst → gather → execute → review will
+        # take seconds-to-minutes). The preview MUST be shown now
+        # so the user gets immediate feedback. The eventual final
+        # output of the engine is a DIFFERENT string, so there is
+        # no risk of duplication.
+        hooks.notify("Infinidev", reply, "agent")
+        return None, "continue"
+    # status="done": the pipeline short-circuits and ``run_task``
+    # returns ``reply`` to the caller in the next instant. The
+    # caller (TUI worker / classic loop) is responsible for
+    # rendering the result via its normal "final output" path.
+    # Notifying here would race against that path and produce a
+    # duplicate message in the chat — so we deliberately skip the
+    # notify and rely on the return value alone.
+    return analysis_result, "done"
+
+
 def _run_analysis_phase(
     *,
     user_input: str,
@@ -145,29 +206,6 @@ def _run_analysis_phase(
 
     if skip_analysis or not _settings.ANALYSIS_ENABLED:
         return (user_input, "Complete the task and report findings."), None, "develop"
-
-    # Pre-planning preamble: ALWAYS speak first. A single small LLM
-    # call uses a forced ``respond`` tool to (1) write a short reply
-    # to the user and (2) decide whether the heavy planning pipeline
-    # should run. The reply is shown immediately so the user gets
-    # feedback within ~1-2 seconds on every turn — for greetings the
-    # pipeline short-circuits, for real tasks the analyst still runs
-    # but with the user already informed that work is starting.
-    from infinidev.engine.orchestration.conversational_fastpath import (
-        try_conversational_fastpath,
-    )
-    preamble = try_conversational_fastpath(
-        user_input, session_summaries=session_summaries,
-    )
-    if preamble is not None:
-        preamble_result, preamble_reply, continue_planning = preamble
-        # Always show the user-facing reply immediately.
-        hooks.notify("Infinidev", preamble_reply, "agent")
-        if not continue_planning:
-            # Pure conversation — short-circuit the pipeline here.
-            return (user_input, ""), preamble_result, "done"
-        # Real work — fall through to the analyst with the reply
-        # already on screen so the user knows the agent is working.
 
     analyst.reset()
     hooks.on_status("info", "Analyzing request...")
@@ -446,6 +484,30 @@ def run_task(
     summaries = get_recent_summaries(session_id, limit=10)
     if hasattr(agent, "_session_summaries"):
         agent._session_summaries = summaries
+
+    # ── Pre-analysis preamble ────────────────────────────────────────────
+    # Mandatory phase. Cannot be disabled. Runs a single restricted
+    # LLM call (only step_complete exposed, custom prompt with no
+    # loop protocol) to give the user an immediate reply and decide
+    # whether to short-circuit (conversational) or proceed (real work).
+    hooks.on_phase("preamble")
+    preamble = _run_preamble_phase(
+        user_input=user_input,
+        session_summaries=summaries,
+        session_id=session_id,
+        hooks=hooks,
+    )
+    if preamble is not None:
+        preamble_analysis, preamble_flow = preamble
+        if preamble_flow == "done":
+            hooks.on_phase("idle")
+            if preamble_analysis is not None:
+                return (
+                    preamble_analysis.reason
+                    or preamble_analysis.original_input
+                    or ""
+                )
+            return ""
 
     # ── Analysis ──────────────────────────────────────────────────────────
     hooks.on_phase("analysis")

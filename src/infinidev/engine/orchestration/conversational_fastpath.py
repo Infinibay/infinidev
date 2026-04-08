@@ -96,6 +96,33 @@ first message, then the system unlocks the rest of the toolbox \
 (read_file, edit_symbol, execute_command, etc.) on the next turn so \
 you can do the actual work.
 
+CRITICAL RULE — self-referential follow-ups ALWAYS pick "continue":
+
+  If the user is asking you to elaborate on, explain, expand, justify, \
+defend, or give details about something YOU said in a previous turn \
+(recommendations, findings, code you wrote, an analysis you produced, \
+files you mentioned), you MUST pick "continue". Even if the previous \
+turn is shown to you above in RECENT CONVERSATION, the visible content \
+is a TRUNCATED snapshot — the real findings live in the project's \
+files, the knowledge base, and the conversation database. Answering \
+from the truncated snapshot is HALLUCINATION, not memory.
+
+Phrases that signal a self-referential follow-up (Spanish + English):
+    • "explica/explain/elabora/expand on/dame mas detalle/give me more detail"
+    • "por que dijiste/why did you say/justifica/justify"
+    • "que significa esa recomendacion/what do you mean by"
+    • "como llegaste a/how did you reach/show me where"
+    • "muestrame/show me/cita/cite the file/the line"
+    • "ampliame/extend/dive deeper into"
+  When you see these AND the topic refers to anything from RECENT \
+CONVERSATION above → status="continue", summary="Voy a re-leer mis \
+hallazgos previos y ampliar". The unlocked toolbox lets you read the \
+real files instead of guessing.
+
+The cost of a wrong "done" here is HALLUCINATION — the user catches \
+you inventing facts. The cost of a wrong "continue" is just a few \
+extra seconds of latency. When in doubt, pick "continue".
+
 Both options are normal. There is NO bias toward one over the other — \
 pick whichever literally matches what the user wrote. If they sent a \
 greeting, "done" is correct. If they sent a task, "continue" is \
@@ -181,6 +208,7 @@ _MAX_PREAMBLE_LEN = 1500
 def run_preamble_step(
     user_input: str,
     session_summaries: Optional[list[str]] = None,
+    session_id: Optional[str] = None,
 ) -> Optional[tuple[str, str]]:
     """Run the pre-planning step and return ``(status, message)``.
 
@@ -199,7 +227,7 @@ def run_preamble_step(
         return None
 
     try:
-        return _preamble_via_llm(user_input, session_summaries)
+        return _preamble_via_llm(user_input, session_summaries, session_id)
     except Exception as exc:
         logger.debug("Preamble step failed (falling through): %s", exc)
         return None
@@ -208,6 +236,7 @@ def run_preamble_step(
 def try_conversational_fastpath(
     user_input: str,
     session_summaries: Optional[list[str]] = None,
+    session_id: Optional[str] = None,
 ) -> Optional[tuple[AnalysisResult, str, bool]]:
     """Backwards-compatible entry point used by ``pipeline.run_task``.
 
@@ -215,7 +244,7 @@ def try_conversational_fastpath(
     show the reply unconditionally and only short-circuit when
     ``continue_planning=False``. ``None`` falls through.
     """
-    decision = run_preamble_step(user_input, session_summaries)
+    decision = run_preamble_step(user_input, session_summaries, session_id)
     if decision is None:
         return None
 
@@ -242,8 +271,16 @@ def try_conversational_fastpath(
 def _preamble_via_llm(
     user_input: str,
     session_summaries: Optional[list[str]],
+    session_id: Optional[str] = None,
 ) -> Optional[tuple[str, str]]:
-    """Make the litellm call and parse the step_complete tool args."""
+    """Make the litellm call and parse the step_complete tool args.
+
+    *session_id* is the preferred way to fetch context: when it is
+    provided we read the last few turns at full fidelity from the DB
+    via :func:`get_recent_turns_full`. *session_summaries* is the
+    legacy fallback (200-char snippets) kept for callers that don't
+    have a session_id at hand.
+    """
     import litellm
 
     from infinidev.config.llm import get_litellm_params_for_behavior
@@ -251,13 +288,44 @@ def _preamble_via_llm(
     params = get_litellm_params_for_behavior()
 
     user_lines: list[str] = []
-    if session_summaries:
+
+    # Prefer the full-content fetch when we have a session id. The
+    # 200-char ``summary`` field that ``get_recent_summaries`` reads
+    # is not enough context for the preamble: when a user asks
+    # "explain those recommendations", the agent's previous reply
+    # IS the recommendations, and truncating it to 200 chars makes
+    # the model hallucinate the rest.
+    full_turns: list[tuple[str, str]] = []
+    if session_id:
+        try:
+            from infinidev.db.service import get_recent_turns_full
+            full_turns = get_recent_turns_full(
+                session_id, limit=6, max_chars_per_turn=2000
+            )
+        except Exception:
+            full_turns = []
+
+    if full_turns:
+        user_lines.append(
+            "RECENT CONVERSATION (full content of the last few turns "
+            "— use this to detect self-referential follow-ups):"
+        )
+        for role, content in full_turns:
+            tag = "USER" if role == "user" else "AGENT"
+            user_lines.append(f"<turn role=\"{tag}\">")
+            user_lines.append(content)
+            user_lines.append("</turn>")
+        user_lines.append("")
+    elif session_summaries:
+        # Legacy path — only used by callers that don't supply a
+        # session_id (tests, single-prompt mode without history).
         recent = [s for s in session_summaries[-3:] if s]
         if recent:
-            user_lines.append("RECENT SESSION CONTEXT (use it for context-aware replies):")
+            user_lines.append("RECENT SESSION CONTEXT (truncated snippets):")
             for s in recent:
                 user_lines.append(f"  - {s}")
             user_lines.append("")
+
     user_lines.append(f"User just wrote: {user_input.strip()}")
     user_lines.append("")
     user_lines.append("Call step_complete now.")
