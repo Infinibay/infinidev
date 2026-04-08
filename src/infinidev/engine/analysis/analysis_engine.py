@@ -160,7 +160,26 @@ class AnalysisEngine:
             "Do NOT write JSON as text — use the step_complete tool call."
         )
 
-        # Run the loop engine
+        # Run the loop engine. The analyst phase has a HARD 4-tool
+        # budget — see prompts/analyst/system.py for the in-prompt
+        # rule. We reinforce it at runtime via ``nudge_threshold`` so
+        # the model gets an in-band warning the moment it reaches the
+        # cap, instead of relying solely on the system-prompt
+        # instruction (small models routinely ignore single-shot
+        # instructions about counting). The phase-specific message
+        # tells the analyst to wrap up via step_complete, NOT to
+        # add steps or continue investigating.
+        _ANALYST_BUDGET = 4
+        _ANALYST_NUDGE_MSG = (
+            "ANALYST OVER BUDGET: you have used {used} of your "
+            "{threshold}-tool analysis budget. Stop exploring NOW. "
+            "Your job is to BOSQUEJAR (sketch), not to investigate. "
+            "Produce your JSON result via step_complete with what you "
+            "have already learned — the developer phase will read more "
+            "files and run tests. Further tool calls in this phase are "
+            "wasted time. Call step_complete(status='done', "
+            "final_answer='{{...}}') as your VERY NEXT action."
+        )
         analyst_agent.activate_context()
         engine = LoopEngine()
         try:
@@ -168,6 +187,8 @@ class AnalysisEngine:
                 agent=analyst_agent,
                 task_prompt=(task_description, expected_output),
                 verbose=True,
+                nudge_threshold=_ANALYST_BUDGET,
+                nudge_message_template=_ANALYST_NUDGE_MSG,
             )
         finally:
             analyst_agent.deactivate()

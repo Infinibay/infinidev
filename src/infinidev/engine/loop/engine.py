@@ -290,6 +290,7 @@ class LoopEngine(AgentEngine):
         max_total_tool_calls: int | None = None,
         max_tool_calls_per_action: int | None = None,
         nudge_threshold: int | None = None,
+        nudge_message_template: str | None = None,
         summarizer_enabled: bool | None = None,
     ) -> str:
         """Plan-execute-summarize loop.
@@ -307,6 +308,7 @@ class LoopEngine(AgentEngine):
             max_total_tool_calls=max_total_tool_calls,
             max_tool_calls_per_action=max_tool_calls_per_action,
             nudge_threshold=nudge_threshold,
+            nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
         )
         # Streaming callback: emit thinking chunks to the UI via event bus
@@ -615,6 +617,7 @@ class LoopEngine(AgentEngine):
             agent_role=getattr(agent, "role", "agent"),
             desc=desc, expected=expected, event_id=event_id,
             skip_plan=bool(getattr(agent, '_system_prompt_protocol', None)),
+            nudge_message_template=kwargs.get('nudge_message_template'),
             state=state, file_tracker=file_tracker,
             start_iteration=state.iteration_count,
         )
@@ -1060,17 +1063,27 @@ class LoopEngine(AgentEngine):
                 ctx.state.total_tool_calls += 1
                 ctx.state.tool_calls_since_last_note += 1
 
-                # Budget nudge
+                # Budget nudge — fires once when the model reaches the
+                # configured threshold. Phases that need a different
+                # framing (e.g. the analyst, which has a 4-tool budget
+                # and a different "what to do next" instruction) pass
+                # ``nudge_message_template`` via engine.execute().
                 _default_nudge = 4 if ctx.is_small else _get_settings().LOOP_STEP_NUDGE_THRESHOLD
                 _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else _default_nudge
                 if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
-                    _active_desc = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
-                    _nudge_msg = (
-                        f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls for this step. "
-                        f"Step scope: \"{_active_desc}\". "
-                        f"Call step_complete now. If the step is not finished, set status=\'continue\' "
-                        f"and add/modify next_steps to capture the remaining work."
-                    )
+                    if ctx.nudge_message_template:
+                        _nudge_msg = ctx.nudge_message_template.format(
+                            used=action_tool_calls,
+                            threshold=_nudge_threshold,
+                        )
+                    else:
+                        _active_desc = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
+                        _nudge_msg = (
+                            f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls for this step. "
+                            f"Step scope: \"{_active_desc}\". "
+                            f"Call step_complete now. If the step is not finished, set status=\'continue\' "
+                            f"and add/modify next_steps to capture the remaining work."
+                        )
                     if ctx.manual_tc:
                         tool_results_text.append(f"\n⚠ STEP BUDGET: {_nudge_msg}")
                     else:

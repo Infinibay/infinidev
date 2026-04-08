@@ -53,6 +53,15 @@ class ExecutionContext:
     # Behavior flags
     skip_plan: bool = False  # True for agents that don't use plan management (e.g. analyst)
 
+    # Phase-specific over-budget warning. Used by the analyst (and any
+    # future restricted-tools phase) to override the developer-oriented
+    # default nudge with phase-appropriate language. Two ``{}``
+    # placeholders are filled at injection time:
+    #   {used}      → action_tool_calls so far this step
+    #   {threshold} → the configured nudge_threshold
+    # When ``None``, the engine uses its built-in developer message.
+    nudge_message_template: str | None = None
+
     @property
     def project_id(self) -> int:
         return self.agent.project_id
