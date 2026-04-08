@@ -70,6 +70,8 @@ from infinidev.engine.tool_executor import (
     WRITE_TOOLS as _WRITE_TOOLS,
 )
 
+from infinidev.engine.loop.context_manager import ContextManager
+from infinidev.engine.loop.guidance_handler import GuidanceHandler
 from infinidev.engine.loop.model_context import _get_model_max_context
 from infinidev.engine.loop.step_summarizer import _summarize_step, _synthesize_final
 from infinidev.engine.loop.execution_context import ExecutionContext
@@ -110,6 +112,7 @@ class LoopEngine(AgentEngine):
         # Thread-safe queue for user messages injected mid-task
         import queue as _queue_mod
         self._user_messages: _queue_mod.Queue[str] = _queue_mod.Queue()
+        self._guidance = GuidanceHandler()
 
     def inject_message(self, message: str) -> None:
         """Inject a user message into the running loop (thread-safe).
@@ -371,36 +374,14 @@ class LoopEngine(AgentEngine):
             except Exception:
                 pass
 
-            # Reactive guidance: at the end of each step, look at the
-            # messages produced during this step and queue pre-baked
-            # how-to advice if a stuck-pattern is detected. Only fires
-            # for small models; never costs an LLM call. The advice
-            # is rendered into the *next* iteration's prompt.
-            try:
-                _settings = _get_settings()
-                if (ctx.is_small
-                    and getattr(_settings, "LOOP_GUIDANCE_ENABLED", True)):
-                    # We always run the detector, regardless of step
-                    # status. The original guard skipped done/blocked
-                    # steps to avoid wasting guidance on a finished
-                    # task, but that bypassed the *proactive* detectors
-                    # (e.g. first_test_run) on the very last step where
-                    # the model would still benefit from seeing the
-                    # advice if a continuation or rework loop fires.
-                    # Reactive detectors (stuck_on_*) self-suppress on
-                    # done/blocked because their patterns can't match
-                    # in a single completed step's history anyway.
-                    from infinidev.engine.guidance import maybe_queue_guidance
-                    queued = maybe_queue_guidance(
-                        ctx.state,
-                        messages[step_messages_start:],
-                        is_small=True,
-                        max_per_task=int(getattr(_settings, "LOOP_GUIDANCE_MAX_PER_TASK", 3)),
-                    )
-                    if queued and ctx.verbose:
-                        _log(f"  {_YELLOW}↪ guidance queued: {queued}{_RESET}")
-            except Exception:
-                pass
+            # Reactive guidance: look for stuck-patterns at end-of-step
+            # and queue pre-baked how-to advice for the next iteration.
+            # Small models only; never costs an LLM call. Delegated to
+            # GuidanceHandler so mid-step and end-of-step share one code
+            # path — see loop/guidance_handler.py.
+            self._guidance.try_queue(
+                ctx, messages, step_messages_start, mid_step=False,
+            )
 
             _hook_manager.dispatch(_HookContext(
                 event=_HookEvent.POST_STEP,
@@ -700,8 +681,8 @@ class LoopEngine(AgentEngine):
                     ),
                     tool_calls=list(getattr(result, "tool_calls", None) or []),
                 )
-            except Exception:
-                pass
+            except Exception as _trace_err:
+                logger.warning("reasoning trace emit failed: %s", _trace_err)
 
             # Emit reasoning content in FC mode (no streaming available).
             # Send full reasoning to both THINKING panel and chat.
@@ -741,7 +722,7 @@ class LoopEngine(AgentEngine):
                     if self._cancel_event.is_set():
                         break
                     # Expire old thinking content to save context window
-                    self._expire_thinking(messages)
+                    ContextManager.expire_thinking(messages)
                     # Check guard conditions
                     forced = guard.check_repetition(ctx, messages)
                     if forced:
@@ -750,31 +731,14 @@ class LoopEngine(AgentEngine):
                     guard.check_error_circuit_breaker(ctx, messages)
                     guard.check_note_discipline(ctx, messages)
 
-                    # A2 — Mid-step guidance. Run detectors right after
-                    # each successful tool execution so patterns like
-                    # same_test_output_loop, regression_after_edit, and
-                    # the dynamic similarity_after_write detector can
-                    # fire on the NEXT LLM call rather than waiting for
-                    # end-of-step. The same cap (`max_per_task`) and the
-                    # same guidance_given set apply across mid-step and
-                    # end-of-step calls — they share state — so guidance
-                    # is never emitted twice.
-                    try:
-                        _g_settings = _get_settings()
-                        if (ctx.is_small
-                            and getattr(_g_settings, "LOOP_GUIDANCE_ENABLED", True)
-                            and not ctx.state.pending_guidance):
-                            from infinidev.engine.guidance import maybe_queue_guidance
-                            queued = maybe_queue_guidance(
-                                ctx.state,
-                                messages[step_messages_start:],
-                                is_small=True,
-                                max_per_task=int(getattr(_g_settings, "LOOP_GUIDANCE_MAX_PER_TASK", 3)),
-                            )
-                            if queued and ctx.verbose:
-                                _log(f"  {_YELLOW}↪ guidance queued mid-step: {queued}{_RESET}")
-                    except Exception:
-                        pass
+                    # A2 — Mid-step guidance: run detectors right after
+                    # each successful tool execution so patterns fire on
+                    # the NEXT LLM call rather than waiting for end-of-
+                    # step. Shares state with the end-of-step call so
+                    # guidance is never emitted twice per step.
+                    self._guidance.try_queue(
+                        ctx, messages, step_messages_start, mid_step=True,
+                    )
                 elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks :
                     # Only pseudo-tools, no regular tools
                     self._build_pseudo_only_messages(ctx, classified, messages, result)
@@ -1089,7 +1053,7 @@ class LoopEngine(AgentEngine):
 
         # Small model: compact old messages to prevent context bloat
         if ctx.is_small:
-            self._compact_messages_for_small(messages)
+            ContextManager.compact_for_small(messages)
 
         # Manual mode: send all results as single user message
         if ctx.manual_tc:
@@ -1147,80 +1111,6 @@ class LoopEngine(AgentEngine):
 
             if classified.step_complete:
                 messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
-
-    # How many tool call rounds before thinking content is truncated
-    _THINKING_TTL = 3
-
-    @staticmethod
-    def _expire_thinking(messages: list[dict[str, Any]]) -> None:
-        """Truncate old assistant thinking to save context window.
-
-        Assistant messages carry a ``_thinking_age`` counter that increments
-        each time this method is called.  Once a message is older than
-        ``_THINKING_TTL`` rounds, its ``content`` (reasoning text) is
-        replaced with a short placeholder — the tool_calls structure stays
-        intact so the API conversation remains valid.
-
-        For manual-TC mode (no tool_calls), the entire assistant content
-        is the reasoning, so we truncate it to the first line.
-        """
-        ttl = LoopEngine._THINKING_TTL
-
-        for msg in messages:
-            if msg.get("role") != "assistant":
-                continue
-
-            content = msg.get("content", "")
-            if not content or len(content) < 80:
-                continue  # Already short, skip
-
-            # Initialize or bump age counter
-            age = msg.get("_thinking_age", 0) + 1
-            msg["_thinking_age"] = age
-
-            if age <= ttl:
-                continue
-
-            # Truncate — keep first line as summary
-            first_line = content.split("\n", 1)[0][:120]
-            if msg.get("tool_calls"):
-                # FC mode: content is optional reasoning alongside tool calls
-                msg["content"] = f"[thinking truncated] {first_line}"
-            else:
-                # Manual mode or text-only: content IS the reasoning
-                msg["content"] = f"[thinking truncated] {first_line}"
-
-    @staticmethod
-    def _compact_messages_for_small(messages: list[dict[str, Any]]) -> None:
-        """Compact old messages in the inner loop for small models.
-
-        Small models have limited context.  This truncates tool result
-        messages older than the last 2 assistant rounds to their first
-        200 chars, preventing context bloat from large tool outputs.
-        The system and first user message are always preserved.
-        """
-        # Count assistant messages from the end to find the cutoff
-        assistant_count = 0
-        cutoff_idx = len(messages)
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].get("role") == "assistant":
-                assistant_count += 1
-                if assistant_count >= 2:
-                    cutoff_idx = i
-                    break
-
-        # Truncate tool results before the cutoff (skip system + first user)
-        for i in range(2, cutoff_idx):
-            msg = messages[i]
-            if msg.get("role") == "tool":
-                content = msg.get("content", "")
-                if len(content) > 200:
-                    msg["content"] = content[:200] + "\n[truncated for context]"
-            elif msg.get("role") == "assistant":
-                content = msg.get("content", "")
-                if content and len(content) > 100:
-                    first_line = content.split("\n", 1)[0][:100]
-                    msg["content"] = f"[compacted] {first_line}"
 
     def _handle_explore(
         self, ctx: ExecutionContext, step_result: StepResult, iteration: int,

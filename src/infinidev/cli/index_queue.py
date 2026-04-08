@@ -7,7 +7,7 @@ prevents redundant re-parsing.
 
 import logging
 import queue
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,8 @@ class IndexQueue:
         self._queue: queue.Queue[str] = queue.Queue()
         self._stop = Event()
         self._worker: Thread | None = None
+        self._stop_lock = Lock()
+        self._stopped = False
 
     def enqueue(self, file_path: str) -> None:
         """Add a file to be re-indexed. Safe to call from any thread."""
@@ -58,12 +60,23 @@ class IndexQueue:
         logger.info("IndexQueue started (project_id=%s)", self._project_id)
 
     def stop(self) -> None:
-        """Stop the worker thread gracefully."""
-        self._stop.set()
-        if self._worker and self._worker.is_alive():
-            self._worker.join(timeout=3.0)
-        self._worker = None
-        logger.info("IndexQueue stopped")
+        """Stop the worker thread gracefully. Idempotent and blocking.
+
+        Called from the shutdown path right before ``os._exit(0)``. If a
+        second caller races in, it must wait until the first completes —
+        otherwise the worker thread can still be walking Python objects
+        when ``_exit`` tears the interpreter down, producing a SIGSEGV.
+        """
+        with self._stop_lock:
+            if self._stopped:
+                return
+            self._stop.set()
+            worker = self._worker
+            if worker and worker.is_alive():
+                worker.join(timeout=3.0)
+            self._worker = None
+            self._stopped = True
+            logger.info("IndexQueue stopped")
 
     def is_running(self) -> bool:
         return self._worker is not None and self._worker.is_alive()

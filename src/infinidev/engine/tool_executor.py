@@ -155,8 +155,18 @@ def update_opened_files_cache(
     handler(state, path, args, result, ws)
 
 
+def _is_error_result(result: Any) -> bool:
+    """True if a tool result is missing or encodes an error payload.
+
+    Centralized so every cache handler uses the same guard — previously
+    each site did ``result and not result.strip().startswith('{"error')``
+    which crashes if a tool returns ``None`` or a non-string (e.g. dict).
+    """
+    return not isinstance(result, str) or result.strip().startswith('{"error')
+
+
 def _cache_read(state, path, args, result, ws):
-    if result and not result.strip().startswith('{"error'):
+    if not _is_error_result(result):
         state.cache_file(path, result)
 
 
@@ -226,19 +236,19 @@ def _cache_apply_patch(state, path, args, result, ws):
 
 
 def _cache_list_dir(state, path, args, result, ws):
-    if result and not result.strip().startswith('{"error'):
+    if not _is_error_result(result):
         state.cache_file(f"[dir] {path}", result)
 
 
 def _cache_glob(state, path, args, result, ws):
     pattern = args.get("pattern", "")
-    if pattern and result and not result.strip().startswith('{"error'):
+    if pattern and not _is_error_result(result):
         state.cache_file(f"[glob] {pattern}", result)
 
 
 def _cache_code_search(state, path, args, result, ws):
     query = args.get("query") or args.get("pattern") or args.get("search_query", "")
-    if query and result and not result.strip().startswith('{"error'):
+    if query and not _is_error_result(result):
         state.cache_file(f"[search] {query}", result)
 
 
@@ -259,7 +269,7 @@ def _cache_get_symbol_code(state, path, args, result, ws):
     name = args.get("name") or args.get("symbol") or args.get("qualified_name", "")
     if not name:
         return
-    if not result or result.strip().startswith('{"error'):
+    if _is_error_result(result):
         return
     # The model expects to find this entry by symbol name, so use a
     # distinctive prefix that won't collide with any real file path.

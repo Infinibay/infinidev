@@ -720,6 +720,18 @@ def _fast_exit_workaround() -> None:
     """
     import os as _os
     import sys as _sys
+    # Belt-and-suspenders: ensure the background IndexQueue worker is
+    # joined before we bypass finalisation. The normal path in _run_main
+    # already calls stop(), but alternate exit paths (errors, TUI crash)
+    # may land here without having done so — and IndexQueue.stop() is
+    # now idempotent, so a second call is cheap and safe.
+    try:
+        from infinidev.code_intel.background_indexer import get_global_queue
+        _q = get_global_queue()
+        if _q is not None:
+            _q.stop()
+    except Exception:
+        pass
     try:
         _sys.stdout.flush()
         _sys.stderr.flush()

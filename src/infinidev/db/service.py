@@ -1,5 +1,6 @@
 """Database service for Infinidev CLI."""
 
+import re
 import sqlite3
 import logging
 import os
@@ -7,6 +8,9 @@ from typing import Any
 from infinidev.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ALLOWED_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "TIMESTAMP", "DATETIME", "NUMERIC"}
 
 def execute_with_retry(func, db_path=None, max_retries=None, base_delay=None):
     """Execute a DB operation with retry logic.
@@ -18,7 +22,22 @@ def execute_with_retry(func, db_path=None, max_retries=None, base_delay=None):
     return _canonical(func, db_path=db_path, max_retries=max_retries, base_delay=base_delay)
 
 def _migrate_add_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
-    """Add a column to a table if it doesn't already exist."""
+    """Add a column to a table if it doesn't already exist.
+
+    Validates identifiers/type as defense in depth: today all callers pass
+    literals, but SQLite has no parameter binding for DDL, so we have to
+    interpolate. Rejecting anything that isn't a bare SQL identifier (or
+    a type from a fixed whitelist) means future misuse fails loud rather
+    than turning into a SQL-injection vector.
+    """
+    if not _IDENT_RE.match(table):
+        raise ValueError(f"invalid table name: {table!r}")
+    if not _IDENT_RE.match(column):
+        raise ValueError(f"invalid column name: {column!r}")
+    # Allow "TYPE" or "TYPE DEFAULT ..." — split on whitespace and check base type.
+    base_type = col_type.strip().split()[0].upper() if col_type.strip() else ""
+    if base_type not in _ALLOWED_COL_TYPES:
+        raise ValueError(f"invalid column type: {col_type!r}")
     try:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
     except sqlite3.OperationalError:
@@ -541,6 +560,7 @@ def get_all_findings(project_id: int = 1, limit: int = 200) -> list[dict]:
     try:
         return execute_with_retry(_query) or []
     except Exception:
+        logger.warning("get_all_findings failed", exc_info=True)
         return []
 
 
@@ -595,6 +615,7 @@ def get_project_knowledge(project_id: int = 1, limit: int = 15) -> list[dict]:
     try:
         return execute_with_retry(_query) or []
     except Exception:
+        logger.warning("get_project_knowledge failed", exc_info=True)
         return []
 
 
@@ -664,4 +685,5 @@ def get_recent_explorations(project_id: int = 1, limit: int = 10) -> list[dict]:
     try:
         return execute_with_retry(_query) or []
     except Exception:
+        logger.warning("get_recent_explorations failed", exc_info=True)
         return []

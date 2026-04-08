@@ -263,68 +263,15 @@ def format_issues(issues: list[SyntaxIssue], *, max_show: int = 5) -> str:
 # a SET of fully-qualified names (e.g. ``"Database._execute_create_table"``)
 # so additions and removals can be compared with simple set arithmetic.
 
-# Tree-sitter node types per language that we treat as "top-level symbol".
-# Each language gets a small list of node types whose ``name`` child is the
-# symbol name. Methods inside classes get qualified with the class name.
-_PYTHON_DEF_NODES = ("function_definition", "class_definition")
-_JS_DEF_NODES = (
-    "function_declaration", "class_declaration",
-    "method_definition", "lexical_declaration",
+# Per-language symbol extractors live in ``code_intel/extractors/``.
+# Re-exported here under their legacy names so existing call sites
+# (``_extract_python_symbols`` etc.) keep working unchanged.
+from infinidev.code_intel.extractors import (
+    LANGUAGE_EXTRACTORS as _LANGUAGE_EXTRACTORS,
+    extract_python_symbols as _extract_python_symbols,
+    extract_js_symbols as _extract_js_symbols,
 )
-
-
-def _node_name(node: Any, source: bytes) -> str | None:
-    """Find a node's identifier child and return its text, or None."""
-    for child in node.children:
-        if child.type in ("identifier", "type_identifier", "property_identifier"):
-            return source[child.start_byte:child.end_byte].decode("utf-8", errors="replace")
-    return None
-
-
-def _extract_python_symbols(root: Any, source: bytes) -> set[str]:
-    """Walk a Python tree and return a set of qualified symbol names."""
-    out: set[str] = set()
-
-    def walk(node: Any, parent_name: str = "") -> None:
-        if node.type in _PYTHON_DEF_NODES:
-            name = _node_name(node, source)
-            if name:
-                qual = f"{parent_name}.{name}" if parent_name else name
-                out.add(qual)
-                # Recurse into class/function body so methods are captured
-                # under the class name.
-                new_parent = qual if node.type == "class_definition" else parent_name
-                for child in node.children:
-                    if child.type == "block":
-                        for grand in child.children:
-                            walk(grand, new_parent)
-                return
-        for child in node.children:
-            walk(child, parent_name)
-
-    walk(root)
-    return out
-
-
-def _extract_js_symbols(root: Any, source: bytes) -> set[str]:
-    """Walk a JavaScript/TypeScript tree and return symbol names."""
-    out: set[str] = set()
-
-    def walk(node: Any, parent_name: str = "") -> None:
-        if node.type in _JS_DEF_NODES:
-            name = _node_name(node, source)
-            if name:
-                qual = f"{parent_name}.{name}" if parent_name else name
-                out.add(qual)
-                new_parent = qual if "class" in node.type else parent_name
-                for child in node.children:
-                    walk(child, new_parent)
-                return
-        for child in node.children:
-            walk(child, parent_name)
-
-    walk(root)
-    return out
+from infinidev.code_intel.extractors._common import node_name as _node_name
 
 
 def extract_top_level_symbols(

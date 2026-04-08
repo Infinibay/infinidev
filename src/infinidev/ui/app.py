@@ -598,58 +598,15 @@ class InfinidevApp:
     # ── Sidebar fragments ────────────────────────────────────────────
 
     def get_context_fragments(self) -> FormattedText:
-        model = self._context_status.get("model", "unknown")
-        max_ctx = self._context_status.get("max_context", 4096)
-        flow_part = f"  {self._context_flow}" if self._context_flow else ""
-
-        fragments: list[tuple[str, str]] = []
-        fragments.append((f"{TEXT} bold", f"{model}"))
-        fragments.append((f"{TEXT_MUTED}", f" ({max_ctx} ctx)"))
-        if flow_part:
-            fragments.append((f"{ACCENT} bold", flow_part))
-        fragments.append(("", "\n"))
-
-        chat = self._context_status.get("chat", {})
-        fragments.extend(self._usage_bar_fragments(
-            "Chat", chat.get("current_tokens", 0),
-            chat.get("remaining_tokens", 0),
-            chat.get("usage_percentage", 0.0),
-        ))
-        fragments.append(("", "\n"))
-
-        tasks = self._context_status.get("tasks", {})
-        fragments.extend(self._usage_bar_fragments(
-            "Task", tasks.get("current_tokens", 0),
-            tasks.get("remaining_tokens", 0),
-            tasks.get("usage_percentage", 0.0),
-        ))
-
-        return FormattedText(fragments)
+        from infinidev.ui.managers.context_render import build_context_fragments
+        return build_context_fragments(self._context_status, self._context_flow)
 
     def _usage_bar_fragments(self, label: str, used: int,
                              available: int, pct: float) -> list[tuple[str, str]]:
-        from infinidev.ui.theme import (
-            PROGRESS_GOOD, PROGRESS_WARNING, PROGRESS_CRITICAL,
-            BAR_WIDTH, BAR_FILLED, BAR_EMPTY,
-        )
-        pct_val = min(pct, 1.0)
-        if pct_val > 0.8:
-            color = PROGRESS_CRITICAL
-        elif pct_val > 0.5:
-            color = PROGRESS_WARNING
-        else:
-            color = PROGRESS_GOOD
-
-        filled = int(BAR_WIDTH * pct_val)
-        empty = BAR_WIDTH - filled
-
-        return [
-            (f"{TEXT} bold", f"{label} "),
-            (f"{TEXT_MUTED}", f"{used}/{available} "),
-            (f"{color}", BAR_FILLED * filled),
-            (f"{TEXT_MUTED}", BAR_EMPTY * empty),
-            (f"{color} bold", f" {pct_val * 100:.0f}%"),
-        ]
+        # Kept as a thin shim so any external caller (tests, plugins)
+        # that reached into the private method still works.
+        from infinidev.ui.managers.context_render import build_usage_bar_fragments
+        return build_usage_bar_fragments(label, used, available, pct)
 
     def get_plan_fragments(self) -> FormattedText:
         if not self._thinking_text and not self._plan_text:
