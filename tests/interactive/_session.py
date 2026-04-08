@@ -73,7 +73,7 @@ class Session:
     def __init__(
         self,
         workspace: Optional[str] = None,
-        model: str = "ollama/qwen3.5:4b",
+        model: str = "ollama/glm-4.7-flash:latest",
         extra_args: Optional[list[str]] = None,
         cols: int = 120,
         rows: int = 40,
@@ -102,13 +102,19 @@ class Session:
             cwd = self._tmpdir
 
         env = os.environ.copy()
-        env["INFINIBAY_LLM_MODEL"] = self._model
+        # The settings env prefix is INFINIDEV_ (NOT INFINIBAY_).
+        env["INFINIDEV_LLM_MODEL"] = self._model
+        # The preamble step uses BEHAVIOR_LLM_MODEL (with fallback to
+        # LLM_MODEL). Pin both so the test doesn't pick up a stale
+        # ~/.infinidev/settings.json default that may not be installed
+        # locally.
+        env["INFINIDEV_BEHAVIOR_LLM_MODEL"] = self._model
         # Force a deterministic terminal so prompt_toolkit doesn't
         # try to negotiate truecolor / sixel / kitty graphics.
         env["TERM"] = "xterm-256color"
         # Disable any background indexer threads that might log over
         # the captured output (the test doesn't need them).
-        env.setdefault("INFINIBAY_CODE_INTEL_AUTO_INDEX", "false")
+        env.setdefault("INFINIDEV_CODE_INTEL_AUTO_INDEX", "false")
 
         # Always go through `python -m infinidev.cli.main` so we hit
         # the canonical entry point regardless of where the
@@ -174,11 +180,17 @@ class Session:
         return self._child.after if isinstance(self._child.after, str) else ""
 
     def read_text(self) -> str:
-        """Return everything seen so far on the TTY, ANSI-stripped."""
-        # ``before`` holds everything BEFORE the last successful match.
-        # For free-form inspection we want both before + after.
-        raw = (self._child.before or "") + (self._child.after or "")
-        return strip_ansi(raw if isinstance(raw, str) else "")
+        """Return everything seen so far on the TTY, ANSI-stripped.
+
+        Tolerant of pexpect's quirky ``after`` field, which can be
+        a class object (``pexpect.TIMEOUT`` / ``pexpect.EOF``) when
+        the last expect timed out instead of matching.
+        """
+        before = self._child.before
+        after = self._child.after
+        before_str = before if isinstance(before, str) else ""
+        after_str = after if isinstance(after, str) else ""
+        return strip_ansi(before_str + after_str)
 
     @property
     def child(self) -> pexpect.spawn:

@@ -1,48 +1,49 @@
-"""Pre-planning preamble: the agent ALWAYS speaks before working.
+"""Pre-planning step: the agent decides chat-vs-work via step_complete.
 
-Every user turn enters the pipeline through this module. A single
-small LLM call ("the preamble") does TWO things in one shot:
+Every user turn starts here. We run a single LLM call with the
+following restrictions:
 
-  1. Produce a short user-facing reply (1-3 sentences). The reply
-     is shown immediately so the user always knows the agent saw
-     them — no matter whether the message is a greeting, a task,
-     or a context-aware follow-up.
+  * Only ONE tool is exposed: ``step_complete``. The model has no
+    way to read files, search code, or run anything else — there is
+    nothing to call BUT the terminator.
+  * The system prompt explains the choice to the model neutrally:
+    pick ``status="done"`` for a conversational reply, or
+    ``status="continue"`` to unlock the rest of the toolbox in the
+    next iteration.
 
-  2. Decide whether more work is needed. If the message is purely
-     conversational ("Hola", "thanks for the fix"), the preamble
-     short-circuits the pipeline with ``flow="done"``. Otherwise
-     the pipeline continues into the analyst → gather → execute.
+The two outcomes:
 
-This is the same architecture a human collaborator uses: hear the
-request, say "OK, let me check that", then start working. The user
-never waits in silence — and the response itself doubles as the
-classification.
+  status="done"      → ``final_answer`` is the user-facing reply,
+                       the pipeline returns ``flow="done"`` and
+                       skips the analyst entirely.
+  status="continue"  → ``summary`` is a one-line "I'm starting X"
+                       message shown to the user, the pipeline
+                       falls through to the analyst with the
+                       message already on screen.
 
-Design rules:
+Why this design (vs my earlier custom ``respond`` tool):
 
-1. **Always speaks first**. The preamble runs on EVERY non-empty
-   input that hasn't been bypassed by ``skip_analysis``. There is
-   no fast/slow path — there's just one path that responds, then
-   decides.
+  * Reuses the engine's existing step_complete schema and parser —
+    no parallel infrastructure to maintain.
+  * The model has been seeing step_complete for the entire session,
+    so the prompt format is in-distribution.
+  * The "tools restricted to step_complete" idea generalises: if we
+    later want a "preamble step" with read-only access, we just
+    add ``read_file`` to the allowed list.
 
-2. **Tight prompt budget**. The system prompt is ~150 tokens —
-   an order of magnitude smaller than the analyst. With a small
-   non-thinking model the call lands in 0.5-2 s.
+Prompt-bias warning (the user surfaced this — preserved as a code
+comment because it's easy to forget):
 
-3. **Context-aware**. Recent session summaries are inlined so
-   "thanks for the fix" gets a contextual reply ("you're welcome,
-   glad the auth fix worked") instead of a generic one.
-
-4. **Falls open on error**. Any exception in the preamble call
-   makes the pipeline fall through to the analyst, so the user
-   still gets a reply via the slower path.
+  Do NOT frame ``continue`` as "the way to help" or ``done`` as
+  "ending too early". The model will read either as a moral
+  imperative and tilt every decision the same way. Both outcomes
+  are equally valid; the prompt below presents them symmetrically.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Optional
 
 from infinidev.engine.analysis.analysis_result import AnalysisResult
@@ -55,72 +56,118 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────
 
 
-_PREAMBLE_SYSTEM_PROMPT = """You are the first responder of a coding assistant.
+_PREAMBLE_SYSTEM_PROMPT = """You are Infinidev, a coding assistant. \
+This is the very first turn after the user wrote a message. Your job \
+is to look at what they said and decide which kind of reply matches it.
 
-Every user message hits you BEFORE the heavy planning machinery runs. \
-You have exactly ONE tool available: ``respond``. You MUST call it \
-exactly once per turn. Do not write prose, do not think out loud, do \
-not ask for other tools — just call ``respond`` immediately.
+You have ONE tool available: ``step_complete``. There are no other \
+tools right now. You will use ``step_complete`` exactly once and the \
+``status`` field decides what happens next.
 
-When you call ``respond`` you give two arguments:
+There are two equally valid options:
 
-  - ``reply``: a short user-facing message (1-3 sentences max) that
-    directly addresses what the user said, in their language
-    (Spanish or English).
+Option A: status="done"
+  Pick this when the user's message is a reply that does NOT require \
+touching any file or running any command. Examples:
+    • Greetings: "hola", "hi", "buenas tardes"
+    • Thanks / acknowledgements: "gracias", "perfect", "ok"
+    • Goodbyes: "chau", "bye", "see you"
+    • Smalltalk / questions about you: "who are you?", "are you there?"
+    • Simple non-code questions you can answer from memory:
+      "what is Python?", "what does this CLI do?"
+  When you pick "done", put the actual reply text in ``final_answer``. \
+The user sees ``final_answer`` and the conversation ends here. \
+Conversational replies are FIRST-CLASS responses — picking "done" is \
+the correct, expected outcome for this category. It is NOT abandoning \
+the user.
 
-      * For greetings / thanks / smalltalk: reply conversationally.
-      * For real work requests: say in one sentence what you're
-        about to start doing. The planning pipeline behind you will
-        handle the actual file reads, edits, and tool calls — you
-        are just announcing the work.
-      * When recent session context is provided, USE it. For
-        "gracias" reference what you actually did; for "did that
-        work?" reference the change.
+Option B: status="continue"
+  Pick this when the user's message asks you to look at code, change \
+code, run tests, refactor, debug, search the codebase, or in any way \
+inspect the project. Examples:
+    • "fix the auth bug in src/auth.py"
+    • "explain how the login flow works" (you need to read the code)
+    • "add a unit test for parseDate"
+    • "refactor verify_token"
+    • "what's in this directory?"
+  When you pick "continue", put a SHORT one-sentence preview of what \
+you're about to do in ``summary``. The user sees the summary as your \
+first message, then the system unlocks the rest of the toolbox \
+(read_file, edit_symbol, execute_command, etc.) on the next turn so \
+you can do the actual work.
 
-  - ``continue_planning``: a boolean.
-      * ``true`` if real work is needed (file inspection, edits,
-        tests, refactor, code question that needs the codebase).
-      * ``false`` for pure conversation (greetings, thanks,
-        goodbyes, smalltalk, simple questions about you).
+Both options are normal. There is NO bias toward one over the other — \
+pick whichever literally matches what the user wrote. If they sent a \
+greeting, "done" is correct. If they sent a task, "continue" is \
+correct. Neither is "playing it safe" or "trying harder".
 
-Be DECISIVE. Call ``respond`` on your very first action."""
+Always answer in the user's language (Spanish or English). Be brief — \
+both ``final_answer`` and ``summary`` should be 1-2 sentences, no more.
+
+Call ``step_complete`` immediately. Do not write content, do not think \
+out loud, do not use any other tool — there are no other tools."""
 
 
-# The single tool the preamble model is allowed to call. Forcing
-# function-calling rather than free-form JSON parsing eliminates
-# most format-drift errors small models make on structured output.
-_RESPOND_TOOL = {
+# Restricted tool list for the preamble step. We use a CUSTOM
+# step_complete schema (instead of the engine's main one) because
+# the engine's description is written for in-loop use — it warns
+# "After finishing the current step objective AND verifying the
+# outcome" — and the model interprets that as "I haven't done
+# anything yet, I shouldn't call this". For the preamble step the
+# tool MUST be callable from a fresh start, so we describe it
+# accordingly. Same parameter shape as the real one, so the
+# downstream parser is unchanged.
+_PREAMBLE_STEP_COMPLETE_SCHEMA: dict = {
     "type": "function",
     "function": {
-        "name": "respond",
+        "name": "step_complete",
         "description": (
-            "Send a short reply to the user AND decide whether the "
-            "planning pipeline should continue. This is the only "
-            "tool you may call."
+            "Call this tool exactly once per turn. It is the ONLY "
+            "tool available right now. Pick the status that matches "
+            "the user's message: 'done' for a conversational reply "
+            "(greeting / thanks / smalltalk / simple answer), "
+            "'continue' to unlock the rest of the toolbox so you can "
+            "do real work (file reads, edits, tests). The user sees "
+            "the reply text immediately either way."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "reply": {
+                "status": {
                     "type": "string",
+                    "enum": ["done", "continue"],
                     "description": (
-                        "Your user-facing message, 1-3 sentences max. "
-                        "Match the user's language (Spanish or English)."
+                        "'done' = conversational reply, no further "
+                        "work needed. 'continue' = real work needed, "
+                        "the system will unlock the rest of the "
+                        "toolbox on the next turn."
                     ),
                 },
-                "continue_planning": {
-                    "type": "boolean",
+                "summary": {
+                    "type": "string",
                     "description": (
-                        "true if real work is needed (file edits, "
-                        "tests, refactor, code questions); false for "
-                        "pure conversation (greetings, thanks, etc.)."
+                        "When status='continue': a SHORT (1 sentence) "
+                        "preview of what you're about to do, e.g. "
+                        "'I'll read src/auth.py to find the bug'."
+                    ),
+                },
+                "final_answer": {
+                    "type": "string",
+                    "description": (
+                        "When status='done': your conversational reply "
+                        "to the user (1-2 sentences). Match their "
+                        "language (Spanish or English)."
                     ),
                 },
             },
-            "required": ["reply", "continue_planning"],
+            "required": ["status"],
         },
     },
 }
+
+
+def _get_preamble_tools() -> list[dict]:
+    return [_PREAMBLE_STEP_COMPLETE_SCHEMA]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -129,42 +176,62 @@ _RESPOND_TOOL = {
 
 
 _MAX_PREAMBLE_LEN = 1500
-"""Inputs longer than this skip the preamble entirely and go straight
-to the analyst. Below this threshold the LLM call is worth the cost;
-above it the message is obviously a real task spec and the preamble
-adds latency without changing the outcome."""
 
 
-def try_conversational_fastpath(
+def run_preamble_step(
     user_input: str,
     session_summaries: Optional[list[str]] = None,
-) -> Optional[tuple[AnalysisResult, str, bool]]:
-    """Run the preamble call and return its decision.
+) -> Optional[tuple[str, str]]:
+    """Run the pre-planning step and return ``(status, message)``.
 
     Returns:
-        ``None`` to skip the preamble (input empty / too long /
-        LLM call failed). The pipeline should continue to the
-        normal analyst.
-
-        ``(analysis_result, reply, continue_planning)`` otherwise.
-        The caller should:
-          - Always notify the user with ``reply``.
-          - If ``continue_planning=False``, return immediately with
-            ``flow="done"`` using the synthesised analysis_result.
-          - If ``continue_planning=True``, fall through to the
-            analyst with the reply already shown to the user.
+        ``(status, message)`` where:
+            * ``status`` is ``"done"`` or ``"continue"``
+            * ``message`` is the reply text (final_answer for done,
+              summary for continue)
+        or ``None`` when the call failed (network error, LLM
+        returned no parseable tool call, etc). Callers should fall
+        through to the normal analyst on None.
     """
     if not user_input or not user_input.strip():
         return None
-
     if len(user_input) > _MAX_PREAMBLE_LEN:
         return None
 
     try:
         return _preamble_via_llm(user_input, session_summaries)
     except Exception as exc:
-        logger.debug("Preamble call failed (falling through): %s", exc)
+        logger.debug("Preamble step failed (falling through): %s", exc)
         return None
+
+
+def try_conversational_fastpath(
+    user_input: str,
+    session_summaries: Optional[list[str]] = None,
+) -> Optional[tuple[AnalysisResult, str, bool]]:
+    """Backwards-compatible entry point used by ``pipeline.run_task``.
+
+    Returns ``(analysis, reply, continue_planning)`` so the caller can
+    show the reply unconditionally and only short-circuit when
+    ``continue_planning=False``. ``None`` falls through.
+    """
+    decision = run_preamble_step(user_input, session_summaries)
+    if decision is None:
+        return None
+
+    status, message = decision
+    if not message:
+        return None
+
+    continue_planning = status == "continue"
+    flow = "develop" if continue_planning else "done"
+    result = AnalysisResult(
+        action="passthrough",
+        original_input=user_input,
+        reason=message,
+        flow=flow,
+    )
+    return result, message, continue_planning
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -175,8 +242,8 @@ def try_conversational_fastpath(
 def _preamble_via_llm(
     user_input: str,
     session_summaries: Optional[list[str]],
-) -> Optional[tuple[AnalysisResult, str, bool]]:
-    """Run the preamble LLM call and parse its response."""
+) -> Optional[tuple[str, str]]:
+    """Make the litellm call and parse the step_complete tool args."""
     import litellm
 
     from infinidev.config.llm import get_litellm_params_for_behavior
@@ -187,36 +254,35 @@ def _preamble_via_llm(
     if session_summaries:
         recent = [s for s in session_summaries[-3:] if s]
         if recent:
-            user_lines.append("RECENT SESSION CONTEXT:")
+            user_lines.append("RECENT SESSION CONTEXT (use it for context-aware replies):")
             for s in recent:
                 user_lines.append(f"  - {s}")
             user_lines.append("")
-    user_lines.append("USER MESSAGE:")
-    user_lines.append(user_input.strip())
+    user_lines.append(f"User just wrote: {user_input.strip()}")
+    user_lines.append("")
+    user_lines.append("Call step_complete now.")
 
     messages = [
         {"role": "system", "content": _PREAMBLE_SYSTEM_PROMPT},
         {"role": "user", "content": "\n".join(user_lines)},
     ]
 
-    # Force the model into the single ``respond`` tool. With
-    # function-calling enabled and ``tool_choice`` pinned to that
-    # one tool, the model can't drift into prose, can't think out
-    # loud (most providers serialise reasoning into the tool call
-    # arguments directly), and produces a guaranteed-shape result
-    # without any free-form JSON parsing.
     call_kwargs = dict(params)
     call_kwargs["messages"] = messages
-    call_kwargs["tools"] = [_RESPOND_TOOL]
+    call_kwargs["tools"] = _get_preamble_tools()
     call_kwargs["tool_choice"] = {
         "type": "function",
-        "function": {"name": "respond"},
+        "function": {"name": "step_complete"},
     }
     call_kwargs["max_tokens"] = 1500
-    call_kwargs["temperature"] = 0.3
+    # temperature=0 is critical: this is a CLASSIFICATION decision,
+    # not a creative one. Determinism makes the test reliable and
+    # eliminates the 1-in-10 misfire we observed where the model
+    # picks continue for a clear greeting.
+    call_kwargs["temperature"] = 0.0
     call_kwargs.setdefault("stream", False)
-    # Hint thinking models to skip chain-of-thought; ignored when
-    # the chat template doesn't honour the kwarg.
+    # Hint thinking models to skip CoT; ignored when the chat
+    # template doesn't honour the kwarg.
     extra_body = dict(call_kwargs.get("extra_body") or {})
     chat_template_kwargs = dict(extra_body.get("chat_template_kwargs") or {})
     chat_template_kwargs.setdefault("enable_thinking", False)
@@ -225,31 +291,24 @@ def _preamble_via_llm(
     call_kwargs["extra_body"] = extra_body
 
     response = litellm.completion(**call_kwargs)
-    parsed = _extract_tool_args(response)
-    if parsed is None:
-        # Tool call missing — fall back to scanning the message
-        # content / reasoning for an inline JSON object. Some local
-        # models ignore tool_choice and emit content instead.
-        raw = _extract_text(response)
-        if not raw:
-            return None
-        parsed = _parse_preamble_json(raw)
-        if parsed is None:
-            return None
-
-    reply = (parsed.get("reply") or "").strip()
-    continue_flag = bool(parsed.get("continue_planning", parsed.get("continue", True)))
-    if not reply:
+    args = _extract_step_complete_args(response)
+    if args is None:
         return None
 
-    flow = "develop" if continue_flag else "done"
-    result = AnalysisResult(
-        action="passthrough",
-        original_input=user_input,
-        reason=reply,
-        flow=flow,
-    )
-    return result, reply, continue_flag
+    status = (args.get("status") or "").lower().strip()
+    if status not in ("done", "continue"):
+        # Models occasionally return blocked / explore — treat as
+        # fall-through so the analyst handles them properly.
+        return None
+
+    if status == "done":
+        message = (args.get("final_answer") or args.get("summary") or "").strip()
+    else:  # continue
+        message = (args.get("summary") or args.get("final_answer") or "").strip()
+
+    if not message:
+        return None
+    return status, message
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -257,14 +316,12 @@ def _preamble_via_llm(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _extract_tool_args(response) -> Optional[dict]:
-    """Pull the ``respond`` tool arguments out of a tool-call response.
+def _extract_step_complete_args(response) -> Optional[dict]:
+    """Pull the step_complete tool arguments out of the response.
 
-    Returns the parsed argument dict or None when the model didn't
-    actually call a tool. We accept any tool name (not strict
-    matching on ``respond``) so that minor disagreements between
-    provider serialisations don't break the parser — the parameters
-    are what we care about.
+    Returns the parsed argument dict, or None when the model didn't
+    actually call a tool. Tolerant to provider differences in how
+    arguments are serialised (string JSON vs dict).
     """
     try:
         msg = response.choices[0].message
@@ -283,62 +340,10 @@ def _extract_tool_args(response) -> Optional[dict]:
             if isinstance(obj, dict):
                 return obj
         except json.JSONDecodeError:
-            pass
+            return None
     except Exception:
-        pass
+        return None
     return None
 
 
-def _extract_text(response) -> str:
-    """Pull the assistant text out of a litellm completion response.
-
-    Falls back to ``reasoning_content`` when ``content`` is empty —
-    thinking models that hit the token limit during their internal
-    chain-of-thought leave ``content`` empty but still emit the JSON
-    decision somewhere in their reasoning trace. Scanning the
-    reasoning lets the parser still find it.
-    """
-    try:
-        msg = response.choices[0].message
-        content = (getattr(msg, "content", None) or "").strip()
-        if content:
-            return content
-        reasoning = (getattr(msg, "reasoning_content", None) or "").strip()
-        return reasoning
-    except Exception:
-        return ""
-
-
-# Loose JSON extractor: finds the FIRST {...} blob in the text and
-# parses it. Tolerant to leading/trailing prose, markdown fences,
-# stray commentary — small models sometimes ignore the "JSON only"
-# instruction in the prompt.
-_JSON_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
-
-
-def _parse_preamble_json(raw: str) -> Optional[dict]:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.strip("`")
-        if raw.lower().startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-
-    try:
-        obj = json.loads(raw)
-        if isinstance(obj, dict):
-            return obj
-    except json.JSONDecodeError:
-        pass
-
-    for match in _JSON_RE.finditer(raw):
-        try:
-            obj = json.loads(match.group(0))
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            continue
-    return None
-
-
-__all__ = ["try_conversational_fastpath"]
+__all__ = ["run_preamble_step", "try_conversational_fastpath"]
