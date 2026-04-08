@@ -225,32 +225,52 @@ class LLMCaller:
         message = choice.message
         tool_calls = getattr(message, "tool_calls", None)
 
-        # FC mode fallback: some models return tool calls as tags in content
+        # Some FC-capable providers occasionally return tool calls as
+        # text (XML tags / raw JSON) inside ``content`` or ``reasoning_content``
+        # instead of populating the ``tool_calls`` API field. This
+        # happens with qwen/glm family on LiteLLM when the router picks
+        # a non-FC model mid-session. Recover by parsing text as manual
+        # tool calls — the result is indistinguishable downstream.
         if not tool_calls:
-            raw_content = (getattr(message, "content", None) or "").strip()
-            if not raw_content:
-                raw_content = (getattr(message, "reasoning_content", None) or "").strip()
-            if raw_content:
-                parsed = _parse_text_tool_calls(raw_content)
-                if parsed:
-                    tool_calls = [
-                        _ManualToolCall(
-                            id=f"fc_fallback_{action_tool_calls + i}",
-                            name=pc["name"],
-                            arguments=(
-                                json.dumps(pc["arguments"])
-                                if isinstance(pc["arguments"], dict)
-                                else str(pc["arguments"])
-                            ),
-                        )
-                        for i, pc in enumerate(parsed)
-                    ]
+            tool_calls = self._fc_fallback_parse_text(message, action_tool_calls)
 
         raw = (getattr(message, "content", None) or "").strip()
         return LLMCallResult(
             tool_calls=tool_calls, message=message, raw_content=raw,
             reasoning_content=(getattr(message, "reasoning_content", None) or "").strip(),
         )
+
+    def _fc_fallback_parse_text(
+        self, message: Any, action_tool_calls: int,
+    ) -> list[Any] | None:
+        """Parse text content as tool calls when FC mode returned none.
+
+        See the caller for the "why". Returns ``None`` if there's no
+        parseable content at all (caller will treat as a text-only
+        response and hit the guardrail path).
+        """
+        raw_content = (getattr(message, "content", None) or "").strip()
+        if not raw_content:
+            raw_content = (getattr(message, "reasoning_content", None) or "").strip()
+        if not raw_content:
+            return None
+
+        parsed = _parse_text_tool_calls(raw_content)
+        if not parsed:
+            return None
+
+        return [
+            _ManualToolCall(
+                id=f"fc_fallback_{action_tool_calls + i}",
+                name=pc["name"],
+                arguments=(
+                    json.dumps(pc["arguments"])
+                    if isinstance(pc["arguments"], dict)
+                    else str(pc["arguments"])
+                ),
+            )
+            for i, pc in enumerate(parsed)
+        ]
 
     def _handle_fc_error(
         self, ctx: ExecutionContext, exc: Exception, messages: list[dict[str, Any]],

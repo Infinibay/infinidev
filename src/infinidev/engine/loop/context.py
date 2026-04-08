@@ -646,31 +646,12 @@ def build_iteration_prompt(
             + "\n".join(note_lines)
             + "\n</notes>"
         )
-    # Note-taking nudge — fires even when some notes exist, based on recent activity
-    if state.tool_calls_since_last_note >= 4 and state.total_tool_calls >= 4:
-        if small_model:
-            parts.append("⚠ SAVE NOTES NOW — call add_note with file paths and findings.")
-        else:
-            parts.append(
-                "<note-reminder>\n"
-                "You have made multiple tool calls without saving notes. Your context resets "
-                "each step — anything not in add_note will be lost. Save key facts NOW: "
-                "file paths, function locations, decisions made, values discovered.\n"
-                "</note-reminder>"
-            )
-    # Stronger warning if previous steps completed but zero notes saved
-    if state.history and not state.notes and state.total_tool_calls >= 4:
-        if small_model:
-            parts.append("⚠ WARNING: ZERO notes saved. Call add_note NOW or you will lose all context.")
-        else:
-            parts.append(
-                "<note-warning>\n"
-                "WARNING: You have completed step(s) but have ZERO notes saved. "
-                "Your context from previous steps is limited to ~150-token summaries. "
-                "Critical details (file paths, line numbers, function signatures, decisions) "
-                "MUST be saved via add_note or they are permanently lost.\n"
-                "</note-warning>"
-            )
+    # Note-taking nudges — two tiers: a gentle reminder when recent
+    # tool calls haven't produced a note, and a stronger warning when a
+    # step completed without ANY notes at all.
+    note_nudge = _render_note_nudge(state, small_model)
+    if note_nudge:
+        parts.append(note_nudge)
 
     # Plan (if we have one) — skip for agents that don't use plans (e.g. analyst)
     if not skip_plan:
@@ -727,29 +708,7 @@ def build_iteration_prompt(
     # Current action — skip for agents that don't use plans
     active = state.plan.active_step if not skip_plan else None
     if active:
-        if small_model:
-            # Simplified scope for small models
-            guidance = f"\n{active.explanation}" if active.explanation else ""
-            parts.append(
-                f"<current-action>\nDO NOW: Step {active.index} — {active.title}"
-                f"{guidance}\n</current-action>"
-            )
-        else:
-            scope_warning = ""
-            next_pending = [s for s in state.plan.steps if s.status == "pending"]
-            if next_pending:
-                off_limits = ", ".join(f'"{s.title}"' for s in next_pending[:3])
-                scope_warning = (
-                    f"\n\nSCOPE CONSTRAINT: This step is ONLY about: {active.title}\n"
-                    f"Do NOT work on future steps: {off_limits}\n"
-                    f"If you discover that this step requires work from future steps, "
-                    f"call step_complete with status='continue' and add new steps."
-                )
-            guidance = f"\n\n{active.explanation}" if active.explanation else ""
-            parts.append(
-                f"<current-action>\nStep {active.index}: {active.title}"
-                f"{guidance}{scope_warning}\n</current-action>"
-            )
+        parts.append(_render_current_action(active, state, small_model))
     elif state.plan.steps:
         # All planned steps are done — prompt to continue or finish
         parts.append(
@@ -864,4 +823,78 @@ def build_iteration_prompt(
         )
 
     return "\n\n".join(parts)
+
+
+# ── iteration prompt helpers ──────────────────────────────────────────────
+
+
+def _render_note_nudge(state: LoopState, small_model: bool) -> str:
+    """Build the note-taking nudge block, or empty if none applies.
+
+    Two independent tiers fire:
+    - ``recent``: model has been tool-calling without saving notes.
+    - ``zero``:   a step completed and not a single note exists.
+    Both can fire in the same iteration; they address different
+    failure modes. Kept separate in the rendered output for clarity.
+    """
+    blocks: list[str] = []
+
+    if state.tool_calls_since_last_note >= 4 and state.total_tool_calls >= 4:
+        if small_model:
+            blocks.append("⚠ SAVE NOTES NOW — call add_note with file paths and findings.")
+        else:
+            blocks.append(
+                "<note-reminder>\n"
+                "You have made multiple tool calls without saving notes. Your context resets "
+                "each step — anything not in add_note will be lost. Save key facts NOW: "
+                "file paths, function locations, decisions made, values discovered.\n"
+                "</note-reminder>"
+            )
+
+    if state.history and not state.notes and state.total_tool_calls >= 4:
+        if small_model:
+            blocks.append("⚠ WARNING: ZERO notes saved. Call add_note NOW or you will lose all context.")
+        else:
+            blocks.append(
+                "<note-warning>\n"
+                "WARNING: You have completed step(s) but have ZERO notes saved. "
+                "Your context from previous steps is limited to ~150-token summaries. "
+                "Critical details (file paths, line numbers, function signatures, decisions) "
+                "MUST be saved via add_note or they are permanently lost.\n"
+                "</note-warning>"
+            )
+
+    return "\n\n".join(blocks)
+
+
+def _render_current_action(active: Any, state: LoopState, small_model: bool) -> str:
+    """Render the ``<current-action>`` block for the active step.
+
+    Small models get a terse "DO NOW" form; regular models get an
+    explicit scope constraint listing the next pending steps as
+    off-limits. Extracted from ``build_iteration_prompt`` so the caller
+    no longer carries both variants inline.
+    """
+    if small_model:
+        guidance = f"\n{active.explanation}" if active.explanation else ""
+        return (
+            f"<current-action>\nDO NOW: Step {active.index} — {active.title}"
+            f"{guidance}\n</current-action>"
+        )
+
+    scope_warning = ""
+    next_pending = [s for s in state.plan.steps if s.status == "pending"]
+    if next_pending:
+        off_limits = ", ".join(f'"{s.title}"' for s in next_pending[:3])
+        scope_warning = (
+            f"\n\nSCOPE CONSTRAINT: This step is ONLY about: {active.title}\n"
+            f"Do NOT work on future steps: {off_limits}\n"
+            f"If you discover that this step requires work from future steps, "
+            f"call step_complete with status='continue' and add new steps."
+        )
+    guidance = f"\n\n{active.explanation}" if active.explanation else ""
+    return (
+        f"<current-action>\nStep {active.index}: {active.title}"
+        f"{guidance}{scope_warning}\n</current-action>"
+    )
 

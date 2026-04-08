@@ -62,6 +62,64 @@ _TOOL_ALIASES: dict[str, str] = {
 }
 
 
+# Common hallucinations from small models — names that aren't real
+# tools but map 1-to-1 to ones that are. Lives at module level so
+# ``execute_tool_call`` doesn't rebuild this dict on every invocation.
+_HALLUCINATION_MAP: dict[str, str] = {
+    "write_file": "create_file",
+    "edit_file": "replace_lines",
+    "read": "read_file",
+    "search": "code_search",
+    "run": "execute_command",
+    "run_command": "execute_command",
+    "ls": "list_directory",
+    "find": "glob",
+    "grep": "code_search",
+    "cat": "read_file",
+    "vim": "replace_lines",
+    "search_knowledge": "search_findings",
+}
+
+
+def _resolve_tool(
+    dispatch: dict[str, Any], name: str,
+) -> tuple[Any | None, str]:
+    """Resolve a tool name to ``(tool, canonical_name)`` using the
+    alias → case-insensitive → hallucination cascade.
+
+    Returns ``(None, name)`` if nothing matches. Kept as a single helper
+    so ``execute_tool_call`` doesn't have to interleave three lookup
+    tables with the rest of its dispatch logic. Logs each correction
+    once at INFO so misbehaving models show up in the logs.
+    """
+    # 1. Back-compat aliases (deprecated names that still resolve)
+    if name in _TOOL_ALIASES:
+        canonical = _TOOL_ALIASES[name]
+        logger.info("Tool alias: '%s' -> '%s'", name, canonical)
+        name = canonical
+
+    tool = dispatch.get(name)
+    if tool is not None:
+        return tool, name
+
+    # 2. Case-insensitive match
+    lower = name.lower()
+    for rname, rtool in dispatch.items():
+        if rname.lower() == lower:
+            logger.info("Tool case-corrected: '%s' → '%s'", name, rname)
+            return rtool, rname
+
+    # 3. Hallucinations from small models
+    canonical = _HALLUCINATION_MAP.get(name) or _TOOL_ALIASES.get(name)
+    if canonical:
+        tool = dispatch.get(canonical)
+        if tool is not None:
+            logger.info("Tool hallucination recovered: '%s' → '%s'", name, canonical)
+            return tool, canonical
+
+    return None, name
+
+
 def execute_tool_call(
     dispatch: dict[str, Any],
     name: str,
@@ -73,43 +131,7 @@ def execute_tool_call(
     Calls ``tool._run()`` directly (bypassing CrewAI's ``BaseTool.run()``)
     with kwargs filtering to strip hallucinated parameters.
     """
-    # Resolve tool name aliases
-    if name in _TOOL_ALIASES:
-        canonical = _TOOL_ALIASES[name]
-        logger.info("Tool alias: '%s' -> '%s'", name, canonical)
-        name = canonical
-
-    tool = dispatch.get(name)
-    if tool is None:
-        # Case-insensitive match
-        for rname, rtool in dispatch.items():
-            if rname.lower() == name.lower():
-                tool, name = rtool, rname
-                logger.info("Tool case-corrected: '%s' → '%s'", name, rname)
-                break
-
-    if tool is None:
-        # Common hallucinations from small models
-        _HALLUCINATION_MAP = {
-            "write_file": "create_file",
-            "edit_file": "replace_lines",
-            "read": "read_file",
-            "search": "code_search",
-            "run": "execute_command",
-            "run_command": "execute_command",
-            "ls": "list_directory",
-            "find": "glob",
-            "grep": "code_search",
-            "cat": "read_file",
-            "vim": "replace_lines",
-            "search_knowledge": "search_findings",
-        }
-        canonical = _HALLUCINATION_MAP.get(name) or _TOOL_ALIASES.get(name)
-        if canonical:
-            tool = dispatch.get(canonical)
-            if tool:
-                logger.info("Tool hallucination recovered: '%s' → '%s'", name, canonical)
-                name = canonical
+    tool, name = _resolve_tool(dispatch, name)
 
     if tool is None:
         available = sorted(dispatch.keys())[:15]

@@ -133,6 +133,76 @@ class LoopEngine(AgentEngine):
                 break
         return messages
 
+    def _inject_mid_step_user_messages(
+        self, ctx: "ExecutionContext", messages: list[dict[str, Any]],
+    ) -> None:
+        """Drain any pending user messages and inject them as urgent
+        ``user``-role turns before the next LLM call.
+
+        No-op if the queue is empty. Used at the top of the inner loop
+        so the model always sees the freshest user input even when the
+        user speaks while an LLM call is in flight.
+        """
+        drained = self._drain_user_messages()
+        if not drained:
+            return
+        _emit_log(
+            "info",
+            f"⚡ mid-step user message drained ({len(drained)} msg(s)) "
+            f"— injecting before next LLM call",
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        )
+        for m in drained:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "URGENT — I just sent this while you were working. "
+                    "Acknowledge it with `send_message` as your VERY NEXT "
+                    f"tool call before continuing your current step:\n\n{m}"
+                ),
+            })
+
+    def _reject_step_complete_on_late_message(
+        self,
+        ctx: "ExecutionContext",
+        messages: list[dict[str, Any]],
+        step_complete_id: str,
+    ) -> bool:
+        """If the user spoke AFTER the model called ``step_complete`` but
+        BEFORE we processed the completion, reject the step and force
+        one more LLM call so the user can be acknowledged.
+
+        Writes a ``tool``-role message on the ``step_complete`` tool id
+        — providers treat that as "your previous close was overridden
+        by this feedback", which is exactly the framing we want.
+        Returns ``True`` if the rejection fired (caller should
+        ``continue`` the loop), ``False`` if the queue was empty.
+        """
+        drained = self._drain_user_messages()
+        if not drained:
+            return False
+
+        _emit_log(
+            "info",
+            f"⚡ late mid-step user message drained ({len(drained)} msg(s)) "
+            f"— overriding step_complete, forcing one more LLM call",
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        )
+        for m in drained:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": step_complete_id,
+                "content": (
+                    "step_complete REJECTED — the user just spoke while "
+                    "you were finishing your last action. You MUST "
+                    "acknowledge them BEFORE completing this step. Call "
+                    "`send_message` with a brief (1-2 sentence) reply "
+                    "that addresses what they said, then call "
+                    f"step_complete again. The user's message was:\n\n{m}"
+                ),
+            })
+        return True
+
     def cancel(self) -> None:
         """Signal the engine to stop after the current tool call."""
         self._cancel_event.set()
@@ -646,25 +716,7 @@ class LoopEngine(AgentEngine):
             # whole iteration prompt: the in-flight conversation context
             # is preserved, and the model sees the new message as a
             # natural follow-up.
-            mid_step_msgs = self._drain_user_messages()
-            if mid_step_msgs:
-                _emit_log(
-                    "info",
-                    f"⚡ mid-step user message drained "
-                    f"({len(mid_step_msgs)} msg(s)) — injecting before "
-                    f"next LLM call",
-                    project_id=ctx.project_id, agent_id=ctx.agent_id,
-                )
-                for _m in mid_step_msgs:
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "URGENT — I just sent this while you were "
-                            "working. Acknowledge it with `send_message` "
-                            "as your VERY NEXT tool call before continuing "
-                            f"your current step:\n\n{_m}"
-                        ),
-                    })
+            self._inject_mid_step_user_messages(ctx, messages)
 
             # Signal UI that LLM call is starting
             _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {})
@@ -800,31 +852,9 @@ class LoopEngine(AgentEngine):
                     # tool-result is the model's natural mode after
                     # a tool call, so this format gets honored far
                     # more often than a bare user-role message.
-                    late_msgs = self._drain_user_messages()
-                    if late_msgs:
-                        _emit_log(
-                            "info",
-                            f"⚡ late mid-step user message drained "
-                            f"({len(late_msgs)} msg(s)) — overriding "
-                            f"step_complete, forcing one more LLM call",
-                            project_id=ctx.project_id, agent_id=ctx.agent_id,
-                        )
-                        for _m in late_msgs:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": classified.step_complete.id,
-                                "content": (
-                                    "step_complete REJECTED — the user "
-                                    "just spoke while you were finishing "
-                                    "your last action. You MUST "
-                                    "acknowledge them BEFORE completing "
-                                    "this step. Call `send_message` with "
-                                    "a brief (1-2 sentence) reply that "
-                                    "addresses what they said, then call "
-                                    "step_complete again. The user's "
-                                    f"message was:\n\n{_m}"
-                                ),
-                            })
+                    if self._reject_step_complete_on_late_message(
+                        ctx, messages, classified.step_complete.id,
+                    ):
                         continue  # Re-enter the loop, don't break.
 
                     step_result = _parse_step_complete_args(classified.step_complete.function.arguments)
@@ -876,6 +906,69 @@ class LoopEngine(AgentEngine):
         step_result.action_tool_calls = action_tool_calls
         step_result.behavior_tracker = tracker
         return step_result
+
+    def _capture_test_command_output(
+        self, ctx: ExecutionContext, arguments: str, result: str,
+    ) -> str:
+        """Side-effects + auto-annotation for a test-runner execute_command.
+
+        Three responsibilities, all best-effort (any exception is
+        swallowed — this is an optimization, not correctness):
+
+        1. Cache raw stdout on ``ctx.state`` so the ``tail_test_output``
+           meta-tool can serve a filtered view without re-running.
+        2. Record the outcome fingerprint per *normalised* test command
+           so ``regression_after_edit`` compares apples to apples.
+           Keeps the last two entries per command to bound state size.
+        3. Parse structured failures and append them inline to the
+           result so the model sees them next to the raw stdout.
+        """
+        try:
+            from infinidev.engine.guidance import (
+                is_test_command,
+                test_outcome_fingerprint,
+                normalize_test_command,
+            )
+            if not is_test_command(arguments, ctx.state):
+                return result
+
+            ctx.state.last_test_output = result
+            try:
+                import json as _json
+                _args = _json.loads(arguments) if arguments else {}
+                cmd_str = str(_args.get("command", ""))
+            except Exception:
+                cmd_str = arguments
+            ctx.state.last_test_command = cmd_str[:300]
+
+            new_fp = test_outcome_fingerprint(result)
+            if new_fp:
+                key = normalize_test_command(cmd_str)
+                history = ctx.state.test_outcome_history.get(key, [])
+                if not history or history[-1] != new_fp:
+                    history.append(new_fp)
+                    ctx.state.test_outcome_history[key] = history[-2:]
+
+            try:
+                from infinidev.engine.test_parsers import parse_test_failures
+                failures = parse_test_failures(result)
+            except Exception:
+                failures = []
+            if failures:
+                import json as _json2
+                _max = 8
+                payload = [f.to_dict() for f in failures[:_max]]
+                suffix = (
+                    f"\n\n[auto-extracted structured_failures "
+                    f"({len(failures)} total"
+                    f"{', showing first ' + str(_max) if len(failures) > _max else ''}):]\n"
+                    + _json2.dumps(payload, indent=2)
+                )
+                result = result + suffix
+        except Exception:
+            pass
+
+        return result
 
     def _execute_regular_tools(
         self, ctx: ExecutionContext, classified: ClassifiedCalls,
@@ -952,71 +1045,14 @@ class LoopEngine(AgentEngine):
                 if is_parallel:
                     counter_tag += " (parallel)"
 
-                # Capture test-runner output so the tail_test_output meta
-                # tool can serve a filtered view without re-running the
-                # tests. Also record the outcome fingerprint per
-                # *normalised* test command so the regression_after_edit
-                # detector can compare apples to apples (same target set,
-                # different time) instead of mixing unrelated test runs.
+                # Capture + auto-annotate test-runner output. All the
+                # noise (fingerprint history, structured_failures, etc.)
+                # lives in _capture_test_command_output so this loop
+                # stays readable.
                 if tc.function.name == "execute_command":
-                    try:
-                        from infinidev.engine.guidance import (
-                            is_test_command,
-                            test_outcome_fingerprint,
-                            normalize_test_command,
-                        )
-                        if is_test_command(tc.function.arguments, ctx.state):
-                            ctx.state.last_test_output = result
-                            try:
-                                import json as _json
-                                _args = _json.loads(tc.function.arguments) if tc.function.arguments else {}
-                                cmd_str = str(_args.get("command", ""))
-                            except Exception:
-                                cmd_str = tc.function.arguments
-                            ctx.state.last_test_command = cmd_str[:300]
-                            # Record the outcome under the normalised
-                            # command key so regression_after_edit can
-                            # compare against the previous run of the
-                            # SAME target set. We keep the LAST TWO
-                            # entries per command — older history is
-                            # dropped to keep state small. Identical
-                            # consecutive outcomes are not duplicated
-                            # (e.g. running the same test twice in a
-                            # row without an edit between).
-                            new_fp = test_outcome_fingerprint(result)
-                            if new_fp:
-                                key = normalize_test_command(cmd_str)
-                                history = ctx.state.test_outcome_history.get(key, [])
-                                if not history or history[-1] != new_fp:
-                                    history.append(new_fp)
-                                    ctx.state.test_outcome_history[key] = history[-2:]
-                            # A4 — Auto-tail_test_output: parse structured
-                            # failures from the captured output and append
-                            # them inline to the tool result. This puts the
-                            # parsed failure list right next to the raw
-                            # stdout the model is already going to read,
-                            # so it doesn't have to discover the
-                            # tail_test_output meta tool on its own. Zero
-                            # extra LLM call. Returns [] on success or
-                            # when no parser recognises the format.
-                            try:
-                                from infinidev.engine.test_parsers import parse_test_failures
-                                _failures = parse_test_failures(result)
-                            except Exception:
-                                _failures = []
-                            if _failures:
-                                import json as _json2
-                                _max = 8  # cap to keep prompt small
-                                _payload = [f.to_dict() for f in _failures[:_max]]
-                                _suffix = (
-                                    f"\n\n[auto-extracted structured_failures "
-                                    f"({len(_failures)} total"
-                                    f"{', showing first ' + str(_max) if len(_failures) > _max else ''}):]\n"
-                                    + _json2.dumps(_payload, indent=2)
-                                )
-                                result = result + _suffix
-                    except Exception:
-                        pass
+                    result = self._capture_test_command_output(
+                        ctx, tc.function.arguments, result,
+                    )
 
                 # Inject behavioral feedback into tool result
                 behavior_feedback = tracker.drain_feedback()
