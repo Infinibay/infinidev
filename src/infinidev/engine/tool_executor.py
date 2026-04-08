@@ -304,6 +304,133 @@ _CACHE_HANDLERS = {
 }
 
 
+# ── Anchored memory injection ─────────────────────────────────────────────
+#
+# When the agent calls a tool that touches a concrete anchor (a file
+# path, a symbol name, a tool name, or produces an error pattern),
+# ``annotate_with_memory`` runs a cheap DB lookup against the findings
+# table for anything with a matching anchor and appends a compact
+# ``[📌 Known lessons for this <anchor>]`` block to the tool result.
+# The model sees the lesson next to the data that provoked it — which
+# is dramatically more effective than pushing lessons into the system
+# prompt and hoping they're still in attention 20 iterations later.
+#
+# The handlers extract anchors from the tool args (``read_file`` →
+# ``path``, ``edit_symbol`` → ``name``, etc.). Tools without a
+# meaningful anchor are not in the dispatch table; they pay zero cost.
+
+
+def _anchor_from_file_arg(args: dict, result: str, ws: str) -> dict:
+    import os as _os
+    path = args.get("path") or args.get("file_path")
+    if not path:
+        return {}
+    if not _os.path.isabs(path):
+        path = _os.path.normpath(_os.path.join(ws, path))
+    return {"anchor_file": path}
+
+
+def _anchor_from_symbol_arg(args: dict, result: str, ws: str) -> dict:
+    name = args.get("name") or args.get("symbol") or args.get("qualified_name")
+    if not name:
+        return {}
+    out: dict = {"anchor_symbol": name}
+    # A symbol edit / read also has a file anchor derived from the
+    # tool result; pick it up so file-anchored lessons fire too.
+    path = _extract_path_from_result(result)
+    if path:
+        out["anchor_file"] = path
+    return out
+
+
+def _anchor_from_command_arg(args: dict, result: str, ws: str) -> dict:
+    # Commands don't have a natural anchor, but the command name
+    # itself (first token) can match tool-level rules. e.g. a
+    # ``pytest ...`` command matches rules anchored to ``pytest``.
+    cmd = args.get("command") or args.get("cmd") or ""
+    if not cmd or not isinstance(cmd, str):
+        return {}
+    first = cmd.strip().split(None, 1)[0] if cmd.strip() else ""
+    if not first:
+        return {}
+    return {"anchor_tool": first}
+
+
+# Per-tool anchor extractors. Keyed by tool name; each returns the
+# subset of anchor kwargs to pass to ``get_anchored_findings``.
+_MEMORY_HANDLERS: dict = {
+    "read_file": _anchor_from_file_arg,
+    "partial_read": _anchor_from_file_arg,
+    "create_file": _anchor_from_file_arg,
+    "edit_file": _anchor_from_file_arg,
+    "replace_lines": _anchor_from_file_arg,
+    "add_content_after_line": _anchor_from_file_arg,
+    "add_content_before_line": _anchor_from_file_arg,
+    "list_directory": _anchor_from_file_arg,
+    "get_symbol_code": _anchor_from_symbol_arg,
+    "edit_symbol": _anchor_from_symbol_arg,
+    "add_symbol": _anchor_from_symbol_arg,
+    "remove_symbol": _anchor_from_symbol_arg,
+    "search_symbols": _anchor_from_symbol_arg,
+    "execute_command": _anchor_from_command_arg,
+}
+
+
+def annotate_with_memory(
+    tool_name: str,
+    arguments: str | dict,
+    result: str,
+    project_id: int,
+) -> str:
+    """Append matching anchored memories to a tool result.
+
+    Returns the result unchanged if no anchor can be extracted, no
+    memory matches, or the result already encodes an error (errors
+    are already noisy; no point adding lessons next to them). All
+    exceptions are swallowed — memory injection is best-effort.
+    """
+    handler = _MEMORY_HANDLERS.get(tool_name)
+    if handler is None:
+        return result
+    if not isinstance(result, str) or _is_error_result_annotation(result):
+        return result
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+        if not isinstance(args, dict):
+            return result
+        from infinidev.tools.base.context import get_current_workspace_path
+        ws = get_current_workspace_path() or ""
+        anchors = handler(args, result, ws)
+        if not anchors:
+            return result
+        from infinidev.db.service import get_anchored_findings
+        matches = get_anchored_findings(
+            project_id=project_id, limit=3, **anchors,
+        )
+        if not matches:
+            return result
+        lines: list[str] = ["", "[📌 Known lessons relevant to this action:]"]
+        for m in matches:
+            kind = (m.get("finding_type") or "lesson").upper()
+            topic = m.get("topic") or ""
+            content = (m.get("content") or "").strip()
+            if topic:
+                lines.append(f"- {kind} — {topic}: {content}")
+            else:
+                lines.append(f"- {kind}: {content}")
+        return result + "\n" + "\n".join(lines)
+    except Exception:
+        return result
+
+
+def _is_error_result_annotation(result: str) -> bool:
+    """Local guard for annotate_with_memory. Same semantics as
+    ``_is_error_result`` but named differently to avoid shadowing."""
+    if not isinstance(result, str) or not result:
+        return True
+    return result.strip().startswith('{"error')
+
+
 # ── Batching ──────────────────────────────────────────────────────────────
 
 def batch_tool_calls(calls: list) -> list[list]:

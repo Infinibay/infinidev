@@ -1048,6 +1048,20 @@ class LoopEngine(AgentEngine):
                         ctx, tc.function.arguments, result,
                     )
 
+                # Anchored-memory injection. Looks up lessons/rules
+                # whose anchor matches the file/symbol/command this
+                # tool touched, and appends them to the result. Zero
+                # cost when no memory matches. Skipped on error results
+                # — lessons next to errors are just noise. See
+                # tool_executor.annotate_with_memory for the mechanism.
+                if not _tool_error:
+                    with best_effort("memory annotation failed for %s", tc.function.name):
+                        from infinidev.engine.tool_executor import annotate_with_memory
+                        result = annotate_with_memory(
+                            tc.function.name, tc.function.arguments, result,
+                            project_id=ctx.project_id,
+                        )
+
                 # Inject behavioral feedback into tool result
                 behavior_feedback = tracker.drain_feedback()
                 result_with_counter = result + counter_tag

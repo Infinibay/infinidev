@@ -276,6 +276,15 @@ def init_db():
         _migrate_add_column(conn, "findings", "validation_method", "TEXT")
         _migrate_add_column(conn, "findings", "reproducibility_score", "REAL")
         _migrate_add_column(conn, "findings", "updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
+        # Anchored memory: each lesson/rule/landmine can be tied to a
+        # concrete code location so it fires automatically when the
+        # agent touches that anchor. See tool_executor._MEMORY_HANDLERS
+        # for the injection mechanism. All nullable — un-anchored
+        # memories still work as traditional project_knowledge.
+        _migrate_add_column(conn, "findings", "anchor_file", "TEXT")
+        _migrate_add_column(conn, "findings", "anchor_symbol", "TEXT")
+        _migrate_add_column(conn, "findings", "anchor_tool", "TEXT")
+        _migrate_add_column(conn, "findings", "anchor_error", "TEXT")
         _migrate_add_column(conn, "artifacts", "session_id", "TEXT")
         _migrate_add_column(conn, "artifacts", "type", "TEXT DEFAULT 'artifact'")
 
@@ -686,4 +695,73 @@ def get_recent_explorations(project_id: int = 1, limit: int = 10) -> list[dict]:
         return execute_with_retry(_query) or []
     except Exception:
         logger.warning("get_recent_explorations failed", exc_info=True)
+        return []
+
+
+# ── Anchored memory retrieval ─────────────────────────────────────────────
+
+
+def get_anchored_findings(
+    *,
+    project_id: int = 1,
+    anchor_file: str | None = None,
+    anchor_symbol: str | None = None,
+    anchor_tool: str | None = None,
+    anchor_error: str | None = None,
+    limit: int = 3,
+) -> list[dict]:
+    """Return findings that match ANY of the supplied anchors.
+
+    Used by the tool executor to surface lessons/rules/landmines when
+    the agent touches a file, symbol, tool, or error pattern they
+    were anchored to. ``OR`` semantics across the anchor kinds — a
+    finding matches if it's anchored to the file OR the symbol OR
+    the tool OR the error, whichever is relevant for the caller.
+
+    Only findings with ``finding_type`` in (``lesson``, ``rule``,
+    ``landmine``) are eligible. Ordered by confidence DESC then
+    recency DESC, capped at ``limit``. Returns the typical finding
+    dict shape plus the anchor fields so the caller can explain
+    which anchor triggered the match.
+    """
+    def _query(conn):
+        conditions: list[str] = []
+        params: list = [project_id]
+        if anchor_file:
+            conditions.append("anchor_file = ?")
+            params.append(anchor_file)
+        if anchor_symbol:
+            conditions.append("anchor_symbol = ?")
+            params.append(anchor_symbol)
+        if anchor_tool:
+            conditions.append("anchor_tool = ?")
+            params.append(anchor_tool)
+        if anchor_error:
+            conditions.append("anchor_error = ?")
+            params.append(anchor_error)
+        if not conditions:
+            return []
+        where = "(" + " OR ".join(conditions) + ")"
+        params.append(limit)
+        rows = conn.execute(
+            f"""
+            SELECT id, topic, content, finding_type, confidence,
+                   anchor_file, anchor_symbol, anchor_tool, anchor_error,
+                   created_at
+            FROM findings
+            WHERE project_id = ?
+              AND status IN ('active', 'provisional')
+              AND finding_type IN ('lesson', 'rule', 'landmine')
+              AND {where}
+            ORDER BY confidence DESC, updated_at DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    try:
+        return execute_with_retry(_query) or []
+    except Exception:
+        logger.warning("get_anchored_findings failed", exc_info=True)
         return []
