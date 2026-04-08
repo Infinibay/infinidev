@@ -123,6 +123,22 @@ def _bootstrap_single_prompt_runtime() -> None:
     _q.start()
     set_global_queue(_q)
 
+    # Warm Pydantic schema introspection so the first
+    # ``LoopEngine._build_context()`` call doesn't pay ~500 ms of
+    # tool-schema build time on the analysis → develop transition.
+    # The schemas themselves are recomputed each time (the result is
+    # not cached), but Pydantic's per-model introspection cache is
+    # populated by this call, which is what actually dominates the
+    # cost. Best-effort: any failure here just leaves the warm-up
+    # for the first real call, no functional impact.
+    try:
+        from infinidev.tools import get_tools_for_role
+        from infinidev.engine.loop.tools import build_tool_schemas
+        _warm_tools = get_tools_for_role("developer", small_model=True)
+        build_tool_schemas(_warm_tools, small_model=True)
+    except Exception:
+        pass
+
     # File watcher — catches every modification to the workspace,
     # including shell commands (``sed ... > file.ts``), external
     # editors, IDE saves, and ``git checkout``. Routes changes to the

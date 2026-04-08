@@ -287,6 +287,9 @@ def _run_gather_phase(
     if not (_settings.GATHER_ENABLED or force_gather):
         return task_prompt
 
+    # Only announce the gather phase once we know it will actually run.
+    hooks.on_phase("gather")
+
     try:
         from infinidev.gather import run_gather
         agent.activate_context(session_id=session_id)
@@ -539,8 +542,11 @@ def run_task(
         agent.backstory = flow_config.backstory
 
     # ── Gather ────────────────────────────────────────────────────────────
+    # Don't emit ``on_phase("gather")`` here — it's pushed inside
+    # ``_run_gather_phase`` after the GATHER_ENABLED check, so the UI
+    # phase indicator no longer flickers through "gather" when the
+    # phase is disabled (which is the default).
     if flow == "develop":
-        hooks.on_phase("gather")
         task_prompt = _run_gather_phase(
             user_input=user_input,
             agent=agent,

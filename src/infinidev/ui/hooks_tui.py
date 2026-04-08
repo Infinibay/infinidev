@@ -93,15 +93,20 @@ class TUIHooks:
         Returns ``None`` only on EOF / interruption — for the TUI we
         always have an interactive user, so returning a string (possibly
         empty) is the normal case.
+
+        UX note: previous versions silently relied on ``notify()`` having
+        rendered the question right before, which is true for the
+        ``clarification`` kind (analyst Q&A) but NOT for ``confirm``
+        (the develop spec confirmation). The result was a 10-15 second
+        "phantom hang" between analysis and develop where the user had
+        no idea the system was waiting for them. We now render the
+        prompt + actions hint for ``confirm`` so the user can see they
+        need to type ``y`` to proceed.
         """
         app = self._app
-        # Surface the prompt in the chat so the user knows what's being
-        # asked. The pipeline already calls notify() before ask_user()
-        # for analyst questions, so this is a fallback for callers that
-        # don't notify first.
-        if not app._chat_history_control.show_thinking:
-            # No double-printing if notify() just put the same prompt up.
-            pass
+        if kind == "confirm" and prompt:
+            app.add_message("Infinidev", prompt, "system")
+            app._actions_text = "Waiting for your confirmation (y / n / feedback)..."
         app._chat_history_control.show_thinking = False
         app._analysis_event = threading.Event()
         app._analysis_waiting = True
