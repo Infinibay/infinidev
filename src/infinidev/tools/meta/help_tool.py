@@ -153,8 +153,14 @@ SHELL TOOLS
     "knowledge": """\
 KNOWLEDGE TOOLS — Findings and reports
 
-  record_finding(title, content, finding_type?, confidence?, tags?, sources?)
-    Save a finding with metadata.
+  record_finding(title, content, finding_type?, confidence?, tags?,
+                 sources?, anchor_file?, anchor_symbol?, anchor_tool?,
+                 anchor_error?)
+    Save a finding. Two tiers — observational (loaded next session)
+    and anchored (auto-injects when the agent touches a matching
+    file/symbol/tool/error). Call `help record_finding` for the
+    full guide, including which finding_type to pick and when an
+    anchor is required.
 
   read_findings(query?, finding_type?, limit?)
     Read stored findings. Filter by query or type.
@@ -975,21 +981,105 @@ immediately whether the index is populated, what languages are
 present, and what kinds of symbols are available to query.""",
 
     "record_finding": """\
-record_finding(title, content, finding_type?, confidence?, tags?, sources?)
+record_finding(title, content, finding_type?, confidence?, tags?, sources?,
+               anchor_file?, anchor_symbol?, anchor_tool?, anchor_error?)
 
-Save a finding to the knowledge base for future sessions.
+Save a finding to the knowledge base for future sessions. There are
+two tiers of memory — pick the right one:
+
+### TIER 1: Observational findings (loaded up-front next session)
+Use for general knowledge about the project or a research result.
+Loaded into the system prompt via <project-knowledge> when the next
+session starts. finding_type values:
+
+  observation / hypothesis / experiment / proof / conclusion / project_context
+
+These do NOT need anchors; they apply broadly.
+
+### TIER 2: Anchored memory (auto-injects on relevant tool calls)
+Use for lessons, rules, and landmines that only matter when the
+agent is touching a specific file, symbol, tool, or error. NOT
+loaded into the system prompt — instead, the memory is AUTOMATICALLY
+appended to the tool result the next time the agent touches the
+matching anchor. The lesson appears inline, next to the data that
+provoked it. Impossible to miss, zero cost when no match fires.
+
+  lesson   — a fact worth remembering when you touch this anchor again
+  rule     — a user preference or policy that applies here
+  landmine — something that burned us before; a warning for next time
+
+For these three types, you MUST provide at least one anchor_*
+parameter or the memory will never fire and is effectively lost.
+The tool rejects the call if no anchor is set.
 
 PARAMS:
-  title (str, required)             — Searchable title/topic
-  content (str, required)           — Finding details (self-contained, useful without extra context)
-  finding_type (str, optional)      — "observation" (default), "conclusion", or "project_context"
-  confidence (float, optional)      — 0.0-1.0. Default: 0.5. Use 0.8+ for verified facts.
-  tags (list[str], optional)        — Tags for categorization
-  sources (list[str], optional)     — Source URLs or file paths
+  title (str, required)         — Searchable title/topic
+  content (str, required)       — Detailed content, self-contained
+  finding_type (str, optional)  — One of the 9 types above. Default: "observation"
+  confidence (float, optional)  — 0.0-1.0. Default: 0.5. Use 0.8+ for verified facts.
+  tags (list[str], optional)    — Tags for categorization
+  sources (list[str], optional) — Source URLs or file paths
+  anchor_file (str, optional)   — File path; matches on read/edit/list of that file
+  anchor_symbol (str, optional) — Qualified symbol name; matches on get_symbol_code/edit_symbol
+  anchor_tool (str, optional)   — Tool name or command first-token (e.g. "pytest")
+  anchor_error (str, optional)  — Error message substring; matches in tool results
+
+Multiple anchors are allowed on a single finding (OR semantics — the
+memory fires if ANY anchor matches).
 
 EXAMPLES:
-  record_finding(title="Auth module structure", content="JWT with HS256, verify_token at src/auth.py:42", finding_type="project_context", confidence=0.9)
-  record_finding(title="Redis 7.2 caching", content="Supports client-side caching via RESP3", sources=["https://redis.io/docs/"])""",
+
+  # Tier 1 — background knowledge, no anchor needed
+  record_finding(
+      title="Auth module structure",
+      content="JWT with HS256, verify_token at src/auth.py:42",
+      finding_type="project_context",
+      confidence=0.9,
+  )
+
+  # Tier 2 — lesson anchored to a file
+  record_finding(
+      title="build_context pays Pydantic warm-up cost",
+      content="LoopEngine._build_context calls build_tool_schemas which "
+              "triggers Pydantic introspection on 28 tools (~500ms). "
+              "Warmed in cli/main._bootstrap to shift the cost off the "
+              "analysis→develop transition. Do not remove the warm-up.",
+      finding_type="lesson",
+      anchor_file="src/infinidev/engine/loop/engine.py",
+      confidence=0.9,
+  )
+
+  # Tier 2 — rule anchored to a symbol
+  record_finding(
+      title="ask_user must render its own prompt",
+      content="TUI blocking calls cannot rely on an implicit contract "
+              "that notify() was called first with the same text.",
+      finding_type="rule",
+      anchor_file="src/infinidev/ui/hooks_tui.py",
+      anchor_symbol="ask_user",
+  )
+
+  # Tier 2 — landmine anchored to a tool token
+  record_finding(
+      title="INFINIDEV_LOG_FILE inside workspace = infinite loop",
+      content="The file watcher treats every log flush as a mod, "
+              "re-injects the file, loops forever. Always use a path "
+              "outside the watched workspace.",
+      finding_type="landmine",
+      anchor_tool="INFINIDEV_LOG_FILE",
+      confidence=1.0,
+  )
+
+  # Tier 2 — landmine anchored to an error pattern
+  record_finding(
+      title="SIGSEGV on shutdown = IndexQueue thread leak",
+      content="If you see SIGSEGV during os._exit, the background "
+              "indexer thread wasn't joined. Check cli/index_queue.py "
+              "and make sure stop() is idempotent AND resets _stopped "
+              "in start().",
+      finding_type="landmine",
+      anchor_error="SIGSEGV",
+  )""",
 
     "read_findings": """\
 read_findings(query?, finding_type?, limit?)

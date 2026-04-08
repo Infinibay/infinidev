@@ -4,24 +4,26 @@ import json
 import sqlite3
 from typing import Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
-
-FINDING_TYPES = ("observation", "hypothesis", "experiment", "proof", "conclusion", "project_context")
+from infinidev.tools.knowledge.finding_types import FINDING_TYPES
 from infinidev.tools.knowledge.record_finding_input import RecordFindingInput
-
-
-FINDING_TYPES = ("observation", "hypothesis", "experiment", "proof", "conclusion", "project_context")
 
 
 class RecordFindingTool(InfinibayBaseTool):
     name: str = "record_finding"
     description: str = (
-        "Record a research finding with confidence level and sources. "
-        "Findings are created as 'provisional' and remain so until the "
-        "Research Reviewer validates or rejects them."
+        "Record a finding for future sessions. Three tiers: observational "
+        "findings (observation/hypothesis/proof/...) are loaded into the "
+        "system prompt next session via project_knowledge. Anchored "
+        "memories (lesson/rule/landmine) are attached to a specific "
+        "anchor (file, symbol, tool, or error pattern) and automatically "
+        "injected next to the tool result when the agent touches that "
+        "anchor. For anchored memories you MUST provide at least one "
+        "anchor_* parameter — otherwise the memory will never fire. "
+        "Findings are created as 'provisional' and promoted by review."
     )
     args_schema: Type[BaseModel] = RecordFindingInput
 
@@ -34,6 +36,10 @@ class RecordFindingTool(InfinibayBaseTool):
         finding_type: str = "observation",
         sources: list[str] | None = None,
         artifact_id: int | None = None,
+        anchor_file: str | None = None,
+        anchor_symbol: str | None = None,
+        anchor_tool: str | None = None,
+        anchor_error: str | None = None,
     ) -> str:
         if tags is None:
             tags = []
@@ -44,6 +50,22 @@ class RecordFindingTool(InfinibayBaseTool):
             return self._error(
                 f"Invalid finding_type '{finding_type}'. "
                 f"Must be one of: {', '.join(FINDING_TYPES)}"
+            )
+
+        # Anchored types MUST have at least one anchor or the memory
+        # is dead on arrival — it'll sit in the DB forever and never
+        # fire. Reject up front with a clear message.
+        _ANCHORED = {"lesson", "rule", "landmine"}
+        if finding_type in _ANCHORED and not any(
+            (anchor_file, anchor_symbol, anchor_tool, anchor_error)
+        ):
+            return self._error(
+                f"finding_type='{finding_type}' requires at least one "
+                f"anchor_* parameter (anchor_file, anchor_symbol, "
+                f"anchor_tool, or anchor_error). Without an anchor the "
+                f"memory will never auto-inject and you have effectively "
+                f"lost it. If you want an un-anchored note, use "
+                f"finding_type='observation' instead."
             )
 
         agent_id = self._validate_agent_context()
@@ -87,12 +109,15 @@ class RecordFindingTool(InfinibayBaseTool):
                 """INSERT INTO findings
                    (project_id, session_id, agent_run_id, topic, content,
                     sources_json, confidence, agent_id, status, finding_type,
-                    artifact_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'provisional', ?, ?)""",
+                    artifact_id,
+                    anchor_file, anchor_symbol, anchor_tool, anchor_error)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'provisional', ?, ?,
+                           ?, ?, ?, ?)""",
                 (
                     project_id, session_id, agent_run_id, title, content,
                     json.dumps(sources), confidence, agent_id, finding_type,
                     artifact_id,
+                    anchor_file, anchor_symbol, anchor_tool, anchor_error,
                 ),
             )
             finding_id = cursor.lastrowid
@@ -112,9 +137,22 @@ class RecordFindingTool(InfinibayBaseTool):
         except Exception as e:
             return self._error(f"Failed to record finding: {e}")
 
+        # Surface the anchor in the log line so a reader can tell at a
+        # glance whether this finding will auto-inject.
+        anchor_parts = []
+        if anchor_file:
+            anchor_parts.append(f"file={anchor_file}")
+        if anchor_symbol:
+            anchor_parts.append(f"symbol={anchor_symbol}")
+        if anchor_tool:
+            anchor_parts.append(f"tool={anchor_tool}")
+        if anchor_error:
+            anchor_parts.append(f"error={anchor_error[:30]}")
+        anchor_tag = f" [anchor: {', '.join(anchor_parts)}]" if anchor_parts else ""
+
         self._log_tool_usage(
-            f"Recorded finding #{finding_id}: {title[:60]} "
-            f"(confidence={confidence})"
+            f"Recorded {finding_type} #{finding_id}: {title[:60]} "
+            f"(confidence={confidence}){anchor_tag}"
         )
         return self._success({
             "status": "Finding recorded successfully",
@@ -123,5 +161,5 @@ class RecordFindingTool(InfinibayBaseTool):
             "finding_type": finding_type,
             "confidence": confidence,
             "finding_status": "provisional",
+            "anchored": bool(anchor_parts),
         })
-

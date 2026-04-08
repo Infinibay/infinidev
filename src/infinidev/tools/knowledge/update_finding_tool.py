@@ -4,23 +4,23 @@ import json
 import sqlite3
 from typing import Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
-
-FINDING_TYPES = ("observation", "hypothesis", "experiment", "proof", "conclusion", "project_context")
+from infinidev.tools.knowledge.finding_types import FINDING_TYPES
 from infinidev.tools.knowledge.update_finding_input import UpdateFindingInput
-
-
-FINDING_TYPES = ("observation", "hypothesis", "experiment", "proof", "conclusion", "project_context")
 
 
 class UpdateFindingTool(InfinibayBaseTool):
     name: str = "update_finding"
     description: str = (
-        "Update an existing finding's content, confidence, type, tags, or sources. "
-        "Only the fields you provide will be changed."
+        "Update an existing finding's content, confidence, type, tags, "
+        "sources, or anchor fields. Only the fields you provide will be "
+        "changed. Useful for promoting an observation into a lesson by "
+        "adding an anchor_file, or for moving an anchor when a symbol "
+        "has been renamed. Pass empty string '' for an anchor_* field "
+        "to clear it; None (the default) leaves it unchanged."
     )
     args_schema: Type[BaseModel] = UpdateFindingInput
 
@@ -33,6 +33,10 @@ class UpdateFindingTool(InfinibayBaseTool):
         finding_type: str | None = None,
         tags: list[str] | None = None,
         sources: list[str] | None = None,
+        anchor_file: str | None = None,
+        anchor_symbol: str | None = None,
+        anchor_tool: str | None = None,
+        anchor_error: str | None = None,
     ) -> str:
         if finding_type is not None and finding_type not in FINDING_TYPES:
             return self._error(
@@ -61,6 +65,22 @@ class UpdateFindingTool(InfinibayBaseTool):
         if sources is not None:
             updates.append("sources_json = ?")
             params.append(json.dumps(sources))
+
+        # Anchor updates. None = unchanged (not in SET clause at all).
+        # Empty string = clear (SET anchor_X = NULL).
+        def _anchor_update(col: str, value: str | None) -> None:
+            if value is None:
+                return
+            if value == "":
+                updates.append(f"{col} = NULL")
+            else:
+                updates.append(f"{col} = ?")
+                params.append(value)
+
+        _anchor_update("anchor_file", anchor_file)
+        _anchor_update("anchor_symbol", anchor_symbol)
+        _anchor_update("anchor_tool", anchor_tool)
+        _anchor_update("anchor_error", anchor_error)
 
         if not updates:
             return self._error("No fields to update. Provide at least one field.")
@@ -113,4 +133,3 @@ class UpdateFindingTool(InfinibayBaseTool):
             "updated_fields": [u.split(" =")[0] for u in updates if u != "updated_at = CURRENT_TIMESTAMP"],
             "status": result["status"],
         })
-

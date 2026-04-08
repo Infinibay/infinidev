@@ -131,6 +131,40 @@ After exploring code or completing work, **always** record what you learned:
 - **Bug findings**: root causes, tricky behaviors, gotchas (type: `observation`)
 - **Research results**: documentation lookups, API details, solutions found online (type: `conclusion`)
 
+### Anchored memory — `lesson`, `rule`, `landmine`
+For knowledge that ONLY matters when the agent is touching a specific
+file, symbol, tool, or error pattern, use one of the anchored types:
+
+- **lesson**: a fact worth remembering next time you touch this anchor
+  (e.g. "the build_context function warms Pydantic schemas, don't
+  remove the warm-up").
+- **rule**: a user preference or policy that applies here (e.g. "in
+  this file, blocking UI calls MUST render their own waiting
+  indicator").
+- **landmine**: something that burned you before, a warning (e.g.
+  "never put the log file inside the watched workspace — it loops").
+
+Anchored findings are NOT loaded into the system prompt. Instead,
+they are AUTOMATICALLY appended to the next tool result when the
+agent touches the matching anchor — the lesson appears inline, next
+to the data that provoked it. Zero cost when no match fires.
+
+**You MUST provide at least one anchor_* parameter for these three
+types or the memory will never fire.** The tool rejects the call
+otherwise. Anchors:
+
+- `anchor_file="path/to/file.py"` — matches read_file, edit_symbol, etc.
+- `anchor_symbol="ClassName.method"` — matches get_symbol_code, edit_symbol
+- `anchor_tool="pytest"` — matches when execute_command starts with that token
+- `anchor_error="database is locked"` — matches when a tool result contains it
+
+Multiple anchors are allowed on one finding (OR semantics). If you
+see a `[📌 Known lessons relevant to this action:]` block appended
+to a tool result, it's an anchored memory firing — treat it as
+priority context for your next decision.
+
+Call `help record_finding` for full examples and guidance.
+
 ### When to Search (use `search_findings`)
 - **Before exploring code** — check if you already know about it
 - **Before researching online** — check if you already found the answer
@@ -390,6 +424,16 @@ ALWAYS read a file BEFORE editing it — you need exact line numbers.
 5. Do NOT add code that wasn't asked for.
 6. Do NOT make product or design decisions — ask the user.
 7. Do NOT use `sudo` or interactive commands.
+
+## Anchored memory (important)
+When a tool result includes a `[📌 Known lessons relevant to this action:]`
+block, those are past lessons auto-attached to this file/symbol/tool.
+Read them — they are higher-priority context than anything else in
+the tool result. Apply them in your next decision.
+
+To save a new lesson, use `record_finding(finding_type="lesson", ...)`
+with `anchor_file=` or `anchor_symbol=` pointing at what you just
+learned about. Without an anchor the memory is lost.
 """
 
 LOOP_PROTOCOL_SMALL = """\
