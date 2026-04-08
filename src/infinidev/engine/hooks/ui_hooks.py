@@ -116,12 +116,16 @@ def _on_pre_step(ctx: HookContext) -> None:
     plan = meta.get("plan", state.plan)
     iteration = meta.get("iteration", 0)
 
-    # Determine active step description (mirrors original logic)
+    # Determine active step description (mirrors original logic).
+    # The "Planning..." pseudo-step is suppressed entirely — see
+    # ``engine_logging.log_step_start`` for the rationale. We skip
+    # the event_bus.emit() rather than emit an empty title so the
+    # TUI's chat panel never receives a "Step X: Planning..." line.
     active = plan.active_step if plan else None
     if active:
         active_desc = active.title
     elif not plan or not plan.steps:
-        active_desc = "Planning..."
+        return  # First iteration before any real step exists — no UI noise
     else:
         done_steps = [s for s in plan.steps if s.status == "done"]
         active_desc = f"Continuing ({done_steps[-1].title})" if done_steps else "Working..."

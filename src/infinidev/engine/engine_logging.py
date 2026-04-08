@@ -239,8 +239,15 @@ def log_start(agent_id: str, agent_name: str, role: str, desc: str, tool_count: 
 
 
 def log_step_start(iteration: int, step_desc: str | None) -> None:
-    label = step_desc or "Planning..."
-    log(f"\n{BOLD}{BLUE}󰄵 Step {iteration}{RESET} {label}")
+    # Suppress the "Planning..." pseudo-step from the chat. It fires
+    # on the very first iteration of every task before the model has
+    # produced a real plan, adds no information (the user can see
+    # the assistant is working from the streaming indicator), and
+    # creates visual noise on simple tasks. Real steps with a title
+    # still print normally.
+    if not step_desc or step_desc == "Planning...":
+        return
+    log(f"\n{BOLD}{BLUE}󰄵 Step {iteration}{RESET} {step_desc}")
 
 
 def log_tool(agent_name: str, iteration: int, tool_name: str, call_num: int, total: int) -> None:
