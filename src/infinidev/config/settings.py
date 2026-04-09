@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "http://localhost:11434"
     LLM_API_KEY: str = "ollama"
     LLM_TIMEOUT: int = 1800  # Request timeout in seconds (default 30 min for large local models)
+    LLM_NUM_RETRIES: int = 3  # Retry transient provider errors (OpenRouter mid-stream drops, 5xx, timeouts)
     OLLAMA_NUM_CTX: int = 16384  # Context window for Ollama models (0 = use model default)
 
     # Thinking / Reasoning

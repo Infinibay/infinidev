@@ -156,6 +156,13 @@ def get_litellm_params() -> dict[str, Any]:
     if settings.LLM_TIMEOUT:
         params["timeout"] = float(settings.LLM_TIMEOUT)
 
+    # Retry transient provider errors (e.g. OpenRouter mid-stream
+    # "Network connection lost"). LiteLLM retries APIError / Timeout /
+    # RateLimitError / ServiceUnavailableError automatically.
+    if settings.LLM_NUM_RETRIES > 0:
+        params["num_retries"] = settings.LLM_NUM_RETRIES
+        params["retry_strategy"] = "exponential_backoff_retry"
+
     # Pass num_ctx for Ollama to control KV cache allocation.
     # Models like gemma4 default to 262k context which hangs on consumer GPUs.
     if settings.LLM_PROVIDER == "ollama" and settings.OLLAMA_NUM_CTX > 0:

@@ -197,18 +197,39 @@ class LoopEngine(AgentEngine):
             f"— overriding step_complete, forcing one more LLM call",
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         )
-        for m in drained:
+        rejection_body = (
+            "step_complete REJECTED — the user just spoke while "
+            "you were finishing your last action. You MUST "
+            "acknowledge them BEFORE completing this step. Call "
+            "`send_message` with a brief (1-2 sentence) reply "
+            "that addresses what they said, then call "
+            "step_complete again. The user's message(s) were:\n\n"
+            + "\n\n---\n\n".join(drained)
+        )
+
+        # Anthropic requires exactly one tool_result per tool_use_id.
+        # Locate the tool_result we already appended for this
+        # step_complete id (the "{\"status\": \"acknowledged\"}" stub
+        # from _execute_regular_tools / _build_pseudo_only_messages) and
+        # overwrite its content in place. Appending a second tool
+        # message with the same id is valid on OpenAI but rejected by
+        # the Anthropic API (each tool_use must have a single result).
+        replaced = False
+        for msg in reversed(messages):
+            if (
+                msg.get("role") == "tool"
+                and msg.get("tool_call_id") == step_complete_id
+            ):
+                msg["content"] = rejection_body
+                replaced = True
+                break
+        if not replaced:
+            # No prior tool_result to override (shouldn't normally
+            # happen, but keep the loop well-formed if it does).
             messages.append({
                 "role": "tool",
                 "tool_call_id": step_complete_id,
-                "content": (
-                    "step_complete REJECTED — the user just spoke while "
-                    "you were finishing your last action. You MUST "
-                    "acknowledge them BEFORE completing this step. Call "
-                    "`send_message` with a brief (1-2 sentence) reply "
-                    "that addresses what they said, then call "
-                    f"step_complete again. The user's message was:\n\n{m}"
-                ),
+                "content": rejection_body,
             })
         return True
 
