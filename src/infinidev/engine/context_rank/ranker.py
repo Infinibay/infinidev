@@ -272,115 +272,151 @@ def _compute_predictive_scores(
 
 # ── Channel 3: Mention detection ────────────────────────────────────
 
-def _extract_identifiers(text: str) -> list[str]:
-    """Extract potential code identifiers from natural language text.
+# Common English words that happen to be valid short symbol names.
+# We exclude these from the "reverse" mention matching because they'd
+# false-positive against almost any natural-language input.
+_COMMON_WORDS: frozenset[str] = frozenset({
+    "type", "file", "test", "tests", "error", "value", "data", "name",
+    "time", "date", "size", "text", "info", "item", "list", "page",
+    "user", "role", "form", "code", "path", "line", "mode", "next",
+    "prev", "root", "done", "open", "save", "load", "send", "read",
+    "init", "self", "this", "that", "from", "into", "main", "core",
+    "util", "args", "kwargs", "true", "false", "none", "null", "undefined",
+    "call", "exit", "work", "task", "node", "edge", "tree", "log",
+    "new", "get", "set", "put", "del", "run", "map", "key", "val",
+})
 
-    Returns identifiers in priority order:
-    1. Backtick-quoted (`fromPlugin`)
-    2. Slash-paths (src/agent/, tool/registry.ts) — split into segments
-    3. CamelCase (ToolRegistry, AgentLoop)
-    4. dot.notation (Agent.handleEvent)
-    5. snake_case (tool_registry)
-    """
-    found: list[str] = []
-    # 1. Backtick-quoted identifiers
-    found.extend(re.findall(r'`([^`]+)`', text))
-    # 2. Slash-paths — extract the interesting segments (filename or last dir)
-    _EXT = (
-        # Web / JS ecosystem
-        r"ts|tsx|js|jsx|mjs|cjs|vue|svelte|astro|"
-        # Python
-        r"py|pyi|pyx|"
-        # Systems
-        r"rs|go|c|h|cpp|cc|cxx|hpp|hxx|"
-        # JVM
-        r"java|kt|kts|scala|groovy|clj|cljs|"
-        # Ruby / Elixir / Erlang
-        r"rb|erb|ex|exs|erl|"
-        # .NET
-        r"cs|fs|fsx|vb|"
-        # Scripts / shell
-        r"sh|bash|zsh|fish|ps1|"
-        # Data / config / markup
-        r"json|yaml|yml|toml|ini|cfg|xml|html|htm|css|scss|sass|less|md|mdx|rst|"
-        # Swift / ObjC
-        r"swift|m|mm|"
-        # Other
-        r"php|lua|r|dart|zig|nim|hs|ml|elm|sql"
-    )
-    for path_match in re.finditer(rf'\b([a-z_][\w./-]*\.(?:{_EXT}))\b', text):
-        # Full path
-        found.append(path_match.group(1))
-    # Also extract meaningful directory names from paths like "src/agent/"
-    for dir_match in re.finditer(r'(?:^|[\s/])([a-z_][\w-]{3,})(?=/)', text):
-        found.append(dir_match.group(1))
-    # 3. CamelCase: ToolRegistry, AgentLoop (at least 2 humps)
-    found.extend(re.findall(r'\b([A-Z][a-z]+(?:[A-Z][a-z0-9]+)+)\b', text))
-    # 3b. Single-word capitalized tech terms: Agent, Session, Provider (4+ chars)
-    found.extend(re.findall(r'\b([A-Z][a-z]{3,})\b', text))
-    # 4. dot.notation: Agent.handleEvent, tool.registry
-    found.extend(re.findall(r'\b(\w+\.\w+(?:\.\w+)*)\b', text))
-    # 4b. camelCase (starts lowercase, has 1+ humps): fromPlugin, handleEvent
-    found.extend(re.findall(r'\b([a-z][a-z0-9]+[A-Z][a-zA-Z0-9]+)\b', text))
-    # 5. snake_case: at least 2 parts
-    found.extend(re.findall(r'\b([a-z]+_[a-z]+(?:_[a-z]+)*)\b', text))
 
-    # Deduplicate preserving order, filter short, skip common English words
-    _STOP = {"the", "this", "that", "with", "from", "read", "show", "work",
-             "find", "what", "how", "does", "explain", "main", "file", "test",
-             "tests", "code", "used", "make", "write", "edit", "name", "line",
-             "function", "class", "method", "type", "interface", "return",
-             "list", "each", "directory", "structure", "system", "part",
-             # Imperative verbs often capitalized at sentence start
-             "check", "look", "give", "tell", "call", "open", "save",
-             # Monorepo / packaging boilerplate — too generic to be useful
-             "packages", "package", "node_modules", "dist", "build", "lib",
-             "source", "target", "project", "module", "modules"}
-    seen: set[str] = set()
-    result: list[str] = []
-    for ident in found:
-        ident_lc = ident.lower()
-        if ident_lc in _STOP:
-            continue
-        if ident not in seen and len(ident) >= _MIN_IDENT_LEN:
-            seen.add(ident)
-            result.append(ident)
-    return result[:15]
+# Words that often mean the English concept, not a file/module name.
+# Only used to filter STEM matches — if the user writes "system.ts"
+# literally, that exact form still matches (it's not a stem-only match).
+_STEM_SKIP: frozenset[str] = frozenset({
+    "system", "systems", "module", "modules", "common", "shared",
+    "base", "helper", "helpers", "manager", "handler", "service",
+    "client", "server", "config", "setup", "index", "const", "style",
+    "styles", "route", "routes", "view", "views", "model", "models",
+    "store", "stores", "util", "utils", "info", "item", "items",
+})
 
 
 def _compute_mention_scores(
     current_input: str, project_id: int,
 ) -> dict[str, tuple[float, str, str]]:
-    """Boost files/symbols explicitly mentioned in the input."""
-    identifiers = _extract_identifiers(current_input)
-    if not identifiers:
+    """Find known symbols from the project that appear in the input.
+
+    Inverse lookup: instead of trying to extract identifiers from the
+    input with regex, we ask the DB "which of the symbols you know
+    about appear literally in this text?".  One SQL query with
+    ``instr()`` does all the work — no regex, no stop-word lists per
+    language, no tokenization bugs.
+    """
+    if not current_input or len(current_input) < 4:
         return {}
 
+    input_lower = current_input.lower()
+    # Pad with spaces so word-boundary heuristics work at start/end
+    padded = " " + input_lower + " "
+
     try:
-        from infinidev.code_intel.query import search_symbols
-    except ImportError:
+        def _fetch(conn):
+            # Find symbols whose name or qualified_name appears in the input.
+            # Constraints:
+            #   - Only function/method/class/interface/enum (distinctive)
+            #   - LENGTH(name) >= 4 to avoid matching short common words
+            #   - instr() returns position (0 if not found)
+            return conn.execute(
+                "SELECT DISTINCT name, qualified_name, file_path, kind, "
+                "LENGTH(name) as name_len "
+                "FROM ci_symbols "
+                "WHERE project_id = ? "
+                "  AND kind IN ('function', 'method', 'class', 'interface', 'enum', 'type_alias') "
+                "  AND LENGTH(name) >= 4 "
+                "  AND (instr(?, LOWER(name)) > 0 "
+                "       OR (qualified_name != '' AND instr(?, LOWER(qualified_name)) > 0)) "
+                "LIMIT 100",
+                (project_id, padded, padded),
+            ).fetchall()
+        rows = execute_with_retry(_fetch)
+    except Exception:
+        logger.debug("Mention detection query failed", exc_info=True)
         return {}
 
     result: dict[str, tuple[float, str, str]] = {}
-    for ident in identifiers:
-        # Split dot notation for sub-searches
-        parts = ident.split(".")
-        for part in parts:
-            if len(part) < _MIN_IDENT_LEN:
-                continue
-            try:
-                symbols = search_symbols(project_id, part, limit=5)
-            except Exception:
-                continue
-            for sym in symbols:
-                # Boost the file
-                key_file = _normalize_path(sym.file_path)
-                if key_file and (key_file not in result or result[key_file][0] < 5.0):
-                    result[key_file] = (5.0, "file", f"contains '{ident}' mentioned in input")
-                # Boost the symbol
-                key_sym = sym.qualified_name or sym.name
-                if key_sym and (key_sym not in result or result[key_sym][0] < 5.0):
-                    result[key_sym] = (5.0, "symbol", f"'{ident}' mentioned in input")
+    for row in rows:
+        name = row["name"]
+        name_lc = name.lower()
+        # Skip common English words that happen to be valid symbol names
+        if name_lc in _COMMON_WORDS:
+            continue
+        # Score scales with name length — longer names are more distinctive
+        score = min(5.0, 3.0 + (row["name_len"] / 20.0))
+
+        fp = _normalize_path(row["file_path"])
+        if fp:
+            existing = result.get(fp, (0.0, "", ""))
+            if score > existing[0]:
+                result[fp] = (score, "file", f"contains '{name}' mentioned in input")
+
+        sym_key = row["qualified_name"] or name
+        if sym_key:
+            existing = result.get(sym_key, (0.0, "", ""))
+            if score > existing[0]:
+                result[sym_key] = (score, "symbol", f"'{name}' mentioned in input")
+
+    # Also check file basenames against the input
+    try:
+        def _fetch_files(conn):
+            return conn.execute(
+                "SELECT DISTINCT file_path FROM ci_files "
+                "WHERE project_id = ? "
+                "LIMIT 2000",
+                (project_id,),
+            ).fetchall()
+        file_rows = execute_with_retry(_fetch_files)
+    except Exception:
+        file_rows = []
+
+    for row in file_rows:
+        fp = row["file_path"]
+        if not fp:
+            continue
+        basename = os.path.basename(fp)
+        stem = basename.rsplit(".", 1)[0] if "." in basename else basename
+        stem_lc = stem.lower()
+        if len(stem) < 4 or stem_lc in _COMMON_WORDS:
+            continue
+
+        # Basename match: "registry.ts" literally in input. This is a
+        # strong signal — user clearly knows the filename.
+        basename_match = "." in basename and basename.lower() in padded
+        # Stem match: word boundaries on both sides. For generic stems
+        # (server, system, ...) we get many matches but other channels
+        # (historical, co-occurrence) rank the truly relevant ones higher.
+        stem_match = (
+            f" {stem_lc} " in padded or
+            f" {stem_lc}." in padded or
+            f" {stem_lc}?" in padded or
+            f" {stem_lc}," in padded or
+            f" {stem_lc}/" in padded
+        )
+
+        if basename_match or stem_match:
+            fp_n = _normalize_path(fp)
+            # Basename matches score higher (more specific)
+            base_score = 4.0 if basename_match else 3.2
+            # Generic stems get a lower score to avoid flooding results
+            if not basename_match and stem_lc in _STEM_SKIP:
+                base_score = 2.5
+            score = min(5.0, base_score + (len(stem) / 25.0))
+            existing = result.get(fp_n, (0.0, "", ""))
+            if score > existing[0]:
+                reason = (
+                    f"filename '{basename}' mentioned in input"
+                    if basename_match else
+                    f"file stem '{stem}' mentioned in input"
+                )
+                result[fp_n] = (score, "file", reason)
+
     return result
 
 
@@ -391,21 +427,32 @@ def _compute_finding_scores(
     current_input: str,
     project_id: int,
 ) -> dict[str, tuple[float, str, str]]:
-    """Score findings by direct semantic similarity to the query."""
+    """Score findings by two independent signals:
+
+    1. **Semantic** — cosine similarity of query embedding vs finding
+       embedding.  Catches synonyms and paraphrases.
+    2. **Literal** — topic words or tags mentioned in the input.
+       Stronger signal for exact matches.
+
+    The max of the two signals is kept per finding.
+    """
+    import json
     from infinidev.tools.base.embeddings import compute_embedding, embedding_from_blob
     from infinidev.tools.base.dedup import _cosine_similarity
 
     query_emb = cached_embedding or compute_embedding(current_input)
-    if query_emb is None:
-        return {}
-    query_vec = np.frombuffer(query_emb, dtype=np.float32)
+    query_vec = np.frombuffer(query_emb, dtype=np.float32) if query_emb else None
+
+    input_lower = current_input.lower()
+    padded = " " + input_lower + " "
 
     try:
         def _fetch(conn):
             return conn.execute(
-                "SELECT topic, content, embedding FROM findings "
-                "WHERE project_id = ? AND embedding IS NOT NULL AND status = 'active' "
-                "LIMIT 200",
+                "SELECT topic, content, embedding, tags_json "
+                "FROM findings "
+                "WHERE project_id = ? AND status = 'active' "
+                "LIMIT 500",
                 (project_id,),
             ).fetchall()
         rows = execute_with_retry(_fetch)
@@ -414,17 +461,45 @@ def _compute_finding_scores(
 
     result: dict[str, tuple[float, str, str]] = {}
     for row in rows:
+        topic = row["topic"] or ""
+        if not topic:
+            continue
+
+        scores: list[tuple[float, str]] = []
+
+        # ── Signal 1: semantic similarity ────────────────────────
+        if query_vec is not None and row["embedding"]:
+            try:
+                f_vec = embedding_from_blob(row["embedding"])
+                sim = float(_cosine_similarity(query_vec, f_vec))
+                if sim >= 0.5:
+                    scores.append((sim * 3.0, f"semantic match (sim={sim:.2f})"))
+            except Exception:
+                pass
+
+        # ── Signal 2: topic word matching ────────────────────────
+        topic_words = [w for w in re.split(r'\W+', topic.lower()) if len(w) >= 4 and w not in _COMMON_WORDS]
+        if topic_words:
+            matched = sum(1 for w in topic_words if f" {w} " in padded or f" {w}" in padded)
+            if matched >= max(2, len(topic_words) // 2):
+                ratio = matched / len(topic_words)
+                scores.append((3.0 + ratio * 1.5, f"{matched}/{len(topic_words)} topic words match"))
+
+        # ── Signal 3: tag matching ───────────────────────────────
         try:
-            f_vec = embedding_from_blob(row["embedding"])
-            sim = float(_cosine_similarity(query_vec, f_vec))
+            tags = json.loads(row["tags_json"] or "[]")
+            tag_hits = [t for t in tags if isinstance(t, str) and len(t) >= 4 and f" {t.lower()} " in padded]
+            if tag_hits:
+                scores.append((4.0 + len(tag_hits) * 0.5, f"tags match: {', '.join(tag_hits[:3])}"))
         except Exception:
-            continue
-        if sim < 0.5:
-            continue
-        topic = row["topic"]
-        score = sim * 3.0
-        preview = (row["content"] or "")[:80]
-        result[topic] = (score, "finding", f"semantic match (sim={sim:.2f}): {preview}")
+            pass
+
+        # Keep the max signal
+        if scores:
+            best_score, best_reason = max(scores, key=lambda x: x[0])
+            preview = (row["content"] or "")[:60]
+            result[topic] = (best_score, "finding", f"{best_reason}: {preview}")
+
     return result
 
 

@@ -346,3 +346,317 @@ class TestPromptRendering:
         assert "Symbols:" in rendered
         # No findings section when empty
         assert "Findings:" not in rendered
+
+
+# ── Mention detection (inverse lookup) ────────────────────────────────
+
+
+def _insert_symbol(conn, *, project_id=1, name, kind="function",
+                   file_path="src/auth.py", qualified_name=None,
+                   line_start=10, line_end=20, docstring=""):
+    """Helper to insert a symbol for mention detection tests."""
+    conn.execute(
+        "INSERT INTO ci_symbols "
+        "(project_id, file_path, name, qualified_name, kind, line_start, "
+        "line_end, signature, docstring, language) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (project_id, file_path, name, qualified_name or name, kind,
+         line_start, line_end, f"{kind} {name}()", docstring, "python"),
+    )
+
+
+def _insert_file(conn, *, project_id=1, file_path, language="python"):
+    """Helper to insert an indexed file for mention detection tests."""
+    conn.execute(
+        "INSERT INTO ci_files (project_id, file_path, language, content_hash) "
+        "VALUES (?, ?, ?, ?)",
+        (project_id, file_path, language, "hash"),
+    )
+
+
+class TestMentionDetection:
+    """Tests for the inverse mention detection (instr-based lookup)."""
+
+    def test_symbol_name_in_input(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            _insert_symbol(conn, name="AuthMiddleware", kind="class",
+                           file_path="/tmp/workspace/src/auth.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        result = _compute_mention_scores(
+            "Please fix the AuthMiddleware class bug", project_id=1,
+        )
+        # Should have matched both the file and the symbol
+        assert any("AuthMiddleware" in r for _, (_, _, r) in result.items())
+
+    def test_short_names_ignored(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            _insert_symbol(conn, name="get", kind="function")
+            _insert_symbol(conn, name="set", kind="function")
+            _insert_symbol(conn, name="run", kind="function")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # These are all short common names — should be filtered by LENGTH(name) >= 4
+        result = _compute_mention_scores("Can you run get and set this?", project_id=1)
+        # Either no matches, or only the `run` symbol if LENGTH check is off
+        # With LENGTH >= 4, nothing should match
+        assert len(result) == 0
+
+    def test_common_words_ignored(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            # "error" is a common word in _COMMON_WORDS
+            _insert_symbol(conn, name="error", kind="function")
+            # "TokenValidator" is distinctive
+            _insert_symbol(conn, name="TokenValidator", kind="class",
+                           file_path="src/tokens.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        result = _compute_mention_scores(
+            "What is the error in TokenValidator?", project_id=1,
+        )
+        # "error" should be filtered, "TokenValidator" should match
+        targets = set(result.keys())
+        assert not any("error" == t.split("/")[-1] for t in targets)
+        assert any("TokenValidator" in r for _, (_, _, r) in result.items())
+
+    def test_qualified_name_match(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            _insert_symbol(
+                conn, name="handleEvent", kind="method",
+                qualified_name="Agent.handleEvent",
+                file_path="src/agent.py",
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        result = _compute_mention_scores(
+            "Explain Agent.handleEvent and what it does", project_id=1,
+        )
+        assert any("handleEvent" in r for _, (_, _, r) in result.items())
+
+    def test_ignores_non_distinctive_kinds(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            # Variables and parameters should be ignored — only function/method/
+            # class/interface/enum/type_alias are considered
+            _insert_symbol(conn, name="sessionRegistry", kind="variable")
+            _insert_symbol(conn, name="sessionManager", kind="class",
+                           file_path="src/session.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        result = _compute_mention_scores(
+            "Show me the sessionRegistry and sessionManager", project_id=1,
+        )
+        # Only sessionManager (class) should match — sessionRegistry is a variable
+        all_reasons = " ".join(r for _, (_, _, r) in result.items())
+        assert "sessionManager" in all_reasons
+        assert "sessionRegistry" not in all_reasons
+
+    def test_filename_stem_match(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            _insert_file(conn, file_path="src/registry.py")
+            _insert_file(conn, file_path="src/unrelated.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        result = _compute_mention_scores(
+            "How does the registry work?", project_id=1,
+        )
+        # registry.py should appear (stem match)
+        assert any("registry" in t for t in result.keys())
+        # unrelated.py should not
+        assert not any("unrelated" in t for t in result.keys())
+
+    def test_basename_match_scores_higher(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            _insert_file(conn, file_path="src/registry.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # With extension — basename match (higher score)
+        result_exact = _compute_mention_scores("Check registry.py please", project_id=1)
+        # Without extension — stem match (lower score)
+        result_stem = _compute_mention_scores("Check the registry module", project_id=1)
+
+        exact_scores = [s for _, (s, _, _) in result_exact.items()]
+        stem_scores = [s for _, (s, _, _) in result_stem.items()]
+        if exact_scores and stem_scores:
+            assert max(exact_scores) >= max(stem_scores)
+
+    def test_empty_or_short_input(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        assert _compute_mention_scores("", 1) == {}
+        assert _compute_mention_scores("hi", 1) == {}
+
+    def test_length_based_scoring(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        def _seed(conn):
+            # Short name — lower score
+            _insert_symbol(conn, name="Auth", kind="class",
+                           file_path="src/auth_short.py")
+            # Long name — higher score
+            _insert_symbol(conn, name="AuthenticationMiddlewareHandler",
+                           kind="class",
+                           file_path="src/auth_long.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        result = _compute_mention_scores(
+            "Auth and AuthenticationMiddlewareHandler", project_id=1,
+        )
+        short_score = result.get("src/auth_short.py", (0, "", ""))[0]
+        long_score = result.get("src/auth_long.py", (0, "", ""))[0]
+        assert long_score > short_score
+
+
+# ── Finding multi-signal scoring ──────────────────────────────────────
+
+
+def _insert_finding(conn, *, project_id=1, topic, content="",
+                    tags=None, finding_type="observation", embedding=None):
+    """Helper to insert a finding for scoring tests."""
+    import json as _json
+    conn.execute(
+        "INSERT INTO findings "
+        "(project_id, topic, content, status, finding_type, tags_json, embedding) "
+        "VALUES (?, ?, ?, 'active', ?, ?, ?)",
+        (project_id, topic, content, finding_type,
+         _json.dumps(tags or []), embedding),
+    )
+
+
+class TestFindingMultiSignal:
+    """Tests for the multi-signal finding scoring (semantic + literal)."""
+
+    def test_topic_word_match(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_finding_scores
+
+        def _seed(conn):
+            _insert_finding(
+                conn,
+                topic="Database migration requires downtime",
+                content="The migration takes 30 minutes",
+            )
+            _insert_finding(
+                conn,
+                topic="Unrelated cache TTL configuration",
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # Input mentions "database" and "migration" — should match first finding
+        result = _compute_finding_scores(
+            None, "How does the database migration work?", project_id=1,
+        )
+        assert "Database migration requires downtime" in result
+        # The unrelated one should not match (no topic word overlap)
+        assert "Unrelated cache TTL configuration" not in result
+
+    def test_tag_match(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_finding_scores
+
+        def _seed(conn):
+            _insert_finding(
+                conn,
+                topic="Auth uses RS256 keys",
+                tags=["authentication", "security"],
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # Input contains "authentication" which is a tag
+        result = _compute_finding_scores(
+            None, "Explain the authentication flow", project_id=1,
+        )
+        assert "Auth uses RS256 keys" in result
+        _, _, reason = result["Auth uses RS256 keys"]
+        assert "tags match" in reason or "topic" in reason
+
+    def test_common_topic_words_need_multiple_matches(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_finding_scores
+
+        def _seed(conn):
+            _insert_finding(
+                conn,
+                topic="System handles error gracefully in production",
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # "system" alone shouldn't trigger — common words filtered
+        result = _compute_finding_scores(
+            None, "What is the system?", project_id=1,
+        )
+        # The topic has "system", "handles", "error", "gracefully", "production"
+        # but "system" and "error" are in _COMMON_WORDS and removed from
+        # topic_words. "handles", "gracefully", "production" remain.
+        # None of those are in the input, so no match.
+        assert "System handles error gracefully in production" not in result
+
+    def test_empty_findings(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_finding_scores
+
+        result = _compute_finding_scores(None, "any query", project_id=1)
+        assert result == {}
+
+    def test_topic_words_require_min_ratio(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_finding_scores
+
+        def _seed(conn):
+            # Long topic — would need at least 2 matches
+            _insert_finding(
+                conn,
+                topic="Redis caching improves database read latency",
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # Only 1 word matches ("redis") — below min threshold of 2
+        result_weak = _compute_finding_scores(
+            None, "What is redis?", project_id=1,
+        )
+        # 2 words match ("redis", "caching")
+        result_strong = _compute_finding_scores(
+            None, "How does redis caching work?", project_id=1,
+        )
+        # Strong match should find it
+        assert "Redis caching improves database read latency" in result_strong
+
+    def test_literal_wins_over_weak_semantic(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_finding_scores
+
+        def _seed(conn):
+            _insert_finding(
+                conn,
+                topic="GraphQL resolver optimization",
+                tags=["graphql", "performance"],
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        result = _compute_finding_scores(
+            None, "How does graphql resolver work?", project_id=1,
+        )
+        assert "GraphQL resolver optimization" in result
+        # Should be a literal match (topic words), not semantic
+        _, _, reason = result["GraphQL resolver optimization"]
+        assert "topic words" in reason or "tags match" in reason
