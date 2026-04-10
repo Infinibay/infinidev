@@ -660,3 +660,145 @@ class TestFindingMultiSignal:
         # Should be a literal match (topic words), not semantic
         _, _, reason = result["GraphQL resolver optimization"]
         assert "topic words" in reason or "tags match" in reason
+
+
+# ── Outlier filtering ─────────────────────────────────────────────────
+
+
+class TestOutlierFiltering:
+    """Tests for the outlier detection that reduces <context-rank> noise."""
+
+    def test_clear_outlier_shown_alone(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # One strong outlier (17.4) vs rest in 3.0-3.5 range
+        items = [
+            RankedItem(target="lsp/server.ts", target_type="file", score=17.4, reason="historical"),
+            RankedItem(target="worker.ts", target_type="file", score=3.5, reason="noise"),
+            RankedItem(target="theme.tsx", target_type="file", score=3.2, reason="noise"),
+            RankedItem(target="utils.ts", target_type="file", score=3.0, reason="noise"),
+            RankedItem(target="config.ts", target_type="file", score=2.8, reason="noise"),
+        ]
+        result = _filter_outliers(items)
+        # Only the clear winner should remain
+        assert len(result) == 1
+        assert result[0].target == "lsp/server.ts"
+
+    def test_no_outlier_all_kept(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # All items in similar range — no outlier, keep all
+        items = [
+            RankedItem(target="a.ts", target_type="file", score=3.8, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=3.6, reason=""),
+            RankedItem(target="c.ts", target_type="file", score=3.5, reason=""),
+            RankedItem(target="d.ts", target_type="file", score=3.4, reason=""),
+            RankedItem(target="e.ts", target_type="file", score=3.2, reason=""),
+        ]
+        result = _filter_outliers(items)
+        assert len(result) == 5
+
+    def test_multiple_outliers_up_to_3(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # Two strong outliers (10, 8) vs rest in 2.0 range
+        items = [
+            RankedItem(target="a.ts", target_type="file", score=10.0, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=8.0, reason=""),
+            RankedItem(target="c.ts", target_type="file", score=2.1, reason=""),
+            RankedItem(target="d.ts", target_type="file", score=2.0, reason=""),
+            RankedItem(target="e.ts", target_type="file", score=1.8, reason=""),
+        ]
+        result = _filter_outliers(items)
+        assert len(result) == 2
+        assert {it.target for it in result} == {"a.ts", "b.ts"}
+
+    def test_too_many_outliers_falls_back(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # 4+ high-scoring items — not a clear outlier cluster, keep all
+        items = [
+            RankedItem(target="a.ts", target_type="file", score=10.0, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=9.0, reason=""),
+            RankedItem(target="c.ts", target_type="file", score=8.5, reason=""),
+            RankedItem(target="d.ts", target_type="file", score=8.0, reason=""),
+            RankedItem(target="e.ts", target_type="file", score=1.0, reason=""),
+        ]
+        result = _filter_outliers(items)
+        # 4 outliers is too many — fall back to showing all
+        assert len(result) == 5
+
+    def test_few_items_unchanged(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # Fewer than 3 items — no filtering
+        items = [
+            RankedItem(target="a.ts", target_type="file", score=10.0, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=1.0, reason=""),
+        ]
+        result = _filter_outliers(items)
+        assert len(result) == 2
+
+    def test_empty_list(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        assert _filter_outliers([]) == []
+
+    def test_works_for_symbols_and_findings(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # Symbols with one clear outlier
+        symbols = [
+            RankedItem(target="Agent.handleEvent", target_type="symbol", score=12.0, reason=""),
+            RankedItem(target="foo", target_type="symbol", score=2.0, reason=""),
+            RankedItem(target="bar", target_type="symbol", score=1.8, reason=""),
+            RankedItem(target="baz", target_type="symbol", score=1.5, reason=""),
+        ]
+        result = _filter_outliers(symbols)
+        assert len(result) == 1
+        assert result[0].target == "Agent.handleEvent"
+
+        # Findings with two clear outliers
+        findings = [
+            RankedItem(target="Auth uses RS256", target_type="finding", score=9.0, reason=""),
+            RankedItem(target="Token refresh pattern", target_type="finding", score=7.5, reason=""),
+            RankedItem(target="CSS layout debt", target_type="finding", score=2.0, reason=""),
+            RankedItem(target="Old migration notes", target_type="finding", score=1.5, reason=""),
+        ]
+        result = _filter_outliers(findings)
+        assert len(result) == 2
+
+    def test_below_min_top_score_no_filtering(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # All scores below _OUTLIER_MIN_TOP_SCORE (1.0) — don't filter
+        items = [
+            RankedItem(target="a.ts", target_type="file", score=0.9, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=0.5, reason=""),
+            RankedItem(target="c.ts", target_type="file", score=0.4, reason=""),
+            RankedItem(target="d.ts", target_type="file", score=0.3, reason=""),
+        ]
+        result = _filter_outliers(items)
+        # Top score < 1.0 disables filtering (confidence too low)
+        assert len(result) == 4
+
+    def test_clear_outlier_above_noise_threshold(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # Top score is above 1.0 and dramatically above noise — should filter
+        items = [
+            RankedItem(target="a.ts", target_type="file", score=5.0, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=1.2, reason=""),
+            RankedItem(target="c.ts", target_type="file", score=1.1, reason=""),
+            RankedItem(target="d.ts", target_type="file", score=1.0, reason=""),
+        ]
+        result = _filter_outliers(items)
+        assert len(result) == 1
+        assert result[0].target == "a.ts"

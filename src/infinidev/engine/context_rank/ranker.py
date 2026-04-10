@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────
 
+# ── Escalera level weights ──
+# Higher = more specific context match contributes more to score.
+# task_input is broadest (applies to whole task), step_description is
+# most specific (scoped to a single plan step).
 _LEVEL_WEIGHTS: dict[str, float] = {
     "task_input": 1.0,
     "step_title": 1.5,
@@ -49,6 +53,48 @@ _MIN_IDENT_LEN = 4
 
 # Index files tried when expanding directory targets
 _INDEX_FILES = ("index.ts", "index.tsx", "index.js", "index.py", "__init__.py", "mod.rs")
+
+# ── Outlier detection constants ──
+# MAD-based outlier detection uses ``median + K * MAD * MAD_SCALE``
+# as the threshold.  Items above that threshold are flagged as
+# outliers and shown alone (if there are few enough of them).
+
+# MAD_SCALE = 1 / Φ⁻¹(0.75) ≈ 1.4826 — converts Median Absolute
+# Deviation to an equivalent standard deviation assuming a normal
+# distribution.  This constant is mathematically derived and should
+# not be changed.
+_MAD_NORMAL_CONSISTENCY = 1.4826
+
+# OUTLIER_MAD_MULTIPLIER: how many "robust standard deviations" above
+# the baseline median a score needs to be to count as an outlier.
+# The classic convention (Iglewicz & Hoaglin 1993) is 3.0 — stricter
+# means fewer but more confident outliers.
+#   * 2.0 → ~95th percentile, more aggressive filtering
+#   * 3.0 → ~99.7th percentile, conservative (default)
+#   * 4.0 → only very extreme cases
+_OUTLIER_MAD_MULTIPLIER = 3.0
+
+# Minimum number of items required to attempt outlier detection.
+# With fewer items, MAD is too noisy to be reliable.
+_OUTLIER_MIN_ITEMS = 3
+
+# Maximum number of outliers to show.  Above this, the "cluster" is
+# too large to be a clean signal, so we fall back to showing all items.
+_OUTLIER_MAX_COUNT = 3
+
+# When MAD is degenerate (bottom half has identical scores), fall back
+# to a simple ratio test: top score must exceed baseline median by at
+# least this factor to be considered an outlier.  Purely empirical.
+_OUTLIER_FALLBACK_RATIO = 1.8
+
+# MAD values below this threshold count as "degenerate" (baseline too
+# tight) and trigger the fallback ratio test.
+_MAD_DEGENERATE_THRESHOLD = 0.05
+
+# Minimum top score required to attempt outlier filtering.  Below this,
+# scores are too close to the confidence floor to make meaningful
+# outlier distinctions.
+_OUTLIER_MIN_TOP_SCORE = 1.0
 
 
 # ── Public API ───────────────────────────────────────────────────────
@@ -130,9 +176,9 @@ def rank(
         return ContextRankResult()
 
     return ContextRankResult(
-        files=_top_k(combined, "file", top_k_files),
-        symbols=_top_k(combined, "symbol", top_k_symbols),
-        findings=_top_k(combined, "finding", top_k_findings),
+        files=_filter_outliers(_top_k(combined, "file", top_k_files)),
+        symbols=_filter_outliers(_top_k(combined, "symbol", top_k_symbols)),
+        findings=_filter_outliers(_top_k(combined, "finding", top_k_findings)),
     )
 
 
@@ -817,3 +863,57 @@ def _top_k(
         RankedItem(target=t, target_type=target_type, score=s, reason=r)
         for t, s, r in filtered[:k]
     ]
+
+
+def _filter_outliers(items: list[RankedItem]) -> list[RankedItem]:
+    """If a few items score dramatically higher than the rest, show only those.
+
+    Uses Median Absolute Deviation (MAD) computed on the **bottom half**
+    of the sorted scores to establish a noise baseline.  Items above
+    ``median_bottom + K × MAD × 1.4826`` are outliers, where ``K`` is
+    :data:`_OUTLIER_MAD_MULTIPLIER`.  Computing MAD on the bottom half
+    (not the full set) prevents outliers from inflating their own
+    reference distribution.
+
+    All tuning thresholds are module-level constants so they can be
+    adjusted without touching the algorithm.  See each constant's
+    docstring for what it controls.
+    """
+    n = len(items)
+    if n < _OUTLIER_MIN_ITEMS:
+        return items
+
+    sorted_items = sorted(items, key=lambda it: it.score, reverse=True)
+    top = sorted_items[0].score
+    if top < _OUTLIER_MIN_TOP_SCORE:
+        return items
+
+    # Bottom half: the lower ⌈n/2⌉ items (the "noise baseline").
+    # Computing MAD on this subset avoids outliers polluting the baseline.
+    bottom_count = max(2, (n + 1) // 2)
+    bottom_scores = [it.score for it in sorted_items[-bottom_count:]]
+
+    def _median(sorted_vals: list[float]) -> float:
+        m = len(sorted_vals)
+        return sorted_vals[m // 2] if m % 2 else (sorted_vals[m // 2 - 1] + sorted_vals[m // 2]) / 2
+
+    b_sorted = sorted(bottom_scores)
+    b_median = _median(b_sorted)
+
+    deviations = sorted(abs(s - b_median) for s in bottom_scores)
+    mad = _median(deviations)
+
+    if mad < _MAD_DEGENERATE_THRESHOLD:
+        # Baseline is too tight (all identical).  Fall back to a simple
+        # ratio test — top must be significantly above the baseline.
+        if top >= b_median * _OUTLIER_FALLBACK_RATIO and b_median > 0:
+            threshold = (top + b_median) / 2  # midpoint
+        else:
+            return items
+    else:
+        threshold = b_median + _OUTLIER_MAD_MULTIPLIER * mad * _MAD_NORMAL_CONSISTENCY
+
+    outliers = [it for it in sorted_items if it.score >= threshold]
+    if 1 <= len(outliers) <= _OUTLIER_MAX_COUNT:
+        return outliers
+    return items
