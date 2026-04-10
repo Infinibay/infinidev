@@ -50,11 +50,15 @@ def rank(
     top_k_files: int | None = None,
     top_k_symbols: int | None = None,
     top_k_findings: int | None = None,
+    cached_embedding: bytes | None = None,
 ) -> ContextRankResult:
     """Compute ranked resources for prompt injection.
 
     Returns a :class:`ContextRankResult` with the top-k files, symbols,
     and findings ordered by combined score.
+
+    Pass *cached_embedding* to skip re-embedding the query (~267ms
+    saved). The hooks layer caches this from the initial task input.
     """
     if top_k_files is None:
         top_k_files = settings.CONTEXT_RANK_TOP_K_FILES
@@ -64,7 +68,7 @@ def rank(
         top_k_findings = settings.CONTEXT_RANK_TOP_K_FINDINGS
 
     reactive = _compute_reactive_scores(session_id, task_id, iteration)
-    predictive = _compute_predictive_scores(current_input, session_id)
+    predictive = _compute_predictive_scores(current_input, session_id, cached_embedding=cached_embedding)
 
     alpha = _compute_alpha(iteration, len(reactive))
 
@@ -144,6 +148,7 @@ def _compute_reactive_scores(
 
 def _compute_predictive_scores(
     current_input: str, exclude_session: str,
+    *, cached_embedding: bytes | None = None,
 ) -> dict[str, tuple[float, str, str]]:
     """Score nodes based on similarity to historical contexts.
 
@@ -151,6 +156,9 @@ def _compute_predictive_scores(
     embeddings across all three escalera levels.  Matching contexts
     propagate their linked interaction scores weighted by cosine
     similarity and level weight.
+
+    Pass *cached_embedding* (raw float32 bytes) to skip the ~267ms
+    embedding computation.
     """
     from infinidev.tools.base.embeddings import compute_embedding, embedding_from_blob
     from infinidev.tools.base.dedup import _cosine_similarity
@@ -158,7 +166,7 @@ def _compute_predictive_scores(
     min_sim = settings.CONTEXT_RANK_MIN_SIMILARITY
     session_decay = settings.CONTEXT_RANK_SESSION_DECAY
 
-    query_emb_bytes = compute_embedding(current_input)
+    query_emb_bytes = cached_embedding or compute_embedding(current_input)
     if query_emb_bytes is None:
         return {}
     query_vec = np.frombuffer(query_emb_bytes, dtype=np.float32)
