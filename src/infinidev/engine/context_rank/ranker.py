@@ -273,22 +273,79 @@ def _compute_predictive_scores(
 # ── Channel 3: Mention detection ────────────────────────────────────
 
 def _extract_identifiers(text: str) -> list[str]:
-    """Extract potential code identifiers from natural language text."""
+    """Extract potential code identifiers from natural language text.
+
+    Returns identifiers in priority order:
+    1. Backtick-quoted (`fromPlugin`)
+    2. Slash-paths (src/agent/, tool/registry.ts) — split into segments
+    3. CamelCase (ToolRegistry, AgentLoop)
+    4. dot.notation (Agent.handleEvent)
+    5. snake_case (tool_registry)
+    """
     found: list[str] = []
-    # Backtick-quoted: `fromPlugin`, `Agent.handleEvent`
+    # 1. Backtick-quoted identifiers
     found.extend(re.findall(r'`([^`]+)`', text))
-    # CamelCase: ToolRegistry, AgentLoop (at least 2 humps)
+    # 2. Slash-paths — extract the interesting segments (filename or last dir)
+    _EXT = (
+        # Web / JS ecosystem
+        r"ts|tsx|js|jsx|mjs|cjs|vue|svelte|astro|"
+        # Python
+        r"py|pyi|pyx|"
+        # Systems
+        r"rs|go|c|h|cpp|cc|cxx|hpp|hxx|"
+        # JVM
+        r"java|kt|kts|scala|groovy|clj|cljs|"
+        # Ruby / Elixir / Erlang
+        r"rb|erb|ex|exs|erl|"
+        # .NET
+        r"cs|fs|fsx|vb|"
+        # Scripts / shell
+        r"sh|bash|zsh|fish|ps1|"
+        # Data / config / markup
+        r"json|yaml|yml|toml|ini|cfg|xml|html|htm|css|scss|sass|less|md|mdx|rst|"
+        # Swift / ObjC
+        r"swift|m|mm|"
+        # Other
+        r"php|lua|r|dart|zig|nim|hs|ml|elm|sql"
+    )
+    for path_match in re.finditer(rf'\b([a-z_][\w./-]*\.(?:{_EXT}))\b', text):
+        # Full path
+        found.append(path_match.group(1))
+    # Also extract meaningful directory names from paths like "src/agent/"
+    for dir_match in re.finditer(r'(?:^|[\s/])([a-z_][\w-]{3,})(?=/)', text):
+        found.append(dir_match.group(1))
+    # 3. CamelCase: ToolRegistry, AgentLoop (at least 2 humps)
     found.extend(re.findall(r'\b([A-Z][a-z]+(?:[A-Z][a-z0-9]+)+)\b', text))
-    # dot.notation: Agent.handleEvent, tool.registry
+    # 3b. Single-word capitalized tech terms: Agent, Session, Provider (4+ chars)
+    found.extend(re.findall(r'\b([A-Z][a-z]{3,})\b', text))
+    # 4. dot.notation: Agent.handleEvent, tool.registry
     found.extend(re.findall(r'\b(\w+\.\w+(?:\.\w+)*)\b', text))
-    # Deduplicate preserving order, filter short
+    # 4b. camelCase (starts lowercase, has 1+ humps): fromPlugin, handleEvent
+    found.extend(re.findall(r'\b([a-z][a-z0-9]+[A-Z][a-zA-Z0-9]+)\b', text))
+    # 5. snake_case: at least 2 parts
+    found.extend(re.findall(r'\b([a-z]+_[a-z]+(?:_[a-z]+)*)\b', text))
+
+    # Deduplicate preserving order, filter short, skip common English words
+    _STOP = {"the", "this", "that", "with", "from", "read", "show", "work",
+             "find", "what", "how", "does", "explain", "main", "file", "test",
+             "tests", "code", "used", "make", "write", "edit", "name", "line",
+             "function", "class", "method", "type", "interface", "return",
+             "list", "each", "directory", "structure", "system", "part",
+             # Imperative verbs often capitalized at sentence start
+             "check", "look", "give", "tell", "call", "open", "save",
+             # Monorepo / packaging boilerplate — too generic to be useful
+             "packages", "package", "node_modules", "dist", "build", "lib",
+             "source", "target", "project", "module", "modules"}
     seen: set[str] = set()
     result: list[str] = []
     for ident in found:
+        ident_lc = ident.lower()
+        if ident_lc in _STOP:
+            continue
         if ident not in seen and len(ident) >= _MIN_IDENT_LEN:
             seen.add(ident)
             result.append(ident)
-    return result[:10]  # Cap to avoid expensive FTS5 storms
+    return result[:15]
 
 
 def _compute_mention_scores(
