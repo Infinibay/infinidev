@@ -17,6 +17,8 @@ def search_ddg(query: str, num_results: int = 10) -> list[dict]:
     """Search via DuckDuckGo.
 
     Returns list of ``{title, url, snippet}`` dicts.
+    Uses a hard timeout to prevent hanging the engine when DDG is slow
+    or unreachable (backend='auto' tries multiple backends sequentially).
     """
     try:
         from ddgs import DDGS
@@ -29,13 +31,27 @@ def search_ddg(query: str, num_results: int = 10) -> list[dict]:
 
     web_rate_limiter.acquire()
 
-    try:
+    timeout = settings.WEB_TIMEOUT
+
+    def _do_search() -> list[dict]:
         ua_headers = {"User-Agent": "Mozilla/5.0 (compatible; InfinidevBot/1.0)"}
         try:
-            ddgs = DDGS(headers=ua_headers)
+            ddgs = DDGS(headers=ua_headers, timeout=timeout)
         except TypeError:
             ddgs = DDGS()
-        raw_results = list(ddgs.text(query, max_results=num_results))
+        return list(ddgs.text(query, max_results=num_results))
+
+    # Hard timeout: DDGS with backend='auto' can try multiple backends
+    # sequentially, each with its own HTTP timeout.  Wrap the whole
+    # operation in a thread with a wall-clock deadline so it can never
+    # block the engine loop indefinitely.
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            raw_results = pool.submit(_do_search).result(timeout=timeout)
+    except FuturesTimeout:
+        logger.warning("DDG search timed out after %ds for query: %s", timeout, query[:80])
+        return []
     except Exception as exc:
         logger.warning("DDG search failed: %s", exc)
         return []

@@ -837,8 +837,21 @@ class LoopEngine(AgentEngine):
                         if ctx.manual_tc:
                             messages.append({"role": "user", "content": nudge})
                         else:
-                            messages.append({"role": "tool", "tool_call_id": classified.step_complete.id,
-                                             "content": nudge})
+                            # Replace the existing tool_result stub instead of
+                            # appending a second one — Anthropic requires exactly
+                            # one tool_result per tool_use id.
+                            _replaced = False
+                            for msg in reversed(messages):
+                                if (
+                                    msg.get("role") == "tool"
+                                    and msg.get("tool_call_id") == classified.step_complete.id
+                                ):
+                                    msg["content"] = nudge
+                                    _replaced = True
+                                    break
+                            if not _replaced:
+                                messages.append({"role": "tool", "tool_call_id": classified.step_complete.id,
+                                                 "content": nudge})
                         continue  # Don't break — let model add notes first
                     self._step_complete_gated = False
 
@@ -1007,7 +1020,7 @@ class LoopEngine(AgentEngine):
                  "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                 for tc in classified.regular
             ]
-            for pseudo_tc in classified.thinks + classified.notes +([classified.step_complete] if classified.step_complete else []):
+            for pseudo_tc in classified.thinks + classified.notes + classified.session_notes +([classified.step_complete] if classified.step_complete else []):
                 assistant_msg["tool_calls"].append({
                     "id": pseudo_tc.id, "type": "function",
                     "function": {"name": pseudo_tc.function.name, "arguments": pseudo_tc.function.arguments},
@@ -1045,7 +1058,17 @@ class LoopEngine(AgentEngine):
                     batch_results.append((tc, result))
 
             if self._cancel_event.is_set():
+                # Append placeholder results for tools in this batch so
+                # every tool_use in the assistant message has a matching
+                # tool_result (required by Anthropic).
+                if not ctx.manual_tc:
+                    _executed_ids = {tc.id for tc, _ in batch_results}
+                    for tc in batch:
+                        if tc.id not in _executed_ids:
+                            messages.append({"role": "tool", "tool_call_id": tc.id,
+                                             "content": '{"error": "cancelled"}'})
                 break
+            _pending_nudge: str | None = None
             for tc, result in batch_results:
                 _tool_error = _extract_tool_error(result)
                 guard.on_tool_result(tc.function.name, tc.function.arguments, bool(_tool_error))
@@ -1103,28 +1126,48 @@ class LoopEngine(AgentEngine):
                 # framing (e.g. the analyst, which has a 4-tool budget
                 # and a different "what to do next" instruction) pass
                 # ``nudge_message_template`` via engine.execute().
+                # Deferred until after all tool results in this batch
+                # are appended — inserting a ``user`` message between
+                # ``tool`` results breaks Anthropic's requirement that
+                # all tool_results follow their tool_use immediately.
                 _default_nudge = 4 if ctx.is_small else _get_settings().LOOP_STEP_NUDGE_THRESHOLD
                 _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else _default_nudge
                 if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
                     if ctx.nudge_message_template:
-                        _nudge_msg = ctx.nudge_message_template.format(
+                        _pending_nudge = ctx.nudge_message_template.format(
                             used=action_tool_calls,
                             threshold=_nudge_threshold,
                         )
                     else:
                         _active_desc = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
-                        _nudge_msg = (
+                        _pending_nudge = (
                             f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls for this step. "
                             f"Step scope: \"{_active_desc}\". "
                             f"Call step_complete now. If the step is not finished, set status=\'continue\' "
                             f"and add/modify next_steps to capture the remaining work."
                         )
-                    if ctx.manual_tc:
-                        tool_results_text.append(f"\n⚠ STEP BUDGET: {_nudge_msg}")
-                    else:
-                        messages.append({"role": "user", "content": _nudge_msg})
 
                 ctx.state.tick_opened_files(1)
+            # Emit deferred nudge AFTER all tool results in this batch
+            if _pending_nudge is not None:
+                if ctx.manual_tc:
+                    tool_results_text.append(f"\n⚠ STEP BUDGET: {_pending_nudge}")
+                else:
+                    messages.append({"role": "user", "content": _pending_nudge})
+
+        # If cancelled, add placeholder results for any regular tools
+        # whose batches were never reached (Anthropic requires every
+        # tool_use to have a corresponding tool_result).
+        if self._cancel_event.is_set() and not ctx.manual_tc:
+            _has_result = {
+                msg["tool_call_id"]
+                for msg in messages
+                if msg.get("role") == "tool" and "tool_call_id" in msg
+            }
+            for tc in classified.regular:
+                if tc.id not in _has_result:
+                    messages.append({"role": "tool", "tool_call_id": tc.id,
+                                     "content": '{"error": "cancelled"}'})
 
         # Small model: compact old messages to prevent context bloat
         if ctx.is_small:
