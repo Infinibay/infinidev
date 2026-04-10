@@ -510,31 +510,62 @@ def _compute_docstring_scores(
 ) -> dict[str, tuple[float, str, str]]:
     """Score symbols by docstring/signature relevance via BM25.
 
-    Only considers functions, methods, and classes — variables and
-    constants produce too many false positives from BM25 token matching.
+    Noise control:
+    - Only top 5 BM25 matches (not 20) — BM25 ranks reliably at the top
+    - Only function/method/class/interface kinds
+    - Requires >= 2 non-common input words present in the docstring
+      (single-word matches are too noisy)
+    - Skips very short docstrings (< 30 chars, usually "Get X" style)
     """
     try:
         from infinidev.code_intel.query import search_by_docstring
-        matches = search_by_docstring(project_id, current_input, limit=20)
+        matches = search_by_docstring(project_id, current_input, limit=5)
     except Exception:
         return {}
 
     _RELEVANT_KINDS = {"function", "method", "class", "interface"}
+
+    # Extract meaningful input words (≥4 chars, not common)
+    input_words = [
+        w for w in re.split(r'\W+', current_input.lower())
+        if len(w) >= 4 and w not in _COMMON_WORDS
+    ]
+    if len(input_words) < 2:
+        return {}
+
     result: dict[str, tuple[float, str, str]] = {}
     for sym, _bm25_rank in matches:
         kind = sym.kind.value if hasattr(sym.kind, "value") else str(sym.kind)
         if kind not in _RELEVANT_KINDS:
             continue
-        # Boost the file
+
+        # Require meaningful docstring
+        doc = (sym.docstring or "").lower()
+        if len(doc) < 30:
+            continue
+
+        # Count how many input words appear in the docstring
+        hits = sum(1 for w in input_words if w in doc)
+        if hits < 2:
+            continue
+
+        # Scale score with hit density
+        density = hits / max(len(input_words), 1)
+        score_file = 3.0 + density * 0.5  # up to 3.5
+        score_sym = 3.5 + density * 0.5   # up to 4.0
+
         fp = _normalize_path(sym.file_path)
         if fp:
             existing = result.get(fp, (0.0, "", ""))
-            if 3.0 > existing[0]:
-                result[fp] = (3.0, "file", f"contains '{sym.name}' with matching docstring")
-        # Boost the symbol
+            if score_file > existing[0]:
+                result[fp] = (score_file, "file",
+                              f"contains '{sym.name}' ({hits} word match in docstring)")
         key = sym.qualified_name or sym.name
         if key:
-            result[key] = (3.5, "symbol", f"docstring matches query")
+            existing = result.get(key, (0.0, "", ""))
+            if score_sym > existing[0]:
+                result[key] = (score_sym, "symbol",
+                               f"{hits} word docstring match")
     return result
 
 

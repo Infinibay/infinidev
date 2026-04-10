@@ -124,6 +124,8 @@ class LoopEngine(AgentEngine):
         self._guidance = GuidanceHandler()
         from infinidev.engine.context_rank.hooks import ContextRankHooks
         self._cr_hooks = ContextRankHooks()
+        self._cr_cached_result: Any | None = None
+        self._cr_last_pivot_key: tuple[int, str] | None = None
 
     def inject_message(self, message: str) -> None:
         """Inject a user message into the running loop (thread-safe).
@@ -372,6 +374,9 @@ class LoopEngine(AgentEngine):
             _cr_session = get_current_session_id() or ctx.agent_id
             _cr_task = get_current_agent_run_id() or ctx.agent_id
             self._cr_hooks.start(_cr_session, _cr_task, ctx.desc)
+            # Reset pivot tracking for this task
+            self._cr_cached_result = None
+            self._cr_last_pivot_key = None
 
         consecutive_all_done = 0
 
@@ -690,20 +695,33 @@ class LoopEngine(AgentEngine):
         # Drain any user messages injected mid-task
         injected = self._drain_user_messages()
 
-        # ContextRank: compute ranked resources for prompt injection
+        # ContextRank: compute + inject only at pivot points
+        # (iteration 0 + step transitions). Between pivots, the model
+        # already saw the <context-rank> so we skip it to save tokens.
+        # The result itself is cached per-step for fast lookup.
         cr_result = None
         with best_effort("ContextRank ranking failed"):
             from infinidev.config.settings import settings as _cr_settings
             if _cr_settings.CONTEXT_RANK_ENABLED and self._cr_hooks._enabled:
-                from infinidev.engine.context_rank.ranker import rank as _cr_rank
-                cr_result = _cr_rank(
-                    ctx.desc,
-                    self._cr_hooks._session_id,
-                    self._cr_hooks._task_id,
-                    iteration,
-                    cached_embedding=self._cr_hooks._task_embedding,
-                    project_id=ctx.project_id,
+                active = ctx.state.plan.active_step
+                active_key = (active.index, active.title) if active else (-1, "")
+                is_pivot = (
+                    iteration == ctx.start_iteration
+                    or active_key != getattr(self, "_cr_last_pivot_key", None)
                 )
+                if is_pivot:
+                    from infinidev.engine.context_rank.ranker import rank as _cr_rank
+                    cr_result = _cr_rank(
+                        ctx.desc,
+                        self._cr_hooks._session_id,
+                        self._cr_hooks._task_id,
+                        iteration,
+                        cached_embedding=self._cr_hooks._task_embedding,
+                        project_id=ctx.project_id,
+                    )
+                    self._cr_cached_result = cr_result
+                    self._cr_last_pivot_key = active_key
+                # Non-pivot iterations: don't inject (keep cr_result = None)
 
         from infinidev.engine.static_analysis_timer import measure as _sa_measure
         with _sa_measure("prompt_build"):
