@@ -450,6 +450,65 @@ def init_db():
             "ON ci_method_bodies(project_id, file_path)"
         )
 
+        # ── ContextRank tables ─────────────────────────────────────────
+        # Vectorized context messages (user input, step titles/descriptions)
+        # that provoked tool calls. Embeddings enable cross-session
+        # similarity search to predict relevant resources for new tasks.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cr_contexts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id      TEXT NOT NULL,
+                session_id   TEXT NOT NULL,
+                context_type TEXT NOT NULL,
+                content      TEXT NOT NULL,
+                embedding    BLOB,
+                iteration    INTEGER,
+                step_index   INTEGER,
+                created_at   REAL NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_contexts_session ON cr_contexts(session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_contexts_type ON cr_contexts(context_type)")
+
+        # Append-only interaction event log. Each row records one tool
+        # call's effect (file read/write, symbol access, finding create)
+        # linked to the context that provoked it.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cr_interactions (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id      TEXT NOT NULL,
+                session_id   TEXT NOT NULL,
+                context_id   INTEGER REFERENCES cr_contexts(id),
+                iteration    INTEGER NOT NULL,
+                event_type   TEXT NOT NULL,
+                target       TEXT NOT NULL,
+                target_type  TEXT NOT NULL,
+                weight       REAL NOT NULL DEFAULT 1.0,
+                metadata     TEXT,
+                created_at   REAL NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_target ON cr_interactions(target, target_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_context ON cr_interactions(context_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_session ON cr_interactions(session_id)")
+
+        # Pre-computed per-node scores snapshotted at session/task end.
+        # Avoids recalculating historical scores from raw interactions.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cr_session_scores (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id      TEXT NOT NULL,
+                session_id   TEXT NOT NULL,
+                target       TEXT NOT NULL,
+                target_type  TEXT NOT NULL,
+                score        REAL NOT NULL,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                created_at   REAL NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_target ON cr_session_scores(target, target_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_session ON cr_session_scores(session_id)")
+
         # Create a default project if none exists
         row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
         if not row:

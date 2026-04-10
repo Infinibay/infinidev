@@ -235,6 +235,11 @@ class StepManager:
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         ))
         self._engine._store_stats(ctx.state)
+        # ContextRank: snapshot session scores for cross-session ranking
+        try:
+            self._engine._cr_hooks.finish()
+        except Exception:
+            pass
         if result is None:
             return _synthesize_final(ctx.state)
         return result

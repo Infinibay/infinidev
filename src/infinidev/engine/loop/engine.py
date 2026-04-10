@@ -122,6 +122,8 @@ class LoopEngine(AgentEngine):
         import queue as _queue_mod
         self._user_messages: _queue_mod.Queue[str] = _queue_mod.Queue()
         self._guidance = GuidanceHandler()
+        from infinidev.engine.context_rank.hooks import ContextRankHooks
+        self._cr_hooks = ContextRankHooks()
 
     def inject_message(self, message: str) -> None:
         """Inject a user message into the running loop (thread-safe).
@@ -364,6 +366,13 @@ class LoopEngine(AgentEngine):
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         ))
 
+        # ContextRank: log task input and start collecting interaction data
+        with best_effort("ContextRank start failed"):
+            from infinidev.tools.base.context import get_current_session_id, get_current_agent_run_id
+            _cr_session = get_current_session_id() or ctx.agent_id
+            _cr_task = get_current_agent_run_id() or ctx.agent_id
+            self._cr_hooks.start(_cr_session, _cr_task, ctx.desc)
+
         consecutive_all_done = 0
 
         # Reset the static-analysis latency accumulator at the start of
@@ -418,6 +427,16 @@ class LoopEngine(AgentEngine):
                 project_id=ctx.project_id, agent_id=ctx.agent_id,
             ))
 
+            # ContextRank: log the active step BEFORE tools execute so
+            # interactions get linked to the step that provoked them.
+            with best_effort("ContextRank pre-step activation failed"):
+                _cr_pre = ctx.state.plan.active_step
+                if _cr_pre:
+                    self._cr_hooks.on_step_activated(
+                        _cr_pre.title, _cr_pre.explanation or "",
+                        iteration, _cr_pre.index,
+                    )
+
             # ── Inner loop ──────────────────────────────────────────
             # Capture the message-buffer offset *before* this step runs so
             # POST_STEP consumers (e.g. the behavior scorer) can slice out
@@ -453,6 +472,15 @@ class LoopEngine(AgentEngine):
             ))
 
             step_mgr.advance_plan(ctx, step_result)
+
+            # ContextRank: log the newly activated step's title + description
+            with best_effort("ContextRank step activation failed"):
+                _cr_active = ctx.state.plan.active_step
+                if _cr_active:
+                    self._cr_hooks.on_step_activated(
+                        _cr_active.title, _cr_active.explanation or "",
+                        iteration, _cr_active.index,
+                    )
 
             action_tool_calls = step_result.action_tool_calls
             step_mgr.summarize_and_record(ctx, step_result, messages, action_tool_calls, iteration)
@@ -662,11 +690,25 @@ class LoopEngine(AgentEngine):
         # Drain any user messages injected mid-task
         injected = self._drain_user_messages()
 
+        # ContextRank: compute ranked resources for prompt injection
+        cr_result = None
+        with best_effort("ContextRank ranking failed"):
+            from infinidev.config.settings import settings as _cr_settings
+            if _cr_settings.CONTEXT_RANK_ENABLED and self._cr_hooks._enabled:
+                from infinidev.engine.context_rank.ranker import rank as _cr_rank
+                cr_result = _cr_rank(
+                    ctx.desc,
+                    self._cr_hooks._session_id,
+                    self._cr_hooks._task_id,
+                    iteration,
+                )
+
         from infinidev.engine.static_analysis_timer import measure as _sa_measure
         with _sa_measure("prompt_build"):
             user_prompt = build_iteration_prompt(
                 ctx.desc, ctx.expected, effective_state,
                 project_knowledge=self._project_knowledge if iteration == ctx.start_iteration else None,
+                context_rank_result=cr_result,
                 max_context_tokens=ctx.max_context_tokens,
                 session_notes=self.session_notes if self.session_notes else None,
                 user_messages=injected if injected else None,
@@ -1120,6 +1162,10 @@ class LoopEngine(AgentEngine):
                 action_tool_calls += 1
                 ctx.state.total_tool_calls += 1
                 ctx.state.tool_calls_since_last_note += 1
+
+                # ContextRank: log interaction
+                with best_effort("ContextRank tool call log failed"):
+                    self._cr_hooks.on_tool_call(tc.function.name, tc.function.arguments, iteration)
 
                 # Budget nudge — fires once when the model reaches the
                 # configured threshold. Phases that need a different

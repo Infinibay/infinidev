@@ -170,7 +170,15 @@ class Settings(BaseSettings):
     BEHAVIOR_CHECKER_PROMPT_POLLUTION: bool = False
     BEHAVIOR_CHECKER_PLAN_QUALITY: bool = True
 
-
+    # ContextRank (cross-session context prioritization)
+    CONTEXT_RANK_ENABLED: bool = False
+    CONTEXT_RANK_TOP_K_FILES: int = 5
+    CONTEXT_RANK_TOP_K_SYMBOLS: int = 5
+    CONTEXT_RANK_TOP_K_FINDINGS: int = 3
+    CONTEXT_RANK_REACTIVE_DECAY: float = 0.15
+    CONTEXT_RANK_SESSION_DECAY: float = 0.95
+    CONTEXT_RANK_MIN_SIMILARITY: float = 0.4
+    CONTEXT_RANK_LOGGING_ENABLED: bool = True
 
     model_config = {"env_prefix": "INFINIDEV_"}
 

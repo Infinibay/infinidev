@@ -554,6 +554,7 @@ def build_iteration_prompt(
     state: LoopState,
     *,
     project_knowledge: list[dict] | None = None,
+    context_rank_result: Any | None = None,
     max_context_tokens: int = 0,
     session_notes: list[str] | None = None,
     user_messages: list[str] | None = None,
@@ -570,6 +571,7 @@ def build_iteration_prompt(
 
     _append_if(parts, _render_smart_summary(state, small_model))
     _append_if(parts, _render_project_knowledge(project_knowledge))
+    _append_if(parts, _render_context_rank(context_rank_result))
     _append_if(parts, _render_workspace())
 
     # Task description
@@ -848,6 +850,126 @@ def _render_project_knowledge(project_knowledge: list[dict] | None) -> str:
         + "\n".join(kb_lines)
         + "\n</project-knowledge>"
     )
+
+
+def _render_context_rank(result: Any | None) -> str:
+    """Render the ContextRank section with enriched resource previews.
+
+    For files: includes symbol outlines (functions, classes, methods)
+    from code intelligence so the model can act without extra tool calls.
+    For findings: includes the finding content.
+    """
+    if result is None or result.empty:
+        return ""
+    lines = ["<context-rank>",
+             "Based on your current task and past sessions, these resources are likely relevant.",
+             "Symbol outlines are included so you can act on them directly."]
+    if result.files:
+        lines.append("\nFiles (by relevance):")
+        for i, item in enumerate(result.files, 1):
+            lines.append(f"  {i}. {item.target}  [score={item.score:.1f}] — {item.reason}")
+            # Enrich with symbol outline from code intelligence
+            outline = _get_file_symbol_outline(item.target)
+            if outline:
+                for sym_line in outline:
+                    lines.append(f"       {sym_line}")
+    if result.symbols:
+        lines.append("\nSymbols:")
+        for i, item in enumerate(result.symbols, 1):
+            lines.append(f"  {i}. {item.target}  [score={item.score:.1f}] — {item.reason}")
+            sig = _get_symbol_signature(item.target)
+            if sig:
+                lines.append(f"       {sig}")
+    if result.findings:
+        lines.append("\nFindings:")
+        for i, item in enumerate(result.findings, 1):
+            lines.append(f"  {i}. {item.target}  [score={item.score:.1f}] — {item.reason}")
+            content = _get_finding_content(item.target)
+            if content:
+                lines.append(f"       {content}")
+    lines.append("</context-rank>")
+    return "\n".join(lines)
+
+
+def _get_file_symbol_outline(file_path: str) -> list[str]:
+    """Fetch symbol outline for a file from code intelligence."""
+    try:
+        from infinidev.tools.base.context import get_current_project_id, get_current_workspace_path
+        from infinidev.code_intel.query import list_symbols
+        import os
+        project_id = get_current_project_id()
+        if not project_id:
+            return []
+        # Resolve relative paths — ci_symbols stores absolute paths
+        if not os.path.isabs(file_path):
+            workspace = get_current_workspace_path() or os.getcwd()
+            file_path = os.path.join(workspace, file_path)
+        symbols = list_symbols(project_id, file_path, limit=30)
+        if not symbols:
+            return []
+        result = []
+        for s in symbols:
+            kind = s.kind.value if hasattr(s.kind, 'value') else str(s.kind)
+            if kind in ("function", "method", "class", "interface", "enum", "type_alias"):
+                sig = s.signature or s.name
+                line_info = f"L{s.line_start}"
+                if s.line_end:
+                    line_info += f"-{s.line_end}"
+                parent = f" ({s.parent_symbol})" if s.parent_symbol else ""
+                result.append(f"[{kind}] {sig}{parent}  {line_info}")
+        return result[:20]  # Cap to avoid prompt bloat
+    except Exception:
+        return []
+
+
+def _get_symbol_signature(qualified_name: str) -> str:
+    """Fetch signature for a symbol from code intelligence."""
+    try:
+        from infinidev.tools.base.context import get_current_project_id
+        from infinidev.code_intel._db import execute_with_retry
+        project_id = get_current_project_id()
+        if not project_id:
+            return ""
+        def _query(conn):
+            row = conn.execute(
+                "SELECT signature, docstring, file_path, line_start FROM ci_symbols "
+                "WHERE project_id = ? AND qualified_name = ? LIMIT 1",
+                (project_id, qualified_name),
+            ).fetchone()
+            return row
+        row = execute_with_retry(_query)
+        if row:
+            sig = row["signature"] or qualified_name
+            loc = f"{row['file_path']}:{row['line_start']}"
+            doc = f" — {row['docstring'][:100]}" if row["docstring"] else ""
+            return f"{sig}  ({loc}){doc}"
+        return ""
+    except Exception:
+        return ""
+
+
+def _get_finding_content(topic: str) -> str:
+    """Fetch finding content by topic."""
+    try:
+        from infinidev.tools.base.context import get_current_project_id
+        from infinidev.code_intel._db import execute_with_retry
+        project_id = get_current_project_id()
+        if not project_id:
+            return ""
+        def _query(conn):
+            row = conn.execute(
+                "SELECT content FROM findings "
+                "WHERE project_id = ? AND topic = ? ORDER BY updated_at DESC LIMIT 1",
+                (project_id, topic),
+            ).fetchone()
+            return row
+        row = execute_with_retry(_query)
+        if row and row["content"]:
+            content = row["content"]
+            return content[:300] + ("..." if len(content) > 300 else "")
+        return ""
+    except Exception:
+        return ""
 
 
 def _render_workspace() -> str:

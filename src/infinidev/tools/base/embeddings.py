@@ -51,3 +51,13 @@ def store_wiki_embedding(conn: sqlite3.Connection, page_id: int, text: str) -> N
             "UPDATE wiki_pages SET embedding = ? WHERE id = ?",
             (emb, page_id),
         )
+
+
+def store_context_embedding(conn: sqlite3.Connection, context_id: int, text: str) -> None:
+    """Compute and store an embedding for a ContextRank context entry."""
+    emb = compute_embedding(text)
+    if emb is not None:
+        conn.execute(
+            "UPDATE cr_contexts SET embedding = ? WHERE id = ?",
+            (emb, context_id),
+        )
