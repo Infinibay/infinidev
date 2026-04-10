@@ -702,6 +702,7 @@ class LoopEngine(AgentEngine):
                     self._cr_hooks._task_id,
                     iteration,
                     cached_embedding=self._cr_hooks._task_embedding,
+                    project_id=ctx.project_id,
                 )
 
         from infinidev.engine.static_analysis_timer import measure as _sa_measure

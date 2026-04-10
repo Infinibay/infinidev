@@ -178,6 +178,7 @@ class Settings(BaseSettings):
     CONTEXT_RANK_REACTIVE_DECAY: float = 0.15
     CONTEXT_RANK_SESSION_DECAY: float = 0.95
     CONTEXT_RANK_MIN_SIMILARITY: float = 0.4
+    CONTEXT_RANK_MIN_CONFIDENCE: float = 0.5
     CONTEXT_RANK_LOGGING_ENABLED: bool = True
 
     model_config = {"env_prefix": "INFINIDEV_"}
