@@ -916,7 +916,14 @@ def _get_file_symbol_outline(file_path: str) -> list[str]:
                 if s.line_end:
                     line_info += f"-{s.line_end}"
                 parent = f" ({s.parent_symbol})" if s.parent_symbol else ""
-                result.append(f"[{kind}] {sig}{parent}  {line_info}")
+                line = f"[{kind}] {sig}{parent}  {line_info}"
+                # Append docstring (truncated) if available
+                if s.docstring:
+                    doc = s.docstring.replace("\n", " ").strip()
+                    if len(doc) > 120:
+                        doc = doc[:117] + "..."
+                    line += f"\n         → {doc}"
+                result.append(line)
         return result[:20]  # Cap to avoid prompt bloat
     except Exception:
         return []

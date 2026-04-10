@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -61,11 +62,21 @@ _TARGET_ARGS: dict[str, list[str]] = {
 
 
 def _extract_target(tool_name: str, target_type: str, arguments: dict[str, Any]) -> str | None:
-    """Extract the interaction target from tool call arguments."""
+    """Extract the interaction target from tool call arguments.
+
+    For file targets, normalizes to relative paths (strips workspace prefix)
+    to avoid duplicate entries for the same file.
+    """
     for arg_name in _TARGET_ARGS.get(target_type, []):
         val = arguments.get(arg_name)
         if val is not None:
-            return str(val)
+            target = str(val)
+            # Normalize file paths to relative
+            if target_type == "file" and os.path.isabs(target):
+                workspace = os.getcwd()
+                if target.startswith(workspace + "/"):
+                    target = target[len(workspace) + 1:]
+            return target
     return None
 
 
