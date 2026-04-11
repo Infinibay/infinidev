@@ -23,9 +23,11 @@ class ContextWindowCalculator:
     - total_tokens: Cumulative tokens across all LLM calls in the current task
     """
 
-    def __init__(self, model_name: str = "", max_context: int = 4096):
+    def __init__(self, model_name: str = "", max_context: int | None = None):
         self.model_name = model_name
-        self.max_context: int = max_context
+        # max_context is None when we don't know the model's context window.
+        # Display code should render this as "?" instead of a misleading number.
+        self.max_context: int | None = max_context
         self._last_prompt_tokens: int = 0
         self._task_prompt_tokens: int = 0
 
@@ -58,7 +60,13 @@ class ContextWindowCalculator:
     }
 
     async def update_model_context(self) -> None:
-        """Fetch model context window. Supports Ollama API and known cloud models."""
+        """Fetch model context window. Supports Ollama API and known cloud models.
+
+        Sets ``self.max_context`` to the real value when found, or ``None``
+        when the context window cannot be determined (unknown cloud model,
+        Ollama API unreachable, etc).  The TUI renders ``None`` as ``?``
+        instead of a misleading hardcoded number.
+        """
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
 
@@ -71,9 +79,13 @@ class ContextWindowCalculator:
         if "/" in bare_model:
             bare_model = bare_model.split("/", 1)[1]
 
+        # Reset to unknown before attempting lookup — we'll set it below
+        # only when we have authoritative data.
+        self.model_name = bare_model
+        self.max_context = None
+
         # Check known cloud models first
         if bare_model in self._KNOWN_CONTEXT:
-            self.model_name = bare_model
             self.max_context = self._KNOWN_CONTEXT[bare_model]
             logger.info(f"Model {bare_model} context length (known): {self.max_context}")
             return
@@ -84,9 +96,15 @@ class ContextWindowCalculator:
             if model in model_cost:
                 ctx = model_cost[model].get("max_input_tokens", 0)
                 if ctx:
-                    self.model_name = bare_model
                     self.max_context = ctx
                     logger.info(f"Model {bare_model} context length (litellm): {self.max_context}")
+                    return
+            # Also try the bare model name
+            if bare_model in model_cost:
+                ctx = model_cost[bare_model].get("max_input_tokens", 0)
+                if ctx:
+                    self.max_context = ctx
+                    logger.info(f"Model {bare_model} context length (litellm bare): {self.max_context}")
                     return
         except Exception:
             pass
@@ -102,7 +120,6 @@ class ContextWindowCalculator:
                     )
                     if resp.status_code == 200:
                         data = resp.json()
-                        self.model_name = bare_model
 
                         model_info = data.get("model_info", {})
                         for key, val in model_info.items():
@@ -110,8 +127,9 @@ class ContextWindowCalculator:
                                 self.max_context = val
                                 break
 
-                        logger.info(f"Model {bare_model} context length: {self.max_context}")
-                        return
+                        if self.max_context is not None:
+                            logger.info(f"Model {bare_model} context length (ollama): {self.max_context}")
+                            return
 
                     # Fallback: try /api/tags
                     resp = await client.get(f"{base_url}/api/tags")
@@ -124,15 +142,15 @@ class ContextWindowCalculator:
                                 ctx = m.get("details", {}).get("context_length", 0)
                                 if ctx:
                                     self.max_context = ctx
+                                    logger.info(f"Model {m_name} context length (tags): {self.max_context}")
+                                    return
                                 break
             except Exception as e:
-                logger.warning(f"Could not fetch model info: {e}")
+                logger.warning(f"Could not fetch Ollama model info: {e}")
 
-        # Default for unknown cloud models
-        if provider_id != "ollama" and self.max_context <= 4096:
-            self.max_context = 128_000
-            self.model_name = bare_model
-            logger.info(f"Model {bare_model}: using default cloud context {self.max_context}")
+        # No authoritative data — leave max_context as None.
+        # The TUI will render this as "?" to signal unknown.
+        logger.info(f"Model {bare_model}: context window unknown, will display as '?'")
 
     def update_chat(self, user_input: str, session_summaries: list[str] | None = None) -> None:
         """Estimate chat context tokens from user input + session history.
@@ -150,20 +168,31 @@ class ContextWindowCalculator:
             self._task_prompt_tokens = task_prompt_tokens
 
     def get_context_status(self) -> dict[str, Any]:
-        """Get current context window status for the UI."""
+        """Get current context window status for the UI.
+
+        When ``max_context`` is ``None`` (unknown window), ``remaining_tokens``
+        is also ``None`` and ``usage_percentage`` is ``0.0``.  Display code
+        should check for ``None`` and render ``?`` instead of computing a
+        percentage against a made-up max.
+        """
         max_ctx = self.max_context
         prompt = self._last_prompt_tokens
         task = self._task_prompt_tokens
 
-        prompt_remaining = max(0, max_ctx - prompt)
-        prompt_pct = min(1.0, prompt / max_ctx) if max_ctx > 0 else 0.0
-
-        task_remaining = max(0, max_ctx - task)
-        task_pct = min(1.0, task / max_ctx) if max_ctx > 0 else 0.0
+        if max_ctx is not None and max_ctx > 0:
+            prompt_remaining: int | None = max(0, max_ctx - prompt)
+            prompt_pct = min(1.0, prompt / max_ctx)
+            task_remaining: int | None = max(0, max_ctx - task)
+            task_pct = min(1.0, task / max_ctx)
+        else:
+            prompt_remaining = None
+            prompt_pct = 0.0
+            task_remaining = None
+            task_pct = 0.0
 
         return {
             "model": self.model_name or "unknown",
-            "max_context": max_ctx,
+            "max_context": max_ctx,  # may be None
             "chat": {
                 "name": "prompt",
                 "current_tokens": prompt,
@@ -184,21 +213,25 @@ class ContextWindowCalculator:
 
     @property
     def chat_remaining(self) -> int:
+        if not self.max_context:
+            return 0
         return max(0, self.max_context - self._last_prompt_tokens)
 
     @property
     def task_remaining(self) -> int:
+        if not self.max_context:
+            return 0
         return max(0, self.max_context - self._task_prompt_tokens)
 
     @property
     def chat_usage_percentage(self) -> float:
-        if self.max_context == 0:
+        if not self.max_context:
             return 0.0
         return min(1.0, self._last_prompt_tokens / self.max_context)
 
     @property
     def task_usage_percentage(self) -> float:
-        if self.max_context == 0:
+        if not self.max_context:
             return 0.0
         return min(1.0, self._task_prompt_tokens / self.max_context)
 
@@ -233,7 +266,7 @@ def _get_initial_model_name() -> str:
     return llm_params.get("model", settings.LLM_MODEL)
 
 
-calculator = ContextWindowCalculator(model_name=_get_initial_model_name(), max_context=4096)
+calculator = ContextWindowCalculator(model_name=_get_initial_model_name(), max_context=None)
 
 
 async def get_context_status() -> dict[str, Any]:

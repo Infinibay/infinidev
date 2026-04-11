@@ -23,14 +23,41 @@ from infinidev.ui.theme import (
 )
 
 
+def _format_count(value: int | None) -> str:
+    """Format a token count in a compact way, '?' when unknown."""
+    if value is None:
+        return "?"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.0f}k"
+    return str(value)
+
+
 def build_usage_bar_fragments(
     label: str,
     used: int,
-    available: int,
+    available: int | None,
     pct: float,
 ) -> list[tuple[str, str]]:
-    """Render a ``label: used/avail [███---] pct%`` row."""
+    """Render a ``label: [███---] used/avail`` row.
+
+    Bars come first with fixed width so successive rows line up
+    visually regardless of the numeric widths of used/avail.  When
+    *available* is ``None`` (unknown context window), the bar is
+    muted and the available side is shown as ``*``.
+    """
     pct_val = min(pct, 1.0)
+    used_str = _format_count(used)
+    label_col = f"{label:<5}"
+
+    if available is None:
+        return [
+            (f"{TEXT} bold", label_col),
+            (f"{TEXT_MUTED}", BAR_EMPTY * BAR_WIDTH),
+            (f"{TEXT_MUTED}", f" {used_str}/*"),
+        ]
+
     if pct_val > 0.8:
         color = PROGRESS_CRITICAL
     elif pct_val > 0.5:
@@ -40,13 +67,13 @@ def build_usage_bar_fragments(
 
     filled = int(BAR_WIDTH * pct_val)
     empty = BAR_WIDTH - filled
+    avail_str = _format_count(available)
 
     return [
-        (f"{TEXT} bold", f"{label} "),
-        (f"{TEXT_MUTED}", f"{used}/{available} "),
+        (f"{TEXT} bold", label_col),
         (f"{color}", BAR_FILLED * filled),
         (f"{TEXT_MUTED}", BAR_EMPTY * empty),
-        (f"{color} bold", f" {pct_val * 100:.0f}%"),
+        (f"{TEXT_MUTED}", f" {used_str}/{avail_str}"),
     ]
 
 
@@ -56,12 +83,15 @@ def build_context_fragments(
 ) -> FormattedText:
     """Render the full sidebar context block (model + chat/task bars)."""
     model = context_status.get("model", "unknown")
-    max_ctx = context_status.get("max_context", 4096)
+    max_ctx = context_status.get("max_context")  # may be None (unknown)
     flow_part = f"  {context_flow}" if context_flow else ""
 
     fragments: list[tuple[str, str]] = []
     fragments.append((f"{TEXT} bold", f"{model}"))
-    fragments.append((f"{TEXT_MUTED}", f" ({max_ctx} ctx)"))
+    if max_ctx is None:
+        fragments.append((f"{TEXT_MUTED}", " (* ctx)"))
+    else:
+        fragments.append((f"{TEXT_MUTED}", f" ({_format_count(max_ctx)} ctx)"))
     if flow_part:
         fragments.append((f"{ACCENT} bold", flow_part))
     fragments.append(("", "\n"))

@@ -361,6 +361,14 @@ def handle_models(app: InfinidevApp, parts: list[str]) -> None:
         reload_all()
         from infinidev.config.model_capabilities import _reset_capabilities
         _reset_capabilities()
+        # Re-fetch the new model's context window (async, best effort)
+        if app.context_calculator:
+            import asyncio
+            try:
+                asyncio.run(app.context_calculator.update_model_context())
+                app._context_status = app.context_calculator.get_context_status()
+            except Exception:
+                pass
         app.add_message("System", f"Model updated to: {settings.LLM_MODEL}", "system")
         app._update_status_bar()
 

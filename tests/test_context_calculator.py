@@ -8,12 +8,21 @@ class TestContextWindowCalculator:
     """Tests for ContextWindowCalculator class."""
 
     def test_initial_state(self):
-        """Test initial calculator state."""
+        """Test initial calculator state — max_context is None until detected."""
         calc = ContextWindowCalculator()
         assert calc.model_name == ""
-        assert calc.max_context == 4096
-        assert calc.chat_remaining == 4096
-        assert calc.task_remaining == 4096
+        # Unknown until update_model_context() is called
+        assert calc.max_context is None
+        # Remaining properties return 0 when max is unknown
+        assert calc.chat_remaining == 0
+        assert calc.task_remaining == 0
+
+    def test_initial_state_with_explicit_max(self):
+        """Test initial state when max_context is explicitly provided."""
+        calc = ContextWindowCalculator(max_context=8192)
+        assert calc.max_context == 8192
+        assert calc.chat_remaining == 8192
+        assert calc.task_remaining == 8192
 
     def test_update_chat(self):
         """Test updating chat context from user input + summaries."""
