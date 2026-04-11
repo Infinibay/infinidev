@@ -82,8 +82,22 @@ class ContextRankHooks:
                     daemon=True,
                 ).start()
 
-    def on_tool_call(self, tool_name: str, arguments: str | dict, iteration: int) -> None:
-        """Called after each regular tool call completes."""
+    def on_tool_call(
+        self,
+        tool_name: str,
+        arguments: str | dict,
+        iteration: int,
+        *,
+        was_error: bool = False,
+    ) -> None:
+        """Called after each regular tool call completes.
+
+        ``was_error`` should be True when the tool returned an error
+        result.  Error interactions are still logged so the snapshot
+        step sees them, but are excluded from productivity/score
+        aggregations — a failing tool call shouldn't count as
+        evidence that the target was relevant.
+        """
         if not self._enabled:
             return
         # Parse arguments if they come as a JSON string
@@ -100,6 +114,7 @@ class ContextRankHooks:
             self._session_id, self._task_id,
             self._active_step_context_id, iteration,
             tool_name, arguments,
+            was_error=was_error,
         )
 
     def finish(self) -> None:

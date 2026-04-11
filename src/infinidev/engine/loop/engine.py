@@ -1183,9 +1183,14 @@ class LoopEngine(AgentEngine):
                 ctx.state.total_tool_calls += 1
                 ctx.state.tool_calls_since_last_note += 1
 
-                # ContextRank: log interaction
+                # ContextRank: log interaction (includes tool error
+                # status so productivity snapshotting can exclude
+                # failed calls from the "useful" signal).
                 with best_effort("ContextRank tool call log failed"):
-                    self._cr_hooks.on_tool_call(tc.function.name, tc.function.arguments, iteration)
+                    self._cr_hooks.on_tool_call(
+                        tc.function.name, tc.function.arguments, iteration,
+                        was_error=bool(_tool_error),
+                    )
 
                 # Budget nudge — fires once when the model reaches the
                 # configured threshold. Phases that need a different

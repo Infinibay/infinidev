@@ -185,7 +185,30 @@ class Settings(BaseSettings):
     # re-reads a file this many times without editing it, the reactive
     # score is damped by a multiplier < 1.0 (see _compute_reactive_scores).
     CONTEXT_RANK_REACTIVE_MANY_READS: int = 3
+    # Per-week session decay applied to past contexts in the predictive
+    # channel.  0.95^(days_ago/7): 1 week = 0.95, 4 weeks = 0.81,
+    # 12 weeks = 0.57, 24 weeks = 0.32.  Lower = forget older sessions
+    # faster.  Phase 2 v3 switched from decay^order_in_result to this
+    # real-time formula — the old one penalised result position, not
+    # actual age, and gave inconsistent decays depending on the fetch
+    # LIMIT.
     CONTEXT_RANK_SESSION_DECAY: float = 0.95
+    # Max age (in days) of historical contexts considered by the
+    # predictive channel.  Contexts older than this are excluded at
+    # SQL level to keep the fetch tight.  180 days ≈ 6 months, enough
+    # for a long-running project to build meaningful cross-session
+    # memory while dropping truly ancient noise.
+    CONTEXT_RANK_CONTEXT_MAX_AGE_DAYS: int = 180
+    # Hard upper bound on how many historical contexts the predictive
+    # channel fetches per rank call.  Up from 500 (v2) because the
+    # old cap was a temporal sample (recent ≠ relevant) that silently
+    # dropped old-but-relevant contexts.  2000 × 384-dim cosine ≈ 4ms,
+    # still well inside the per-pivot budget.
+    CONTEXT_RANK_CONTEXT_FETCH_LIMIT: int = 2000
+    # Max age (in days) for co-occurrence signal.  Co-occurrence pairs
+    # older than this are excluded — stale "A always with B" edges
+    # from refactored-away modules shouldn't keep boosting files.
+    CONTEXT_RANK_COOC_MAX_AGE_DAYS: int = 90
     CONTEXT_RANK_MIN_SIMILARITY: float = 0.4
     CONTEXT_RANK_MIN_CONFIDENCE: float = 0.5
     CONTEXT_RANK_LOGGING_ENABLED: bool = True

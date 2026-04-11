@@ -509,6 +509,40 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_target ON cr_session_scores(target, target_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_session ON cr_session_scores(session_id)")
 
+        # ── Phase 2 v3 migrations ────────────────────────────────
+        # Productivity-aware scoring needs richer logging than v2
+        # captured.  These additive migrations add tool-error tracking
+        # to the interaction log and per-target productivity/edit
+        # flags to the per-session score snapshot.
+        #
+        # cr_interactions.was_error: whether the tool call returned
+        # an error.  Populated from _tool_error in the loop engine.
+        # Error interactions are excluded from historical scoring so
+        # failed actions don't poison the signal.
+        _migrate_add_column(conn, "cr_interactions", "was_error", "INTEGER DEFAULT 0")
+        # cr_session_scores.productivity: per-target multiplier
+        # computed at snapshot time.  1.5 for edited targets, 1.0
+        # for single-read targets, 0.6 for repeatedly-read-but-not-
+        # edited targets.  The predictive channel joins on this to
+        # weight historical interactions by their productivity.
+        _migrate_add_column(conn, "cr_session_scores", "productivity", "REAL DEFAULT 1.0")
+        # cr_session_scores.was_edited: fast-lookup boolean for
+        # "did any write hit this target in this session?".  True
+        # when at least one cr_interactions row had weight >= 2.0.
+        _migrate_add_column(conn, "cr_session_scores", "was_edited", "INTEGER DEFAULT 0")
+
+        # Indexes for Phase 2's new queries:
+        # - Age-filtered context fetch (WHERE created_at > ?)
+        # - Session+target composite for the productivity join
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cr_contexts_created_at "
+            "ON cr_contexts(created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cr_session_scores_session_target "
+            "ON cr_session_scores(session_id, target, target_type)"
+        )
+
         # Create a default project if none exists
         row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
         if not row:

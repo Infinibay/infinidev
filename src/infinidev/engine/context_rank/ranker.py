@@ -45,15 +45,15 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────
 
-# ── Escalera level weights ──
-# Higher = more specific context match contributes more to score.
-# task_input is broadest (applies to whole task), step_description is
-# most specific (scoped to a single plan step).
-_LEVEL_WEIGHTS: dict[str, float] = {
-    "task_input": 1.0,
-    "step_title": 1.5,
-    "step_description": 2.0,
-}
+# Phase 2 v3 removed _LEVEL_WEIGHTS (task_input / step_title /
+# step_description).  The arbitrary 1.0/1.5/2.0 weights imposed a
+# fixed ordering that wasn't grounded in data — a task_input that
+# matches at 0.85 is more trustworthy than a step_description that
+# matches at 0.55, not the other way around.  The new contribution
+# formula uses `sim²` alone, which rewards high-confidence matches
+# naturally without privileging any level.  The escalera is still
+# used for *logging* contexts at three granularities, but the ranker
+# treats them uniformly.
 
 # Identifiers shorter than this are too common to be useful mentions
 _MIN_IDENT_LEN = 4
@@ -139,8 +139,10 @@ _DOCSTRING_SYMBOL_BONUS = 0.5
 # ── Co-occurrence boost ──
 # Only boost co-occurrences of files whose base score is at least this.
 # Below this threshold, the anchor file is too marginal to trust as a
-# source of co-occurrence signal.
-_COOC_ANCHOR_MIN_SCORE = 1.0
+# source of co-occurrence signal.  Lowered from 1.0 in v3 so the
+# channel can fire on lower-confidence foundations from early-session
+# rankings.
+_COOC_ANCHOR_MIN_SCORE = 0.6
 # Only look at the top N anchor files — DB query per anchor, so this
 # caps the work regardless of how many files made the cut.
 _COOC_MAX_ANCHORS = 5
@@ -463,33 +465,71 @@ def _compute_predictive_scores(
 ) -> dict[str, tuple[float, str, str]]:
     """Score nodes via embedding similarity to historical contexts.
 
-    Edit interactions (weight >= 2.0) get a 2x multiplier in predictive
-    scoring — a file *edited* in a similar past task is more likely
-    relevant than one just read.
+    Phase 2 v3 rewrite applies four interrelated fixes:
+
+    (2a) **Age-filtered SQL fetch.**  The old query used
+         ``ORDER BY created_at DESC LIMIT 500`` which is a temporal
+         *sample*, not a relevance sample — 500 recent contexts in a
+         busy project can crowd out all older-but-relevant ones.
+         New query adds ``WHERE created_at > ?`` (180-day cutoff)
+         and raises the LIMIT to 2000.
+
+    (2b) **Day-based session decay.**  Old: ``session_decay ** order``
+         where ``order`` was the rank of the session in the fetch
+         result.  That's position, not age.  New:
+         ``session_decay ** (days_ago / 7)`` — a weekly decay keyed
+         to real elapsed time, independent of fetch ordering.
+
+    (2c) **sim² contribution, no level weights.**  Old:
+         ``sim × level_weight × s_decay`` with level_weight in
+         {1.0, 1.5, 2.0} depending on context_type.  New:
+         ``sim² × s_decay``.  Squaring naturally rewards confident
+         matches (0.8² = 0.64 vs 0.5² = 0.25) and removes the
+         arbitrary escalera weight ordering.  See the comment on
+         ``_LEVEL_WEIGHTS`` removal above.
+
+    (2d) **Productivity-aware interaction propagation.**  Old: every
+         interaction linked to a matched context propagated with
+         uniform multiplier.  New: LEFT JOIN with ``cr_session_scores``
+         to fetch the per-target ``productivity`` multiplier
+         (populated by snapshot_session_scores at task end), so
+         historical sessions where the model actually edited the
+         target contribute 1.5× and exploratory-only sessions
+         contribute 0.6×.  Also filters ``was_error = 0`` so failed
+         tool calls don't poison the signal.
 
     The embedding is expected to be provided via ``cached_embedding``
-    — ``rank()`` computes it once and shares it across channels.  When
-    None is passed the channel returns empty rather than re-computing,
-    since the caller already tried and failed.
+    — ``rank()`` computes it once and shares it across channels.
     """
+    from time import time as _now
     from infinidev.tools.base.embeddings import embedding_from_blob
     from infinidev.tools.base.dedup import _cosine_similarity
 
     min_sim = settings.CONTEXT_RANK_MIN_SIMILARITY
     session_decay = settings.CONTEXT_RANK_SESSION_DECAY
+    max_age_days = settings.CONTEXT_RANK_CONTEXT_MAX_AGE_DAYS
+    fetch_limit = settings.CONTEXT_RANK_CONTEXT_FETCH_LIMIT
 
     if cached_embedding is None:
         return {}
     query_vec = np.frombuffer(cached_embedding, dtype=np.float32)
 
+    now = _now()
+    age_cutoff = now - (max_age_days * 86400)
+
     try:
         def _fetch_contexts(conn):
+            # (2a) Widen the fetch and filter by age in SQL.  The
+            # index idx_cr_contexts_created_at makes the range scan
+            # cheap even on large tables.
             return conn.execute(
-                "SELECT id, session_id, context_type, embedding "
+                "SELECT id, session_id, context_type, embedding, created_at "
                 "FROM cr_contexts "
-                "WHERE embedding IS NOT NULL AND session_id != ? "
-                "ORDER BY created_at DESC LIMIT 500",
-                (exclude_session,),
+                "WHERE embedding IS NOT NULL "
+                "  AND session_id != ? "
+                "  AND created_at > ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (exclude_session, age_cutoff, fetch_limit),
             ).fetchall()
         ctx_rows = execute_with_retry(_fetch_contexts)
     except Exception:
@@ -499,20 +539,17 @@ def _compute_predictive_scores(
         return {}
 
     matched_contexts: list[tuple[int, float, float]] = []
-    session_order: dict[str, int] = {}
-    order_counter = 0
     for row in ctx_rows:
-        sid = row["session_id"]
-        if sid not in session_order:
-            session_order[sid] = order_counter
-            order_counter += 1
         ctx_vec = embedding_from_blob(row["embedding"])
         sim = float(_cosine_similarity(query_vec, ctx_vec))
         if sim < min_sim:
             continue
-        level_weight = _LEVEL_WEIGHTS.get(row["context_type"], 1.0)
-        s_decay = session_decay ** session_order[sid]
-        contribution = sim * level_weight * s_decay
+        # (2b) Session decay by actual days, not result position.
+        days_ago = max(0.0, (now - row["created_at"]) / 86400)
+        s_decay = session_decay ** (days_ago / 7.0)
+        # (2c) sim² contribution — high-confidence matches dominate
+        # without needing arbitrary level weights.
+        contribution = (sim * sim) * s_decay
         matched_contexts.append((row["id"], contribution, sim))
 
     if not matched_contexts:
@@ -524,10 +561,20 @@ def _compute_predictive_scores(
     try:
         def _fetch_interactions(conn):
             placeholders = ",".join("?" * len(context_ids))
+            # (2d) JOIN on cr_session_scores for per-target productivity.
+            # COALESCE default 1.0 handles targets not yet snapshotted
+            # (the current session's interactions don't have entries yet).
+            # Also excludes errored interactions via was_error = 0.
             return conn.execute(
-                f"SELECT context_id, target, target_type, weight "
-                f"FROM cr_interactions "
-                f"WHERE context_id IN ({placeholders})",
+                f"SELECT i.context_id, i.target, i.target_type, i.weight, "
+                f"       COALESCE(s.productivity, 1.0) AS productivity "
+                f"FROM cr_interactions i "
+                f"LEFT JOIN cr_session_scores s "
+                f"  ON s.session_id  = i.session_id "
+                f" AND s.target      = i.target "
+                f" AND s.target_type = i.target_type "
+                f"WHERE i.context_id IN ({placeholders}) "
+                f"  AND i.was_error = 0",
                 context_ids,
             ).fetchall()
         int_rows = execute_with_retry(_fetch_interactions)
@@ -541,9 +588,15 @@ def _compute_predictive_scores(
         target = _normalize_path(row["target"], workspace) if row["target_type"] == "file" else row["target"]
         if target not in accum:
             accum[target] = {"target_type": row["target_type"], "score": 0.0, "best_sim": 0.0}
-        # Edit vs Read asymmetry: writes get 2x in predictive channel
-        predictive_mult = 2.0 if row["weight"] >= 2.0 else 1.0
-        accum[target]["score"] += contribution * row["weight"] * predictive_mult
+        # Edit vs Read asymmetry (kept from v2): writes get 2x in the
+        # predictive channel because editing a file in a past task is
+        # stronger evidence of relevance than just reading it.
+        edit_mult = 2.0 if row["weight"] >= 2.0 else 1.0
+        # Productivity from the snapshotted session (1.5 if the target
+        # was edited in that session, 0.6 if it was repeatedly read
+        # without editing, 1.0 for neutral single reads).
+        productivity = row["productivity"]
+        accum[target]["score"] += contribution * row["weight"] * edit_mult * productivity
         accum[target]["best_sim"] = max(accum[target]["best_sim"], sim)
 
     result: dict[str, tuple[float, str, str]] = {}
@@ -925,7 +978,15 @@ def _compute_docstring_scores(
 def _apply_cooccurrence_boost(
     scores: dict[str, tuple[float, str, str]],
 ) -> dict[str, tuple[float, str, str]]:
-    """Boost files frequently accessed alongside high-scoring files."""
+    """Boost files frequently accessed alongside high-scoring files.
+
+    Phase 2 v3 adds a time cutoff (``CONTEXT_RANK_COOC_MAX_AGE_DAYS``,
+    default 90) so co-occurrence pairs from long-refactored-away
+    modules don't keep boosting files forever.  The cutoff is applied
+    to the co-occurring side's ``created_at``.
+    """
+    from time import time as _now
+
     # Get top file targets to find co-occurring files for
     top_files = [
         (t, s) for t, (s, tt, _) in scores.items()
@@ -937,17 +998,25 @@ def _apply_cooccurrence_boost(
     top_files.sort(key=lambda x: x[1], reverse=True)
     top_files = top_files[:_COOC_MAX_ANCHORS]
 
+    max_age_days = getattr(settings, "CONTEXT_RANK_COOC_MAX_AGE_DAYS", 90)
+    age_cutoff = _now() - (max_age_days * 86400)
+
     for target, target_score in top_files:
         try:
-            def _query(conn, t=target):
+            def _query(conn, t=target, ac=age_cutoff):
                 return conn.execute(
                     "SELECT b.target, COUNT(DISTINCT b.session_id) as co_sessions "
                     "FROM cr_session_scores a "
-                    "JOIN cr_session_scores b ON a.session_id = b.session_id AND a.target != b.target "
-                    "WHERE a.target = ? AND a.target_type = 'file' AND b.target_type = 'file' "
+                    "JOIN cr_session_scores b "
+                    "  ON a.session_id = b.session_id "
+                    " AND a.target != b.target "
+                    "WHERE a.target = ? "
+                    "  AND a.target_type = 'file' "
+                    "  AND b.target_type = 'file' "
+                    "  AND b.created_at > ? "
                     "GROUP BY b.target "
                     "HAVING co_sessions >= ?",
-                    (t, _COOC_MIN_SESSIONS),
+                    (t, ac, _COOC_MIN_SESSIONS),
                 ).fetchall()
             rows = execute_with_retry(_query)
         except Exception:

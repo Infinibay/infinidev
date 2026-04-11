@@ -1103,3 +1103,172 @@ class TestImportGraphPathNormalization:
         # Downstream (importers of target) should get a higher multiplier
         # than upstream (dependencies of target).
         assert _IMPORT_IN_PROPAGATION > _IMPORT_OUT_PROPAGATION
+
+
+# ── Phase 2 v3: productivity snapshot + was_error + age-filtered predictive ─
+
+
+class TestProductivitySnapshot:
+    """Phase 2 v3: snapshot_session_scores computes productivity."""
+
+    def test_edited_target_gets_high_productivity(self, cr_db):
+        from infinidev.engine.context_rank.logger import (
+            log_interaction, snapshot_session_scores,
+        )
+
+        # File was read AND edited — productive
+        log_interaction("sess-A", "task-A", None, 0, "file_read",  "edited.py", "file", 1.0)
+        log_interaction("sess-A", "task-A", None, 1, "file_write", "edited.py", "file", 2.0)
+        snapshot_session_scores("sess-A", "task-A")
+
+        def _check(conn):
+            return conn.execute(
+                "SELECT productivity, was_edited FROM cr_session_scores "
+                "WHERE target = 'edited.py'",
+            ).fetchone()
+        row = execute_with_retry(_check)
+        assert row is not None
+        assert row["productivity"] == 1.5  # _PRODUCTIVITY_EDITED
+        assert row["was_edited"] == 1
+
+    def test_single_read_is_neutral(self, cr_db):
+        from infinidev.engine.context_rank.logger import (
+            log_interaction, snapshot_session_scores,
+        )
+
+        log_interaction("sess-B", "task-B", None, 0, "file_read", "glanced.py", "file", 1.0)
+        snapshot_session_scores("sess-B", "task-B")
+
+        def _check(conn):
+            return conn.execute(
+                "SELECT productivity, was_edited FROM cr_session_scores "
+                "WHERE target = 'glanced.py'",
+            ).fetchone()
+        row = execute_with_retry(_check)
+        assert row["productivity"] == 1.0
+        assert row["was_edited"] == 0
+
+    def test_repeated_reads_without_edit_are_penalised(self, cr_db):
+        from infinidev.engine.context_rank.logger import (
+            log_interaction, snapshot_session_scores,
+        )
+
+        for it in (0, 1, 2, 3):
+            log_interaction(
+                "sess-C", "task-C", None, it,
+                "file_read", "confused.py", "file", 1.0,
+            )
+        snapshot_session_scores("sess-C", "task-C")
+
+        def _check(conn):
+            return conn.execute(
+                "SELECT productivity, was_edited FROM cr_session_scores "
+                "WHERE target = 'confused.py'",
+            ).fetchone()
+        row = execute_with_retry(_check)
+        assert row["productivity"] == 0.6  # _PRODUCTIVITY_EXPLORATORY
+        assert row["was_edited"] == 0
+
+    def test_errored_interactions_excluded_from_score(self, cr_db):
+        from infinidev.engine.context_rank.logger import (
+            log_interaction, snapshot_session_scores,
+        )
+
+        # One successful read, one errored write
+        log_interaction(
+            "sess-D", "task-D", None, 0,
+            "file_read", "mixed.py", "file", 1.0,
+            was_error=False,
+        )
+        log_interaction(
+            "sess-D", "task-D", None, 1,
+            "file_write", "mixed.py", "file", 2.0,
+            was_error=True,
+        )
+        snapshot_session_scores("sess-D", "task-D")
+
+        def _check(conn):
+            return conn.execute(
+                "SELECT score, productivity, was_edited FROM cr_session_scores "
+                "WHERE target = 'mixed.py'",
+            ).fetchone()
+        row = execute_with_retry(_check)
+        # Errored write is excluded from the SUM, so score = 1.0 (just the read)
+        assert row["score"] == 1.0
+        # Errored write is also excluded from write_count, so was_edited=False
+        assert row["was_edited"] == 0
+        # Pattern becomes "single read, no write" → neutral
+        assert row["productivity"] == 1.0
+
+
+class TestWasErrorPersistence:
+    """Phase 2 v3: was_error flag round-trips to cr_interactions."""
+
+    def test_was_error_persisted(self, cr_db):
+        from infinidev.engine.context_rank.logger import log_interaction
+
+        log_interaction(
+            "sess-E", "task-E", None, 0,
+            "file_read", "ok.py", "file", 1.0,
+            was_error=False,
+        )
+        log_interaction(
+            "sess-E", "task-E", None, 1,
+            "file_read", "bad.py", "file", 1.0,
+            was_error=True,
+        )
+
+        def _check(conn):
+            return conn.execute(
+                "SELECT target, was_error FROM cr_interactions "
+                "WHERE session_id = 'sess-E' ORDER BY iteration",
+            ).fetchall()
+        rows = execute_with_retry(_check)
+        assert len(rows) == 2
+        assert rows[0]["target"] == "ok.py"
+        assert rows[0]["was_error"] == 0
+        assert rows[1]["target"] == "bad.py"
+        assert rows[1]["was_error"] == 1
+
+
+class TestPredictiveAgeFilter:
+    """Phase 2 v3: predictive channel filters by context age."""
+
+    def test_predictive_sql_has_age_filter(self):
+        """The SQL fetch must filter by created_at cutoff."""
+        import inspect
+        from infinidev.engine.context_rank import ranker
+        source = inspect.getsource(ranker._compute_predictive_scores)
+        assert "created_at > ?" in source, (
+            "predictive channel must filter by context age — "
+            "see fix 2a in the v3 plan"
+        )
+        # _LEVEL_WEIGHTS must not be used in active code (it may still
+        # be referenced in docstrings/comments explaining the removal).
+        # Check the module-level constant is gone entirely instead:
+        assert not hasattr(ranker, "_LEVEL_WEIGHTS"), (
+            "_LEVEL_WEIGHTS should have been removed in fix 2c — "
+            "contribution is now sim² × decay with no level bonus"
+        )
+        # sim² contribution
+        assert "sim * sim" in source or "sim**2" in source or "sim ** 2" in source
+
+    def test_session_decay_uses_days_not_order(self):
+        """Session decay must be based on real time, not result position."""
+        import inspect
+        from infinidev.engine.context_rank import ranker
+        source = inspect.getsource(ranker._compute_predictive_scores)
+        # New: days_ago / 7 in the power
+        assert "days_ago" in source, (
+            "session decay must use days_ago, not session_order[sid] — "
+            "see fix 2b in the v3 plan"
+        )
+
+    def test_productivity_join_present(self):
+        """Fix 2d: predictive must LEFT JOIN cr_session_scores for productivity."""
+        import inspect
+        from infinidev.engine.context_rank import ranker
+        source = inspect.getsource(ranker._compute_predictive_scores)
+        assert "LEFT JOIN cr_session_scores" in source
+        assert "productivity" in source
+        assert "was_error = 0" in source

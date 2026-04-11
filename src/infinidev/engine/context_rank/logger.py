@@ -142,8 +142,15 @@ def log_interaction(
     target_type: str,
     weight: float,
     metadata: dict[str, Any] | None = None,
+    *,
+    was_error: bool = False,
 ) -> None:
-    """Append an interaction event to the log."""
+    """Append an interaction event to the log.
+
+    The ``was_error`` flag is persisted so the predictive channel
+    can exclude failed tool calls from historical scoring, and the
+    snapshot step can compute productivity without counting errors.
+    """
     now = time.time()
     meta_json = json.dumps(metadata) if metadata else None
     try:
@@ -151,10 +158,11 @@ def log_interaction(
             conn.execute(
                 "INSERT INTO cr_interactions "
                 "(task_id, session_id, context_id, iteration, event_type, "
-                "target, target_type, weight, metadata, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "target, target_type, weight, metadata, was_error, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (task_id, session_id, context_id, iteration,
-                 event_type, target, target_type, weight, meta_json, now),
+                 event_type, target, target_type, weight, meta_json,
+                 1 if was_error else 0, now),
             )
             conn.commit()
         execute_with_retry(_insert)
@@ -169,6 +177,8 @@ def log_tool_call(
     iteration: int,
     tool_name: str,
     arguments: dict[str, Any],
+    *,
+    was_error: bool = False,
 ) -> None:
     """Convenience wrapper: classify a tool call and log the interaction."""
     classified = classify_tool_call(tool_name, arguments)
@@ -178,6 +188,7 @@ def log_tool_call(
     log_interaction(
         session_id, task_id, context_id, iteration,
         event_type, target, target_type, weight,
+        was_error=was_error,
     )
 
 
@@ -202,29 +213,74 @@ def compute_context_embedding(context_id: int) -> None:
         logger.debug("Failed to compute context embedding", exc_info=True)
 
 
+# Productivity multipliers used by snapshot_session_scores.  The
+# predictive channel later multiplies historical interaction weights
+# by these, so "productive" past actions propagate more signal than
+# "exploratory" or "error" ones.
+_PRODUCTIVITY_EDITED = 1.5       # any write hit this target → useful
+_PRODUCTIVITY_NEUTRAL = 1.0      # single read, never edited → normal
+_PRODUCTIVITY_EXPLORATORY = 0.6  # repeated reads, never edited → penalty
+
+
 def snapshot_session_scores(session_id: str, task_id: str) -> None:
     """Pre-compute per-node scores for this session and persist them.
 
     Called once at task end so that future sessions can cheaply query
     historical relevance without re-scanning raw interactions.
+
+    Phase 2 v3 changes:
+
+    * Excludes interactions where ``was_error = 1`` from all
+      aggregations — a failed tool call shouldn't count as evidence
+      that the target was relevant.
+    * Computes per-target ``productivity`` multiplier based on the
+      read/write pattern over non-errored interactions:
+        - any write  → _PRODUCTIVITY_EDITED (the model actually
+          modified the target, so it was meaningfully useful)
+        - single read, no write → _PRODUCTIVITY_NEUTRAL
+        - multiple reads, no write → _PRODUCTIVITY_EXPLORATORY
+          (the model re-read without committing — likely dead-end
+          exploration)
+    * Also stores ``was_edited`` as a fast-lookup boolean.
+
+    The predictive channel later LEFT JOINs cr_session_scores on
+    (session_id, target, target_type) and multiplies historical
+    interaction contributions by ``productivity``, so "productive"
+    past sessions carry more weight in the ranking.
     """
     now = time.time()
     try:
         def _snapshot(conn):
             rows = conn.execute(
-                "SELECT target, target_type, SUM(weight) as total_weight, COUNT(*) as cnt "
+                "SELECT target, target_type, "
+                "       SUM(CASE WHEN was_error = 0 THEN weight ELSE 0 END) AS total_weight, "
+                "       COUNT(*) AS cnt, "
+                "       SUM(CASE WHEN weight >= 2.0 AND was_error = 0 THEN 1 ELSE 0 END) AS write_count, "
+                "       SUM(CASE WHEN weight <  2.0 AND was_error = 0 THEN 1 ELSE 0 END) AS read_count "
                 "FROM cr_interactions "
                 "WHERE session_id = ? AND task_id = ? "
                 "GROUP BY target, target_type",
                 (session_id, task_id),
             ).fetchall()
             for row in rows:
+                write_count = row["write_count"] or 0
+                read_count = row["read_count"] or 0
+                was_edited = write_count > 0
+                if was_edited:
+                    productivity = _PRODUCTIVITY_EDITED
+                elif read_count == 1:
+                    productivity = _PRODUCTIVITY_NEUTRAL
+                else:
+                    productivity = _PRODUCTIVITY_EXPLORATORY
+
                 conn.execute(
                     "INSERT INTO cr_session_scores "
-                    "(task_id, session_id, target, target_type, score, access_count, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(task_id, session_id, target, target_type, score, "
+                    " access_count, productivity, was_edited, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, session_id, row["target"], row["target_type"],
-                     row["total_weight"], row["cnt"], now),
+                     row["total_weight"], row["cnt"],
+                     productivity, 1 if was_edited else 0, now),
                 )
             conn.commit()
         execute_with_retry(_snapshot)
