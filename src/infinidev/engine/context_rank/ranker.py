@@ -65,22 +65,9 @@ _INDEX_FILES = ("index.ts", "index.tsx", "index.js", "index.py", "__init__.py", 
 # not be changed.
 _MAD_NORMAL_CONSISTENCY = 1.4826
 
-# OUTLIER_MAD_MULTIPLIER: how many "robust standard deviations" above
-# the baseline median a score needs to be to count as an outlier.
-# The classic convention (Iglewicz & Hoaglin 1993) is 3.0 — stricter
-# means fewer but more confident outliers.
-#   * 2.0 → ~95th percentile, more aggressive filtering
-#   * 3.0 → ~99.7th percentile, conservative (default)
-#   * 4.0 → only very extreme cases
-_OUTLIER_MAD_MULTIPLIER = 3.0
-
 # Minimum number of items required to attempt outlier detection.
 # With fewer items, MAD is too noisy to be reliable.
 _OUTLIER_MIN_ITEMS = 3
-
-# Maximum number of outliers to show.  Above this, the "cluster" is
-# too large to be a clean signal, so we fall back to showing all items.
-_OUTLIER_MAX_COUNT = 3
 
 # When MAD is degenerate (bottom half has identical scores), fall back
 # to a simple ratio test: top score must exceed baseline median by at
@@ -91,10 +78,40 @@ _OUTLIER_FALLBACK_RATIO = 1.8
 # tight) and trigger the fallback ratio test.
 _MAD_DEGENERATE_THRESHOLD = 0.05
 
-# Minimum top score required to attempt outlier filtering.  Below this,
-# scores are too close to the confidence floor to make meaningful
-# outlier distinctions.
-_OUTLIER_MIN_TOP_SCORE = 1.0
+
+def _percentile_to_mad_multiplier(percentile: float | str) -> float:
+    """Convert a user-friendly percentile to the MAD multiplier K.
+
+    Accepts a number (99) or a percentage string ("99%").  Returns
+    the corresponding K such that ``K × MAD × 1.4826`` equals the
+    standard-deviation distance at that percentile of a normal
+    distribution.
+
+        90   →  1.28   (top 10%)
+        95   →  1.645  (top 5%)
+        99   →  2.326  (top 1%)
+        99.7 →  2.748  (top 0.3%, classic 3-sigma)
+    """
+    from statistics import NormalDist
+
+    if isinstance(percentile, str):
+        s = percentile.strip().rstrip("%")
+        try:
+            p = float(s)
+        except ValueError:
+            p = 99.0
+    else:
+        p = float(percentile)
+
+    # Clamp to a sensible range
+    if p <= 0 or p >= 100:
+        p = 99.0
+
+    # Φ⁻¹(p/100) — inverse normal CDF at the requested percentile
+    try:
+        return NormalDist().inv_cdf(p / 100.0)
+    except Exception:
+        return 2.326  # fallback: 99th percentile
 
 
 # ── Public API ───────────────────────────────────────────────────────
@@ -871,21 +888,24 @@ def _filter_outliers(items: list[RankedItem]) -> list[RankedItem]:
     Uses Median Absolute Deviation (MAD) computed on the **bottom half**
     of the sorted scores to establish a noise baseline.  Items above
     ``median_bottom + K × MAD × 1.4826`` are outliers, where ``K`` is
-    :data:`_OUTLIER_MAD_MULTIPLIER`.  Computing MAD on the bottom half
+    derived from ``CONTEXT_RANK_OUTLIER_PERCENTILE`` (user-friendly
+    setting: 90, 95, 99, etc).  Computing MAD on the bottom half
     (not the full set) prevents outliers from inflating their own
     reference distribution.
-
-    All tuning thresholds are module-level constants so they can be
-    adjusted without touching the algorithm.  See each constant's
-    docstring for what it controls.
     """
     n = len(items)
     if n < _OUTLIER_MIN_ITEMS:
         return items
 
+    # Read user-friendly settings
+    percentile = getattr(settings, "CONTEXT_RANK_OUTLIER_PERCENTILE", 99)
+    max_count = getattr(settings, "CONTEXT_RANK_OUTLIER_MAX_COUNT", 3)
+    min_top = getattr(settings, "CONTEXT_RANK_OUTLIER_MIN_TOP_SCORE", 1.0)
+    mad_multiplier = _percentile_to_mad_multiplier(percentile)
+
     sorted_items = sorted(items, key=lambda it: it.score, reverse=True)
     top = sorted_items[0].score
-    if top < _OUTLIER_MIN_TOP_SCORE:
+    if top < min_top:
         return items
 
     # Bottom half: the lower ⌈n/2⌉ items (the "noise baseline").
@@ -911,9 +931,9 @@ def _filter_outliers(items: list[RankedItem]) -> list[RankedItem]:
         else:
             return items
     else:
-        threshold = b_median + _OUTLIER_MAD_MULTIPLIER * mad * _MAD_NORMAL_CONSISTENCY
+        threshold = b_median + mad_multiplier * mad * _MAD_NORMAL_CONSISTENCY
 
     outliers = [it for it in sorted_items if it.score >= threshold]
-    if 1 <= len(outliers) <= _OUTLIER_MAX_COUNT:
+    if 1 <= len(outliers) <= max_count:
         return outliers
     return items

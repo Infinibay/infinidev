@@ -181,6 +181,25 @@ class Settings(BaseSettings):
     CONTEXT_RANK_MIN_CONFIDENCE: float = 0.5
     CONTEXT_RANK_LOGGING_ENABLED: bool = True
 
+    # Outlier detection — when a few suggestions score dramatically
+    # higher than the rest, show only those (the rest are noise).
+    #
+    # CONTEXT_RANK_OUTLIER_PERCENTILE: what percentile of the noise
+    # distribution a score must exceed to count as an outlier.
+    # Accepts a number (99) or a percentage string ("99%" / "99.5%").
+    # Higher = stricter (fewer outliers, higher confidence).
+    #   90   → top 10% — aggressive (shows more suggestions)
+    #   95   → top 5%
+    #   99   → top 1%  — default (conservative)
+    #   99.7 → top 0.3% (very strict, classic 3-sigma)
+    CONTEXT_RANK_OUTLIER_PERCENTILE: float | str = 99
+    # Max number of outliers to show.  Above this, the "cluster" is
+    # too large to be a clean signal → fall back to showing all items.
+    CONTEXT_RANK_OUTLIER_MAX_COUNT: int = 3
+    # Minimum top score required to attempt outlier filtering.
+    # Below this, scores are too close to the confidence floor.
+    CONTEXT_RANK_OUTLIER_MIN_TOP_SCORE: float = 1.0
+
     model_config = {"env_prefix": "INFINIDEV_"}
 
     @classmethod

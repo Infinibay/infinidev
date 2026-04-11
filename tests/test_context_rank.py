@@ -689,13 +689,14 @@ class TestOutlierFiltering:
         from infinidev.engine.context_rank.ranker import _filter_outliers
         from infinidev.engine.context_rank.models import RankedItem
 
-        # All items in similar range — no outlier, keep all
+        # All items nearly identical — degenerate MAD case, ratio
+        # test says top is not meaningfully above baseline → keep all
         items = [
-            RankedItem(target="a.ts", target_type="file", score=3.8, reason=""),
-            RankedItem(target="b.ts", target_type="file", score=3.6, reason=""),
+            RankedItem(target="a.ts", target_type="file", score=3.6, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=3.5, reason=""),
             RankedItem(target="c.ts", target_type="file", score=3.5, reason=""),
             RankedItem(target="d.ts", target_type="file", score=3.4, reason=""),
-            RankedItem(target="e.ts", target_type="file", score=3.2, reason=""),
+            RankedItem(target="e.ts", target_type="file", score=3.3, reason=""),
         ]
         result = _filter_outliers(items)
         assert len(result) == 5
@@ -720,17 +721,19 @@ class TestOutlierFiltering:
         from infinidev.engine.context_rank.ranker import _filter_outliers
         from infinidev.engine.context_rank.models import RankedItem
 
-        # 4+ high-scoring items — not a clear outlier cluster, keep all
+        # 4+ items all at the same high score (degenerate MAD, fallback
+        # ratio fires) — 4 items > max_count → return all
         items = [
             RankedItem(target="a.ts", target_type="file", score=10.0, reason=""),
-            RankedItem(target="b.ts", target_type="file", score=9.0, reason=""),
-            RankedItem(target="c.ts", target_type="file", score=8.5, reason=""),
-            RankedItem(target="d.ts", target_type="file", score=8.0, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=10.0, reason=""),
+            RankedItem(target="c.ts", target_type="file", score=10.0, reason=""),
+            RankedItem(target="d.ts", target_type="file", score=10.0, reason=""),
             RankedItem(target="e.ts", target_type="file", score=1.0, reason=""),
+            RankedItem(target="f.ts", target_type="file", score=1.0, reason=""),
         ]
         result = _filter_outliers(items)
-        # 4 outliers is too many — fall back to showing all
-        assert len(result) == 5
+        # 4 outliers detected > max_count (3) → return all 6
+        assert len(result) == 6
 
     def test_few_items_unchanged(self):
         from infinidev.engine.context_rank.ranker import _filter_outliers
@@ -802,3 +805,64 @@ class TestOutlierFiltering:
         result = _filter_outliers(items)
         assert len(result) == 1
         assert result[0].target == "a.ts"
+
+
+class TestPercentileToMadMultiplier:
+    """Tests for the user-friendly percentile → K conversion."""
+
+    def test_common_percentiles(self):
+        from infinidev.engine.context_rank.ranker import _percentile_to_mad_multiplier
+
+        # Well-known Z-score values (table Z of normal distribution)
+        assert abs(_percentile_to_mad_multiplier(90) - 1.282) < 0.01
+        assert abs(_percentile_to_mad_multiplier(95) - 1.645) < 0.01
+        assert abs(_percentile_to_mad_multiplier(99) - 2.326) < 0.01
+        assert abs(_percentile_to_mad_multiplier(99.7) - 2.748) < 0.01
+
+    def test_percentage_strings(self):
+        from infinidev.engine.context_rank.ranker import _percentile_to_mad_multiplier
+
+        # Strings with and without % sign
+        assert abs(_percentile_to_mad_multiplier("90%") - 1.282) < 0.01
+        assert abs(_percentile_to_mad_multiplier("95") - 1.645) < 0.01
+        assert abs(_percentile_to_mad_multiplier("99.5%") - 2.576) < 0.01
+
+    def test_invalid_values_fallback(self):
+        from infinidev.engine.context_rank.ranker import _percentile_to_mad_multiplier
+
+        # Invalid values fall back to 99% (K ≈ 2.326)
+        assert abs(_percentile_to_mad_multiplier("not a number") - 2.326) < 0.01
+        assert abs(_percentile_to_mad_multiplier(-5) - 2.326) < 0.01
+        assert abs(_percentile_to_mad_multiplier(100) - 2.326) < 0.01
+        assert abs(_percentile_to_mad_multiplier(150) - 2.326) < 0.01
+
+    def test_aggressive_vs_strict_affects_outlier_count(self):
+        from infinidev.engine.context_rank.ranker import _filter_outliers
+        from infinidev.engine.context_rank.models import RankedItem
+
+        # Moderate outlier: score 5 vs noise around 2
+        items = [
+            RankedItem(target="a.ts", target_type="file", score=5.0, reason=""),
+            RankedItem(target="b.ts", target_type="file", score=2.1, reason=""),
+            RankedItem(target="c.ts", target_type="file", score=2.0, reason=""),
+            RankedItem(target="d.ts", target_type="file", score=1.9, reason=""),
+            RankedItem(target="e.ts", target_type="file", score=1.8, reason=""),
+        ]
+
+        # At 90% (aggressive), score=5 clearly exceeds threshold → 1 outlier
+        original = settings.CONTEXT_RANK_OUTLIER_PERCENTILE
+        try:
+            settings.CONTEXT_RANK_OUTLIER_PERCENTILE = 90
+            result_aggressive = _filter_outliers(items)
+
+            # At 99.9% (very strict), threshold is much higher
+            settings.CONTEXT_RANK_OUTLIER_PERCENTILE = 99.9
+            result_strict = _filter_outliers(items)
+        finally:
+            settings.CONTEXT_RANK_OUTLIER_PERCENTILE = original
+
+        # Aggressive percentile (lower K) has a lower threshold, so
+        # it should return at least as many outliers as strict.
+        assert len(result_aggressive) >= len(result_strict)
+        # Strict should return exactly the single clearest outlier.
+        assert result_strict[0].target == "a.ts"
