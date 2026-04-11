@@ -1,30 +1,47 @@
 """ContextRanker v3 — multi-channel scoring for files, symbols, and findings.
 
-Combines 5 independent scoring channels + 3 post-processing boosts:
+Combines 4 independent scoring channels + 3 post-processing boosts:
 
 **Independent channels** (produce scores from scratch):
   1. Reactive — current session tool calls with recency decay and
-     productivity pattern multiplier (read+edit > read alone, re-read
-     without edit penalised as "confusion")
+     productivity pattern multiplier (read+edit boosted 2×, re-read
+     without edit penalised as "confusion" 0.7×, edit-only 1.5×)
   2. Predictive (historical) — embedding sim vs past contexts →
-     interactions, with day-based session decay and sim² contribution
-  3. Mention detection — FTS5/fuzzy lookup of identifiers in the input
-  4. Semantic findings — multi-signal (cosine + topic + tags)
-  5. Semantic docstrings — BM25 via FTS5 on symbol docstrings/signatures
+     interactions, with day-based session decay, sim² contribution,
+     and per-target productivity multiplier from cr_session_scores
+     (edited-in-past-session = 1.5×, exploratory-only = 0.6×)
+  3. Fuzzy symbol search — cosine similarity against per-symbol
+     and per-file embeddings stored at index time.  Handles typos
+     ("AuthServise" → AuthService) and synonyms ("authentication
+     service" → AuthenticationHandler).  Replaces v2's substring-
+     based "mention detection".
+  4. Semantic findings — multi-signal (cosine + topic word match +
+     tag match), dedup by finding id, ORDER BY confidence DESC.
 
 **Post-processing boosts** (modify existing scores):
-  6. Co-occurrence — files frequently accessed alongside top-scored files
-  7. Import graph — 1-hop propagation through ``ci_imports`` (importers
-     boosted more than imported, since the former is non-obvious)
-  8. Freshness — filesystem mtime amplifies already-ranked files
+  5. Co-occurrence — files frequently accessed alongside top-scored
+     files in the last 90 days (cr_session_scores self-join).
+  6. Import graph — 1-hop propagation through ``ci_imports``;
+     importers/downstream boosted more than imported/upstream
+     because downstream consumers are the non-obvious surface.
+  7. Freshness — filesystem mtime amplifies already-ranked files
+     (multiplicative, 1.0-1.3×).  Does not rescue unranked files.
 
-A confidence gate suppresses the entire ``<context-rank>`` section when
-the top raw score is below ``CONTEXT_RANK_MIN_CONFIDENCE``.  Outliers
-within a passing ranking are filtered via MAD on the bottom half of
-scores (see ``_filter_outliers``).
+A confidence gate suppresses the entire ``<context-rank>`` section
+when the top raw score is below ``CONTEXT_RANK_MIN_CONFIDENCE``.
+Outliers within a passing ranking are filtered via MAD on the
+bottom half of scores (see ``_filter_outliers``).
 
-v3 removed canal 6 (popularity — scores too low to clear confidence
-gate) and canal 10 (directory expansion — rarely fired in practice).
+v3 removed five things vs v2:
+  - canal 5 (docstring BM25): folded into canal 3 via the symbol
+    embedding text, which includes the first line of each docstring
+  - canal 6 (popularity): scores too low to clear the confidence
+    gate, marginal value over list_directory
+  - canal 10 (directory expansion): rarely fired, JS/TS/Python bias
+  - ``_LEVEL_WEIGHTS`` (escalera bonuses): replaced by sim² so
+    confident matches win without arbitrary level ordering
+  - ``log(1+count)`` frequency boost in reactive: rewarded confusion,
+    replaced by productivity pattern multiplier
 """
 
 from __future__ import annotations
@@ -80,30 +97,30 @@ _ALPHA_REACTIVE_MIN_SIGNALS = 3
 # Multiplier applied when reactive signals are below the threshold.
 _ALPHA_SPARSE_REACTIVE_MULT = 0.5
 
-# ── Mention channel weights ──
-# Base score for a symbol name appearing literally in the input.
-# Longer names are more distinctive (less likely to be false
-# positives) so the score grows with name length.
-_MENTION_BASE_SCORE = 3.0
-# Per-character bonus: `score = BASE + name_len / DIVISOR`, capped at
-# `CAP`.  With DIVISOR=20 and CAP=5.0: names up to 40 chars still earn
-# extra score, beyond that it saturates.
-_MENTION_NAME_LEN_DIVISOR = 20.0
-_MENTION_SCORE_CAP = 5.0
-# Base score for matching a file basename ("foo.ts" appears in input).
-# Stronger than a stem match because the extension disambiguates.
-_MENTION_BASENAME_BASE = 4.0
-# Base score for matching a file stem ("foo" appears with word boundary).
-_MENTION_STEM_BASE = 3.2
-# Penalty applied to stem matches whose stem is in `_STEM_SKIP` (e.g.
-# "config", "utils").  Still scored (the stem literally appears) but
-# treated as weaker evidence.
-_MENTION_STEM_SKIP_BASE = 2.5
-# Per-character bonus for basename/stem matches.
-_MENTION_FILENAME_LEN_DIVISOR = 25.0
-# Max LIKE patterns in the basename query — cap to avoid pathological
-# queries when the input has many distinct words.
-_MENTION_MAX_LIKE_PATTERNS = 20
+# ── Fuzzy symbol channel (v3: replaces substring mention) ──
+# The v3 mention channel uses dense embeddings stored on ci_symbols
+# and ci_files (populated at index time by symbol_embeddings.py).
+# At rank time it does a vectorized cosine sweep against all
+# embedded symbols/files in the project — handles typos, synonyms,
+# and descriptive queries uniformly.
+#
+# Below this cosine similarity a symbol match is too weak to surface.
+# Calibrated empirically for all-MiniLM-L6-v2 — below ~0.45 matches
+# become incidental (shared stop words, capitalised prefixes).
+_FUZZY_SYMBOL_MIN_SIM = 0.45
+# Score scale: sim ∈ [0.45, 1.0] × 5.0 → [2.25, 5.0], putting fuzzy
+# scores in the same range as the old substring mention scores so
+# the `max()` merge treats them comparably.
+_FUZZY_SYMBOL_SCALE = 5.0
+# Symbol hits get a small bonus over the same-file hit so the symbol
+# itself is preferred in the symbol-type output when both would rank.
+_FUZZY_SYMBOL_BONUS = 0.5
+
+# File-level fuzzy matching uses a slightly lower threshold because
+# file embeddings are shorter (stem + top-N symbol names) and their
+# cosine values naturally run lower.
+_FUZZY_FILE_MIN_SIM = 0.4
+_FUZZY_FILE_SCALE = 4.5
 
 # ── Finding channel weights ──
 # Cosine similarity is in [0, 1]; multiplying by this scale brings
@@ -120,21 +137,11 @@ _FINDING_TOPIC_BONUS = 1.5
 _FINDING_TAG_BASE = 4.0
 _FINDING_TAG_BONUS = 0.5
 
-# ── Docstring channel weights ──
-# Minimum docstring length to consider — shorter docstrings like
-# "Get X" match everything and produce noise.
-_DOCSTRING_MIN_LENGTH = 30
-# Minimum number of non-common input words that must appear in the
-# docstring.  Single-word matches are too noisy in practice.
-_DOCSTRING_MIN_HITS = 2
-# BM25 result cap — top-5 is where BM25 ranking is most reliable,
-# past that the tail is noisy.
-_DOCSTRING_BM25_LIMIT = 5
-# Base + density-scaled bonus for file and symbol scores.
-_DOCSTRING_FILE_BASE = 3.0
-_DOCSTRING_FILE_BONUS = 0.5
-_DOCSTRING_SYMBOL_BASE = 3.5
-_DOCSTRING_SYMBOL_BONUS = 0.5
+# v3 removed the _DOCSTRING_* constants along with canal 5
+# (_compute_docstring_scores).  Docstring matching is now absorbed
+# into canal 3 via the symbol embedding text, which includes
+# `{kind} {name} — {docstring_first_line}`.  The embedding captures
+# both the symbol identity and the documented intent in one shot.
 
 # ── Co-occurrence boost ──
 # Only boost co-occurrences of files whose base score is at least this.
@@ -324,17 +331,22 @@ def rank(
     alpha = _compute_alpha(iteration, len(reactive))
     blended = _blend_reactive_predictive(reactive, predictive, alpha)
 
-    # ── Channel 3: Mention detection (FTS5 symbol lookup) ────────
-    mentions = _compute_mention_scores(current_input, project_id, workspace)
+    # ── Channel 3: Fuzzy symbol search (embedding cosine) ────────
+    mentions = _compute_mention_scores(
+        current_input, project_id, workspace,
+        cached_embedding=query_embedding,
+    )
 
     # ── Channel 4: Semantic findings (embedding similarity) ──────
     findings = _compute_finding_scores(query_embedding, current_input, project_id)
 
-    # ── Channel 5: Semantic docstrings (BM25) ────────────────────
-    docstrings = _compute_docstring_scores(current_input, project_id, workspace)
+    # Canal 5 (docstring BM25) was removed in v3 — the semantic
+    # match via fuzzy symbol embeddings now covers docstring
+    # matching, since the symbol embedding text includes the
+    # docstring's first line.
 
     # ── Merge all independent channels (max per target) ──────────
-    combined = _merge_channels(blended, mentions, findings, docstrings)
+    combined = _merge_channels(blended, mentions, findings)
 
     # ── Post-processing boosts ───────────────────────────────────
     combined = _apply_cooccurrence_boost(combined)
@@ -347,7 +359,7 @@ def rank(
     # when there's no predictive data, but the raw signal may be strong.
     min_confidence = getattr(settings, "CONTEXT_RANK_MIN_CONFIDENCE", 0.5)
     all_raw = [
-        s for ch in (reactive, predictive, mentions, findings, docstrings)
+        s for ch in (reactive, predictive, mentions, findings)
         for s, _, _ in ch.values()
     ]
     if not combined or (not all_raw or max(all_raw) < min_confidence):
@@ -608,11 +620,11 @@ def _compute_predictive_scores(
     return result
 
 
-# ── Channel 3: Mention detection ────────────────────────────────────
+# ── Channel 3: Fuzzy symbol search (v3) ────────────────────────────
 
-# Common English words that happen to be valid short symbol names.
-# We exclude these from the "reverse" mention matching because they'd
-# false-positive against almost any natural-language input.
+# Common English words kept for canal 4 (findings) topic-word match.
+# Canal 3 no longer needs a stop-word list because fuzzy cosine sim
+# naturally suppresses low-information matches via its threshold.
 _COMMON_WORDS: frozenset[str] = frozenset({
     "type", "file", "test", "tests", "error", "value", "data", "name",
     "time", "date", "size", "text", "info", "item", "list", "page",
@@ -625,152 +637,146 @@ _COMMON_WORDS: frozenset[str] = frozenset({
 })
 
 
-# Words that often mean the English concept, not a file/module name.
-# Only used to filter STEM matches — if the user writes "system.ts"
-# literally, that exact form still matches (it's not a stem-only match).
-_STEM_SKIP: frozenset[str] = frozenset({
-    "system", "systems", "module", "modules", "common", "shared",
-    "base", "helper", "helpers", "manager", "handler", "service",
-    "client", "server", "config", "setup", "index", "const", "style",
-    "styles", "route", "routes", "view", "views", "model", "models",
-    "store", "stores", "util", "utils", "info", "item", "items",
-})
-
-
 def _compute_mention_scores(
     current_input: str, project_id: int, workspace: str | None = None,
+    *, cached_embedding: bytes | None = None,
 ) -> dict[str, tuple[float, str, str]]:
-    """Find known symbols from the project that appear in the input.
+    """Fuzzy semantic search over per-symbol and per-file embeddings.
 
-    Inverse lookup: instead of trying to extract identifiers from the
-    input with regex, we ask the DB "which of the symbols you know
-    about appear literally in this text?".  One SQL query with
-    ``instr()`` does all the work — no regex, no stop-word lists per
-    language, no tokenization bugs.
+    v3 replaces the old substring-based mention detection entirely.
+    At index time, ``symbol_embeddings.embed_file_symbols`` populates
+    ``ci_symbols.embedding`` and ``ci_files.embedding`` with 384-dim
+    float32 vectors computed from text like
+    ``{kind} {name} — {docstring_first_line}``.  At rank time this
+    function does a vectorized cosine sweep and keeps matches above
+    the empirical thresholds ``_FUZZY_SYMBOL_MIN_SIM=0.45`` and
+    ``_FUZZY_FILE_MIN_SIM=0.4``.
+
+    Benefits over v2 substring matching:
+
+    - **Typo tolerance.** "AuthServise" (typo) still matches
+      AuthService because the embedding model sees subword tokens.
+    - **Synonym tolerance.** "authentication service" matches
+      AuthenticationHandler through shared semantic space.
+    - **No stop-word lists.** ``_COMMON_WORDS`` and ``_STEM_SKIP``
+      are gone — the similarity threshold does the filtering.
+    - **No kind whitelist.** Variables and constants
+      (``DEFAULT_TIMEOUT``, ``ROUTER_PREFIX``) participate too,
+      restricted only by what the symbol_embeddings module
+      considered embeddable (see ``_EMBEDDABLE_KINDS`` there).
+
+    Performance: for 10k embedded symbols, one np.stack + one
+    matmul is ~5ms; for 1k embedded files, ~1ms.  Total <10ms per
+    rank call — well inside the per-pivot budget.
     """
-    if not current_input or len(current_input) < _MIN_IDENT_LEN:
+    if cached_embedding is None or not current_input:
         return {}
 
-    input_lower = current_input.lower()
-    # Pad with spaces so word-boundary heuristics work at start/end
-    padded = " " + input_lower + " "
-
-    try:
-        def _fetch(conn):
-            # Find symbols whose name or qualified_name appears in the input.
-            # Constraints:
-            #   - Only function/method/class/interface/enum (distinctive)
-            #   - LENGTH(name) >= 4 to avoid matching short common words
-            #   - instr() returns position (0 if not found)
-            return conn.execute(
-                "SELECT DISTINCT name, qualified_name, file_path, kind, "
-                "LENGTH(name) as name_len "
-                "FROM ci_symbols "
-                "WHERE project_id = ? "
-                "  AND kind IN ('function', 'method', 'class', 'interface', 'enum', 'type_alias') "
-                "  AND LENGTH(name) >= 4 "
-                "  AND (instr(?, LOWER(name)) > 0 "
-                "       OR (qualified_name != '' AND instr(?, LOWER(qualified_name)) > 0)) "
-                "LIMIT 100",
-                (project_id, padded, padded),
-            ).fetchall()
-        rows = execute_with_retry(_fetch)
-    except Exception:
-        logger.debug("Mention detection query failed", exc_info=True)
+    query_vec = np.frombuffer(cached_embedding, dtype=np.float32)
+    # Normalize the query vector once — the stored symbol vectors
+    # get normalized row-wise in the matmul.
+    q_norm = np.linalg.norm(query_vec)
+    if q_norm == 0:
         return {}
+    q_unit = query_vec / q_norm
 
     result: dict[str, tuple[float, str, str]] = {}
-    for row in rows:
-        name = row["name"]
-        name_lc = name.lower()
-        # Skip common English words that happen to be valid symbol names
-        if name_lc in _COMMON_WORDS:
-            continue
-        # Score scales with name length — longer names are more distinctive
-        score = min(
-            _MENTION_SCORE_CAP,
-            _MENTION_BASE_SCORE + (row["name_len"] / _MENTION_NAME_LEN_DIVISOR),
-        )
 
-        fp = _normalize_path(row["file_path"], workspace)
-        if fp:
-            existing = result.get(fp, (0.0, "", ""))
-            if score > existing[0]:
-                result[fp] = (score, "file", f"contains '{name}' mentioned in input")
+    # ── Symbols ────────────────────────────────────────────────
+    try:
+        def _fetch_symbols(conn):
+            return conn.execute(
+                "SELECT name, qualified_name, file_path, kind, embedding "
+                "FROM ci_symbols "
+                "WHERE project_id = ? AND embedding IS NOT NULL",
+                (project_id,),
+            ).fetchall()
+        sym_rows = execute_with_retry(_fetch_symbols)
+    except Exception:
+        logger.debug("fuzzy symbol fetch failed", exc_info=True)
+        sym_rows = []
 
-        sym_key = row["qualified_name"] or name
-        if sym_key:
-            existing = result.get(sym_key, (0.0, "", ""))
-            if score > existing[0]:
-                result[sym_key] = (score, "symbol", f"'{name}' mentioned in input")
-
-    # Also check file basenames against the input.
-    # Extract candidate words from the input once, then query only
-    # files whose path contains any of those words.  This replaces
-    # the full-scan approach (2000 rows → Python filter).
-    input_words = set(
-        w for w in re.split(r'\W+', input_lower)
-        if len(w) >= _MIN_IDENT_LEN and w not in _COMMON_WORDS
-    )
-    file_rows = []
-    if input_words:
+    if sym_rows:
         try:
-            def _fetch_files(conn):
-                # Build an OR of LIKE patterns — SQLite uses the
-                # ci_files index on file_path so this is fast even
-                # with 10+ patterns.
-                words_list = list(input_words)[:_MENTION_MAX_LIKE_PATTERNS]
-                placeholders = " OR ".join("file_path LIKE ?" for _ in words_list)
-                params = [project_id] + [f"%{w}%" for w in words_list]
-                return conn.execute(
-                    f"SELECT DISTINCT file_path FROM ci_files "
-                    f"WHERE project_id = ? AND ({placeholders}) "
-                    f"LIMIT 200",
-                    params,
-                ).fetchall()
-            file_rows = execute_with_retry(_fetch_files)
+            mat = np.stack([
+                np.frombuffer(r["embedding"], dtype=np.float32) for r in sym_rows
+            ])
+            # Row-normalize the matrix.  Adding a small epsilon so
+            # zero-vector rows (shouldn't exist but defensive) don't
+            # NaN the division.
+            row_norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
+            m_unit = mat / row_norms
+            sims = m_unit @ q_unit  # shape (N,)
+
+            for row, sim in zip(sym_rows, sims):
+                sim_val = float(sim)
+                if sim_val < _FUZZY_SYMBOL_MIN_SIM:
+                    continue
+                base_score = sim_val * _FUZZY_SYMBOL_SCALE
+                name = row["name"]
+
+                # File gets the max symbol-level score
+                fp = _normalize_path(row["file_path"], workspace)
+                if fp:
+                    existing = result.get(fp, (0.0, "", ""))
+                    if base_score > existing[0]:
+                        result[fp] = (
+                            base_score, "file",
+                            f"contains '{name}' (fuzzy sim={sim_val:.2f})",
+                        )
+
+                # Symbol entry gets a small bonus so the symbol itself
+                # outranks its file in the symbol-type output.
+                sym_key = row["qualified_name"] or name
+                if sym_key:
+                    sym_score = base_score + _FUZZY_SYMBOL_BONUS
+                    existing = result.get(sym_key, (0.0, "", ""))
+                    if sym_score > existing[0]:
+                        result[sym_key] = (
+                            sym_score, "symbol",
+                            f"fuzzy semantic match (sim={sim_val:.2f})",
+                        )
         except Exception:
-            file_rows = []
+            logger.debug("fuzzy symbol cosine failed", exc_info=True)
 
-    for row in file_rows:
-        fp = row["file_path"]
-        if not fp:
-            continue
-        basename = os.path.basename(fp)  # trust Python's extraction
-        stem = basename.rsplit(".", 1)[0] if "." in basename else basename
-        stem_lc = stem.lower()
-        if len(stem) < _MIN_IDENT_LEN or stem_lc in _COMMON_WORDS:
-            continue
+    # ── Files ──────────────────────────────────────────────────
+    try:
+        def _fetch_files(conn):
+            return conn.execute(
+                "SELECT file_path, embedding FROM ci_files "
+                "WHERE project_id = ? AND embedding IS NOT NULL",
+                (project_id,),
+            ).fetchall()
+        file_rows = execute_with_retry(_fetch_files)
+    except Exception:
+        logger.debug("fuzzy file fetch failed", exc_info=True)
+        file_rows = []
 
-        # The SQL already confirmed the basename substring is in the
-        # input.  We now distinguish between "basename.ext literal" and
-        # "stem with word boundary" for scoring.
-        basename_match = "." in basename and basename.lower() in padded
-        stem_match = (
-            f" {stem_lc} " in padded or
-            f" {stem_lc}." in padded or
-            f" {stem_lc}?" in padded or
-            f" {stem_lc}," in padded or
-            f" {stem_lc}/" in padded
-        )
+    if file_rows:
+        try:
+            mat = np.stack([
+                np.frombuffer(r["embedding"], dtype=np.float32) for r in file_rows
+            ])
+            row_norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
+            m_unit = mat / row_norms
+            sims = m_unit @ q_unit
 
-        if basename_match or stem_match:
-            fp_n = _normalize_path(fp, workspace)
-            base_score = _MENTION_BASENAME_BASE if basename_match else _MENTION_STEM_BASE
-            if not basename_match and stem_lc in _STEM_SKIP:
-                base_score = _MENTION_STEM_SKIP_BASE
-            score = min(
-                _MENTION_SCORE_CAP,
-                base_score + (len(stem) / _MENTION_FILENAME_LEN_DIVISOR),
-            )
-            existing = result.get(fp_n, (0.0, "", ""))
-            if score > existing[0]:
-                reason = (
-                    f"filename '{basename}' mentioned in input"
-                    if basename_match else
-                    f"file stem '{stem}' mentioned in input"
-                )
-                result[fp_n] = (score, "file", reason)
+            for row, sim in zip(file_rows, sims):
+                sim_val = float(sim)
+                if sim_val < _FUZZY_FILE_MIN_SIM:
+                    continue
+                fp = _normalize_path(row["file_path"], workspace)
+                if not fp:
+                    continue
+                score = sim_val * _FUZZY_FILE_SCALE
+                existing = result.get(fp, (0.0, "", ""))
+                if score > existing[0]:
+                    result[fp] = (
+                        score, "file",
+                        f"fuzzy file match (sim={sim_val:.2f})",
+                    )
+        except Exception:
+            logger.debug("fuzzy file cosine failed", exc_info=True)
 
     return result
 
@@ -902,75 +908,13 @@ def _compute_finding_scores(
     return result
 
 
-# ── Channel 5: Semantic docstring match (BM25) ─────────────────────
-
-def _compute_docstring_scores(
-    current_input: str, project_id: int, workspace: str | None = None,
-) -> dict[str, tuple[float, str, str]]:
-    """Score symbols by docstring/signature relevance via BM25.
-
-    Noise control:
-    - Only top ``_DOCSTRING_BM25_LIMIT`` BM25 matches — past the top,
-      BM25 ranking becomes unreliable in our experience.
-    - Only function/method/class/interface kinds (symbols whose
-      docstring is likely to describe intent, not a type alias).
-    - Requires >= ``_DOCSTRING_MIN_HITS`` non-common input words
-      present in the docstring (single-word matches are too noisy).
-    - Skips docstrings shorter than ``_DOCSTRING_MIN_LENGTH`` chars
-      (usually "Get X" / "Returns Y" boilerplate that matches too much).
-    """
-    try:
-        from infinidev.code_intel.query import search_by_docstring
-        matches = search_by_docstring(
-            project_id, current_input, limit=_DOCSTRING_BM25_LIMIT,
-        )
-    except Exception:
-        return {}
-
-    _RELEVANT_KINDS = {"function", "method", "class", "interface"}
-
-    # Extract meaningful input words (≥ _MIN_IDENT_LEN chars, not common)
-    input_words = [
-        w for w in re.split(r'\W+', current_input.lower())
-        if len(w) >= _MIN_IDENT_LEN and w not in _COMMON_WORDS
-    ]
-    if len(input_words) < _DOCSTRING_MIN_HITS:
-        return {}
-
-    result: dict[str, tuple[float, str, str]] = {}
-    for sym, _bm25_rank in matches:
-        kind = sym.kind.value if hasattr(sym.kind, "value") else str(sym.kind)
-        if kind not in _RELEVANT_KINDS:
-            continue
-
-        # Require meaningful docstring
-        doc = (sym.docstring or "").lower()
-        if len(doc) < _DOCSTRING_MIN_LENGTH:
-            continue
-
-        # Count how many input words appear in the docstring
-        hits = sum(1 for w in input_words if w in doc)
-        if hits < _DOCSTRING_MIN_HITS:
-            continue
-
-        # Scale score with hit density
-        density = hits / max(len(input_words), 1)
-        score_file = _DOCSTRING_FILE_BASE + density * _DOCSTRING_FILE_BONUS
-        score_sym = _DOCSTRING_SYMBOL_BASE + density * _DOCSTRING_SYMBOL_BONUS
-
-        fp = _normalize_path(sym.file_path, workspace)
-        if fp:
-            existing = result.get(fp, (0.0, "", ""))
-            if score_file > existing[0]:
-                result[fp] = (score_file, "file",
-                              f"contains '{sym.name}' ({hits} word match in docstring)")
-        key = sym.qualified_name or sym.name
-        if key:
-            existing = result.get(key, (0.0, "", ""))
-            if score_sym > existing[0]:
-                result[key] = (score_sym, "symbol",
-                               f"{hits} word docstring match")
-    return result
+# Canal 5 (docstring BM25) was removed in v3.  The fuzzy symbol
+# channel now handles docstring matching via dense embeddings — the
+# symbol embedding text includes the docstring's first line, so
+# "authentication service" can match a function whose docstring
+# says "Authenticates users via JWT" even when the function name
+# itself is something unrelated like ``_verify``.  See
+# ``symbol_embeddings._build_symbol_text`` for the embedding format.
 
 
 # ── Post-processing: Co-occurrence boost ────────────────────────────

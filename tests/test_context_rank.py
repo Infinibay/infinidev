@@ -353,179 +353,233 @@ class TestPromptRendering:
 
 def _insert_symbol(conn, *, project_id=1, name, kind="function",
                    file_path="src/auth.py", qualified_name=None,
-                   line_start=10, line_end=20, docstring=""):
-    """Helper to insert a symbol for mention detection tests."""
+                   line_start=10, line_end=20, docstring="",
+                   embedding=None, embedding_text=None):
+    """Helper to insert a symbol for fuzzy symbol search tests.
+
+    Optional ``embedding`` / ``embedding_text`` let tests seed pre-
+    computed vectors so the fuzzy channel can score them without
+    having to run the indexer hook path.
+    """
     conn.execute(
         "INSERT INTO ci_symbols "
         "(project_id, file_path, name, qualified_name, kind, line_start, "
-        "line_end, signature, docstring, language) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "line_end, signature, docstring, language, embedding, embedding_text) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (project_id, file_path, name, qualified_name or name, kind,
-         line_start, line_end, f"{kind} {name}()", docstring, "python"),
+         line_start, line_end, f"{kind} {name}()", docstring, "python",
+         embedding, embedding_text),
     )
 
 
-def _insert_file(conn, *, project_id=1, file_path, language="python"):
-    """Helper to insert an indexed file for mention detection tests."""
+def _insert_file(conn, *, project_id=1, file_path, language="python",
+                 embedding=None, embedding_text=None):
+    """Helper to insert an indexed file for fuzzy symbol search tests."""
     conn.execute(
-        "INSERT INTO ci_files (project_id, file_path, language, content_hash) "
-        "VALUES (?, ?, ?, ?)",
-        (project_id, file_path, language, "hash"),
+        "INSERT INTO ci_files "
+        "(project_id, file_path, language, content_hash, embedding, embedding_text) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (project_id, file_path, language, "hash", embedding, embedding_text),
     )
 
 
-class TestMentionDetection:
-    """Tests for the inverse mention detection (instr-based lookup)."""
+def _embed_symbol_like(name: str, kind: str = "class", desc: str = "") -> bytes | None:
+    """Compute an embedding matching symbol_embeddings._build_symbol_text.
 
-    def test_symbol_name_in_input(self, cr_db):
+    Reproduces the same text format the real indexer hook uses so
+    the stored embeddings match what the ranker would see in
+    production.  Used by the fuzzy symbol search tests.
+    """
+    from infinidev.tools.base.embeddings import compute_embedding
+    text = f"{kind} {name}" if not desc else f"{kind} {name} — {desc}"
+    return compute_embedding(text)
+
+
+class TestFuzzySymbolSearch:
+    """Tests for canal 3 v3 — fuzzy semantic symbol search via embeddings.
+
+    The v3 design replaces substring matching with dense cosine
+    similarity over per-symbol and per-file embeddings stored at
+    index time.  These tests exercise the end-to-end path: seed
+    symbols with real embeddings (matching the format
+    symbol_embeddings._build_symbol_text produces), compute a query
+    embedding, pass it via cached_embedding, and verify the ranker
+    surfaces the expected matches.
+    """
+
+    def test_exact_symbol_name_matches(self, cr_db):
         from infinidev.engine.context_rank.ranker import _compute_mention_scores
+        from infinidev.tools.base.embeddings import compute_embedding
 
         def _seed(conn):
-            _insert_symbol(conn, name="AuthMiddleware", kind="class",
-                           file_path="/tmp/workspace/src/auth.py")
-            conn.commit()
-        execute_with_retry(_seed)
-
-        result = _compute_mention_scores(
-            "Please fix the AuthMiddleware class bug", project_id=1,
-        )
-        # Should have matched both the file and the symbol
-        assert any("AuthMiddleware" in r for _, (_, _, r) in result.items())
-
-    def test_short_names_ignored(self, cr_db):
-        from infinidev.engine.context_rank.ranker import _compute_mention_scores
-
-        def _seed(conn):
-            _insert_symbol(conn, name="get", kind="function")
-            _insert_symbol(conn, name="set", kind="function")
-            _insert_symbol(conn, name="run", kind="function")
-            conn.commit()
-        execute_with_retry(_seed)
-
-        # These are all short common names — should be filtered by LENGTH(name) >= 4
-        result = _compute_mention_scores("Can you run get and set this?", project_id=1)
-        # Either no matches, or only the `run` symbol if LENGTH check is off
-        # With LENGTH >= 4, nothing should match
-        assert len(result) == 0
-
-    def test_common_words_ignored(self, cr_db):
-        from infinidev.engine.context_rank.ranker import _compute_mention_scores
-
-        def _seed(conn):
-            # "error" is a common word in _COMMON_WORDS
-            _insert_symbol(conn, name="error", kind="function")
-            # "TokenValidator" is distinctive
-            _insert_symbol(conn, name="TokenValidator", kind="class",
-                           file_path="src/tokens.py")
-            conn.commit()
-        execute_with_retry(_seed)
-
-        result = _compute_mention_scores(
-            "What is the error in TokenValidator?", project_id=1,
-        )
-        # "error" should be filtered, "TokenValidator" should match
-        targets = set(result.keys())
-        assert not any("error" == t.split("/")[-1] for t in targets)
-        assert any("TokenValidator" in r for _, (_, _, r) in result.items())
-
-    def test_qualified_name_match(self, cr_db):
-        from infinidev.engine.context_rank.ranker import _compute_mention_scores
-
-        def _seed(conn):
+            emb = _embed_symbol_like("AuthMiddleware", "class",
+                                     "Intercepts requests to verify JWT")
             _insert_symbol(
-                conn, name="handleEvent", kind="method",
-                qualified_name="Agent.handleEvent",
-                file_path="src/agent.py",
+                conn, name="AuthMiddleware", kind="class",
+                file_path="src/auth.py", embedding=emb,
             )
             conn.commit()
         execute_with_retry(_seed)
 
+        query_emb = compute_embedding("Please fix the AuthMiddleware class bug")
         result = _compute_mention_scores(
-            "Explain Agent.handleEvent and what it does", project_id=1,
+            "Please fix the AuthMiddleware class bug",
+            project_id=1, cached_embedding=query_emb,
         )
-        assert any("handleEvent" in r for _, (_, _, r) in result.items())
+        # AuthMiddleware should appear either as file or symbol hit
+        assert any(
+            "AuthMiddleware" in r for _, (_, _, r) in result.items()
+        ), f"expected AuthMiddleware in {list(result.items())}"
 
-    def test_ignores_non_distinctive_kinds(self, cr_db):
+    def test_typo_tolerance(self, cr_db):
+        """The whole point of v3: typos still match."""
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+        from infinidev.tools.base.embeddings import compute_embedding
+
+        def _seed(conn):
+            emb = _embed_symbol_like("AuthService", "class",
+                                     "User authentication service")
+            _insert_symbol(
+                conn, name="AuthService", kind="class",
+                file_path="src/auth_service.py", embedding=emb,
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # Deliberate typo — substring matching would fail, fuzzy should work
+        query_emb = compute_embedding("Show me the AuthServise class")
+        result = _compute_mention_scores(
+            "Show me the AuthServise class",
+            project_id=1, cached_embedding=query_emb,
+        )
+        # Should still find AuthService via embedding similarity
+        assert any(
+            "AuthService" in r for _, (_, _, r) in result.items()
+        ), f"typo query should still match AuthService, got {list(result.items())}"
+
+    def test_synonym_tolerance(self, cr_db):
+        """Description-based queries match the named symbol."""
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+        from infinidev.tools.base.embeddings import compute_embedding
+
+        def _seed(conn):
+            emb = _embed_symbol_like(
+                "JWTValidator", "class",
+                "Validates JSON Web Tokens for API authentication",
+            )
+            _insert_symbol(
+                conn, name="JWTValidator", kind="class",
+                file_path="src/jwt.py", embedding=emb,
+            )
+            # An unrelated symbol with an embedding that shouldn't match
+            noise_emb = _embed_symbol_like(
+                "CacheWarmupScheduler", "class",
+                "Periodic cache preloading job runner",
+            )
+            _insert_symbol(
+                conn, name="CacheWarmupScheduler", kind="class",
+                file_path="src/cache.py", embedding=noise_emb,
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        # Query uses synonymous phrasing — no literal "JWTValidator"
+        query_emb = compute_embedding("How does token authentication validation work?")
+        result = _compute_mention_scores(
+            "How does token authentication validation work?",
+            project_id=1, cached_embedding=query_emb,
+        )
+        # JWTValidator should rank higher than CacheWarmupScheduler
+        jwt_score = max(
+            (s for k, (s, _, _) in result.items() if "JWT" in k or "jwt" in k),
+            default=0.0,
+        )
+        cache_score = max(
+            (s for k, (s, _, _) in result.items() if "Cache" in k or "cache" in k),
+            default=0.0,
+        )
+        assert jwt_score > cache_score, (
+            f"semantic match should prefer JWTValidator over CacheWarmupScheduler; "
+            f"got jwt={jwt_score:.2f}, cache={cache_score:.2f}"
+        )
+
+    def test_empty_input_returns_empty(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+
+        result = _compute_mention_scores("", 1, cached_embedding=None)
+        assert result == {}
+
+    def test_no_cached_embedding_returns_empty(self, cr_db):
+        """Without a query embedding, the channel can't rank — return empty."""
         from infinidev.engine.context_rank.ranker import _compute_mention_scores
 
         def _seed(conn):
-            # Variables and parameters should be ignored — only function/method/
-            # class/interface/enum/type_alias are considered
-            _insert_symbol(conn, name="sessionRegistry", kind="variable")
-            _insert_symbol(conn, name="sessionManager", kind="class",
-                           file_path="src/session.py")
+            emb = _embed_symbol_like("SomeClass", "class")
+            _insert_symbol(conn, name="SomeClass", kind="class", embedding=emb)
             conn.commit()
         execute_with_retry(_seed)
 
         result = _compute_mention_scores(
-            "Show me the sessionRegistry and sessionManager", project_id=1,
+            "Show me SomeClass", project_id=1, cached_embedding=None,
         )
-        # Only sessionManager (class) should match — sessionRegistry is a variable
+        assert result == {}
+
+    def test_unembedded_symbols_ignored(self, cr_db):
+        """Symbols without embeddings are skipped, not crashed on."""
+        from infinidev.engine.context_rank.ranker import _compute_mention_scores
+        from infinidev.tools.base.embeddings import compute_embedding
+
+        def _seed(conn):
+            # One symbol with embedding, one without
+            emb = _embed_symbol_like("EmbeddedOne", "class")
+            _insert_symbol(conn, name="EmbeddedOne", kind="class",
+                           file_path="src/one.py", embedding=emb)
+            _insert_symbol(conn, name="UnembeddedTwo", kind="class",
+                           file_path="src/two.py", embedding=None)
+            conn.commit()
+        execute_with_retry(_seed)
+
+        query_emb = compute_embedding("EmbeddedOne or UnembeddedTwo please")
+        result = _compute_mention_scores(
+            "EmbeddedOne or UnembeddedTwo please",
+            project_id=1, cached_embedding=query_emb,
+        )
+        # Only the embedded one should appear
         all_reasons = " ".join(r for _, (_, _, r) in result.items())
-        assert "sessionManager" in all_reasons
-        assert "sessionRegistry" not in all_reasons
+        assert "EmbeddedOne" in all_reasons
+        assert "UnembeddedTwo" not in all_reasons
 
-    def test_filename_stem_match(self, cr_db):
+    def test_file_level_matching(self, cr_db):
+        """Files with embeddings also rank via cosine."""
         from infinidev.engine.context_rank.ranker import _compute_mention_scores
+        from infinidev.tools.base.embeddings import compute_embedding
 
         def _seed(conn):
-            _insert_file(conn, file_path="src/registry.py")
-            _insert_file(conn, file_path="src/unrelated.py")
+            file_emb = compute_embedding(
+                "python auth_service — AuthService, login, validate_token"
+            )
+            _insert_file(conn, file_path="src/auth_service.py",
+                         embedding=file_emb)
+            noise = compute_embedding(
+                "python email_queue — EmailJob, Sender, retry"
+            )
+            _insert_file(conn, file_path="src/email_queue.py",
+                         embedding=noise)
             conn.commit()
         execute_with_retry(_seed)
 
+        query_emb = compute_embedding("How does user login validation work?")
         result = _compute_mention_scores(
-            "How does the registry work?", project_id=1,
+            "How does user login validation work?",
+            project_id=1, cached_embedding=query_emb,
         )
-        # registry.py should appear (stem match)
-        assert any("registry" in t for t in result.keys())
-        # unrelated.py should not
-        assert not any("unrelated" in t for t in result.keys())
-
-    def test_basename_match_scores_higher(self, cr_db):
-        from infinidev.engine.context_rank.ranker import _compute_mention_scores
-
-        def _seed(conn):
-            _insert_file(conn, file_path="src/registry.py")
-            conn.commit()
-        execute_with_retry(_seed)
-
-        # With extension — basename match (higher score)
-        result_exact = _compute_mention_scores("Check registry.py please", project_id=1)
-        # Without extension — stem match (lower score)
-        result_stem = _compute_mention_scores("Check the registry module", project_id=1)
-
-        exact_scores = [s for _, (s, _, _) in result_exact.items()]
-        stem_scores = [s for _, (s, _, _) in result_stem.items()]
-        if exact_scores and stem_scores:
-            assert max(exact_scores) >= max(stem_scores)
-
-    def test_empty_or_short_input(self, cr_db):
-        from infinidev.engine.context_rank.ranker import _compute_mention_scores
-
-        assert _compute_mention_scores("", 1) == {}
-        assert _compute_mention_scores("hi", 1) == {}
-
-    def test_length_based_scoring(self, cr_db):
-        from infinidev.engine.context_rank.ranker import _compute_mention_scores
-
-        def _seed(conn):
-            # Short name — lower score
-            _insert_symbol(conn, name="Auth", kind="class",
-                           file_path="src/auth_short.py")
-            # Long name — higher score
-            _insert_symbol(conn, name="AuthenticationMiddlewareHandler",
-                           kind="class",
-                           file_path="src/auth_long.py")
-            conn.commit()
-        execute_with_retry(_seed)
-
-        result = _compute_mention_scores(
-            "Auth and AuthenticationMiddlewareHandler", project_id=1,
+        # auth_service.py should rank higher than email_queue.py
+        auth_score = result.get("src/auth_service.py", (0, "", ""))[0]
+        email_score = result.get("src/email_queue.py", (0, "", ""))[0]
+        assert auth_score > email_score, (
+            f"fuzzy file match should prefer auth_service over email_queue; "
+            f"got auth={auth_score:.2f}, email={email_score:.2f}"
         )
-        short_score = result.get("src/auth_short.py", (0, "", ""))[0]
-        long_score = result.get("src/auth_long.py", (0, "", ""))[0]
-        assert long_score > short_score
 
 
 # ── Finding multi-signal scoring ──────────────────────────────────────

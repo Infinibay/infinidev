@@ -509,6 +509,19 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_target ON cr_session_scores(target, target_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_session ON cr_session_scores(session_id)")
 
+        # ── Phase 3 v3 migrations: fuzzy symbol embeddings ───────
+        # Canal 3 (mention detection) is redesigned in v3 to use
+        # dense embeddings instead of substring matching.  Each
+        # indexed symbol and each source file gets an embedding
+        # stored inline on its row, computed at index time by the
+        # code_intel.symbol_embeddings module.  The embedding_text
+        # column captures what was embedded (for debugging and for
+        # re-embedding if the prompt template changes).
+        _migrate_add_column(conn, "ci_symbols", "embedding", "BLOB")
+        _migrate_add_column(conn, "ci_symbols", "embedding_text", "TEXT")
+        _migrate_add_column(conn, "ci_files", "embedding", "BLOB")
+        _migrate_add_column(conn, "ci_files", "embedding_text", "TEXT")
+
         # ── Phase 2 v3 migrations ────────────────────────────────
         # Productivity-aware scoring needs richer logging than v2
         # captured.  These additive migrations add tool-error tracking

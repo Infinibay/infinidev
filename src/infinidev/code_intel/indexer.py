@@ -114,6 +114,17 @@ def index_file(project_id: int, file_path: str) -> int:
     except Exception as exc:
         logger.debug("method_index hook failed for %s: %s", file_path, exc)
 
+    # ContextRank fuzzy symbol embeddings — populates ci_symbols.embedding
+    # and ci_files.embedding for the v3 fuzzy mention channel.  Runs
+    # after store_file_symbols like method_index, and like it is purely
+    # best-effort: embedding failures must not block the main index
+    # because the ranker handles missing embeddings by skipping the row.
+    try:
+        from infinidev.code_intel.symbol_embeddings import embed_file_symbols
+        embed_file_symbols(project_id, file_path, symbols, language)
+    except Exception as exc:
+        logger.debug("symbol_embeddings hook failed for %s: %s", file_path, exc)
+
     # File integrity check — the single-source-of-truth for "did a
     # change on disk leave this file in a broken syntactic state?".
     # This fires on EVERY path that calls index_file: direct writes
