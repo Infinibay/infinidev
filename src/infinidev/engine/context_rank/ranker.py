@@ -54,6 +54,145 @@ _MIN_IDENT_LEN = 4
 # Index files tried when expanding directory targets
 _INDEX_FILES = ("index.ts", "index.tsx", "index.js", "index.py", "__init__.py", "mod.rs")
 
+# ── Alpha blend (reactive vs predictive) ──
+# `alpha = 0` → pure predictive (historical), `alpha = 1` → pure reactive
+# (this session).  Grows linearly with iteration so the loop starts
+# biased toward historical memory and shifts toward current-session
+# evidence as the task progresses.
+#
+# `ALPHA_ITERATION_SATURATE` — number of iterations at which alpha
+# reaches `ALPHA_MAX`.  Chosen to be "roughly one step's worth of
+# tool calls": most steps finish in 4-8 tool calls, so by iteration
+# 8 the current session has produced enough signal to dominate.
+_ALPHA_ITERATION_SATURATE = 8
+# Never give reactive full weight — always keep a floor of historical
+# signal so cross-session memory cannot be completely drowned by a
+# few noisy in-session reads.
+_ALPHA_MAX = 0.85
+# If the current session has fewer than this many reactive signals,
+# the reactive channel is too sparse to trust on its own.  We halve
+# its contribution so predictive/historical still dominates.
+_ALPHA_REACTIVE_MIN_SIGNALS = 3
+# Multiplier applied when reactive signals are below the threshold.
+_ALPHA_SPARSE_REACTIVE_MULT = 0.5
+
+# ── Mention channel weights ──
+# Base score for a symbol name appearing literally in the input.
+# Longer names are more distinctive (less likely to be false
+# positives) so the score grows with name length.
+_MENTION_BASE_SCORE = 3.0
+# Per-character bonus: `score = BASE + name_len / DIVISOR`, capped at
+# `CAP`.  With DIVISOR=20 and CAP=5.0: names up to 40 chars still earn
+# extra score, beyond that it saturates.
+_MENTION_NAME_LEN_DIVISOR = 20.0
+_MENTION_SCORE_CAP = 5.0
+# Base score for matching a file basename ("foo.ts" appears in input).
+# Stronger than a stem match because the extension disambiguates.
+_MENTION_BASENAME_BASE = 4.0
+# Base score for matching a file stem ("foo" appears with word boundary).
+_MENTION_STEM_BASE = 3.2
+# Penalty applied to stem matches whose stem is in `_STEM_SKIP` (e.g.
+# "config", "utils").  Still scored (the stem literally appears) but
+# treated as weaker evidence.
+_MENTION_STEM_SKIP_BASE = 2.5
+# Per-character bonus for basename/stem matches.
+_MENTION_FILENAME_LEN_DIVISOR = 25.0
+# Max LIKE patterns in the basename query — cap to avoid pathological
+# queries when the input has many distinct words.
+_MENTION_MAX_LIKE_PATTERNS = 20
+
+# ── Finding channel weights ──
+# Cosine similarity is in [0, 1]; multiplying by this scale brings
+# finding semantic scores into the same range as mention scores
+# (0-5 region) so the `max()` merge compares apples to apples.
+_FINDING_SEMANTIC_SCALE = 3.0
+# Below this similarity, the finding is not semantically related
+# enough to surface.  Calibrated against all-MiniLM-L6-v2 embeddings.
+_FINDING_SEMANTIC_MIN_SIM = 0.5
+# Score for literal topic-word matches: `BASE + ratio * BONUS`.
+_FINDING_TOPIC_BASE = 3.0
+_FINDING_TOPIC_BONUS = 1.5
+# Score for tag matches: `BASE + hits * BONUS`.
+_FINDING_TAG_BASE = 4.0
+_FINDING_TAG_BONUS = 0.5
+
+# ── Docstring channel weights ──
+# Minimum docstring length to consider — shorter docstrings like
+# "Get X" match everything and produce noise.
+_DOCSTRING_MIN_LENGTH = 30
+# Minimum number of non-common input words that must appear in the
+# docstring.  Single-word matches are too noisy in practice.
+_DOCSTRING_MIN_HITS = 2
+# BM25 result cap — top-5 is where BM25 ranking is most reliable,
+# past that the tail is noisy.
+_DOCSTRING_BM25_LIMIT = 5
+# Base + density-scaled bonus for file and symbol scores.
+_DOCSTRING_FILE_BASE = 3.0
+_DOCSTRING_FILE_BONUS = 0.5
+_DOCSTRING_SYMBOL_BASE = 3.5
+_DOCSTRING_SYMBOL_BONUS = 0.5
+
+# ── Popularity channel weights ──
+# Minimum distinct sessions for a file to get any popularity score.
+# Below this, it's a one-off read — no signal.
+_POPULARITY_MIN_SESSIONS = 3
+# Multiplier on log(session_count).  Logarithmic so a file in 20
+# sessions doesn't crush a file with strong topical relevance — just
+# nudges the ranking.  0.3 puts popularity scores in ~0.3-1.0 range.
+_POPULARITY_LOG_SCALE = 0.3
+
+# ── Co-occurrence boost ──
+# Only boost co-occurrences of files whose base score is at least this.
+# Below this threshold, the anchor file is too marginal to trust as a
+# source of co-occurrence signal.
+_COOC_ANCHOR_MIN_SCORE = 1.0
+# Only look at the top N anchor files — DB query per anchor, so this
+# caps the work regardless of how many files made the cut.
+_COOC_MAX_ANCHORS = 5
+# Minimum number of sessions a pair must co-occur in to count.
+_COOC_MIN_SESSIONS = 2
+# Score propagation factor: co-occurring file gets `anchor_score *
+# COOC_PROPAGATION * min(co_sessions / COOC_SATURATE, 1.0)`.
+_COOC_PROPAGATION = 0.4
+# Session count at which co-occurrence confidence saturates.
+_COOC_SATURATE = 5.0
+# Minimum propagated score to actually add to the ranking.  Below
+# this, the boost is too weak to be worth the prompt tokens.
+_COOC_MIN_PROPAGATED = 0.3
+
+# ── Import graph boost ──
+# Only propagate scores from files at or above this threshold.
+_IMPORT_ANCHOR_MIN_SCORE = 1.5
+# Look at the top N anchor files (each fires one UNION query).
+_IMPORT_MAX_ANCHORS = 3
+# When A imports B, A gets `B.score * IMPORT_IN_PROPAGATION`.
+# Lower than "out" because knowing the importer is less useful than
+# knowing the imported dependency.
+_IMPORT_IN_PROPAGATION = 0.3
+# When A imports B, B gets `A.score * IMPORT_OUT_PROPAGATION`.
+# Higher because the dependency is usually needed to understand A.
+_IMPORT_OUT_PROPAGATION = 0.5
+
+# ── Freshness boost ──
+# Multiplicative boost applied to already-ranked files based on
+# their filesystem mtime.  Boosts files currently being worked on.
+#
+# Linear decay from `FRESH_MAX_MULT` today to `1.0` at
+# `FRESH_DECAY_DAYS` days ago.  This is multiplicative *on top of*
+# an existing score, so the effect is proportional — a file that
+# was already ranked 4.0 and got touched today becomes 5.2, a file
+# ranked 0.3 becomes 0.39 (still below the confidence floor).
+# This is intentional: freshness amplifies, it does not rescue.
+_FRESH_MAX_MULT = 1.3
+_FRESH_DECAY_DAYS = 100  # smaller = faster decay; 100 gives ~30d visible effect
+_FRESH_SECONDS_PER_DAY = 86400
+
+# ── Directory expansion ──
+# Score applied to an index file when expanded from its parent dir.
+# Slightly lower than the original dir score because the index is a
+# concrete but approximate substitute.
+_DIR_EXPAND_DAMPEN = 0.8
+
 # ── Outlier detection constants ──
 # MAD-based outlier detection uses ``median + K * MAD * MAD_SCALE``
 # as the threshold.  Items above that threshold are flagged as
@@ -154,12 +293,34 @@ def rank(
         except Exception:
             project_id = 1
 
+    # Resolve workspace once from the canonical source (context) and
+    # fall back to the process cwd only if it's not set.  Passing the
+    # workspace explicitly to every channel avoids re-reading os.getcwd()
+    # inside hot paths and removes a hidden dependency on process state.
+    workspace = _resolve_workspace()
+
+    # ── Shared embedding ─────────────────────────────────────────
+    # Compute the task embedding once and pass it to every channel
+    # that needs it.  Previously each channel fell back to
+    # `cached_embedding or compute_embedding(current_input)` which
+    # could fire up to 2 redundant embedding calls (~267ms each) on
+    # the first rank, when the background thread hadn't yet populated
+    # the cache.
+    query_embedding = cached_embedding
+    if query_embedding is None:
+        try:
+            from infinidev.tools.base.embeddings import compute_embedding
+            query_embedding = compute_embedding(current_input)
+        except Exception:
+            query_embedding = None
+
     # ── Channel 1: Reactive (current session) ────────────────────
     reactive = _compute_reactive_scores(session_id, task_id, iteration)
 
     # ── Channel 2: Predictive / Historical (past sessions) ───────
     predictive = _compute_predictive_scores(
-        current_input, session_id, cached_embedding=cached_embedding,
+        current_input, session_id, cached_embedding=query_embedding,
+        workspace=workspace,
     )
 
     # Blend reactive + predictive with adaptive alpha
@@ -167,13 +328,13 @@ def rank(
     blended = _blend_reactive_predictive(reactive, predictive, alpha)
 
     # ── Channel 3: Mention detection (FTS5 symbol lookup) ────────
-    mentions = _compute_mention_scores(current_input, project_id)
+    mentions = _compute_mention_scores(current_input, project_id, workspace)
 
     # ── Channel 4: Semantic findings (embedding similarity) ──────
-    findings = _compute_finding_scores(cached_embedding, current_input, project_id)
+    findings = _compute_finding_scores(query_embedding, current_input, project_id)
 
     # ── Channel 5: Semantic docstrings (BM25) ────────────────────
-    docstrings = _compute_docstring_scores(current_input, project_id)
+    docstrings = _compute_docstring_scores(current_input, project_id, workspace)
 
     # ── Channel 6: Cross-session popularity ──────────────────────
     popularity = _compute_popularity_scores()
@@ -184,8 +345,8 @@ def rank(
     # ── Post-processing boosts ───────────────────────────────────
     combined = _apply_cooccurrence_boost(combined)
     combined = _apply_import_boost(combined, project_id)
-    combined = _apply_freshness_boost(combined)
-    combined = _expand_directory_targets(combined)
+    combined = _apply_freshness_boost(combined, workspace)
+    combined = _expand_directory_targets(combined, workspace)
 
     # ── Confidence gate ──────────────────────────────────────────
     # Check the max score across ALL raw channels (pre-merge), not
@@ -249,23 +410,28 @@ def _compute_reactive_scores(
 def _compute_predictive_scores(
     current_input: str, exclude_session: str,
     *, cached_embedding: bytes | None = None,
+    workspace: str | None = None,
 ) -> dict[str, tuple[float, str, str]]:
     """Score nodes via embedding similarity to historical contexts.
 
     Edit interactions (weight >= 2.0) get a 2x multiplier in predictive
     scoring — a file *edited* in a similar past task is more likely
     relevant than one just read.
+
+    The embedding is expected to be provided via ``cached_embedding``
+    — ``rank()`` computes it once and shares it across channels.  When
+    None is passed the channel returns empty rather than re-computing,
+    since the caller already tried and failed.
     """
-    from infinidev.tools.base.embeddings import compute_embedding, embedding_from_blob
+    from infinidev.tools.base.embeddings import embedding_from_blob
     from infinidev.tools.base.dedup import _cosine_similarity
 
     min_sim = settings.CONTEXT_RANK_MIN_SIMILARITY
     session_decay = settings.CONTEXT_RANK_SESSION_DECAY
 
-    query_emb_bytes = cached_embedding or compute_embedding(current_input)
-    if query_emb_bytes is None:
+    if cached_embedding is None:
         return {}
-    query_vec = np.frombuffer(query_emb_bytes, dtype=np.float32)
+    query_vec = np.frombuffer(cached_embedding, dtype=np.float32)
 
     try:
         def _fetch_contexts(conn):
@@ -323,7 +489,7 @@ def _compute_predictive_scores(
     for row in int_rows:
         ctx_id = row["context_id"]
         contribution, sim = contrib_by_id[ctx_id]
-        target = _normalize_path(row["target"]) if row["target_type"] == "file" else row["target"]
+        target = _normalize_path(row["target"], workspace) if row["target_type"] == "file" else row["target"]
         if target not in accum:
             accum[target] = {"target_type": row["target_type"], "score": 0.0, "best_sim": 0.0}
         # Edit vs Read asymmetry: writes get 2x in predictive channel
@@ -370,7 +536,7 @@ _STEM_SKIP: frozenset[str] = frozenset({
 
 
 def _compute_mention_scores(
-    current_input: str, project_id: int,
+    current_input: str, project_id: int, workspace: str | None = None,
 ) -> dict[str, tuple[float, str, str]]:
     """Find known symbols from the project that appear in the input.
 
@@ -380,7 +546,7 @@ def _compute_mention_scores(
     ``instr()`` does all the work — no regex, no stop-word lists per
     language, no tokenization bugs.
     """
-    if not current_input or len(current_input) < 4:
+    if not current_input or len(current_input) < _MIN_IDENT_LEN:
         return {}
 
     input_lower = current_input.lower()
@@ -419,9 +585,12 @@ def _compute_mention_scores(
         if name_lc in _COMMON_WORDS:
             continue
         # Score scales with name length — longer names are more distinctive
-        score = min(5.0, 3.0 + (row["name_len"] / 20.0))
+        score = min(
+            _MENTION_SCORE_CAP,
+            _MENTION_BASE_SCORE + (row["name_len"] / _MENTION_NAME_LEN_DIVISOR),
+        )
 
-        fp = _normalize_path(row["file_path"])
+        fp = _normalize_path(row["file_path"], workspace)
         if fp:
             existing = result.get(fp, (0.0, "", ""))
             if score > existing[0]:
@@ -439,7 +608,7 @@ def _compute_mention_scores(
     # the full-scan approach (2000 rows → Python filter).
     input_words = set(
         w for w in re.split(r'\W+', input_lower)
-        if len(w) >= 4 and w not in _COMMON_WORDS
+        if len(w) >= _MIN_IDENT_LEN and w not in _COMMON_WORDS
     )
     file_rows = []
     if input_words:
@@ -448,7 +617,7 @@ def _compute_mention_scores(
                 # Build an OR of LIKE patterns — SQLite uses the
                 # ci_files index on file_path so this is fast even
                 # with 10+ patterns.
-                words_list = list(input_words)[:20]  # cap to avoid giant queries
+                words_list = list(input_words)[:_MENTION_MAX_LIKE_PATTERNS]
                 placeholders = " OR ".join("file_path LIKE ?" for _ in words_list)
                 params = [project_id] + [f"%{w}%" for w in words_list]
                 return conn.execute(
@@ -468,7 +637,7 @@ def _compute_mention_scores(
         basename = os.path.basename(fp)  # trust Python's extraction
         stem = basename.rsplit(".", 1)[0] if "." in basename else basename
         stem_lc = stem.lower()
-        if len(stem) < 4 or stem_lc in _COMMON_WORDS:
+        if len(stem) < _MIN_IDENT_LEN or stem_lc in _COMMON_WORDS:
             continue
 
         # The SQL already confirmed the basename substring is in the
@@ -484,11 +653,14 @@ def _compute_mention_scores(
         )
 
         if basename_match or stem_match:
-            fp_n = _normalize_path(fp)
-            base_score = 4.0 if basename_match else 3.2
+            fp_n = _normalize_path(fp, workspace)
+            base_score = _MENTION_BASENAME_BASE if basename_match else _MENTION_STEM_BASE
             if not basename_match and stem_lc in _STEM_SKIP:
-                base_score = 2.5
-            score = min(5.0, base_score + (len(stem) / 25.0))
+                base_score = _MENTION_STEM_SKIP_BASE
+            score = min(
+                _MENTION_SCORE_CAP,
+                base_score + (len(stem) / _MENTION_FILENAME_LEN_DIVISOR),
+            )
             existing = result.get(fp_n, (0.0, "", ""))
             if score > existing[0]:
                 reason = (
@@ -516,13 +688,18 @@ def _compute_finding_scores(
        Stronger signal for exact matches.
 
     The max of the two signals is kept per finding.
+
+    The embedding is expected to be provided via ``cached_embedding``
+    — ``rank()`` computes it once and shares it across channels.
     """
     import json
-    from infinidev.tools.base.embeddings import compute_embedding, embedding_from_blob
+    from infinidev.tools.base.embeddings import embedding_from_blob
     from infinidev.tools.base.dedup import _cosine_similarity
 
-    query_emb = cached_embedding or compute_embedding(current_input)
-    query_vec = np.frombuffer(query_emb, dtype=np.float32) if query_emb else None
+    query_vec = (
+        np.frombuffer(cached_embedding, dtype=np.float32)
+        if cached_embedding else None
+    )
 
     input_lower = current_input.lower()
     padded = " " + input_lower + " "
@@ -553,25 +730,41 @@ def _compute_finding_scores(
             try:
                 f_vec = embedding_from_blob(row["embedding"])
                 sim = float(_cosine_similarity(query_vec, f_vec))
-                if sim >= 0.5:
-                    scores.append((sim * 3.0, f"semantic match (sim={sim:.2f})"))
+                if sim >= _FINDING_SEMANTIC_MIN_SIM:
+                    scores.append((
+                        sim * _FINDING_SEMANTIC_SCALE,
+                        f"semantic match (sim={sim:.2f})",
+                    ))
             except Exception:
                 pass
 
         # ── Signal 2: topic word matching ────────────────────────
-        topic_words = [w for w in re.split(r'\W+', topic.lower()) if len(w) >= 4 and w not in _COMMON_WORDS]
+        topic_words = [
+            w for w in re.split(r'\W+', topic.lower())
+            if len(w) >= _MIN_IDENT_LEN and w not in _COMMON_WORDS
+        ]
         if topic_words:
             matched = sum(1 for w in topic_words if f" {w} " in padded or f" {w}" in padded)
             if matched >= max(2, len(topic_words) // 2):
                 ratio = matched / len(topic_words)
-                scores.append((3.0 + ratio * 1.5, f"{matched}/{len(topic_words)} topic words match"))
+                scores.append((
+                    _FINDING_TOPIC_BASE + ratio * _FINDING_TOPIC_BONUS,
+                    f"{matched}/{len(topic_words)} topic words match",
+                ))
 
         # ── Signal 3: tag matching ───────────────────────────────
         try:
             tags = json.loads(row["tags_json"] or "[]")
-            tag_hits = [t for t in tags if isinstance(t, str) and len(t) >= 4 and f" {t.lower()} " in padded]
+            tag_hits = [
+                t for t in tags
+                if isinstance(t, str) and len(t) >= _MIN_IDENT_LEN
+                and f" {t.lower()} " in padded
+            ]
             if tag_hits:
-                scores.append((4.0 + len(tag_hits) * 0.5, f"tags match: {', '.join(tag_hits[:3])}"))
+                scores.append((
+                    _FINDING_TAG_BASE + len(tag_hits) * _FINDING_TAG_BONUS,
+                    f"tags match: {', '.join(tag_hits[:3])}",
+                ))
         except Exception:
             pass
 
@@ -587,31 +780,36 @@ def _compute_finding_scores(
 # ── Channel 5: Semantic docstring match (BM25) ─────────────────────
 
 def _compute_docstring_scores(
-    current_input: str, project_id: int,
+    current_input: str, project_id: int, workspace: str | None = None,
 ) -> dict[str, tuple[float, str, str]]:
     """Score symbols by docstring/signature relevance via BM25.
 
     Noise control:
-    - Only top 5 BM25 matches (not 20) — BM25 ranks reliably at the top
-    - Only function/method/class/interface kinds
-    - Requires >= 2 non-common input words present in the docstring
-      (single-word matches are too noisy)
-    - Skips very short docstrings (< 30 chars, usually "Get X" style)
+    - Only top ``_DOCSTRING_BM25_LIMIT`` BM25 matches — past the top,
+      BM25 ranking becomes unreliable in our experience.
+    - Only function/method/class/interface kinds (symbols whose
+      docstring is likely to describe intent, not a type alias).
+    - Requires >= ``_DOCSTRING_MIN_HITS`` non-common input words
+      present in the docstring (single-word matches are too noisy).
+    - Skips docstrings shorter than ``_DOCSTRING_MIN_LENGTH`` chars
+      (usually "Get X" / "Returns Y" boilerplate that matches too much).
     """
     try:
         from infinidev.code_intel.query import search_by_docstring
-        matches = search_by_docstring(project_id, current_input, limit=5)
+        matches = search_by_docstring(
+            project_id, current_input, limit=_DOCSTRING_BM25_LIMIT,
+        )
     except Exception:
         return {}
 
     _RELEVANT_KINDS = {"function", "method", "class", "interface"}
 
-    # Extract meaningful input words (≥4 chars, not common)
+    # Extract meaningful input words (≥ _MIN_IDENT_LEN chars, not common)
     input_words = [
         w for w in re.split(r'\W+', current_input.lower())
-        if len(w) >= 4 and w not in _COMMON_WORDS
+        if len(w) >= _MIN_IDENT_LEN and w not in _COMMON_WORDS
     ]
-    if len(input_words) < 2:
+    if len(input_words) < _DOCSTRING_MIN_HITS:
         return {}
 
     result: dict[str, tuple[float, str, str]] = {}
@@ -622,20 +820,20 @@ def _compute_docstring_scores(
 
         # Require meaningful docstring
         doc = (sym.docstring or "").lower()
-        if len(doc) < 30:
+        if len(doc) < _DOCSTRING_MIN_LENGTH:
             continue
 
         # Count how many input words appear in the docstring
         hits = sum(1 for w in input_words if w in doc)
-        if hits < 2:
+        if hits < _DOCSTRING_MIN_HITS:
             continue
 
         # Scale score with hit density
         density = hits / max(len(input_words), 1)
-        score_file = 3.0 + density * 0.5  # up to 3.5
-        score_sym = 3.5 + density * 0.5   # up to 4.0
+        score_file = _DOCSTRING_FILE_BASE + density * _DOCSTRING_FILE_BONUS
+        score_sym = _DOCSTRING_SYMBOL_BASE + density * _DOCSTRING_SYMBOL_BONUS
 
-        fp = _normalize_path(sym.file_path)
+        fp = _normalize_path(sym.file_path, workspace)
         if fp:
             existing = result.get(fp, (0.0, "", ""))
             if score_file > existing[0]:
@@ -653,7 +851,7 @@ def _compute_docstring_scores(
 # ── Channel 6: Cross-session popularity ─────────────────────────────
 
 def _compute_popularity_scores() -> dict[str, tuple[float, str, str]]:
-    """Base score for files accessed in 3+ different sessions."""
+    """Base score for files accessed in many different sessions."""
     try:
         def _query(conn):
             return conn.execute(
@@ -661,7 +859,8 @@ def _compute_popularity_scores() -> dict[str, tuple[float, str, str]]:
                 "FROM cr_session_scores "
                 "WHERE target_type = 'file' "
                 "GROUP BY target "
-                "HAVING session_count >= 3",
+                "HAVING session_count >= ?",
+                (_POPULARITY_MIN_SESSIONS,),
             ).fetchall()
         rows = execute_with_retry(_query)
     except Exception:
@@ -670,7 +869,7 @@ def _compute_popularity_scores() -> dict[str, tuple[float, str, str]]:
     result: dict[str, tuple[float, str, str]] = {}
     for row in rows:
         count = row["session_count"]
-        score = math.log(count) * 0.3
+        score = math.log(count) * _POPULARITY_LOG_SCALE
         result[row["target"]] = (score, "file", f"accessed in {count} sessions")
     return result
 
@@ -684,13 +883,13 @@ def _apply_cooccurrence_boost(
     # Get top file targets to find co-occurring files for
     top_files = [
         (t, s) for t, (s, tt, _) in scores.items()
-        if tt == "file" and s >= 1.0
+        if tt == "file" and s >= _COOC_ANCHOR_MIN_SCORE
     ]
     if not top_files:
         return scores
 
     top_files.sort(key=lambda x: x[1], reverse=True)
-    top_files = top_files[:5]  # Limit to top 5 to control DB queries
+    top_files = top_files[:_COOC_MAX_ANCHORS]
 
     for target, target_score in top_files:
         try:
@@ -701,8 +900,8 @@ def _apply_cooccurrence_boost(
                     "JOIN cr_session_scores b ON a.session_id = b.session_id AND a.target != b.target "
                     "WHERE a.target = ? AND a.target_type = 'file' AND b.target_type = 'file' "
                     "GROUP BY b.target "
-                    "HAVING co_sessions >= 2",
-                    (t,),
+                    "HAVING co_sessions >= ?",
+                    (t, _COOC_MIN_SESSIONS),
                 ).fetchall()
             rows = execute_with_retry(_query)
         except Exception:
@@ -712,9 +911,12 @@ def _apply_cooccurrence_boost(
             co_target = row["target"]
             if co_target in scores:
                 continue  # Don't boost already-scored files
-            co_score = target_score * 0.4 * min(row["co_sessions"] / 5.0, 1.0)
-            if co_score > 0.3:
-                scores[co_target] = (co_score, "file", f"co-occurs with {os.path.basename(target)}")
+            confidence = min(row["co_sessions"] / _COOC_SATURATE, 1.0)
+            co_score = target_score * _COOC_PROPAGATION * confidence
+            if co_score > _COOC_MIN_PROPAGATED:
+                scores[co_target] = (
+                    co_score, "file", f"co-occurs with {os.path.basename(target)}",
+                )
     return scores
 
 
@@ -727,13 +929,13 @@ def _apply_import_boost(
     """1-hop propagation through the import graph."""
     top_files = [
         (t, s) for t, (s, tt, _) in scores.items()
-        if tt == "file" and s >= 1.5
+        if tt == "file" and s >= _IMPORT_ANCHOR_MIN_SCORE
     ]
     if not top_files:
         return scores
 
     top_files.sort(key=lambda x: x[1], reverse=True)
-    top_files = top_files[:3]  # Limit queries
+    top_files = top_files[:_IMPORT_MAX_ANCHORS]
 
     for target, target_score in top_files:
         try:
@@ -759,9 +961,15 @@ def _apply_import_boost(
             if not fp or fp in scores:
                 continue
             if row["direction"] == "in":
-                scores[fp] = (target_score * 0.3, "file", f"imports {basename}")
+                scores[fp] = (
+                    target_score * _IMPORT_IN_PROPAGATION,
+                    "file", f"imports {basename}",
+                )
             else:
-                scores[fp] = (target_score * 0.5, "file", f"imported by {basename}")
+                scores[fp] = (
+                    target_score * _IMPORT_OUT_PROPAGATION,
+                    "file", f"imported by {basename}",
+                )
     return scores
 
 
@@ -769,6 +977,7 @@ def _apply_import_boost(
 
 def _apply_freshness_boost(
     scores: dict[str, tuple[float, str, str]],
+    workspace: str | None = None,
 ) -> dict[str, tuple[float, str, str]]:
     """Boost files modified recently on disk.
 
@@ -777,10 +986,18 @@ def _apply_freshness_boost(
     is a close enough proxy for "recently worked on": it tracks when
     the file was last touched, which is what we care about for
     relevance ranking.
+
+    The boost is **multiplicative on top of an already-computed score**,
+    not additive — freshness *amplifies* existing rankings instead of
+    rescuing marginal files from the noise floor.  A file that another
+    channel already ranked highly and is being worked on now climbs
+    faster; a file nobody ranked doesn't magically appear just because
+    it was touched recently.
     """
     import time as _time
     now = _time.time()
-    workspace = os.getcwd()
+    if workspace is None:
+        workspace = _resolve_workspace()
 
     for target in list(scores):
         score, tt, reason = scores[target]
@@ -792,9 +1009,9 @@ def _apply_freshness_boost(
             mtime = os.stat(abs_path).st_mtime
         except OSError:
             continue
-        days_ago = (now - mtime) / 86400
-        # Linear decay: 1.3× today, 1.0× at 30+ days
-        freshness = max(1.0, 1.3 - (days_ago / 100))
+        days_ago = (now - mtime) / _FRESH_SECONDS_PER_DAY
+        # Linear decay from _FRESH_MAX_MULT today to 1.0 at ~30 days
+        freshness = max(1.0, _FRESH_MAX_MULT - (days_ago / _FRESH_DECAY_DAYS))
         if freshness > 1.0:
             scores[target] = (score * freshness, tt, reason)
     return scores
@@ -804,9 +1021,11 @@ def _apply_freshness_boost(
 
 def _expand_directory_targets(
     scores: dict[str, tuple[float, str, str]],
+    workspace: str | None = None,
 ) -> dict[str, tuple[float, str, str]]:
     """Replace directory targets with their entry-point files."""
-    workspace = os.getcwd()
+    if workspace is None:
+        workspace = _resolve_workspace()
     for target in list(scores):
         score, tt, reason = scores[target]
         if tt != "file":
@@ -823,21 +1042,49 @@ def _expand_directory_targets(
             if os.path.exists(candidate):
                 rel = os.path.relpath(candidate, workspace)
                 if rel not in scores:
-                    scores[rel] = (score * 0.8, "file", f"index of {os.path.basename(target)}/")
+                    scores[rel] = (
+                        score * _DIR_EXPAND_DAMPEN,
+                        "file", f"index of {os.path.basename(target)}/",
+                    )
                 break
     return scores
 
 
 # ── Path normalization ───────────────────────────────────────────────
 
-def _normalize_path(path: str) -> str:
-    """Normalize a file path to relative (strips workspace prefix)."""
+def _resolve_workspace() -> str:
+    """Return the canonical workspace directory.
+
+    Prefers ``get_current_workspace_path()`` (the value infinidev's
+    tool context was initialised with) and falls back to ``os.getcwd()``
+    only when the context has no workspace set.  Callers should pass
+    the result explicitly to channels instead of calling os.getcwd()
+    themselves, so that a mid-task cwd change (``os.chdir`` from a
+    tool, test fixture, etc.) cannot desync path normalization.
+    """
+    try:
+        from infinidev.tools.base.context import get_current_workspace_path
+        ws = get_current_workspace_path()
+        if ws:
+            return ws
+    except Exception:
+        pass
+    return os.getcwd()
+
+
+def _normalize_path(path: str, workspace: str | None = None) -> str:
+    """Normalize a file path to relative (strips workspace prefix).
+
+    When ``workspace`` is None the function resolves it lazily — this
+    is the back-compat path for callers that don't thread workspace
+    through.  New code should pass it explicitly.
+    """
     if not path:
         return path
     if os.path.isabs(path):
-        workspace = os.getcwd()
-        if path.startswith(workspace + "/"):
-            return path[len(workspace) + 1:]
+        ws = workspace if workspace is not None else _resolve_workspace()
+        if path.startswith(ws + "/"):
+            return path[len(ws) + 1:]
     return path
 
 
@@ -874,10 +1121,23 @@ def _merge_channels(
 
 
 def _compute_alpha(iteration: int, reactive_signal_count: int) -> float:
-    """Adaptive blend factor: 0 = pure prediction, 1 = pure reactive."""
-    base_alpha = min(0.85, iteration / 8)
-    if reactive_signal_count < 3:
-        base_alpha *= 0.5
+    """Adaptive blend factor: 0 = pure prediction, 1 = pure reactive.
+
+    At iteration 0 the current session has produced zero signal, so
+    the ranking should lean entirely on historical memory.  As the
+    session accumulates tool calls, the in-session reactive scores
+    become more informative and the blend shifts toward reactive.
+
+    Two caps prevent runaway:
+      * Alpha never exceeds ``_ALPHA_MAX`` — a floor of historical
+        signal is always preserved.
+      * If the session has fewer than ``_ALPHA_REACTIVE_MIN_SIGNALS``
+        interactions, reactive evidence is too sparse to trust alone
+        and its contribution is halved via ``_ALPHA_SPARSE_REACTIVE_MULT``.
+    """
+    base_alpha = min(_ALPHA_MAX, iteration / _ALPHA_ITERATION_SATURATE)
+    if reactive_signal_count < _ALPHA_REACTIVE_MIN_SIGNALS:
+        base_alpha *= _ALPHA_SPARSE_REACTIVE_MULT
     return base_alpha
 
 
