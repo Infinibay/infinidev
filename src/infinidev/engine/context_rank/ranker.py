@@ -105,8 +105,16 @@ _ALPHA_SPARSE_REACTIVE_MULT = 0.5
 # and descriptive queries uniformly.
 #
 # Below this cosine similarity a symbol match is too weak to surface.
-# Calibrated empirically for all-MiniLM-L6-v2 — below ~0.45 matches
-# become incidental (shared stop words, capitalised prefixes).
+# Empirically calibrated against a live 9232-symbol TypeScript
+# project.  We tried lowering to 0.40 to rescue one descriptive
+# query whose top real match was at 0.445, but doing so introduced
+# a false positive on conversational noise queries that matched
+# literal symbol names (e.g. "what's the weather today" matching a
+# symbol literally named `today`).  The scores for genuine weak
+# matches and noise matches are indistinguishable with a linear
+# threshold — 0.45 is the point that gives the best hit rate
+# overall, at the cost of occasionally missing a relevant match
+# by a few thousandths.
 _FUZZY_SYMBOL_MIN_SIM = 0.45
 # Score scale: sim ∈ [0.45, 1.0] × 5.0 → [2.25, 5.0], putting fuzzy
 # scores in the same range as the old substring mention scores so
@@ -685,10 +693,19 @@ def _compute_mention_scores(
     # ── Symbols ────────────────────────────────────────────────
     try:
         def _fetch_symbols(conn):
+            # Filter out anonymous symbols (name IS NULL or empty).
+            # Some TypeScript/JS parsers record anonymous defaults
+            # and default-exported arrow functions with empty names;
+            # surfacing them to the model produces "contains ''"
+            # reasons that aren't actionable — the model can't
+            # read_symbol or edit_symbol something without a name.
             return conn.execute(
                 "SELECT name, qualified_name, file_path, kind, embedding "
                 "FROM ci_symbols "
-                "WHERE project_id = ? AND embedding IS NOT NULL",
+                "WHERE project_id = ? "
+                "  AND embedding IS NOT NULL "
+                "  AND name IS NOT NULL "
+                "  AND name != ''",
                 (project_id,),
             ).fetchall()
         sym_rows = execute_with_retry(_fetch_symbols)
