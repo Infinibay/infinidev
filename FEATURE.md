@@ -30,13 +30,15 @@ is a snapshot of the *current* state, not a history.
 5. [Tools — the model's hands](#tools)
 6. [Code intelligence — the model's eyes](#code-intelligence)
 7. [The guidance system — coaching for stuck models](#the-guidance-system)
-8. [The phase engine — for deeper reasoning](#the-phase-engine)
-9. [The tree engine — for explore / brainstorm](#the-tree-engine)
-10. [Multi-provider LLM support](#multi-provider-llm-support)
-11. [Performance instrumentation](#performance-instrumentation)
-12. [Database & persistence](#database--persistence)
-13. [Settings, env vars, and operational tooling](#settings-env-vars-and-operational-tooling)
-14. [Things that exist on purpose to NOT do](#things-that-exist-on-purpose-to-not-do)
+8. [ContextRank — cross-session context prioritization](#contextrank)
+9. [Anchored memory — lessons that find the model](#anchored-memory)
+10. [The phase engine — for deeper reasoning](#the-phase-engine)
+11. [The tree engine — for explore / brainstorm](#the-tree-engine)
+12. [Multi-provider LLM support](#multi-provider-llm-support)
+13. [Performance instrumentation](#performance-instrumentation)
+14. [Database & persistence](#database--persistence)
+15. [Settings, env vars, and operational tooling](#settings-env-vars-and-operational-tooling)
+16. [Things that exist on purpose to NOT do](#things-that-exist-on-purpose-to-not-do)
 
 ---
 
@@ -411,7 +413,7 @@ of "I want to reuse code that already exists":
 
 | Tool | What it does |
 |---|---|
-| `record_finding` | Persist a key fact the agent discovered (with semantic dedup at threshold 0.82). |
+| `record_finding` | Persist a key fact the agent discovered (with semantic dedup at threshold 0.82). Accepts optional `anchor_file`, `anchor_symbol`, `anchor_tool`, `anchor_error` parameters for [anchored memory](#anchored-memory). |
 | `read_findings` | Retrieve all findings for the current session. |
 | `search_findings` | Vector + FTS hybrid search over findings. |
 | `validate_finding` / `reject_finding` / `update_finding` / `delete_finding` | Lifecycle management. |
@@ -706,6 +708,280 @@ dispatch loop picks it up automatically.
 
 ---
 
+## ContextRank
+
+Located at `engine/context_rank/`. A cross-session context
+prioritization system that ranks files, symbols, and findings by
+relevance to the current task and injects a compact
+`<context-rank>` block into the loop prompt. Where gather assembles
+a static brief at the start of a task, ContextRank runs every time
+the plan advances and adapts to what the model is actually doing.
+
+The problem it solves: small models starve when they are forced to
+discover the same files from scratch on every task. ContextRank
+remembers what the model reached for in past sessions for similar
+problems and pre-suggests those same files, symbols and findings —
+with docstring-enriched outlines — so the model can skip the
+exploration phase and go straight to the work.
+
+Opt-in. Off by default (`CONTEXT_RANK_ENABLED=False`) because the
+historical tables need to accumulate data before the signal becomes
+useful. Turn it on after a few sessions.
+
+### Architecture
+
+Ten scoring channels merge into a single ranked list:
+
+| # | Channel | Signal | Location |
+|---|---|---|---|
+| 1 | **Reactive**  | Files, symbols and findings touched *in the current session* (decayed over iterations). | `_compute_reactive_scores` |
+| 2 | **Predictive** | Embedding similarity between the current task and past task/step contexts, propagated through interactions they produced. | `_compute_predictive_scores` |
+| 3 | **Mention** | Inverse SQL lookup — every indexed symbol name tested against the user input via `instr()`. Beats regex-based extraction on natural-language queries. | `_compute_mention_scores` |
+| 4 | **Finding** | Cosine similarity between the task embedding and finding embeddings, plus literal topic/tag matches against the input. | `_compute_finding_scores` |
+| 5 | **Docstring** | BM25 over `ci_symbols_fts` matching docstring + signature, noise-controlled (≥2 input words, ≥30 chars, top-5 only). | `_compute_docstring_scores` |
+| 6 | **Popularity** | Log-scaled boost for files touched in many distinct past sessions (infrastructure). | `_compute_popularity_scores` |
+| 7 | **Co-occurrence** | Files that are frequently accessed alongside already-scored files (`cr_session_scores` self-join). | `_apply_cooccurrence_boost` |
+| 8 | **Import graph** | 1-hop propagation through `ci_imports` — importers get 0.3×, imported files get 0.5×. | `_apply_import_boost` |
+| 9 | **Freshness** | `os.stat(mtime)` boost for files recently modified on disk (no git subprocess). | `_apply_freshness_boost` |
+| 10 | **Directory expansion** | Replaces directory targets (`src/auth/`) with their concrete entry-point file (`src/auth/index.ts`, `__init__.py`, ...). | `_expand_directory_targets` |
+
+Merge semantics: channels 1–6 merge per-target with `max()` — a
+file takes the **best reason** across channels, not the sum.
+Channels 7–10 are post-processing boosts applied after the merge.
+Predictive scoring has an **edit vs read asymmetry** — files the
+model wrote to in similar past tasks get 2× the predictive score of
+files it only read.
+
+### Confidence gate + outlier filtering
+
+Two orthogonal suppression layers keep noise out of the prompt:
+
+1. **Confidence gate** (`CONTEXT_RANK_MIN_CONFIDENCE`, default `0.5`):
+   if the top score of the whole ranking is below this value, the
+   `<context-rank>` block is dropped entirely. It is better to show
+   nothing than to distract the model with a weak guess.
+
+2. **Outlier filter** (`_filter_outliers`): within a passing
+   ranking, items that are not clearly above the noise baseline are
+   pruned. Built on **MAD (median absolute deviation)** computed on
+   the bottom half of the scores (so the outliers themselves don't
+   inflate the noise floor) with the 1.4826 normal-consistency
+   factor, plus a relative-magnitude requirement
+   (`_OUTLIER_MIN_RATIO = 1.5`).
+
+The MAD multiplier is derived from a user-friendly percentile
+setting via `statistics.NormalDist().inv_cdf()`:
+
+```
+CONTEXT_RANK_OUTLIER_PERCENTILE = 95     # or "95%"
+  → k ≈ 1.645 × 1.4826 ≈ 2.44
+  → outlier iff score > median + 2.44 × MAD
+```
+
+Common values:
+
+| Percentile | Meaning |
+|---|---|
+| 90 | loose — more items pass |
+| 95 | **default** — good balance |
+| 99 | strict — only very clear outliers |
+
+Hard caps: `CONTEXT_RANK_OUTLIER_MAX_COUNT = 3` (never keep more
+than N), `CONTEXT_RANK_OUTLIER_MIN_TOP_SCORE = 1.0` (skip the
+filter entirely if the top score is below this, i.e. everything is
+noise anyway).
+
+### Pivot-based injection
+
+The ranker does NOT run on every iteration. `ContextRankHooks` runs
+it at **pivot points** only:
+
+  * iteration 0 (start of task)
+  * whenever the active step index changes
+
+In between, the last result is cached and re-rendered. Measured
+cost per pivot: ~48 ms (multi-channel + outlier filter). Average
+overhead per task: a few pivots × 48 ms ≈ < 300 ms total. The task
+embedding itself is computed **once in a background thread** when
+the hooks start — the first rank call then reuses it (670× speedup
+vs computing it synchronously per pivot).
+
+### Enriched output
+
+The `<context-rank>` block is not just a list of file paths. Each
+ranked file comes with its symbol outline (top-level classes,
+functions, methods) and each symbol that has one gets a truncated
+docstring inline. Each ranked finding shows its content, not just
+its topic. The model can read the ranking and understand the
+suggested code surface without having to open anything.
+
+Example (abridged):
+
+```
+<context-rank>
+files:
+  - src/engine/guidance/hooks.py  (score 4.2, reason: matches "guidance detector")
+      class GuidanceDispatcher
+        .queue(entry)      — Queue a guidance entry for the next prompt
+        .drain()           — Drain and render all pending entries
+      def maybe_queue_guidance(...)
+      def drain_pending_guidance(...)
+
+  - src/engine/guidance/detectors.py  (score 3.1, reason: imported by guidance/hooks.py)
+      def _has_reread_loop(...)       — Fires when the same file is re-read ...
+      def _has_same_test_output(...)  — Fires on identical test fingerprints ...
+
+findings:
+  - stuck_on_edit should check read-before-write  (score 2.8)
+      The detector was firing on legitimate edits because it didn't see ...
+</context-rank>
+```
+
+### Logging + the historical tables
+
+Three SQLite tables track the cross-session signal:
+
+| Table | Purpose |
+|---|---|
+| `cr_contexts` | Per-iteration context snapshots (task input, step titles, step descriptions) with their embeddings. |
+| `cr_interactions` | Per-tool-call events classified by `classify_tool_call` — `read_file`, `edit_symbol`, `execute_command`, etc, each with a weight (reads are 1.0, writes are 2.0+). |
+| `cr_session_scores` | Aggregated per-session final scores for each target. Used by popularity, co-occurrence, and cross-session propagation. |
+
+Logging is enabled independently of ranking via
+`CONTEXT_RANK_LOGGING_ENABLED=True` (default). You can log for
+several sessions before turning `CONTEXT_RANK_ENABLED` on — the
+ranker reads historical data written during earlier sessions.
+
+### Performance
+
+Measured on a medium-sized indexed project with ~5k symbols, ~300
+findings, ~50 recorded sessions:
+
+| Phase | Time |
+|---|---|
+| Task embedding (background, async) | ~270 ms |
+| Mention channel (SQL `instr()` filter) | ~2 ms |
+| Finding channel (multi-signal + cosine) | ~4 ms |
+| Docstring channel (BM25) | ~1 ms |
+| Import graph (UNION query) | ~3 ms |
+| Freshness (`os.stat` batch) | ~1 ms |
+| Merge + outlier filter + render | ~2 ms |
+| **Total per pivot (with cache)** | **~48 ms** |
+
+An earlier iteration was 190 ms per rank, dominated by
+`git log -1 --format=%at` subprocess calls in the freshness
+channel (800× slower than `os.stat`) and per-identifier regex in
+the mention channel. Both were replaced.
+
+### When to enable it
+
+  * You are on a recurring codebase and have accumulated ≥ 10
+    sessions of interaction data.
+  * You are running a small model that struggles to discover files
+    on its own.
+  * You want the model to benefit from institutional memory —
+    "where did we fix this last time?"
+
+### When to leave it off
+
+  * Fresh project, no history to rank against.
+  * You are running a large model that discovers the codebase
+    effectively on its own.
+  * You are testing a specific bug pattern and don't want the
+    ranker to bias toward historically popular files.
+
+---
+
+## Anchored memory
+
+Located at `engine/tool_executor.py::annotate_with_memory` and the
+four anchor columns on `findings`. A finding created with
+`finding_type` in (`lesson`, `rule`, `landmine`) can be tagged with
+an **anchor** — a file path, symbol name, tool name, or error
+pattern — and the loop engine automatically appends the lesson to
+the result of any tool call that touches the matching anchor.
+
+The design centre is "impossible to miss, zero prompt bloat when no
+match fires". The lesson is shown **inline**, next to the data that
+provoked it, at the moment the agent is about to act. Nothing is
+injected into the system prompt; nothing is rendered on iterations
+where no anchor matches.
+
+### Anchor kinds
+
+| Column | Matches on | Example |
+|---|---|---|
+| `anchor_file` | `read_file(file_path=...)`, `partial_read`, `edit_file`, ... | Lesson fires when agent opens `src/auth/middleware.py`. |
+| `anchor_symbol` | `edit_symbol(name=...)`, `get_symbol_code(name=...)`, ... | Lesson fires when agent touches `AuthService.validate_token`. |
+| `anchor_tool` | The tool name itself (e.g. `execute_command`). | Lesson fires on every `execute_command` call. |
+| `anchor_error` | Substring match against the tool result when it is an error. | Lesson fires whenever a tool result contains "permission denied". |
+
+Multiple anchors OR together — a single lesson can point at both a
+file and a symbol. Lesson storage is `finding_type IN (lesson, rule,
+landmine)`; other finding types never trigger anchor injection.
+
+### How the lesson appears
+
+After a successful (non-error) tool call, the loop engine looks up
+matching anchored findings for the just-executed tool and appends
+one block at the end of the tool result:
+
+```
+[📌 Known lessons relevant to this action]
+- LESSON (confidence 0.9): The auth middleware rejects tokens signed
+  before 2024-01-01. If you see a 401 here, check the `iat` claim
+  first instead of regenerating the token.
+
+- LANDMINE (confidence 1.0): `AuthService.validate_token` appears
+  thread-safe but holds an internal cache keyed by pid — do NOT
+  call it from a forked worker.
+```
+
+Ordered by confidence desc, then recency, capped at 3 entries per
+tool call.
+
+### Recording a lesson
+
+The `record_finding` tool exposes anchor parameters directly:
+
+```json
+{
+  "topic": "auth middleware iat claim",
+  "content": "If you see a 401 from the auth middleware, check the iat claim before regenerating the token — the middleware rejects pre-2024 tokens.",
+  "finding_type": "lesson",
+  "confidence": 0.9,
+  "anchor_file": "src/auth/middleware.py"
+}
+```
+
+The model is coached by the `record_finding` tool description to use
+anchors whenever a lesson has a concrete scope — "I learned something
+while editing X" becomes `anchor_symbol: "X"`.
+
+### Operational properties
+
+  * **Zero-latency lookup**. The anchor columns are indexed and the
+    query is a simple OR-joined SELECT. Measured < 1 ms per tool
+    call on a DB with 500+ findings.
+  * **Best-effort**. The lookup is wrapped in `best_effort` — if
+    anything goes wrong, the tool result is returned unmodified and
+    the failure is logged but does not break the loop.
+  * **No injection on errors**. Lessons are only appended to
+    *successful* tool results — there's no point drowning an error
+    message in advice.
+  * **Transparent schema migration**. The four anchor columns are
+    added to `findings` via `_migrate_add_column`, so existing
+    databases upgrade without touching any rows.
+
+Contrast with guidance: guidance is *reactive pattern detection* on
+the loop's behaviour ("you re-read this file 3 times"); anchored
+memory is *proactive institutional knowledge* tied to a concrete
+piece of the codebase ("when you touch this file, here's what we
+learned last time"). They are complementary — a task can trigger
+both in the same iteration.
+
+---
+
 ## The phase engine
 
 `engine/phases/phase_engine.py` — an alternative execution path that
@@ -890,7 +1166,7 @@ for the thread's lifetime.
 | Table | Purpose |
 |---|---|
 | `projects` | Project registry. |
-| `findings` | Knowledge tool entries with embeddings, FTS5, semantic dedup. |
+| `findings` | Knowledge tool entries with embeddings, FTS5, semantic dedup. Also carries `anchor_file`, `anchor_symbol`, `anchor_tool`, `anchor_error` columns for [anchored memory](#anchored-memory). |
 | `findings_fts` | FTS5 virtual table for findings. |
 | `artifacts` | Tracked file artifacts. |
 | `artifact_changes` | Per-edit change history. |
@@ -907,6 +1183,9 @@ for the thread's lifetime.
 | `ci_imports` | Import declarations. |
 | `ci_diagnostics` | Heuristic analysis results. |
 | `ci_method_bodies` | **Per-method normalized fingerprints for fuzzy similarity search** (the `find_similar_methods` backend). |
+| `cr_contexts` | [ContextRank](#contextrank) per-iteration context snapshots (task input, step title, step description) + embeddings. |
+| `cr_interactions` | [ContextRank](#contextrank) per-tool-call interaction log, classified and weighted (reads 1.0, writes 2.0+). |
+| `cr_session_scores` | [ContextRank](#contextrank) aggregated per-session final scores per target — the input to popularity and co-occurrence channels. |
 
 ### Schema migrations
 
@@ -942,6 +1221,18 @@ turns via `reload_all()`. Override via `INFINIDEV_*` env vars or via
 | `LOOP_VALIDATE_SYNTAX_BEFORE_WRITE` | True | Pre-write syntax check. |
 | `LOOP_REQUIRE_NOTE_BEFORE_COMPLETE` | False | Force the agent to add a note before completing a step. |
 | `LOOP_CUSTOM_TEST_COMMANDS` | (empty) | Add project-specific test command substrings. |
+| `CONTEXT_RANK_ENABLED` | False | Master switch for [ContextRank](#contextrank) prompt injection. Off by default — turn on after accumulating session data. |
+| `CONTEXT_RANK_LOGGING_ENABLED` | True | Log interactions + contexts into `cr_*` tables even when ranking is disabled, so data accumulates for future use. |
+| `CONTEXT_RANK_TOP_K_FILES` | 5 | Max files shown in `<context-rank>`. |
+| `CONTEXT_RANK_TOP_K_SYMBOLS` | 5 | Max symbols shown in `<context-rank>`. |
+| `CONTEXT_RANK_TOP_K_FINDINGS` | 3 | Max findings shown in `<context-rank>`. |
+| `CONTEXT_RANK_REACTIVE_DECAY` | 0.15 | Per-iteration decay applied to in-session reactive scores. |
+| `CONTEXT_RANK_SESSION_DECAY` | 0.95 | Per-session decay applied to historical cross-session scores. |
+| `CONTEXT_RANK_MIN_SIMILARITY` | 0.4 | Minimum cosine similarity for a historical context to count in the predictive channel. |
+| `CONTEXT_RANK_MIN_CONFIDENCE` | 0.5 | Confidence gate — suppress the `<context-rank>` block entirely if the top score is below this. |
+| `CONTEXT_RANK_OUTLIER_PERCENTILE` | 95 | MAD outlier threshold as a percentile (accepts `95`, `95.0`, or `"95%"`). Higher = stricter. |
+| `CONTEXT_RANK_OUTLIER_MAX_COUNT` | 3 | Hard cap on outliers kept per category. |
+| `CONTEXT_RANK_OUTLIER_MIN_TOP_SCORE` | 1.0 | Skip outlier filter if the top score is below this (everything is noise — drop the whole block instead). |
 | `ANALYSIS_ENABLED` | True | Run the analyst phase. |
 | `REVIEW_ENABLED` | True | Run the review phase. |
 | `GATHER_ENABLED` | False | Run the gather phase by default. |
@@ -1055,6 +1346,11 @@ src/infinidev/
 │   │   ├── detectors.py      All _has_* functions + _DETECTORS list
 │   │   ├── hooks.py          maybe_queue_guidance / drain_pending_guidance
 │   │   └── test_runners.py   is_test_command + normalize_test_command
+│   ├── context_rank/         Cross-session context prioritization
+│   │   ├── ranker.py         rank() + 10 scoring channels + MAD outlier filter
+│   │   ├── logger.py         classify_tool_call + log_interaction/context
+│   │   ├── hooks.py          ContextRankHooks with pivot-based caching
+│   │   └── models.py         RankedItem / ContextRankResult
 │   ├── test_parsers/         7 per-runner parsers (pytest/jest/...)
 │   ├── phases/               PhaseEngine — CLASSIFY/INVESTIGATE/PLAN/EXECUTE
 │   ├── tree/                 TreeEngine — exploration / brainstorm
