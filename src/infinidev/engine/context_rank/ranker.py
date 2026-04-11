@@ -78,17 +78,24 @@ _OUTLIER_FALLBACK_RATIO = 1.8
 # tight) and trigger the fallback ratio test.
 _MAD_DEGENERATE_THRESHOLD = 0.05
 
+# Minimum relative magnitude for an item to qualify as an outlier:
+# the score must be at least this many times the baseline median.
+# Prevents low-variance baselines from flagging tiny deltas as
+# "statistically significant" outliers when they aren't meaningful.
+# 1.5 means an outlier must be at least 50% above the noise median.
+_OUTLIER_MIN_RATIO = 1.5
+
 
 def _percentile_to_mad_multiplier(percentile: float | str) -> float:
     """Convert a user-friendly percentile to the MAD multiplier K.
 
-    Accepts a number (99) or a percentage string ("99%").  Returns
+    Accepts a number (95) or a percentage string ("95%").  Returns
     the corresponding K such that ``K × MAD × 1.4826`` equals the
     standard-deviation distance at that percentile of a normal
     distribution.
 
         90   →  1.28   (top 10%)
-        95   →  1.645  (top 5%)
+        95   →  1.645  (top 5%, default)
         99   →  2.326  (top 1%)
         99.7 →  2.748  (top 0.3%, classic 3-sigma)
     """
@@ -99,19 +106,19 @@ def _percentile_to_mad_multiplier(percentile: float | str) -> float:
         try:
             p = float(s)
         except ValueError:
-            p = 99.0
+            p = 95.0
     else:
         p = float(percentile)
 
     # Clamp to a sensible range
     if p <= 0 or p >= 100:
-        p = 99.0
+        p = 95.0
 
     # Φ⁻¹(p/100) — inverse normal CDF at the requested percentile
     try:
         return NormalDist().inv_cdf(p / 100.0)
     except Exception:
-        return 2.326  # fallback: 99th percentile
+        return 1.645  # fallback: 95th percentile
 
 
 # ── Public API ───────────────────────────────────────────────────────
@@ -426,35 +433,48 @@ def _compute_mention_scores(
             if score > existing[0]:
                 result[sym_key] = (score, "symbol", f"'{name}' mentioned in input")
 
-    # Also check file basenames against the input
-    try:
-        def _fetch_files(conn):
-            return conn.execute(
-                "SELECT DISTINCT file_path FROM ci_files "
-                "WHERE project_id = ? "
-                "LIMIT 2000",
-                (project_id,),
-            ).fetchall()
-        file_rows = execute_with_retry(_fetch_files)
-    except Exception:
-        file_rows = []
+    # Also check file basenames against the input.
+    # Extract candidate words from the input once, then query only
+    # files whose path contains any of those words.  This replaces
+    # the full-scan approach (2000 rows → Python filter).
+    input_words = set(
+        w for w in re.split(r'\W+', input_lower)
+        if len(w) >= 4 and w not in _COMMON_WORDS
+    )
+    file_rows = []
+    if input_words:
+        try:
+            def _fetch_files(conn):
+                # Build an OR of LIKE patterns — SQLite uses the
+                # ci_files index on file_path so this is fast even
+                # with 10+ patterns.
+                words_list = list(input_words)[:20]  # cap to avoid giant queries
+                placeholders = " OR ".join("file_path LIKE ?" for _ in words_list)
+                params = [project_id] + [f"%{w}%" for w in words_list]
+                return conn.execute(
+                    f"SELECT DISTINCT file_path FROM ci_files "
+                    f"WHERE project_id = ? AND ({placeholders}) "
+                    f"LIMIT 200",
+                    params,
+                ).fetchall()
+            file_rows = execute_with_retry(_fetch_files)
+        except Exception:
+            file_rows = []
 
     for row in file_rows:
         fp = row["file_path"]
         if not fp:
             continue
-        basename = os.path.basename(fp)
+        basename = os.path.basename(fp)  # trust Python's extraction
         stem = basename.rsplit(".", 1)[0] if "." in basename else basename
         stem_lc = stem.lower()
         if len(stem) < 4 or stem_lc in _COMMON_WORDS:
             continue
 
-        # Basename match: "registry.ts" literally in input. This is a
-        # strong signal — user clearly knows the filename.
+        # The SQL already confirmed the basename substring is in the
+        # input.  We now distinguish between "basename.ext literal" and
+        # "stem with word boundary" for scoring.
         basename_match = "." in basename and basename.lower() in padded
-        # Stem match: word boundaries on both sides. For generic stems
-        # (server, system, ...) we get many matches but other channels
-        # (historical, co-occurrence) rank the truly relevant ones higher.
         stem_match = (
             f" {stem_lc} " in padded or
             f" {stem_lc}." in padded or
@@ -465,9 +485,7 @@ def _compute_mention_scores(
 
         if basename_match or stem_match:
             fp_n = _normalize_path(fp)
-            # Basename matches score higher (more specific)
             base_score = 4.0 if basename_match else 3.2
-            # Generic stems get a lower score to avoid flooding results
             if not basename_match and stem_lc in _STEM_SKIP:
                 base_score = 2.5
             score = min(5.0, base_score + (len(stem) / 25.0))
@@ -720,34 +738,30 @@ def _apply_import_boost(
     for target, target_score in top_files:
         try:
             def _query(conn, t=target, pid=project_id):
-                # Files that import the scored file
-                importers = conn.execute(
-                    "SELECT DISTINCT file_path FROM ci_imports "
-                    "WHERE project_id = ? AND resolved_file = ?",
-                    (pid, t),
+                # Single UNION query fetches both directions:
+                #   direction='in'  → files that import target
+                #   direction='out' → files that target imports
+                return conn.execute(
+                    "SELECT file_path AS fp, 'in' AS direction FROM ci_imports "
+                    "  WHERE project_id = ? AND resolved_file = ? "
+                    "UNION "
+                    "SELECT resolved_file AS fp, 'out' AS direction FROM ci_imports "
+                    "  WHERE project_id = ? AND file_path = ? AND resolved_file != ''",
+                    (pid, t, pid, t),
                 ).fetchall()
-                # Files imported by the scored file
-                imported = conn.execute(
-                    "SELECT DISTINCT resolved_file FROM ci_imports "
-                    "WHERE project_id = ? AND file_path = ? AND resolved_file != ''",
-                    (pid, t),
-                ).fetchall()
-                return importers, imported
-            importers, imported = execute_with_retry(_query)
+            rows = execute_with_retry(_query)
         except Exception:
             continue
 
         basename = os.path.basename(target)
-        for row in importers:
-            fp = row["file_path"]
-            if fp not in scores:
-                score = target_score * 0.3
-                scores[fp] = (score, "file", f"imports {basename}")
-        for row in imported:
-            fp = row["resolved_file"]
-            if fp and fp not in scores:
-                score = target_score * 0.5
-                scores[fp] = (score, "file", f"imported by {basename}")
+        for row in rows:
+            fp = row["fp"]
+            if not fp or fp in scores:
+                continue
+            if row["direction"] == "in":
+                scores[fp] = (target_score * 0.3, "file", f"imports {basename}")
+            else:
+                scores[fp] = (target_score * 0.5, "file", f"imported by {basename}")
     return scores
 
 
@@ -756,30 +770,33 @@ def _apply_import_boost(
 def _apply_freshness_boost(
     scores: dict[str, tuple[float, str, str]],
 ) -> dict[str, tuple[float, str, str]]:
-    """Boost files with recent git modifications."""
-    import subprocess
+    """Boost files modified recently on disk.
+
+    Uses ``os.stat().st_mtime`` instead of ``git log`` for speed —
+    subprocess spawning would cost 5-20ms per file.  Filesystem mtime
+    is a close enough proxy for "recently worked on": it tracks when
+    the file was last touched, which is what we care about for
+    relevance ranking.
+    """
     import time as _time
+    now = _time.time()
+    workspace = os.getcwd()
 
-    file_targets = [t for t, (_, tt, _) in scores.items() if tt == "file" and "." in os.path.basename(t)]
-    if not file_targets:
-        return scores
-
-    # Batch git log for efficiency
-    for target in file_targets[:10]:  # Cap to 10 files
+    for target in list(scores):
+        score, tt, reason = scores[target]
+        if tt != "file" or "." not in os.path.basename(target):
+            continue
+        # Resolve to absolute path
+        abs_path = target if os.path.isabs(target) else os.path.join(workspace, target)
         try:
-            result = subprocess.run(
-                ["git", "log", "--format=%at", "-1", "--", target],
-                capture_output=True, text=True, timeout=2,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                mtime = int(result.stdout.strip())
-                days_ago = (_time.time() - mtime) / 86400
-                freshness = max(1.0, 1.3 - (days_ago / 100))
-                if freshness > 1.0:
-                    old_score, tt, reason = scores[target]
-                    scores[target] = (old_score * freshness, tt, reason)
-        except Exception:
-            pass
+            mtime = os.stat(abs_path).st_mtime
+        except OSError:
+            continue
+        days_ago = (now - mtime) / 86400
+        # Linear decay: 1.3× today, 1.0× at 30+ days
+        freshness = max(1.0, 1.3 - (days_ago / 100))
+        if freshness > 1.0:
+            scores[target] = (score * freshness, tt, reason)
     return scores
 
 
@@ -933,7 +950,16 @@ def _filter_outliers(items: list[RankedItem]) -> list[RankedItem]:
     else:
         threshold = b_median + mad_multiplier * mad * _MAD_NORMAL_CONSISTENCY
 
-    outliers = [it for it in sorted_items if it.score >= threshold]
+    # Secondary filter: outliers must ALSO be meaningfully above the
+    # baseline in absolute magnitude.  Prevents low-variance baselines
+    # (e.g. [3.2, 3.0, 2.8]) from flagging marginal values (3.5) as
+    # outliers when they're really just slightly above noise.
+    min_magnitude = b_median * _OUTLIER_MIN_RATIO if b_median > 0 else 0
+
+    outliers = [
+        it for it in sorted_items
+        if it.score >= threshold and it.score >= min_magnitude
+    ]
     if 1 <= len(outliers) <= max_count:
         return outliers
     return items

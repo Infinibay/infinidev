@@ -186,13 +186,17 @@ class Settings(BaseSettings):
     #
     # CONTEXT_RANK_OUTLIER_PERCENTILE: what percentile of the noise
     # distribution a score must exceed to count as an outlier.
-    # Accepts a number (99) or a percentage string ("99%" / "99.5%").
+    # Accepts a number (95) or a percentage string ("95%" / "99.5%").
     # Higher = stricter (fewer outliers, higher confidence).
     #   90   → top 10% — aggressive (shows more suggestions)
-    #   95   → top 5%
-    #   99   → top 1%  — default (conservative)
+    #   95   → top 5%  — default (balanced)
+    #   99   → top 1%  — conservative
     #   99.7 → top 0.3% (very strict, classic 3-sigma)
-    CONTEXT_RANK_OUTLIER_PERCENTILE: float | str = 99
+    #
+    # Rationale for 95% default: the cost of showing too many items
+    # (wasted prompt tokens every iteration) is higher than the cost
+    # of hiding a marginal item (the model can still read_file it).
+    CONTEXT_RANK_OUTLIER_PERCENTILE: float | str = 95
     # Max number of outliers to show.  Above this, the "cluster" is
     # too large to be a clean signal → fall back to showing all items.
     CONTEXT_RANK_OUTLIER_MAX_COUNT: int = 3

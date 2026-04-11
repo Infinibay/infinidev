@@ -830,11 +830,11 @@ class TestPercentileToMadMultiplier:
     def test_invalid_values_fallback(self):
         from infinidev.engine.context_rank.ranker import _percentile_to_mad_multiplier
 
-        # Invalid values fall back to 99% (K ≈ 2.326)
-        assert abs(_percentile_to_mad_multiplier("not a number") - 2.326) < 0.01
-        assert abs(_percentile_to_mad_multiplier(-5) - 2.326) < 0.01
-        assert abs(_percentile_to_mad_multiplier(100) - 2.326) < 0.01
-        assert abs(_percentile_to_mad_multiplier(150) - 2.326) < 0.01
+        # Invalid values fall back to 95% (K ≈ 1.645)
+        assert abs(_percentile_to_mad_multiplier("not a number") - 1.645) < 0.01
+        assert abs(_percentile_to_mad_multiplier(-5) - 1.645) < 0.01
+        assert abs(_percentile_to_mad_multiplier(100) - 1.645) < 0.01
+        assert abs(_percentile_to_mad_multiplier(150) - 1.645) < 0.01
 
     def test_aggressive_vs_strict_affects_outlier_count(self):
         from infinidev.engine.context_rank.ranker import _filter_outliers
