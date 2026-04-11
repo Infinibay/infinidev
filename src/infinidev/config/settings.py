@@ -175,7 +175,16 @@ class Settings(BaseSettings):
     CONTEXT_RANK_TOP_K_FILES: int = 5
     CONTEXT_RANK_TOP_K_SYMBOLS: int = 5
     CONTEXT_RANK_TOP_K_FINDINGS: int = 3
-    CONTEXT_RANK_REACTIVE_DECAY: float = 0.15
+    # Exponential decay λ applied per iteration to reactive (in-session)
+    # interactions.  At Δ=10 iterations a score drops to exp(-0.35*10)≈3%,
+    # so actions from 10+ iterations ago effectively vanish.  Bumped from
+    # 0.15 in v3 because 0.15 kept ~22% of the weight at Δ=10, which made
+    # long tasks feel like every past action still mattered equally.
+    CONTEXT_RANK_REACTIVE_DECAY: float = 0.35
+    # Threshold for penalising "confusion" read patterns.  If the model
+    # re-reads a file this many times without editing it, the reactive
+    # score is damped by a multiplier < 1.0 (see _compute_reactive_scores).
+    CONTEXT_RANK_REACTIVE_MANY_READS: int = 3
     CONTEXT_RANK_SESSION_DECAY: float = 0.95
     CONTEXT_RANK_MIN_SIMILARITY: float = 0.4
     CONTEXT_RANK_MIN_CONFIDENCE: float = 0.5

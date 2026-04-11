@@ -1,23 +1,30 @@
-"""ContextRanker v2 — multi-channel scoring for files, symbols, and findings.
+"""ContextRanker v3 — multi-channel scoring for files, symbols, and findings.
 
-Combines 6 independent scoring channels + 4 post-processing boosts:
+Combines 5 independent scoring channels + 3 post-processing boosts:
 
 **Independent channels** (produce scores from scratch):
-  1. Reactive — current session tool calls with recency decay
-  2. Predictive (historical) — embedding sim vs past contexts → interactions
-  3. Mention detection — FTS5 lookup of identifiers mentioned in the input
-  4. Semantic findings — cosine sim of input vs finding embeddings
+  1. Reactive — current session tool calls with recency decay and
+     productivity pattern multiplier (read+edit > read alone, re-read
+     without edit penalised as "confusion")
+  2. Predictive (historical) — embedding sim vs past contexts →
+     interactions, with day-based session decay and sim² contribution
+  3. Mention detection — FTS5/fuzzy lookup of identifiers in the input
+  4. Semantic findings — multi-signal (cosine + topic + tags)
   5. Semantic docstrings — BM25 via FTS5 on symbol docstrings/signatures
-  6. Popularity — files accessed in 3+ sessions get a base boost
 
 **Post-processing boosts** (modify existing scores):
-  7. Co-occurrence — files frequently accessed alongside top-scored files
-  8. Import graph — 1-hop propagation through ``ci_imports``
-  9. Git freshness — recent git modifications boost score
-  10. Directory expansion — replace directory targets with index files
+  6. Co-occurrence — files frequently accessed alongside top-scored files
+  7. Import graph — 1-hop propagation through ``ci_imports`` (importers
+     boosted more than imported, since the former is non-obvious)
+  8. Freshness — filesystem mtime amplifies already-ranked files
 
 A confidence gate suppresses the entire ``<context-rank>`` section when
-the top score is below ``CONTEXT_RANK_MIN_CONFIDENCE``.
+the top raw score is below ``CONTEXT_RANK_MIN_CONFIDENCE``.  Outliers
+within a passing ranking are filtered via MAD on the bottom half of
+scores (see ``_filter_outliers``).
+
+v3 removed canal 6 (popularity — scores too low to clear confidence
+gate) and canal 10 (directory expansion — rarely fired in practice).
 """
 
 from __future__ import annotations
@@ -50,9 +57,6 @@ _LEVEL_WEIGHTS: dict[str, float] = {
 
 # Identifiers shorter than this are too common to be useful mentions
 _MIN_IDENT_LEN = 4
-
-# Index files tried when expanding directory targets
-_INDEX_FILES = ("index.ts", "index.tsx", "index.js", "index.py", "__init__.py", "mod.rs")
 
 # ── Alpha blend (reactive vs predictive) ──
 # `alpha = 0` → pure predictive (historical), `alpha = 1` → pure reactive
@@ -132,15 +136,6 @@ _DOCSTRING_FILE_BONUS = 0.5
 _DOCSTRING_SYMBOL_BASE = 3.5
 _DOCSTRING_SYMBOL_BONUS = 0.5
 
-# ── Popularity channel weights ──
-# Minimum distinct sessions for a file to get any popularity score.
-# Below this, it's a one-off read — no signal.
-_POPULARITY_MIN_SESSIONS = 3
-# Multiplier on log(session_count).  Logarithmic so a file in 20
-# sessions doesn't crush a file with strong topical relevance — just
-# nudges the ranking.  0.3 puts popularity scores in ~0.3-1.0 range.
-_POPULARITY_LOG_SCALE = 0.3
-
 # ── Co-occurrence boost ──
 # Only boost co-occurrences of files whose base score is at least this.
 # Below this threshold, the anchor file is too marginal to trust as a
@@ -161,17 +156,22 @@ _COOC_SATURATE = 5.0
 _COOC_MIN_PROPAGATED = 0.3
 
 # ── Import graph boost ──
-# Only propagate scores from files at or above this threshold.
-_IMPORT_ANCHOR_MIN_SCORE = 1.5
+# Only propagate scores from files at or above this threshold.  Lowered
+# from 1.5 in v3 so the channel fires on new-project tasks where no
+# other channel produces strong scores yet.
+_IMPORT_ANCHOR_MIN_SCORE = 0.8
 # Look at the top N anchor files (each fires one UNION query).
 _IMPORT_MAX_ANCHORS = 3
-# When A imports B, A gets `B.score * IMPORT_IN_PROPAGATION`.
-# Lower than "out" because knowing the importer is less useful than
-# knowing the imported dependency.
-_IMPORT_IN_PROPAGATION = 0.3
-# When A imports B, B gets `A.score * IMPORT_OUT_PROPAGATION`.
-# Higher because the dependency is usually needed to understand A.
-_IMPORT_OUT_PROPAGATION = 0.5
+# When A imports B, A (the importer, downstream) gets
+# `B.score * IMPORT_IN_PROPAGATION`.  Higher than OUT because downstream
+# consumers are the non-obvious surface the model wouldn't discover by
+# just opening B — the model needs these to know what it might break.
+_IMPORT_IN_PROPAGATION = 0.5
+# When A imports B, B (the dependency, upstream) gets
+# `A.score * IMPORT_OUT_PROPAGATION`.  Lower because upstream deps are
+# already visible in A's import block the moment the model opens the
+# file — less useful to surface them separately.
+_IMPORT_OUT_PROPAGATION = 0.3
 
 # ── Freshness boost ──
 # Multiplicative boost applied to already-ranked files based on
@@ -187,11 +187,6 @@ _FRESH_MAX_MULT = 1.3
 _FRESH_DECAY_DAYS = 100  # smaller = faster decay; 100 gives ~30d visible effect
 _FRESH_SECONDS_PER_DAY = 86400
 
-# ── Directory expansion ──
-# Score applied to an index file when expanded from its parent dir.
-# Slightly lower than the original dir score because the index is a
-# concrete but approximate substitute.
-_DIR_EXPAND_DAMPEN = 0.8
 
 # ── Outlier detection constants ──
 # MAD-based outlier detection uses ``median + K * MAD * MAD_SCALE``
@@ -336,17 +331,13 @@ def rank(
     # ── Channel 5: Semantic docstrings (BM25) ────────────────────
     docstrings = _compute_docstring_scores(current_input, project_id, workspace)
 
-    # ── Channel 6: Cross-session popularity ──────────────────────
-    popularity = _compute_popularity_scores()
-
     # ── Merge all independent channels (max per target) ──────────
-    combined = _merge_channels(blended, mentions, findings, docstrings, popularity)
+    combined = _merge_channels(blended, mentions, findings, docstrings)
 
     # ── Post-processing boosts ───────────────────────────────────
     combined = _apply_cooccurrence_boost(combined)
-    combined = _apply_import_boost(combined, project_id)
+    combined = _apply_import_boost(combined, project_id, workspace)
     combined = _apply_freshness_boost(combined, workspace)
-    combined = _expand_directory_targets(combined, workspace)
 
     # ── Confidence gate ──────────────────────────────────────────
     # Check the max score across ALL raw channels (pre-merge), not
@@ -354,7 +345,7 @@ def rank(
     # when there's no predictive data, but the raw signal may be strong.
     min_confidence = getattr(settings, "CONTEXT_RANK_MIN_CONFIDENCE", 0.5)
     all_raw = [
-        s for ch in (reactive, predictive, mentions, findings, docstrings, popularity)
+        s for ch in (reactive, predictive, mentions, findings, docstrings)
         for s, _, _ in ch.values()
     ]
     if not combined or (not all_raw or max(all_raw) < min_confidence):
@@ -369,11 +360,44 @@ def rank(
 
 # ── Channel 1: Reactive scoring ─────────────────────────────────────
 
+# Per-target access pattern multipliers.  Replaces the old log(1+count)
+# frequency boost which rewarded confusion — the more the model re-read
+# a file, the higher the score, which is backwards.  The new pattern
+# classification is productivity-aware:
+#
+#   read + edit  → 2.0  (model read AND edited → the file was useful)
+#   edit only    → 1.5  (edited without a prior read → unusual but
+#                        high-signal, the target was definitely worked on)
+#   3+ reads,
+#     no edit    → 0.7  (confusion: re-read N times without editing →
+#                        mild penalty to push this below productive reads)
+#   otherwise    → 1.0  (1-2 reads, exploratory — neutral)
+#
+# Write events are identified by interaction weight >= 2.0, matching
+# the convention in logger._TOOL_EVENT_MAP where file_write / symbol_write
+# events have weight >= 2.0.
+_REACTIVE_PATTERN_READ_AND_EDIT = 2.0
+_REACTIVE_PATTERN_EDIT_ONLY = 1.5
+_REACTIVE_PATTERN_CONFUSION = 0.7
+_REACTIVE_PATTERN_NEUTRAL = 1.0
+
+
 def _compute_reactive_scores(
     session_id: str, task_id: str, current_iteration: int,
 ) -> dict[str, tuple[float, str, str]]:
-    """Score nodes based on tool calls in the current session."""
+    """Score nodes based on tool calls in the current session.
+
+    Per-target score:
+        score = Σ(weight × exp(-λ × Δi)) × pattern_mult(interactions)
+
+    The pattern multiplier rewards productive access patterns (read
+    followed by edit, or edit followed by verification read) and
+    penalises repeated reads without any edit.  Order between read
+    and edit is intentionally ignored — both read→edit and edit→read
+    count as productive.
+    """
     decay_lambda = settings.CONTEXT_RANK_REACTIVE_DECAY
+    many_reads_threshold = settings.CONTEXT_RANK_REACTIVE_MANY_READS
     try:
         def _query(conn):
             return conn.execute(
@@ -391,17 +415,42 @@ def _compute_reactive_scores(
     for row in rows:
         target = row["target"]
         if target not in accum:
-            accum[target] = {"target_type": row["target_type"], "weighted_sum": 0.0, "count": 0}
+            accum[target] = {
+                "target_type": row["target_type"],
+                "weighted_sum": 0.0,
+                "read_count": 0,
+                "write_count": 0,
+            }
         delta = current_iteration - row["iteration"]
         decay = math.exp(-decay_lambda * max(delta, 0))
         accum[target]["weighted_sum"] += row["weight"] * decay
-        accum[target]["count"] += 1
+        if row["weight"] >= 2.0:
+            accum[target]["write_count"] += 1
+        else:
+            accum[target]["read_count"] += 1
 
     result: dict[str, tuple[float, str, str]] = {}
     for target, info in accum.items():
-        freq_boost = math.log(1 + info["count"])
-        score = info["weighted_sum"] * freq_boost
-        result[target] = (score, info["target_type"], f"accessed {info['count']}x this session")
+        read_count = info["read_count"]
+        write_count = info["write_count"]
+        has_write = write_count > 0
+        has_read = read_count > 0
+
+        if has_write and has_read:
+            pattern_mult = _REACTIVE_PATTERN_READ_AND_EDIT
+            reason = "read + edited this session"
+        elif has_write:
+            pattern_mult = _REACTIVE_PATTERN_EDIT_ONLY
+            reason = "edited this session"
+        elif read_count >= many_reads_threshold:
+            pattern_mult = _REACTIVE_PATTERN_CONFUSION
+            reason = f"re-read {read_count}× without editing"
+        else:
+            pattern_mult = _REACTIVE_PATTERN_NEUTRAL
+            reason = "read this session"
+
+        score = info["weighted_sum"] * pattern_mult
+        result[target] = (score, info["target_type"], reason)
     return result
 
 
@@ -706,10 +755,15 @@ def _compute_finding_scores(
 
     try:
         def _fetch(conn):
+            # ORDER BY confidence DESC so the LIMIT 500 keeps the most
+            # trusted findings when a project accumulates more.
+            # Dedup is keyed by id (not topic) so two findings with the
+            # same topic don't overwrite each other in the result dict.
             return conn.execute(
-                "SELECT topic, content, embedding, tags_json "
+                "SELECT id, topic, content, embedding, tags_json "
                 "FROM findings "
                 "WHERE project_id = ? AND status = 'active' "
+                "ORDER BY confidence DESC, updated_at DESC "
                 "LIMIT 500",
                 (project_id,),
             ).fetchall()
@@ -722,6 +776,7 @@ def _compute_finding_scores(
         topic = row["topic"] or ""
         if not topic:
             continue
+        finding_id = row["id"]
 
         scores: list[tuple[float, str]] = []
 
@@ -753,13 +808,26 @@ def _compute_finding_scores(
                 ))
 
         # ── Signal 3: tag matching ───────────────────────────────
+        # Tags can be multi-word ("authentication flow").  A previous
+        # implementation only matched the exact bi-gram in the input,
+        # which missed the common case where the user writes just one
+        # of the words ("authentication").  Fix: split each tag on
+        # whitespace, consider a tag a hit when ALL of its non-common
+        # words (≥ _MIN_IDENT_LEN) appear as whole words in the input.
         try:
             tags = json.loads(row["tags_json"] or "[]")
-            tag_hits = [
-                t for t in tags
-                if isinstance(t, str) and len(t) >= _MIN_IDENT_LEN
-                and f" {t.lower()} " in padded
-            ]
+            tag_hits: list[str] = []
+            for t in tags:
+                if not isinstance(t, str):
+                    continue
+                tag_words = [
+                    w for w in re.split(r'\W+', t.lower())
+                    if len(w) >= _MIN_IDENT_LEN and w not in _COMMON_WORDS
+                ]
+                if not tag_words:
+                    continue
+                if all(f" {w} " in padded for w in tag_words):
+                    tag_hits.append(t)
             if tag_hits:
                 scores.append((
                     _FINDING_TAG_BASE + len(tag_hits) * _FINDING_TAG_BONUS,
@@ -768,11 +836,15 @@ def _compute_finding_scores(
         except Exception:
             pass
 
-        # Keep the max signal
+        # Keep the max signal.  Dict key is the finding id — prevents
+        # two findings with the same topic from overwriting each other.
         if scores:
             best_score, best_reason = max(scores, key=lambda x: x[0])
             preview = (row["content"] or "")[:60]
-            result[topic] = (best_score, "finding", f"{best_reason}: {preview}")
+            result[f"finding:{finding_id}"] = (
+                best_score, "finding",
+                f"[{topic}] {best_reason}: {preview}",
+            )
 
     return result
 
@@ -848,32 +920,6 @@ def _compute_docstring_scores(
     return result
 
 
-# ── Channel 6: Cross-session popularity ─────────────────────────────
-
-def _compute_popularity_scores() -> dict[str, tuple[float, str, str]]:
-    """Base score for files accessed in many different sessions."""
-    try:
-        def _query(conn):
-            return conn.execute(
-                "SELECT target, COUNT(DISTINCT session_id) as session_count "
-                "FROM cr_session_scores "
-                "WHERE target_type = 'file' "
-                "GROUP BY target "
-                "HAVING session_count >= ?",
-                (_POPULARITY_MIN_SESSIONS,),
-            ).fetchall()
-        rows = execute_with_retry(_query)
-    except Exception:
-        return {}
-
-    result: dict[str, tuple[float, str, str]] = {}
-    for row in rows:
-        count = row["session_count"]
-        score = math.log(count) * _POPULARITY_LOG_SCALE
-        result[row["target"]] = (score, "file", f"accessed in {count} sessions")
-    return result
-
-
 # ── Post-processing: Co-occurrence boost ────────────────────────────
 
 def _apply_cooccurrence_boost(
@@ -925,8 +971,17 @@ def _apply_cooccurrence_boost(
 def _apply_import_boost(
     scores: dict[str, tuple[float, str, str]],
     project_id: int,
+    workspace: str | None = None,
 ) -> dict[str, tuple[float, str, str]]:
-    """1-hop propagation through the import graph."""
+    """1-hop propagation through the import graph.
+
+    Paths from ``ci_imports.file_path`` / ``resolved_file`` may be
+    absolute depending on the indexer's resolution — this function
+    normalises them via ``_normalize_path`` before merging into
+    ``scores`` so the same file cannot appear twice under two keys
+    (one from a semantic channel at relative path, one from here at
+    absolute path).
+    """
     top_files = [
         (t, s) for t, (s, tt, _) in scores.items()
         if tt == "file" and s >= _IMPORT_ANCHOR_MIN_SCORE
@@ -941,8 +996,8 @@ def _apply_import_boost(
         try:
             def _query(conn, t=target, pid=project_id):
                 # Single UNION query fetches both directions:
-                #   direction='in'  → files that import target
-                #   direction='out' → files that target imports
+                #   direction='in'  → files that import target (downstream)
+                #   direction='out' → files that target imports (upstream)
                 return conn.execute(
                     "SELECT file_path AS fp, 'in' AS direction FROM ci_imports "
                     "  WHERE project_id = ? AND resolved_file = ? "
@@ -958,15 +1013,18 @@ def _apply_import_boost(
         basename = os.path.basename(target)
         for row in rows:
             fp = row["fp"]
-            if not fp or fp in scores:
+            if not fp:
+                continue
+            fp_n = _normalize_path(fp, workspace)
+            if fp_n in scores:
                 continue
             if row["direction"] == "in":
-                scores[fp] = (
+                scores[fp_n] = (
                     target_score * _IMPORT_IN_PROPAGATION,
                     "file", f"imports {basename}",
                 )
             else:
-                scores[fp] = (
+                scores[fp_n] = (
                     target_score * _IMPORT_OUT_PROPAGATION,
                     "file", f"imported by {basename}",
                 )
@@ -1018,37 +1076,6 @@ def _apply_freshness_boost(
 
 
 # ── Post-processing: Directory expansion ────────────────────────────
-
-def _expand_directory_targets(
-    scores: dict[str, tuple[float, str, str]],
-    workspace: str | None = None,
-) -> dict[str, tuple[float, str, str]]:
-    """Replace directory targets with their entry-point files."""
-    if workspace is None:
-        workspace = _resolve_workspace()
-    for target in list(scores):
-        score, tt, reason = scores[target]
-        if tt != "file":
-            continue
-        # Heuristic: no extension in basename → likely a directory
-        if "." in os.path.basename(target):
-            continue
-        full_path = os.path.join(workspace, target) if not os.path.isabs(target) else target
-        if not os.path.isdir(full_path):
-            continue
-        del scores[target]
-        for idx_file in _INDEX_FILES:
-            candidate = os.path.join(full_path, idx_file)
-            if os.path.exists(candidate):
-                rel = os.path.relpath(candidate, workspace)
-                if rel not in scores:
-                    scores[rel] = (
-                        score * _DIR_EXPAND_DAMPEN,
-                        "file", f"index of {os.path.basename(target)}/",
-                    )
-                break
-    return scores
-
 
 # ── Path normalization ───────────────────────────────────────────────
 
