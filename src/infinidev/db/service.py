@@ -509,6 +509,17 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_target ON cr_session_scores(target, target_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_session ON cr_session_scores(session_id)")
 
+        # ── Parser versioning migration ──────────────────────────
+        # ci_files.parser_version tracks which parser version
+        # produced the current symbols for this file.  The
+        # incremental indexer skips re-parsing only when BOTH the
+        # content hash and the parser version match — otherwise
+        # a parser bug fix's effect would never propagate to
+        # already-indexed files (the content hash never changes).
+        # See code_intel/parsers/__init__.py::PARSER_VERSIONS for
+        # the per-language version registry.
+        _migrate_add_column(conn, "ci_files", "parser_version", "INTEGER DEFAULT 0")
+
         # ── Phase 3 v3 migrations: fuzzy symbol embeddings ───────
         # Canal 3 (mention detection) is redesigned in v3 to use
         # dense embeddings instead of substring matching.  Each

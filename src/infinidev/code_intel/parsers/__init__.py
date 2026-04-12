@@ -1,4 +1,26 @@
-"""Parser registry — maps languages to their tree-sitter parsers."""
+"""Parser registry — maps languages to their tree-sitter parsers.
+
+**Parser versioning.**  Each language-specific parser has a
+``PARSER_VERSION`` integer that should be bumped whenever its
+extraction logic changes in a way that would produce different
+output for the same input file — typically a bug fix like
+"accept type_identifier for TypeScript class names" or "capture
+abstract class declarations correctly".
+
+The version is stored in ``ci_files.parser_version`` alongside the
+``content_hash``.  The incremental indexer's skip check compares
+both fields: if the content hash matches but the parser version is
+older, the file is re-parsed.  This prevents stale symbols from
+surviving parser bug fixes indefinitely (which is exactly what
+happened with ErrorHandler.ts classes being indexed with empty
+names by a pre-fix parser — the content hash never changed so the
+incremental skip kept returning the broken data for months).
+
+To bump a parser's version: edit the corresponding entry in
+``PARSER_VERSIONS`` below and include a one-line note about the
+change in the git commit message.  Running ``/reindex`` on any
+project will then re-process all files for that language.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +28,53 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from infinidev.code_intel.parsers.base import LanguageParser
+
+
+# Parser version per language.  Bump when extraction logic changes.
+#
+# Version history:
+#   python=1:      initial release
+#   javascript=2:  fix class_declaration name extraction accepting
+#                  type_identifier (was only accepting identifier,
+#                  which caused empty names on TypeScript classes
+#                  extending the JS parser — same fix propagates here).
+#   typescript=2:  inherits JS parser fix plus adds interface / enum
+#                  / type_alias extraction.
+#   rust=1:        initial release
+#   c=1:           initial release
+#   generic=1:     initial release (covers Go, Java, Ruby, C#, PHP,
+#                  Kotlin, Bash, C++, TSX).
+PARSER_VERSIONS: dict[str, int] = {
+    "python":     1,
+    "javascript": 2,
+    "typescript": 2,
+    "rust":       1,
+    "c":          1,
+    "config":     1,
+    # Generic parser entries — all share the same version because
+    # the GenericParser class is one implementation.
+    "go":         1,
+    "java":       1,
+    "ruby":       1,
+    "csharp":     1,
+    "php":        1,
+    "kotlin":     1,
+    "bash":       1,
+    "cpp":        1,
+    "tsx":        1,
+    "dart":       1,
+}
+
+
+def get_parser_version(language: str) -> int:
+    """Return the current parser version for a language.
+
+    Returns ``0`` if the language isn't in ``PARSER_VERSIONS`` — this
+    effectively disables versioned skip-check for unknown languages
+    (content-hash match alone will still allow skip).
+    """
+    return PARSER_VERSIONS.get(language, 0)
+
 
 # File extension → language name
 EXTENSIONS: dict[str, str] = {

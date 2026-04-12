@@ -1,8 +1,8 @@
 [project]
 name = "infinidev"
-version = "0.1.0"
+version = "0.2.0"
 description = "A terminal-based AI programming tool using agent loops."
-authors = [{ name = "Andres", email = "andres@example.com" }]
+authors = [{ name = "Andres Borek", email = "andres.b.dev@gmail.com" }]
 dependencies = [
     "crewai>=0.100.0",
     "crewai-tools>=0.30.0",
@@ -46,6 +46,7 @@ dependencies = [
     "tree-sitter-php>=0.24.1",
     "tree-sitter-kotlin>=1.1.0",
     "wordfreq>=3.1.1",
+    "langdetect>=1.0.9",
 ]
 
 [project.scripts]

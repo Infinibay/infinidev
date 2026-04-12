@@ -51,16 +51,23 @@ def index_file(project_id: int, file_path: str) -> int:
     if not language:
         return 0
 
+    # Import here instead of at module level to keep the registry
+    # change isolated to this file during Phase 2 v3 rollout.
+    from infinidev.code_intel.parsers import get_parser_version
+    parser_version = get_parser_version(language)
+
     # Config files: track hash for change detection, no symbol parsing
     if language == "config":
         try:
             with open(file_path, "rb") as f:
                 content = f.read()
             content_hash = _file_hash(content)
-            existing_hash = ci_index.get_file_hash(project_id, file_path)
-            if existing_hash == content_hash:
+            existing = ci_index.get_file_index_state(project_id, file_path)
+            if existing is not None and existing == (content_hash, parser_version):
                 return 0
-            ci_index.mark_file_indexed(project_id, file_path, language, content_hash, 0)
+            ci_index.mark_file_indexed(
+                project_id, file_path, language, content_hash, 0, parser_version,
+            )
             return 0
         except (PermissionError, OSError):
             return 0
@@ -80,9 +87,13 @@ def index_file(project_id: int, file_path: str) -> int:
 
     content_hash = _file_hash(content)
 
-    # Skip if unchanged
-    existing_hash = ci_index.get_file_hash(project_id, file_path)
-    if existing_hash == content_hash:
+    # Skip if BOTH content hash AND parser version are unchanged.
+    # If the parser was bumped since the last index (e.g. because
+    # we fixed a bug in how it extracts class names), we re-parse
+    # even though the file content is identical — that's the whole
+    # point of versioning the parser.
+    existing = ci_index.get_file_index_state(project_id, file_path)
+    if existing is not None and existing == (content_hash, parser_version):
         return 0
 
     # Parse
@@ -102,7 +113,9 @@ def index_file(project_id: int, file_path: str) -> int:
 
     # Store
     ci_index.store_file_symbols(project_id, file_path, symbols, references, imports)
-    ci_index.mark_file_indexed(project_id, file_path, language, content_hash, len(symbols))
+    ci_index.mark_file_indexed(
+        project_id, file_path, language, content_hash, len(symbols), parser_version,
+    )
 
     # Method body fingerprints — populates ci_method_bodies for the
     # find_similar_methods tool. Runs after store_file_symbols because

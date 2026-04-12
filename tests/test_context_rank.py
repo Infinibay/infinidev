@@ -1261,6 +1261,108 @@ class TestQuerySimplification:
         assert "the" not in lower_tokens
 
 
+class TestMultilingualQuerySimplification:
+    """Tests for language-aware query simplification.
+
+    The Zipf threshold is applied against the detected language's
+    corpus, so Spanish "cómo", "el", "de" filter against Spanish
+    frequencies, not English.  These tests verify the wire-up
+    between langdetect and wordfreq works for the 6 supported
+    languages.
+    """
+
+    def test_detects_english_by_default(self):
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        assert _detect_query_language("How does the auth service work?") == "en"
+
+    def test_short_queries_default_to_english(self):
+        """Queries < 3 words skip detection for reliability."""
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        # langdetect is unreliable on very short inputs, so we bypass it
+        assert _detect_query_language("Auth") == "en"
+        assert _detect_query_language("show AuthService") == "en"
+
+    def test_detects_spanish(self):
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        assert _detect_query_language(
+            "¿Cómo funciona el servicio de autenticación?"
+        ) == "es"
+
+    def test_detects_portuguese(self):
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        assert _detect_query_language(
+            "Como funciona o serviço de autenticação?"
+        ) == "pt"
+
+    def test_detects_french(self):
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        assert _detect_query_language(
+            "Comment fonctionne le service d'authentification?"
+        ) == "fr"
+
+    def test_detects_german(self):
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        assert _detect_query_language(
+            "Wie funktioniert der Authentifizierungsdienst genau?"
+        ) == "de"
+
+    def test_detects_italian(self):
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        assert _detect_query_language(
+            "Come funziona il servizio di autenticazione utente?"
+        ) == "it"
+
+    def test_unsupported_language_falls_back_to_english(self):
+        """A detected language outside _QUERY_SUPPORTED_LANGS → 'en'.
+
+        Russian, Arabic, Chinese, etc. are all valid ISO codes but
+        our Zipf threshold was calibrated for Latin-alphabet European
+        languages.  For unsupported languages we fall back to English:
+        the Zipf lookup returns 0 for most tokens (unknown to English
+        corpus), so the query passes through unchanged — effectively
+        no simplification, which is safer than aggressive filtering
+        with the wrong lexicon.
+        """
+        from infinidev.engine.context_rank.ranker import _detect_query_language
+        # Russian — langdetect would return 'ru' but our set excludes it
+        result = _detect_query_language(
+            "Как работает служба аутентификации пользователей?"
+        )
+        assert result == "en"  # fallback
+
+    def test_spanish_simplification_drops_spanish_stop_words(self):
+        """Spanish 'cómo', 'el', 'de', 'la' filter against Spanish Zipf."""
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        result = _simplify_query("¿Cómo funciona el servicio de autenticación?")
+        # Must not contain: cómo, el, de (all high-frequency in Spanish)
+        tokens_lower = [t.lower() for t in result.split()]
+        assert "cómo" not in tokens_lower
+        assert "el" not in tokens_lower
+        assert "de" not in tokens_lower
+        # Content words must survive
+        assert "autenticación" in tokens_lower
+        assert "funciona" in tokens_lower
+
+    def test_spanish_with_code_identifier_preserved(self):
+        """Spanish query mentioning a CamelCase identifier keeps the ID."""
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        result = _simplify_query("Arregla el método handleCriticalError por favor")
+        # The identifier must survive regardless of language
+        assert "handleCriticalError" in result
+
+    def test_french_simplification(self):
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        result = _simplify_query(
+            "Comment fonctionne le service d'authentification?"
+        )
+        tokens_lower = [t.lower() for t in result.split()]
+        # Filtered: "comment", "le", "d"
+        assert "comment" not in tokens_lower
+        assert "le" not in tokens_lower
+        # Kept: "fonctionne", "authentification"
+        assert "fonctionne" in tokens_lower or "authentification" in tokens_lower
+
+
 # ── Phase 2 v3: productivity snapshot + was_error + age-filtered predictive ─
 
 

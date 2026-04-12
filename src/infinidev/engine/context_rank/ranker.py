@@ -670,10 +670,11 @@ _COMMON_WORDS: frozenset[str] = frozenset({
 #     needing to ship a new stop word list.
 #
 # Zipf frequency scale: 0 (unknown word) to ~8 (most frequent).
-# Anything ≥ 5.0 is in the top ~10k most common English words
-# (the, is, how, today, show, ...), which is our stop-word cutoff.
-# Words below 5.0 are either domain content (firewall=3.24,
-# validate=3.40, machine=4.90) or unknown identifiers (zipf 0).
+# Anything ≥ 5.0 is in the top ~10k most common words of the
+# detected language (the, is, how, today, show, ...), which is
+# our stop-word cutoff.  Words below 5.0 are either domain content
+# (firewall=3.24, validate=3.40, machine=4.90) or unknown
+# identifiers (zipf 0).
 #
 # Only applied to canal 3 — canal 2 (predictive) keeps the raw
 # embedding because its historical contexts were also stored raw,
@@ -685,8 +686,11 @@ _QUERY_STOP_ZIPF = 5.0
 # apostrophes, so "what's" becomes ["what", "s"] — both of which
 # get filtered as high-frequency words.  Does NOT match dots, so
 # "Agent.handleEvent" becomes ["Agent", "handleEvent"] which keeps
-# both halves distinct for the Zipf lookup.
-_QUERY_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# both halves distinct for the Zipf lookup.  Also allows non-ASCII
+# unicode letters via \p{L}-style fallback so that Spanish
+# ("autenticación"), French ("autenticación"), German
+# ("Authentifizierung"), etc. tokenize correctly.
+_QUERY_TOKEN_RE = re.compile(r"[^\W\d_][\w]*", re.UNICODE)
 
 # Minimum number of tokens that must survive filtering before we
 # use the simplified query.  Below this, the filter has removed
@@ -697,6 +701,69 @@ _QUERY_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # matched a symbol literally named ``today``).
 _QUERY_MIN_TOKENS_AFTER = 2
 
+# Supported languages for query simplification.  wordfreq covers
+# 40+ languages and langdetect covers 55+, so adding new ones is
+# just appending the ISO code here.  These six cover the overwhelming
+# majority of developer queries in practice (English plus major
+# European languages).  If langdetect returns a language not in this
+# set (e.g. Russian, Arabic, Chinese — all valid codes but beyond
+# what we've calibrated the 5.0 Zipf threshold on), we fall back to
+# English.  The fallback is safe: English Zipf frequencies for
+# unknown-language words are 0, so non-English tokens all pass
+# through untouched — equivalent to no simplification for them.
+_QUERY_SUPPORTED_LANGS: frozenset[str] = frozenset({
+    "en",  # English
+    "es",  # Spanish
+    "pt",  # Portuguese
+    "fr",  # French
+    "de",  # German
+    "it",  # Italian
+})
+
+# Cached at module level to avoid the 100ms langdetect init per call.
+_LANGDETECT_INITED = False
+
+
+def _init_langdetect() -> None:
+    """Seed langdetect's random state for deterministic detection.
+
+    langdetect uses a non-deterministic algorithm by default (short
+    ambiguous inputs can classify differently across calls).  Seeding
+    the DetectorFactory makes every invocation reproducible, which
+    matters for tests and for consistent ranker behaviour.
+    """
+    global _LANGDETECT_INITED
+    if _LANGDETECT_INITED:
+        return
+    try:
+        from langdetect import DetectorFactory
+        DetectorFactory.seed = 0
+        _LANGDETECT_INITED = True
+    except Exception:
+        pass
+
+
+def _detect_query_language(text: str) -> str:
+    """Return the ISO code for the query's language, falling back to ``en``.
+
+    Langdetect needs ≥ 3 words to classify reliably.  For shorter
+    queries we skip detection entirely and use English — the cost
+    of mis-detecting a 2-word query is higher than the benefit.
+    For longer queries, if detection fails or returns a language we
+    don't support, we also fall back to English.
+    """
+    if not text or len(text.split()) < 3:
+        return "en"
+    _init_langdetect()
+    try:
+        from langdetect import detect
+        lang = detect(text)
+        if lang in _QUERY_SUPPORTED_LANGS:
+            return lang
+    except Exception:
+        pass
+    return "en"
+
 
 def _simplify_query(text: str) -> str:
     """Drop high-frequency noise words from a user query.
@@ -704,14 +771,22 @@ def _simplify_query(text: str) -> str:
     Uses ``wordfreq.zipf_frequency`` to decide which words are
     frequent enough to be conversational noise vs rare enough to
     carry signal.  The threshold is ``_QUERY_STOP_ZIPF = 5.0``,
-    which roughly corresponds to "top 10000 most common English
-    words" — things like ``the``, ``is``, ``how``, ``show``,
-    ``today``, ``we``, ``me`` all exceed it.
+    which roughly corresponds to "top 10000 most common words" in
+    the detected language — things like ``the``, ``is``, ``how``
+    in English; ``el``, ``cómo``, ``es`` in Spanish; ``le``,
+    ``comment``, ``est`` in French.
+
+    Language is detected via ``langdetect`` for queries of ≥ 3
+    words; shorter queries default to English.  If the detected
+    language isn't in ``_QUERY_SUPPORTED_LANGS``, we fall back to
+    English — the Zipf lookup will return 0 for most of the query's
+    tokens and effectively pass the query through unchanged, which
+    is safer than aggressively filtering with the wrong lexicon.
 
     Unknown words (zipf 0, e.g. ``ErorHandler``, ``JWTValidator``,
     or any CamelCase identifier not in the corpus) always pass
     through — they're almost certainly code-derived tokens that
-    we specifically want to preserve.
+    we specifically want to preserve, regardless of language.
 
     Case is preserved on retained tokens so CamelCase identifiers
     keep their subword structure for the embedding model.  If the
@@ -730,10 +805,12 @@ def _simplify_query(text: str) -> str:
         logger.debug("wordfreq not available; skipping query simplification")
         return text
 
+    lang = _detect_query_language(text)
+
     tokens = _QUERY_TOKEN_RE.findall(text)
     kept: list[str] = []
     for tok in tokens:
-        z = zipf_frequency(tok.lower(), "en")
+        z = zipf_frequency(tok.lower(), lang)
         # Unknown words (zipf == 0) → keep (likely identifier).
         # Rare words (zipf < threshold) → keep (content word).
         # Frequent words (zipf >= threshold) → drop (stop word).

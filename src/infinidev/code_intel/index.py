@@ -10,7 +10,13 @@ from infinidev.code_intel._db import execute_with_retry
 
 
 def get_file_hash(project_id: int, file_path: str) -> str | None:
-    """Return the stored content hash for a file, or None if not indexed."""
+    """Return the stored content hash for a file, or None if not indexed.
+
+    .. deprecated::
+        Prefer ``get_file_index_state`` which also returns the parser
+        version — without it the incremental skip check is blind to
+        parser bug fixes (see PARSER_VERSIONS docstring).
+    """
     def _query(conn: sqlite3.Connection):
         row = conn.execute(
             "SELECT content_hash FROM ci_files WHERE project_id = ? AND file_path = ?",
@@ -20,20 +26,52 @@ def get_file_hash(project_id: int, file_path: str) -> str | None:
     return execute_with_retry(_query)
 
 
+def get_file_index_state(project_id: int, file_path: str) -> tuple[str, int] | None:
+    """Return (content_hash, parser_version) for a file, or None if not indexed.
+
+    The parser_version defaults to 0 for rows inserted before the
+    column existed (the migration adds the column with DEFAULT 0).
+    A stored version of 0 never matches any current parser version
+    (which start at 1), so the incremental skip check correctly
+    invalidates pre-versioning entries — exactly the behaviour we
+    want after introducing the PARSER_VERSIONS registry.
+    """
+    def _query(conn: sqlite3.Connection):
+        row = conn.execute(
+            "SELECT content_hash, parser_version FROM ci_files "
+            "WHERE project_id = ? AND file_path = ?",
+            (project_id, file_path),
+        ).fetchone()
+        if row is None:
+            return None
+        return (row["content_hash"], row["parser_version"] or 0)
+    return execute_with_retry(_query)
+
+
 def mark_file_indexed(
-    project_id: int, file_path: str, language: str, content_hash: str, symbol_count: int,
+    project_id: int, file_path: str, language: str, content_hash: str,
+    symbol_count: int, parser_version: int = 0,
 ) -> None:
-    """Update or insert the file index entry."""
+    """Update or insert the file index entry.
+
+    ``parser_version`` should be passed by callers that care about
+    bug-fix propagation (the indexer in particular — see
+    ``indexer.index_file`` for the versioned skip check).  Callers
+    that pass 0 will have their rows invalidated on the next real
+    reindex pass, which is the safer default for backwards compat.
+    """
     def _upsert(conn: sqlite3.Connection):
         conn.execute(
             """\
-            INSERT INTO ci_files (project_id, file_path, language, content_hash, symbol_count, indexed_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO ci_files (project_id, file_path, language, content_hash,
+                                  symbol_count, parser_version, indexed_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(project_id, file_path)
-            DO UPDATE SET language=?, content_hash=?, symbol_count=?, indexed_at=CURRENT_TIMESTAMP
+            DO UPDATE SET language=?, content_hash=?, symbol_count=?,
+                          parser_version=?, indexed_at=CURRENT_TIMESTAMP
             """,
-            (project_id, file_path, language, content_hash, symbol_count,
-             language, content_hash, symbol_count),
+            (project_id, file_path, language, content_hash, symbol_count, parser_version,
+             language, content_hash, symbol_count, parser_version),
         )
         conn.commit()
     execute_with_retry(_upsert)
