@@ -48,7 +48,7 @@ def handle_command(cmd_text: str):
             try:
                 # Use base URL from settings
                 base_url = settings.LLM_BASE_URL.rstrip("/")
-                resp = httpx.get(f"{base_url}/api/tags")
+                resp = httpx.get(f"{base_url}/api/tags", timeout=8)
                 if resp.status_code == 200:
                     data = resp.json()
                     models = data.get("models", [])
