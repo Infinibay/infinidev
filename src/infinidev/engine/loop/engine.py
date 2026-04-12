@@ -336,31 +336,76 @@ class LoopEngine(AgentEngine):
             nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
         )
-        # Streaming callback: emit thinking chunks to the UI via event bus
+        llm_caller, tool_proc, guard, step_mgr = self._init_execution(ctx, task_prompt)
+        consecutive_all_done = 0
+
+        for iteration in range(ctx.start_iteration, ctx.max_iterations):
+            if self._cancel_event.is_set():
+                logger.info("LoopEngine: cancelled by user")
+                _emit_log("info", f"{_YELLOW}\u26a0 Task cancelled by user{_RESET}",
+                          project_id=ctx.project_id, agent_id=ctx.agent_id)
+                break
+
+            messages, step_messages_start = self._run_iteration_preamble(ctx, iteration)
+
+            step_result = self._run_inner_loop(
+                ctx, messages, iteration, llm_caller, tool_proc, guard,
+                step_messages_start=step_messages_start,
+            )
+
+            # Track consecutive text-only iterations
+            if step_result.action_tool_calls == 0:
+                guard.mark_text_only_iteration()
+                if guard.text_only_iterations >= 3:
+                    _emit_log("error",
+                              f"{_RED}\u26a0 Model failed to produce tool calls for "
+                              f"{guard.text_only_iterations} consecutive iterations "
+                              f"\u2014 aborting task{_RESET}",
+                              project_id=ctx.project_id, agent_id=ctx.agent_id)
+                    return step_mgr.finish(ctx, "blocked", iteration,
+                                           "Model unable to produce function calls after multiple attempts.")
+            else:
+                guard.mark_productive_iteration()
+
+            self._run_post_step(ctx, step_result, step_mgr, messages, step_messages_start, iteration)
+
+            term = self._check_termination(ctx, step_result, step_mgr, iteration, consecutive_all_done)
+            if term is not None:
+                return term
+
+            # Update consecutive all-done counter
+            if step_result.status == "explore":
+                consecutive_all_done = 0
+            elif ctx.state.plan.steps and not ctx.state.plan.has_pending:
+                consecutive_all_done += 1
+            else:
+                consecutive_all_done = 0
+
+        # Outer loop exhausted
+        return step_mgr.finish(ctx, "exhausted", ctx.max_iterations - 1)
+
+    # ── Extracted phases of execute() ──────────────────────────────────
+
+    def _init_execution(
+        self, ctx: ExecutionContext, task_prompt: tuple[str, str],
+    ) -> tuple[LLMCaller, ToolProcessor, LoopGuard, StepManager]:
+        """Set up components and hooks for a new execution run."""
         def _on_thinking(text: str) -> None:
-            _emit_loop_event("loop_thinking_chunk", ctx.project_id, ctx.agent_id, {
-                "text": text,
-            })
+            _emit_loop_event("loop_thinking_chunk", ctx.project_id, ctx.agent_id, {"text": text})
 
         def _on_stream_status(phase: str, token_count: int, tool_name: str | None) -> None:
             _emit_loop_event("loop_stream_status", ctx.project_id, ctx.agent_id, {
-                "phase": phase,
-                "token_count": token_count,
-                "tool_name": tool_name,
+                "phase": phase, "token_count": token_count, "tool_name": tool_name,
             })
 
-        llm_caller = LLMCaller(
-            on_thinking_chunk=_on_thinking,
-            on_stream_status=_on_stream_status,
-        )
+        llm_caller = LLMCaller(on_thinking_chunk=_on_thinking, on_stream_status=_on_stream_status)
         tool_proc = ToolProcessor()
         guard = LoopGuard(is_small=ctx.is_small)
         step_mgr = StepManager(self)
 
         self._cancel_event.clear()
-        self._last_state = ctx.state  # Make state available for live introspection
+        self._last_state = ctx.state
 
-        # Attach loop state to tool context so plan tools can modify the plan
         set_loop_state(ctx.agent_id, ctx.state)
         _hook_manager.dispatch(_HookContext(
             event=_HookEvent.LOOP_START,
@@ -368,20 +413,14 @@ class LoopEngine(AgentEngine):
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         ))
 
-        # ContextRank: log task input and start collecting interaction data
         with best_effort("ContextRank start failed"):
             from infinidev.tools.base.context import get_current_session_id, get_current_agent_run_id
             _cr_session = get_current_session_id() or ctx.agent_id
             _cr_task = get_current_agent_run_id() or ctx.agent_id
             self._cr_hooks.start(_cr_session, _cr_task, ctx.desc)
-            # Reset pivot tracking for this task
             self._cr_cached_result = None
             self._cr_last_pivot_key = None
 
-        consecutive_all_done = 0
-
-        # Reset the static-analysis latency accumulator at the start of
-        # each run so the final summary reports just this task's costs.
         with best_effort("static_analysis_timer reset failed"):
             from infinidev.engine.static_analysis_timer import reset as _sa_reset
             _sa_reset()
@@ -389,183 +428,141 @@ class LoopEngine(AgentEngine):
         with best_effort("_trace_run_start failed"):
             _trace_run_start(
                 model=str(ctx.llm_params.get("model", "?")),
-                task=ctx.desc,
-                expected=ctx.expected,
+                task=ctx.desc, expected=ctx.expected,
                 settings_snapshot={
-                    "is_small": ctx.is_small,
-                    "manual_tc": ctx.manual_tc,
-                    "max_iterations": ctx.max_iterations,
-                    "max_per_action": ctx.max_per_action,
-                    "max_total_calls": ctx.max_total_calls,
-                    "history_window": ctx.history_window,
+                    "is_small": ctx.is_small, "manual_tc": ctx.manual_tc,
+                    "max_iterations": ctx.max_iterations, "max_per_action": ctx.max_per_action,
+                    "max_total_calls": ctx.max_total_calls, "history_window": ctx.history_window,
                     "max_context_tokens": ctx.max_context_tokens,
                 },
             )
 
-        for iteration in range(ctx.start_iteration, ctx.max_iterations):
-            if self._cancel_event.is_set():
-                logger.info("LoopEngine: cancelled by user")
-                _emit_log("info", f"{_YELLOW}⚠ Task cancelled by user{_RESET}",
+        return llm_caller, tool_proc, guard, step_mgr
+
+    def _run_iteration_preamble(
+        self, ctx: ExecutionContext, iteration: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Build messages, log step start, dispatch PRE_STEP hook."""
+        ctx.state.iteration_count = iteration + 1
+        messages = self._build_iteration_messages(ctx, iteration)
+        with best_effort("_trace_iter_prompt failed"):
+            _trace_iter_prompt(iteration + 1, messages[0].get("content", ""), messages[1].get("content", ""))
+
+        active = ctx.state.plan.active_step
+        if active:
+            active_desc = active.title
+        elif not ctx.state.plan.steps:
+            active_desc = "Planning..."
+        else:
+            done_steps = [s for s in ctx.state.plan.steps if s.status == "done"]
+            active_desc = f"Continuing ({done_steps[-1].title})" if done_steps else "Working..."
+        if ctx.verbose:
+            _log_step_start(iteration + 1, active_desc)
+
+        _hook_manager.dispatch(_HookContext(
+            event=_HookEvent.PRE_STEP,
+            metadata={"iteration": iteration, "state": ctx.state, "plan": ctx.state.plan, "agent_name": ctx.agent_name},
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        ))
+
+        with best_effort("ContextRank pre-step activation failed"):
+            _cr_pre = ctx.state.plan.active_step
+            if _cr_pre:
+                self._cr_hooks.on_step_activated(
+                    _cr_pre.title, _cr_pre.explanation or "", iteration, _cr_pre.index,
+                )
+
+        return messages, len(messages)
+
+    def _run_post_step(
+        self, ctx: ExecutionContext, step_result: StepResult,
+        step_mgr: StepManager, messages: list[dict[str, Any]],
+        step_messages_start: int, iteration: int,
+    ) -> None:
+        """Advance plan, summarize, log, dispatch hooks after a step completes."""
+        step_result = step_mgr.auto_split(ctx, step_result)
+
+        _hook_manager.dispatch(_HookContext(
+            event=_HookEvent.STEP_TRANSITION,
+            metadata={"step_result": step_result, "plan": ctx.state.plan, "iteration": iteration},
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        ))
+        step_mgr.advance_plan(ctx, step_result)
+
+        with best_effort("ContextRank step activation failed"):
+            _cr_active = ctx.state.plan.active_step
+            if _cr_active:
+                self._cr_hooks.on_step_activated(
+                    _cr_active.title, _cr_active.explanation or "", iteration, _cr_active.index,
+                )
+
+        action_tool_calls = step_result.action_tool_calls
+        step_mgr.summarize_and_record(ctx, step_result, messages, action_tool_calls, iteration)
+
+        if ctx.verbose:
+            _log_step_done(iteration + 1, step_result.status, step_result.summary, action_tool_calls, ctx.state.total_tokens)
+            _log_plan(ctx.state.plan)
+        try:
+            _trace_step_done(iteration + 1, step_result.status, step_result.summary, action_tool_calls)
+            _trace_plan(iteration + 1, ctx.state.plan)
+        except Exception:
+            pass
+
+        self._guidance.try_queue(ctx, messages, step_messages_start, mid_step=False)
+
+        _hook_manager.dispatch(_HookContext(
+            event=_HookEvent.POST_STEP,
+            metadata={
+                "iteration": iteration, "step_result": step_result,
+                "record": ctx.state.history[-1] if ctx.state.history else None,
+                "state": ctx.state, "agent_name": ctx.agent_name,
+                "action_tool_calls": action_tool_calls,
+                "messages": messages, "step_messages_start": step_messages_start,
+            },
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        ))
+        if ctx.event_id:
+            self._checkpoint(ctx.event_id, ctx.state)
+
+    def _check_termination(
+        self, ctx: ExecutionContext, step_result: StepResult,
+        step_mgr: StepManager, iteration: int,
+        consecutive_all_done: int,
+    ) -> str | None:
+        """Check if the task should terminate. Returns result string or None."""
+        if step_result.status == "explore":
+            self._handle_explore(ctx, step_result, iteration)
+            return None
+
+        if step_result.status == "done":
+            if not step_result.final_answer and iteration == ctx.start_iteration:
+                _emit_log("warning",
+                          f"{_YELLOW}\u26a0 LLM declared done on first step without final_answer \u2014 forcing continue{_RESET}",
                           project_id=ctx.project_id, agent_id=ctx.agent_id)
-                break
-
-            ctx.state.iteration_count = iteration + 1
-            messages = self._build_iteration_messages(ctx, iteration)
-            with best_effort("_trace_iter_prompt failed"):
-                _trace_iter_prompt(iteration + 1, messages[0].get("content", ""), messages[1].get("content", ""))
-
-            # Log step start
-            active = ctx.state.plan.active_step
-            if active:
-                active_desc = active.title
-            elif not ctx.state.plan.steps:
-                active_desc = "Planning..."
-            else:
-                done_steps = [s for s in ctx.state.plan.steps if s.status == "done"]
-                active_desc = f"Continuing ({done_steps[-1].title})" if done_steps else "Working..."
-            if ctx.verbose:
-                _log_step_start(iteration + 1, active_desc)
-
-            _hook_manager.dispatch(_HookContext(
-                event=_HookEvent.PRE_STEP,
-                metadata={"iteration": iteration, "state": ctx.state, "plan": ctx.state.plan, "agent_name": ctx.agent_name},
-                project_id=ctx.project_id, agent_id=ctx.agent_id,
-            ))
-
-            # ContextRank: log the active step BEFORE tools execute so
-            # interactions get linked to the step that provoked them.
-            with best_effort("ContextRank pre-step activation failed"):
-                _cr_pre = ctx.state.plan.active_step
-                if _cr_pre:
-                    self._cr_hooks.on_step_activated(
-                        _cr_pre.title, _cr_pre.explanation or "",
-                        iteration, _cr_pre.index,
-                    )
-
-            # ── Inner loop ──────────────────────────────────────────
-            # Capture the message-buffer offset *before* this step runs so
-            # POST_STEP consumers (e.g. the behavior scorer) can slice out
-            # exactly the messages produced during this step.
-            step_messages_start = len(messages)
-            step_result = self._run_inner_loop(
-                ctx, messages, iteration, llm_caller, tool_proc, guard,
-                step_messages_start=step_messages_start,
+                step_result.status = "continue"
+                return None
+            result = step_result.final_answer or step_result.summary
+            result = step_mgr.finish(ctx, "done", iteration, result)
+            return self._apply_guardrail(
+                result, ctx.guardrail, ctx.guardrail_max_retries,
+                ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
+                ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
+                max_per_action=ctx.max_per_action,
             )
 
-            # Track consecutive text-only iterations across the outer loop
-            action_tc = step_result.action_tool_calls
-            if action_tc == 0:
-                guard.mark_text_only_iteration()
-                if guard.text_only_iterations >= 3:
-                    _emit_log("error",
-                              f"{_RED}⚠ Model failed to produce tool calls for "
-                              f"{guard.text_only_iterations} consecutive iterations "
-                              f"— aborting task{_RESET}",
-                              project_id=ctx.project_id, agent_id=ctx.agent_id)
-                    return step_mgr.finish(ctx, "blocked", iteration,
-                                           "Model unable to produce function calls after multiple attempts.")
-            else:
-                guard.mark_productive_iteration()
+        if step_result.status == "blocked":
+            return step_mgr.finish(ctx, "blocked", iteration, step_result.summary)
 
-            # ── Post-step processing ────────────────────────────────
-            step_result = step_mgr.auto_split(ctx, step_result)
-
-            _hook_manager.dispatch(_HookContext(
-                event=_HookEvent.STEP_TRANSITION,
-                metadata={"step_result": step_result, "plan": ctx.state.plan, "iteration": iteration},
-                project_id=ctx.project_id, agent_id=ctx.agent_id,
-            ))
-
-            step_mgr.advance_plan(ctx, step_result)
-
-            # ContextRank: log the newly activated step's title + description
-            with best_effort("ContextRank step activation failed"):
-                _cr_active = ctx.state.plan.active_step
-                if _cr_active:
-                    self._cr_hooks.on_step_activated(
-                        _cr_active.title, _cr_active.explanation or "",
-                        iteration, _cr_active.index,
-                    )
-
-            action_tool_calls = step_result.action_tool_calls
-            step_mgr.summarize_and_record(ctx, step_result, messages, action_tool_calls, iteration)
-
-            if ctx.verbose:
-                _log_step_done(iteration + 1, step_result.status, step_result.summary, action_tool_calls, ctx.state.total_tokens)
-                _log_plan(ctx.state.plan)
-
-            try:
-                _trace_step_done(iteration + 1, step_result.status, step_result.summary, action_tool_calls)
-                _trace_plan(iteration + 1, ctx.state.plan)
-            except Exception:
-                pass
-
-            # Reactive guidance: look for stuck-patterns at end-of-step
-            # and queue pre-baked how-to advice for the next iteration.
-            # Small models only; never costs an LLM call. Delegated to
-            # GuidanceHandler so mid-step and end-of-step share one code
-            # path — see loop/guidance_handler.py.
-            self._guidance.try_queue(
-                ctx, messages, step_messages_start, mid_step=False,
+        if consecutive_all_done >= 2 and ctx.state.plan.steps and not ctx.state.plan.has_pending:
+            result = step_mgr.finish(ctx, "done", iteration, step_result.summary)
+            return self._apply_guardrail(
+                result, ctx.guardrail, ctx.guardrail_max_retries,
+                ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
+                ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
+                max_per_action=ctx.max_per_action,
             )
 
-            _hook_manager.dispatch(_HookContext(
-                event=_HookEvent.POST_STEP,
-                metadata={
-                    "iteration": iteration, "step_result": step_result,
-                    "record": ctx.state.history[-1] if ctx.state.history else None,
-                    "state": ctx.state, "agent_name": ctx.agent_name,
-                    "action_tool_calls": action_tool_calls,
-                    "messages": messages,
-                    "step_messages_start": step_messages_start,
-                },
-                project_id=ctx.project_id, agent_id=ctx.agent_id,
-            ))
-
-            if ctx.event_id:
-                self._checkpoint(ctx.event_id, ctx.state)
-
-            # ── Check termination ───────────────────────────────────
-            if step_result.status == "explore":
-                self._handle_explore(ctx, step_result, iteration)
-                consecutive_all_done = 0
-                continue
-
-            if step_result.status == "done":
-                if not step_result.final_answer and iteration == ctx.start_iteration:
-                    _emit_log("warning",
-                              f"{_YELLOW}⚠ LLM declared done on first step without final_answer — forcing continue{_RESET}",
-                              project_id=ctx.project_id, agent_id=ctx.agent_id)
-                    step_result = StepResult(summary=step_result.summary, status="continue", next_steps=step_result.next_steps)
-                else:
-                    result = step_result.final_answer or step_result.summary
-                    result = step_mgr.finish(ctx, "done", iteration, result)
-                    return self._apply_guardrail(
-                        result, ctx.guardrail, ctx.guardrail_max_retries,
-                        ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
-                        ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
-                        max_per_action=ctx.max_per_action,
-                    )
-
-            if step_result.status == "blocked":
-                return step_mgr.finish(ctx, "blocked", iteration, step_result.summary)
-
-            # Safety: consecutive all-done detection
-            if ctx.state.plan.steps and not ctx.state.plan.has_pending:
-                consecutive_all_done += 1
-                if consecutive_all_done >= 2:
-                    result = step_mgr.finish(ctx, "done", iteration, step_result.summary)
-                    return self._apply_guardrail(
-                        result, ctx.guardrail, ctx.guardrail_max_retries,
-                        ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
-                        ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
-                        max_per_action=ctx.max_per_action,
-                    )
-            else:
-                consecutive_all_done = 0
-
-        # Outer loop exhausted
-        return step_mgr.finish(ctx, "exhausted", ctx.max_iterations - 1)
+        return None
 
     # ── Private helpers for execute() ───────────────────────────────────
 
@@ -970,31 +967,30 @@ class LoopEngine(AgentEngine):
                 _emit_log("error", f"{_RED}⚠ Inner loop exhausted: {limit_msg}{_RESET}",
                           project_id=ctx.project_id, agent_id=ctx.agent_id)
 
+        return self._finalize_inner_loop(ctx, step_result, action_tool_calls, tracker)
+
+    def _finalize_inner_loop(
+        self, ctx: ExecutionContext, step_result: StepResult | None,
+        action_tool_calls: int, tracker: BehaviorTracker,
+    ) -> StepResult:
+        """Default step_result, propagate edit state, attach metadata."""
         if step_result is None:
             step_result = StepResult(summary="Step completed.", status="continue")
 
-        # Run end-of-step behavior checks and propagate edit flag
         tracker.on_step_end()
         if tracker.task_has_edits:
             ctx.state.task_has_edits = True
-        # Propagate the set of files edited in this step into the
-        # loop state so the ``similarity_after_write`` detector can
-        # check the freshly-reindexed methods against the rest of the
-        # project. The list is cleared by the detector itself after
-        # consuming it, so guidance fires at most once per write burst.
+
         if tracker.files_edited:
-            # Skip files we've already warned about in this task.
             warned = set(ctx.state.similarity_warned_files)
             new_paths = [p for p in tracker.files_edited if p not in warned]
             if new_paths:
-                # Dedup while preserving order.
                 existing = set(ctx.state.recently_written_files)
                 for p in new_paths:
                     if p not in existing:
                         ctx.state.recently_written_files.append(p)
                         existing.add(p)
 
-        # Attach metadata for post-step processing
         step_result.action_tool_calls = action_tool_calls
         step_result.behavior_tracker = tracker
         return step_result
