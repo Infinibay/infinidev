@@ -1159,6 +1159,108 @@ class TestImportGraphPathNormalization:
         assert _IMPORT_IN_PROPAGATION > _IMPORT_OUT_PROPAGATION
 
 
+# ── Query simplification via Zipf frequency ─────────────────────────────
+
+
+class TestQuerySimplification:
+    """Tests for _simplify_query — the wordfreq Zipf-based stop word filter.
+
+    Regression coverage for the live smoke test on backend-refactor
+    that showed the filter rescuing two queries (typo tolerance, multi-
+    hop semantic) while correctly falling back to raw text on
+    conversational noise.  Protects against accidental regression if
+    someone tunes _QUERY_STOP_ZIPF or the token regex.
+    """
+
+    def test_drops_conversational_preamble(self):
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        # "show me the X method" → "X method" after filter.
+        # Note: "class" has zipf=5.36 (filtered), "method" has
+        # zipf=4.80 (kept), so we use "method" here to guarantee a
+        # second surviving token and avoid the fallback guard.
+        result = _simplify_query("Show me the AuthService method")
+        tokens = result.split()
+        assert "AuthService" in tokens
+        assert "method" in tokens
+        assert "show" not in [t.lower() for t in tokens]
+        assert "me" not in [t.lower() for t in tokens]
+        assert "the" not in [t.lower() for t in tokens]
+
+    def test_preserves_unknown_identifiers(self):
+        """Unknown words (zipf == 0) must always pass through."""
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        # None of these are in the wordfreq corpus
+        result = _simplify_query(
+            "ErorHandler JWTValidator VirtioSocket MachineTemplateResolver"
+        )
+        tokens = result.split()
+        assert "ErorHandler" in tokens
+        assert "JWTValidator" in tokens
+        assert "VirtioSocket" in tokens
+        assert "MachineTemplateResolver" in tokens
+
+    def test_preserves_domain_content_words(self):
+        """Words like firewall, validate, cleanup are in the corpus
+        but below the threshold (zipf < 5.0), so they survive."""
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        result = _simplify_query("How does the firewall cleanup work?")
+        tokens = result.split()
+        assert "firewall" in tokens
+        assert "cleanup" in tokens
+        # Filtered: how (5.8+), does (5.8+), the (7.8), work (5.96)
+        assert "how" not in [t.lower() for t in tokens]
+        assert "work" not in [t.lower() for t in tokens]
+
+    def test_handles_contractions(self):
+        """"what's" should tokenize into "what" + "s", both filtered."""
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        result = _simplify_query("what's the weather today")
+        # "weather" (4.87) survives, "what" / "s" / "the" / "today" all filter
+        # With only 1 surviving token, guard triggers → return raw
+        assert result == "what's the weather today"  # fallback to raw
+
+    def test_preserves_case_on_kept_tokens(self):
+        """CamelCase identifiers must keep their original case."""
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        result = _simplify_query("Show me AuthMiddleware and ErrorHandler")
+        tokens = result.split()
+        # Both identifiers preserved with original case
+        assert "AuthMiddleware" in tokens
+        assert "ErrorHandler" in tokens
+
+    def test_fallback_when_too_few_tokens_survive(self):
+        """If filtering leaves < _QUERY_MIN_TOKENS_AFTER tokens,
+        return the raw text instead of a degenerate single-word query."""
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        # Only "weather" (4.87) passes the Zipf filter; single-word
+        # result triggers the fallback.
+        result = _simplify_query("what is today")
+        assert result == "what is today"
+
+    def test_empty_input(self):
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        assert _simplify_query("") == ""
+
+    def test_rescues_typo_plus_stop_words_query(self):
+        """Regression test for Q2 of the backend-refactor smoke test.
+
+        'Show me the handleCrticalError method' should leave
+        'handleCrticalError method' or similar — a query where the
+        distinctive typo token dominates the embedding, which is
+        what lets the fuzzy channel find ``handleCriticalError``.
+        """
+        from infinidev.engine.context_rank.ranker import _simplify_query
+        result = _simplify_query("Show me the handleCrticalError method")
+        tokens = result.split()
+        # The typo identifier must survive (unknown word, zipf=0)
+        assert "handleCrticalError" in tokens
+        # Pronouns and determiners must be filtered
+        lower_tokens = [t.lower() for t in tokens]
+        assert "show" not in lower_tokens
+        assert "me" not in lower_tokens
+        assert "the" not in lower_tokens
+
+
 # ── Phase 2 v3: productivity snapshot + was_error + age-filtered predictive ─
 
 

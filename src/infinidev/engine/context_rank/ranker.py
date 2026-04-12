@@ -631,8 +631,7 @@ def _compute_predictive_scores(
 # ── Channel 3: Fuzzy symbol search (v3) ────────────────────────────
 
 # Common English words kept for canal 4 (findings) topic-word match.
-# Canal 3 no longer needs a stop-word list because fuzzy cosine sim
-# naturally suppresses low-information matches via its threshold.
+# Canal 3 uses this as a base for _QUERY_STOP_WORDS below.
 _COMMON_WORDS: frozenset[str] = frozenset({
     "type", "file", "test", "tests", "error", "value", "data", "name",
     "time", "date", "size", "text", "info", "item", "list", "page",
@@ -643,6 +642,107 @@ _COMMON_WORDS: frozenset[str] = frozenset({
     "call", "exit", "work", "task", "node", "edge", "tree", "log",
     "new", "get", "set", "put", "del", "run", "map", "key", "val",
 })
+
+
+# ── Query simplification via Zipf frequency ─────────────────────
+# Queries passed to canal 3 go through _simplify_query which drops
+# conversational noise words to concentrate the distinctive tokens
+# in the resulting embedding.
+#
+# The core insight: ``all-MiniLM-L6-v2`` averages the vectors of all
+# input tokens.  When 4 of 5 tokens are generic ("show", "me", "the",
+# "class"), the single distinctive token ("ErorHandler") contributes
+# only 1/5 of the resulting vector, and the query's cosine against
+# its intended target collapses into the same ~0.46 band as every
+# other generic query.  Dropping the stop words rebalances the
+# average so the distinctive token dominates.
+#
+# v3 approach: use ``wordfreq.zipf_frequency`` for the stop word
+# decision instead of a hardcoded list.  Reasons:
+#   - Multi-language by construction (wordfreq covers 40+ languages
+#     from the same API; a future commit can detect the query's
+#     language and filter per-language stop words).
+#   - Robust to contractions, plurals, tenses — wordfreq tokenizes
+#     and looks up each form properly instead of mishandling edges
+#     like "what's" or "don't".
+#   - No list maintenance: as the corpus is updated, the definition
+#     of "common" updates automatically, without ContextRank
+#     needing to ship a new stop word list.
+#
+# Zipf frequency scale: 0 (unknown word) to ~8 (most frequent).
+# Anything ≥ 5.0 is in the top ~10k most common English words
+# (the, is, how, today, show, ...), which is our stop-word cutoff.
+# Words below 5.0 are either domain content (firewall=3.24,
+# validate=3.40, machine=4.90) or unknown identifiers (zipf 0).
+#
+# Only applied to canal 3 — canal 2 (predictive) keeps the raw
+# embedding because its historical contexts were also stored raw,
+# and filtering would introduce an asymmetry in the cosine space.
+_QUERY_STOP_ZIPF = 5.0
+
+# Token pattern used by _simplify_query.  Matches alphanumeric
+# identifiers (including CamelCase and snake_case) but splits on
+# apostrophes, so "what's" becomes ["what", "s"] — both of which
+# get filtered as high-frequency words.  Does NOT match dots, so
+# "Agent.handleEvent" becomes ["Agent", "handleEvent"] which keeps
+# both halves distinct for the Zipf lookup.
+_QUERY_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# Minimum number of tokens that must survive filtering before we
+# use the simplified query.  Below this, the filter has removed
+# too much and we fall back to the raw query (a diluted embedding
+# is better than a 1-word embedding that happens to match a
+# literal symbol name — see the Q6 "what's the weather today"
+# regression where "weather" alone survived and the ranker
+# matched a symbol literally named ``today``).
+_QUERY_MIN_TOKENS_AFTER = 2
+
+
+def _simplify_query(text: str) -> str:
+    """Drop high-frequency noise words from a user query.
+
+    Uses ``wordfreq.zipf_frequency`` to decide which words are
+    frequent enough to be conversational noise vs rare enough to
+    carry signal.  The threshold is ``_QUERY_STOP_ZIPF = 5.0``,
+    which roughly corresponds to "top 10000 most common English
+    words" — things like ``the``, ``is``, ``how``, ``show``,
+    ``today``, ``we``, ``me`` all exceed it.
+
+    Unknown words (zipf 0, e.g. ``ErorHandler``, ``JWTValidator``,
+    or any CamelCase identifier not in the corpus) always pass
+    through — they're almost certainly code-derived tokens that
+    we specifically want to preserve.
+
+    Case is preserved on retained tokens so CamelCase identifiers
+    keep their subword structure for the embedding model.  If the
+    filter would leave fewer than ``_QUERY_MIN_TOKENS_AFTER``
+    tokens, returns the original text unchanged — a diluted
+    embedding is better than one built from a single token that
+    accidentally matches a literal symbol name.
+    """
+    if not text:
+        return text
+    try:
+        from wordfreq import zipf_frequency
+    except Exception:
+        # wordfreq is an optional runtime dependency — if not
+        # installed, skip simplification and use the raw query.
+        logger.debug("wordfreq not available; skipping query simplification")
+        return text
+
+    tokens = _QUERY_TOKEN_RE.findall(text)
+    kept: list[str] = []
+    for tok in tokens:
+        z = zipf_frequency(tok.lower(), "en")
+        # Unknown words (zipf == 0) → keep (likely identifier).
+        # Rare words (zipf < threshold) → keep (content word).
+        # Frequent words (zipf >= threshold) → drop (stop word).
+        if z == 0.0 or z < _QUERY_STOP_ZIPF:
+            kept.append(tok)
+
+    if len(kept) < _QUERY_MIN_TOKENS_AFTER:
+        return text
+    return " ".join(kept)
 
 
 def _compute_mention_scores(
@@ -673,14 +773,42 @@ def _compute_mention_scores(
       restricted only by what the symbol_embeddings module
       considered embeddable (see ``_EMBEDDABLE_KINDS`` there).
 
+    **Query simplification (v3.1):** Before embedding, the query is
+    passed through ``_simplify_query`` which drops conversational
+    stop words ("show me the", "how do we", "what's the").  This
+    rebalances the averaged query vector so distinctive tokens
+    (identifiers, domain nouns) dominate instead of being diluted
+    by generic preamble.  The simplified text is re-embedded here
+    rather than reusing ``cached_embedding`` (which was computed
+    from the raw text for canal 2's benefit).  This costs one extra
+    ``compute_embedding`` call per rank (~200-300ms) but was the
+    only way to fix the typo-in-question case (Q2 in the smoke test).
+
     Performance: for 10k embedded symbols, one np.stack + one
-    matmul is ~5ms; for 1k embedded files, ~1ms.  Total <10ms per
-    rank call — well inside the per-pivot budget.
+    matmul is ~5ms; for 1k embedded files, ~1ms.  Query simplification
+    adds ~1ms.  Re-embed for simplified query adds ~200-300ms only
+    when simplification actually changed the input.
     """
-    if cached_embedding is None or not current_input:
+    if not current_input:
         return {}
 
-    query_vec = np.frombuffer(cached_embedding, dtype=np.float32)
+    # Query simplification: drop conversational noise words so the
+    # distinctive tokens dominate the resulting embedding.  Only
+    # re-embeds if the simplification actually changed the text,
+    # and falls back to the raw cached_embedding otherwise.
+    simplified = _simplify_query(current_input)
+    if simplified != current_input:
+        from infinidev.tools.base.embeddings import compute_embedding
+        channel_embedding = compute_embedding(simplified)
+        if channel_embedding is None:
+            channel_embedding = cached_embedding
+    else:
+        channel_embedding = cached_embedding
+
+    if channel_embedding is None:
+        return {}
+
+    query_vec = np.frombuffer(channel_embedding, dtype=np.float32)
     # Normalize the query vector once — the stored symbol vectors
     # get normalized row-wise in the matmul.
     q_norm = np.linalg.norm(query_vec)
