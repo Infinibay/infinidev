@@ -96,6 +96,7 @@ class InfinidevApp:
         # Hold-Escape-to-cancel state
         self._cancel_hold_start: float | None = None
         self._cancel_last_escape: float = 0.0
+        self._cancel_watcher_active: bool = False
         self._gather_next_task: bool = False
         self._tree_resolved_lines: list[str] = []
         self.session_id: str = str(uuid.uuid4())
@@ -549,9 +550,11 @@ class InfinidevApp:
             if self._cancel_hold_start is None:
                 self._cancel_hold_start = now
                 self._cancel_last_escape = now
-                import threading as _th
-                _th.Thread(target=self._cancel_hold_watcher, daemon=True,
-                           name="cancel-hold").start()
+                if not self._cancel_watcher_active:
+                    self._cancel_watcher_active = True
+                    import threading as _th
+                    _th.Thread(target=self._cancel_hold_watcher, daemon=True,
+                               name="cancel-hold").start()
             else:
                 self._cancel_last_escape = now
                 elapsed = now - self._cancel_hold_start
@@ -568,26 +571,29 @@ class InfinidevApp:
 
     def _cancel_hold_watcher(self) -> None:
         """Background thread: detect key release and animate progress bar."""
-        while self._cancel_hold_start is not None:
-            time.sleep(0.1)
-            now = time.monotonic()
-            # User released Escape (no event in last 300ms)
-            if now - self._cancel_last_escape > 0.3:
-                self._cancel_hold_start = None
+        try:
+            while self._cancel_hold_start is not None:
+                time.sleep(0.1)
+                now = time.monotonic()
+                # User released Escape (no event in last 300ms)
+                if now - self._cancel_last_escape > 0.3:
+                    self._cancel_hold_start = None
+                    self._update_cancel_bar()
+                    self.invalidate()
+                    return
+                # 3 seconds reached — trigger cancel
+                if now - self._cancel_hold_start >= self._CANCEL_HOLD_SECONDS:
+                    self._execute_cancel()
+                    return
+                # Engine finished on its own while holding
+                if not self._engine_running:
+                    self._cancel_hold_start = None
+                    self._update_cancel_bar()
+                    self.invalidate()
+                    return
                 self._update_cancel_bar()
-                self.invalidate()
-                return
-            # 3 seconds reached — trigger cancel
-            if now - self._cancel_hold_start >= self._CANCEL_HOLD_SECONDS:
-                self._execute_cancel()
-                return
-            # Engine finished on its own while holding
-            if not self._engine_running:
-                self._cancel_hold_start = None
-                self._update_cancel_bar()
-                self.invalidate()
-                return
-            self._update_cancel_bar()
+        finally:
+            self._cancel_watcher_active = False
             self.invalidate()
 
     def _update_cancel_bar(self) -> None:

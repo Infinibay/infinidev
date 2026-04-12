@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Bounded pool for embedding computations — prevents thread accumulation
+# during long sessions with many steps.
+_embed_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cr-embed")
 
 
 class ContextRankHooks:
@@ -50,7 +54,7 @@ class ContextRankHooks:
                 compute_context_embedding(self._task_context_id)
                 from infinidev.tools.base.embeddings import compute_embedding
                 self._task_embedding = compute_embedding(task_description)
-            threading.Thread(target=_embed_and_store, daemon=True).start()
+            _embed_pool.submit(_embed_and_store)
 
     def on_step_activated(self, title: str, explanation: str, iteration: int, step_index: int) -> None:
         """Called when a new plan step becomes active."""
@@ -81,14 +85,10 @@ class ContextRankHooks:
         # Use the most specific context_id for linking subsequent tool calls
         self._active_step_context_id = desc_ctx_id or title_ctx_id or self._task_context_id
 
-        # Background embed
+        # Background embed (bounded pool — no thread accumulation)
         for cid in (title_ctx_id, desc_ctx_id):
             if cid is not None:
-                threading.Thread(
-                    target=compute_context_embedding,
-                    args=(cid,),
-                    daemon=True,
-                ).start()
+                _embed_pool.submit(compute_context_embedding, cid)
 
     def on_tool_call(
         self,

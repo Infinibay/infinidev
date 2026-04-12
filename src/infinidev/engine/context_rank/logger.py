@@ -30,8 +30,9 @@ logger = logging.getLogger(__name__)
 
 # ── Async interaction writer ───────────────────────────────────────
 
-_interaction_queue: queue.Queue[tuple | None] = queue.Queue()
-_writer_started = False
+_QUEUE_MAXSIZE = 10_000  # cap memory; put() blocks if full
+_interaction_queue: queue.Queue[tuple | None] = queue.Queue(maxsize=_QUEUE_MAXSIZE)
+_writer_thread: threading.Thread | None = None
 _writer_lock = threading.Lock()
 
 _INTERACTION_INSERT_SQL = (
@@ -43,16 +44,17 @@ _INTERACTION_INSERT_SQL = (
 
 
 def _ensure_writer() -> None:
-    """Start the background writer thread (idempotent)."""
-    global _writer_started
-    if _writer_started:
+    """Start (or restart) the background writer thread."""
+    global _writer_thread
+    if _writer_thread is not None and _writer_thread.is_alive():
         return
     with _writer_lock:
-        if _writer_started:
+        if _writer_thread is not None and _writer_thread.is_alive():
             return
-        _writer_started = True
-        t = threading.Thread(target=_writer_loop, daemon=True, name="cr-writer")
-        t.start()
+        _writer_thread = threading.Thread(
+            target=_writer_loop, daemon=True, name="cr-writer",
+        )
+        _writer_thread.start()
 
 
 def _writer_loop() -> None:
@@ -112,7 +114,8 @@ def flush() -> None:
     """Commit pending context writes and drain the interaction queue.
 
     Call at step boundaries and at task end to ensure all data is
-    persisted before the next phase reads it.
+    persisted before the next phase reads it.  If the writer thread
+    died, it is restarted automatically.
     """
     from infinidev.engine.static_analysis_timer import measure as _sa_measure
     # 1. Commit any pending synchronous writes (log_context rows)
@@ -123,8 +126,13 @@ def flush() -> None:
     except Exception:
         logger.debug("flush() sync commit failed", exc_info=True)
 
-    # 2. Wait for the writer thread to drain its queue
-    if _writer_started and not _interaction_queue.empty():
+    # 2. If writer is dead, restart it so the queue drains
+    if _writer_thread is not None and not _writer_thread.is_alive():
+        logger.warning("cr-writer thread died — restarting")
+        _ensure_writer()
+
+    # 3. Wait for the writer thread to drain its queue
+    if _writer_thread is not None and _writer_thread.is_alive() and not _interaction_queue.empty():
         done = threading.Event()
         _interaction_queue.put(done)
         done.wait(timeout=5.0)
