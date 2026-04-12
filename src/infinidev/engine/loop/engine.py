@@ -1060,16 +1060,13 @@ class LoopEngine(AgentEngine):
 
         return result
 
-    def _execute_regular_tools(
+    def _build_assistant_message(
         self, ctx: ExecutionContext, classified: ClassifiedCalls,
         messages: list[dict[str, Any]], llm_result: LLMCallResult,
-        action_tool_calls: int, iteration: int, guard: LoopGuard,
-        tracker: BehaviorTracker,
-    ) -> int:
-        """Execute regular tool calls and build messages. Returns updated action_tool_calls."""
+    ) -> None:
+        """Append the assistant message with tool_calls to the conversation."""
         message = llm_result.message
         raw_content = llm_result.raw_content
-
         if ctx.manual_tc:
             messages.append({
                 "role": "assistant",
@@ -1077,19 +1074,48 @@ class LoopEngine(AgentEngine):
             })
         else:
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": message.content or ""}
+            all_calls = list(classified.regular)
+            for pseudo_tc in classified.thinks + classified.notes + classified.session_notes + ([classified.step_complete] if classified.step_complete else []):
+                all_calls.append(pseudo_tc)
             assistant_msg["tool_calls"] = [
                 {"id": tc.id, "type": "function",
                  "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in classified.regular
+                for tc in all_calls
             ]
-            for pseudo_tc in classified.thinks + classified.notes + classified.session_notes +([classified.step_complete] if classified.step_complete else []):
-                assistant_msg["tool_calls"].append({
-                    "id": pseudo_tc.id, "type": "function",
-                    "function": {"name": pseudo_tc.function.name, "arguments": pseudo_tc.function.arguments},
-                })
             messages.append(assistant_msg)
 
-        tool_results_text: list[str] = []
+    def _append_pseudo_tool_results(
+        self, ctx: ExecutionContext, classified: ClassifiedCalls,
+        messages: list[dict[str, Any]], tool_results_text: list[str] | None = None,
+    ) -> None:
+        """Append result messages for pseudo-tools (think, notes, step_complete)."""
+        if ctx.manual_tc:
+            texts = tool_results_text if tool_results_text is not None else []
+            for nc in classified.notes:
+                texts.append('[Tool: add_note] Result:\n{"status": "noted"}')
+            for snc in classified.session_notes:
+                texts.append('[Tool: add_session_note] Result:\n{"status": "noted"}')
+            for tk in classified.thinks:
+                texts.append('[Tool: think] Result:\n{"status": "acknowledged"}')
+            if texts:
+                messages.append({"role": "user", "content": "\n\n".join(texts)})
+        else:
+            for tk in classified.thinks:
+                messages.append({"role": "tool", "tool_call_id": tk.id, "content": '{"status": "acknowledged"}'})
+            for nc in classified.notes:
+                messages.append({"role": "tool", "tool_call_id": nc.id, "content": '{"status": "noted"}'})
+            for snc in classified.session_notes:
+                messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
+            if classified.step_complete:
+                messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
+
+    def _execute_tool_batches(
+        self, ctx: ExecutionContext, classified: ClassifiedCalls,
+        messages: list[dict[str, Any]],
+        action_tool_calls: int, iteration: int, guard: LoopGuard,
+        tracker: BehaviorTracker, tool_results_text: list[str],
+    ) -> int:
+        """Execute tool batches and process results. Returns updated action_tool_calls."""
         _tool_hook_meta = {
             "agent_name": ctx.agent_name, "iteration": iteration,
             "verbose": ctx.verbose, "tokens_total": ctx.state.total_tokens,
@@ -1120,9 +1146,6 @@ class LoopEngine(AgentEngine):
                     batch_results.append((tc, result))
 
             if self._cancel_event.is_set():
-                # Append placeholder results for tools in this batch so
-                # every tool_use in the assistant message has a matching
-                # tool_result (required by Anthropic).
                 if not ctx.manual_tc:
                     _executed_ids = {tc.id for tc, _ in batch_results}
                     for tc in batch:
@@ -1130,105 +1153,14 @@ class LoopEngine(AgentEngine):
                             messages.append({"role": "tool", "tool_call_id": tc.id,
                                              "content": '{"error": "cancelled"}'})
                 break
-            _pending_nudge: str | None = None
-            for tc, result in batch_results:
-                _tool_error = _extract_tool_error(result)
-                guard.on_tool_result(tc.function.name, tc.function.arguments, bool(_tool_error))
-                tracker.on_tool_call(tc.function.name, tc.function.arguments, bool(_tool_error))
 
-                if not _tool_error:
-                    _update_opened_files_cache(ctx.state, tc.function.name, tc.function.arguments, result)
-                    # Auto-note for small models on successful reads
-                    ToolProcessor.auto_note_for_small(ctx, tc.function.name, tc.function.arguments, result)
+            action_tool_calls = self._process_tool_results(
+                ctx, batch_results, messages, action_tool_calls,
+                iteration, is_parallel, guard, tracker, tool_results_text,
+            )
+            ctx.state.tick_opened_files(1)
 
-                counter_tag = f"\n[Tool call {action_tool_calls + 1}/{ctx.max_per_action} for this step]"
-                if is_parallel:
-                    counter_tag += " (parallel)"
-
-                # Capture + auto-annotate test-runner output. All the
-                # noise (fingerprint history, structured_failures, etc.)
-                # lives in _capture_test_command_output so this loop
-                # stays readable.
-                if tc.function.name == "execute_command":
-                    result = self._capture_test_command_output(
-                        ctx, tc.function.arguments, result,
-                    )
-
-                # Anchored-memory injection. Looks up lessons/rules
-                # whose anchor matches the file/symbol/command this
-                # tool touched, and appends them to the result. Zero
-                # cost when no memory matches. Skipped on error results
-                # — lessons next to errors are just noise. See
-                # tool_executor.annotate_with_memory for the mechanism.
-                if not _tool_error:
-                    with best_effort("memory annotation failed for %s", tc.function.name):
-                        from infinidev.engine.tool_executor import annotate_with_memory
-                        result = annotate_with_memory(
-                            tc.function.name, tc.function.arguments, result,
-                            project_id=ctx.project_id,
-                        )
-
-                # Inject behavioral feedback into tool result
-                behavior_feedback = tracker.drain_feedback()
-                result_with_counter = result + counter_tag
-                if behavior_feedback:
-                    result_with_counter += f"\n{behavior_feedback}"
-
-                if ctx.manual_tc:
-                    tool_results_text.append(f"[Tool: {tc.function.name}] Result:\n{result_with_counter}")
-                else:
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_with_counter})
-
-                action_tool_calls += 1
-                ctx.state.total_tool_calls += 1
-                ctx.state.tool_calls_since_last_note += 1
-
-                # ContextRank: log interaction (includes tool error
-                # status so productivity snapshotting can exclude
-                # failed calls from the "useful" signal).
-                with best_effort("ContextRank tool call log failed"):
-                    self._cr_hooks.on_tool_call(
-                        tc.function.name, tc.function.arguments, iteration,
-                        was_error=bool(_tool_error),
-                    )
-
-                # Budget nudge — fires once when the model reaches the
-                # configured threshold. Phases that need a different
-                # framing (e.g. the analyst, which has a 4-tool budget
-                # and a different "what to do next" instruction) pass
-                # ``nudge_message_template`` via engine.execute().
-                # Deferred until after all tool results in this batch
-                # are appended — inserting a ``user`` message between
-                # ``tool`` results breaks Anthropic's requirement that
-                # all tool_results follow their tool_use immediately.
-                _default_nudge = 4 if ctx.is_small else _get_settings().LOOP_STEP_NUDGE_THRESHOLD
-                _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else _default_nudge
-                if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
-                    if ctx.nudge_message_template:
-                        _pending_nudge = ctx.nudge_message_template.format(
-                            used=action_tool_calls,
-                            threshold=_nudge_threshold,
-                        )
-                    else:
-                        _active_desc = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
-                        _pending_nudge = (
-                            f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls for this step. "
-                            f"Step scope: \"{_active_desc}\". "
-                            f"Call step_complete now. If the step is not finished, set status=\'continue\' "
-                            f"and add/modify next_steps to capture the remaining work."
-                        )
-
-                ctx.state.tick_opened_files(1)
-            # Emit deferred nudge AFTER all tool results in this batch
-            if _pending_nudge is not None:
-                if ctx.manual_tc:
-                    tool_results_text.append(f"\n⚠ STEP BUDGET: {_pending_nudge}")
-                else:
-                    messages.append({"role": "user", "content": _pending_nudge})
-
-        # If cancelled, add placeholder results for any regular tools
-        # whose batches were never reached (Anthropic requires every
-        # tool_use to have a corresponding tool_result).
+        # Cancelled: placeholder results for unreached batches
         if self._cancel_event.is_set() and not ctx.manual_tc:
             _has_result = {
                 msg["tool_call_id"]
@@ -1240,33 +1172,105 @@ class LoopEngine(AgentEngine):
                     messages.append({"role": "tool", "tool_call_id": tc.id,
                                      "content": '{"error": "cancelled"}'})
 
-        # Small model: compact old messages to prevent context bloat
+        return action_tool_calls
+
+    def _process_tool_results(
+        self, ctx: ExecutionContext,
+        batch_results: list[tuple], messages: list[dict[str, Any]],
+        action_tool_calls: int, iteration: int, is_parallel: bool,
+        guard: LoopGuard, tracker: BehaviorTracker,
+        tool_results_text: list[str],
+    ) -> int:
+        """Process results from one batch. Returns updated action_tool_calls."""
+        _pending_nudge: str | None = None
+        for tc, result in batch_results:
+            _tool_error = _extract_tool_error(result)
+            guard.on_tool_result(tc.function.name, tc.function.arguments, bool(_tool_error))
+            tracker.on_tool_call(tc.function.name, tc.function.arguments, bool(_tool_error))
+
+            if not _tool_error:
+                _update_opened_files_cache(ctx.state, tc.function.name, tc.function.arguments, result)
+                ToolProcessor.auto_note_for_small(ctx, tc.function.name, tc.function.arguments, result)
+
+            counter_tag = f"\n[Tool call {action_tool_calls + 1}/{ctx.max_per_action} for this step]"
+            if is_parallel:
+                counter_tag += " (parallel)"
+
+            if tc.function.name == "execute_command":
+                result = self._capture_test_command_output(ctx, tc.function.arguments, result)
+
+            if not _tool_error:
+                with best_effort("memory annotation failed for %s", tc.function.name):
+                    from infinidev.engine.tool_executor import annotate_with_memory
+                    result = annotate_with_memory(
+                        tc.function.name, tc.function.arguments, result,
+                        project_id=ctx.project_id,
+                    )
+
+            behavior_feedback = tracker.drain_feedback()
+            result_with_counter = result + counter_tag
+            if behavior_feedback:
+                result_with_counter += f"\n{behavior_feedback}"
+
+            if ctx.manual_tc:
+                tool_results_text.append(f"[Tool: {tc.function.name}] Result:\n{result_with_counter}")
+            else:
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_with_counter})
+
+            action_tool_calls += 1
+            ctx.state.total_tool_calls += 1
+            ctx.state.tool_calls_since_last_note += 1
+
+            with best_effort("ContextRank tool call log failed"):
+                self._cr_hooks.on_tool_call(
+                    tc.function.name, tc.function.arguments, iteration,
+                    was_error=bool(_tool_error),
+                )
+
+            # Budget nudge (deferred until after all results in batch)
+            _default_nudge = 4 if ctx.is_small else _get_settings().LOOP_STEP_NUDGE_THRESHOLD
+            _nudge_threshold = self._nudge_threshold_override if self._nudge_threshold_override is not None else _default_nudge
+            if _nudge_threshold > 0 and action_tool_calls == _nudge_threshold:
+                if ctx.nudge_message_template:
+                    _pending_nudge = ctx.nudge_message_template.format(
+                        used=action_tool_calls, threshold=_nudge_threshold,
+                    )
+                else:
+                    _active_desc = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
+                    _pending_nudge = (
+                        f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls for this step. "
+                        f"Step scope: \"{_active_desc}\". "
+                        f"Call step_complete now. If the step is not finished, set status=\'continue\' "
+                        f"and add/modify next_steps to capture the remaining work."
+                    )
+
+        if _pending_nudge is not None:
+            if ctx.manual_tc:
+                tool_results_text.append(f"\n⚠ STEP BUDGET: {_pending_nudge}")
+            else:
+                messages.append({"role": "user", "content": _pending_nudge})
+
+        return action_tool_calls
+
+    def _execute_regular_tools(
+        self, ctx: ExecutionContext, classified: ClassifiedCalls,
+        messages: list[dict[str, Any]], llm_result: LLMCallResult,
+        action_tool_calls: int, iteration: int, guard: LoopGuard,
+        tracker: BehaviorTracker,
+    ) -> int:
+        """Execute regular tool calls and build messages. Returns updated action_tool_calls."""
+        self._build_assistant_message(ctx, classified, messages, llm_result)
+
+        tool_results_text: list[str] = []
+        action_tool_calls = self._execute_tool_batches(
+            ctx, classified, messages, action_tool_calls, iteration,
+            guard, tracker, tool_results_text,
+        )
+
         if ctx.is_small:
             ContextManager.compact_for_small(messages)
 
-        # Manual mode: send all results as single user message
-        if ctx.manual_tc:
-            for nc in classified.notes:
-                tool_results_text.append('[Tool: add_note] Result:\n{"status": "noted"}')
-            for snc in classified.session_notes:
-                tool_results_text.append('[Tool: add_session_note] Result:\n{"status": "noted"}')
-            for tk in classified.thinks:
-                tool_results_text.append('[Tool: think] Result:\n{"status": "acknowledged"}')
-            if tool_results_text:
-                messages.append({"role": "user", "content": "\n\n".join(tool_results_text)})
-
-        # FC mode: pseudo-tool results
-        if not ctx.manual_tc:
-            for tk in classified.thinks:
-                messages.append({"role": "tool", "tool_call_id": tk.id, "content": '{"status": "acknowledged"}'})
-            for nc in classified.notes:
-                messages.append({"role": "tool", "tool_call_id": nc.id, "content": '{"status": "noted"}'})
-            for snc in classified.session_notes:
-                messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
-
-            if classified.step_complete:
-                messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
-
+        self._append_pseudo_tool_results(ctx, classified, messages, tool_results_text)
         return action_tool_calls
 
     def _build_pseudo_only_messages(
@@ -1274,32 +1278,8 @@ class LoopEngine(AgentEngine):
         messages: list[dict[str, Any]], llm_result: LLMCallResult,
     ) -> None:
         """Build messages when only pseudo-tools were called (no regular tools)."""
-        message = llm_result.message
-        raw_content = llm_result.raw_content
-
-        if ctx.manual_tc:
-            messages.append({
-                "role": "assistant",
-                "content": getattr(message, "content", "") or raw_content,
-            })
-        else:
-            assistant_msg = {"role": "assistant", "content": message.content or ""}
-            pseudo_calls = classified.thinks + classified.notes + classified.session_notes +([classified.step_complete] if classified.step_complete else [])
-            assistant_msg["tool_calls"] = [
-                {"id": pc.id, "type": "function",
-                 "function": {"name": pc.function.name, "arguments": pc.function.arguments}}
-                for pc in pseudo_calls
-            ]
-            messages.append(assistant_msg)
-            for tk in classified.thinks:
-                messages.append({"role": "tool", "tool_call_id": tk.id, "content": '{"status": "acknowledged"}'})
-            for nc in classified.notes:
-                messages.append({"role": "tool", "tool_call_id": nc.id, "content": '{"status": "noted"}'})
-            for snc in classified.session_notes:
-                messages.append({"role": "tool", "tool_call_id": snc.id, "content": '{"status": "noted"}'})
-
-            if classified.step_complete:
-                messages.append({"role": "tool", "tool_call_id": classified.step_complete.id, "content": '{"status": "acknowledged"}'})
+        self._build_assistant_message(ctx, classified, messages, llm_result)
+        self._append_pseudo_tool_results(ctx, classified, messages)
 
     def _handle_explore(
         self, ctx: ExecutionContext, step_result: StepResult, iteration: int,
