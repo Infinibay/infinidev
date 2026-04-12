@@ -233,6 +233,10 @@ class ChatHistoryControl(UIControl):
 
     def _render_message(self, msg: dict, width: int) -> list[list[tuple[str, str]]]:
         """Render a single message to a list of line fragment lists."""
+        # Hidden messages (e.g. cancel context) stay in the list but aren't shown
+        if not msg.get("visible", True):
+            return []
+
         msg_type = msg.get("type", "agent")
 
         # Diff messages get special rendering

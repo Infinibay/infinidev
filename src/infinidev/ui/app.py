@@ -15,7 +15,7 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout.containers import (
-    ConditionalContainer, HSplit, Window,
+    ConditionalContainer, HSplit, VSplit, Window,
 )
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.filters import Condition
@@ -93,6 +93,9 @@ class InfinidevApp:
         # ── Engine state ────────────────────────────────────
         self._engine_running: bool = False
         self._pending_inputs: list[str] = []
+        # Hold-Escape-to-cancel state
+        self._cancel_hold_start: float | None = None
+        self._cancel_last_escape: float = 0.0
         self._gather_next_task: bool = False
         self._tree_resolved_lines: list[str] = []
         self.session_id: str = str(uuid.uuid4())
@@ -129,13 +132,18 @@ class InfinidevApp:
         self.footer_control = None
 
         # ── Build stable content windows (created once) ─────
-        from prompt_toolkit.layout.margins import ScrollbarMargin
+        from infinidev.ui.controls.clickable_scrollbar import ClickableScrollbar
+        self._chat_history_window = Window(
+            content=self._chat_history_control,
+            wrap_lines=False,
+        )
+        self._chat_scrollbar = ClickableScrollbar(self._chat_history_window)
         self._chat_content_window = HSplit([
-            Window(
-                content=self._chat_history_control,
-                wrap_lines=False,
-                right_margins=[ScrollbarMargin(display_arrows=True)],
-            ),
+            VSplit([
+                self._chat_history_window,
+                Window(content=self._chat_scrollbar, width=1,
+                       style=f"bg:{SCROLLBAR_BG}"),
+            ]),
             ConditionalContainer(
                 content=Window(
                     content=FormattedTextControl(lambda: self._autocomplete.get_fragments()),
@@ -541,7 +549,91 @@ class InfinidevApp:
             self._autocomplete.dismiss()
             self.invalidate()
             return
-        # Phase 4: task cancellation
+        # Hold-Escape to cancel running task
+        if self._engine_running and self.engine is not None:
+            now = time.monotonic()
+            if self._cancel_hold_start is None:
+                self._cancel_hold_start = now
+                self._cancel_last_escape = now
+                import threading as _th
+                _th.Thread(target=self._cancel_hold_watcher, daemon=True,
+                           name="cancel-hold").start()
+            else:
+                self._cancel_last_escape = now
+                elapsed = now - self._cancel_hold_start
+                if elapsed >= 3.0:
+                    self._execute_cancel()
+                    return
+            self._update_cancel_bar()
+            self.invalidate()
+
+    # ── Hold-to-cancel helpers ──────────────────────────────────────
+
+    _CANCEL_HOLD_SECONDS = 3.0
+    _CANCEL_BAR_WIDTH = 6
+
+    def _cancel_hold_watcher(self) -> None:
+        """Background thread: detect key release and animate progress bar."""
+        while self._cancel_hold_start is not None:
+            time.sleep(0.1)
+            now = time.monotonic()
+            # User released Escape (no event in last 300ms)
+            if now - self._cancel_last_escape > 0.3:
+                self._cancel_hold_start = None
+                self._update_cancel_bar()
+                self.invalidate()
+                return
+            # 3 seconds reached — trigger cancel
+            if now - self._cancel_hold_start >= self._CANCEL_HOLD_SECONDS:
+                self._execute_cancel()
+                return
+            # Engine finished on its own while holding
+            if not self._engine_running:
+                self._cancel_hold_start = None
+                self._update_cancel_bar()
+                self.invalidate()
+                return
+            self._update_cancel_bar()
+            self.invalidate()
+
+    def _update_cancel_bar(self) -> None:
+        """Update the status bar with the cancel progress or clear it."""
+        if self.status_bar_control is None:
+            return
+        if self._cancel_hold_start is None:
+            self.status_bar_control.set_status("")
+            return
+        elapsed = time.monotonic() - self._cancel_hold_start
+        progress = min(1.0, elapsed / self._CANCEL_HOLD_SECONDS)
+        filled = int(progress * self._CANCEL_BAR_WIDTH)
+        bar = "\u2588" * filled + "\u2591" * (self._CANCEL_BAR_WIDTH - filled)
+        self.status_bar_control.set_status(f"Cancelling... [{bar}]")
+
+    def _execute_cancel(self) -> None:
+        """Trigger engine cancellation and queue a response turn."""
+        if self._cancel_hold_start is None and not self._engine_running:
+            return
+        self._cancel_hold_start = None
+        self._update_cancel_bar()
+        # Signal the engine to stop
+        if self.engine:
+            self.engine.cancel()
+        # Hidden message — stays in chat_messages for context but not rendered
+        self.chat_messages.append({
+            "sender": "System",
+            "text": "[Task cancelled by user]",
+            "type": "system",
+            "visible": False,
+        })
+        self._chat_history_control.invalidate_cache()
+        # Queue a cancel-acknowledgement turn (runs after engine finishes)
+        cancel_prompt = (
+            "[SYSTEM] The user just cancelled the task you were working on. "
+            "Acknowledge the cancellation very briefly (1-2 sentences, in the "
+            "language the user has been using) and ask what they need."
+        )
+        self._pending_inputs.insert(0, cancel_prompt)
+        self.invalidate()
 
     # ── Settings dialog ──────────────────────────────────────────────
 
