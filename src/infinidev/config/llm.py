@@ -25,7 +25,7 @@ def _is_native_provider(model: str) -> bool:
     if provider.is_native:
         return True
     # Fallback: check model prefix for backward compatibility
-    return _extract_provider(model) in {"deepseek", "anthropic", "gemini", "openai", "zai"}
+    return _extract_provider(model) in {"deepseek", "anthropic", "gemini", "openai"}
 
 def _get_model_size_b(model: str | None = None) -> int:
     """Extract model size in billions from model name.
@@ -107,7 +107,7 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
         is_native = bool(getattr(provider, "is_native", False))
     except Exception:
         is_native = _extract_provider(model) in {
-            "deepseek", "anthropic", "gemini", "openai", "zai",
+            "deepseek", "anthropic", "gemini", "openai",
         }
     if base_url and not is_native:
         params["api_base"] = base_url

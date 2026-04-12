@@ -30,7 +30,7 @@ DIALOG_NAME = "settings_editor"
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
-        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,qwen,openai_compatible"),
+        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
         ("LLM_MODEL", "LLM model", "select_dynamic:provider_models"),
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
@@ -123,7 +123,7 @@ def _build_behavior_section() -> list[tuple[str, str, str]]:
          "int"),
         # Independent LLM endpoint for the judge — empty = reuse main LLM_*
         ("BEHAVIOR_LLM_PROVIDER", "Behavior judge provider (empty = reuse main)",
-         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,kimi,minimax,openrouter,qwen,openai_compatible"),
+         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
         ("BEHAVIOR_LLM_MODEL", "Behavior judge model", "select_dynamic:behavior_models"),
         ("BEHAVIOR_LLM_BASE_URL", "Behavior judge API base URL (auto-filled)", "str"),
         ("BEHAVIOR_LLM_API_KEY", "Behavior judge API key (auto-filled)", "str"),

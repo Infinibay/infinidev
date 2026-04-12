@@ -91,6 +91,19 @@ PROVIDERS: dict[str, ProviderConfig] = {
             "glm-4.5-flash", "glm-4.5-air",
         ],
     ),
+    "zai_coding": ProviderConfig(
+        id="zai_coding",
+        display_name="Z.AI Coding Plan",
+        prefix="zai/",
+        default_base_url="https://api.z.ai/api/coding/paas/v4",
+        model_list_format="openai",
+        is_native=False,
+        static_models=[
+            "glm-5", "glm-5-turbo",
+            "glm-4.7", "glm-4.6", "glm-4.5",
+            "glm-4.5-flash", "glm-4.5-air",
+        ],
+    ),
     "kimi": ProviderConfig(
         id="kimi",
         display_name="Kimi (Moonshot)",
