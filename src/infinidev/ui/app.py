@@ -46,17 +46,28 @@ class InfinidevApp:
     """
 
     def __init__(self) -> None:
-        # ── UI state ────────────────────────────────────────
+        self._init_ui_state()
+        self._init_chat_subsystem()
+        self._init_sidebar_state()
+        self._init_file_management()
+        self._init_engine_state()
+        self._init_analysis_state()
+        self._init_lazy_engines()
+        self._init_dialog_and_permissions()
+        self._init_content_windows()
+        self._init_application()
+
+    # ── Init helpers (called once from __init__) ────────────────────
+
+    def _init_ui_state(self) -> None:
         self.explorer_visible: bool = False
-        self.active_tab: str = "chat"  # "chat" or tab_id for files
+        self.active_tab: str = "chat"
         self.active_dialog: str | None = None
 
-        # ── Chat state ──────────────────────────────────────
+    def _init_chat_subsystem(self) -> None:
         self.chat_messages: list[dict[str, Any]] = []
         self._chat_history_control = ChatHistoryControl(self.chat_messages)
         self._autocomplete = AutocompleteState(on_select=self._apply_autocomplete)
-
-        # Chat input
         self._chat_buffer, self._chat_input_control, self._chat_input_kb = \
             create_chat_input(
                 on_submit=self._handle_submit,
@@ -69,18 +80,18 @@ class InfinidevApp:
                 chat_history_control=self._chat_history_control,
             )
 
-        # ── Sidebar state ───────────────────────────────────
+    def _init_sidebar_state(self) -> None:
         self._context_status: dict[str, Any] = {}
         self._context_flow: str = ""
         self._plan_text: str = ""
-        self._thinking_text: str = ""  # Live streaming thinking content
+        self._thinking_text: str = ""
         self._steps_text: str = ""
         self._actions_text: str = ""
-        self._streaming_tool_name: str | None = None  # Tool detected during streaming
-        self._streaming_token_count: int = 0           # Tokens received so far
-        self._log_entries: deque[tuple[float, str]] = deque(maxlen=15)  # (timestamp, text)
+        self._streaming_tool_name: str | None = None
+        self._streaming_token_count: int = 0
+        self._log_entries: deque[tuple[float, str]] = deque(maxlen=15)
 
-        # ── File management (delegated to FileManager) ──────
+    def _init_file_management(self) -> None:
         self.file_manager = FileManager(self)
         # Backward-compat aliases used by layout.py / keybindings.py
         self._open_files = self.file_manager.open_files
@@ -90,10 +101,9 @@ class InfinidevApp:
         self._editor_windows = self.file_manager.editor_windows
         self._search_bar = self.file_manager.search_bar
 
-        # ── Engine state ────────────────────────────────────
+    def _init_engine_state(self) -> None:
         self._engine_running: bool = False
         self._pending_inputs: list[str] = []
-        # Hold-Escape-to-cancel state
         self._cancel_hold_start: float | None = None
         self._cancel_last_escape: float = 0.0
         self._cancel_watcher_active: bool = False
@@ -101,38 +111,32 @@ class InfinidevApp:
         self._tree_resolved_lines: list[str] = []
         self.session_id: str = str(uuid.uuid4())
 
-        # ── Analysis state ──────────────────────────────────
+    def _init_analysis_state(self) -> None:
         self._analysis_waiting: bool = False
         self._analysis_event = None
         self._analysis_answer: str = ""
         self._analysis_original_input: str = ""
-
-        # ── Plan review state ──────────────────────────────
         self._plan_review_waiting: bool = False
         self._plan_review_event = None
         self._plan_review_answer: str = ""
 
-        # ── Engine objects (lazy-initialized on first run) ──
+    def _init_lazy_engines(self) -> None:
         self.engine = None       # LoopEngine
         self.analyst = None      # AnalysisEngine
         self.reviewer = None     # ReviewEngine
         self.agent = None        # InfinidevAgent
         self.context_calculator = None
 
-        # ── Dialog management (delegated to DialogManager) ───
+    def _init_dialog_and_permissions(self) -> None:
         self.dialog_manager = DialogManager(self)
-
-        # ── Permission state ────────────────────────────────
         self._permission_waiting: bool = False
         self._permission_event = None
         self._permission_approved: bool = False
 
-        # ── Refs set by layout.py ───────────────────────────
+    def _init_content_windows(self) -> None:
         self._float_container = None
         self.status_bar_control = None
         self.footer_control = None
-
-        # ── Build stable content windows (created once) ─────
         from infinidev.ui.controls.clickable_scrollbar import scrollable_window
         self._chat_history_window, chat_scroll_container = scrollable_window(
             self._chat_history_control, display_arrows=True, wrap_lines=False,
@@ -149,17 +153,15 @@ class InfinidevApp:
             ),
         ])
 
-        # ── Build the Application ───────────────────────────
+    def _init_application(self) -> None:
         global_kb = create_global_keybindings(self)
         self._layout = build_layout(self)
-
         from prompt_toolkit.styles import Style as PTStyle
         app_style = PTStyle.from_dict({
             "scrollbar.background": f"bg:{SCROLLBAR_BG}",
             "scrollbar.button":    f"bg:{SCROLLBAR_FG}",
             "scrollbar.arrow":     f"{SCROLLBAR_FG}",
         })
-
         self.app = Application(
             layout=self._layout,
             key_bindings=global_kb,
@@ -167,14 +169,8 @@ class InfinidevApp:
             full_screen=True,
             mouse_support=True,
         )
-
-        # Welcome message
         self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
-
-        # ── Animation refresh timer ─────────────────────────────
         self._start_animation_timer()
-
-        # ── Start background workspace indexing ────────────────
         self._index_ready = False
         self._start_background_index()
 
