@@ -86,6 +86,8 @@ class ChatHistoryControl(UIControl):
         self._follow_tail: bool = True  # stick to bottom
         self._scroll_offset: int = 0    # lines from bottom (when not following)
         self._line_count: int = 0
+        # Maps content line index → message dict for diff headers (click-to-toggle)
+        self._diff_header_lines: dict[int, dict] = {}
 
     def invalidate_cache(self) -> None:
         """Force re-render on next frame and scroll to bottom."""
@@ -97,7 +99,15 @@ class ChatHistoryControl(UIControl):
         return True
 
     def mouse_handler(self, mouse_event: MouseEvent):
-        """Return NotImplemented so Window handles scroll wheel natively."""
+        """Handle clicks on diff headers to toggle collapse; delegate rest to Window."""
+        if mouse_event.event_type == MouseEventType.MOUSE_UP:
+            line_idx = mouse_event.position.y
+            msg = self._diff_header_lines.get(line_idx)
+            if msg is not None:
+                msg["collapsed"] = not msg.get("collapsed", True)
+                # Rebuild lines but preserve scroll position
+                self._line_cache = None
+                return None  # handled — trigger redraw
         return NotImplemented
 
     def move_cursor_down(self) -> None:
@@ -200,14 +210,23 @@ class ChatHistoryControl(UIControl):
         if self._line_cache is not None and self._cache_len <= msg_count and self._cache_width == width:
             # Append only new messages
             for msg in self._messages[self._cache_len:]:
-                self._line_cache.extend(self._render_message(msg, width))
+                start = len(self._line_cache)
+                rendered = self._render_message(msg, width)
+                if msg.get("type") == "diff" and rendered:
+                    self._diff_header_lines[start] = msg
+                self._line_cache.extend(rendered)
             self._cache_len = msg_count
             lines = self._line_cache
         else:
             # Full rebuild (width changed or cache invalid)
             lines = []
+            self._diff_header_lines = {}
             for msg in self._messages:
-                lines.extend(self._render_message(msg, width))
+                start = len(lines)
+                rendered = self._render_message(msg, width)
+                if msg.get("type") == "diff" and rendered:
+                    self._diff_header_lines[start] = msg
+                lines.extend(rendered)
             self._line_cache = lines
             self._cache_len = msg_count
             self._cache_width = width
@@ -378,21 +397,26 @@ class ChatHistoryControl(UIControl):
         return lines
 
     def _render_diff_message(self, msg: dict, width: int) -> list[list[tuple[str, str]]]:
-        """Render a file change diff message with colorized diff output."""
+        """Render a file change diff message with colorized diff output.
+
+        Diffs are collapsed by default.  Click the header to expand.
+        """
         from infinidev.ui.controls.file_diff import colorize_diff_fragments
 
         header_text = msg.get("text", "")
         diff_text = msg.get("diff_text", "")
+        collapsed = msg.get("collapsed", True)
         title_bg = f"bg:{DIFF_TITLE_BG}"
+        arrow = "\u25b6" if collapsed else "\u25bc"  # ▶ / ▼
 
         lines: list[list[tuple[str, str]]] = []
 
-        # Header: colored title bar showing filename and action
-        pad = " " * max(0, width - len(header_text) - 2)
-        lines.append([(f"{DIFF_TITLE_FG} {title_bg} bold", f" {header_text}{pad} ")])
+        # Header: colored title bar with collapse indicator
+        pad = " " * max(0, width - len(header_text) - 4)
+        lines.append([(f"{DIFF_TITLE_FG} {title_bg} bold", f" {arrow} {header_text}{pad}")])
 
-        # Diff lines with syntax coloring
-        if diff_text:
+        # Diff lines (only when expanded)
+        if not collapsed and diff_text:
             diff_lines = colorize_diff_fragments(diff_text)
             for diff_line in diff_lines:
                 lines.append(diff_line)

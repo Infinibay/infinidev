@@ -130,6 +130,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             "diff_text": diff,
             "diff_path": path,
             "diff_action": action,
+            "collapsed": True,
         })
         app._chat_history_control.invalidate_cache()
         app.invalidate()
