@@ -22,6 +22,7 @@ from infinidev.ui.theme import (
     SURFACE, SURFACE_LIGHT, SURFACE_DARK,
 )
 from infinidev.ui.dialogs.base import dialog_frame
+from infinidev.ui.controls.clickable_scrollbar import scrollable_window
 
 DIALOG_NAME = "settings_editor"
 
@@ -47,11 +48,15 @@ def create_settings_editor(on_save: Callable[[str, str], None] | None = None,
     sections_ctrl = SectionsControl(state)
     settings_ctrl = SettingsControl(state)
 
+    _, settings_container = scrollable_window(
+        settings_ctrl, display_arrows=True,
+    )
+
     body = VSplit([
         Window(content=sections_ctrl, width=D(preferred=20)),
         Window(width=1, char="│", style=f"{PRIMARY}"),
         HSplit([
-            Window(content=settings_ctrl),
+            settings_container,
             # Edit buffer (visible only when editing)
             ConditionalContainer(
                 content=Window(
