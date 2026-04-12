@@ -119,27 +119,34 @@ def build_layout(app_state: InfinidevApp) -> Layout:
     sidebar_border = Window(width=1, char="│", style=f"{PRIMARY}")
 
     def _sidebar_section(title: str, content_getter, scrollable: bool = False):
-        from prompt_toolkit.layout.margins import ScrollbarMargin
-        margins = [ScrollbarMargin()] if scrollable else []
         if scrollable:
             control = ScrollableTextControl(content_getter)
         else:
             control = FormattedTextControl(content_getter)
-        return HSplit([
-            Window(
-                content=FormattedTextControl(lambda t=title: [
-                    (STYLE_SIDEBAR_TITLE, f" {t} "),
-                ]),
-                height=1,
-            ),
-            Window(
+
+        title_win = Window(
+            content=FormattedTextControl(lambda t=title: [
+                (STYLE_SIDEBAR_TITLE, f" {t} "),
+            ]),
+            height=1,
+        )
+
+        if scrollable:
+            from infinidev.ui.controls.clickable_scrollbar import scrollable_window
+            _, content_container = scrollable_window(
+                control, display_arrows=False,
+                height=D(min=2, max=15, preferred=4),
+                style=f"bg:{SURFACE_LIGHT}",
+                wrap_lines=True,
+            )
+            return HSplit([title_win, content_container])
+        else:
+            return HSplit([title_win, Window(
                 content=control,
                 height=D(min=2, max=15, preferred=4),
                 style=f"bg:{SURFACE_LIGHT}",
                 wrap_lines=True,
-                right_margins=margins,
-            ),
-        ])
+            )])
 
     context_section = _sidebar_section("CONTEXT", lambda: app_state.get_context_fragments())
     plan_section = _sidebar_section("THINKING", lambda: app_state.get_plan_fragments(), scrollable=True)

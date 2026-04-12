@@ -85,10 +85,9 @@ class FileManager:
             root_path=os.getcwd(),
             on_file_selected=self._on_file_selected,
         )
-        from prompt_toolkit.layout.margins import ScrollbarMargin
-        self._tree_window = Window(
-            content=self._tree_control,
-            right_margins=[ScrollbarMargin(display_arrows=True)],
+        from infinidev.ui.controls.clickable_scrollbar import scrollable_window
+        self._tree_window, self._tree_container = scrollable_window(
+            self._tree_control, display_arrows=True,
         )
         # Start file watcher for live updates
         self._start_file_watcher()
@@ -131,9 +130,9 @@ class FileManager:
         self.open_file(file_path)
 
     def get_explorer_content(self) -> Any:
-        """Return the stable explorer Window (same instance every call)."""
+        """Return the stable explorer container (same instance every call)."""
         if self._tree_window is not None:
-            return self._tree_window
+            return self._tree_container
         return self._explorer_placeholder
 
     # ── File tabs ───────────────────────────────────────────────────

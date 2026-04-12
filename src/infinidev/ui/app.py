@@ -15,7 +15,7 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout.containers import (
-    ConditionalContainer, HSplit, VSplit, Window,
+    ConditionalContainer, HSplit, Window,
 )
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.filters import Condition
@@ -132,18 +132,12 @@ class InfinidevApp:
         self.footer_control = None
 
         # ── Build stable content windows (created once) ─────
-        from infinidev.ui.controls.clickable_scrollbar import ClickableScrollbar
-        self._chat_history_window = Window(
-            content=self._chat_history_control,
-            wrap_lines=False,
+        from infinidev.ui.controls.clickable_scrollbar import scrollable_window
+        self._chat_history_window, chat_scroll_container = scrollable_window(
+            self._chat_history_control, display_arrows=True, wrap_lines=False,
         )
-        self._chat_scrollbar = ClickableScrollbar(self._chat_history_window)
         self._chat_content_window = HSplit([
-            VSplit([
-                self._chat_history_window,
-                Window(content=self._chat_scrollbar, width=1,
-                       style=f"bg:{SCROLLBAR_BG}"),
-            ]),
+            chat_scroll_container,
             ConditionalContainer(
                 content=Window(
                     content=FormattedTextControl(lambda: self._autocomplete.get_fragments()),

@@ -280,22 +280,21 @@ class DialogManager:
         from prompt_toolkit.layout.containers import (
             Float, ConditionalContainer, Window,
         )
-        from prompt_toolkit.layout.margins import ScrollbarMargin
         from prompt_toolkit.layout.containers import ScrollOffsets
         from prompt_toolkit.filters import Condition
         from prompt_toolkit.key_binding import KeyBindings
         from infinidev.ui.dialogs.notes_browser import NotesBrowserControl
         from infinidev.ui.dialogs.base import dialog_frame
         from infinidev.ui.theme import ACCENT
+        from infinidev.ui.controls.clickable_scrollbar import scrollable_window
 
         app = self._app
 
         ctrl = NotesBrowserControl()
         self._notes_ctrl = ctrl
 
-        self._notes_window = Window(
-            content=ctrl,
-            right_margins=[ScrollbarMargin(display_arrows=True)],
+        self._notes_window, self._notes_container = scrollable_window(
+            ctrl, display_arrows=True,
             scroll_offsets=ScrollOffsets(top=1, bottom=1),
         )
 
@@ -320,7 +319,7 @@ class DialogManager:
         ctrl._nav_kb = kb
         ctrl.get_key_bindings = lambda: kb
 
-        frame = dialog_frame("Agent Notes", self._notes_window,
+        frame = dialog_frame("Agent Notes", self._notes_container,
                              width=70, height=24, border_color=ACCENT)
 
         dialog_float = Float(
@@ -404,7 +403,6 @@ class DialogManager:
             Float, ConditionalContainer, VSplit, Window,
         )
         from prompt_toolkit.layout.dimension import Dimension as D
-        from prompt_toolkit.layout.margins import ScrollbarMargin
         from prompt_toolkit.layout.containers import ScrollOffsets
         from prompt_toolkit.filters import Condition
         from prompt_toolkit.key_binding import KeyBindings
@@ -413,6 +411,7 @@ class DialogManager:
         )
         from infinidev.ui.dialogs.base import dialog_frame
         from infinidev.ui.theme import PRIMARY, ACCENT
+        from infinidev.ui.controls.clickable_scrollbar import scrollable_window
 
         app = self._app
 
@@ -423,9 +422,8 @@ class DialogManager:
         content_ctrl = DebugContentControl(state)
 
         self._debug_sections_window = Window(content=sections_ctrl, width=14)
-        self._debug_content_window = Window(
-            content=content_ctrl,
-            right_margins=[ScrollbarMargin(display_arrows=True)],
+        self._debug_content_window, self._debug_content_container = scrollable_window(
+            content_ctrl, display_arrows=True,
             scroll_offsets=ScrollOffsets(top=1, bottom=1),
         )
 
@@ -489,7 +487,7 @@ class DialogManager:
         body = VSplit([
             self._debug_sections_window,
             Window(width=1, char="│", style=f"{PRIMARY}"),
-            self._debug_content_window,
+            self._debug_content_container,
         ])
 
         frame = dialog_frame("Debug", body, width=95, height=30, border_color=ACCENT)

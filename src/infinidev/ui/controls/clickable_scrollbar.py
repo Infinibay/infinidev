@@ -4,9 +4,9 @@ and arrow clicks.
 
 Usage::
 
-    from prompt_toolkit.layout.containers import VSplit, Window
-    scrollbar = ClickableScrollbar(target_window)
-    layout = VSplit([target_window, Window(content=scrollbar, width=1)])
+    from infinidev.ui.controls.clickable_scrollbar import scrollable_window
+    win, container = scrollable_window(my_control, display_arrows=True)
+    # Use 'container' in layout, 'win' for focus
 """
 
 from __future__ import annotations
@@ -171,3 +171,23 @@ class ClickableScrollbar(UIControl):
             else:
                 content._follow_tail = False
                 content._scroll_offset = max_scroll - target_scroll
+
+
+def scrollable_window(
+    content,
+    *,
+    display_arrows: bool = True,
+    **window_kwargs,
+) -> tuple["Window", "VSplit"]:
+    """Create a Window with a clickable scrollbar in a VSplit.
+
+    Returns ``(window, container)`` — use *container* in the layout
+    and *window* when you need a focus target.
+    """
+    from prompt_toolkit.layout.containers import VSplit, Window as _Window
+
+    win = _Window(content=content, **window_kwargs)
+    sb = ClickableScrollbar(win, display_arrows=display_arrows)
+    sb_win = _Window(content=sb, width=1, style=f"bg:{SCROLLBAR_BG}")
+    container = VSplit([win, sb_win])
+    return win, container
