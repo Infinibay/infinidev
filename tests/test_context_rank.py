@@ -60,12 +60,13 @@ class TestInteractionLogger:
         assert row["step_index"] == 1
 
     def test_log_interaction_stores_row(self, cr_db):
-        from infinidev.engine.context_rank.logger import log_interaction
+        from infinidev.engine.context_rank.logger import log_interaction, flush
 
         log_interaction(
             "sess-1", "task-1", None, 0,
             "file_read", "src/auth.py", "file", 1.0,
         )
+        flush()  # drain async writer before reading
 
         def _check(conn):
             rows = conn.execute(
@@ -78,12 +79,13 @@ class TestInteractionLogger:
         assert rows[0]["weight"] == 1.0
 
     def test_log_tool_call_classifies_correctly(self, cr_db):
-        from infinidev.engine.context_rank.logger import log_tool_call
+        from infinidev.engine.context_rank.logger import log_tool_call, flush
 
         log_tool_call(
             "sess-1", "task-1", None, 0,
             "replace_lines", {"path": "src/auth.py", "start": 1, "end": 5},
         )
+        flush()
 
         def _check(conn):
             return conn.execute(
@@ -278,7 +280,9 @@ class TestContextRankHooks:
 
             hooks.on_tool_call("read_file", '{"path": "src/auth.py"}', 0)
 
-            # Verify data was logged
+            # Verify data was logged (flush async writer first)
+            from infinidev.engine.context_rank.logger import flush
+            flush()
             def _check(conn):
                 return conn.execute(
                     "SELECT COUNT(*) as cnt FROM cr_interactions",
@@ -299,6 +303,8 @@ class TestContextRankHooks:
             # Arguments as JSON string (how they come from the LLM)
             hooks.on_tool_call("replace_lines", '{"path": "x.py", "start": 1}', 0)
 
+            from infinidev.engine.context_rank.logger import flush
+            flush()
             def _check(conn):
                 row = conn.execute(
                     "SELECT * FROM cr_interactions WHERE target = 'x.py'",
@@ -1463,7 +1469,7 @@ class TestWasErrorPersistence:
     """Phase 2 v3: was_error flag round-trips to cr_interactions."""
 
     def test_was_error_persisted(self, cr_db):
-        from infinidev.engine.context_rank.logger import log_interaction
+        from infinidev.engine.context_rank.logger import log_interaction, flush
 
         log_interaction(
             "sess-E", "task-E", None, 0,
@@ -1475,6 +1481,7 @@ class TestWasErrorPersistence:
             "file_read", "bad.py", "file", 1.0,
             was_error=True,
         )
+        flush()
 
         def _check(conn):
             return conn.execute(

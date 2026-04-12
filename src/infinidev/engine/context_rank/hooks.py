@@ -35,11 +35,12 @@ class ContextRankHooks:
         self._session_id = session_id
         self._task_id = task_id
 
-        from infinidev.engine.context_rank.logger import log_context, compute_context_embedding
+        from infinidev.engine.context_rank.logger import log_context, compute_context_embedding, flush
         self._task_context_id = log_context(
             session_id, task_id, "task_input", task_description,
         )
         self._active_step_context_id = self._task_context_id
+        flush()  # commit task_input context before background embed
         # Compute embedding eagerly so it's ready for predictive scoring.
         # Also cache it in-memory to avoid re-embedding the same query
         # on every iteration (~267ms saved per iteration).
@@ -55,7 +56,11 @@ class ContextRankHooks:
         """Called when a new plan step becomes active."""
         if not self._enabled:
             return
-        from infinidev.engine.context_rank.logger import log_context, compute_context_embedding
+        from infinidev.engine.context_rank.logger import log_context, compute_context_embedding, flush
+
+        # Flush any pending interaction writes from the previous step
+        # before inserting new context rows.
+        flush()
 
         # Level 2: step title
         title_ctx_id = log_context(
@@ -69,6 +74,9 @@ class ContextRankHooks:
                 self._session_id, self._task_id, "step_description",
                 explanation, iteration, step_index,
             )
+
+        # Single commit for both context rows
+        flush()
 
         # Use the most specific context_id for linking subsequent tool calls
         self._active_step_context_id = desc_ctx_id or title_ctx_id or self._task_context_id
@@ -118,10 +126,12 @@ class ContextRankHooks:
         )
 
     def finish(self) -> None:
-        """Called once when the task ends. Snapshots session scores."""
+        """Called once when the task ends. Flushes pending writes and snapshots."""
         if not self._enabled:
             return
-        from infinidev.engine.context_rank.logger import snapshot_session_scores
+        from infinidev.engine.context_rank.logger import flush, snapshot_session_scores
+        # Flush any remaining interaction writes before snapshot
+        flush()
         try:
             snapshot_session_scores(self._session_id, self._task_id)
         except Exception:

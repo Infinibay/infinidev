@@ -409,6 +409,9 @@ def _compute_reactive_scores(
 ) -> dict[str, tuple[float, str, str]]:
     """Score nodes based on tool calls in the current session.
 
+    Drains the async interaction writer first so the query sees all
+    pending rows.
+
     Per-target score:
         score = Σ(weight × exp(-λ × Δi)) × pattern_mult(interactions)
 
@@ -418,6 +421,8 @@ def _compute_reactive_scores(
     and edit is intentionally ignored — both read→edit and edit→read
     count as productive.
     """
+    from infinidev.engine.context_rank.logger import flush as _cr_flush
+    _cr_flush()
     decay_lambda = settings.CONTEXT_RANK_REACTIVE_DECAY
     many_reads_threshold = settings.CONTEXT_RANK_REACTIVE_MANY_READS
     try:

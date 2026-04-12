@@ -4,6 +4,13 @@ Emits lightweight interaction events from tool execution and stores
 the context messages (user input, step titles, step descriptions) that
 provoked them.  All writes are append-only and non-blocking — failures
 are logged but never propagate to the caller.
+
+Interaction rows are written asynchronously via a dedicated writer
+thread to keep the engine's hot path free of SQLite commit latency.
+Context rows (``log_context``) remain synchronous because callers
+need the ``lastrowid`` immediately, but they are infrequent (~3 per
+step).  Call :func:`flush` at step boundaries to commit pending
+context rows and drain the interaction queue.
 """
 
 from __future__ import annotations
@@ -11,12 +18,116 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
+import threading
 import time
 from typing import Any
 
-from infinidev.code_intel._db import execute_with_retry
+from infinidev.code_intel._db import execute_with_retry, get_pooled_connection
 
 logger = logging.getLogger(__name__)
+
+
+# ── Async interaction writer ───────────────────────────────────────
+
+_interaction_queue: queue.Queue[tuple | None] = queue.Queue()
+_writer_started = False
+_writer_lock = threading.Lock()
+
+_INTERACTION_INSERT_SQL = (
+    "INSERT INTO cr_interactions "
+    "(task_id, session_id, context_id, iteration, event_type, "
+    "target, target_type, weight, metadata, was_error, created_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+
+def _ensure_writer() -> None:
+    """Start the background writer thread (idempotent)."""
+    global _writer_started
+    if _writer_started:
+        return
+    with _writer_lock:
+        if _writer_started:
+            return
+        _writer_started = True
+        t = threading.Thread(target=_writer_loop, daemon=True, name="cr-writer")
+        t.start()
+
+
+def _writer_loop() -> None:
+    """Pull interaction rows from the queue and batch-commit them."""
+    while True:
+        batch: list[tuple] = []
+        try:
+            item = _interaction_queue.get(timeout=2.0)
+        except queue.Empty:
+            continue
+
+        if item is None:  # shutdown sentinel
+            break
+
+        # Flush sentinel — commit what we have and signal caller
+        if isinstance(item, threading.Event):
+            if batch:
+                _commit_batch(batch)
+            item.set()
+            continue
+
+        batch.append(item)
+
+        # Drain any additional queued items
+        while True:
+            try:
+                item = _interaction_queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:
+                _commit_batch(batch)
+                return
+            if isinstance(item, threading.Event):
+                _commit_batch(batch)
+                batch.clear()
+                item.set()
+                continue
+            batch.append(item)
+
+        if batch:
+            _commit_batch(batch)
+
+
+def _commit_batch(batch: list[tuple]) -> None:
+    """Insert a batch of interaction rows in one transaction."""
+    from infinidev.engine.static_analysis_timer import measure as _sa_measure
+    try:
+        with _sa_measure("db_write"):
+            conn = get_pooled_connection()
+            conn.executemany(_INTERACTION_INSERT_SQL, batch)
+            conn.commit()
+    except Exception:
+        logger.debug("Writer batch commit failed (%d rows)", len(batch), exc_info=True)
+
+
+def flush() -> None:
+    """Commit pending context writes and drain the interaction queue.
+
+    Call at step boundaries and at task end to ensure all data is
+    persisted before the next phase reads it.
+    """
+    from infinidev.engine.static_analysis_timer import measure as _sa_measure
+    # 1. Commit any pending synchronous writes (log_context rows)
+    try:
+        with _sa_measure("db_write"):
+            conn = get_pooled_connection()
+            conn.commit()
+    except Exception:
+        logger.debug("flush() sync commit failed", exc_info=True)
+
+    # 2. Wait for the writer thread to drain its queue
+    if _writer_started and not _interaction_queue.empty():
+        done = threading.Event()
+        _interaction_queue.put(done)
+        done.wait(timeout=5.0)
 
 # ── Tool → event mapping ────────────────────────────────────────────
 
@@ -114,6 +225,10 @@ def log_context(
       - ``task_input``        (level 1 — broadest)
       - ``step_title``        (level 2)
       - ``step_description``  (level 3 — most specific)
+
+    The INSERT is NOT committed immediately — call :func:`flush` at
+    step boundaries to batch multiple writes into one WAL checkpoint.
+    ``lastrowid`` is available before commit in SQLite.
     """
     now = time.time()
     try:
@@ -124,7 +239,6 @@ def log_context(
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (task_id, session_id, context_type, content, iteration, step_index, now),
             )
-            conn.commit()
             return cur.lastrowid
         return execute_with_retry(_insert)
     except Exception:
@@ -145,29 +259,22 @@ def log_interaction(
     *,
     was_error: bool = False,
 ) -> None:
-    """Append an interaction event to the log.
+    """Append an interaction event to the async write queue.
+
+    The row is written by a background thread, so this call returns
+    immediately (~0ms) without blocking the engine.
 
     The ``was_error`` flag is persisted so the predictive channel
     can exclude failed tool calls from historical scoring, and the
     snapshot step can compute productivity without counting errors.
     """
-    now = time.time()
+    _ensure_writer()
     meta_json = json.dumps(metadata) if metadata else None
-    try:
-        def _insert(conn):
-            conn.execute(
-                "INSERT INTO cr_interactions "
-                "(task_id, session_id, context_id, iteration, event_type, "
-                "target, target_type, weight, metadata, was_error, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (task_id, session_id, context_id, iteration,
-                 event_type, target, target_type, weight, meta_json,
-                 1 if was_error else 0, now),
-            )
-            conn.commit()
-        execute_with_retry(_insert)
-    except Exception:
-        logger.debug("Failed to log interaction", exc_info=True)
+    _interaction_queue.put((
+        task_id, session_id, context_id, iteration,
+        event_type, target, target_type, weight, meta_json,
+        1 if was_error else 0, time.time(),
+    ))
 
 
 def log_tool_call(
@@ -248,6 +355,8 @@ def snapshot_session_scores(session_id: str, task_id: str) -> None:
     interaction contributions by ``productivity``, so "productive"
     past sessions carry more weight in the ranking.
     """
+    # Drain async writer — the SELECT below needs all interactions committed.
+    flush()
     now = time.time()
     try:
         def _snapshot(conn):

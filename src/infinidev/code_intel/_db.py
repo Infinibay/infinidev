@@ -32,6 +32,9 @@ def _new_connection(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA mmap_size = 67108864")  # 64MB memory-mapped I/O
+    conn.execute("PRAGMA wal_autocheckpoint = 1000")  # defer checkpoints
     return conn
 
 
