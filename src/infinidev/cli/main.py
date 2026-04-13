@@ -9,6 +9,26 @@ except Exception:
 
 import sys
 import os
+
+# Auto-detect NVIDIA GPU libraries installed via pip (nvidia-cudnn-cu12, etc.)
+# and add them to LD_LIBRARY_PATH so ONNX Runtime can use CUDAExecutionProvider.
+# This runs before any onnxruntime import to ensure GPU is available.
+def _setup_gpu_library_path():
+    try:
+        import importlib.util
+        for pkg in ("nvidia.cudnn", "nvidia.cublas"):
+            spec = importlib.util.find_spec(pkg)
+            if spec and spec.submodule_search_locations:
+                for loc in spec.submodule_search_locations:
+                    lib_dir = os.path.join(loc, "lib")
+                    if os.path.isdir(lib_dir):
+                        current = os.environ.get("LD_LIBRARY_PATH", "")
+                        if lib_dir not in current:
+                            os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{current}" if current else lib_dir
+    except Exception:
+        pass
+
+_setup_gpu_library_path()
 import logging
 import click
 from prompt_toolkit import PromptSession
