@@ -220,7 +220,15 @@ class InfinidevApp:
             try:
                 from infinidev.cli.initial_index import run_initial_index
 
-                stats = run_initial_index(project_id=1)
+                def _on_index_progress(msg: str):
+                    if self.status_bar_control:
+                        self.status_bar_control.set_status(msg)
+                        try:
+                            self.invalidate()
+                        except Exception:
+                            pass
+
+                stats = run_initial_index(project_id=1, on_progress=_on_index_progress)
 
                 files = stats.get("files_indexed", 0)
                 symbols = stats.get("symbols_total", 0)

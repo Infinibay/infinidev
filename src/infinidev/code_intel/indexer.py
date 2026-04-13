@@ -186,13 +186,33 @@ def reindex_file(project_id: int, file_path: str) -> int:
     return index_file(project_id, file_path)
 
 
+def _count_indexable_files(dir_path: str) -> int:
+    """Quick pre-scan to count files that will be processed."""
+    total = 0
+    for root, dirs, files in os.walk(dir_path):
+        dirs[:] = [d for d in dirs
+                   if d not in SKIP_DIRS and not d.startswith(".")
+                   and not (os.path.join(root, d) != dir_path
+                            and os.path.isdir(os.path.join(root, d, ".git")))]
+        for fname in files:
+            _, ext = os.path.splitext(fname)
+            if ext.lower() not in SKIP_EXTENSIONS:
+                total += 1
+    return total
+
+
 def index_directory(
     project_id: int,
     dir_path: str,
     *,
     verbose: bool = False,
+    on_progress: "callable | None" = None,
 ) -> dict[str, int]:
     """Index all supported source files in a directory tree.
+
+    Args:
+        on_progress: Optional callback(processed, total, files_indexed,
+            symbols_total) called periodically during indexing.
 
     Returns dict with stats: files_indexed, symbols_total, files_skipped, elapsed_ms.
     """
@@ -200,8 +220,12 @@ def index_directory(
     files_indexed = 0
     symbols_total = 0
     files_skipped = 0
+    processed = 0
 
     dir_path = os.path.abspath(dir_path)
+
+    # Pre-count for percentage progress
+    total_files = _count_indexable_files(dir_path) if on_progress else 0
 
     for root, dirs, files in os.walk(dir_path):
         # Skip ignored directories and nested git repos (not the root)
@@ -235,6 +259,11 @@ def index_directory(
             except Exception as exc:
                 logger.debug("Failed to index %s: %s", fpath, exc)
                 files_skipped += 1
+
+            # Report progress every 10 files
+            processed += 1
+            if on_progress and processed % 10 == 0:
+                on_progress(processed, total_files, files_indexed, symbols_total)
 
     elapsed = int((time.time() - start) * 1000)
     stats = {

@@ -62,10 +62,18 @@ def ensure_indexed(project_id: int, file_path: str) -> bool:
         return False
 
 
-def ensure_directory_indexed(project_id: int, dir_path: str) -> dict[str, int]:
+def ensure_directory_indexed(
+    project_id: int,
+    dir_path: str,
+    on_progress: "callable | None" = None,
+) -> dict[str, int]:
     """Ensure all supported files in a directory are indexed.
 
     Only indexes files that have changed since last indexing.
+
+    Args:
+        on_progress: Optional callback(files_indexed, symbols_total) for
+            progress reporting during indexing.
 
     Returns:
         Dict with stats: {files_indexed, files_skipped, symbols_total}
@@ -75,7 +83,8 @@ def ensure_directory_indexed(project_id: int, dir_path: str) -> dict[str, int]:
 
     from infinidev.code_intel.indexer import index_directory
     try:
-        return index_directory(project_id, dir_path)
+        return index_directory(project_id, dir_path,
+                               on_progress=on_progress)
     except Exception as exc:
         logger.warning("Failed to index directory %s: %s", dir_path, str(exc)[:100])
         return {"files_indexed": 0, "files_skipped": 0, "symbols_total": 0}

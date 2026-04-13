@@ -42,8 +42,18 @@ def run_initial_index(
 
     _log("Indexing workspace...")
 
+    def _index_progress(processed, total, indexed, symbols):
+        if total > 0:
+            pct = int(processed / total * 100)
+            _log(f"indexing... {processed}/{total} ({pct}%)")
+        else:
+            _log(f"indexing... {processed} files scanned")
+
     from infinidev.code_intel.smart_index import ensure_directory_indexed
-    stats = ensure_directory_indexed(project_id, workspace)
+    stats = ensure_directory_indexed(
+        project_id, workspace,
+        on_progress=_index_progress,
+    )
 
     elapsed_ms = stats.get("elapsed_ms", 0)
     files = stats.get("files_indexed", 0)
