@@ -9,6 +9,48 @@ from infinidev.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
+# ── Register models missing from LiteLLM's built-in database ─────────
+# LiteLLM rejects requests for unknown models with wrong context-window
+# limits.  We register them once at import time so every call_llm() and
+# capability probe works correctly.
+
+def _register_custom_models() -> None:
+    """Add model entries that LiteLLM doesn't ship yet."""
+    try:
+        import litellm
+
+        _M27_BASE = {
+            "litellm_provider": "minimax",
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_tool_choice": True,
+            "supports_prompt_caching": True,
+            "supports_reasoning": True,
+            "supports_system_messages": True,
+            "max_input_tokens": 204_800,
+            "max_output_tokens": 8192,
+            "input_cost_per_token": 3e-07,
+            "output_cost_per_token": 1.2e-06,
+            "cache_read_input_token_cost": 3e-08,
+            "cache_creation_input_token_cost": 3.75e-07,
+        }
+
+        custom = {
+            "minimax/MiniMax-M2.7": {**_M27_BASE},
+            "minimax/MiniMax-M2.7-highspeed": {**_M27_BASE},
+        }
+
+        for model_id, info in custom.items():
+            if model_id not in litellm.model_cost:
+                litellm.model_cost[model_id] = info
+                logger.debug("Registered custom model: %s", model_id)
+    except Exception as exc:
+        logger.debug("Could not register custom models: %s", exc)
+
+
+_register_custom_models()
+
 def _extract_provider(model: str) -> str:
     """Extract provider prefix from a LiteLLM model string."""
     if "/" in model:
