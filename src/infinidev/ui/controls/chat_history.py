@@ -8,6 +8,7 @@ viewport culling without the ±200px visibility hack.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from prompt_toolkit.data_structures import Point
@@ -31,6 +32,9 @@ if not _copy_log.handlers:
 
 # Style for the selected message in selection mode
 _SELECT_HIGHLIGHT = f"#ffffff bg:{PRIMARY} bold"
+
+# Minimum interval between full line rebuilds (seconds)
+_REBUILD_MIN_INTERVAL = 0.18  # ~5.5 rebuilds/sec max
 
 
 class ChatHistoryControl(UIControl):
@@ -56,9 +60,17 @@ class ChatHistoryControl(UIControl):
         # Message selection mode state
         self._select_mode: bool = False
         self._selected_msg_index: int = -1
+        # Rebuild throttle
+        self._last_rebuild: float = 0.0
+        # Message line ranges for selection mode (msg_index → (start, end))
+        self._msg_line_ranges: dict[int, tuple[int, int]] = {}
 
     def invalidate_cache(self) -> None:
-        """Force re-render on next frame and scroll to bottom."""
+        """Mark cache as stale and scroll to bottom.
+
+        The actual rebuild is deferred to the next create_content() call
+        and throttled to avoid excessive rebuilds during rapid event bursts.
+        """
         self._line_cache = None
         self._follow_tail = True
         self._scroll_offset = 0
@@ -196,85 +208,45 @@ class ChatHistoryControl(UIControl):
 
         Consecutive same-type messages are grouped. Groups of 2+ show a
         clickable header; when collapsed only the last message is visible.
+
+        Optimizations:
+        - Cache is keyed on (msg_count, width) — repaints without new
+          messages reuse the cache.
+        - Rebuilds are throttled to ~5/sec to keep the UI responsive
+          when the engine emits events rapidly.
+        - Message indices are computed from group.start_index instead of
+          list.index() to avoid O(n²) lookups.
         """
         from infinidev.ui.controls.message_groups import identify_groups
         from infinidev.ui.controls.message_widgets import get_widget
 
         msg_count = len(self._messages)
-        # Invalidate cache in select mode (highlight changes without msg changes)
-        if self._select_mode:
-            self._line_cache = None
-        if self._line_cache is not None and self._cache_len == msg_count and self._cache_width == width:
+
+        # ── Cache check ──────────────────────────────────────────────
+        # In select mode the highlight changes without msg count changes,
+        # so we must force a rebuild.
+        cache_valid = (
+            self._line_cache is not None
+            and self._cache_len == msg_count
+            and self._cache_width == width
+            and not self._select_mode
+        )
+
+        if cache_valid:
             lines = self._line_cache
         else:
-            # Full rebuild
-            lines = []
-            self._clickable_lines = {}
-            self._msg_line_ranges: dict[int, tuple[int, int]] = {}
-            groups = identify_groups(self._messages)
-
-            for group in groups:
-                widget = get_widget(group.msg_type)
-                if widget is None:
-                    # Unknown type — render each message with fallback
-                    for msg in group.messages:
-                        lines.extend(self._render_fallback(msg, width))
-                    continue
-
-                if group.is_group:
-                    # Multi-message group: render header + visible messages
-                    collapsed = self._group_states.get(group.start_index, True)
-
-                    header_result = widget.render_group_header(
-                        len(group.messages), collapsed, width,
-                    )
-                    header_start = len(lines)
-                    lines.extend(header_result.lines)
-
-                    # Register group header click
-                    def _toggle_group(idx=group.start_index):
-                        self._group_states[idx] = not self._group_states.get(idx, True)
-                    self._clickable_lines[header_start] = _toggle_group
-
-                    if collapsed:
-                        # Only render last message
-                        visible_msgs = [group.messages[-1]]
-                    else:
-                        visible_msgs = group.messages
-
-                    for msg in visible_msgs:
-                        msg_idx = self._messages.index(msg)
-                        result = widget.render(msg, width)
-                        start = len(lines)
-                        lines.extend(result.lines)
-                        self._msg_line_ranges[msg_idx] = (start, len(lines))
-                        # Register per-message clickable offsets
-                        for offset, cb in result.clickable_offsets.items():
-                            self._clickable_lines[start + offset] = cb
-                else:
-                    # Single message — no group header
-                    msg = group.messages[0]
-                    msg_idx = self._messages.index(msg)
-                    result = widget.render(msg, width)
-                    start = len(lines)
-                    lines.extend(result.lines)
-                    self._msg_line_ranges[msg_idx] = (start, len(lines))
-                    for offset, cb in result.clickable_offsets.items():
-                        self._clickable_lines[start + offset] = cb
-
-            # Apply selection highlight
-            if self._select_mode and self._selected_msg_index in self._msg_line_ranges:
-                sel_start, sel_end = self._msg_line_ranges[self._selected_msg_index]
-                for i in range(sel_start, sel_end):
-                    if i < len(lines) and lines[i] and lines[i] != [("", "")]:
-                        # Prepend reverse-video marker to highlight
-                        lines[i] = [(_SELECT_HIGHLIGHT, frag_text)
-                                     if frag_text.strip() else (style, frag_text)
-                                     for style, frag_text in lines[i]]
-
-            self._line_cache = lines
-            self._cache_len = msg_count
-            self._cache_width = width
+            # Throttle: skip rebuild if we just did one and msg count
+            # hasn't changed (pure repaint).  Always rebuild when new
+            # messages arrive so they appear immediately.
+            now = time.monotonic()
+            if (self._line_cache is not None
+                    and self._cache_len == msg_count
+                    and now - self._last_rebuild < _REBUILD_MIN_INTERVAL
+                    and not self._select_mode):
+                lines = self._line_cache
+            else:
+                lines = self._do_rebuild(msg_count, width)
+                self._last_rebuild = now
 
         # Append thinking indicator if active
         if self._show_thinking:
@@ -294,6 +266,75 @@ class ChatHistoryControl(UIControl):
             return lines, total, get_line_with_thinking
 
         return lines, len(lines), None
+
+    def _do_rebuild(self, msg_count: int, width: int) -> list[list[tuple[str, str]]]:
+        """Full line rebuild — separated from _build_lines for clarity."""
+        from infinidev.ui.controls.message_groups import identify_groups
+        from infinidev.ui.controls.message_widgets import get_widget
+
+        lines: list[list[tuple[str, str]]] = []
+        self._clickable_lines = {}
+        self._msg_line_ranges = {}
+        groups = identify_groups(self._messages)
+
+        for group in groups:
+            widget = get_widget(group.msg_type)
+            if widget is None:
+                for msg in group.messages:
+                    lines.extend(self._render_fallback(msg, width))
+                continue
+
+            if group.is_group:
+                collapsed = self._group_states.get(group.start_index, True)
+
+                header_result = widget.render_group_header(
+                    len(group.messages), collapsed, width,
+                )
+                header_start = len(lines)
+                lines.extend(header_result.lines)
+
+                def _toggle_group(idx=group.start_index):
+                    self._group_states[idx] = not self._group_states.get(idx, True)
+                self._clickable_lines[header_start] = _toggle_group
+
+                if collapsed:
+                    visible_msgs = [group.messages[-1]]
+                    # Index of last msg = start_index + len - 1
+                    visible_indices = [group.start_index + len(group.messages) - 1]
+                else:
+                    visible_msgs = group.messages
+                    visible_indices = [group.start_index + i for i in range(len(group.messages))]
+
+                for msg, msg_idx in zip(visible_msgs, visible_indices):
+                    result = widget.render(msg, width)
+                    start = len(lines)
+                    lines.extend(result.lines)
+                    self._msg_line_ranges[msg_idx] = (start, len(lines))
+                    for offset, cb in result.clickable_offsets.items():
+                        self._clickable_lines[start + offset] = cb
+            else:
+                msg = group.messages[0]
+                msg_idx = group.start_index
+                result = widget.render(msg, width)
+                start = len(lines)
+                lines.extend(result.lines)
+                self._msg_line_ranges[msg_idx] = (start, len(lines))
+                for offset, cb in result.clickable_offsets.items():
+                    self._clickable_lines[start + offset] = cb
+
+        # Apply selection highlight
+        if self._select_mode and self._selected_msg_index in self._msg_line_ranges:
+            sel_start, sel_end = self._msg_line_ranges[self._selected_msg_index]
+            for i in range(sel_start, sel_end):
+                if i < len(lines) and lines[i] and lines[i] != [("", "")]:
+                    lines[i] = [(_SELECT_HIGHLIGHT, frag_text)
+                                 if frag_text.strip() else (style, frag_text)
+                                 for style, frag_text in lines[i]]
+
+        self._line_cache = lines
+        self._cache_len = msg_count
+        self._cache_width = width
+        return lines
 
     # ── Selection mode ──────────────────────────────────────────────
 
