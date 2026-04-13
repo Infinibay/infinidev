@@ -25,6 +25,15 @@ from infinidev.ui.theme import (
 COPY_ICON = " [⧉] "
 COPY_ICON_STYLE = f"{TEXT_MUTED}"
 
+# Module-level callback set by the app — receives (ok: bool) after a copy
+_copy_feedback: Callable[[bool], None] | None = None
+
+
+def set_copy_feedback(cb: Callable[[bool], None]) -> None:
+    """Register a callback invoked after every copy attempt (ok=True/False)."""
+    global _copy_feedback
+    _copy_feedback = cb
+
 
 # ── Render result ──────────────────────────────────────────────────────
 
@@ -234,7 +243,9 @@ class BorderedWidget:
         # Register header line (offset 0) as clickable → copy message text
         def _copy_msg(m=msg):
             from infinidev.ui.clipboard import copy_to_clipboard
-            copy_to_clipboard(m.get("text", ""))
+            ok = copy_to_clipboard(m.get("text", ""))
+            if _copy_feedback:
+                _copy_feedback(ok)
         clickable[0] = _copy_msg
 
         # Body

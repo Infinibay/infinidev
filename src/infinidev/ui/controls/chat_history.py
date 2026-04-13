@@ -42,8 +42,6 @@ class ChatHistoryControl(UIControl):
         self._clickable_lines: dict[int, Any] = {}
         # Group collapse state: start_index of group → collapsed bool
         self._group_states: dict[int, bool] = {}
-        # Copy callback — set by app to trigger flash feedback
-        self.on_copy: Any = None
         # Message selection mode state
         self._select_mode: bool = False
         self._selected_msg_index: int = -1
@@ -124,9 +122,7 @@ class ChatHistoryControl(UIControl):
         @kb.add("enter")
         def _select_confirm(event):
             if self._select_mode:
-                if self.copy_selected_message():
-                    if self.on_copy:
-                        self.on_copy()
+                self.copy_selected_message()
 
         return kb
 
@@ -236,7 +232,7 @@ class ChatHistoryControl(UIControl):
                         self._msg_line_ranges[msg_idx] = (start, len(lines))
                         # Register per-message clickable offsets
                         for offset, cb in result.clickable_offsets.items():
-                            self._clickable_lines[start + offset] = self._wrap_copy_cb(cb)
+                            self._clickable_lines[start + offset] = cb
                 else:
                     # Single message — no group header
                     msg = group.messages[0]
@@ -246,7 +242,7 @@ class ChatHistoryControl(UIControl):
                     lines.extend(result.lines)
                     self._msg_line_ranges[msg_idx] = (start, len(lines))
                     for offset, cb in result.clickable_offsets.items():
-                        self._clickable_lines[start + offset] = self._wrap_copy_cb(cb)
+                        self._clickable_lines[start + offset] = cb
 
             # Apply selection highlight
             if self._select_mode and self._selected_msg_index in self._msg_line_ranges:
@@ -280,18 +276,6 @@ class ChatHistoryControl(UIControl):
             return lines, total, get_line_with_thinking
 
         return lines, len(lines), None
-
-    def _wrap_copy_cb(self, cb):
-        """Wrap a widget callback so that copy actions also fire on_copy."""
-        from infinidev.ui.clipboard import copy_to_clipboard
-        # Detect if cb came from a copy-icon widget (it calls copy_to_clipboard)
-        # We wrap it to also notify the app for flash feedback.
-        original = cb
-        def wrapped():
-            original()
-            if self.on_copy:
-                self.on_copy()
-        return wrapped
 
     # ── Selection mode ──────────────────────────────────────────────
 
@@ -349,7 +333,10 @@ class ChatHistoryControl(UIControl):
             return False
         msg = self._messages[self._selected_msg_index]
         from infinidev.ui.clipboard import copy_to_clipboard
+        from infinidev.ui.controls.message_widgets import _copy_feedback
         ok = copy_to_clipboard(msg.get("text", ""))
+        if _copy_feedback:
+            _copy_feedback(ok)
         self.exit_select_mode()
         return ok
 

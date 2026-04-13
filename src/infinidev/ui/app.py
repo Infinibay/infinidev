@@ -154,8 +154,9 @@ class InfinidevApp:
         ])
 
     def _init_application(self) -> None:
-        # Wire copy callback for flash feedback
-        self._chat_history_control.on_copy = lambda: self.flash_status("Copied!")
+        # Wire copy feedback from message widgets to the status bar
+        from infinidev.ui.controls.message_widgets import set_copy_feedback
+        set_copy_feedback(self._on_copy_feedback)
         global_kb = create_global_keybindings(self)
         self._layout = build_layout(self)
         from prompt_toolkit.styles import Style as PTStyle
@@ -786,6 +787,13 @@ class InfinidevApp:
 
     # ── Clipboard helpers ───────────────────────────────────────────
 
+    def _on_copy_feedback(self, ok: bool) -> None:
+        """Callback from widgets/controls after a copy attempt."""
+        if ok:
+            self.flash_status("Copied!")
+        else:
+            self.flash_status("Copy failed — install xclip or xsel")
+
     def flash_status(self, text: str, duration: float = 2.0) -> None:
         """Show a temporary status message that auto-clears."""
         import threading
@@ -804,10 +812,7 @@ class InfinidevApp:
         from infinidev.ui.clipboard import copy_to_clipboard
         for msg in reversed(self.chat_messages):
             if msg.get("type") == "agent":
-                if copy_to_clipboard(msg.get("text", "")):
-                    self.flash_status("Copied!")
-                else:
-                    self.flash_status("No clipboard tool available")
+                self._on_copy_feedback(copy_to_clipboard(msg.get("text", "")))
                 return
         self.flash_status("No agent messages to copy")
 
@@ -820,15 +825,6 @@ class InfinidevApp:
         else:
             ctrl.enter_select_mode()
             self.flash_status("SELECT MODE: ↑/↓ navigate, Enter copy, Esc exit")
-        self.invalidate()
-
-    def copy_selected_message(self) -> None:
-        """Copy the selected message and exit selection mode."""
-        ctrl = self._chat_history_control
-        if ctrl.copy_selected_message():
-            self.flash_status("Copied!")
-        else:
-            self.flash_status("No clipboard tool available")
         self.invalidate()
 
     # ── Status bar ───────────────────────────────────────────────────
