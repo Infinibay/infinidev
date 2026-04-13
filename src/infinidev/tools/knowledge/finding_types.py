@@ -17,6 +17,9 @@ they simply never match an anchor lookup and behave like before.
 
 from __future__ import annotations
 
+# Anchored-memory types — require at least one anchor_* field.
+ANCHORED_TYPES: frozenset[str] = frozenset({"lesson", "rule", "landmine"})
+
 # The ordering matters only for the docstring rendered to the LLM —
 # the most commonly-needed types are listed first.
 FINDING_TYPES: tuple[str, ...] = (
@@ -50,6 +53,4 @@ FINDING_TYPE_HELP: str = (
     "For the first three (lesson/rule/landmine), ALWAYS provide at "
     "least one anchor_* parameter or the memory will never fire."
 )
-
-
-__all__ = ["FINDING_TYPES", "FINDING_TYPE_HELP"]
+__all__ = ["FINDING_TYPES", "ANCHORED_TYPES", "FINDING_TYPE_HELP"]

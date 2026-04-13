@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
-from infinidev.tools.knowledge.finding_types import FINDING_TYPES
+from infinidev.tools.knowledge.finding_types import ANCHORED_TYPES, FINDING_TYPES
 from infinidev.tools.knowledge.update_finding_input import UpdateFindingInput
 
 
@@ -43,6 +43,36 @@ class UpdateFindingTool(InfinibayBaseTool):
                 f"Invalid finding_type '{finding_type}'. "
                 f"Must be one of: {', '.join(FINDING_TYPES)}"
             )
+
+        # Anchor validation must be done inside _update where we can see
+        # both the existing anchors AND the new values being set.
+        def _validate_anchors(
+            existing_anchors: dict,
+            new_anchors: dict,
+            new_type: str | None,
+        ) -> str | None:
+            """Return None if valid, or an error string."""
+            if new_type not in ANCHORED_TYPES:
+                return None
+
+            # Merge existing + new: None means "keep existing", "" means "clear"
+            _ANCHOR_KEYS = ("anchor_file", "anchor_symbol", "anchor_tool", "anchor_error")
+            final_anchors = {}
+            for k in _ANCHOR_KEYS:
+                new_val = new_anchors.get(k)
+                if new_val is None:
+                    final_anchors[k] = existing_anchors.get(k, "")
+                else:
+                    final_anchors[k] = new_val  # "" clears, non-empty sets
+
+            if not any(final_anchors.values()):
+                return (
+                    f"finding_type='{new_type}' requires at least one anchor_* "
+                    f"parameter (anchor_file, anchor_symbol, anchor_tool, or "
+                    f"anchor_error). Either provide an anchor now or use a "
+                    f"non-anchored finding_type like 'observation'."
+                )
+            return None
 
         updates: list[str] = []
         params: list = []
@@ -88,14 +118,31 @@ class UpdateFindingTool(InfinibayBaseTool):
         updates.append("updated_at = CURRENT_TIMESTAMP")
         params.append(finding_id)
 
-        def _update(conn: sqlite3.Connection) -> dict:
-            row = conn.execute(
-                "SELECT id, topic, status FROM findings WHERE id = ?",
+        # --- Pre-validate anchor requirement before touching the DB ---
+        # We need to know whether the existing record already has anchors
+        # and whether this update is adding/changing them.
+        def _fetch_existing_anchors(_conn: sqlite3.Connection) -> dict | None:
+            row = _conn.execute(
+                "SELECT anchor_file, anchor_symbol, anchor_tool, anchor_error "
+                "FROM findings WHERE id = ?",
                 (finding_id,),
             ).fetchone()
+            return dict(row) if row else None
 
-            if not row:
+        def _update(conn: sqlite3.Connection) -> dict:
+            existing = _fetch_existing_anchors(conn)
+            if existing is None:
                 raise ValueError(f"Finding {finding_id} not found")
+
+            new_anchors = {
+                "anchor_file": anchor_file,
+                "anchor_symbol": anchor_symbol,
+                "anchor_tool": anchor_tool,
+                "anchor_error": anchor_error,
+            }
+            err = _validate_anchors(existing, new_anchors, finding_type)
+            if err:
+                raise ValueError(err)
 
             conn.execute(
                 f"UPDATE findings SET {', '.join(updates)} WHERE id = ?",

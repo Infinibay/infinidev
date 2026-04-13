@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
-from infinidev.tools.knowledge.finding_types import FINDING_TYPES
+from infinidev.tools.knowledge.finding_types import ANCHORED_TYPES, FINDING_TYPES
 from infinidev.tools.knowledge.record_finding_input import RecordFindingInput
 
 
@@ -55,8 +55,7 @@ class RecordFindingTool(InfinibayBaseTool):
         # Anchored types MUST have at least one anchor or the memory
         # is dead on arrival — it'll sit in the DB forever and never
         # fire. Reject up front with a clear message.
-        _ANCHORED = {"lesson", "rule", "landmine"}
-        if finding_type in _ANCHORED and not any(
+        if finding_type in ANCHORED_TYPES and not any(
             (anchor_file, anchor_symbol, anchor_tool, anchor_error)
         ):
             return self._error(
@@ -74,8 +73,8 @@ class RecordFindingTool(InfinibayBaseTool):
         agent_run_id = self.agent_run_id
 
         # --- Semantic dedup check (same session + same finding_type) ---
-        def _fetch_existing(conn: sqlite3.Connection) -> list[dict]:
-            rows = conn.execute(
+        def _fetch_existing(_conn: sqlite3.Connection) -> list[dict]:
+            rows = _conn.execute(
                 "SELECT id, topic AS title, content FROM findings"
                 " WHERE session_id = ? AND finding_type = ?",
                 (session_id, finding_type),
