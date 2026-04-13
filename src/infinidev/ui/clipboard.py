@@ -22,6 +22,9 @@ def copy_to_clipboard(text: str) -> bool:
     terminal emulators).
     Returns True on success, False if nothing worked.
     """
+    import logging
+    log = logging.getLogger("infinidev.copy_debug")
+
     for cmd, args in _CLIPBOARD_COMMANDS:
         if shutil.which(cmd) is not None:
             try:
@@ -31,14 +34,19 @@ def copy_to_clipboard(text: str) -> bool:
                     check=True,
                     timeout=3,
                 )
+                log.debug("copied via %s (%d chars)", cmd, len(text))
                 return True
-            except (subprocess.SubprocessError, OSError):
+            except (subprocess.SubprocessError, OSError) as e:
+                log.debug("failed %s: %s", cmd, e)
                 continue
 
+    log.debug("no native clipboard tool found, trying OSC 52")
     # Fallback: OSC 52 escape sequence — tells the terminal emulator
     # to set its clipboard.  Works in kitty, alacritty, iTerm2, foot,
     # WezTerm, Windows Terminal, and many others.
-    return _osc52_copy(text)
+    ok = _osc52_copy(text)
+    log.debug("OSC 52 result: %s", ok)
+    return ok
 
 
 def _osc52_copy(text: str) -> bool:
