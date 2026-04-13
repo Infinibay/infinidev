@@ -34,6 +34,10 @@ SKIP_EXTENSIONS = {
 
 MAX_FILE_SIZE = 1_000_000  # 1 MB
 
+# Queue of (project_id, file_path, symbols, language) for deferred embedding.
+# Populated during index_file(), drained by run_deferred_embeddings().
+_deferred_embedding_queue: list[tuple] = []
+
 
 def _file_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()[:16]
@@ -127,16 +131,13 @@ def index_file(project_id: int, file_path: str) -> int:
     except Exception as exc:
         logger.debug("method_index hook failed for %s: %s", file_path, exc)
 
-    # ContextRank fuzzy symbol embeddings — populates ci_symbols.embedding
-    # and ci_files.embedding for the v3 fuzzy mention channel.  Runs
-    # after store_file_symbols like method_index, and like it is purely
-    # best-effort: embedding failures must not block the main index
-    # because the ranker handles missing embeddings by skipping the row.
-    try:
-        from infinidev.code_intel.symbol_embeddings import embed_file_symbols
-        embed_file_symbols(project_id, file_path, symbols, language)
-    except Exception as exc:
-        logger.debug("symbol_embeddings hook failed for %s: %s", file_path, exc)
+    # ContextRank fuzzy symbol embeddings — deferred to a background pass
+    # after the main index completes.  Embedding is slow (~50-200ms/file
+    # on CPU) and blocks the index from being "ready".  The ranker handles
+    # missing embeddings by skipping the fuzzy channel, so deferring is safe.
+    # Files that need embeddings are queued and processed by
+    # _run_deferred_embeddings() after index_directory() returns.
+    _deferred_embedding_queue.append((project_id, file_path, symbols, language))
 
     # File integrity check — the single-source-of-truth for "did a
     # change on disk leave this file in a broken syntactic state?".
@@ -186,21 +187,6 @@ def reindex_file(project_id: int, file_path: str) -> int:
     return index_file(project_id, file_path)
 
 
-def _count_indexable_files(dir_path: str) -> int:
-    """Quick pre-scan to count files that will be processed."""
-    total = 0
-    for root, dirs, files in os.walk(dir_path):
-        dirs[:] = [d for d in dirs
-                   if d not in SKIP_DIRS and not d.startswith(".")
-                   and not (os.path.join(root, d) != dir_path
-                            and os.path.isdir(os.path.join(root, d, ".git")))]
-        for fname in files:
-            _, ext = os.path.splitext(fname)
-            if ext.lower() not in SKIP_EXTENSIONS:
-                total += 1
-    return total
-
-
 def index_directory(
     project_id: int,
     dir_path: str,
@@ -224,16 +210,13 @@ def index_directory(
 
     dir_path = os.path.abspath(dir_path)
 
-    # Pre-count for percentage progress
-    total_files = _count_indexable_files(dir_path) if on_progress else 0
-
+    # Collect file list in a single walk (avoids a second os.walk for counting)
+    file_list: list[str] = []
     for root, dirs, files in os.walk(dir_path):
-        # Skip ignored directories and nested git repos (not the root)
         filtered = []
         for d in dirs:
             if d in SKIP_DIRS or d.startswith("."):
                 continue
-            # Skip subdirectories that are independent git repos
             sub = os.path.join(root, d)
             if sub != dir_path and os.path.isdir(os.path.join(sub, ".git")):
                 continue
@@ -242,28 +225,28 @@ def index_directory(
 
         for fname in files:
             _, ext = os.path.splitext(fname)
-            if ext.lower() in SKIP_EXTENSIONS:
-                files_skipped += 1
-                continue
+            if ext.lower() not in SKIP_EXTENSIONS:
+                file_list.append(os.path.join(root, fname))
 
-            fpath = os.path.join(root, fname)
-            try:
-                count = index_file(project_id, fpath)
-                if count > 0:
-                    files_indexed += 1
-                    symbols_total += count
-                    if verbose:
-                        logger.info("Indexed %s (%d symbols)", fpath, count)
-                else:
-                    files_skipped += 1
-            except Exception as exc:
-                logger.debug("Failed to index %s: %s", fpath, exc)
-                files_skipped += 1
+    total_files = len(file_list)
 
-            # Report progress every 10 files
-            processed += 1
-            if on_progress and processed % 10 == 0:
-                on_progress(processed, total_files, files_indexed, symbols_total)
+    for fpath in file_list:
+        try:
+            count = index_file(project_id, fpath)
+            if count > 0:
+                files_indexed += 1
+                symbols_total += count
+                if verbose:
+                    logger.info("Indexed %s (%d symbols)", fpath, count)
+            else:
+                files_skipped += 1
+        except Exception as exc:
+            logger.debug("Failed to index %s: %s", fpath, exc)
+            files_skipped += 1
+
+        processed += 1
+        if on_progress and processed % 10 == 0:
+            on_progress(processed, total_files, files_indexed, symbols_total)
 
     elapsed = int((time.time() - start) * 1000)
     stats = {
@@ -276,7 +259,33 @@ def index_directory(
         "Index complete: %d files, %d symbols in %dms",
         files_indexed, symbols_total, elapsed,
     )
+
+    # Kick off deferred embeddings in a background thread so the index
+    # is reported as "ready" immediately while embeddings fill in.
+    if _deferred_embedding_queue:
+        import threading
+        queue_copy = list(_deferred_embedding_queue)
+        _deferred_embedding_queue.clear()
+        threading.Thread(
+            target=_run_deferred_embeddings,
+            args=(queue_copy,),
+            daemon=True,
+            name="infinidev-embeddings",
+        ).start()
+
     return stats
+
+
+def _run_deferred_embeddings(queue: list[tuple]) -> None:
+    """Process queued embedding work in background after index completes."""
+    logger.info("Starting deferred embeddings for %d files", len(queue))
+    for project_id, file_path, symbols, language in queue:
+        try:
+            from infinidev.code_intel.symbol_embeddings import embed_file_symbols
+            embed_file_symbols(project_id, file_path, symbols, language)
+        except Exception as exc:
+            logger.debug("deferred embedding failed for %s: %s", file_path, exc)
+    logger.info("Deferred embeddings complete (%d files)", len(queue))
 
 
 def _get_ts_language(language: str):

@@ -225,12 +225,10 @@ def embed_file_symbols(
     except Exception as exc:
         logger.debug("file embedding failed for %s: %s", file_path, exc)
 
-    # ── Per-symbol embeddings ─────────────────────────────────────
-    # Each symbol gets one compute_embedding call.  ChromaDB's
-    # default embed fn is fast on short strings (~1ms each), so a
-    # 100-symbol file completes in ~100ms — well inside the indexer's
-    # budget.  Batching at the ChromaDB level would help on larger
-    # files but adds complexity the current volume doesn't justify.
+    # ── Per-symbol embeddings (batched) ────────────────────────────
+    # Collect all embeddable texts first, compute embeddings in one
+    # batch call, then store all results in a single DB transaction.
+    sym_items: list[tuple[str, str, int]] = []  # (text, name, line_start)
     for sym in symbols:
         kind = _kind_str(sym)
         if kind not in _EMBEDDABLE_KINDS:
@@ -238,32 +236,40 @@ def embed_file_symbols(
         name = str(getattr(sym, "name", "") or "")
         if not name:
             continue
+        text = _build_symbol_text(sym)
+        line_start = int(getattr(sym, "line_start", 0) or 0)
+        sym_items.append((text, name, line_start))
 
-        try:
-            text = _build_symbol_text(sym)
-            emb = compute_embedding(text)
-            if emb is None:
-                continue
+    if not sym_items:
+        return
 
-            line_start = int(getattr(sym, "line_start", 0) or 0)
+    try:
+        from infinidev.tools.base.dedup import _get_embed_fn
+        import numpy as np
 
-            # Match on (project_id, file_path, name, line_start) — the
-            # combination is unique per symbol even for overloaded names
-            # in languages that allow them.
-            def _update(conn, _emb=emb, _text=text, _name=name, _line=line_start):
-                conn.execute(
-                    "UPDATE ci_symbols "
-                    "SET embedding = ?, embedding_text = ? "
-                    "WHERE project_id = ? "
-                    "  AND file_path = ? "
-                    "  AND name = ? "
-                    "  AND line_start = ?",
-                    (_emb, _text, project_id, file_path, _name, _line),
-                )
-                conn.commit()
-            execute_with_retry(_update)
-        except Exception as exc:
-            logger.debug(
-                "symbol embedding failed for %s in %s: %s",
-                name, file_path, exc,
+        embed_fn = _get_embed_fn()
+        texts = [item[0] for item in sym_items]
+        vectors = embed_fn(texts)
+
+        # Store all symbol embeddings in one transaction
+        updates: list[tuple] = []
+        for i, (text, name, line_start) in enumerate(sym_items):
+            arr = np.asarray(vectors[i], dtype=np.float32)
+            emb = arr.tobytes()
+            updates.append((emb, text, project_id, file_path, name, line_start))
+
+        def _batch_update(conn):
+            conn.executemany(
+                "UPDATE ci_symbols "
+                "SET embedding = ?, embedding_text = ? "
+                "WHERE project_id = ? "
+                "  AND file_path = ? "
+                "  AND name = ? "
+                "  AND line_start = ?",
+                updates,
             )
+            conn.commit()
+        execute_with_retry(_batch_update)
+
+    except Exception as exc:
+        logger.debug("batch symbol embedding failed for %s: %s", file_path, exc)
