@@ -16,58 +16,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 
-from infinidev.ui.theme import (
-    STYLE_USER_MSG, STYLE_AGENT_MSG, STYLE_SYSTEM_MSG, STYLE_THINK_MSG,
-    STYLE_PENDING_MSG, STYLE_QUEUED_MSG,
-    STYLE_DIFF_TITLE,
-    STYLE_USER_HEADER, STYLE_AGENT_HEADER, STYLE_SYSTEM_HEADER, STYLE_THINK_HEADER,
-    MSG_USER_BORDER, MSG_AGENT_BORDER, MSG_SYSTEM_BORDER, MSG_THINK_BORDER,
-    MSG_PENDING_BORDER,
-    DIFF_TITLE_FG, DIFF_TITLE_BG,
-    TEXT, TEXT_MUTED, THINKING_FG, ACCENT,
-    SENDER_COLORS, NAME_COLORS,
-)
-
-# ── Message type → style mapping ────────────────────────────────────────
-
-_MSG_STYLES = {
-    "user": STYLE_USER_MSG,
-    "agent": STYLE_AGENT_MSG,
-    "system": STYLE_SYSTEM_MSG,
-    "think": STYLE_THINK_MSG,
-    "pending": STYLE_PENDING_MSG,
-    "queued": STYLE_QUEUED_MSG,
-}
-
-_HEADER_STYLES = {
-    "user": STYLE_USER_HEADER,
-    "agent": STYLE_AGENT_HEADER,
-    "system": STYLE_SYSTEM_HEADER,
-    "think": STYLE_THINK_HEADER,
-    "pending": STYLE_PENDING_MSG,
-    "queued": STYLE_QUEUED_MSG,
-}
-
-_BORDER_CHARS = {
-    "user": ("▌", MSG_USER_BORDER),
-    "agent": ("▌", MSG_AGENT_BORDER),
-    "system": ("▌", MSG_SYSTEM_BORDER),
-    "think": ("▌", MSG_THINK_BORDER),
-    "pending": ("┊", MSG_PENDING_BORDER),
-    "queued": ("▌", ACCENT),
-}
-
-# Code block style for markdown rendering
-_CODE_BLOCK_STYLE = f"{TEXT_MUTED}"
-
-
-def _markdown_enabled() -> bool:
-    """Check if markdown message rendering is enabled."""
-    try:
-        from infinidev.config.settings import settings
-        return settings.MARKDOWN_MESSAGES
-    except Exception:
-        return False
+from infinidev.ui.theme import TEXT_MUTED, THINKING_FG
 
 
 class ChatHistoryControl(UIControl):
@@ -86,8 +35,10 @@ class ChatHistoryControl(UIControl):
         self._follow_tail: bool = True  # stick to bottom
         self._scroll_offset: int = 0    # lines from bottom (when not following)
         self._line_count: int = 0
-        # Maps content line index → message dict for diff headers (click-to-toggle)
-        self._diff_header_lines: dict[int, dict] = {}
+        # Generalized click targets: line index → callback
+        self._clickable_lines: dict[int, Any] = {}
+        # Group collapse state: start_index of group → collapsed bool
+        self._group_states: dict[int, bool] = {}
 
     def invalidate_cache(self) -> None:
         """Force re-render on next frame and scroll to bottom."""
@@ -99,15 +50,14 @@ class ChatHistoryControl(UIControl):
         return True
 
     def mouse_handler(self, mouse_event: MouseEvent):
-        """Handle clicks on diff headers to toggle collapse; delegate rest to Window."""
+        """Handle clicks on any registered clickable line; delegate rest to Window."""
         if mouse_event.event_type == MouseEventType.MOUSE_UP:
             line_idx = mouse_event.position.y
-            msg = self._diff_header_lines.get(line_idx)
-            if msg is not None:
-                msg["collapsed"] = not msg.get("collapsed", True)
-                # Rebuild lines but preserve scroll position
-                self._line_cache = None
-                return None  # handled — trigger redraw
+            callback = self._clickable_lines.get(line_idx)
+            if callback is not None:
+                callback()
+                self._line_cache = None  # rebuild on next frame
+                return None
         return NotImplemented
 
     def move_cursor_down(self) -> None:
@@ -202,40 +152,77 @@ class ChatHistoryControl(UIControl):
         )
 
     def _build_lines(self, width: int) -> list[list[tuple[str, str]]]:
-        """Convert all messages to a flat list of styled line fragments.
+        """Build flat line list with message grouping.
 
-        Incremental: only renders new messages since last build.
+        Consecutive same-type messages are grouped. Groups of 2+ show a
+        clickable header; when collapsed only the last message is visible.
         """
+        from infinidev.ui.controls.message_groups import identify_groups
+        from infinidev.ui.controls.message_widgets import get_widget
+
         msg_count = len(self._messages)
-        if self._line_cache is not None and self._cache_len <= msg_count and self._cache_width == width:
-            # Append only new messages
-            for msg in self._messages[self._cache_len:]:
-                start = len(self._line_cache)
-                rendered = self._render_message(msg, width)
-                if msg.get("type") == "diff" and rendered:
-                    self._diff_header_lines[start] = msg
-                self._line_cache.extend(rendered)
-            self._cache_len = msg_count
+        if self._line_cache is not None and self._cache_len == msg_count and self._cache_width == width:
             lines = self._line_cache
         else:
-            # Full rebuild (width changed or cache invalid)
+            # Full rebuild
             lines = []
-            self._diff_header_lines = {}
-            for msg in self._messages:
-                start = len(lines)
-                rendered = self._render_message(msg, width)
-                if msg.get("type") == "diff" and rendered:
-                    self._diff_header_lines[start] = msg
-                lines.extend(rendered)
+            self._clickable_lines = {}
+            groups = identify_groups(self._messages)
+
+            for group in groups:
+                widget = get_widget(group.msg_type)
+                if widget is None:
+                    # Unknown type — render each message with fallback
+                    for msg in group.messages:
+                        lines.extend(self._render_fallback(msg, width))
+                    continue
+
+                if group.is_group:
+                    # Multi-message group: render header + visible messages
+                    collapsed = self._group_states.get(group.start_index, True)
+
+                    header_result = widget.render_group_header(
+                        len(group.messages), collapsed, width,
+                    )
+                    header_start = len(lines)
+                    lines.extend(header_result.lines)
+
+                    # Register group header click
+                    def _toggle_group(idx=group.start_index):
+                        self._group_states[idx] = not self._group_states.get(idx, True)
+                    self._clickable_lines[header_start] = _toggle_group
+
+                    if collapsed:
+                        # Only render last message
+                        visible_msgs = [group.messages[-1]]
+                    else:
+                        visible_msgs = group.messages
+
+                    for msg in visible_msgs:
+                        result = widget.render(msg, width)
+                        start = len(lines)
+                        lines.extend(result.lines)
+                        # Register per-message clickable offsets
+                        for offset, cb in result.clickable_offsets.items():
+                            self._clickable_lines[start + offset] = cb
+                else:
+                    # Single message — no group header
+                    msg = group.messages[0]
+                    result = widget.render(msg, width)
+                    start = len(lines)
+                    lines.extend(result.lines)
+                    for offset, cb in result.clickable_offsets.items():
+                        self._clickable_lines[start + offset] = cb
+
             self._line_cache = lines
             self._cache_len = msg_count
             self._cache_width = width
 
-        # Append thinking indicator if active (without copying the list)
+        # Append thinking indicator if active
         if self._show_thinking:
             total = len(lines) + 2
             thinking_1 = [(f"{THINKING_FG}", "  Infinidev is thinking...")]
-            thinking_2 = [(f"{THINKING_FG}", "  ···")]
+            thinking_2 = [(f"{THINKING_FG}", "  \u00b7\u00b7\u00b7")]
 
             def get_line_with_thinking(i: int) -> list[tuple[str, str]]:
                 if i < len(lines):
@@ -250,180 +237,16 @@ class ChatHistoryControl(UIControl):
 
         return lines, len(lines), None
 
-    def _render_message(self, msg: dict, width: int) -> list[list[tuple[str, str]]]:
-        """Render a single message to a list of line fragment lists."""
-        # Hidden messages (e.g. cancel context) stay in the list but aren't shown
+    def _render_fallback(self, msg: dict, width: int) -> list[list[tuple[str, str]]]:
+        """Minimal fallback for unknown message types."""
         if not msg.get("visible", True):
             return []
-
-        msg_type = msg.get("type", "agent")
-
-        # Diff messages get special rendering
-        if msg_type == "diff":
-            return self._render_diff_message(msg, width)
-
-        sender = msg.get("sender", "")
         text = msg.get("text", "")
-
-        border_char, border_color = _BORDER_CHARS.get(msg_type, ("▌", TEXT_MUTED))
-        body_style = _MSG_STYLES.get(msg_type, f"{TEXT}")
-
-        # Extract bg color from the body style for full-width fill
-        bg_part = ""
-        for part in body_style.split():
-            if part.startswith("bg:"):
-                bg_part = part
-                break
-        fill_style = bg_part  # just the bg for padding spaces
-
-        # Determine header color: sender-specific override, or type-based
-        header_style = NAME_COLORS.get(sender, "")
-        if not header_style:
-            header_style = _HEADER_STYLES.get(msg_type, f"{TEXT} bold")
-        else:
-            header_style = f"{header_style} bold"
-        # Add bg to header too
-        if bg_part and bg_part not in header_style:
-            header_style = f"{header_style} {bg_part}"
-
-        # Add bg to border style
-        border_style = f"{border_color} {bg_part}" if bg_part else f"{border_color}"
-
-        lines: list[list[tuple[str, str]]] = []
-
-        # Header line
-        suffix = " (pending):" if msg_type == "pending" else ":"
-        header_text = f"{sender}{suffix}"
-        header_used = 2 + len(header_text)  # border char + space + header
-        lines.append([
-            (border_style, f"{border_char} "),
-            (header_style, header_text),
-            (fill_style, " " * max(0, width - header_used)),
-        ])
-
-        # Body lines — word-wrap to width minus border indent
-        content_width = max(width - 3, 20)  # 3 = border + space + margin
-
-        use_markdown = (
-            msg_type in ("agent", "think")
-            and _markdown_enabled()
-        )
-
-        in_code_block = False
-        for raw_line in text.split("\n"):
-            if use_markdown:
-                # Track code block state for plain rendering inside fences
-                if raw_line.rstrip().startswith("```"):
-                    in_code_block = not in_code_block
-                    from infinidev.ui.controls.markdown_render import render_markdown_line
-                    frags = render_markdown_line(raw_line, body_style, bg_part)
-                    used = 2 + sum(len(t) for _, t in frags)
-                    lines.append(
-                        [(border_style, f"{border_char} ")]
-                        + frags
-                        + [(fill_style, " " * max(0, width - used))]
-                    )
-                    continue
-
-                if in_code_block:
-                    # Inside code block — render as plain code with code style
-                    code_style = f"{_CODE_BLOCK_STYLE} {bg_part}" if bg_part else _CODE_BLOCK_STYLE
-                    while len(raw_line) > content_width:
-                        chunk = raw_line[:content_width]
-                        used = 2 + len(chunk)
-                        lines.append([
-                            (border_style, f"{border_char} "),
-                            (code_style, chunk),
-                            (fill_style, " " * max(0, width - used)),
-                        ])
-                        raw_line = raw_line[content_width:]
-                    used = 2 + len(raw_line)
-                    lines.append([
-                        (border_style, f"{border_char} "),
-                        (code_style, raw_line),
-                        (fill_style, " " * max(0, width - used)),
-                    ])
-                    continue
-
-                # Markdown line — parse into styled fragments
-                from infinidev.ui.controls.markdown_render import render_markdown_line
-                frags = render_markdown_line(raw_line, body_style, bg_part)
-                used = 2 + sum(len(t) for _, t in frags)
-                # Simple overflow: if too wide, fall back to plain wrap
-                if used > width:
-                    # Fall back to plain text wrapping for very long lines
-                    while len(raw_line) > content_width:
-                        chunk = raw_line[:content_width]
-                        u = 2 + len(chunk)
-                        lines.append([
-                            (border_style, f"{border_char} "),
-                            (body_style, chunk),
-                            (fill_style, " " * max(0, width - u)),
-                        ])
-                        raw_line = raw_line[content_width:]
-                    used = 2 + len(raw_line)
-                    lines.append([
-                        (border_style, f"{border_char} "),
-                        (body_style, raw_line),
-                        (fill_style, " " * max(0, width - used)),
-                    ])
-                else:
-                    lines.append(
-                        [(border_style, f"{border_char} ")]
-                        + frags
-                        + [(fill_style, " " * max(0, width - used))]
-                    )
-            else:
-                # Plain text rendering (original behavior)
-                while len(raw_line) > content_width:
-                    chunk = raw_line[:content_width]
-                    used = 2 + len(chunk)
-                    lines.append([
-                        (border_style, f"{border_char} "),
-                        (body_style, chunk),
-                        (fill_style, " " * max(0, width - used)),
-                    ])
-                    raw_line = raw_line[content_width:]
-                used = 2 + len(raw_line)
-                lines.append([
-                    (border_style, f"{border_char} "),
-                    (body_style, raw_line),
-                    (fill_style, " " * max(0, width - used)),
-                ])
-
-        # Blank line after message (no fill — separator)
-        lines.append([("", "")])
-
-        return lines
-
-    def _render_diff_message(self, msg: dict, width: int) -> list[list[tuple[str, str]]]:
-        """Render a file change diff message with colorized diff output.
-
-        Diffs are collapsed by default.  Click the header to expand.
-        """
-        from infinidev.ui.controls.file_diff import colorize_diff_fragments
-
-        header_text = msg.get("text", "")
-        diff_text = msg.get("diff_text", "")
-        collapsed = msg.get("collapsed", True)
-        title_bg = f"bg:{DIFF_TITLE_BG}"
-        arrow = "\u25b6" if collapsed else "\u25bc"  # ▶ / ▼
-
-        lines: list[list[tuple[str, str]]] = []
-
-        # Header: colored title bar with collapse indicator
-        pad = " " * max(0, width - len(header_text) - 4)
-        lines.append([(f"{DIFF_TITLE_FG} {title_bg} bold", f" {arrow} {header_text}{pad}")])
-
-        # Diff lines (only when expanded)
-        if not collapsed and diff_text:
-            diff_lines = colorize_diff_fragments(diff_text)
-            for diff_line in diff_lines:
-                lines.append(diff_line)
-
-        # Blank separator
-        lines.append([("", "")])
-
+        sender = msg.get("sender", "")
+        lines = [
+            [(f"{TEXT_MUTED}", f"  {sender}: {text[:width - 4]}")],
+            [("", "")],
+        ]
         return lines
 
 
