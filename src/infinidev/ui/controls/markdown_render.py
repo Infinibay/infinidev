@@ -27,6 +27,17 @@ _HEADING = f"{PRIMARY} bold"
 _BLOCKQUOTE = f"{TEXT_MUTED} italic"
 _BULLET = f"{SUCCESS} bold"
 
+# Pre-compiled patterns (avoid re.compile() on every line render)
+_HEADING_RE = re.compile(r'^(#{1,3})\s+(.+)')
+_BULLET_RE = re.compile(r'^(\s*)([-*])\s+(.+)')
+_NUMLIST_RE = re.compile(r'^(\s*)(\d+)[.)]\s+(.+)')
+_INLINE_RE = re.compile(
+    r'(\*\*(.+?)\*\*)'    # **bold**
+    r'|(\*(.+?)\*)'       # *italic*
+    r'|(`(.+?)`)'         # `code`
+    r'|([^*`]+)'          # plain text
+)
+
 
 def render_markdown_line(line: str, base_style: str, bg_part: str) -> list[tuple[str, str]]:
     """Render a single line of markdown into styled fragments.
@@ -44,7 +55,7 @@ def render_markdown_line(line: str, base_style: str, bg_part: str) -> list[tuple
         return [(style, f"───{label}")]
 
     # Headings
-    heading_match = re.match(r'^(#{1,3})\s+(.+)', stripped)
+    heading_match = _HEADING_RE.match(stripped)
     if heading_match:
         style = f"{_HEADING} {bg_part}" if bg_part else _HEADING
         return [(style, heading_match.group(2))]
@@ -56,7 +67,7 @@ def render_markdown_line(line: str, base_style: str, bg_part: str) -> list[tuple
         return [(style, f"│ {content}")]
 
     # Bullet lists
-    bullet_match = re.match(r'^(\s*)([-*])\s+(.+)', stripped)
+    bullet_match = _BULLET_RE.match(stripped)
     if bullet_match:
         indent = bullet_match.group(1)
         content = bullet_match.group(3)
@@ -65,7 +76,7 @@ def render_markdown_line(line: str, base_style: str, bg_part: str) -> list[tuple
         return [(bullet_style, f"{indent}• ")] + text_frags
 
     # Numbered lists
-    num_match = re.match(r'^(\s*)(\d+)[.)]\s+(.+)', stripped)
+    num_match = _NUMLIST_RE.match(stripped)
     if num_match:
         indent = num_match.group(1)
         num = num_match.group(2)
@@ -81,15 +92,8 @@ def render_markdown_line(line: str, base_style: str, bg_part: str) -> list[tuple
 def _parse_inline(text: str, base_style: str, bg_part: str) -> list[tuple[str, str]]:
     """Parse inline markdown: **bold**, *italic*, `code`."""
     fragments: list[tuple[str, str]] = []
-    # Pattern matches: **bold**, *italic*, `code`, or plain text
-    pattern = re.compile(
-        r'(\*\*(.+?)\*\*)'    # **bold**
-        r'|(\*(.+?)\*)'       # *italic*
-        r'|(`(.+?)`)'         # `code`
-        r'|([^*`]+)'          # plain text
-    )
 
-    for m in pattern.finditer(text):
+    for m in _INLINE_RE.finditer(text):
         if m.group(2) is not None:
             # **bold**
             style = f"{base_style} bold"

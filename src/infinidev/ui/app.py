@@ -90,6 +90,7 @@ class InfinidevApp:
         self._streaming_tool_name: str | None = None
         self._streaming_token_count: int = 0
         self._log_entries: deque[tuple[float, str]] = deque(maxlen=15)
+        self._init_sidebar_cache()
 
     def _init_file_management(self) -> None:
         self.file_manager = FileManager(self)
@@ -262,7 +263,7 @@ class InfinidevApp:
 
         def _tick():
             while True:
-                time.sleep(0.16)  # ~6 FPS
+                time.sleep(0.33)  # ~3 FPS — enough for smooth spinners
                 if self._engine_running or self._streaming_token_count > 0:
                     try:
                         self.invalidate()
@@ -646,6 +647,13 @@ class InfinidevApp:
         self.file_manager.switch_tab(tab_id)
 
     def get_tab_bar_fragments(self) -> FormattedText:
+        # Cache key: (active_tab, tab_names tuple, dirty_files frozenset)
+        cache_key = (self.active_tab, tuple(self._tab_names.items()), frozenset(self._dirty_files))
+        cached = getattr(self, "_tab_bar_cache", None)
+        cached_key = getattr(self, "_tab_bar_cache_key", None)
+        if cached is not None and cached_key == cache_key:
+            return cached
+
         fragments: list = []
 
         # Chat tab
@@ -672,7 +680,10 @@ class InfinidevApp:
                 fragments.append((f"{TEXT_MUTED} bg:{SURFACE_LIGHT}", f" {dirty}{name} ", _click_tab))
             fragments.append(("", " "))
 
-        return FormattedText(fragments)
+        result = FormattedText(fragments)
+        self._tab_bar_cache = result
+        self._tab_bar_cache_key = cache_key
+        return result
 
     # ── Content area ─────────────────────────────────────────────────
 
@@ -686,23 +697,63 @@ class InfinidevApp:
         # Fallback
         return self._chat_content_window
 
-    # ── Sidebar fragments ────────────────────────────────────────────
+    # ── Sidebar fragments (cached — rebuilt only when data changes) ──
+
+    # Animation frame tables (module-level constants, not per-call allocs)
+    _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    _TOOL_FRAMES = ("◐", "◓", "◑", "◒")
+
+    def _init_sidebar_cache(self) -> None:
+        """Initialize dirty-flag cache for sidebar fragments."""
+        self._sidebar_cache: dict[str, FormattedText | None] = {
+            "context": None, "plan": None, "steps": None, "logs": None,
+        }
+        self._sidebar_dirty: dict[str, bool] = {
+            "context": True, "plan": True, "steps": True, "logs": True,
+        }
+        # Snapshot keys for cheap change detection
+        self._cache_snap_context_status: dict = {}
+        self._cache_snap_thinking: str = ""
+        self._cache_snap_plan: str = ""
+        self._cache_snap_steps: str = ""
+        self._cache_snap_logs_len: int = 0
+
+    def _mark_sidebar_dirty(self, *keys: str) -> None:
+        """Mark one or more sidebar sections for rebuild on next read."""
+        for k in keys:
+            self._sidebar_dirty[k] = True
 
     def get_context_fragments(self) -> FormattedText:
-        from infinidev.ui.managers.context_render import build_context_fragments
-        return build_context_fragments(self._context_status, self._context_flow)
+        if self._context_status is not self._cache_snap_context_status:
+            self._cache_snap_context_status = self._context_status
+            self._sidebar_dirty["context"] = True
+        if self._sidebar_dirty.get("context") or self._sidebar_cache.get("context") is None:
+            from infinidev.ui.managers.context_render import build_context_fragments
+            self._sidebar_cache["context"] = build_context_fragments(self._context_status, self._context_flow)
+            self._sidebar_dirty["context"] = False
+        return self._sidebar_cache["context"]
 
     def _usage_bar_fragments(self, label: str, used: int,
                              available: int, pct: float) -> list[tuple[str, str]]:
-        # Kept as a thin shim so any external caller (tests, plugins)
-        # that reached into the private method still works.
         from infinidev.ui.managers.context_render import build_usage_bar_fragments
         return build_usage_bar_fragments(label, used, available, pct)
 
     def get_plan_fragments(self) -> FormattedText:
+        # Check if data changed since last build
+        if (self._thinking_text != self._cache_snap_thinking
+                or self._plan_text != self._cache_snap_plan):
+            self._cache_snap_thinking = self._thinking_text
+            self._cache_snap_plan = self._plan_text
+            self._sidebar_dirty["plan"] = True
+
+        if self._sidebar_dirty.get("plan") or self._sidebar_cache.get("plan") is None:
+            self._sidebar_cache["plan"] = self._build_plan_fragments()
+            self._sidebar_dirty["plan"] = False
+        return self._sidebar_cache["plan"]
+
+    def _build_plan_fragments(self) -> FormattedText:
         if not self._thinking_text and not self._plan_text:
             return FormattedText([(f"{TEXT_MUTED}", " Idle")])
-        # Show streaming thinking first, then plan context
         fragments = []
         if self._thinking_text:
             fragments.append((f"#c0b8e0 bg:{SURFACE_LIGHT}", f" {self._thinking_text}"))
@@ -713,9 +764,18 @@ class InfinidevApp:
         return FormattedText(fragments)
 
     def get_steps_fragments(self) -> FormattedText:
+        if self._steps_text != self._cache_snap_steps:
+            self._cache_snap_steps = self._steps_text
+            self._sidebar_dirty["steps"] = True
+
+        if self._sidebar_dirty.get("steps") or self._sidebar_cache.get("steps") is None:
+            self._sidebar_cache["steps"] = self._build_steps_fragments()
+            self._sidebar_dirty["steps"] = False
+        return self._sidebar_cache["steps"]
+
+    def _build_steps_fragments(self) -> FormattedText:
         if not self._steps_text:
             return FormattedText([(f"{TEXT_MUTED}", " Waiting...")])
-        # Parse step lines and render with styled icons
         fragments = []
         for line in self._steps_text.split("\n"):
             line = line.strip()
@@ -735,34 +795,26 @@ class InfinidevApp:
         return FormattedText(fragments) if fragments else FormattedText([(f"{TEXT_MUTED}", " Waiting...")])
 
     def get_actions_fragments(self) -> FormattedText:
-        # Streaming tool detection — show animated indicator
+        # Actions are animated — always recompute, but use pre-allocated
+        # frame arrays and avoid per-call imports.
+        now = time.monotonic()
+
         if self._streaming_tool_name:
-            import time
-            # Cycle through animation frames based on time
-            frames = ["◐", "◓", "◑", "◒"]
-            frame = frames[int(time.monotonic() * 4) % len(frames)]
-            tokens = self._streaming_token_count
+            frame = self._TOOL_FRAMES[int(now * 4) % 4]
             return FormattedText([
                 (f"{ACCENT} bold", f" {frame} "),
                 (f"{ACCENT}", f"{self._streaming_tool_name}"),
-                (f"{TEXT_MUTED}", f"\n   streaming... {tokens} tokens"),
+                (f"{TEXT_MUTED}", f"\n   streaming... {self._streaming_token_count} tokens"),
             ])
 
-        # Active streaming without tool detection — show token count
         if self._streaming_token_count > 0 and self._engine_running and not self._actions_text:
-            import time
-            frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-            frame = frames[int(time.monotonic() * 8) % len(frames)]
-            tokens = self._streaming_token_count
+            frame = self._SPINNER_FRAMES[int(now * 8) % 10]
             return FormattedText([
-                (f"{TEXT_MUTED}", f" {frame} receiving... {tokens} tokens"),
+                (f"{TEXT_MUTED}", f" {frame} receiving... {self._streaming_token_count} tokens"),
             ])
 
-        # Engine running but no streaming data yet — show waiting animation
         if self._engine_running and not self._actions_text:
-            import time
-            frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-            frame = frames[int(time.monotonic() * 6) % len(frames)]
+            frame = self._SPINNER_FRAMES[int(now * 6) % 10]
             return FormattedText([
                 (f"{TEXT_MUTED}", f" {frame} waiting for LLM..."),
             ])
@@ -772,12 +824,21 @@ class InfinidevApp:
         return FormattedText([(STYLE_SIDEBAR_CONTENT, self._actions_text)])
 
     def get_logs_fragments(self) -> FormattedText:
+        cur_len = len(self._log_entries)
+        if cur_len != self._cache_snap_logs_len:
+            self._cache_snap_logs_len = cur_len
+            self._sidebar_dirty["logs"] = True
+
+        if self._sidebar_dirty.get("logs") or self._sidebar_cache.get("logs") is None:
+            self._sidebar_cache["logs"] = self._build_logs_fragments()
+            self._sidebar_dirty["logs"] = False
+        return self._sidebar_cache["logs"]
+
+    def _build_logs_fragments(self) -> FormattedText:
         now = time.monotonic()
-        # Filter entries older than 30s
         active = [(ts, text) for ts, text in self._log_entries if now - ts < 30.0]
         if not active:
             return FormattedText([(f"{TEXT_MUTED}", " No logs")])
-        # Show last 5
         lines = [text for _, text in active[-5:]]
         return FormattedText([(STYLE_SIDEBAR_CONTENT, "\n".join(lines))])
 
