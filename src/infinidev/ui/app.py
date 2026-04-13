@@ -902,10 +902,11 @@ class InfinidevApp:
         if self.status_bar_control:
             try:
                 from infinidev.config.settings import settings
-                model = settings.LLM_MODEL.split("/", 1)[-1] if "/" in settings.LLM_MODEL else settings.LLM_MODEL
-                self.status_bar_control.set_model(model)
+                raw = settings.LLM_MODEL or ""
+                model = raw.split("/", 1)[-1] if "/" in raw else raw
+                self.status_bar_control.set_model(model or "no model set")
             except Exception:
-                pass
+                self.status_bar_control.set_model("unknown")
             self.invalidate()
 
     # ── Event bus integration ────────────────────────────────────────
@@ -932,8 +933,9 @@ def run_tui() -> None:
     try:
         app_state = InfinidevApp()
         if app_state.status_bar_control:
-            app_state.status_bar_control.set_model("loading...")
             app_state.status_bar_control.set_project(os.path.basename(os.getcwd()))
+            # Show the real model name immediately from settings
+            app_state._update_status_bar()
         app_state.run()
     finally:
         sys.stderr.close()
