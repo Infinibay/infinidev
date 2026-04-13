@@ -68,37 +68,20 @@ class ChatHistoryControl(UIControl):
 
     def mouse_handler(self, mouse_event: MouseEvent):
         """Handle clicks on any registered clickable line; delegate rest to Window."""
-        # Handle both MOUSE_UP and MOUSE_DOWN — some terminals (especially
-        # via SSH, tmux, or screen) may only report one of the two.
-        if mouse_event.event_type in (MouseEventType.MOUSE_UP, MouseEventType.MOUSE_DOWN):
+        if mouse_event.event_type == MouseEventType.MOUSE_UP:
             line_idx = mouse_event.position.y
             _copy_log.debug(
-                "mouse %s at y=%d  clickable_keys=%s  match=%s",
-                mouse_event.event_type, line_idx,
+                "mouse MOUSE_UP at y=%d  clickable_keys=%s  match=%s",
+                line_idx,
                 sorted(self._clickable_lines.keys())[:20],
                 line_idx in self._clickable_lines,
             )
             callback = self._clickable_lines.get(line_idx)
             if callback is not None:
-                # Only fire on MOUSE_UP (preferred) or MOUSE_DOWN as fallback.
-                # Track last handled click to avoid double-firing.
-                import time
-                now = time.monotonic()
-                if mouse_event.event_type == MouseEventType.MOUSE_UP:
-                    self._last_click_time = now
-                    _copy_log.debug("firing callback via MOUSE_UP for line %d", line_idx)
-                    callback()
-                    self._line_cache = None
-                    return None
-                elif mouse_event.event_type == MouseEventType.MOUSE_DOWN:
-                    # Only use MOUSE_DOWN if no MOUSE_UP arrived recently
-                    last = getattr(self, "_last_click_time", 0.0)
-                    if now - last > 0.5:
-                        self._last_click_time = now
-                        _copy_log.debug("firing callback via MOUSE_DOWN for line %d", line_idx)
-                        callback()
-                        self._line_cache = None
-                        return None
+                _copy_log.debug("firing callback for line %d", line_idx)
+                callback()
+                self._line_cache = None  # rebuild on next frame
+                return None
         return NotImplemented
 
     def move_cursor_down(self) -> None:
