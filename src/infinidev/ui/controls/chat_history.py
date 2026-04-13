@@ -16,7 +16,10 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 
-from infinidev.ui.theme import TEXT_MUTED, THINKING_FG
+from infinidev.ui.theme import TEXT_MUTED, THINKING_FG, PRIMARY
+
+# Style for the selected message in selection mode
+_SELECT_HIGHLIGHT = f"#ffffff bg:{PRIMARY} bold"
 
 
 class ChatHistoryControl(UIControl):
@@ -39,6 +42,11 @@ class ChatHistoryControl(UIControl):
         self._clickable_lines: dict[int, Any] = {}
         # Group collapse state: start_index of group → collapsed bool
         self._group_states: dict[int, bool] = {}
+        # Copy callback — set by app to trigger flash feedback
+        self.on_copy: Any = None
+        # Message selection mode state
+        self._select_mode: bool = False
+        self._selected_msg_index: int = -1
 
     def invalidate_cache(self) -> None:
         """Force re-render on next frame and scroll to bottom."""
@@ -102,6 +110,24 @@ class ChatHistoryControl(UIControl):
             self._follow_tail = True
             self._scroll_offset = 0
 
+        # Selection mode navigation
+        @kb.add("up")
+        def _select_up(event):
+            if self._select_mode:
+                self.select_prev_message()
+
+        @kb.add("down")
+        def _select_down(event):
+            if self._select_mode:
+                self.select_next_message()
+
+        @kb.add("enter")
+        def _select_confirm(event):
+            if self._select_mode:
+                if self.copy_selected_message():
+                    if self.on_copy:
+                        self.on_copy()
+
         return kb
 
     @property
@@ -161,12 +187,16 @@ class ChatHistoryControl(UIControl):
         from infinidev.ui.controls.message_widgets import get_widget
 
         msg_count = len(self._messages)
+        # Invalidate cache in select mode (highlight changes without msg changes)
+        if self._select_mode:
+            self._line_cache = None
         if self._line_cache is not None and self._cache_len == msg_count and self._cache_width == width:
             lines = self._line_cache
         else:
             # Full rebuild
             lines = []
             self._clickable_lines = {}
+            self._msg_line_ranges: dict[int, tuple[int, int]] = {}
             groups = identify_groups(self._messages)
 
             for group in groups:
@@ -199,20 +229,34 @@ class ChatHistoryControl(UIControl):
                         visible_msgs = group.messages
 
                     for msg in visible_msgs:
+                        msg_idx = self._messages.index(msg)
                         result = widget.render(msg, width)
                         start = len(lines)
                         lines.extend(result.lines)
+                        self._msg_line_ranges[msg_idx] = (start, len(lines))
                         # Register per-message clickable offsets
                         for offset, cb in result.clickable_offsets.items():
-                            self._clickable_lines[start + offset] = cb
+                            self._clickable_lines[start + offset] = self._wrap_copy_cb(cb)
                 else:
                     # Single message — no group header
                     msg = group.messages[0]
+                    msg_idx = self._messages.index(msg)
                     result = widget.render(msg, width)
                     start = len(lines)
                     lines.extend(result.lines)
+                    self._msg_line_ranges[msg_idx] = (start, len(lines))
                     for offset, cb in result.clickable_offsets.items():
-                        self._clickable_lines[start + offset] = cb
+                        self._clickable_lines[start + offset] = self._wrap_copy_cb(cb)
+
+            # Apply selection highlight
+            if self._select_mode and self._selected_msg_index in self._msg_line_ranges:
+                sel_start, sel_end = self._msg_line_ranges[self._selected_msg_index]
+                for i in range(sel_start, sel_end):
+                    if i < len(lines) and lines[i] and lines[i] != [("", "")]:
+                        # Prepend reverse-video marker to highlight
+                        lines[i] = [(_SELECT_HIGHLIGHT, frag_text)
+                                     if frag_text.strip() else (style, frag_text)
+                                     for style, frag_text in lines[i]]
 
             self._line_cache = lines
             self._cache_len = msg_count
@@ -236,6 +280,82 @@ class ChatHistoryControl(UIControl):
             return lines, total, get_line_with_thinking
 
         return lines, len(lines), None
+
+    def _wrap_copy_cb(self, cb):
+        """Wrap a widget callback so that copy actions also fire on_copy."""
+        from infinidev.ui.clipboard import copy_to_clipboard
+        # Detect if cb came from a copy-icon widget (it calls copy_to_clipboard)
+        # We wrap it to also notify the app for flash feedback.
+        original = cb
+        def wrapped():
+            original()
+            if self.on_copy:
+                self.on_copy()
+        return wrapped
+
+    # ── Selection mode ──────────────────────────────────────────────
+
+    def enter_select_mode(self) -> None:
+        """Enter message selection mode, starting at the last message."""
+        visible = [i for i, m in enumerate(self._messages)
+                    if m.get("visible", True) and m.get("type") in ("user", "agent")]
+        if not visible:
+            return
+        self._select_mode = True
+        self._selected_msg_index = visible[-1]
+        self._line_cache = None  # force redraw with highlight
+
+    def exit_select_mode(self) -> None:
+        """Leave message selection mode."""
+        self._select_mode = False
+        self._selected_msg_index = -1
+        self._line_cache = None
+
+    def select_prev_message(self) -> None:
+        """Move selection to the previous visible message."""
+        if not self._select_mode:
+            return
+        visible = [i for i, m in enumerate(self._messages)
+                    if m.get("visible", True) and m.get("type") in ("user", "agent")]
+        if not visible:
+            return
+        try:
+            pos = visible.index(self._selected_msg_index)
+        except ValueError:
+            pos = len(visible) - 1
+        if pos > 0:
+            self._selected_msg_index = visible[pos - 1]
+            self._line_cache = None
+
+    def select_next_message(self) -> None:
+        """Move selection to the next visible message."""
+        if not self._select_mode:
+            return
+        visible = [i for i, m in enumerate(self._messages)
+                    if m.get("visible", True) and m.get("type") in ("user", "agent")]
+        if not visible:
+            return
+        try:
+            pos = visible.index(self._selected_msg_index)
+        except ValueError:
+            pos = 0
+        if pos < len(visible) - 1:
+            self._selected_msg_index = visible[pos + 1]
+            self._line_cache = None
+
+    def copy_selected_message(self) -> bool:
+        """Copy the currently selected message to clipboard. Returns True on success."""
+        if not self._select_mode or self._selected_msg_index < 0:
+            return False
+        msg = self._messages[self._selected_msg_index]
+        from infinidev.ui.clipboard import copy_to_clipboard
+        ok = copy_to_clipboard(msg.get("text", ""))
+        self.exit_select_mode()
+        return ok
+
+    @property
+    def select_mode(self) -> bool:
+        return self._select_mode
 
     def _render_fallback(self, msg: dict, width: int) -> list[list[tuple[str, str]]]:
         """Minimal fallback for unknown message types."""

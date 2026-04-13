@@ -77,9 +77,24 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Move focus to the sidebar."""
         app_state.focus_sidebar()
 
+    @kb.add("c-y")
+    def copy_last_agent(event):
+        """Copy the last agent message to the system clipboard."""
+        app_state.copy_last_agent_message()
+
+    @kb.add("escape", "y")
+    def toggle_select_mode(event):
+        """Enter/exit message selection mode to pick a message to copy."""
+        app_state.toggle_select_mode()
+
     @kb.add("escape")
     def cancel_task(event):
-        """Cancel the currently running task, or dismiss active dialog."""
+        """Cancel the currently running task, dismiss dialog, or exit select mode."""
+        if app_state._chat_history_control.select_mode:
+            app_state._chat_history_control.exit_select_mode()
+            app_state.flash_status("")
+            app_state.invalidate()
+            return
         app_state.handle_escape()
 
     return kb
@@ -95,6 +110,8 @@ FOOTER_HINTS = [
     ("Ctrl+W", "Close tab"),
     ("Ctrl+S", "Save"),
     ("Ctrl+F", "Find"),
+    ("Ctrl+Y", "Copy msg"),
+    ("Alt+Y", "Select msg"),
     ("F2", "Chat"),
     ("Esc", "Stop task"),
 ]

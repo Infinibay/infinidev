@@ -21,6 +21,10 @@ from infinidev.ui.theme import (
     NAME_COLORS,
 )
 
+# Copy button label shown on message headers
+COPY_ICON = " [⧉] "
+COPY_ICON_STYLE = f"{TEXT_MUTED}"
+
 
 # ── Render result ──────────────────────────────────────────────────────
 
@@ -212,16 +216,26 @@ class BorderedWidget:
         border_style = f"{self._border_color} {bg_part}" if bg_part else f"{self._border_color}"
 
         lines: list[list[tuple[str, str]]] = []
+        clickable: dict[int, Callable[[], None]] = {}
 
-        # Header line
+        # Header line (with copy button on the right)
         suffix = " (pending):" if self.msg_type == "pending" else ":"
         header_text = f"{sender}{suffix}"
-        header_used = 2 + len(header_text)
+        copy_label = COPY_ICON
+        header_used = 2 + len(header_text) + len(copy_label)
+        gap = max(0, width - header_used)
         lines.append([
             (border_style, f"{self._border_char} "),
             (header_style, header_text),
-            (fill_style, " " * max(0, width - header_used)),
+            (fill_style, " " * gap),
+            (COPY_ICON_STYLE, copy_label),
         ])
+
+        # Register header line (offset 0) as clickable → copy message text
+        def _copy_msg(m=msg):
+            from infinidev.ui.clipboard import copy_to_clipboard
+            copy_to_clipboard(m.get("text", ""))
+        clickable[0] = _copy_msg
 
         # Body
         use_markdown = self.msg_type in ("agent", "think") and _markdown_enabled()
@@ -232,7 +246,7 @@ class BorderedWidget:
 
         # Blank separator
         lines.append([("", "")])
-        return RenderResult(lines=lines)
+        return RenderResult(lines=lines, clickable_offsets=clickable)
 
     def render_group_header(self, count: int, collapsed: bool, width: int) -> RenderResult:
         arrow = "\u25b6" if collapsed else "\u25bc"
