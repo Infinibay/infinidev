@@ -130,6 +130,7 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
         supports_function_calling=True,
         supports_tool_choice_required=False,
         supports_json_mode=True,
+        has_thinking_sections=True,  # MiniMax M2.7 sends reasoning_content like DeepSeek
         probed=True,
     ),
     "openrouter": ModelCapabilities(
