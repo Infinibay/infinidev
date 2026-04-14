@@ -631,6 +631,52 @@ class TestMultiPassReview:
         assert "added f" in prompt
         assert "## Diffs" not in prompt
 
+    @patch("litellm.completion")
+    @patch("infinidev.config.llm.get_litellm_params_for_review_extractor")
+    @patch("infinidev.config.llm.get_litellm_params")
+    def test_review_calls_route_through_prompt_cache(
+        self, mock_params, mock_ext_params, mock_completion, monkeypatch,
+    ):
+        """All three reviewer LLM calls (extractor, judge, single-pass) must
+        go through apply_prompt_caching — otherwise the static system prompts
+        waste input tokens on every request."""
+        self._set_mode(monkeypatch, "always")
+        mock_params.return_value = {"model": "anthropic/claude-sonnet-4-6"}
+        mock_ext_params.return_value = {"model": "anthropic/claude-sonnet-4-6"}
+        from infinidev.config.settings import settings as s
+        monkeypatch.setattr(s, "LLM_PROVIDER", "anthropic")
+        monkeypatch.setattr(s, "PROMPT_CACHE_ENABLED", True)
+
+        mock_completion.side_effect = [
+            self._extraction_response({
+                "changes": [], "plan_coverage": [],
+                "public_api_impact": {"new_exports": [], "removed_exports": [], "signature_changes": []},
+                "report_discrepancies": [],
+            }),
+            self._verdict_response({"verdict": "APPROVED", "summary": "ok"}),
+        ]
+
+        engine = ReviewEngine()
+        engine.review(
+            task_description="t",
+            developer_result="done",
+            file_changes_summary="--- a/a.py\n+++ b/a.py\n+x",
+            file_contents={"a.py": "x"},
+        )
+
+        # Both calls should have had their system messages upgraded to
+        # content blocks with cache_control by apply_prompt_caching.
+        for call in mock_completion.call_args_list:
+            system_msg = next(
+                m for m in call.kwargs["messages"] if m["role"] == "system"
+            )
+            content = system_msg["content"]
+            assert isinstance(content, list), \
+                "system content should be content blocks after caching"
+            assert any(b.get("cache_control") == {"type": "ephemeral"}
+                       for b in content), \
+                "at least one block must carry cache_control ephemeral"
+
     def test_parallel_extraction_and_checks_integration(
         self, tmp_path, monkeypatch,
     ):

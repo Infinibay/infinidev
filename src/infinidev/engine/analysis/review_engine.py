@@ -244,13 +244,12 @@ class ReviewEngine:
             {"role": "user", "content": user_prompt},
         ]
 
+        from infinidev.config.settings import settings as _s
+        ext_provider = (_s.REVIEW_EXTRACTOR_LLM_PROVIDER or _s.LLM_PROVIDER or "")
         for attempt in range(2):
             try:
-                import litellm
-                response = litellm.completion(
-                    messages=messages,
-                    **ext_params,
-                    temperature=EXTRACTOR_TEMPERATURE,
+                response = self._completion_with_caching(
+                    ext_params, messages, EXTRACTOR_TEMPERATURE, ext_provider,
                 )
                 raw = (response.choices[0].message.content or "").strip()
                 parsed = self._parse_extraction(raw)
@@ -367,11 +366,9 @@ class ReviewEngine:
         ]
 
         try:
-            import litellm
-            response = litellm.completion(
-                messages=messages,
-                **llm_params,
-                temperature=JUDGE_TEMPERATURE,
+            from infinidev.config.settings import settings as _s
+            response = self._completion_with_caching(
+                llm_params, messages, JUDGE_TEMPERATURE, _s.LLM_PROVIDER or "",
             )
             raw_content = response.choices[0].message.content or ""
             return self._parse_response(raw_content)
@@ -473,11 +470,9 @@ class ReviewEngine:
             {"role": "user", "content": user_prompt},
         ]
         try:
-            import litellm
-            response = litellm.completion(
-                messages=messages,
-                **llm_params,
-                temperature=JUDGE_TEMPERATURE,
+            from infinidev.config.settings import settings as _s
+            response = self._completion_with_caching(
+                llm_params, messages, JUDGE_TEMPERATURE, _s.LLM_PROVIDER or "",
             )
             raw_content = response.choices[0].message.content or ""
             return self._parse_response(raw_content)
@@ -615,6 +610,32 @@ class ReviewEngine:
     def can_review_again(self) -> bool:
         """Whether we can do another review-rework cycle."""
         return self._review_count < self._max_reviews
+
+    @staticmethod
+    def _completion_with_caching(
+        llm_params: dict,
+        messages: list,
+        temperature: float,
+        provider_id: str,
+        **extra,
+    ):
+        """Run litellm.completion with provider-aware prompt caching.
+
+        The review prompts (extractor, judge, single-pass) are large and
+        mostly static per session — they benefit massively from the same
+        cache_control path the main loop uses.
+        """
+        import litellm
+        from infinidev.config.prompt_cache import apply_prompt_caching
+
+        call_kwargs = {
+            **llm_params,
+            "messages": messages,
+            "temperature": temperature,
+            **extra,
+        }
+        apply_prompt_caching(call_kwargs, provider_id)
+        return litellm.completion(**call_kwargs)
 
     @staticmethod
     def _format_automated_checks(checks: dict[str, Any]) -> str:
