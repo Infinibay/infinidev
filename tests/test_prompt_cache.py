@@ -309,3 +309,105 @@ class TestCacheMetricsExtraction:
         assert state.cache_creation_tokens == 0
         assert state.cache_read_tokens == 0
         assert state.cached_tokens == 0
+
+
+class TestCacheBreakpointMarker:
+    """build_system_prompt + _apply_cache_control_caching must split
+    the system message at the marker so session_summaries (dynamic) does
+    not invalidate the cached prefix."""
+
+    def test_build_system_prompt_inserts_marker_when_summaries_present(self):
+        from infinidev.engine.loop.context import (
+            build_system_prompt,
+            CACHE_BREAKPOINT_MARKER,
+        )
+        out = build_system_prompt(
+            backstory="b",
+            session_summaries=["turn 1 recap", "turn 2 recap"],
+        )
+        assert CACHE_BREAKPOINT_MARKER in out
+        stable, _, dynamic = out.partition(CACHE_BREAKPOINT_MARKER)
+        assert "<session-context>" not in stable  # dynamic stays after
+        assert "<session-context>" in dynamic
+        assert "turn 1 recap" in dynamic
+
+    def test_build_system_prompt_omits_marker_when_no_summaries(self):
+        from infinidev.engine.loop.context import (
+            build_system_prompt,
+            CACHE_BREAKPOINT_MARKER,
+        )
+        out = build_system_prompt(backstory="b")
+        assert CACHE_BREAKPOINT_MARKER not in out
+
+    def test_cache_control_splits_on_marker(self):
+        from infinidev.engine.loop.context import CACHE_BREAKPOINT_MARKER
+        stable = "IDENTITY + TECH + PROTOCOL"
+        dynamic = "<session-context>\nturn 1\n</session-context>"
+        kwargs = {
+            "model": "anthropic/claude-sonnet-4-6",
+            "messages": [
+                {"role": "system",
+                 "content": f"{stable}\n\n{CACHE_BREAKPOINT_MARKER}\n\n{dynamic}"},
+                {"role": "user", "content": "hi"},
+            ],
+        }
+        _apply_cache_control_caching(kwargs)
+
+        blocks = kwargs["messages"][0]["content"]
+        assert isinstance(blocks, list)
+        assert len(blocks) == 2
+        # First block = stable prefix, marked cacheable
+        assert blocks[0]["text"].strip() == stable
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+        # Second block = dynamic suffix, NOT cached
+        assert blocks[1]["text"].strip() == dynamic
+        assert "cache_control" not in blocks[1]
+        # Marker must not leak to the LLM
+        assert CACHE_BREAKPOINT_MARKER not in blocks[0]["text"]
+        assert CACHE_BREAKPOINT_MARKER not in blocks[1]["text"]
+
+    def test_cache_control_single_block_when_no_marker(self):
+        """Legacy behavior: no marker → whole system message cached."""
+        kwargs = _make_kwargs()
+        _apply_cache_control_caching(kwargs)
+        blocks = kwargs["messages"][0]["content"]
+        assert len(blocks) == 1
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_marker_stripped_for_non_caching_providers(self):
+        """Ollama/local providers don't split — the marker must be removed
+        so it doesn't leak into the prompt the model sees."""
+        from infinidev.engine.loop.context import CACHE_BREAKPOINT_MARKER
+        kwargs = {
+            "model": "ollama_chat/qwen",
+            "messages": [
+                {"role": "system",
+                 "content": f"PREFIX\n\n{CACHE_BREAKPOINT_MARKER}\n\nSUFFIX"},
+                {"role": "user", "content": "hi"},
+            ],
+        }
+        apply_prompt_caching(kwargs, "ollama")
+        content = kwargs["messages"][0]["content"]
+        assert isinstance(content, str)
+        assert CACHE_BREAKPOINT_MARKER not in content
+        assert "PREFIX" in content
+        assert "SUFFIX" in content
+
+    def test_marker_stripped_when_caching_disabled(self, monkeypatch):
+        """PROMPT_CACHE_ENABLED=False must still strip the marker."""
+        from infinidev.config.settings import settings
+        from infinidev.engine.loop.context import CACHE_BREAKPOINT_MARKER
+        monkeypatch.setattr(settings, "PROMPT_CACHE_ENABLED", False)
+        kwargs = {
+            "model": "anthropic/claude-sonnet-4-6",
+            "messages": [
+                {"role": "system",
+                 "content": f"A\n\n{CACHE_BREAKPOINT_MARKER}\n\nB"},
+                {"role": "user", "content": "hi"},
+            ],
+        }
+        apply_prompt_caching(kwargs, "anthropic")
+        content = kwargs["messages"][0]["content"]
+        # With caching disabled the marker is stripped and content stays a plain string.
+        assert isinstance(content, str)
+        assert CACHE_BREAKPOINT_MARKER not in content

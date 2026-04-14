@@ -42,8 +42,14 @@ def apply_prompt_caching(
 
     Called from ``call_llm()`` after thinking budget is applied but
     before the actual LLM call.
+
+    Also strips the ``CACHE_BREAKPOINT_MARKER`` sentinel from any system
+    message that happens to reach a provider without explicit cache
+    breakpoints — otherwise a benign-looking HTML comment would leak to
+    the model.
     """
     if not settings.PROMPT_CACHE_ENABLED:
+        _strip_cache_breakpoint(kwargs)
         return
 
     if provider_id in _CACHE_CONTROL_PROVIDERS:
@@ -55,6 +61,30 @@ def apply_prompt_caching(
     # openai, deepseek, zai, gemini: automatic prefix caching, no-op
     # ollama, llama_cpp, vllm, openai_compatible: local/no cache API, no-op
 
+    # Anything not handled above — strip the marker so it never reaches
+    # a provider that can't use it.
+    _strip_cache_breakpoint(kwargs)
+
+
+def _strip_cache_breakpoint(kwargs: dict[str, Any]) -> None:
+    """Remove the cache-breakpoint sentinel from string system messages."""
+    from infinidev.engine.loop.context import CACHE_BREAKPOINT_MARKER
+
+    messages = kwargs.get("messages")
+    if not messages:
+        return
+    for i, msg in enumerate(messages):
+        if msg.get("role") != "system":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str) and CACHE_BREAKPOINT_MARKER in content:
+            messages[i] = {
+                "role": "system",
+                "content": content.replace(
+                    f"\n\n{CACHE_BREAKPOINT_MARKER}\n\n", "\n\n"
+                ).replace(CACHE_BREAKPOINT_MARKER, ""),
+            }
+
 
 # ── Strategy A: cache_control (Anthropic / DashScope / MiniMax) ─────
 
@@ -62,21 +92,39 @@ def _apply_cache_control_caching(kwargs: dict[str, Any]) -> None:
     """Annotate system message and tools with cache_control breakpoints.
 
     Uses 2 of the 4 available breakpoints:
-      1. System prompt (static per session, ~2-4K tokens)
-      2. Last tool schema (static per session, ~3-5K tokens)
+      1. Stable system prefix (identity + tech + protocol)
+      2. Last tool schema (static per session)
 
-    The user message is dynamic (changes every iteration) so caching
-    it would cause misses and waste the write surcharge.
+    When the system prompt contains ``CACHE_BREAKPOINT_MARKER``, the
+    message is split at that marker into two content blocks — only the
+    first (stable prefix) gets ``cache_control``. The second (session
+    context, changes per iteration) is sent plain so growing it doesn't
+    invalidate the cache. Without the marker, the whole system message
+    is cached (legacy behavior).
     """
+    from infinidev.engine.loop.context import CACHE_BREAKPOINT_MARKER
+
     messages = kwargs.get("messages")
     if not messages:
         return
 
-    # 1. System message → content blocks with cache_control
     for i, msg in enumerate(messages):
-        if msg.get("role") == "system":
-            content = msg.get("content", "")
-            if isinstance(content, str) and content:
+        if msg.get("role") != "system":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str) and content:
+            if CACHE_BREAKPOINT_MARKER in content:
+                stable, _, dynamic = content.partition(CACHE_BREAKPOINT_MARKER)
+                blocks: list[dict[str, Any]] = [{
+                    "type": "text",
+                    "text": stable.rstrip(),
+                    "cache_control": {"type": "ephemeral"},
+                }]
+                dynamic_text = dynamic.lstrip()
+                if dynamic_text:
+                    blocks.append({"type": "text", "text": dynamic_text})
+                messages[i] = {"role": "system", "content": blocks}
+            else:
                 messages[i] = {
                     "role": "system",
                     "content": [{
@@ -85,17 +133,16 @@ def _apply_cache_control_caching(kwargs: dict[str, Any]) -> None:
                         "cache_control": {"type": "ephemeral"},
                     }],
                 }
-            elif isinstance(content, list) and content:
-                # Already content blocks (e.g. from thinking_budget) —
-                # add cache_control to the last block.
-                last_block = content[-1]
-                if "cache_control" not in last_block:
-                    last_block["cache_control"] = {"type": "ephemeral"}
-            break
+        elif isinstance(content, list) and content:
+            # Already content blocks (e.g. from thinking_budget) —
+            # add cache_control to the last block.
+            last_block = content[-1]
+            if "cache_control" not in last_block:
+                last_block["cache_control"] = {"type": "ephemeral"}
+        break
 
-    # 2. Last tool schema → cache_control
-    # Deep-copy to avoid mutating ctx.tool_schemas which is shared
-    # across iterations.
+    # Last tool schema → cache_control (deep-copy to avoid mutating
+    # the shared schema list).
     tools = kwargs.get("tools")
     if tools:
         kwargs["tools"] = copy.deepcopy(tools)

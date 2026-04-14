@@ -96,11 +96,18 @@ def _summarize_step(
         # via INFINIBAY_LOOP_SUMMARIZER_TIMEOUT.
         timeout_s = float(getattr(settings, "LOOP_SUMMARIZER_TIMEOUT", 30) or 30)
         summarizer_params["timeout"] = timeout_s
-        response = litellm.completion(
+
+        # The summarizer's system prompt is fully static and fires on
+        # every completed step — apply provider-aware prompt caching so
+        # the fixed prefix is a cache hit from the 2nd call onward.
+        from infinidev.config.prompt_cache import apply_prompt_caching
+        call_kwargs = {
             **summarizer_params,
-            messages=summarizer_messages,
-            max_tokens=500,
-        )
+            "messages": summarizer_messages,
+            "max_tokens": 500,
+        }
+        apply_prompt_caching(call_kwargs, settings.LLM_PROVIDER)
+        response = litellm.completion(**call_kwargs)
         content = response.choices[0].message.content or ""
 
         # Try to parse as JSON

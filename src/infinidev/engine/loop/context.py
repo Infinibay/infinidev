@@ -18,7 +18,18 @@ __all__ = [
     "build_system_prompt",
     "build_iteration_prompt",
     "build_tools_prompt_section",
+    "CACHE_BREAKPOINT_MARKER",
 ]
+
+# Sentinel inserted by ``build_system_prompt`` between the stable prefix
+# (identity + tech + protocol) and the dynamic suffix (session context).
+# ``prompt_cache.apply_prompt_caching`` detects this marker, splits the
+# system message at that point and applies ``cache_control`` ONLY to the
+# stable prefix — keeping the provider cache hot across iterations even
+# as session_summaries grows. For providers without explicit cache
+# breakpoints, the marker is stripped before the LLM call. Looks like a
+# benign HTML comment if ever leaked.
+CACHE_BREAKPOINT_MARKER = "<!--__INFINIDEV_CACHE_BREAK__-->"
 
 CLI_AGENT_IDENTITY = """\
 ## Identity
@@ -523,6 +534,9 @@ def build_system_prompt(
         identity = identity_override or get_variant("loop.identity") or CLI_AGENT_IDENTITY
         protocol = protocol_override or get_variant("loop.protocol") or LOOP_PROTOCOL
 
+    # Stable prefix: identity + tech + protocol. Kept in this order so the
+    # whole prefix can be cached as a single block — the dynamic session
+    # context goes AFTER the cache breakpoint marker below.
     parts: list[str] = [identity]
 
     # Tech-specific guidelines (skip for small models — too many tokens)
@@ -536,14 +550,23 @@ def build_system_prompt(
         if tech_sections:
             parts.append("## Technology Guidelines\n\n" + "\n\n".join(tech_sections))
 
-    # Session context from previous turns
+    parts.append(protocol)
+
+    # Session context changes every iteration (step summaries grow over
+    # time). Emit it AFTER the breakpoint marker so caching-capable
+    # providers only mark the stable prefix as cacheable. Providers
+    # without explicit cache control see the marker stripped by
+    # ``apply_prompt_caching``.
     if session_summaries:
         numbered = "\n".join(
             f"{i+1}. {s}" for i, s in enumerate(session_summaries)
         )
-        parts.append(f"<session-context>\n{numbered}\n</session-context>")
-
-    parts.append(protocol)
+        session_block = f"<session-context>\n{numbered}\n</session-context>"
+        return (
+            "\n\n".join(parts)
+            + f"\n\n{CACHE_BREAKPOINT_MARKER}\n\n"
+            + session_block
+        )
 
     return "\n\n".join(parts)
 
