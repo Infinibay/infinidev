@@ -1,19 +1,63 @@
 """Centralized configuration for Infinidev CLI."""
 
-import os
 import json
 from pathlib import Path
+
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
-# Base directory: .infinidev inside the current working directory.
-# This keeps settings, DB, and logs project-local.
-DEFAULT_BASE_DIR = Path.cwd() / ".infinidev"
-DEFAULT_BASE_DIR.mkdir(parents=True, exist_ok=True)
-SETTINGS_FILE = DEFAULT_BASE_DIR / "settings.json"
+# Base directory: .infinidev in the current working directory.
+# Using cwd ensures the DB is relative to wherever the engine runs.
+# NOTE: get_base_dir() and get_settings_file() are called lazily at runtime
+# (not at module import time), so they always reflect the actual cwd.
+SETTINGS_FILE_NAME = "settings.json"
+DB_FILE_NAME = "infinidev.db"
+
+
+def _get_base_dir() -> Path:
+    """Return the .infinidev directory path relative to the current working directory.
+
+    Recomputed on every call so it always tracks the real cwd, even if the
+    process has changed directory since import time. Creates the directory if
+    it does not exist.
+    """
+    base = Path.cwd() / ".infinidev"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def get_base_dir() -> Path:
+    """Return the .infinidev base directory path.
+
+    This is the root directory for all engine data (DB, settings, logs) and
+    is always relative to the current working directory at call time.
+    """
+    return _get_base_dir()
+
+
+def get_settings_file() -> Path:
+    """Return the path to the settings.json file.
+
+    The file lives inside .infinidev in the current working directory.
+    """
+    return _get_base_dir() / SETTINGS_FILE_NAME
+
+
+def get_db_path() -> Path:
+    """Return the path to the SQLite database file (infinidev.db).
+
+    The DB lives inside .infinidev in the current working directory.
+    """
+    return _get_base_dir() / DB_FILE_NAME
+
+# Backward-compatibility alias: module-level Path so tests can patch it.
+# Runtime code should prefer get_settings_file() / get_db_path() / get_base_dir()
+# which always track the real cwd.
+SETTINGS_FILE = get_settings_file()
 
 class Settings(BaseSettings):
     # Database
-    DB_PATH: str = str(DEFAULT_BASE_DIR / "infinidev.db")
+    DB_PATH: str = Field(default_factory=lambda: str(get_db_path()))
     MAX_RETRIES: int = 5
     RETRY_BASE_DELAY: float = 0.1
 
@@ -240,7 +284,6 @@ class Settings(BaseSettings):
 
     @classmethod
     def load_user_settings(cls):
-        """Load settings from JSON file and env vars."""
         file_settings = {}
         if SETTINGS_FILE.exists():
             try:
@@ -265,6 +308,7 @@ class Settings(BaseSettings):
         current_data.update(updates)
         with open(SETTINGS_FILE, "w") as f:
             json.dump(current_data, f, indent=2)
+
 
 def reload_all():
     """Reload settings from file and update the global instance."""

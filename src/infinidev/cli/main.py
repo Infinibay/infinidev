@@ -33,7 +33,7 @@ import logging
 import click
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
-from infinidev.config.settings import settings, DEFAULT_BASE_DIR
+from infinidev.config.settings import settings, get_base_dir
 from infinidev.config.llm import get_litellm_params
 import uuid
 from infinidev.db.service import init_db, get_recent_summaries
@@ -57,7 +57,7 @@ import infinidev.prompts.flows  # noqa: F401 — registers flows
 # nothing is emitted anywhere. Third-party libraries that log at INFO
 # (httpx, litellm, openai, ...) are still clamped to ERROR as a safety
 # net in case something slips through.
-DEFAULT_BASE_DIR.mkdir(parents=True, exist_ok=True)
+get_base_dir().mkdir(parents=True, exist_ok=True)
 
 _log_level_name = os.environ.get("INFINIDEV_LOG_LEVEL", "").strip().upper()
 _log_level = getattr(logging, _log_level_name, None) if _log_level_name else logging.WARNING
@@ -332,7 +332,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     click.echo(click.style("Welcome to Infinidev CLI (Classic Mode)!", fg="cyan", bold=True))
     click.echo("Type your instructions or /help for commands.")
 
-    session = PromptSession(history=FileHistory(str(DEFAULT_BASE_DIR / "history")))
+    session = PromptSession(history=FileHistory(str(get_base_dir() / "history")))
 
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())

@@ -178,28 +178,29 @@ def handle_command(cmd_text: str):
 
 def handle_settings_command(parts: list[str]):
     """Handle /settings command in classic CLI mode."""
-    from infinidev.config.settings import settings, SETTINGS_FILE, reload_all
+    from infinidev.config.settings import settings, get_settings_file, reload_all
     import shutil
     from pathlib import Path
 
     subcmd = parts[1].lower() if len(parts) > 1 else "info"
 
     if subcmd == "reset":
-        if SETTINGS_FILE.exists():
-            SETTINGS_FILE.unlink()
+        sf = get_settings_file()
+        if sf.exists():
+            sf.unlink()
         reload_all()
         click.echo(click.style("Settings reset to defaults. Reloaded.", fg="green"))
     elif subcmd == "export" and len(parts) > 2:
         export_path = parts[2]
         try:
-            shutil.copy(SETTINGS_FILE, export_path)
+            shutil.copy(get_settings_file(), export_path)
             click.echo(click.style(f"Settings exported to: {export_path}", fg="green"))
         except Exception as e:
             click.echo(click.style(f"Export failed: {e}", fg="red"))
     elif subcmd == "import" and len(parts) > 2:
         import_path = parts[2]
         try:
-            settings_file_path = SETTINGS_FILE if isinstance(SETTINGS_FILE, Path) else Path(SETTINGS_FILE)
+            settings_file_path = get_settings_file()
             if not settings_file_path.exists():
                 settings_file_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(import_path, settings_file_path)
@@ -212,7 +213,7 @@ def handle_settings_command(parts: list[str]):
     elif subcmd == "info" or subcmd == "" or len(parts) == 1:
         # Show all settings in formatted table
         click.echo(click.style("Infinidev Settings", bold=True))
-        click.echo(click.style(f"(from {SETTINGS_FILE})", dim=True))
+        click.echo(click.style(f"(from {get_settings_file()})", dim=True))
         click.echo("")
         click.echo(click.style("LLM", bold=True))
         click.echo(f"  {settings.LLM_MODEL:<50} (LLM_MODEL)")
