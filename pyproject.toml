@@ -61,7 +61,9 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-
+testpaths = ["tests"]
+norecursedirs = ["tests/finetune", "tests/examples/taskqueue"]
+#   uv run pytest --override-ini="addopts="
 [project.optional-dependencies]
 cuda = ["cupy-cuda12x>=13.0.0"]
 

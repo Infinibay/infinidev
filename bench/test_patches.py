@@ -21,7 +21,8 @@ def run(cmd, cwd=None, timeout=300):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
 
 
-def test_instance(instance, model_patch, workdir, cache_dir):
+def _test_instance(instance, model_patch, workdir, cache_dir):
+    """Apply model_patch + test_patch, then run FAIL_TO_PASS tests."""
     """Apply model_patch + test_patch, then run FAIL_TO_PASS tests."""
     iid = instance["instance_id"]
     repo = instance["repo"]

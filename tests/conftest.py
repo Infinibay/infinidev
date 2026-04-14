@@ -125,3 +125,12 @@ def auto_approve_permissions():
     yield
     settings.EXECUTE_COMMANDS_PERMISSION = orig_exec
     settings.FILE_OPERATIONS_PERMISSION = orig_file
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Ignore interactive tests by default unless INFINIDEV_RUN_INTERACTIVE_TESTS=1."""
+    import os
+    if collection_path.name == "interactive":
+        run_interactive = os.environ.get("INFINIDEV_RUN_INTERACTIVE_TESTS", "0") in ("1", "true", "True")
+        if not run_interactive:
+            return True
