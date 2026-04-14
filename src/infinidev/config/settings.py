@@ -169,6 +169,21 @@ class Settings(BaseSettings):
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True
 
+    # Multi-pass code review: split extraction from judgment for complex diffs.
+    # "off" = always single-pass | "auto" = split when complexity > threshold
+    # | "always" = always two passes.
+    REVIEW_MULTI_PASS_MODE: str = "auto"
+    # Complexity score = changed_lines + 50 * changed_files. 400 ≈ 150 lines
+    # across 5 files, or 400 lines in a single file.
+    REVIEW_MULTI_PASS_COMPLEXITY_THRESHOLD: int = 400
+    # Optional override for the extractor pass. Each is "" by default and
+    # falls back to the main LLM_* setting. Point this at a cheap/fast model
+    # (e.g. ollama/qwen2.5:3b) while keeping a heavy model for the judge.
+    REVIEW_EXTRACTOR_LLM_PROVIDER: str = ""
+    REVIEW_EXTRACTOR_LLM_MODEL: str = ""
+    REVIEW_EXTRACTOR_LLM_BASE_URL: str = ""
+    REVIEW_EXTRACTOR_LLM_API_KEY: str = ""
+
     # Prompt Caching
     PROMPT_CACHE_ENABLED: bool = True  # Enable provider-specific prompt caching
 

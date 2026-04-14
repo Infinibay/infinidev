@@ -605,3 +605,14 @@ def maybe_emit_file_change(
         "action": tracker.get_action(file_path),
         "num_changes": tracker.get_change_count(file_path),
     })
+
+    # Forward silent-deletion info from the tool result to the tracker so
+    # the post-task verification can catch orphaned references.
+    try:
+        res_obj = json.loads(result) if isinstance(result, str) else result
+    except (ValueError, TypeError):
+        return
+    if isinstance(res_obj, dict):
+        removed = res_obj.get("removed_symbols")
+        if isinstance(removed, list) and removed:
+            tracker.record_deleted_symbols(file_path, [str(s) for s in removed])

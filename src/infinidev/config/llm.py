@@ -117,6 +117,60 @@ def _is_small_model(model: str | None = None) -> bool:
     return False
 
 
+def get_litellm_params_for_review_extractor() -> dict[str, Any]:
+    """Build litellm params for the review extractor (Pass A).
+
+    Each ``REVIEW_EXTRACTOR_LLM_*`` setting is optional and falls back to
+    the matching ``LLM_*`` main setting when empty. Use this to point the
+    factual-extraction pass at a small/fast model while the judge keeps
+    running on the main one.
+    """
+    model = (settings.REVIEW_EXTRACTOR_LLM_MODEL or "").strip() or settings.LLM_MODEL
+    if not model:
+        raise RuntimeError("No review-extractor model and no main LLM_MODEL configured.")
+
+    if model.startswith("ollama/"):
+        model = "ollama_chat/" + model[len("ollama/"):]
+
+    provider_id = (settings.REVIEW_EXTRACTOR_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
+    api_key = (settings.REVIEW_EXTRACTOR_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
+    base_url = (settings.REVIEW_EXTRACTOR_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
+
+    params: dict[str, Any] = {"model": model}
+    if api_key:
+        params["api_key"] = api_key
+
+    try:
+        from infinidev.config.providers import get_provider
+        provider = get_provider(provider_id)
+        is_native = bool(getattr(provider, "is_native", False))
+    except Exception:
+        is_native = _extract_provider(model) in {
+            "deepseek", "anthropic", "gemini", "openai",
+        }
+    if base_url and not is_native:
+        params["api_base"] = base_url
+
+    if settings.LLM_TIMEOUT:
+        params["timeout"] = float(settings.LLM_TIMEOUT)
+
+    if provider_id == "ollama" and settings.OLLAMA_NUM_CTX > 0:
+        params["num_ctx"] = settings.OLLAMA_NUM_CTX
+
+    from importlib.metadata import version as _pkg_version
+    try:
+        _version = _pkg_version("infinidev")
+    except Exception:
+        _version = "0.1.0"
+    params["extra_headers"] = {
+        "User-Agent": f"infinidev/{_version}",
+        "X-Client-Name": "infinidev-review-extractor",
+        "X-Client-Version": _version,
+    }
+
+    return params
+
+
 def get_litellm_params_for_behavior() -> dict[str, Any]:
     """Build litellm params for the behavior-checker judge.
 

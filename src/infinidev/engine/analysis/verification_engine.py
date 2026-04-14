@@ -32,11 +32,16 @@ class VerificationEngine:
     def verify(
         self,
         changed_files: list[str] | None = None,
+        file_tracker: Any = None,
     ) -> VerificationResult:
         """Run verification checks.
 
         Args:
             changed_files: List of changed file paths (absolute or relative).
+            file_tracker: Optional FileChangeTracker with deleted symbol info.
+                When provided and it contains removed symbols, runs an
+                orphaned-references check to detect "disconnected code"
+                (symbols that were removed but are still referenced).
 
         Returns:
             VerificationResult with pass/fail and command outputs.
@@ -69,6 +74,17 @@ class VerificationEngine:
                     if result["exit_code"] != 0:
                         all_passed = False
 
+        # 3. Orphaned references check: symbols removed but still referenced elsewhere
+        if file_tracker is not None:
+            orphaned = self._check_orphaned_references(file_tracker)
+            if orphaned:
+                commands_run.append({
+                    "command": "(orphaned-references check)",
+                    "exit_code": 1,
+                    "output": self._format_orphaned_warning(orphaned),
+                })
+                all_passed = False
+
         if not commands_run:
             return VerificationResult(
                 passed=True,
@@ -89,6 +105,53 @@ class VerificationEngine:
             summary=summary,
             commands_run=commands_run,
         )
+
+    def _check_orphaned_references(self, file_tracker: Any) -> list[dict[str, Any]]:
+        """Check for symbols that were deleted but are still referenced elsewhere.
+
+        Ensures each modified file is re-indexed first (so the deleted symbol
+        is gone from ci_symbols) before querying references.
+        """
+        from infinidev.code_intel.analyzer import check_orphaned_references
+        from infinidev.code_intel.smart_index import ensure_indexed
+
+        deleted_by_file = file_tracker.get_deleted_symbols()
+        if not deleted_by_file:
+            return []
+
+        project_id = 1  # matches the default used throughout the CLI
+
+        for source_file in deleted_by_file.keys():
+            try:
+                ensure_indexed(project_id, source_file)
+            except Exception as exc:
+                logger.debug("Reindex before orphan check failed for %s: %s",
+                             source_file, exc)
+
+        try:
+            diags = check_orphaned_references(project_id, deleted_by_file)
+        except Exception as exc:
+            logger.debug("Orphaned references check failed: %s", exc)
+            return []
+
+        return [
+            {
+                "file": d.file_path,
+                "line": d.line,
+                "message": d.message,
+                "fix": d.fix_suggestion or "",
+            }
+            for d in diags
+        ]
+
+    def _format_orphaned_warning(self, orphaned: list[dict[str, Any]]) -> str:
+        """Format orphaned reference warnings for developer output."""
+        lines = ["ORPHANED REFERENCES (deleted symbols still in use):"]
+        for item in orphaned:
+            lines.append(f"  - {item['message']}")
+            if item.get("fix"):
+                lines.append(f"    Fix: {item['fix']}")
+        return "\n".join(lines)
 
     def _detect_test_command(self) -> str | None:
         """Detect the project's test runner."""

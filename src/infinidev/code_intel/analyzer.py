@@ -41,7 +41,17 @@ _PYTHON_BUILTINS = frozenset({
     "dataclass", "field",
 })
 
-ALL_CHECKS = ["broken_imports", "undefined_symbols", "unused_imports", "unused_definitions"]
+ALL_CHECKS = [
+    "broken_imports",
+    "undefined_symbols",
+    "unused_imports",
+    "unused_definitions",
+    "missing_docstrings",
+]
+# Note: `orphaned_references` is NOT in ALL_CHECKS. It requires a
+# `deleted_by_file` mapping from the task tracker, so it can't run as
+# part of the generic file-path dispatch. Call `check_orphaned_references`
+# directly from the review/verification pipeline.
 
 
 from infinidev.code_intel.diagnostic import Diagnostic
@@ -81,9 +91,12 @@ def analyze_code(
                 diags = check_unused_imports(project_id, file_path)
             elif check_name == "unused_definitions":
                 diags = check_unused_definitions(project_id, file_path)
+            elif check_name == "missing_docstrings":
+                diags = check_missing_docstrings(project_id, file_path)
             else:
-                continue
-
+                # orphaned_references is intentionally excluded: it needs
+                # a deleted_by_file mapping, not a file path.
+                diags = []
             report.diagnostics.extend(diags)
             report.stats[check_name] = len(diags)
         except Exception as exc:
@@ -343,6 +356,140 @@ def check_unused_definitions(
             ))
 
     return diagnostics
+
+
+
+def check_missing_docstrings(
+    project_id: int, file_path: str | None = None,
+) -> list[Diagnostic]:
+    """Find public classes, methods, and functions that lack docstrings.
+
+    Only flags symbols defined in the requested file(s) that are:
+      - Kind: class, function, or method
+      - Visibility: public (not starting with _)
+      - Docstring: empty or whitespace-only
+    Skips __init__ methods and private/_dunder symbols.
+    """
+    def _query(conn):
+        sql = """
+            SELECT name, qualified_name, kind, file_path, line_start, docstring
+            FROM ci_symbols
+            WHERE project_id = ?
+              AND kind IN ('class', 'function', 'method')
+              AND visibility = 'public'
+              AND (docstring IS NULL OR docstring = '')
+        """
+        params: list = [project_id]
+        if file_path:
+            sql += " AND file_path = ?"
+            params.append(file_path)
+        sql += " ORDER BY file_path, line_start"
+        return conn.execute(sql, params).fetchall()
+
+    rows = execute_with_retry(_query)
+    diagnostics = []
+
+    for name, qualified_name, kind, fp, line_start, _docstring in rows:
+        # Skip __init__ methods (often intentionally undocumented)
+        if kind == "method" and name == "__init__":
+            continue
+        # Skip dunder methods
+        if name.startswith("__") and name.endswith("__"):
+            continue
+        # Skip private/protected symbols (starting with _ but not dunders)
+        # Note: the parser only sets visibility for functions/methods; classes
+        # default to visibility='public', so we also filter by name here.
+        if name.startswith("_"):
+            continue
+
+        diagnostics.append(Diagnostic(
+            file_path=fp,
+            line=line_start,
+            severity="hint",
+            check="missing_docstrings",
+            message=f"{kind.capitalize()} '{qualified_name or name}' is missing a docstring.",
+            fix_suggestion=f"Add a docstring to document the purpose and behavior of '{name}'.",
+        ))
+
+    return diagnostics
+
+
+def check_orphaned_references(
+    project_id: int,
+    deleted_by_file: dict[str, list[str] | set[str]] | None = None,
+) -> list[Diagnostic]:
+    """Find symbols that were removed but still have active references elsewhere.
+
+    Detects "código desconectado" — symbols that existed in a file before an
+    edit/delete and are now referenced from other files that were not part of
+    the same change batch.
+
+    False-positive guard: if another symbol with the same simple name still
+    exists anywhere in the project (outside the source file), references are
+    assumed to resolve to that other definition and are NOT flagged. This
+    trades a few false negatives on common names (get/run/name) for a much
+    lower false-positive rate.
+
+    Args:
+        project_id: Project to analyze.
+        deleted_by_file: Mapping of source file (where the symbol used to
+            live) → symbol names removed from that file. Required; the source
+            file is needed to avoid flagging references in the same file and
+            to detect "symbol fully gone from project".
+
+    Returns:
+        Diagnostics (severity=error) for each orphaned reference.
+    """
+    if not deleted_by_file:
+        return []
+
+    def _query(conn):
+        diags: list[Diagnostic] = []
+        for source_file, symbols in deleted_by_file.items():
+            abs_source = os.path.abspath(source_file)
+            for name in symbols:
+                simple = name.rsplit(".", 1)[-1]
+                if not simple:
+                    continue
+                # Skip if another symbol with the same simple name is still
+                # defined elsewhere in the project — the reference likely
+                # resolves there, not to the deleted one.
+                still_defined = conn.execute(
+                    """SELECT 1 FROM ci_symbols
+                       WHERE project_id = ? AND name = ? AND file_path != ?
+                       LIMIT 1""",
+                    (project_id, simple, abs_source),
+                ).fetchone()
+                if still_defined:
+                    continue
+                rows = conn.execute(
+                    """SELECT DISTINCT file_path, line, context
+                       FROM ci_references
+                       WHERE project_id = ? AND name = ? AND file_path != ?
+                       ORDER BY file_path, line
+                       LIMIT 20""",
+                    (project_id, simple, abs_source),
+                ).fetchall()
+                for fp, line, context in rows:
+                    diags.append(Diagnostic(
+                        file_path=fp,
+                        line=line,
+                        severity="error",
+                        check="orphaned_references",
+                        message=(
+                            f"Symbol '{name}' was removed from "
+                            f"{os.path.basename(abs_source)} but is still used "
+                            f"at {fp}:{line}."
+                        ),
+                        fix_suggestion=(
+                            f"Restore '{name}' or update the reference at "
+                            f"{fp}:{line} to use an alternative. "
+                            f"Context: {context[:80] if context else 'N/A'}."
+                        ),
+                    ))
+        return diags
+
+    return execute_with_retry(_query)
 
 
 def store_diagnostics(project_id: int, file_path: str, diagnostics: list[Diagnostic]) -> None:

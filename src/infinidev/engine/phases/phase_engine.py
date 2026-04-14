@@ -50,6 +50,7 @@ class PhaseEngine:
 
     def __init__(self) -> None:
         self._last_engine: LoopEngine | None = None
+        self._last_plan_steps: list[dict] = []
         self._test_checkpoint: TestCheckpoint | None = None
 
     def execute(
@@ -139,6 +140,8 @@ class PhaseEngine:
         if not plan_steps:
             return "Failed to generate a valid plan."
 
+        self._last_plan_steps = plan_steps
+
         if verbose:
             _log(f"  {DIM}Plan: {len(plan_steps)} steps{RESET}")
             for s in plan_steps:
@@ -179,6 +182,8 @@ class PhaseEngine:
                     )
                     if not plan_steps:
                         break
+
+                    self._last_plan_steps = plan_steps
 
                     if verbose:
                         _log(f"  {DIM}Re-plan: {len(plan_steps)} new steps{RESET}")
@@ -267,6 +272,7 @@ class PhaseEngine:
             verdict, feedback = on_plan_ready(plan_steps)
 
             if verdict == "approve":
+                self._last_plan_steps = plan_steps
                 break
             if verdict == "cancel":
                 return "Plan cancelled."
@@ -332,3 +338,22 @@ class PhaseEngine:
         if self._last_engine:
             return self._last_engine.has_file_changes()
         return False
+
+    def get_plan_steps(self) -> list[dict]:
+        """Return the last plan used for execution (empty if none planned)."""
+        return list(self._last_plan_steps)
+
+    def get_file_contents(self) -> dict[str, str]:
+        if self._last_engine:
+            return self._last_engine.get_file_contents()
+        return {}
+
+    def get_file_change_reasons(self) -> dict[str, list[str]]:
+        if self._last_engine:
+            return self._last_engine.get_file_change_reasons()
+        return {}
+
+    def get_file_tracker(self):
+        if self._last_engine:
+            return self._last_engine.get_file_tracker()
+        return None

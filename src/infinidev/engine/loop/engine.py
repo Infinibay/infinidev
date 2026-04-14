@@ -286,6 +286,14 @@ class LoopEngine(AgentEngine):
                 result[path] = reasons
         return result
 
+    def get_file_tracker(self) -> FileChangeTracker | None:
+        """Expose the tracker from the last task for downstream checks."""
+        return self._last_file_tracker
+
+    def get_plan_steps(self) -> list[dict]:
+        """Loop engine is step-scoped — no multi-step plan of its own."""
+        return []
+
     def get_file_contents(self) -> dict[str, str]:
         """Return path → current content for each changed file."""
         import os as _os

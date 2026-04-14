@@ -14,6 +14,13 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# Multi-pass temperatures: extraction is maximally deterministic; the
+# judge matches the long-standing single-pass value so verdicts stay
+# consistent when we fall back.
+EXTRACTOR_TEMPERATURE = 0.0
+JUDGE_TEMPERATURE = 0.2
+
+
 from infinidev.engine.analysis.review_result import ReviewResult
 
 class ReviewEngine:
@@ -41,6 +48,9 @@ class ReviewEngine:
         file_contents: dict[str, str] | None = None,
         recent_messages: list[str] | None = None,
         previous_feedback: str = "",
+        plan_steps: list[dict] | None = None,
+        automated_checks: dict[str, Any] | None = None,
+        pre_extraction: dict | None = None,
     ) -> ReviewResult:
         """Review code changes and return a ReviewResult.
 
@@ -52,6 +62,16 @@ class ReviewEngine:
             file_contents: path → current content for each changed file.
             recent_messages: Last few conversation messages for context.
             previous_feedback: Feedback from a previous review round (for re-reviews).
+            plan_steps: Ordered list of plan step dicts (title + explanation).
+                When provided, the reviewer is asked to verify plan fidelity.
+            automated_checks: Pre-computed deterministic check results keyed
+                by check name. Shape: ``{"orphaned_references": [...],
+                "missing_docstrings": [...], "verification_passed": bool}``.
+                Items with severity='error' are BLOCKING by definition.
+            pre_extraction: Pre-computed Pass A output. When provided, the
+                reviewer skips its own extraction call and goes straight to
+                judgment. Used by run_review_rework_loop to parallelize
+                Pass A with ``collect_automated_checks``.
 
         Returns:
             ReviewResult with verdict and feedback.
@@ -67,7 +87,6 @@ class ReviewEngine:
             )
 
         from infinidev.config.llm import get_litellm_params
-        from infinidev.prompts.reviewer.system import REVIEWER_SYSTEM_PROMPT
 
         llm_params = get_litellm_params()
         if llm_params is None:
@@ -83,34 +102,57 @@ class ReviewEngine:
             "round": self._review_count,
         })
 
-        user_prompt = self._build_review_prompt(
-            task_description, developer_result,
-            file_changes_summary, previous_feedback,
-            file_reasons=file_reasons or {},
-            file_contents=file_contents or {},
-            recent_messages=recent_messages or [],
+        plan_steps = plan_steps or []
+        automated_checks = automated_checks or {}
+        file_reasons = file_reasons or {}
+        file_contents = file_contents or {}
+        recent_messages = recent_messages or []
+
+        # Dispatch: multi-pass for complex diffs, single-pass otherwise.
+        # ``pre_extraction`` lets run_review_rework_loop parallelize Pass A
+        # with collect_automated_checks — when supplied, we skip the
+        # extraction call and go straight to judgment.
+        result: ReviewResult | None = None
+        use_multi_pass = (
+            pre_extraction is not None
+            or self._should_multi_pass(file_changes_summary, file_contents)
         )
+        if use_multi_pass:
+            extraction = pre_extraction
+            if extraction is None:
+                extraction = self._run_extraction_pass(
+                    task_description=task_description,
+                    developer_result=developer_result,
+                    file_changes_summary=file_changes_summary,
+                    file_contents=file_contents,
+                    plan_steps=plan_steps,
+                )
+            if extraction is not None:
+                result = self._run_judgment_pass(
+                    llm_params=llm_params,
+                    extraction=extraction,
+                    task_description=task_description,
+                    developer_result=developer_result,
+                    plan_steps=plan_steps,
+                    automated_checks=automated_checks,
+                    previous_feedback=previous_feedback,
+                    recent_messages=recent_messages,
+                )
+            else:
+                logger.info("ReviewEngine: extraction pass failed, falling back to single-pass")
 
-        messages = [
-            {"role": "system", "content": REVIEWER_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        try:
-            import litellm
-            response = litellm.completion(
-                messages=messages,
-                **llm_params,
-                temperature=0.2,  # Low temp for consistent reviews
-            )
-            raw_content = response.choices[0].message.content or ""
-            result = self._parse_response(raw_content)
-
-        except Exception as e:
-            logger.warning("ReviewEngine: LLM call failed (%s), skipping review", e)
-            result = ReviewResult(
-                verdict="SKIPPED",
-                summary=f"Review skipped due to error: {e}",
+        if result is None:
+            result = self._single_pass_review(
+                llm_params=llm_params,
+                task_description=task_description,
+                developer_result=developer_result,
+                file_changes_summary=file_changes_summary,
+                previous_feedback=previous_feedback,
+                file_reasons=file_reasons,
+                file_contents=file_contents,
+                recent_messages=recent_messages,
+                plan_steps=plan_steps,
+                automated_checks=automated_checks,
             )
 
         event_bus.emit("review_complete", 0, "", {
@@ -120,6 +162,331 @@ class ReviewEngine:
         })
 
         return result
+
+    # ── Dispatch helpers ────────────────────────────────────────────────
+
+    @staticmethod
+    def _compute_complexity(
+        file_changes_summary: str,
+        file_contents: dict[str, str] | None,
+    ) -> int:
+        """Score = changed_lines + 50 * changed_files.
+
+        `changed_lines` counts non-empty lines in the unified diff (a rough
+        but robust proxy). `changed_files` uses the file_contents dict
+        when available, else counts ``diff --git`` / ``--- a/`` headers.
+        """
+        lines = sum(
+            1 for ln in file_changes_summary.splitlines()
+            if ln.strip() and not ln.startswith("@@")
+        )
+        if file_contents:
+            file_count = len(file_contents)
+        else:
+            # Fallback: count diff headers.
+            file_count = file_changes_summary.count("\n--- a/") + (
+                1 if file_changes_summary.startswith("--- a/") else 0
+            )
+            if file_count == 0:
+                file_count = max(1, file_changes_summary.count("diff --git"))
+        return lines + 50 * file_count
+
+    def _should_multi_pass(
+        self,
+        file_changes_summary: str,
+        file_contents: dict[str, str] | None,
+    ) -> bool:
+        """Decide single vs multi based on REVIEW_MULTI_PASS_MODE + threshold."""
+        from infinidev.config.settings import settings as _settings
+        mode = (getattr(_settings, "REVIEW_MULTI_PASS_MODE", "auto") or "auto").lower()
+        if mode == "off":
+            return False
+        if mode == "always":
+            return True
+        threshold = int(getattr(_settings, "REVIEW_MULTI_PASS_COMPLEXITY_THRESHOLD", 400))
+        return self._compute_complexity(file_changes_summary, file_contents) > threshold
+
+    # ── Pass A: extraction ──────────────────────────────────────────────
+
+    def _run_extraction_pass(
+        self,
+        *,
+        task_description: str,
+        developer_result: str,
+        file_changes_summary: str,
+        file_contents: dict[str, str],
+        plan_steps: list[dict],
+    ) -> dict | None:
+        """Call Pass A LLM. Returns parsed JSON, or None on failure.
+
+        One retry on malformed JSON with a 'return valid JSON' reminder.
+        Any exception falls through as None so the caller can fall back to
+        single-pass.
+        """
+        from infinidev.config.llm import get_litellm_params_for_review_extractor
+        from infinidev.prompts.reviewer.extractor_system import EXTRACTOR_SYSTEM_PROMPT
+
+        try:
+            ext_params = get_litellm_params_for_review_extractor()
+        except Exception as exc:
+            logger.warning("ReviewEngine: extractor LLM params unavailable (%s)", exc)
+            return None
+
+        user_prompt = self._build_extractor_prompt(
+            task_description=task_description,
+            developer_result=developer_result,
+            file_changes_summary=file_changes_summary,
+            file_contents=file_contents,
+            plan_steps=plan_steps,
+        )
+        messages = [
+            {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        for attempt in range(2):
+            try:
+                import litellm
+                response = litellm.completion(
+                    messages=messages,
+                    **ext_params,
+                    temperature=EXTRACTOR_TEMPERATURE,
+                )
+                raw = (response.choices[0].message.content or "").strip()
+                parsed = self._parse_extraction(raw)
+                if parsed is not None:
+                    return parsed
+            except Exception as exc:
+                logger.warning("ReviewEngine: extractor LLM call failed: %s", exc)
+                return None
+            # Retry once with an explicit reminder.
+            messages = messages + [
+                {"role": "user", "content": "Your previous reply was not valid JSON. Return ONLY the JSON object specified in the schema."},
+            ]
+
+        return None
+
+    @staticmethod
+    def _parse_extraction(raw: str) -> dict | None:
+        """Parse the extractor's JSON output, tolerating markdown fences."""
+        if not raw:
+            return None
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            keep: list[str] = []
+            in_block = False
+            for ln in lines:
+                if ln.strip().startswith("```") and not in_block:
+                    in_block = True
+                    continue
+                if ln.strip() == "```" and in_block:
+                    break
+                if in_block:
+                    keep.append(ln)
+            text = "\n".join(keep) if keep else text
+        from infinidev.engine.formats.tool_call_parser import safe_json_loads
+        try:
+            data = safe_json_loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return data
+
+    def _build_extractor_prompt(
+        self,
+        *,
+        task_description: str,
+        developer_result: str,
+        file_changes_summary: str,
+        file_contents: dict[str, str],
+        plan_steps: list[dict],
+    ) -> str:
+        """Build the user prompt for the extractor pass."""
+        parts: list[str] = []
+        parts.append(f"## Original Task\n{task_description}")
+
+        if plan_steps:
+            plan_lines = ["## Plan"]
+            for s in plan_steps:
+                num = s.get("step", "?")
+                title = s.get("title") or s.get("explanation", "")
+                files = s.get("files") or []
+                files_str = f" [{', '.join(files)}]" if files else ""
+                plan_lines.append(f"{num}. {title}{files_str}")
+                detail = s.get("explanation", "")
+                if detail and detail != title:
+                    plan_lines.append(f"   → {detail[:300]}")
+            parts.append("\n".join(plan_lines))
+
+        parts.append(f"## Developer's Report\n{developer_result}")
+
+        if file_contents:
+            parts.append("## Current File Contents")
+            for path in sorted(file_contents.keys()):
+                content = file_contents[path]
+                max_chars = 50_000
+                if len(content) > max_chars:
+                    content = content[:max_chars] + f"\n... (truncated, {len(content)} total chars)"
+                ext = path.rsplit(".", 1)[-1] if "." in path else ""
+                parts.append(f"### `{path}`\n```{ext}\n{content}\n```")
+
+        parts.append(f"## Diffs\n{file_changes_summary}")
+        return "\n\n".join(parts)
+
+    # ── Pass B: judgment ────────────────────────────────────────────────
+
+    def _run_judgment_pass(
+        self,
+        *,
+        llm_params: dict,
+        extraction: dict,
+        task_description: str,
+        developer_result: str,
+        plan_steps: list[dict],
+        automated_checks: dict,
+        previous_feedback: str,
+        recent_messages: list[str],
+    ) -> ReviewResult:
+        """Call Pass B LLM with the extraction + checks (no diffs)."""
+        from infinidev.prompts.reviewer.judge_system import JUDGE_SYSTEM_PROMPT
+
+        user_prompt = self._build_judge_prompt(
+            extraction=extraction,
+            task_description=task_description,
+            developer_result=developer_result,
+            plan_steps=plan_steps,
+            automated_checks=automated_checks,
+            previous_feedback=previous_feedback,
+            recent_messages=recent_messages,
+        )
+        messages = [
+            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            import litellm
+            response = litellm.completion(
+                messages=messages,
+                **llm_params,
+                temperature=JUDGE_TEMPERATURE,
+            )
+            raw_content = response.choices[0].message.content or ""
+            return self._parse_response(raw_content)
+        except Exception as exc:
+            logger.warning("ReviewEngine: judge LLM call failed (%s), skipping", exc)
+            return ReviewResult(
+                verdict="SKIPPED",
+                summary=f"Judge skipped due to error: {exc}",
+            )
+
+    def _build_judge_prompt(
+        self,
+        *,
+        extraction: dict,
+        task_description: str,
+        developer_result: str,
+        plan_steps: list[dict],
+        automated_checks: dict,
+        previous_feedback: str,
+        recent_messages: list[str],
+    ) -> str:
+        """Build the user prompt for the judge pass.
+
+        Crucially, this does NOT include the raw diffs or file contents —
+        the extraction is the authoritative summary the judge works from.
+        """
+        parts: list[str] = []
+
+        if recent_messages:
+            parts.append("## Conversation Context")
+            for i, msg in enumerate(recent_messages):
+                if i == len(recent_messages) - 1:
+                    parts.append(f">>> CURRENT REQUEST <<<\n{msg}")
+                else:
+                    parts.append(msg)
+
+        parts.append(f"## Original Task\n{task_description}")
+
+        if plan_steps:
+            plan_lines = ["## Plan (what the developer committed to)"]
+            for s in plan_steps:
+                num = s.get("step", "?")
+                title = s.get("title") or s.get("explanation", "")
+                files = s.get("files") or []
+                files_str = f" [{', '.join(files)}]" if files else ""
+                plan_lines.append(f"{num}. {title}{files_str}")
+                detail = s.get("explanation", "")
+                if detail and detail != title:
+                    plan_lines.append(f"   → {detail[:300]}")
+            parts.append("\n".join(plan_lines))
+
+        if automated_checks:
+            parts.append(self._format_automated_checks(automated_checks))
+
+        parts.append("## Extraction (authoritative factual summary)")
+        parts.append("```json\n" + json.dumps(extraction, indent=2) + "\n```")
+
+        parts.append(f"## Developer's Report\n{developer_result}")
+
+        if previous_feedback:
+            parts.append(
+                f"## Previous Review Feedback (Round {self._review_count})\n"
+                f"The developer was asked to fix these issues. Verify they were addressed:\n"
+                f"{previous_feedback}"
+            )
+
+        return "\n\n".join(parts)
+
+    # ── Single-pass (legacy, also fallback) ─────────────────────────────
+
+    def _single_pass_review(
+        self,
+        *,
+        llm_params: dict,
+        task_description: str,
+        developer_result: str,
+        file_changes_summary: str,
+        previous_feedback: str,
+        file_reasons: dict[str, list[str]],
+        file_contents: dict[str, str],
+        recent_messages: list[str],
+        plan_steps: list[dict],
+        automated_checks: dict,
+    ) -> ReviewResult:
+        """Classic one-shot reviewer. Also used as fallback from multi-pass."""
+        from infinidev.prompts.reviewer.system import REVIEWER_SYSTEM_PROMPT
+
+        user_prompt = self._build_review_prompt(
+            task_description, developer_result,
+            file_changes_summary, previous_feedback,
+            file_reasons=file_reasons,
+            file_contents=file_contents,
+            recent_messages=recent_messages,
+            plan_steps=plan_steps,
+            automated_checks=automated_checks,
+        )
+        messages = [
+            {"role": "system", "content": REVIEWER_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        try:
+            import litellm
+            response = litellm.completion(
+                messages=messages,
+                **llm_params,
+                temperature=JUDGE_TEMPERATURE,
+            )
+            raw_content = response.choices[0].message.content or ""
+            return self._parse_response(raw_content)
+        except Exception as exc:
+            logger.warning("ReviewEngine: LLM call failed (%s), skipping review", exc)
+            return ReviewResult(
+                verdict="SKIPPED",
+                summary=f"Review skipped due to error: {exc}",
+            )
 
     def _build_review_prompt(
         self,
@@ -131,6 +498,8 @@ class ReviewEngine:
         file_reasons: dict[str, list[str]] | None = None,
         file_contents: dict[str, str] | None = None,
         recent_messages: list[str] | None = None,
+        plan_steps: list[dict] | None = None,
+        automated_checks: dict[str, Any] | None = None,
     ) -> str:
         """Build the user prompt for the review LLM call."""
         parts = []
@@ -146,6 +515,24 @@ class ReviewEngine:
 
         # Task context
         parts.append(f"## Original Task\n{task_description}")
+
+        # Plan (what the developer committed to doing, step-by-step)
+        if plan_steps:
+            plan_lines = ["## Plan (what the developer committed to)"]
+            for s in plan_steps:
+                num = s.get("step", "?")
+                title = s.get("title") or s.get("explanation", "")
+                files = s.get("files") or []
+                files_str = f" [{', '.join(files)}]" if files else ""
+                plan_lines.append(f"{num}. {title}{files_str}")
+                detail = s.get("explanation", "")
+                if detail and detail != title:
+                    plan_lines.append(f"   → {detail[:300]}")
+            parts.append("\n".join(plan_lines))
+
+        # Automated checks (deterministic evidence — pre-classified severity)
+        if automated_checks:
+            parts.append(self._format_automated_checks(automated_checks))
 
         # Developer's result
         parts.append(f"## Developer's Report\n{developer_result}")
@@ -229,6 +616,108 @@ class ReviewEngine:
         """Whether we can do another review-rework cycle."""
         return self._review_count < self._max_reviews
 
+    @staticmethod
+    def _format_automated_checks(checks: dict[str, Any]) -> str:
+        """Render automated check results as a compact, high-signal block.
+
+        The reviewer is told to trust these — they came from deterministic
+        tooling (tree-sitter index queries), not from another LLM.
+        """
+        lines = ["## Automated Checks (deterministic, trust these)"]
+
+        verif = checks.get("verification_passed")
+        if verif is True:
+            lines.append("- tests/import-check: PASSED")
+        elif verif is False:
+            lines.append("- tests/import-check: FAILED (treat as blocking)")
+
+        orphaned = checks.get("orphaned_references") or []
+        lines.append(
+            f"- orphaned_references: {len(orphaned)} "
+            f"(BLOCKING — symbols removed but still referenced)"
+        )
+        for item in orphaned[:10]:
+            lines.append(f"    • {item.get('message', '')}")
+        if len(orphaned) > 10:
+            lines.append(f"    • ... {len(orphaned) - 10} more")
+
+        missing = checks.get("missing_docstrings") or []
+        lines.append(
+            f"- missing_docstrings: {len(missing)} "
+            f"(suggestion — flag in notes, not sole reason to reject)"
+        )
+        for item in missing[:5]:
+            lines.append(f"    • {item.get('message', '')}")
+        if len(missing) > 5:
+            lines.append(f"    • ... {len(missing) - 5} more")
+
+        return "\n".join(lines)
+
+
+def collect_automated_checks(
+    changed_files: list[str],
+    file_tracker: Any = None,
+    verification_passed: bool | None = None,
+) -> dict[str, Any]:
+    """Gather deterministic check results to feed into the reviewer.
+
+    Runs orphaned-reference and missing-docstring checks against the
+    code-intel index for the given changed files. Resilient: any single
+    check that errors returns an empty list for that key.
+    """
+    from infinidev.code_intel.analyzer import (
+        check_missing_docstrings, check_orphaned_references,
+    )
+    from infinidev.code_intel.smart_index import ensure_indexed
+
+    project_id = 1  # CLI uses a single project by default
+    result: dict[str, Any] = {
+        "verification_passed": verification_passed,
+        "orphaned_references": [],
+        "missing_docstrings": [],
+    }
+
+    # Reindex changed files so the checks see post-edit state
+    import os as _os
+    abs_changed = [_os.path.abspath(p) for p in (changed_files or [])]
+    for p in abs_changed:
+        try:
+            ensure_indexed(project_id, p)
+        except Exception as exc:
+            logger.debug("Reindex failed for %s before checks: %s", p, exc)
+
+    # Orphaned references — only if tracker recorded deletions
+    if file_tracker is not None:
+        try:
+            deleted = file_tracker.get_deleted_symbols()
+            if deleted:
+                # Make sure source files are reindexed too
+                for src in deleted.keys():
+                    try:
+                        ensure_indexed(project_id, src)
+                    except Exception:
+                        pass
+                diags = check_orphaned_references(project_id, deleted)
+                result["orphaned_references"] = [
+                    {"file": d.file_path, "line": d.line, "message": d.message}
+                    for d in diags
+                ]
+        except Exception as exc:
+            logger.debug("Orphaned references collection failed: %s", exc)
+
+    # Missing docstrings — one query per changed file
+    for p in abs_changed:
+        try:
+            diags = check_missing_docstrings(project_id, p)
+            for d in diags:
+                result["missing_docstrings"].append(
+                    {"file": d.file_path, "line": d.line, "message": d.message}
+                )
+        except Exception as exc:
+            logger.debug("Missing-docstrings check failed for %s: %s", p, exc)
+
+    return result
+
 
 def run_review_rework_loop(
     *,
@@ -283,7 +772,8 @@ def run_review_rework_loop(
 
         verifier = VerificationEngine(workspace=workspace)
         changed = list((engine.get_file_contents() or {}).keys())
-        vresult = verifier.verify(changed_files=changed)
+        tracker = getattr(engine, 'get_file_tracker', lambda: None)()
+        vresult = verifier.verify(changed_files=changed, file_tracker=tracker)
 
         if vresult.passed:
             _notify("verification_pass", vresult.summary)
@@ -321,16 +811,55 @@ def run_review_rework_loop(
     result = _run_verification_and_fix(result)
 
     previous_feedback = ""
+    plan_steps = getattr(engine, "get_plan_steps", lambda: [])()
 
     while True:
+        changed_files = list((engine.get_file_contents() or {}).keys())
+        tracker = getattr(engine, "get_file_tracker", lambda: None)()
+        file_changes_summary = engine.get_changed_files_summary()
+        file_contents = engine.get_file_contents() or {}
+
+        pre_extraction: dict | None = None
+        # When multi-pass is in play, extraction (LLM-bound) and
+        # collect_automated_checks (disk+SQLite-bound) are independent —
+        # run both at once to save a couple of seconds per review round.
+        if reviewer._should_multi_pass(file_changes_summary, file_contents):
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                ext_future = ex.submit(
+                    reviewer._run_extraction_pass,
+                    task_description=task_prompt[0],
+                    developer_result=result,
+                    file_changes_summary=file_changes_summary,
+                    file_contents=file_contents,
+                    plan_steps=plan_steps,
+                )
+                checks_future = ex.submit(
+                    collect_automated_checks,
+                    changed_files=changed_files,
+                    file_tracker=tracker,
+                    verification_passed=True,
+                )
+                pre_extraction = ext_future.result()
+                automated = checks_future.result()
+        else:
+            automated = collect_automated_checks(
+                changed_files=changed_files,
+                file_tracker=tracker,
+                verification_passed=True,
+            )
+
         review = reviewer.review(
             task_description=task_prompt[0],
             developer_result=result,
-            file_changes_summary=engine.get_changed_files_summary(),
+            file_changes_summary=file_changes_summary,
             file_reasons=engine.get_file_change_reasons(),
-            file_contents=engine.get_file_contents(),
+            file_contents=file_contents,
             recent_messages=recent_messages or [],
             previous_feedback=previous_feedback,
+            plan_steps=plan_steps,
+            automated_checks=automated,
+            pre_extraction=pre_extraction,
         )
 
         if review.is_approved:

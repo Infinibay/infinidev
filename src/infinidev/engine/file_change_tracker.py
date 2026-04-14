@@ -19,6 +19,7 @@ class FileChangeTracker:
         self._current: dict[str, str] = {}      # path → content after latest edit
         self._change_counts: dict[str, int] = {}
         self._reasons: dict[str, list[str]] = {}  # path → list of reasons for changes
+        self._deleted_symbols: dict[str, set[str]] = {}  # path → set of removed symbol names
         self._active: bool = True
 
     @property
@@ -99,6 +100,30 @@ class FileChangeTracker:
     def get_all_paths(self) -> list[str]:
         return list(self._current.keys())
 
+    def record_deleted_symbols(self, path: str, symbols: list[str]) -> None:
+        """Record symbol names that were removed from a file.
+
+        Called from `maybe_emit_file_change` when a file-write tool reports
+        `removed_symbols` in its result. Consumed by VerificationEngine to
+        run the orphaned-references check post-task.
+
+        Args:
+            path: Absolute file path that was changed.
+            symbols: Simple or qualified symbol names removed from the file.
+        """
+        if not symbols:
+            return
+        path = os.path.abspath(path)
+        self._deleted_symbols.setdefault(path, set()).update(symbols)
+
+    def get_deleted_symbols(self) -> dict[str, set[str]]:
+        """Return all removed symbols grouped by file path.
+
+        Returns a dict mapping file path → set of removed symbol names.
+        Used by VerificationEngine to check for orphaned references.
+        """
+        return dict(self._deleted_symbols)
+
     def deactivate(self) -> None:
         self._active = False
 
@@ -107,4 +132,5 @@ class FileChangeTracker:
         self._current.clear()
         self._change_counts.clear()
         self._reasons.clear()
+        self._deleted_symbols.clear()
         self._active = True

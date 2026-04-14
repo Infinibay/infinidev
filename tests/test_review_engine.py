@@ -427,6 +427,298 @@ class TestReviewEngine:
         assert result.verdict == "SKIPPED"
 
 
+class TestMultiPassReview:
+    """Test multi-pass review: extraction + judgment."""
+
+    def _set_mode(self, monkeypatch, mode: str, threshold: int = 400):
+        from infinidev.config.settings import settings as s
+        monkeypatch.setattr(s, "REVIEW_MULTI_PASS_MODE", mode)
+        monkeypatch.setattr(s, "REVIEW_MULTI_PASS_COMPLEXITY_THRESHOLD", threshold)
+
+    def _extraction_response(self, extraction: dict) -> MagicMock:
+        return MagicMock(choices=[MagicMock(message=MagicMock(
+            content=json.dumps(extraction)
+        ))])
+
+    def _verdict_response(self, verdict: dict) -> MagicMock:
+        return MagicMock(choices=[MagicMock(message=MagicMock(
+            content=json.dumps(verdict)
+        ))])
+
+    @patch("litellm.completion")
+    @patch("infinidev.config.llm.get_litellm_params_for_review_extractor")
+    @patch("infinidev.config.llm.get_litellm_params")
+    def test_multi_pass_happy_path(
+        self, mock_params, mock_ext_params, mock_completion, monkeypatch,
+    ):
+        self._set_mode(monkeypatch, "always")
+        mock_params.return_value = {"model": "judge"}
+        mock_ext_params.return_value = {"model": "extractor"}
+
+        mock_completion.side_effect = [
+            self._extraction_response({
+                "changes": [{"file": "a.py", "kind": "modified",
+                             "symbols_added": ["f"], "symbols_removed": [],
+                             "line_range": "1-5", "summary": "add f", "notable_lines": []}],
+                "plan_coverage": [],
+                "public_api_impact": {"new_exports": ["f"], "removed_exports": [], "signature_changes": []},
+                "report_discrepancies": [],
+            }),
+            self._verdict_response({"verdict": "APPROVED", "summary": "ok"}),
+        ]
+
+        engine = ReviewEngine()
+        result = engine.review(
+            task_description="Add f",
+            developer_result="Added f",
+            file_changes_summary="--- a/a.py\n+++ b/a.py\n+def f(): pass",
+            file_contents={"a.py": "def f(): pass"},
+        )
+        assert result.is_approved
+        assert mock_completion.call_count == 2
+
+        # The second call is the judge — its user message must contain the
+        # Extraction block and must NOT contain a "## Diffs" section.
+        second_call = mock_completion.call_args_list[1]
+        user_msg = next(
+            m["content"] for m in second_call.kwargs["messages"]
+            if m["role"] == "user"
+        )
+        assert "## Extraction" in user_msg
+        assert "## Diffs" not in user_msg
+
+    @patch("litellm.completion")
+    @patch("infinidev.config.llm.get_litellm_params_for_review_extractor")
+    @patch("infinidev.config.llm.get_litellm_params")
+    def test_multi_pass_extraction_malformed_falls_back(
+        self, mock_params, mock_ext_params, mock_completion, monkeypatch,
+    ):
+        self._set_mode(monkeypatch, "always")
+        mock_params.return_value = {"model": "judge"}
+        mock_ext_params.return_value = {"model": "extractor"}
+
+        garbage = MagicMock(choices=[MagicMock(message=MagicMock(
+            content="not json at all"
+        ))])
+        single_pass_resp = self._verdict_response(
+            {"verdict": "APPROVED", "summary": "fallback ok"},
+        )
+        mock_completion.side_effect = [garbage, garbage, single_pass_resp]
+
+        engine = ReviewEngine()
+        result = engine.review(
+            task_description="task",
+            developer_result="done",
+            file_changes_summary="--- a/a.py\n+++ b/a.py\n+x",
+            file_contents={"a.py": "x"},
+        )
+        assert result.is_approved
+        assert "fallback ok" in result.summary
+        # 2 extractor attempts + 1 single-pass fallback
+        assert mock_completion.call_count == 3
+
+    @patch("litellm.completion")
+    @patch("infinidev.config.llm.get_litellm_params_for_review_extractor")
+    @patch("infinidev.config.llm.get_litellm_params")
+    def test_multi_pass_extraction_raises_falls_back(
+        self, mock_params, mock_ext_params, mock_completion, monkeypatch,
+    ):
+        self._set_mode(monkeypatch, "always")
+        mock_params.return_value = {"model": "judge"}
+        mock_ext_params.return_value = {"model": "extractor"}
+
+        fallback_resp = self._verdict_response(
+            {"verdict": "APPROVED", "summary": "recovered"},
+        )
+        mock_completion.side_effect = [RuntimeError("boom"), fallback_resp]
+
+        engine = ReviewEngine()
+        result = engine.review(
+            task_description="task",
+            developer_result="done",
+            file_changes_summary="--- a/a.py\n+++ b/a.py\n+x",
+        )
+        assert result.is_approved
+
+    @pytest.mark.parametrize(
+        "mode,lines,expected_calls",
+        [
+            ("off", 5000, 1),       # off ignores threshold
+            ("auto", 10, 1),         # below threshold
+            ("auto", 800, 2),        # above threshold
+            ("always", 10, 2),       # always regardless
+        ],
+    )
+    @patch("litellm.completion")
+    @patch("infinidev.config.llm.get_litellm_params_for_review_extractor")
+    @patch("infinidev.config.llm.get_litellm_params")
+    def test_mode_and_threshold_gating(
+        self, mock_params, mock_ext_params, mock_completion,
+        mode, lines, expected_calls, monkeypatch,
+    ):
+        self._set_mode(monkeypatch, mode, threshold=400)
+        mock_params.return_value = {"model": "judge"}
+        mock_ext_params.return_value = {"model": "extractor"}
+
+        if expected_calls == 2:
+            mock_completion.side_effect = [
+                self._extraction_response({
+                    "changes": [], "plan_coverage": [],
+                    "public_api_impact": {"new_exports": [], "removed_exports": [], "signature_changes": []},
+                    "report_discrepancies": [],
+                }),
+                self._verdict_response({"verdict": "APPROVED", "summary": "ok"}),
+            ]
+        else:
+            mock_completion.side_effect = [
+                self._verdict_response({"verdict": "APPROVED", "summary": "ok"}),
+            ]
+
+        diff = "--- a/a.py\n+++ b/a.py\n" + "\n".join(f"+line{i}" for i in range(lines))
+        engine = ReviewEngine()
+        engine.review(
+            task_description="task",
+            developer_result="done",
+            file_changes_summary=diff,
+            file_contents={"a.py": "x"},
+        )
+        assert mock_completion.call_count == expected_calls
+
+    def test_compute_complexity_score(self):
+        """Score = changed_lines + 50 * changed_files."""
+        diff = "\n".join(f"+line{i}" for i in range(10))
+        score = ReviewEngine._compute_complexity(
+            diff, {"a.py": "", "b.py": "", "c.py": ""},
+        )
+        # 10 content lines + 3 files * 50 = 160
+        assert score == 160
+
+    def test_extractor_prompt_builder(self):
+        eng = ReviewEngine()
+        prompt = eng._build_extractor_prompt(
+            task_description="Add login",
+            developer_result="done",
+            file_changes_summary="--- a/auth.py\n+++ b/auth.py\n+def login():",
+            file_contents={"auth.py": "def login(): pass"},
+            plan_steps=[{"step": 1, "title": "write login"}],
+        )
+        assert "## Original Task" in prompt
+        assert "## Plan" in prompt
+        assert "## Diffs" in prompt
+        # Extractor prompt body should not mention severity/judgment language
+        assert "severity" not in prompt.lower()
+        assert "blocking" not in prompt.lower()
+        assert "reject" not in prompt.lower()
+
+    def test_judge_prompt_omits_diffs(self):
+        eng = ReviewEngine()
+        extraction = {
+            "changes": [{"file": "a.py", "summary": "added f"}],
+            "plan_coverage": [],
+            "public_api_impact": {},
+            "report_discrepancies": [],
+        }
+        prompt = eng._build_judge_prompt(
+            extraction=extraction,
+            task_description="task",
+            developer_result="done",
+            plan_steps=[],
+            automated_checks={},
+            previous_feedback="",
+            recent_messages=[],
+        )
+        assert "## Extraction" in prompt
+        assert "added f" in prompt
+        assert "## Diffs" not in prompt
+
+    def test_parallel_extraction_and_checks_integration(
+        self, tmp_path, monkeypatch,
+    ):
+        """run_review_rework_loop runs Pass A in parallel with
+        collect_automated_checks when multi-pass fires."""
+        from infinidev.engine.analysis.review_engine import (
+            run_review_rework_loop,
+        )
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+
+        self._set_mode(monkeypatch, "always")
+
+        # Minimal stub engine exposing the API the loop needs.
+        class _StubEngine:
+            def __init__(self):
+                self._tracker = FileChangeTracker()
+                self._workspace = str(tmp_path)
+
+            def get_file_contents(self):
+                return {"a.py": "def f(): pass"}
+
+            def get_file_change_reasons(self):
+                return {"a.py": ["added f"]}
+
+            def get_changed_files_summary(self):
+                return "--- a/a.py\n+++ b/a.py\n+def f(): pass"
+
+            def get_file_tracker(self):
+                return self._tracker
+
+            def get_plan_steps(self):
+                return [{"step": 1, "title": "add f"}]
+
+            def has_file_changes(self):
+                return True
+
+            def execute(self, **_kw):
+                return "Done"
+
+        class _StubAgent:
+            def activate_context(self, **_kw):
+                pass
+
+            def deactivate(self):
+                pass
+
+        extraction = {
+            "changes": [], "plan_coverage": [],
+            "public_api_impact": {"new_exports": [], "removed_exports": [], "signature_changes": []},
+            "report_discrepancies": [],
+        }
+        verdict = {"verdict": "APPROVED", "summary": "ok"}
+
+        with patch("litellm.completion") as mock_completion, \
+                patch("infinidev.config.llm.get_litellm_params_for_review_extractor",
+                      return_value={"model": "ext"}), \
+                patch("infinidev.config.llm.get_litellm_params",
+                      return_value={"model": "judge"}), \
+                patch("infinidev.engine.analysis.review_engine.collect_automated_checks") as mock_collect, \
+                patch("infinidev.engine.analysis.verification_engine.VerificationEngine") as MockVE:
+            mock_completion.side_effect = [
+                self._extraction_response(extraction),
+                self._verdict_response(verdict),
+            ]
+            mock_collect.return_value = {
+                "verification_passed": True,
+                "orphaned_references": [],
+                "missing_docstrings": [],
+            }
+
+            reviewer = ReviewEngine()
+            _result, review = run_review_rework_loop(
+                engine=_StubEngine(),
+                agent=_StubAgent(),
+                session_id="sid",
+                task_prompt=("add f", "Complete the task."),
+                initial_result="Added f",
+                reviewer=reviewer,
+                recent_messages=[],
+                on_status=None,
+            )
+
+            assert review is not None
+            assert review.is_approved
+            assert mock_completion.call_count == 2
+            assert mock_collect.call_count == 1
+
+
 class TestFileChangeTrackerReasons:
     """Test reason tracking in FileChangeTracker."""
 
@@ -457,6 +749,159 @@ class TestFileChangeTrackerReasons:
         tracker.record_reason("/tmp/foo.py", "some reason")
         tracker.reset()
         assert tracker.get_reasons("/tmp/foo.py") == []
+
+    def test_record_deleted_symbols(self):
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        tracker = FileChangeTracker()
+        tracker.record_deleted_symbols("/tmp/foo.py", ["old_func", "HelperClass"])
+        tracker.record_deleted_symbols("/tmp/foo.py", ["another_func"])
+        tracker.record_deleted_symbols("/tmp/bar.py", ["MyClass.my_method"])
+
+        deleted = tracker.get_deleted_symbols()
+        assert "/tmp/foo.py" in deleted
+        assert "old_func" in deleted["/tmp/foo.py"]
+        assert "HelperClass" in deleted["/tmp/foo.py"]
+        assert "another_func" in deleted["/tmp/foo.py"]
+        assert "/tmp/bar.py" in deleted
+        assert "MyClass.my_method" in deleted["/tmp/bar.py"]
+
+    def test_record_deleted_symbols_empty_list_ignored(self):
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        tracker = FileChangeTracker()
+        tracker.record_deleted_symbols("/tmp/foo.py", [])
+        assert tracker.get_deleted_symbols() == {}
+
+    def test_reset_clears_deleted_symbols(self):
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        tracker = FileChangeTracker()
+        tracker.record_deleted_symbols("/tmp/foo.py", ["removed_func"])
+        tracker.reset()
+        assert tracker.get_deleted_symbols() == {}
+
+    def test_maybe_emit_file_change_forwards_removed_symbols(self, tmp_path):
+        """Integration: the hook called by the tool executor must forward
+        `removed_symbols` from the tool result into the tracker. This is the
+        wiring that makes the orphaned-references check actually run."""
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        from infinidev.engine.tool_executor import maybe_emit_file_change
+
+        target = tmp_path / "mod.py"
+        target.write_text("# reduced content\n")
+
+        tracker = FileChangeTracker()
+        result = json.dumps({
+            "file_path": str(target),
+            "action": "modified",
+            "size_bytes": 20,
+            "warning": "deleted symbol",
+            "removed_symbols": ["deleted_func", "GoneClass"],
+        })
+
+        maybe_emit_file_change(
+            tool_name="write_file",
+            arguments={"file_path": str(target), "content": "# reduced\n"},
+            result=result,
+            pre_content="def deleted_func():\n    return 1\n",
+            tracker=tracker,
+            project_id=1,
+            agent_id="test-agent",
+        )
+
+        deleted = tracker.get_deleted_symbols()
+        abs_target = str(target.resolve())
+        assert abs_target in deleted
+        assert deleted[abs_target] == {"deleted_func", "GoneClass"}
+
+    def test_prompt_builder_includes_plan_section(self):
+        eng = ReviewEngine()
+        plan = [
+            {"step": 1, "title": "Add schema", "explanation": "Create Users table", "files": ["schema.sql"]},
+            {"step": 2, "title": "Wire up migration"},
+        ]
+        prompt = eng._build_review_prompt(
+            task_description="Add user auth",
+            developer_result="Done",
+            file_changes_summary="",
+            previous_feedback="",
+            plan_steps=plan,
+        )
+        assert "## Plan (what the developer committed to)" in prompt
+        assert "1. Add schema [schema.sql]" in prompt
+        assert "Create Users table" in prompt
+        assert "2. Wire up migration" in prompt
+
+    def test_prompt_builder_includes_automated_checks(self):
+        eng = ReviewEngine()
+        checks = {
+            "verification_passed": True,
+            "orphaned_references": [
+                {"file": "a.py", "line": 10, "message": "Symbol 'foo' removed but used at a.py:10."},
+            ],
+            "missing_docstrings": [
+                {"file": "b.py", "line": 3, "message": "Class 'Bar' is missing a docstring."},
+            ],
+        }
+        prompt = eng._build_review_prompt(
+            task_description="t",
+            developer_result="r",
+            file_changes_summary="",
+            previous_feedback="",
+            automated_checks=checks,
+        )
+        assert "## Automated Checks" in prompt
+        assert "orphaned_references: 1" in prompt
+        assert "Symbol 'foo' removed" in prompt
+        assert "missing_docstrings: 1" in prompt
+        assert "Class 'Bar'" in prompt
+        assert "tests/import-check: PASSED" in prompt
+
+    def test_prompt_builder_omits_sections_when_empty(self):
+        eng = ReviewEngine()
+        prompt = eng._build_review_prompt(
+            task_description="t",
+            developer_result="r",
+            file_changes_summary="",
+            previous_feedback="",
+        )
+        assert "## Plan" not in prompt
+        assert "## Automated Checks" not in prompt
+
+    def test_collect_automated_checks_empty_when_no_changes(self):
+        from infinidev.engine.analysis.review_engine import collect_automated_checks
+        checks = collect_automated_checks(
+            changed_files=[], file_tracker=None, verification_passed=True,
+        )
+        assert checks["verification_passed"] is True
+        assert checks["orphaned_references"] == []
+        assert checks["missing_docstrings"] == []
+
+    def test_maybe_emit_file_change_no_removed_symbols(self, tmp_path):
+        """When the tool result has no removed_symbols, tracker stays empty
+        for deletions (regular diff tracking still happens)."""
+        from infinidev.engine.file_change_tracker import FileChangeTracker
+        from infinidev.engine.tool_executor import maybe_emit_file_change
+
+        target = tmp_path / "clean.py"
+        target.write_text("def added():\n    pass\n")
+
+        tracker = FileChangeTracker()
+        result = json.dumps({
+            "file_path": str(target),
+            "action": "modified",
+            "size_bytes": 20,
+        })
+
+        maybe_emit_file_change(
+            tool_name="write_file",
+            arguments={"file_path": str(target), "content": "def added():\n    pass\n"},
+            result=result,
+            pre_content="",
+            tracker=tracker,
+            project_id=1,
+            agent_id="test-agent",
+        )
+
+        assert tracker.get_deleted_symbols() == {}
 
 
 class TestPhaseSettings:
