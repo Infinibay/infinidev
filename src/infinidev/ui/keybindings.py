@@ -111,7 +111,7 @@ FOOTER_HINTS = [
     ("Ctrl+S", "Save"),
     ("Ctrl+F", "Find"),
     ("Ctrl+Y", "Copy msg"),
-    ("Alt+Y", "Select msg"),
+    ("Esc Y", "Select msg"),
     ("F2", "Chat"),
     ("Esc", "Stop task"),
 ]

@@ -125,9 +125,9 @@ def create_chat_input(
         else:
             buf.insert_text("    ")  # normal tab = 4 spaces
 
-    @kb.add("escape")
+    @kb.add("escape", filter=Condition(lambda: is_autocomplete_visible is not None and is_autocomplete_visible()))
     def dismiss_autocomplete(event):
-        """Dismiss autocomplete menu."""
+        """Dismiss autocomplete menu when visible."""
         if on_autocomplete_dismiss:
             on_autocomplete_dismiss()
 
