@@ -876,29 +876,7 @@ class InfinidevApp:
                     self.invalidate()
             threading.Thread(target=_clear, daemon=True).start()
 
-    def copy_last_agent_message(self) -> None:
-        """Copy the last agent message to clipboard."""
-        from infinidev.ui.clipboard import copy_to_clipboard
-        from infinidev.ui.controls.message_widgets import _copy_highlight
-        import time as _time
-        for msg in reversed(self.chat_messages):
-            if msg.get("type") == "agent":
-                ok = copy_to_clipboard(msg.get("text", ""))
-                _copy_highlight[id(msg)] = (_time.monotonic(), ok)
-                self._on_copy_feedback(ok)
-                return
-        self.flash_status("No agent messages to copy")
 
-    def toggle_select_mode(self) -> None:
-        """Enter or exit message selection mode."""
-        ctrl = self._chat_history_control
-        if ctrl.select_mode:
-            ctrl.exit_select_mode()
-            self.flash_status("")
-        else:
-            ctrl.enter_select_mode()
-            self.flash_status("SELECT MODE: ↑/↓ navigate, Enter copy, Esc exit")
-        self.invalidate()
 
     # ── Status bar ───────────────────────────────────────────────────
 

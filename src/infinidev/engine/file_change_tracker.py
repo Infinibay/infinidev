@@ -73,9 +73,11 @@ class FileChangeTracker:
 
         # Truncate very long diffs
         max_lines = 500
-        if len(diff_lines) > max_lines:
+        total_lines = len(diff_lines)
+        if total_lines > max_lines:
+            truncated_count = total_lines - max_lines
             diff_lines = diff_lines[:max_lines]
-            diff_lines.append(f"\n... ({len(diff_lines)} more lines truncated)")
+            diff_lines.append(f"\n... ({truncated_count} more lines truncated)")
 
         return "\n".join(diff_lines)
 
