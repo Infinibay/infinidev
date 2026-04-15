@@ -71,13 +71,16 @@ class TestAnalysisResultFlow:
         result = AnalysisResult(action="proceed", original_input="test")
         assert result.flow == "develop"
 
-    def test_passthrough_has_flow_done(self):
+    def test_passthrough_routes_to_develop(self):
+        # Passthrough means "no spec needed" — the developer still runs
+        # with the raw user input. Trivial/conversational short-circuits
+        # are handled by the preamble fastpath, not by the analyst.
         engine = AnalysisEngine()
         result = engine._parse_response(
-            '{"action": "passthrough", "reason": "greeting"}', "hello"
+            '{"action": "passthrough", "reason": "no spec needed"}', "hello"
         )
         assert result.action == "passthrough"
-        assert result.flow == "done"
+        assert result.flow == "develop"
 
     def test_proceed_extracts_flow(self):
         engine = AnalysisEngine()

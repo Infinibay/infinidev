@@ -310,7 +310,7 @@ class AnalysisEngine:
                 action="passthrough",
                 original_input=original_input,
                 reason=data.get("reason", ""),
-                flow="done",
+                flow="develop",
             )
 
         elif action == "ask":
