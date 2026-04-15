@@ -67,14 +67,16 @@ tools right now. You will use ``step_complete`` exactly once and the \
 There are two equally valid options:
 
 Option A: status="done"
-  Pick this when the user's message is a reply that does NOT require \
-touching any file or running any command. Examples:
+  Pick this ONLY when the user's message is pure conversation that \
+requires zero knowledge of this specific project. Examples:
     • Greetings: "hola", "hi", "buenas tardes"
     • Thanks / acknowledgements: "gracias", "perfect", "ok"
     • Goodbyes: "chau", "bye", "see you"
-    • Smalltalk / questions about you: "who are you?", "are you there?"
-    • Simple non-code questions you can answer from memory:
-      "what is Python?", "what does this CLI do?"
+    • Smalltalk / questions about you as an assistant: "who are you?", \
+      "are you there?", "what can you do in general?"
+    • Generic factual questions with no project context needed: \
+      "what is Python?", "what is an AppImage?" (the DEFINITION, not \
+      "how do I make one FOR THIS project")
   When you pick "done", put the actual reply text in ``final_answer``. \
 The user sees ``final_answer`` and the conversation ends here. \
 Conversational replies are FIRST-CLASS responses — picking "done" is \
@@ -82,14 +84,24 @@ the correct, expected outcome for this category. It is NOT abandoning \
 the user.
 
 Option B: status="continue"
-  Pick this when the user's message asks you to look at code, change \
-code, run tests, refactor, debug, search the codebase, or in any way \
-inspect the project. Examples:
+  Pick this when the user's message is ANY request whose good answer \
+depends on THIS project's code, config, or setup. This includes \
+questions — questions are tasks too. Examples:
     • "fix the auth bug in src/auth.py"
     • "explain how the login flow works" (you need to read the code)
     • "add a unit test for parseDate"
     • "refactor verify_token"
     • "what's in this directory?"
+    • "how can I build for Linux?" / "¿cómo hago un AppImage?" \
+      (these need pyproject.toml, install.sh, packaging config — \
+      NOT a generic Wikipedia-style answer)
+    • "how does X work here?", "can this project do Y?", "what's the \
+      best way to add Z to this codebase?"
+
+  The decisive test: "would a good answer reference specific files, \
+commands, or patterns from THIS project?" If yes → continue. The user \
+is in Infinidev asking about their own repo — they want a project- \
+informed answer, not a generic tutorial.
   When you pick "continue", put a SHORT one-sentence preview of what \
 you're about to do in ``summary``. The user sees the summary as your \
 first message, then the system unlocks the rest of the toolbox \
