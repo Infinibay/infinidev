@@ -92,6 +92,14 @@ def _markdown_enabled() -> bool:
         return False
 
 
+def _side_by_side_enabled() -> bool:
+    try:
+        from infinidev.config.settings import settings
+        return settings.DIFF_DISPLAY_MODE == "side_by_side"
+    except Exception:
+        return False
+
+
 def _render_bordered_body(
     text: str, width: int,
     border_char: str, border_style: str, body_style: str, fill_style: str,
@@ -308,7 +316,10 @@ class DiffWidget:
     group_label = "Diffs"
 
     def render(self, msg: dict[str, Any], width: int) -> RenderResult:
-        from infinidev.ui.controls.file_diff import colorize_diff_fragments
+        from infinidev.ui.controls.file_diff import (
+            colorize_diff_fragments,
+            colorize_diff_side_by_side,
+        )
 
         header_text = msg.get("text", "")
         diff_text = msg.get("diff_text", "")
@@ -322,8 +333,13 @@ class DiffWidget:
         lines.append([(f"{DIFF_TITLE_FG} {title_bg} bold", f" {arrow} {header_text}{pad}")])
 
         if not collapsed and diff_text:
-            for diff_line in colorize_diff_fragments(diff_text):
-                lines.append(diff_line)
+            col_width = max(20, (width - 3) // 2)  # subtract separator width
+            if _side_by_side_enabled():
+                for diff_line in colorize_diff_side_by_side(diff_text, column_width=col_width):
+                    lines.append(diff_line)
+            else:
+                for diff_line in colorize_diff_fragments(diff_text):
+                    lines.append(diff_line)
 
         lines.append([("", "")])
 

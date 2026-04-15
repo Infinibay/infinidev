@@ -91,6 +91,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "UI": [
         ("MARKDOWN_MESSAGES", "Render LLM responses with markdown styling", "bool"),
+        ("DIFF_DISPLAY_MODE", "Diff display style (unified=git diff, side_by_side=columns)", "select:unified,side_by_side"),
     ],
 }
 

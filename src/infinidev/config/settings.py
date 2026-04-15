@@ -192,6 +192,7 @@ class Settings(BaseSettings):
 
     # UI
     MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling
+    DIFF_DISPLAY_MODE: str = "unified"  # "unified" (git diff) | "side_by_side"
 
     # Behavior Checkers (modular punish/promote scoring after each model message)
     BEHAVIOR_CHECKERS_ENABLED: bool = False  # Master toggle
