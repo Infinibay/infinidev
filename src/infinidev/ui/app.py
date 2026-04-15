@@ -879,9 +879,13 @@ class InfinidevApp:
     def copy_last_agent_message(self) -> None:
         """Copy the last agent message to clipboard."""
         from infinidev.ui.clipboard import copy_to_clipboard
+        from infinidev.ui.controls.message_widgets import _copy_highlight
+        import time as _time
         for msg in reversed(self.chat_messages):
             if msg.get("type") == "agent":
-                self._on_copy_feedback(copy_to_clipboard(msg.get("text", "")))
+                ok = copy_to_clipboard(msg.get("text", ""))
+                _copy_highlight[id(msg)] = (_time.monotonic(), ok)
+                self._on_copy_feedback(ok)
                 return
         self.flash_status("No agent messages to copy")
 

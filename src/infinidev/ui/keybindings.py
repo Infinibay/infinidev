@@ -7,8 +7,16 @@ respective control modules and are merged separately.
 
 from __future__ import annotations
 
+import time
+
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
+
+
+# ── Ctrl+C multi-press state ──────────────────────────────────────────
+_cc_stage: int = 0
+_cc_last: float = 0.0
+_CC_TIMEOUT: float = 2.0  # seconds before the sequence resets
 
 
 def create_global_keybindings(app_state) -> KeyBindings:
@@ -20,11 +28,70 @@ def create_global_keybindings(app_state) -> KeyBindings:
     """
     kb = KeyBindings()
 
+    # Reset the Ctrl+C counter whenever the user types in chat input.
+    def _reset_cc_on_input(_b) -> None:
+        global _cc_stage
+        _cc_stage = 0
+
+    try:
+        app_state._chat_buffer.on_text_changed += _reset_cc_on_input
+    except Exception:
+        pass
     @kb.add("c-c")
     def quit_(event):
-        """Exit the application."""
-        app_state.request_quit(event)
+        """Three-stage Ctrl+C:
 
+        *If text is selected in the buffer, copy it instead of quitting.*
+        Otherwise:
+        1st press — if chat input has text, clear it.
+        2nd press — show 'Press Ctrl+C again to quit'.
+        3rd press — actually quit.
+        Resets after 2 s or when the user types.
+        """
+        global _cc_stage, _cc_last
+        now = time.monotonic()
+
+        # Reset stage if too much time has passed
+        if now - _cc_last > _CC_TIMEOUT:
+            _cc_stage = 0
+
+        # ── Fallback: if the terminal lumped Ctrl+Shift+C into Ctrl+C,
+        #    copy the selection when present instead of clearing/quitting.
+        buf = app_state._chat_buffer
+        focused = event.app.current_buffer
+        if focused and focused.selection_state:
+            start = min(focused.selection_state.original_cursor_position,
+                        focused.cursor_position)
+            end = max(focused.selection_state.original_cursor_position,
+                      focused.cursor_position)
+            selected_text = focused.text[start:end]
+            if selected_text:
+                from infinidev.ui.clipboard import copy_to_clipboard
+                ok = copy_to_clipboard(selected_text)
+                app_state.flash_status("Copied to clipboard" if ok else "Copy failed")
+                return
+
+        if _cc_stage == 0:
+            if buf.text:
+                # Stage 0 → 1: clear the input
+                from prompt_toolkit.document import Document
+                buf.set_document(Document(""), bypass_readonly=True)
+                app_state.flash_status("Input cleared")
+                _cc_stage = 1
+            else:
+                # Input already empty, skip straight to hint
+                app_state.flash_status("Press Ctrl+C again to quit")
+                _cc_stage = 2
+        elif _cc_stage == 1:
+            # Stage 1 → 2: show quit hint
+            app_state.flash_status("Press Ctrl+C again to quit")
+            _cc_stage = 2
+        else:
+            # Stage 2 → quit
+            _cc_stage = 0
+            app_state.request_quit(event)
+
+        _cc_last = now
     @kb.add("c-e")
     def toggle_explorer(event):
         """Toggle the file explorer panel."""
@@ -103,7 +170,7 @@ def create_global_keybindings(app_state) -> KeyBindings:
 # ── Keybinding hints for the footer ────────────────────────────────────
 
 FOOTER_HINTS = [
-    ("Ctrl+C", "Exit"),
+    ("Ctrl+C", "Clear/Quit"),
     ("Ctrl+O", "Open file"),
     ("Ctrl+E", "Explorer"),
     ("F6", "Line #"),

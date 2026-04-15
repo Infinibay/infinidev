@@ -21,12 +21,21 @@ from infinidev.ui.theme import (
     NAME_COLORS,
 )
 
-# Copy button label shown on message headers
+# Copy button labels shown on message headers
 COPY_ICON = " [⧉] "
 COPY_ICON_STYLE = f"{TEXT_MUTED}"
+COPY_OK_ICON = " [✓ Copied] "
+COPY_OK_STYLE = "#00ff00 bold"
+COPY_FAIL_ICON = " [✗ Failed] "
+COPY_FAIL_STYLE = "#ff4444 bold"
+_COPY_FEEDBACK_DURATION = 2.0  # seconds the icon stays visible
 
 # Module-level callback set by the app — receives (ok: bool) after a copy
 _copy_feedback: Callable[[bool], None] | None = None
+
+# Tracks recently-copied messages: id(msg) → (timestamp, ok)
+import time as _time
+_copy_highlight: dict[int, tuple[float, bool]] = {}
 
 
 def set_copy_feedback(cb: Callable[[bool], None]) -> None:
@@ -230,14 +239,25 @@ class BorderedWidget:
         # Header line (with copy button on the right)
         suffix = " (pending):" if self.msg_type == "pending" else ":"
         header_text = f"{sender}{suffix}"
-        copy_label = COPY_ICON
+
+        # Check if this message was recently copied → show feedback icon
+        now = _time.monotonic()
+        hl = _copy_highlight.get(id(msg))
+        if hl and (now - hl[0]) < _COPY_FEEDBACK_DURATION:
+            if hl[1]:
+                copy_label, copy_style = COPY_OK_ICON, COPY_OK_STYLE
+            else:
+                copy_label, copy_style = COPY_FAIL_ICON, COPY_FAIL_STYLE
+        else:
+            copy_label, copy_style = COPY_ICON, COPY_ICON_STYLE
+
         header_used = 2 + len(header_text) + len(copy_label)
         gap = max(0, width - header_used)
         lines.append([
             (border_style, f"{self._border_char} "),
             (header_style, header_text),
             (fill_style, " " * gap),
-            (COPY_ICON_STYLE, copy_label),
+            (copy_style, copy_label),
         ])
 
         # Register header line (offset 0) as clickable → copy message text
@@ -248,6 +268,8 @@ class BorderedWidget:
             from infinidev.ui.clipboard import copy_to_clipboard
             ok = copy_to_clipboard(m.get("text", ""))
             log.debug("copy_to_clipboard returned %s, _copy_feedback=%s", ok, _copy_feedback is not None)
+            # Store highlight so next render shows ✓/✗ icon
+            _copy_highlight[id(m)] = (_time.monotonic(), ok)
             if _copy_feedback:
                 _copy_feedback(ok)
         clickable[0] = _copy_msg

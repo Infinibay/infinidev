@@ -392,8 +392,11 @@ class ChatHistoryControl(UIControl):
             return False
         msg = self._messages[self._selected_msg_index]
         from infinidev.ui.clipboard import copy_to_clipboard
-        from infinidev.ui.controls.message_widgets import _copy_feedback
+        from infinidev.ui.controls.message_widgets import _copy_feedback, _copy_highlight
+        import time as _time
         ok = copy_to_clipboard(msg.get("text", ""))
+        # Store highlight so next render shows ✓/✗ icon
+        _copy_highlight[id(msg)] = (_time.monotonic(), ok)
         if _copy_feedback:
             _copy_feedback(ok)
         self.exit_select_mode()
