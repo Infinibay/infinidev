@@ -13,7 +13,7 @@ from infinidev.tools.file._helpers import (
     guard_file_access,
     atomic_write,
     record_artifact_change,
-    validate_syntax_or_error,
+    check_syntax_warning,
 )
 from infinidev.tools.file.create_file_input import CreateFileInput
 
@@ -48,10 +48,8 @@ class CreateFileTool(InfinibayBaseTool):
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
 
-        # Pre-write syntax check (tree-sitter, language detected from path)
-        syntax_err = validate_syntax_or_error(self, file_path, content, operation="create_file")
-        if syntax_err:
-            return syntax_err
+        # Pre-write syntax check (tree-sitter) — advisory only, never blocks
+        syntax_warn = check_syntax_warning(self, file_path, content, operation="create_file")
 
         # Create parent directories
         parent = os.path.dirname(file_path)
@@ -79,11 +77,14 @@ class CreateFileTool(InfinibayBaseTool):
         record_artifact_change(self, file_path, "created", None, after_hash, size_bytes)
 
         self._log_tool_usage(f"Created {file_path} ({size_bytes} bytes)")
-        return self._success({
+        result = {
             "file_path": file_path,
             "action": "created",
             "size_bytes": size_bytes,
-        })
+        }
+        if syntax_warn:
+            result["syntax_warning"] = syntax_warn
+        return self._success(result)
 
     def _run_in_pod(self, file_path: str, content: str) -> str:
         """Create file via infinibay-file-helper inside the pod."""

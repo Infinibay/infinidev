@@ -14,7 +14,7 @@ from infinidev.tools.file._helpers import (
     guard_file_access,
     atomic_write,
     record_artifact_change,
-    validate_syntax_or_error,
+    check_syntax_warning,
     detect_silent_deletions,
     deletion_warning_text,
 )
@@ -70,11 +70,9 @@ class WriteFileTool(InfinibayBaseTool):
         # append (mode='a') is typically used for logs/text accumulation
         # where validating a fragment in isolation would cause false positives.
         deleted_symbols: list[str] = []
+        syntax_warn: str | None = None
         if mode == "w":
-            syntax_err = validate_syntax_or_error(self, file_path, content, operation="write_file")
-            if syntax_err:
-                return syntax_err
-            # Silent deletion check (only on full overwrite of an existing file)
+            syntax_warn = check_syntax_warning(self, file_path, content, operation="write_file")
             if old_text:
                 deleted_symbols = detect_silent_deletions(file_path, old_text, content)
 
@@ -108,7 +106,6 @@ class WriteFileTool(InfinibayBaseTool):
         action = "modified" if before_hash else "created"
         record_artifact_change(self, file_path, action, before_hash, after_hash, size_bytes)
 
-        self._log_tool_usage(f"Wrote {file_path} ({size_bytes} bytes, {action})")
         result = {
             "file_path": file_path,
             "action": action,
@@ -119,6 +116,9 @@ class WriteFileTool(InfinibayBaseTool):
             result["removed_symbols"] = deleted_symbols
         if reason:
             result["reason"] = reason
+        if syntax_warn:
+            result["syntax_warning"] = syntax_warn
+        self._log_tool_usage(f"Wrote {file_path} ({size_bytes} bytes, {action})")
         return self._success(result)
 
     def _run_in_pod(self, file_path: str, content: str, mode: str) -> str:

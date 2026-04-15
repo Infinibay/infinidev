@@ -255,6 +255,14 @@ class InfinibayBaseTool(BaseTool, ABC):
         """Return a JSON error string for consistent error formatting."""
         return json.dumps({"error": message})
 
+    def _warning(self, message: str) -> str:
+        """Return a JSON warning string for advisory messages.
+
+        Unlike _error, this does not block operations — it informs the LLM
+        of potential issues (e.g., syntax errors that might be false positives).
+        """
+        return json.dumps({"warning": message})
+
     def _success(self, data: Any) -> str:
         """Return a JSON success string."""
         if isinstance(data, str):

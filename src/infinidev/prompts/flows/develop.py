@@ -192,9 +192,6 @@ _DEVELOP_TOOL_USAGE_FULL = """\
 - **edit_symbol**(symbol, new_code): Replace a function/method body by symbol name.
   Use for editing whole methods when you know the symbol name.
 - **add_symbol** / **remove_symbol**: Add or remove functions/methods by symbol name.
-- **add_content_after_line** / **add_content_before_line**: Insert new lines at a position.
-- **apply_patch**(patch): Apply a unified diff to one or more files. Use for multi-file
-  changes when you can express the fix as a diff.
 - **execute_command**: Run shell commands — build, test, lint, install.
 - **git_diff** / **git_status**: Review your changes. Do not commit or push unless asked.
 - **add_note**(note): Save key information for later steps. Your context resets

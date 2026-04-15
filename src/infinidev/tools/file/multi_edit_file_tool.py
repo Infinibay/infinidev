@@ -13,7 +13,7 @@ from infinidev.tools.file._helpers import (
     guard_file_access,
     atomic_write,
     record_artifact_change,
-    validate_syntax_or_error,
+    check_syntax_warning,
     detect_silent_deletions,
     deletion_warning_text,
 )
@@ -134,10 +134,8 @@ class MultiEditFileTool(InfinibayBaseTool):
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
 
-        # Pre-write syntax check on the post-merge result
-        syntax_err = validate_syntax_or_error(self, file_path, new_content, operation="multi_edit_file")
-        if syntax_err:
-            return syntax_err
+        # Pre-write syntax check on the post-merge result (advisory only)
+        syntax_warn = check_syntax_warning(self, file_path, new_content, operation="multi_edit_file")
 
         # Detect silent symbol deletions across the merged result
         deleted_symbols = detect_silent_deletions(file_path, content, new_content)
@@ -170,5 +168,7 @@ class MultiEditFileTool(InfinibayBaseTool):
             result["removed_symbols"] = deleted_symbols
         if reason:
             result["reason"] = reason
+        if syntax_warn:
+            result["syntax_warning"] = syntax_warn
         return self._success(result)
 

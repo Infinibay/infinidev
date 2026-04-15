@@ -150,9 +150,7 @@ _TOOL_EVENT_MAP: dict[str, tuple[str, str, float]] = {
     # File writes
     "replace_lines":    ("file_write",   "file", 2.0),
     "create_file":      ("file_write",   "file", 2.0),
-    "edit_file":        ("file_write",   "file", 2.0),
     "multi_edit_file":  ("file_write",   "file", 2.0),
-    "apply_patch":      ("file_write",   "file", 2.0),
     "add_content_above": ("file_write",  "file", 2.0),
     "add_content_below": ("file_write",  "file", 2.0),
     # Symbol reads

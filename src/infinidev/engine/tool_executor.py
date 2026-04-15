@@ -21,7 +21,11 @@ from infinidev.engine.loop.tools import execute_tool_call
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
-# Tools that modify files — tracked for diff generation
+# Tools that modify files — tracked for diff generation.
+# ``edit_file`` and ``apply_patch`` are included as the raw names the
+# model may emit before the hallucination alias rewrites them to
+# ``replace_lines``; keeping them here ensures batching and diff
+# capture see the write intent even on the unresolved name.
 FILE_CHANGE_TOOLS = {
     "edit_file", "write_file", "multi_edit_file", "apply_patch",
     "create_file", "replace_lines",
@@ -227,18 +231,6 @@ def _cache_move_symbol(state, path, args, result, ws):
         pass
 
 
-def _cache_apply_patch(state, path, args, result, ws):
-    import os as _os
-    try:
-        res = json.loads(result) if isinstance(result, str) else result
-        if isinstance(res, dict) and "files_modified" in res:
-            for fpath in res["files_modified"]:
-                abs_path = _os.path.join(ws, fpath) if not _os.path.isabs(fpath) else fpath
-                _reread_and_cache(state, abs_path)
-    except Exception:
-        pass
-
-
 def _cache_list_dir(state, path, args, result, ws):
     if not _is_error_result(result):
         state.cache_file(f"[dir] {path}", result)
@@ -296,7 +288,6 @@ _CACHE_HANDLERS = {
     "remove_symbol": _cache_symbol_edit,
     "rename_symbol": _cache_rename_symbol,
     "move_symbol": _cache_move_symbol,
-    "apply_patch": _cache_apply_patch,
     "list_directory": _cache_list_dir,
     "glob": _cache_glob,
     "code_search": _cache_code_search,

@@ -34,10 +34,6 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Insert content before a specific line",
         "add_content_before_line(file_path='src/main.py', line_number=10, content='new line')",
     ),
-    "apply_patch": (
-        "Apply a unified diff patch to one or more files",
-        "apply_patch(patch='--- a/file\\n+++ b/file\\n@@ ... @@\\n...')",
-    ),
     "list_directory": (
         "List directory contents",
         "list_directory(file_path='src/')",
@@ -194,7 +190,7 @@ def build_tool_usage_section(available_tools: set[str]) -> str:
                      "project_structure", "analyze_code"]),
         ("Writing", ["create_file", "replace_lines", "edit_symbol",
                      "add_symbol", "remove_symbol", "add_content_after_line",
-                     "add_content_before_line", "apply_patch"]),
+                     "add_content_before_line"]),
         ("Execution", ["execute_command", "code_interpreter"]),
         ("Git", ["git_branch", "git_commit", "git_diff", "git_status"]),
         ("Web", ["web_search", "web_fetch"]),

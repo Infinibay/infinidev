@@ -2,8 +2,9 @@
 
 A single, dependency-free entry point for "would this string parse cleanly
 in language X?". Used by file-write tools (replace_lines, create_file,
-edit_file, multi_edit_file, apply_patch) to refuse edits that would leave
-the file in a broken-syntax state — *before* writing to disk.
+write_file, multi_edit_file) to surface syntax issues as advisory warnings
+on the tool response — false positives (Jest mocks, TSX experimental
+syntax) mean we never block the write.
 
 Design notes:
   * Tree-sitter is error-tolerant: it parses anything and marks invalid

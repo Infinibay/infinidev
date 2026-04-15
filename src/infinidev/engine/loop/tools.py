@@ -68,6 +68,7 @@ _TOOL_ALIASES: dict[str, str] = {
 _HALLUCINATION_MAP: dict[str, str] = {
     "write_file": "create_file",
     "edit_file": "replace_lines",
+    "apply_patch": "replace_lines",
     "read": "read_file",
     "search": "code_search",
     "run": "execute_command",

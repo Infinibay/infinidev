@@ -76,8 +76,7 @@ class LoopState(BaseModel):
     # spammed with the same advice.
     regression_signaled: bool = False
     # Paths of files written in the current step (create_file,
-    # replace_lines, edit_file, multi_edit_file, apply_patch,
-    # add_content_*). Consumed by the
+    # replace_lines, multi_edit_file, add_content_*). Consumed by the
     # ``similarity_after_write`` detector, which checks whether any
     # of the freshly-indexed methods look suspiciously similar to
     # methods elsewhere in the project — if so, guidance is queued

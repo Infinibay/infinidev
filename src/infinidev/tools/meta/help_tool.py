@@ -14,9 +14,9 @@ from infinidev.tools.meta.help_input import HelpInput
 # ---------------------------------------------------------------------------
 
 _CATEGORY_INDEX = {
-    "file": ["read_file", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "apply_patch", "list_directory", "glob", "code_search"],
+    "file": ["read_file", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "list_directory", "glob", "code_search"],
     "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure", "analyze_code"],
-    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "apply_patch", "rename_symbol", "move_symbol"],
+    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "rename_symbol", "move_symbol"],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
     "shell": ["execute_command", "code_interpreter"],
     "knowledge": ["record_finding", "read_findings", "search_findings", "search_knowledge"],
@@ -58,9 +58,6 @@ FILE TOOLS — Reading and creating files
   add_content_before_line(file_path, line_number, content)
     Insert content before a specific line.
 
-  apply_patch(patch, strip?)
-    Apply a unified diff to one or more files. See help("apply_patch").
-
   list_directory(file_path?)
     List files and directories. Defaults to workspace root.
 
@@ -92,10 +89,7 @@ TWO APPROACHES:
    add_content_after_line(file_path, line_number, content)
    add_content_before_line(file_path, line_number, content)
 
-4. PATCH (multi-file changes as unified diff):
-   apply_patch(patch, strip?) — Apply a unified diff to one or more files
-
-5. REFACTORING (project-wide operations):
+4. REFACTORING (project-wide operations):
    rename_symbol(symbol, new_name)  — Rename everywhere: definition + all references + imports
    move_symbol(symbol, target_file) — Move to another file/class, update imports
 
@@ -405,47 +399,6 @@ EXAMPLES:
 
   # Add imports before the first function definition
   add_content_before_line(file_path="src/utils.py", line_number=5, content="from typing import Optional\\n")""",
-
-    "apply_patch": """\
-apply_patch(patch, strip?)
-
-Apply a unified diff patch to one or more files. Like running `patch -p1`.
-
-PARAMS:
-  patch (str, required) — Unified diff string (like output of `git diff`).
-                          Must include diff headers (--- a/file, +++ b/file) and hunks (@@ ... @@).
-  strip (int, optional) — Number of leading path components to strip (like `patch -pN`). Default 1.
-
-EXAMPLES:
-  # Single file change
-  apply_patch(patch=\"\"\"--- a/src/auth.py
-+++ b/src/auth.py
-@@ -10,3 +10,4 @@
-     def verify(self):
--        return True
-+        if not self.token:
-+            return False
-+        return self._check(self.token)
-\"\"\")
-
-  # Multi-file change in one call
-  apply_patch(patch=\"\"\"--- a/src/auth.py
-+++ b/src/auth.py
-@@ -1,3 +1,4 @@
- import os
-+import jwt
- from .base import Base
---- a/src/config.py
-+++ b/src/config.py
-@@ -5,1 +5,1 @@
--TIMEOUT = 30
-+TIMEOUT = 60
-\"\"\")
-
-TIPS:
-  - Use for multi-file changes when you can express the fix as a diff
-  - Context lines (unchanged) help locate the right position
-  - strip=0 if paths are already correct (no a/ b/ prefix)""",
 
     "git_status": """\
 git_status()

@@ -79,27 +79,25 @@ def deletion_warning_text(removed: list[str], file_path: str) -> str:
     )
 
 
-def validate_syntax_or_error(
+def check_syntax_warning(
     tool: InfinibayBaseTool,
     file_path: str,
     new_content: str,
     *,
     operation: str = "write",
 ) -> str | None:
-    """Pre-write syntax check using tree-sitter.
+    """Pre-write syntax check via tree-sitter — returns an advisory warning string.
 
-    Runs ``code_intel.syntax_check.check_syntax`` against *new_content*
-    using the language detected from *file_path*. Returns an error-JSON
-    string (built via ``tool._error``) when the proposed content has
-    syntax errors, otherwise None. Honors the
-    ``LOOP_VALIDATE_SYNTAX_BEFORE_WRITE`` setting and silently skips
-    when tree-sitter is unavailable, the language is unsupported, or
-    the content is empty — never blocks legitimate writes on infrastructure
-    failures.
+    Returns a human-readable warning body when tree-sitter flags issues in
+    *new_content*, or ``None`` when the content parses cleanly, the language
+    is unsupported, tree-sitter is unavailable, or the check is disabled via
+    ``LOOP_VALIDATE_SYNTAX_BEFORE_WRITE``. The result is advisory only —
+    callers include it in the success response; it never blocks the write.
 
-    The error message lists each issue with line/column and a short
-    snippet so the model can fix and retry in a single call instead of
-    discovering the breakage from a downstream pytest failure.
+    Previously this was ``validate_syntax_or_error`` and returned a JSON
+    error that refused the write, but false positives (Jest mocks, TSX
+    experimental syntax, TS project references) were rejecting legitimate
+    edits — hence the demotion to warning.
     """
     try:
         from infinidev.config.settings import settings
@@ -114,18 +112,15 @@ def validate_syntax_or_error(
             from infinidev.code_intel.syntax_check import check_syntax, format_issues
             issues = check_syntax(new_content, file_path=file_path)
         except Exception:
-            return None  # never block writes on a tree-sitter failure
-
+            return None
         if not issues:
             return None
-
         body = format_issues(issues)
-        msg = (
-            f"Refusing {operation}: the new content for {file_path} has "
-            f"{len(issues)} syntax error(s) detected by tree-sitter. Fix and retry.\n"
-            f"{body}"
+        return (
+            f"tree-sitter flagged {len(issues)} potential issue(s) in {file_path}. "
+            "These may be false positives (Jest mocks, TS project config, "
+            f"experimental syntax) — review before trusting:\n{body}"
         )
-        return tool._error(msg)
 
 
 def atomic_write(file_path: str, content: str) -> None:

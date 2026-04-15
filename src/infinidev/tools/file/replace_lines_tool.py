@@ -12,7 +12,7 @@ from infinidev.tools.file._helpers import (
     guard_file_access,
     atomic_write,
     record_artifact_change,
-    validate_syntax_or_error,
+    check_syntax_warning,
     detect_silent_deletions,
     deletion_warning_text,
 )
@@ -101,11 +101,10 @@ class ReplaceLinesTool(InfinibayBaseTool):
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
 
-        # Pre-write syntax check on the SPLICED result (not just the new
-        # content) so we catch errors at the seam between old and new lines.
-        syntax_err = validate_syntax_or_error(self, path, new_content, operation="replace_lines")
-        if syntax_err:
-            return syntax_err
+        # Pre-write syntax check on the SPLICED result (advisory only) so
+        # the model can notice seam-level errors between old and new lines
+        # without blocking the write on tree-sitter false positives.
+        syntax_warn = check_syntax_warning(self, path, new_content, operation="replace_lines")
 
         # Detect symbols (functions/classes/methods) that disappeared
         # between the old and the new content. Soft signal — we still
@@ -144,5 +143,7 @@ class ReplaceLinesTool(InfinibayBaseTool):
         if (warn := deletion_warning_text(deleted_symbols, path)):
             result["warning"] = warn
             result["removed_symbols"] = deleted_symbols
+        if syntax_warn:
+            result["syntax_warning"] = syntax_warn
         return self._success(result)
 

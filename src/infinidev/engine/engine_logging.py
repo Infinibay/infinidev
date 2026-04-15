@@ -39,9 +39,7 @@ STATUS_ICON = {
 TOOL_DETAIL_KEYS: dict[str, list[str]] = {
     "read_file": ["path", "file_path"],
     "write_file": ["path", "file_path"],
-    "edit_file": ["path", "file_path"],
     "multi_edit_file": ["path", "file_path"],
-    "apply_patch": ["patch"],
     "list_directory": ["path", "directory"],
     "code_search": ["query", "pattern", "search_query"],
     "glob": ["pattern", "glob_pattern"],

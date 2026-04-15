@@ -1,8 +1,6 @@
-"""Infinidev Tool Registry."""
-
 from infinidev.tools.file import (
-    ReadFileTool, WriteFileTool, EditFileTool, MultiEditFileTool,
-    ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool,
+    ReadFileTool, WriteFileTool, MultiEditFileTool,
+    ListDirectoryTool, CodeSearchTool, GlobTool,
     CreateFileTool, ReplaceLinesTool,
     AddContentAfterLineTool, AddContentBeforeLineTool,
 )
@@ -34,7 +32,7 @@ from infinidev.tools.code_intel import (
     IterSymbolsTool, ProjectStatsTool,
 )
 
-FILE_TOOLS = [ReadFileTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ApplyPatchTool, ListDirectoryTool, CodeSearchTool, GlobTool]
+FILE_TOOLS = [ReadFileTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ListDirectoryTool, CodeSearchTool, GlobTool]
 META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool, DeclareTestCommandTool, TailTestOutputTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
