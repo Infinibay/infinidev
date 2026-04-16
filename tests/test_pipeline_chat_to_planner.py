@@ -110,14 +110,16 @@ class TestChatRespondShortCircuits:
             planner_calls.append(kwargs)
             raise AssertionError("Planner must not run on respond")
 
-        # Patch the names as they're bound inside pipeline (top-level
-        # imports), not the source modules — that's what run_task sees.
+        # Patch the SOURCE modules: run_task imports both functions
+        # lazily (local `from ... import` inside the body) to break a
+        # circular import. Each call re-reads the current module state,
+        # so monkeypatching the source module is what takes effect.
         monkeypatch.setattr(
-            "infinidev.engine.orchestration.pipeline.run_chat_agent",
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
             _chat_respond,
         )
         monkeypatch.setattr(
-            "infinidev.engine.orchestration.pipeline.run_planner",
+            "infinidev.engine.analysis.planner.run_planner",
             _planner_spy,
         )
 
@@ -175,11 +177,11 @@ class TestEscalateRunsFullPipeline:
             return expected_plan
 
         monkeypatch.setattr(
-            "infinidev.engine.orchestration.pipeline.run_chat_agent",
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
             _chat_escalate,
         )
         monkeypatch.setattr(
-            "infinidev.engine.orchestration.pipeline.run_planner", _planner,
+            "infinidev.engine.analysis.planner.run_planner", _planner,
         )
 
         hooks = _RecordingHooks()
@@ -230,11 +232,11 @@ class TestReviewOnlyRunsOnFileChanges:
         plan = Plan(overview="explain", steps=[PlanStepSpec(title="x")])
 
         monkeypatch.setattr(
-            "infinidev.engine.orchestration.pipeline.run_chat_agent",
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
             lambda *a, **kw: ChatAgentResult(kind="escalate", escalation=escalation),
         )
         monkeypatch.setattr(
-            "infinidev.engine.orchestration.pipeline.run_planner",
+            "infinidev.engine.analysis.planner.run_planner",
             lambda *a, **kw: plan,
         )
 
