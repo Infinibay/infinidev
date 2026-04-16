@@ -111,21 +111,9 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="https://api.moonshot.ai/v1",
         model_list_format="openai",
         static_models=[
-            "kimi-k2.6-preview",
             "kimi-k2.5",
             "kimi-k2-thinking", "kimi-k2-thinking-turbo",
             "kimi-k2-0905-preview", "kimi-k2-turbo-preview",
-        ],
-    ),
-    "kimi_coding": ProviderConfig(
-        id="kimi_coding",
-        display_name="Kimi Code Plan",
-        prefix="moonshot/",
-        default_base_url="https://api.kimi.com/coding/v1",
-        model_list_format="openai",
-        is_native=False,
-        static_models=[
-            "kimi-for-coding",
         ],
     ),
     "minimax": ProviderConfig(
