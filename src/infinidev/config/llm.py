@@ -264,6 +264,15 @@ def get_litellm_params() -> dict[str, Any]:
     if settings.LLM_PROVIDER == "ollama" and settings.OLLAMA_NUM_CTX > 0:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
 
+    # Pin the developer loop temperature. Without this, local Ollama models
+    # fall back to their Modelfile default (often 0.8–1.0), which destabilises
+    # tool-calling JSON and mid-edit structured output. Stages that want a
+    # different value (chat_agent, planner, review) use `setdefault` on top
+    # of a fresh call dict, so they are unaffected. Set LLM_TEMPERATURE < 0
+    # to opt out and defer to the model/provider default.
+    if settings.LLM_TEMPERATURE >= 0:
+        params["temperature"] = float(settings.LLM_TEMPERATURE)
+
     # Identify Infinidev to providers via HTTP headers.
     # Providers track client identity for analytics, rate-limit fairness,
     # and partnership eligibility.

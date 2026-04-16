@@ -234,9 +234,8 @@ Source material:
 
         try:
             response = litellm.completion(
-                **params,
+                **{**params, "temperature": 0.1},
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
             )
             text = response.choices[0].message.content.strip()
             start = text.find("[")
@@ -288,9 +287,8 @@ Source material (extract relevant information for "{title}"):
 
             try:
                 response = litellm.completion(
-                    **params,
+                    **{**params, "temperature": 0.3},
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
                 )
                 content = response.choices[0].message.content.strip()
             except Exception as e:

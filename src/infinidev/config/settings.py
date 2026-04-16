@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = "ollama"
     LLM_TIMEOUT: int = 1800  # Request timeout in seconds (default 30 min for large local models)
     LLM_NUM_RETRIES: int = 3  # Retry transient provider errors (OpenRouter mid-stream drops, 5xx, timeouts)
+    LLM_TEMPERATURE: float = 0.2  # Default temp for the developer loop. Low values favour reliable tool-calling and deterministic edits. Set < 0 to defer to the model/provider default.
     OLLAMA_NUM_CTX: int = 16384  # Context window for Ollama models (0 = use model default)
 
     # Thinking / Reasoning
