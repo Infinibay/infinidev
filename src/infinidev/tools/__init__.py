@@ -21,6 +21,7 @@ from infinidev.tools.knowledge import (
     SearchKnowledgeTool, SummarizeFindingsTool,
 )
 from infinidev.tools.chat import SendMessageTool
+from infinidev.tools.chat_agent import RespondTool, EscalateTool
 from infinidev.tools.docs import DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool
 from infinidev.tools.code_intel import (
     FindDefinitionTool, FindReferencesTool, ListSymbolsTool, SearchSymbolsTool,
@@ -44,6 +45,10 @@ KNOWLEDGE_TOOLS = [
     SearchKnowledgeTool, SummarizeFindingsTool,
 ]
 CHAT_TOOLS = [SendMessageTool]
+# Exclusive to the chat agent tier — NOT bound to the developer.
+# These are schema-level terminators (like step_complete); the chat
+# orchestrator parses their args directly from the LLM response.
+CHAT_AGENT_TOOLS = [RespondTool, EscalateTool]
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
 CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool, FindSimilarMethodsTool, SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool]
 
@@ -79,14 +84,18 @@ def get_tools_for_role(role: str, *, small_model: bool = False) -> list:
     — prompt rules alone cannot stop a model from calling a write tool
     if the schema exposes it.
     """
+    # CHAT_AGENT_TOOLS (respond, escalate) are NOT in the developer
+    # toolset — they're exclusive to the chat agent tier. The developer
+    # uses step_complete for termination; the chat agent uses respond
+    # and escalate.
     all_tool_classes = FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS + DOCS_TOOLS + CODE_INTEL_TOOLS + META_TOOLS
     if role == "chat_agent":
         # Instantiate each tool and keep only the read-only ones. Pydantic
         # moves class-level field defaults into model_fields so getattr on
         # the class returns the descriptor rather than the default value —
         # instantiating is the reliable way to read is_read_only.
-        instances = [cls() for cls in all_tool_classes]
-        return [t for t in instances if t.is_read_only]
+        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
+        return read_only + [cls() for cls in CHAT_AGENT_TOOLS]
     if small_model:
         return [cls() for cls in SMALL_MODEL_TOOLS]
     return [cls() for cls in all_tool_classes]
