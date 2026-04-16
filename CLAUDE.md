@@ -30,22 +30,47 @@ Settings live at `~/.infinidev/settings.json` and are reloaded on each interacti
 
 ## Architecture
 
-### Loop Engine (`engine/loop_engine.py`)
+### Pipeline (`engine/orchestration/pipeline.py`)
 
-The core is a **plan-execute-summarize** cycle, not a ReAct loop:
+Every user turn runs through a **chat-agent-first** pipeline:
 
-1. **Plan** — LLM produces 2-3 initial steps from the user instruction
-2. **Execute** — One step at a time, up to 4 tool calls per step
-3. **Summarize** — LLM produces a ~50-token summary; raw tool output is discarded
-4. **Repeat** — Prompt is rebuilt from scratch each iteration using only compact summaries
+```
+user message
+  ↓
+ChatAgent (read-only, default)         ← orchestration/chat_agent.py
+  ↓ respond? return reply, done.
+  ↓ escalate → EscalationPacket
+AnalystPlanner                         ← analysis/planner.py
+  ↓ emits Plan(overview, steps[])
+Gather (optional, develop flow)        ← gather/runner.py
+  ↓
+LoopEngine.execute(initial_plan=plan)  ← loop/engine.py
+  ↓
+Review (runs if files changed)         ← analysis/review_engine.py
+```
 
-The LLM signals step completion via a `step_complete` tool call with `status` (continue/done/blocked), `summary`, and optional plan modifications (add/modify/remove steps).
+The `ChatAgent` owns a short (~5 iteration) read-only LLM loop with
+the `respond`/`escalate` terminator tools. The `AnalystPlanner` owns a
+budgeted loop with the `emit_plan` terminator. Neither uses the
+LoopEngine — they call litellm directly; the LoopEngine is reserved
+for the developer's heavy plan-execute-summarize loop.
+
+### Loop Engine (`engine/loop/engine.py`)
+
+The developer stage is a **plan-execute-summarize** cycle, not a ReAct loop:
+
+1. **Plan** — either seeded upfront from `initial_plan` (chat-agent-first path, steps marked `user_approved=True`) or bootstrapped by the LLM via `add_step` calls (legacy PhaseEngine path).
+2. **Execute** — One step at a time, up to 4 tool calls per step.
+3. **Summarize** — LLM produces a ~50-token summary; raw tool output is discarded.
+4. **Repeat** — Prompt is rebuilt from scratch each iteration using only compact summaries.
+
+The LLM signals step completion via a `step_complete` tool call with `status` (continue/done/blocked), `summary`, and optional plan modifications (add/modify/remove steps). `user_approved` steps are protected — `apply_operations` rejects remove/modify on them so the LLM cannot rewrite an analyst-produced plan mid-execution.
 
 **Dual tool-calling modes:** The engine auto-detects whether the LLM supports native function calling (FC mode) or falls back to parsing tool calls from text JSON (manual mode). Detection happens at startup via `config/model_capabilities.py`.
 
 ### Prompt Construction
 
-Every iteration builds an XML-structured prompt: `<task>`, `<plan>`, `<previous-actions>`, `<current-action>`, `<next-actions>`, `<expected-output>`. The protocol rules are in `prompts/shared.py` as `LOOP_PROTOCOL`.
+Every iteration builds an XML-structured prompt: `<task>`, `<plan-overview>` (stable prose, set once by the planner), `<plan>` (step list), `<previous-actions>`, `<current-action>` (active step's full `detail`), `<next-actions>`, `<expected-output>`. The protocol rules are in `prompts/shared.py` as `LOOP_PROTOCOL`. Per-step `detail` renders ONLY for the active step to keep context compact.
 
 ### Tools (`tools/`)
 
@@ -58,6 +83,10 @@ Categories:
 - **shell**: `execute_command`, `code_interpreter`
 - **knowledge**: `record_finding`, `read_findings`, `search_findings` (with semantic dedup)
 - **meta**: `help` (dynamic tool documentation)
+- **chat_agent** (tier-exclusive): `respond`, `escalate` — terminators for the chat agent's loop; never bound to the developer.
+- **planner** (tier-exclusive): `emit_plan` — the planner's single-shot terminator that produces the `Plan` artifact.
+
+The base class exposes `is_read_only: bool = False`. The 18 pure-read tools (file reads, code-intel lookups, git diff/status, findings reads) override it to `True`. `get_tools_for_role("chat_agent")` and `get_tools_for_role("planner")` filter the full toolset by this attribute — the schema passed to LiteLLM is the security boundary, not prompt rules.
 
 Key tool design: `read_file` auto-indexes files via tree-sitter for code intelligence. `replace_lines` uses deterministic line-range replacement (no text matching). Symbol tools (`edit_symbol`, `add_symbol`, `remove_symbol`) use the code index to locate symbols by qualified name.
 

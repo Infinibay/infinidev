@@ -223,6 +223,70 @@ class TestGracefulFailureModes:
         assert "problema" in result.reply.lower() or "error" in result.reply.lower()
 
 
+class TestLanguageAwareFallbacks:
+    """The fallback-respond paths bypass the LLM, so they must localize
+    themselves. English/Spanish coverage only — matches what the system
+    prompt tells the model to handle."""
+
+    def test_spanish_input_gets_spanish_fallback(self, patch_litellm):
+        patch_litellm([])  # no LLM call — empty_input path
+        result = run_chat_agent("")
+        # Empty short-circuits to "(empty message)" regardless of lang.
+        assert result.reply == "(empty message)"
+
+    def test_max_iter_spanish(self, patch_litellm):
+        patch_litellm([
+            _response([_tc("list_directory", {"file_path": "."}, f"tc-{i}")])
+            for i in range(5)
+        ])
+        result = run_chat_agent("¿qué hace este proyecto?", max_iterations=5)
+        assert result.kind == "respond"
+        assert "reformul" in result.reply.lower()
+
+    def test_max_iter_english(self, patch_litellm):
+        patch_litellm([
+            _response([_tc("list_directory", {"file_path": "."}, f"tc-{i}")])
+            for i in range(5)
+        ])
+        result = run_chat_agent("what does this project do?", max_iterations=5)
+        assert result.kind == "respond"
+        assert "circles" in result.reply.lower() or "rephrase" in result.reply.lower()
+
+    def test_llm_exception_english_fallback(self, patch_litellm, monkeypatch):
+        patch_litellm([])
+        import litellm as _lit
+        monkeypatch.setattr(_lit, "completion", lambda **kw: (_ for _ in ()).throw(RuntimeError("x")))
+        result = run_chat_agent("do something", max_iterations=3)
+        assert result.kind == "respond"
+        # English input → English fallback, no Spanish characters.
+        assert not any(ch in result.reply for ch in "¿¡ñ")
+
+
+class TestSingleUserMessage:
+    """Two consecutive role='user' messages trip some providers; we
+    merge history + input into one."""
+
+    def test_only_one_user_message_sent(self, patch_litellm, monkeypatch):
+        # Stub history to make sure it's non-empty.
+        monkeypatch.setattr(
+            "infinidev.db.service.get_recent_turns_full",
+            lambda *a, **kw: [("user", "prior msg"), ("assistant", "prior reply")],
+        )
+        scripted = patch_litellm([
+            _response([_tc("respond", {"message": "ok"})]),
+        ])
+        run_chat_agent("now?", session_id="test-session")
+        msgs = scripted.calls[0]["messages"]
+        user_msgs = [m for m in msgs if m["role"] == "user"]
+        assert len(user_msgs) == 1, (
+            f"Expected 1 user message, got {len(user_msgs)}"
+        )
+        # Both the snapshot AND the current input must be in it.
+        content = user_msgs[0]["content"]
+        assert "prior msg" in content
+        assert "now?" in content
+
+
 class TestToolboxIntegrity:
     def test_write_tools_absent_from_llm_schema(self, patch_litellm):
         scripted = patch_litellm([

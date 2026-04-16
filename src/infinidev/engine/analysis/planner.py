@@ -236,21 +236,24 @@ def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
 def _fallback_plan(escalation: EscalationPacket, reason: str) -> Plan:
     """Last-resort plan: one step, carrying the user's request as-is.
 
-    This path is a safety net; it should not fire in healthy runs.
+    This path is a safety net; it should not fire in healthy runs. The
+    reason is LOGGED, not embedded in the overview, because the overview
+    is rendered every iteration of the developer loop and repeating a
+    debug string as context would confuse the model.
     """
-    overview = (
-        f"Fallback plan — {reason}. Executing the user's request "
-        f"directly:\n\n{escalation.user_request}"
-    )
+    logger.warning("planner falling back: reason=%s", reason)
     return Plan(
-        overview=overview,
+        overview=(
+            "Carry out the user's request directly. No structured plan "
+            "was produced; the developer should investigate and execute "
+            "based on the original request and the chat agent's "
+            "understanding."
+        ),
         steps=[PlanStepSpec(
             title="Execute user request",
             detail=(
-                "No structured plan was produced by the planner. "
-                "Read the user request and chat agent's understanding; "
-                "carry out the work and verify with tests where "
-                f"applicable.\n\nunderstanding: {escalation.understanding}"
+                f"User request: {escalation.user_request}\n\n"
+                f"Chat agent's understanding: {escalation.understanding}"
             ),
             expected_output="Request fulfilled; user verifies outcome.",
         )],

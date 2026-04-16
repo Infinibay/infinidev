@@ -162,9 +162,12 @@ class TestDefensiveFallbacks:
             })]),
         ])
         plan = run_planner(_sample_escalation())
-        # Fallback plan carries the user's request as overview context.
-        assert "arreglá el bug" in plan.overview
+        # Fallback plan has a neutral overview (no debug-reason prose that
+        # would repeat every iteration as <plan-overview>). The user's
+        # original request lives in the step's detail instead.
+        assert "Carry out the user's request" in plan.overview
         assert len(plan.steps) == 1
+        assert "arreglá el bug" in plan.steps[0].detail
 
     def test_zero_steps_falls_back(self, patch_litellm):
         patch_litellm([

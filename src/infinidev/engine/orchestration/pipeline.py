@@ -28,6 +28,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from infinidev.engine.analysis.planner import run_planner
+from infinidev.engine.orchestration.chat_agent import run_chat_agent
+from infinidev.tools.base.context import (
+    get_context_for_agent,
+    get_current_project_id,
+    get_current_workspace_path,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -308,14 +316,6 @@ def run_task(
     and ``hooks``. The project_id and workspace_path for the chat agent
     are resolved from the agent's bound context.
     """
-    from infinidev.engine.orchestration.chat_agent import run_chat_agent
-    from infinidev.engine.analysis.planner import run_planner
-    from infinidev.tools.base.context import (
-        get_context_for_agent,
-        get_current_project_id,
-        get_current_workspace_path,
-    )
-
     # ── Chat agent ──────────────────────────────────────────────────────
     hooks.on_phase("chat")
     agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)

@@ -71,6 +71,11 @@ def run_chat_agent(
             reply="(empty message)",
         )
 
+    # Ephemeral agent_id isolates this turn's tool-context binding from the
+    # developer agent's context. set_context writes into a process-global
+    # dict keyed by agent_id, so the chat agent, the planner, and the
+    # developer each own independent slots that do not stomp each other.
+    # clear_agent_context in `finally` ensures no leak across turns.
     agent_id = f"chat-agent-{uuid.uuid4().hex[:8]}"
     tools = get_tools_for_role("chat_agent")
     bind_tools_to_agent(tools, agent_id)
@@ -86,9 +91,8 @@ def run_chat_agent(
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": CHAT_AGENT_SYSTEM_PROMPT},
+        {"role": "user", "content": _build_user_message(user_input, session_id)},
     ]
-    _append_recent_turns(messages, session_id)
-    messages.append({"role": "user", "content": user_input.strip()})
 
     try:
         return _run_llm_loop(
@@ -100,9 +104,7 @@ def run_chat_agent(
         )
     except Exception as exc:
         logger.exception("Chat agent loop failed")
-        return _fallback_respond(
-            f"Tuve un problema procesando tu mensaje ({exc}). ¿Podrías repetirlo?"
-        )
+        return _fallback_respond(_detect_lang(user_input), exc=exc)
     finally:
         clear_agent_context(agent_id)
 
@@ -179,10 +181,7 @@ def _run_llm_loop(
     # Max iterations reached without terminator. Return a graceful
     # respond so the user sees SOMETHING — never a silent return.
     logger.warning("Chat agent hit max_iterations=%d without terminator", max_iterations)
-    return _fallback_respond(
-        "Me quedé dando vueltas sin decidir. ¿Podrías reformular lo que "
-        "necesitás o decirme explícitamente si querés que lo implemente?"
-    )
+    return _fallback_respond(_detect_lang(user_input), reason="max_iter")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -194,9 +193,7 @@ def _build_respond(tc: Any, user_input: str) -> ChatAgentResult:
     args = _parse_args(tc)
     message = (args.get("message") or "").strip()
     if not message:
-        return _fallback_respond(
-            "No supe cómo contestarte. ¿Podrías reformular?"
-        )
+        return _fallback_respond(_detect_lang(user_input), reason="empty_respond")
     return ChatAgentResult(kind="respond", reply=message)
 
 
@@ -206,10 +203,7 @@ def _build_escalate(tc: Any, user_input: str) -> ChatAgentResult:
     if not understanding:
         # Defensive: escalate with empty understanding is a useless
         # handoff. Fall back to respond so the user isn't stranded.
-        return _fallback_respond(
-            "Detecté que querías que haga algo, pero no me quedó clara la "
-            "consigna. ¿Podrías decirme qué implementar?"
-        )
+        return _fallback_respond(_detect_lang(user_input), reason="empty_escalate")
     opened = args.get("opened_files") or []
     if not isinstance(opened, list):
         opened = []
@@ -253,8 +247,75 @@ def _tool_call_to_dict(tc: Any) -> dict[str, Any]:
     }
 
 
-def _fallback_respond(msg: str) -> ChatAgentResult:
-    return ChatAgentResult(kind="respond", reply=msg)
+# Fallback messages keyed by (language, reason). The chat agent's system
+# prompt tells the model to match the user's language, but the fallback
+# paths bypass the model entirely — so we have to localize ourselves or
+# hardcode one language and surprise users in the other. A tiny heuristic
+# is good enough here (greetings / action verbs / punctuation cover most
+# short chats); the LLM still handles the normal path.
+_FALLBACK_MESSAGES: dict[tuple[str, str], str] = {
+    ("es", "max_iter"): (
+        "Me quedé dando vueltas sin decidir. ¿Podrías reformular lo que "
+        "necesitás o decirme explícitamente si querés que lo implemente?"
+    ),
+    ("en", "max_iter"): (
+        "I went in circles without reaching a decision. Could you "
+        "rephrase what you need, or say explicitly whether you want me "
+        "to implement it?"
+    ),
+    ("es", "empty_respond"): "No supe cómo contestarte. ¿Podrías reformular?",
+    ("en", "empty_respond"): "I don't know how to answer that. Could you rephrase?",
+    ("es", "empty_escalate"): (
+        "Detecté que querías que haga algo, pero no me quedó clara la "
+        "consigna. ¿Podrías decirme qué implementar?"
+    ),
+    ("en", "empty_escalate"): (
+        "I detected that you wanted me to do something, but the request "
+        "isn't clear. Could you tell me what to implement?"
+    ),
+    ("es", "exception"): "Tuve un problema procesando tu mensaje. ¿Podrías repetirlo?",
+    ("en", "exception"): "I ran into a problem processing your message. Could you try again?",
+}
+
+
+def _detect_lang(text: str) -> str:
+    """Cheap Spanish-vs-English heuristic for fallback messages only.
+
+    Not used for the normal LLM path — the model handles that. Returns
+    ``"es"`` when obvious Spanish markers appear, ``"en"`` otherwise.
+    Default English because the codebase and prompts lean English.
+    """
+    if not text:
+        return "en"
+    lowered = text.lower()
+    # Unicode markers that only appear in Spanish (ñ, ¿, ¡, accented vowels)
+    if any(ch in lowered for ch in "ñáéíóúü¿¡"):
+        return "es"
+    # Common Spanish function words
+    spanish_markers = (" que ", " por ", " para ", " con ", " los ", " las ",
+                       " una ", " dale", " hacé", " decí", " implementá",
+                       " arreglá", " agregá", " borrá", "hola", "gracias", "chau")
+    padded = f" {lowered} "
+    if any(m in padded for m in spanish_markers):
+        return "es"
+    return "en"
+
+
+def _fallback_respond(
+    lang: str, *, reason: str = "exception", exc: Exception | None = None,
+) -> ChatAgentResult:
+    """Build a respond result from a localized fallback message.
+
+    The exception (if any) is logged — not surfaced in the reply —
+    because tracebacks in chat messages are noise.
+    """
+    if exc is not None:
+        logger.warning("chat_agent fallback (reason=%s): %s", reason, exc)
+    message = _FALLBACK_MESSAGES.get(
+        (lang, reason),
+        _FALLBACK_MESSAGES[("en", reason if (("en", reason) in _FALLBACK_MESSAGES) else "exception")],
+    )
+    return ChatAgentResult(kind="respond", reply=message)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -262,33 +323,43 @@ def _fallback_respond(msg: str) -> ChatAgentResult:
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _append_recent_turns(
-    messages: list[dict[str, Any]], session_id: Optional[str],
-) -> None:
-    """Append prior USER/ASSISTANT turns as a context snapshot.
+def _build_user_message(user_input: str, session_id: Optional[str]) -> str:
+    """Combine the session-history snapshot and the current user input
+    into a SINGLE ``role="user"`` message.
 
-    Uses the same DB helper the legacy preamble used, so self-referential
-    follow-ups see the same signal (plus the chat agent can now go read
-    the real files referenced in prior turns via its tool access).
+    Two consecutive ``role="user"`` turns trip some providers (Anthropic
+    strictly alternates), so we merge: the snapshot is rendered first,
+    then the actual request. The snapshot is optional — missing /
+    empty session id / DB failure all degrade gracefully.
     """
-    if not session_id:
-        return
-    try:
-        from infinidev.db.service import get_recent_turns_full
-        turns = get_recent_turns_full(session_id, limit=6, max_chars_per_turn=2000)
-    except Exception:
-        return
+    trimmed = user_input.strip()
+    turns: list[tuple[str, str]] = []
+    if session_id:
+        try:
+            from infinidev.db.service import get_recent_turns_full
+            turns = get_recent_turns_full(
+                session_id, limit=6, max_chars_per_turn=2000,
+            )
+        except Exception as exc:
+            logger.warning(
+                "chat_agent: session history fetch failed (continuing "
+                "without snapshot): %s", exc,
+            )
+            turns = []
     if not turns:
-        return
-    snapshot_lines = [
+        return trimmed
+    lines = [
         "Recent conversation (for context; use tools to reground facts):",
     ]
     for role, content in turns:
         tag = "USER" if role == "user" else "AGENT"
-        snapshot_lines.append(f'<turn role="{tag}">')
-        snapshot_lines.append(content)
-        snapshot_lines.append("</turn>")
-    messages.append({"role": "user", "content": "\n".join(snapshot_lines)})
+        lines.append(f'<turn role="{tag}">')
+        lines.append(content)
+        lines.append("</turn>")
+    lines.append("")
+    lines.append("Current user message:")
+    lines.append(trimmed)
+    return "\n".join(lines)
 
 
 __all__ = ["run_chat_agent"]
