@@ -162,6 +162,10 @@ def build_layout(app_state: InfinidevApp) -> Layout:
         if mouse_event.event_type == MouseEventType.MOUSE_UP:
             app_state.toggle_sidebar()
 
+    def _sidebar_hide_click(mouse_event):
+        if mouse_event.event_type == MouseEventType.MOUSE_UP:
+            app_state.toggle_sidebar()
+
     def _sidebar_indicator():
         if app_state.sidebar_visible:
             return FormattedText([])
@@ -183,9 +187,20 @@ def build_layout(app_state: InfinidevApp) -> Layout:
         filter=Condition(lambda: app_state.sidebar_visible),
     )
 
+    # Hide button — appears at top of sidebar when visible
+    sidebar_hide_button = Window(
+        content=FormattedTextControl(lambda: FormattedText([
+            ("", "  "),
+            (f"{PRIMARY} bold", "◆", _sidebar_hide_click),
+        ])),
+        height=1,
+        style=f"bg:{SURFACE_DARK}",
+    )
+
     sidebar_content = ConditionalContainer(
         content=HSplit(
             [
+                sidebar_hide_button,
                 context_section,
                 plan_section,
                 steps_section,
