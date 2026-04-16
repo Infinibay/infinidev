@@ -81,6 +81,32 @@ class TUIHooks:
         self._app._chat_history_control.show_thinking = True
         self._app.invalidate()
 
+    def notify_stream_chunk(
+        self, speaker: str, chunk: str, kind: str = "agent",
+    ) -> None:
+        """Append *chunk* to the in-progress streaming message.
+
+        The first chunk for a given ``(speaker, kind)`` creates a new
+        chat entry (same shape as :meth:`notify`) with ``streaming=True``;
+        subsequent chunks extend it in place. Markdown rendering is
+        deferred until :meth:`notify_stream_end` so unclosed ``**`` /
+        backticks don't render as literal text mid-stream.
+        """
+        self._app._chat_history_control.show_thinking = False
+        self._app.append_to_last_message(speaker, chunk, kind)
+
+    def notify_stream_end(
+        self, speaker: str, kind: str = "agent",
+    ) -> None:
+        """Flip the streaming flag on the last message and re-render.
+
+        After this call the message widget re-parses the full text with
+        markdown / syntax highlighting applied. The user sees plain text
+        appear chunk-by-chunk and then "snap" into styled form once the
+        LLM finishes producing it.
+        """
+        self._app.finalize_streaming_message(speaker, kind)
+
     # ── User interaction ─────────────────────────────────────────────────
 
     def ask_user(self, prompt: str, kind: str = "text") -> str | None:

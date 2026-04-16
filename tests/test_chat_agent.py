@@ -209,8 +209,11 @@ class TestGracefulFailureModes:
         ])
         result = run_chat_agent("hola", max_iterations=5)
         assert result.kind == "respond"
-        # Falls back with a friendly ask-to-reformulate.
-        assert "reformul" in result.reply.lower() or "implement" in result.reply.lower()
+        # Falls back with a neutral "happy to keep going" message —
+        # never blames the user for the agent hitting its own ceiling.
+        assert "reformul" not in result.reply.lower()
+        assert "rephrase" not in result.reply.lower()
+        assert result.reply  # non-empty
 
     def test_llm_raises_returns_respond(self, patch_litellm, monkeypatch):
         patch_litellm([])
@@ -241,7 +244,11 @@ class TestLanguageAwareFallbacks:
         ])
         result = run_chat_agent("¿qué hace este proyecto?", max_iterations=5)
         assert result.kind == "respond"
-        assert "reformul" in result.reply.lower()
+        # Neutral Spanish wrap-up — mentions "investigué" or "seguimos",
+        # never tells the user to rephrase.
+        lower = result.reply.lower()
+        assert any(w in lower for w in ("investigué", "seguimos", "contame"))
+        assert "reformul" not in lower
 
     def test_max_iter_english(self, patch_litellm):
         patch_litellm([
@@ -250,7 +257,9 @@ class TestLanguageAwareFallbacks:
         ])
         result = run_chat_agent("what does this project do?", max_iterations=5)
         assert result.kind == "respond"
-        assert "circles" in result.reply.lower() or "rephrase" in result.reply.lower()
+        lower = result.reply.lower()
+        assert any(w in lower for w in ("investigated", "keep going", "what you want"))
+        assert "rephrase" not in lower
 
     def test_llm_exception_english_fallback(self, patch_litellm, monkeypatch):
         patch_litellm([])

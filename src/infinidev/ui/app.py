@@ -305,6 +305,67 @@ class InfinidevApp:
         except Exception:
             pass  # App might not be running yet during init
 
+    def append_to_last_message(
+        self, sender: str, chunk: str, msg_type: str = "agent",
+    ) -> None:
+        """Append *chunk* to the last chat message if it shares the same
+        sender and type AND is currently streaming; otherwise create a
+        new streaming message.
+
+        The ``streaming`` flag on the message dict tells the renderer to
+        skip markdown parsing — partial ``**bold`` / unclosed backticks
+        render ugly otherwise. The flag flips to False in
+        :meth:`finalize_streaming_message`, at which point the cache is
+        invalidated and the full markdown styling kicks in.
+        """
+        last = self.chat_messages[-1] if self.chat_messages else None
+        if (
+            last is not None
+            and last.get("sender") == sender
+            and last.get("type") == msg_type
+            and last.get("streaming") is True
+        ):
+            existing = str(last.get("text") or "")
+            last["text"] = existing + str(chunk)
+        else:
+            self.chat_messages.append({
+                "sender": sender,
+                "text": str(chunk) if chunk else "",
+                "type": msg_type,
+                "streaming": True,
+            })
+        self._chat_history_control.invalidate_cache()
+        try:
+            self.invalidate()
+        except Exception:
+            pass
+
+    def finalize_streaming_message(
+        self, sender: str, msg_type: str = "agent",
+    ) -> None:
+        """Flip the last streaming message's ``streaming`` flag to False.
+
+        Triggers one more cache invalidation so the renderer reparses
+        the final text with markdown enabled. No-op if the last message
+        isn't a streaming one from ``sender``/``msg_type`` (can happen
+        if a ``notify()`` interrupted the stream or nothing was
+        streamed at all).
+        """
+        last = self.chat_messages[-1] if self.chat_messages else None
+        if (
+            last is None
+            or last.get("sender") != sender
+            or last.get("type") != msg_type
+            or last.get("streaming") is not True
+        ):
+            return
+        last["streaming"] = False
+        self._chat_history_control.invalidate_cache()
+        try:
+            self.invalidate()
+        except Exception:
+            pass
+
     # ── Engine initialization ────────────────────────────────────────
 
     def _ensure_engine(self) -> None:

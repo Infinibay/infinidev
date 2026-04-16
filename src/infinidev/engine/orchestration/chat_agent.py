@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import types
 import uuid
 from typing import Any, Optional
 
@@ -42,7 +44,12 @@ from infinidev.tools.base.context import (
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_MAX_ITERATIONS = 5
+# Generous cap — the chat agent is encouraged to use its read-only
+# tools freely, so we don't punish "needed 8 reads to answer a deep
+# question" with a rephrase-yourself fallback. The cap is a runaway
+# guard, not a quality gate. Two iterations before the cap we inject
+# a nudge telling the model to wrap up; see _run_llm_loop.
+_DEFAULT_MAX_ITERATIONS = 20
 _MAX_RESULT_CHARS = 8000  # trim overly long tool outputs before re-prompting
 
 
@@ -53,6 +60,7 @@ def run_chat_agent(
     project_id: Optional[int] = None,
     workspace_path: Optional[str] = None,
     max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+    hooks: Any | None = None,
 ) -> ChatAgentResult:
     """Run one turn of the chat agent and return its result.
 
@@ -60,6 +68,12 @@ def run_chat_agent(
     ``kind="respond"`` → show ``reply`` and end the turn;
     ``kind="escalate"`` → continue to the analyst planner with
     ``escalation`` as the handoff packet.
+
+    When ``hooks`` is provided, the LLM call runs in streaming mode and
+    the ``respond`` tool's ``message`` field is emitted chunk-by-chunk
+    via ``hooks.notify_stream_chunk`` as the JSON arguments form. The
+    returned ``ChatAgentResult.streamed`` is True so the caller knows
+    the UI already received the text and should not re-notify.
 
     When the loop can't produce a decision (LLM error, no tool call,
     max-iter exhaustion), a fallback ``respond`` is returned rather
@@ -101,6 +115,7 @@ def run_chat_agent(
             dispatch=dispatch,
             user_input=user_input,
             max_iterations=max_iterations,
+            hooks=hooks,
         )
     except Exception as exc:
         logger.exception("Chat agent loop failed")
@@ -121,38 +136,68 @@ def _run_llm_loop(
     dispatch: dict[str, Any],
     user_input: str,
     max_iterations: int,
+    hooks: Any | None = None,
 ) -> ChatAgentResult:
     import litellm
 
     base_kwargs = get_litellm_params_for_behavior()
+    stream_mode = hooks is not None
+    budget_nudged = False
 
     for iteration in range(max_iterations):
+        # Near the end of the budget, nudge the model to wrap up.
+        # We don't want to mid-response ambush the LLM, so this fires
+        # exactly once on the second-to-last iteration, giving it two
+        # chances to produce a terminator.
+        if (
+            not budget_nudged
+            and max_iterations >= 3
+            and iteration == max_iterations - 2
+        ):
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You're approaching your iteration budget. On your "
+                    "next call, use `respond` to share what you've found "
+                    "so far, or `escalate` if the user clearly asked for "
+                    "implementation. Don't start a new investigation — "
+                    "summarise and end the turn."
+                ),
+            })
+            budget_nudged = True
+
         call_kwargs = dict(base_kwargs)
         call_kwargs["messages"] = messages
         call_kwargs["tools"] = tool_schemas
         call_kwargs.setdefault("temperature", 0.1)
-        call_kwargs.setdefault("stream", False)
+        call_kwargs["stream"] = stream_mode
         call_kwargs.setdefault("max_tokens", 2000)
 
         response = litellm.completion(**call_kwargs)
-        message = response.choices[0].message
-        tool_calls = getattr(message, "tool_calls", None) or []
+
+        if stream_mode:
+            content, tool_calls, streamed = _consume_stream(response, hooks)
+        else:
+            message = response.choices[0].message
+            content = getattr(message, "content", None) or ""
+            tool_calls = getattr(message, "tool_calls", None) or []
+            streamed = False
 
         if not tool_calls:
             # The model chatted in plain text instead of calling a tool.
             # Treat it as a respond — we still terminate cleanly and the
             # user sees the text.
-            content = getattr(message, "content", None) or ""
             return ChatAgentResult(
                 kind="respond",
                 reply=content.strip() or "(no reply)",
+                streamed=streamed,
             )
 
         # Add the assistant turn to the transcript so tool results can
         # reference the tool_use IDs.
         messages.append({
             "role": "assistant",
-            "content": getattr(message, "content", None) or "",
+            "content": content,
             "tool_calls": [_tool_call_to_dict(tc) for tc in tool_calls],
         })
 
@@ -160,7 +205,7 @@ def _run_llm_loop(
         for tc in tool_calls:
             name = tc.function.name
             if name == "respond":
-                return _build_respond(tc, user_input)
+                return _build_respond(tc, user_input, streamed=streamed)
             if name == "escalate":
                 return _build_escalate(tc, user_input)
 
@@ -189,12 +234,14 @@ def _run_llm_loop(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _build_respond(tc: Any, user_input: str) -> ChatAgentResult:
+def _build_respond(
+    tc: Any, user_input: str, *, streamed: bool = False,
+) -> ChatAgentResult:
     args = _parse_args(tc)
     message = (args.get("message") or "").strip()
     if not message:
         return _fallback_respond(_detect_lang(user_input), reason="empty_respond")
-    return ChatAgentResult(kind="respond", reply=message)
+    return ChatAgentResult(kind="respond", reply=message, streamed=streamed)
 
 
 def _build_escalate(tc: Any, user_input: str) -> ChatAgentResult:
@@ -254,14 +301,16 @@ def _tool_call_to_dict(tc: Any) -> dict[str, Any]:
 # is good enough here (greetings / action verbs / punctuation cover most
 # short chats); the LLM still handles the normal path.
 _FALLBACK_MESSAGES: dict[tuple[str, str], str] = {
+    # max_iter fires only when even the end-of-budget nudge didn't
+    # produce a terminator. Message stays neutral — it's our ceiling,
+    # not the user's prompt, that ran out. We don't blame them.
     ("es", "max_iter"): (
-        "Me quedé dando vueltas sin decidir. ¿Podrías reformular lo que "
-        "necesitás o decirme explícitamente si querés que lo implemente?"
+        "Investigué bastante y no terminé de cerrar la respuesta. "
+        "Si querés seguimos desde acá; contame qué querés que haga."
     ),
     ("en", "max_iter"): (
-        "I went in circles without reaching a decision. Could you "
-        "rephrase what you need, or say explicitly whether you want me "
-        "to implement it?"
+        "I investigated quite a bit but didn't wrap up a final answer. "
+        "Happy to keep going from here — let me know what you want next."
     ),
     ("es", "empty_respond"): "No supe cómo contestarte. ¿Podrías reformular?",
     ("en", "empty_respond"): "I don't know how to answer that. Could you rephrase?",
@@ -360,6 +409,117 @@ def _build_user_message(user_input: str, session_id: Optional[str]) -> str:
     lines.append("Current user message:")
     lines.append(trimmed)
     return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Streaming
+# ─────────────────────────────────────────────────────────────────────────
+
+
+# Matches ``"message"`` field in partial JSON tool_call args. Captures
+# the raw content up to (but not including) the unescaped closing quote
+# — we may be mid-character, which is fine since we emit diffs. ``\\.``
+# handles ``\"`` / ``\n`` / ``\\`` escapes so they don't prematurely
+# terminate the match.
+_RESPOND_MESSAGE_RE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)')
+
+
+def _extract_partial_message(args: str) -> str:
+    """Return the ``message`` field's content extracted from partial
+    JSON tool_call args. Returns "" if the field hasn't started yet."""
+    m = _RESPOND_MESSAGE_RE.search(args)
+    if not m:
+        return ""
+    raw = m.group(1)
+    # Minimal unescape. Not a full JSON parser — good enough for the
+    # common escapes a chat message contains. The final non-streaming
+    # pass (`_build_respond` → `_parse_args`) uses real json.loads.
+    return (
+        raw.replace('\\"', '"')
+           .replace('\\n', '\n')
+           .replace('\\t', '\t')
+           .replace('\\r', '\r')
+           .replace('\\\\', '\\')
+    )
+
+
+def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
+    """Consume a LiteLLM streaming response, emitting chunks of the
+    ``respond`` tool's ``message`` field via ``hooks.notify_stream_chunk``
+    as they form.
+
+    Returns ``(content, tool_calls, streamed)`` in the shape the
+    non-streaming path produces: ``content`` is the accumulated plain
+    text; ``tool_calls`` is a list of objects exposing ``.id``,
+    ``.function.name``, and ``.function.arguments`` (synthesised so
+    downstream code — ``_build_respond``, ``_build_escalate``,
+    ``_tool_call_to_dict``, tool dispatch — works unchanged).
+    """
+    accumulated: dict[int, dict[str, str]] = {}  # idx → {id, name, args}
+    emitted_per_tc: dict[int, str] = {}  # idx → chars already emitted
+    content_buffer = ""
+    streamed = False
+
+    for chunk in stream:
+        try:
+            delta = chunk.choices[0].delta
+        except (AttributeError, IndexError):
+            continue
+
+        delta_content = getattr(delta, "content", None)
+        if delta_content:
+            content_buffer += delta_content
+            # Stream plain-text content too. Most chat-agent turns end
+            # in a tool call, but some models emit plain text as a
+            # respond-equivalent; either way the user sees it live.
+            try:
+                hooks.notify_stream_chunk("Infinidev", delta_content, "agent")
+                streamed = True
+            except Exception as exc:
+                logger.warning("notify_stream_chunk failed (content): %s", exc)
+
+        delta_tool_calls = getattr(delta, "tool_calls", None) or []
+        for tc_delta in delta_tool_calls:
+            idx = getattr(tc_delta, "index", 0) or 0
+            slot = accumulated.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+            if getattr(tc_delta, "id", None):
+                slot["id"] = tc_delta.id
+            fn = getattr(tc_delta, "function", None)
+            if fn is None:
+                continue
+            if getattr(fn, "name", None):
+                slot["name"] = (slot["name"] or "") + fn.name
+            fn_args = getattr(fn, "arguments", None)
+            if fn_args:
+                slot["arguments"] += fn_args
+                # Emit incremental `message` chars only for the respond tool.
+                if slot["name"] == "respond":
+                    current = _extract_partial_message(slot["arguments"])
+                    emitted = emitted_per_tc.get(idx, "")
+                    if current.startswith(emitted) and len(current) > len(emitted):
+                        new_chars = current[len(emitted):]
+                        try:
+                            hooks.notify_stream_chunk("Infinidev", new_chars, "agent")
+                            streamed = True
+                        except Exception as exc:
+                            logger.warning(
+                                "notify_stream_chunk failed (tool): %s", exc,
+                            )
+                        emitted_per_tc[idx] = current
+
+    tool_calls: list[Any] = []
+    for idx, slot in sorted(accumulated.items()):
+        if not slot["name"]:
+            continue  # skip half-formed entries
+        tool_calls.append(types.SimpleNamespace(
+            id=slot["id"] or f"stream-tc-{idx}",
+            function=types.SimpleNamespace(
+                name=slot["name"],
+                arguments=slot["arguments"],
+            ),
+        ))
+
+    return content_buffer, tool_calls, streamed
 
 
 __all__ = ["run_chat_agent"]

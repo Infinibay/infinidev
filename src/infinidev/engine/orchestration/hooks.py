@@ -39,6 +39,16 @@ class NoOpHooks:
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
         return None
 
+    def notify_stream_chunk(
+        self, speaker: str, chunk: str, kind: str = "agent",
+    ) -> None:
+        return None
+
+    def notify_stream_end(
+        self, speaker: str, kind: str = "agent",
+    ) -> None:
+        return None
+
     def ask_user(self, prompt: str, kind: str = "text") -> str | None:
         return None
 
@@ -90,6 +100,10 @@ class ClickHooks(NoOpHooks):
 
     def __init__(self, session: Any | None = None) -> None:
         self._session = session
+        # Tracks the in-progress streaming (speaker, kind) so that the
+        # first chunk for a given pair prints a header and subsequent
+        # chunks flush incrementally without re-printing it.
+        self._stream_active: tuple[str, str] | None = None
 
     def on_phase(self, phase: str) -> None:
         # Phase transitions don't print anything in classic CLI; the
@@ -105,9 +119,44 @@ class ClickHooks(NoOpHooks):
 
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
         import click
+        # If a stream was in progress, close it with a newline so the
+        # new header starts on its own line. This preserves the
+        # contract that notify() ends any pending stream.
+        if self._stream_active is not None:
+            click.echo("")
+            self._stream_active = None
         fg, dim = self._SPEAKER_COLOURS.get(speaker, ("white", False))
         click.echo(click.style(f"\n[{speaker}]", fg=fg, bold=True, dim=dim))
         click.echo(msg)
+
+    def notify_stream_chunk(
+        self, speaker: str, chunk: str, kind: str = "agent",
+    ) -> None:
+        import sys
+        import click
+        current = (speaker, kind)
+        if self._stream_active != current:
+            # First chunk for this (speaker, kind) — print the header.
+            fg, dim = self._SPEAKER_COLOURS.get(speaker, ("white", False))
+            click.echo(click.style(f"\n[{speaker}]", fg=fg, bold=True, dim=dim))
+            self._stream_active = current
+        # nl=False + manual flush so characters appear as they arrive.
+        click.echo(chunk, nl=False)
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+    def notify_stream_end(
+        self, speaker: str, kind: str = "agent",
+    ) -> None:
+        # Terminal has no markdown-swap story, but we still close the
+        # streaming block with a newline so the next output doesn't
+        # concatenate onto the last chunk.
+        if self._stream_active is not None:
+            import click
+            click.echo("")
+            self._stream_active = None
 
     def ask_user(self, prompt: str, kind: str = "text") -> str | None:
         import click

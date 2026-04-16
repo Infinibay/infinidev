@@ -70,6 +70,30 @@ class OrchestrationHooks(Protocol):
         ``"agent"`` (a model output), ``"system"`` (process feedback),
         ``"error"`` (failure)."""
 
+    def notify_stream_chunk(
+        self, speaker: str, chunk: str, kind: str = "agent",
+    ) -> None:
+        """Append a streaming text chunk. The FIRST chunk for a new
+        ``(speaker, kind)`` pair creates a message; subsequent chunks
+        append to that same message. A later :meth:`notify` call
+        implicitly ends the stream — the next chunk opens a new
+        message. UIs that render streaming incrementally (TUI chat
+        panel, terminal with cursor control) override this; stateless
+        adapters may concatenate and defer until a sentinel arrives."""
+
+    def notify_stream_end(
+        self, speaker: str, kind: str = "agent",
+    ) -> None:
+        """Mark the in-progress streaming message as complete.
+
+        The distinction from ``notify`` is important for rich UIs:
+        during streaming, markdown / syntax highlighting is typically
+        skipped (partial ``**bold`` etc. renders ugly). Once the stream
+        ends, the UI re-renders the message with full styling applied.
+        Stateless adapters (e.g. plain terminal echo) can no-op this —
+        the final newline they add on ``notify`` or session end is
+        enough."""
+
     # ── User interaction ─────────────────────────────────────────────────
     def ask_user(self, prompt: str, kind: str = "text") -> str | None:
         """Block until the user replies. Return the user's text answer
@@ -333,10 +357,18 @@ def run_task(
         session_id=session_id,
         project_id=(ctx.project_id if ctx else get_current_project_id()),
         workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
+        hooks=hooks,
     )
 
     if chat_result.kind == "respond":
-        hooks.notify("Infinidev", chat_result.reply, "agent")
+        if chat_result.streamed:
+            # Streaming already showed the text to the user chunk-by-chunk.
+            # Signal end-of-stream so the UI can flip the `streaming`
+            # flag on the message and re-render with markdown styling
+            # (otherwise the final message stays in plain-text mode).
+            hooks.notify_stream_end("Infinidev", "agent")
+        else:
+            hooks.notify("Infinidev", chat_result.reply, "agent")
         hooks.on_phase("idle")
         return chat_result.reply
 

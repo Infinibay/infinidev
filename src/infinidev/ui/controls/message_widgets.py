@@ -283,7 +283,16 @@ class BorderedWidget:
         clickable[0] = _copy_msg
 
         # Body
-        use_markdown = self.msg_type in ("agent", "think") and _markdown_enabled()
+        # Skip markdown while the message is mid-stream — unclosed
+        # ``**bold`` / backticks / headers half-formed render as literal
+        # text and look broken. Once the chat agent calls
+        # notify_stream_end the flag flips and we re-render with full
+        # markdown applied.
+        use_markdown = (
+            self.msg_type in ("agent", "think")
+            and _markdown_enabled()
+            and not msg.get("streaming", False)
+        )
         lines.extend(_render_bordered_body(
             text, width, self._border_char, border_style, self._body_style,
             fill_style, use_markdown,

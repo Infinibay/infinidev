@@ -24,11 +24,18 @@ class ChatAgentResult:
     Invariants enforced at construction time:
       * ``kind="respond"`` → ``reply`` is non-empty, ``escalation`` is None
       * ``kind="escalate"`` → ``escalation`` is not None
+
+    ``streamed`` is True when the chat agent ran in streaming mode and
+    already emitted the ``reply`` text incrementally via
+    ``hooks.notify_stream_chunk``. The pipeline uses this to decide
+    whether to call ``hooks.notify`` for the reply (double-render
+    otherwise). Only meaningful for ``kind="respond"``.
     """
 
     kind: Literal["respond", "escalate"]
     reply: str = ""
     escalation: EscalationPacket | None = None
+    streamed: bool = False
 
     def __post_init__(self) -> None:
         if self.kind == "respond":
