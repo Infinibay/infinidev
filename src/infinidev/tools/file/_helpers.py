@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import stat
+import subprocess
 import tempfile
 from typing import TYPE_CHECKING
 
@@ -56,27 +58,166 @@ def detect_silent_deletions(
         return removed
 
 
-def deletion_warning_text(removed: list[str], file_path: str) -> str:
+def _has_git(path: str) -> bool:
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, cwd=path, timeout=3,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+# Names so common they'd almost always match something and drown the signal.
+_USAGE_NAME_BLACKLIST = frozenset({
+    "run", "close", "open", "read", "write", "main", "init", "new",
+    "get", "set", "add", "remove", "delete", "update", "do", "on",
+    "to", "as", "is", "of", "at", "it", "x", "y", "i", "j", "n",
+})
+
+
+def find_external_usages(
+    removed_symbols: list[str],
+    edited_file: str,
+    workspace_path: str | None,
+    *,
+    max_hits_per_symbol: int = 5,
+    max_symbols: int = 10,
+) -> dict[str, list[str]]:
+    """Grep the workspace for references to each removed symbol.
+
+    Returns ``{qualified_name: [relpath:line, ...]}`` for symbols that
+    still appear somewhere outside *edited_file*. Symbols with no
+    external hits are omitted, so callers can use truthiness on the
+    result. Best-effort — swallows all errors and returns ``{}`` on
+    any failure (missing workspace, grep not installed, timeout).
+
+    The grep is textual, so false positives are expected and accepted:
+    the warning is advisory ("looks like it's still used, fix or
+    ignore"), not authoritative. To keep the signal useful we skip
+    very short names, a small blacklist of ultra-generic names, and
+    cap the number of symbols probed per edit.
+    """
+    if not removed_symbols or not workspace_path:
+        return {}
+    if not os.path.isdir(workspace_path):
+        return {}
+    if len(removed_symbols) > max_symbols:
+        # A mass-delete — too noisy to probe each one.
+        return {}
+
+    use_git = _has_git(workspace_path)
+    edited_abs = os.path.realpath(edited_file)
+    results: dict[str, list[str]] = {}
+
+    for sym in removed_symbols:
+        short = sym.rsplit(".", 1)[-1].strip()
+        if len(short) < 3:
+            continue
+        if short.lower() in _USAGE_NAME_BLACKLIST:
+            continue
+
+        pattern = rf"\b{re.escape(short)}\b"
+
+        if use_git:
+            cmd = ["git", "grep", "-nE", "--", pattern]
+        else:
+            cmd = [
+                "grep", "-rnE",
+                "--exclude-dir=.git",
+                "--exclude-dir=node_modules",
+                "--exclude-dir=__pycache__",
+                "--exclude-dir=.venv",
+                "--exclude-dir=venv",
+                "--exclude-dir=dist",
+                "--exclude-dir=build",
+                pattern, ".",
+            ]
+
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=5, cwd=workspace_path,
+            )
+        except Exception:
+            continue
+        if r.returncode not in (0, 1):
+            continue
+
+        hits: list[str] = []
+        for line in (r.stdout or "").splitlines():
+            parts = line.split(":", 2)
+            if len(parts) < 3:
+                continue
+            fpath, lineno, _rest = parts
+            abs_fpath = os.path.realpath(os.path.join(workspace_path, fpath))
+            if abs_fpath == edited_abs:
+                continue
+            hits.append(f"{fpath}:{lineno}")
+            if len(hits) >= max_hits_per_symbol:
+                break
+
+        if hits:
+            results[sym] = hits
+
+    return results
+
+
+def deletion_warning_text(
+    removed: list[str],
+    file_path: str,
+    usages: dict[str, list[str]] | None = None,
+) -> str:
     """Render a short, model-facing warning that lists deleted symbols.
+
+    When *usages* maps a removed symbol to a non-empty list of
+    ``relpath:line`` strings, an extra "still in use" notice is
+    appended — the model can then decide to restore the symbol or
+    fix the callers.
 
     Returns "" when there's nothing to warn about, so callers can
     use truthiness directly: ``if (warn := deletion_warning_text(...)): ``.
     """
     if not removed:
         return ""
+    usages = usages or {}
+    still_used = {k: v for k, v in usages.items() if v}
+
     if len(removed) == 1:
-        return (
-            f"You removed {removed[0]} from {file_path}. If this was "
+        sym = removed[0]
+        msg = (
+            f"You removed {sym} from {file_path}. If this was "
             "intentional, ignore this notice. If not, restore the "
             "function — your edit may have collapsed too much."
         )
+        if sym in still_used:
+            hits = ", ".join(still_used[sym])
+            msg += (
+                f"\n⚠ The removed symbol appears to be still in use at: "
+                f"{hits}. If so, fix the problem; otherwise ignore this message."
+            )
+        return msg
+
     head = ", ".join(removed[:5])
     extra = f" (+{len(removed) - 5} more)" if len(removed) > 5 else ""
-    return (
+    msg = (
         f"You removed {len(removed)} symbols from {file_path}: {head}{extra}. "
         "If this was intentional, ignore this notice. If not, restore them — "
         "your edit may have collapsed too much."
     )
+    if still_used:
+        parts = []
+        for sym, hits in list(still_used.items())[:5]:
+            parts.append(f"{sym} → {', '.join(hits[:3])}")
+        extras = f" (+{len(still_used) - 5} more)" if len(still_used) > 5 else ""
+        msg += (
+            "\n⚠ Some removed symbols appear to be still in use:\n  - "
+            + "\n  - ".join(parts)
+            + extras
+            + "\nIf so, fix the problem; otherwise ignore this message."
+        )
+    return msg
 
 
 def check_syntax_warning(

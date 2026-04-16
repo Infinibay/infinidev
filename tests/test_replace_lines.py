@@ -152,3 +152,58 @@ class TestReplaceLines:
         data = json.loads(result)
         assert "error" in data
         assert "denied" in data["error"].lower()
+
+    def test_warning_flags_external_usage(self, bound_tool, workspace_dir):
+        """When replace_lines deletes a symbol that is still referenced in
+        another file in the workspace, the tool result carries a warning
+        mentioning the external call site."""
+        defs = workspace_dir / "defs.py"
+        defs.write_text(
+            "def compute_total(x):\n"
+            "    return x * 2\n"
+            "\n"
+            "def helper():\n"
+            "    return 1\n"
+        )
+        caller = workspace_dir / "caller.py"
+        caller.write_text(
+            "from defs import compute_total\n"
+            "\n"
+            "print(compute_total(5))\n"
+        )
+
+        tool = bound_tool(ReplaceLinesTool)
+        # Wipe lines 1-2 (the def and its body) — compute_total disappears.
+        result = tool._run(
+            file_path=str(defs), content="", start_line=1, end_line=2,
+        )
+        data = json.loads(result)
+        assert "error" not in data
+        assert "warning" in data
+        assert "compute_total" in data["warning"]
+        assert "still in use" in data["warning"]
+        assert data.get("removed_symbols") == ["compute_total"]
+        usages = data.get("removed_symbol_usages", {})
+        assert "compute_total" in usages
+        assert any("caller.py" in hit for hit in usages["compute_total"])
+
+    def test_warning_no_external_usage(self, bound_tool, workspace_dir):
+        """When the deleted symbol is not referenced elsewhere, the
+        warning still fires (symbol removed) but without the 'still in
+        use' appendix."""
+        defs = workspace_dir / "lonely.py"
+        defs.write_text(
+            "def only_here_fn():\n"
+            "    return 42\n"
+        )
+        tool = bound_tool(ReplaceLinesTool)
+        result = tool._run(
+            file_path=str(defs), content="", start_line=1, end_line=2,
+        )
+        data = json.loads(result)
+        assert "error" not in data
+        # Warning about removal still present, but no "still in use" line.
+        assert "warning" in data
+        assert "only_here_fn" in data["warning"]
+        assert "still in use" not in data["warning"]
+        assert "removed_symbol_usages" not in data

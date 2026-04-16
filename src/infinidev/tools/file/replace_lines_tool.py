@@ -15,6 +15,7 @@ from infinidev.tools.file._helpers import (
     check_syntax_warning,
     detect_silent_deletions,
     deletion_warning_text,
+    find_external_usages,
 )
 from infinidev.tools.file.replace_lines_input import ReplaceLinesInput
 
@@ -111,6 +112,9 @@ class ReplaceLinesTool(InfinibayBaseTool):
         # write the file, but the success response carries a warning so
         # the model can notice and restore if it was an accident.
         deleted_symbols = detect_silent_deletions(path, old_content, new_content)
+        symbol_usages = find_external_usages(
+            deleted_symbols, path, getattr(self, "workspace_path", None)
+        )
 
         # Atomic write (preserve permissions)
         try:
@@ -140,9 +144,11 @@ class ReplaceLinesTool(InfinibayBaseTool):
             "total_lines": len(result_lines),
             "size_bytes": new_size,
         }
-        if (warn := deletion_warning_text(deleted_symbols, path)):
+        if (warn := deletion_warning_text(deleted_symbols, path, symbol_usages)):
             result["warning"] = warn
             result["removed_symbols"] = deleted_symbols
+            if symbol_usages:
+                result["removed_symbol_usages"] = symbol_usages
         if syntax_warn:
             result["syntax_warning"] = syntax_warn
         return self._success(result)
