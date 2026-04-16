@@ -1,7 +1,8 @@
 """Chat input control — Buffer with Enter to submit, history, and autocomplete.
 
 Replaces the Textual ChatInput(TextArea) with a prompt_toolkit Buffer that
-has custom key bindings for Enter/Shift+Enter/Up/Down history navigation.
+has custom key bindings for Enter (with backslash continuation) and Up/Down
+history navigation.
 """
 
 from __future__ import annotations
@@ -55,7 +56,20 @@ def create_chat_input(
 
     @kb.add("enter", eager=True)
     def submit(event):
-        """Submit the message on Enter (not Shift+Enter)."""
+        """Submit on Enter, unless current line ends with backslash."""
+        line = buf.document.current_line
+        if line.endswith("\\"):
+            # Backslash continuation: remove trailing \, insert newline
+            line_end = (
+                buf.document.cursor_position
+                - buf.document.cursor_position_col
+                + len(line)
+            )
+            new_text = buf.text[:line_end - 1] + "\n" + buf.text[line_end:]
+            buf.set_document(Document(new_text), bypass_readonly=True)
+            buf.cursor_position = line_end
+            return
+
         text = buf.text.strip()
         if text:
             msg_history.append(buf.text)
@@ -63,11 +77,6 @@ def create_chat_input(
             draft[0] = ""
             on_submit(buf.text)
             buf.reset(Document(""))
-
-    @kb.add("escape", "enter", eager=True)
-    def newline(event):
-        """Insert a literal newline on Escape+Enter (Shift+Enter alternative)."""
-        buf.insert_text("\n")
 
     @kb.add("up")
     def history_prev(event):

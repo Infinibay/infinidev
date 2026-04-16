@@ -1,4 +1,4 @@
-"""Tests for multi-line chat input (backslash continuation and Escape+Enter)."""
+"""Tests for multi-line chat input (backslash continuation)."""
 
 from __future__ import annotations
 
@@ -25,12 +25,11 @@ def _make_event(buffer: Buffer) -> KeyPressEvent:
 def _fire_binding(kb: KeyBindings, keys: tuple[str, ...], buffer: Buffer) -> None:
     """Find a handler registered for *keys* in *kb* and invoke it.
 
-    *keys* uses human-readable names (``"enter"``, ``"escape"``) which are
+    *keys* uses human-readable names (``"enter"``, ``"up"``) which are
     translated to prompt_toolkit's internal ``Keys`` enum values for matching.
     """
     _KEY_MAP = {
         "enter": "c-m",
-        "escape": "escape",
         "up": "up",
         "down": "down",
     }
@@ -128,36 +127,11 @@ class TestBackslashContinuation:
 
 
 
-# ── Escape+Enter inserts newline ───────────────────────────────────────────
-
-
-
-
-class TestEscapeEnter:
-    """Escape followed by Enter inserts a literal newline (alternative to Shift+Enter)."""
-
-    def test_escape_enter_inserts_newline(self):
-        buf, _ctrl, kb, submitted = _create_input()
-        buf.text = "hello"
-        buf.cursor_position = len(buf.text)
-        _fire_binding(kb, ("escape", "enter"), buf)
-        assert buf.text == "hello\n"
-        assert submitted == []
-
-    def test_escape_enter_at_beginning(self):
-        buf, _ctrl, kb, submitted = _create_input()
-        buf.text = "world"
-        buf.cursor_position = 0
-        _fire_binding(kb, ("escape", "enter"), buf)
-        assert buf.text == "\nworld"
-        assert submitted == []
-
-
 # ── Submit after multi-line editing ────────────────────────────────────────
 
 
 class TestSubmitAfterMultiline:
-    r"""After building a multi-line message via \ or Escape+Enter,
+    r"""After building a multi-line message via \ continuation,
     a final Enter on a non-backslash line submits the full text."""
 
     def test_backslash_then_submit(self):
@@ -166,16 +140,6 @@ class TestSubmitAfterMultiline:
         buf.text = "hello\\"
         buf.cursor_position = len(buf.text)
         _fire_binding(kb, ("enter",), buf)  # continuation
-        buf.text = "hello\nworld"
-        buf.cursor_position = len(buf.text)
-        _fire_binding(kb, ("enter",), buf)  # submit
-        assert submitted == ["hello\nworld"]
-
-    def test_escape_enter_then_submit(self):
-        buf, _ctrl, kb, submitted = _create_input()
-        buf.text = "hello"
-        buf.cursor_position = len(buf.text)
-        _fire_binding(kb, ("escape", "enter"), buf)  # newline
         buf.text = "hello\nworld"
         buf.cursor_position = len(buf.text)
         _fire_binding(kb, ("enter",), buf)  # submit
