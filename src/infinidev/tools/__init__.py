@@ -22,6 +22,7 @@ from infinidev.tools.knowledge import (
 )
 from infinidev.tools.chat import SendMessageTool
 from infinidev.tools.chat_agent import RespondTool, EscalateTool
+from infinidev.tools.planner import EmitPlanTool
 from infinidev.tools.docs import DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool
 from infinidev.tools.code_intel import (
     FindDefinitionTool, FindReferencesTool, ListSymbolsTool, SearchSymbolsTool,
@@ -49,6 +50,10 @@ CHAT_TOOLS = [SendMessageTool]
 # These are schema-level terminators (like step_complete); the chat
 # orchestrator parses their args directly from the LLM response.
 CHAT_AGENT_TOOLS = [RespondTool, EscalateTool]
+# Exclusive to the planner tier — NOT bound to the chat agent or the
+# developer. The planner orchestrator reads its args directly as the
+# final artifact of the planning turn.
+PLANNER_TOOLS = [EmitPlanTool]
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
 CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool, FindSimilarMethodsTool, SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool]
 
@@ -96,6 +101,13 @@ def get_tools_for_role(role: str, *, small_model: bool = False) -> list:
         # instantiating is the reliable way to read is_read_only.
         read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
         return read_only + [cls() for cls in CHAT_AGENT_TOOLS]
+    if role == "planner":
+        # Planner gets the same read-only exploration tools as the chat
+        # agent, plus EmitPlanTool as its terminator. Tight budget
+        # (~4 tool calls) enforced by the orchestrator, not the tool
+        # list.
+        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
+        return read_only + [cls() for cls in PLANNER_TOOLS]
     if small_model:
         return [cls() for cls in SMALL_MODEL_TOOLS]
     return [cls() for cls in all_tool_classes]
