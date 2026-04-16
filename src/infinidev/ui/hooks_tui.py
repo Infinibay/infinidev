@@ -42,7 +42,8 @@ class TUIHooks:
         # Drives the "Actions" indicator and the chat-history "context flow"
         # tag. Idle clears both so the panel returns to its resting state.
         labels = {
-            "analysis": "Analyzing...",
+            "chat":     "Thinking...",
+            "analysis": "Planning...",
             "gather":   "Gathering context...",
             "execute":  "Working...",
             "review":   "Code review...",

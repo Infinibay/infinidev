@@ -132,7 +132,6 @@ class InfinidevApp:
 
     def _init_lazy_engines(self) -> None:
         self.engine = None       # LoopEngine
-        self.analyst = None      # AnalysisEngine
         self.reviewer = None     # ReviewEngine
         self.agent = None        # InfinidevAgent
         self.context_calculator = None
@@ -315,7 +314,6 @@ class InfinidevApp:
 
         from infinidev.db.service import init_db
         from infinidev.engine.loop import LoopEngine
-        from infinidev.engine.analysis.analysis_engine import AnalysisEngine
         from infinidev.engine.analysis.review_engine import ReviewEngine
         from infinidev.agents.base import InfinidevAgent
         from infinidev.flows.event_listeners import event_bus
@@ -332,7 +330,6 @@ class InfinidevApp:
         event_bus.subscribe(self.on_loop_event)
 
         self.engine = LoopEngine()
-        self.analyst = AnalysisEngine()
         self.reviewer = ReviewEngine()
         self.agent = InfinidevAgent(agent_id="tui_agent")
 

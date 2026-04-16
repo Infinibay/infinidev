@@ -91,7 +91,6 @@ def run_engine_task(app: InfinidevApp, user_input: str) -> None:
             user_input=user_input,
             session_id=app.session_id,
             engine=app.engine,
-            analyst=app.analyst,
             reviewer=app.reviewer,
             hooks=hooks,
             force_gather=force_gather,

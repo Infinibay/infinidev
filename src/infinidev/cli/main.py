@@ -39,7 +39,6 @@ import uuid
 from infinidev.db.service import init_db, get_recent_summaries
 from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop import LoopEngine
-from infinidev.engine.analysis.analysis_engine import AnalysisEngine
 from infinidev.engine.analysis.review_engine import ReviewEngine
 import infinidev.prompts.flows  # noqa: F401 — registers flows
 
@@ -241,20 +240,17 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
         click.echo(result or "Done.")
         return
 
-    # Develop flow — full pipeline. Imperative bypass: skip the analyst
-    # for obvious action-verb tasks (see _IMPERATIVE_PREFIXES). The
-    # gather phase still runs if globally enabled.
-    _imperative = prompt_text.lstrip().lower().startswith(_IMPERATIVE_PREFIXES)
+    # Every turn runs through chat agent → (maybe escalate) → planner →
+    # developer. The chat agent itself detects action-verb requests and
+    # escalates immediately, so the legacy imperative bypass is gone.
     result = run_task(
         agent=agent,
         user_input=prompt_text,
         session_id=session_id,
         engine=engine,
-        analyst=AnalysisEngine(),
         reviewer=ReviewEngine(),
         hooks=hooks,
         use_phase_engine=use_phase_engine,
-        skip_analysis=_imperative,
     )
     click.echo(result or "Done.")
 
@@ -337,7 +333,6 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())
     engine = LoopEngine()
-    analyst = AnalysisEngine()
     reviewer = ReviewEngine()
     hooks = ClickHooks(session=session)
     _gather_next_task = False
@@ -419,7 +414,6 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                 user_input=user_input,
                 session_id=session_id,
                 engine=engine,
-                analyst=analyst,
                 reviewer=reviewer,
                 hooks=hooks,
                 use_phase_engine=_use_phase_engine,
