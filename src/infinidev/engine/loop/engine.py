@@ -101,6 +101,29 @@ from infinidev.engine.trace_log import (
 logger = logging.getLogger(__name__)
 
 
+def _seed_state_from_plan(state, plan) -> None:
+    """Populate ``state.plan`` from an analyst-emitted Plan.
+
+    Each step becomes a user-approved PlanStep (LLM cannot remove or
+    modify them via step_complete operations). The first step is set
+    active so the developer has somewhere to start.
+    """
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    state.plan.overview = plan.overview or ""
+    state.plan.steps = [
+        PlanStep(
+            index=idx + 1,
+            title=spec.title,
+            detail=spec.detail,
+            expected_output=spec.expected_output,
+            user_approved=True,
+            status="active" if idx == 0 else "pending",
+        )
+        for idx, spec in enumerate(plan.steps)
+    ]
+
+
 class LoopEngine(AgentEngine):
     """Plan-execute-summarize loop engine.
 
@@ -325,11 +348,21 @@ class LoopEngine(AgentEngine):
         nudge_threshold: int | None = None,
         nudge_message_template: str | None = None,
         summarizer_enabled: bool | None = None,
+        initial_plan: Any | None = None,
     ) -> str:
         """Plan-execute-summarize loop.
 
         Delegates to composition components: LLMCaller, ToolProcessor,
         LoopGuard, StepManager. See class docstrings for details.
+
+        When ``initial_plan`` (an ``infinidev.engine.analysis.plan.Plan``
+        instance) is provided, the loop starts with a pre-approved plan
+        populated from the analyst: plan.overview seeds
+        ``state.plan.overview`` (rendered every iteration as
+        ``<plan-overview>``), and each step becomes a ``user_approved``
+        PlanStep that the LLM cannot remove or modify. The bootstrap
+        branch that asks "No plan yet — call add_step" is naturally
+        suppressed because state.plan.steps is non-empty.
         """
         ctx = self._build_context(
             agent, task_prompt,
@@ -344,6 +377,8 @@ class LoopEngine(AgentEngine):
             nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
         )
+        if initial_plan is not None:
+            _seed_state_from_plan(ctx.state, initial_plan)
         llm_caller, tool_proc, guard, step_mgr = self._init_execution(ctx, task_prompt)
         consecutive_all_done = 0
 
