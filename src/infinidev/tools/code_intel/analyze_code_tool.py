@@ -9,6 +9,7 @@ from infinidev.tools.code_intel.analyze_code_input import AnalyzeCodeInput
 
 
 class AnalyzeCodeTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "analyze_code"
     description: str = "Detect code errors: broken imports, undefined symbols, unused imports/definitions."
     args_schema: Type[BaseModel] = AnalyzeCodeInput

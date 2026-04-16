@@ -60,6 +60,7 @@ class IterSymbolsInput(BaseModel):
 
 
 class IterSymbolsTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "iter_symbols"
     description: str = (
         "Walk all indexed symbols, optionally filtered by kind, parent "

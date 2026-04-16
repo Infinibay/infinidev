@@ -9,6 +9,7 @@ from infinidev.tools.code_intel.project_structure_input import ProjectStructureI
 
 
 class ProjectStructureTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "project_structure"
     description: str = "Show project directory tree with file descriptions."
     args_schema: Type[BaseModel] = ProjectStructureInput

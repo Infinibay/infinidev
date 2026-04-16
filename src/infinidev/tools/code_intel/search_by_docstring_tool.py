@@ -58,6 +58,7 @@ class SearchByDocstringInput(BaseModel):
 
 
 class SearchByDocstringTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "search_by_docstring"
     description: str = (
         "Find functions/methods/classes by what they DO (intent), not what "

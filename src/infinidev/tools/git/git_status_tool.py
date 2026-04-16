@@ -10,6 +10,7 @@ from infinidev.tools.git.git_status_input import GitStatusInput
 
 
 class GitStatusTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "git_status"
     description: str = (
         "Show the current Git status including modified, staged, and untracked files."

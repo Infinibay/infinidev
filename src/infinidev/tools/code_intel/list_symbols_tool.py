@@ -8,6 +8,7 @@ from infinidev.tools.code_intel.list_symbols_input import ListSymbolsInput
 
 
 class ListSymbolsTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "list_symbols"
     description: str = "List symbols defined in a file, optionally filtered by kind."
     args_schema: Type[BaseModel] = ListSymbolsInput

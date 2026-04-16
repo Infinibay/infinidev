@@ -10,6 +10,7 @@ from infinidev.tools.git.git_diff_input import GitDiffInput
 
 
 class GitDiffTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "git_diff"
     description: str = (
         "Show Git diff of changes. Can diff against a branch, "

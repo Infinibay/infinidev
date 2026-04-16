@@ -28,6 +28,7 @@ _FALLBACK_SKIP_SUFFIXES: set[str] = {".egg-info"}
 
 
 class ListDirectoryTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "list_directory"
     description: str = "List files and directories at a path."
     args_schema: Type[BaseModel] = ListDirectoryInput

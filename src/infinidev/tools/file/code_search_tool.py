@@ -19,6 +19,7 @@ def _shell_quote(s: str) -> str:
 
 
 class CodeSearchTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "code_search"
     description: str = "Search code files for a text pattern or regex."
     args_schema: Type[BaseModel] = CodeSearchInput

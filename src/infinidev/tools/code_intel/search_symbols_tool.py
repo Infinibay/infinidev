@@ -8,6 +8,7 @@ from infinidev.tools.code_intel.search_symbols_input import SearchSymbolsInput
 
 
 class SearchSymbolsTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "search_symbols"
     description: str = "Search symbols by name across the project. Supports partial matching."
     args_schema: Type[BaseModel] = SearchSymbolsInput

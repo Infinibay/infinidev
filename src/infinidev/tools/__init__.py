@@ -71,8 +71,22 @@ SMALL_MODEL_TOOLS = [
 
 
 def get_tools_for_role(role: str, *, small_model: bool = False) -> list:
-    """Simplified tool selection for the CLI."""
+    """Simplified tool selection for the CLI.
+
+    role="chat_agent" returns only tools whose class declares
+    is_read_only=True. The chat agent is the default entry point of the
+    pipeline; the whitelist at the schema level is the security boundary
+    — prompt rules alone cannot stop a model from calling a write tool
+    if the schema exposes it.
+    """
+    all_tool_classes = FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS + DOCS_TOOLS + CODE_INTEL_TOOLS + META_TOOLS
+    if role == "chat_agent":
+        # Instantiate each tool and keep only the read-only ones. Pydantic
+        # moves class-level field defaults into model_fields so getattr on
+        # the class returns the descriptor rather than the default value —
+        # instantiating is the reliable way to read is_read_only.
+        instances = [cls() for cls in all_tool_classes]
+        return [t for t in instances if t.is_read_only]
     if small_model:
         return [cls() for cls in SMALL_MODEL_TOOLS]
-    tool_classes = FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS + DOCS_TOOLS + CODE_INTEL_TOOLS + META_TOOLS
-    return [cls() for cls in tool_classes]
+    return [cls() for cls in all_tool_classes]

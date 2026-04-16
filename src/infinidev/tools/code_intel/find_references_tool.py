@@ -8,6 +8,7 @@ from infinidev.tools.code_intel.find_references_input import FindReferencesInput
 
 
 class FindReferencesTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "find_references"
     description: str = "Find all references to a symbol in the codebase."
     args_schema: Type[BaseModel] = FindReferencesInput

@@ -42,6 +42,14 @@ class InfinibayBaseTool(BaseTool, ABC):
     2. Thread-local / ContextVar / environment variables (fallback)
     """
 
+    # Declares whether this tool is pure-read (no filesystem, process, db,
+    # or network side effects). Used by get_tools_for_role("chat_agent")
+    # to whitelist the chat-agent toolbox — write tools with is_read_only
+    # still set to False are kept out of the schema, making them
+    # unreachable for the LLM (schema is the enforcement mechanism; prompt
+    # rules alone are not enough).
+    is_read_only: bool = False
+
     def run(self, *args: Any, **kwargs: Any) -> Any:
         """Override CrewAI's run() to strip kwargs not accepted by _run().
 

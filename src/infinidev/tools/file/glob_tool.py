@@ -30,6 +30,7 @@ _FALLBACK_SKIP_SUFFIXES: set[str] = {".egg-info"}
 
 
 class GlobTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "glob"
     description: str = "Find files by glob pattern with optional content filtering."
     args_schema: Type[BaseModel] = GlobInput

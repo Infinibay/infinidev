@@ -58,6 +58,7 @@ class FindSimilarMethodsInput(BaseModel):
 
 
 class FindSimilarMethodsTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "find_similar_methods"
     description: str = (
         "Find methods elsewhere in the project whose body looks like a given "

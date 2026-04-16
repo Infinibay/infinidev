@@ -20,6 +20,7 @@ class ProjectStatsInput(BaseModel):
 
 
 class ProjectStatsTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "project_stats"
     description: str = (
         "Summary of the project's code intelligence index: file count, "

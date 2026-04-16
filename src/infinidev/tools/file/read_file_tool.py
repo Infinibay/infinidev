@@ -149,6 +149,7 @@ def _is_binary_file(file_path: str, sample_size: int = 8192) -> bool:
 
 
 class ReadFileTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "read_file"
     description: str = (
         "Read file contents with line numbers. Auto-indexes for code "

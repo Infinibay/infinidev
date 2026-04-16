@@ -12,6 +12,7 @@ from infinidev.tools.knowledge.search_findings_input import SearchFindingsInput
 
 
 class SearchFindingsTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "search_findings"
     description: str = (
         "Search findings by semantic similarity. Returns findings whose "

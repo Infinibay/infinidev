@@ -9,6 +9,7 @@ from infinidev.tools.code_intel.get_symbol_code_input import GetSymbolCodeInput
 
 
 class GetSymbolCodeTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "get_symbol_code"
     description: str = "Get source code of a symbol by name."
     args_schema: Type[BaseModel] = GetSymbolCodeInput

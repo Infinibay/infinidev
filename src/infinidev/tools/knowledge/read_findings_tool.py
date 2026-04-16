@@ -11,6 +11,7 @@ from infinidev.tools.knowledge.read_findings_input import ReadFindingsInput
 
 
 class ReadFindingsTool(InfinibayBaseTool):
+    is_read_only: bool = True
     name: str = "read_findings"
     description: str = (
         "Read and search research findings. Supports full-text search "
