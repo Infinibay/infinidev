@@ -18,6 +18,14 @@ class PlanStep(BaseModel):
     # the iteration prompt and as the post-step verification anchor. Empty if
     # the model didn't declare one (older flows / quick steps).
     expected_output: str = ""
+    # Long-form guidance written upfront by the planner: exact files, changes,
+    # verification approach. Rendered ONLY while the step is active to keep
+    # the iteration prompt small — pending steps show their title only.
+    detail: str = ""
+    # True when this step came from a user-approved plan (analyst-emitted,
+    # displayed to the user in chat). LoopPlan.apply_operations refuses to
+    # remove or modify approved steps when the LLM tries mid-execution.
+    user_approved: bool = False
     status: Literal["pending", "active", "done", "skipped"] = "pending"
 
 

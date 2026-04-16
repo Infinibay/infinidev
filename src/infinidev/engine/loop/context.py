@@ -661,6 +661,11 @@ def build_iteration_prompt(
 
     # Plan (if we have one) — skip for agents that don't use plans (e.g. analyst)
     if not skip_plan:
+        # Plan overview: stable prose narrative from the planner. Rendered
+        # every iteration so the agent keeps the big picture; the per-step
+        # detail is shown only inside <current-action> for the active step.
+        if state.plan.overview:
+            parts.append(f"<plan-overview>\n{state.plan.overview}\n</plan-overview>")
         if state.plan.steps:
             parts.append(f"<plan>\n{state.plan.render()}\n</plan>")
         else:
@@ -1119,9 +1124,10 @@ def _render_current_action(active: Any, state: LoopState, small_model: bool) -> 
     """
     if small_model:
         guidance = f"\n{active.explanation}" if active.explanation else ""
+        detail = f"\n\n{active.detail}" if getattr(active, "detail", "") else ""
         return (
             f"<current-action>\nDO NOW: Step {active.index} — {active.title}"
-            f"{guidance}\n</current-action>"
+            f"{guidance}{detail}\n</current-action>"
         )
 
     scope_warning = ""
@@ -1135,8 +1141,9 @@ def _render_current_action(active: Any, state: LoopState, small_model: bool) -> 
             f"call step_complete with status='continue' and add new steps."
         )
     guidance = f"\n\n{active.explanation}" if active.explanation else ""
+    detail = f"\n\n{active.detail}" if getattr(active, "detail", "") else ""
     return (
         f"<current-action>\nStep {active.index}: {active.title}"
-        f"{guidance}{scope_warning}\n</current-action>"
+        f"{guidance}{detail}{scope_warning}\n</current-action>"
     )
 

@@ -16,6 +16,11 @@ class LoopPlan(BaseModel):
     """The agent's mutable execution plan."""
 
     steps: list[PlanStep] = Field(default_factory=list)
+    # Stable prose narrative set once by the planner (what, why, which files,
+    # validation approach). Rendered every iteration as <plan-overview>;
+    # apply_operations never mutates this field — it is immutable after
+    # the LoopEngine populates it from an external Plan.
+    overview: str = ""
 
     @property
     def active_step(self) -> PlanStep | None:
@@ -54,9 +59,31 @@ class LoopPlan(BaseModel):
 
         Protections:
         - ``done`` steps are never replaced or removed.
+        - ``user_approved`` steps cannot be removed or modified by the LLM.
+          The orchestrator populates these when injecting an analyst plan;
+          the LLM can still add new steps around them.
         - Bulk removal of all pending steps is blocked (max 50% can be removed
           per call) to prevent the LLM from accidentally wiping the plan.
         """
+        approved_indices = {s.index for s in self.steps if s.user_approved}
+        filtered_ops: list[StepOperation] = []
+        for op in ops:
+            if op.op in ("remove", "modify") and op.index in approved_indices:
+                logger.warning(
+                    "Rejected %s op on user-approved step %d — approved steps "
+                    "are protected from LLM modification",
+                    op.op, op.index,
+                )
+                continue
+            if op.op == "add" and op.index in approved_indices:
+                logger.warning(
+                    "Rejected add op at index %d — would overwrite user-approved step",
+                    op.index,
+                )
+                continue
+            filtered_ops.append(op)
+        ops = filtered_ops
+
         # Count how many pending/active steps would be removed
         pending_count = sum(1 for s in self.steps if s.status in ("pending", "active"))
         remove_count = sum(1 for op in ops if op.op == "remove")
