@@ -69,7 +69,6 @@ class TestRegistrationCompleteness:
         "loop.identity",
         "loop.protocol",
         "flow.develop.identity",
-        "flow.research.identity",
         "flow.document.identity",
         "flow.sysadmin.identity",
         "flow.explore.identity",
@@ -138,7 +137,6 @@ class TestSizeReduction:
         "loop.identity",
         "loop.protocol",
         "flow.develop.identity",
-        "flow.research.identity",
         "flow.sysadmin.identity",
     ])
     def test_generalized_shorter_than_full(self, name):

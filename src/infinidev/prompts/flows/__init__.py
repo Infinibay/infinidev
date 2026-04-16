@@ -28,11 +28,6 @@ from infinidev.prompts.flows.develop import (
     DEVELOP_EXPECTED_OUTPUT,
     DEVELOP_IDENTITY,
 )
-from infinidev.prompts.flows.research import (
-    RESEARCH_BACKSTORY,
-    RESEARCH_EXPECTED_OUTPUT,
-    RESEARCH_IDENTITY,
-)
 from infinidev.prompts.flows.document import (
     DOCUMENT_BACKSTORY,
     DOCUMENT_EXPECTED_OUTPUT,
@@ -60,13 +55,6 @@ register_flow(FlowConfig(
     expected_output=DEVELOP_EXPECTED_OUTPUT,
     backstory=DEVELOP_BACKSTORY,
     run_review=True,
-))
-
-register_flow(FlowConfig(
-    name="research",
-    identity_prompt=RESEARCH_IDENTITY,
-    expected_output=RESEARCH_EXPECTED_OUTPUT,
-    backstory=RESEARCH_BACKSTORY,
 ))
 
 register_flow(FlowConfig(

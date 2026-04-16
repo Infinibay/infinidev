@@ -16,14 +16,12 @@ register("full", "loop.protocol", LOOP_PROTOCOL)
 # ── Flow Identities ──────────────────────────────────────────────────────
 
 from infinidev.prompts.flows.develop import DEVELOP_IDENTITY
-from infinidev.prompts.flows.research import RESEARCH_IDENTITY
 from infinidev.prompts.flows.document import DOCUMENT_IDENTITY
 from infinidev.prompts.flows.sysadmin import SYSADMIN_IDENTITY
 from infinidev.prompts.flows.explore import EXPLORE_IDENTITY
 from infinidev.prompts.flows.brainstorm import BRAINSTORM_IDENTITY
 
 register("full", "flow.develop.identity", DEVELOP_IDENTITY)
-register("full", "flow.research.identity", RESEARCH_IDENTITY)
 register("full", "flow.document.identity", DOCUMENT_IDENTITY)
 register("full", "flow.sysadmin.identity", SYSADMIN_IDENTITY)
 register("full", "flow.explore.identity", EXPLORE_IDENTITY)
