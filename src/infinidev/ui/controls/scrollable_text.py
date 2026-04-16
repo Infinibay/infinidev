@@ -63,15 +63,14 @@ class ScrollableTextControl(FormattedTextControl):
 
     # ── Content rendering ──────────────────────────────────────────────
 
-    def create_content(self, width: int, height: int | None,
-                       preview_search: bool = False) -> UIContent:
+    def create_content(self, width: int, height: int | None) -> UIContent:
         """Build UIContent with cursor positioned according to scroll state.
 
         This is the key difference from the base FormattedTextControl:
         we set ``cursor_position.y`` to the line we want visible, which
         prevents the Window from overriding our manual vertical_scroll.
         """
-        content = super().create_content(width, height, preview_search)
+        content = super().create_content(width, height)
         line_count = content.line_count
         self._line_count = line_count
 
