@@ -119,6 +119,15 @@ def run_chat_agent(
         )
     except Exception as exc:
         logger.exception("Chat agent loop failed")
+        # If the exception interrupted a stream-in-progress, finalize
+        # the partial message so the UI flips it out of streaming mode
+        # and re-renders with whatever text was captured. Without this,
+        # the TUI would carry a phantom message stuck in streaming=True.
+        if hooks is not None:
+            try:
+                hooks.notify_stream_end("Infinidev", "agent")
+            except Exception:
+                pass
         return _fallback_respond(_detect_lang(user_input), exc=exc)
     finally:
         clear_agent_context(agent_id)
