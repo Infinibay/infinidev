@@ -97,7 +97,7 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Toggle the file explorer panel."""
         app_state.toggle_explorer()
 
-    @kb.add("c-.")  # Ctrl+. — toggle right sidebar
+    @kb.add("escape", ".")  # Alt+. — toggle right sidebar
     def toggle_sidebar(event):
         """Toggle the right sidebar panel."""
         app_state.toggle_sidebar()
@@ -174,7 +174,7 @@ FOOTER_HINTS: list[tuple[str, str, frozenset[str]]] = [
     ("Ctrl+C", "Clear/Quit", frozenset({"always"})),
     ("Ctrl+O", "Open file",  frozenset({"always"})),
     ("Ctrl+E", "Explorer",   frozenset({"always"})),
-    ("Ctrl+.", "Sidebar",    frozenset({"always"})),
+    ("Alt+.",  "Sidebar",    frozenset({"always"})),
     ("F6",     "Line #",     frozenset({"file"})),
     ("Ctrl+W", "Close tab",  frozenset({"file"})),
     ("Ctrl+S", "Save",       frozenset({"file"})),

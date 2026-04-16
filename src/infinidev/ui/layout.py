@@ -17,6 +17,7 @@ from prompt_toolkit.layout.containers import (
     VSplit,
     Window,
 )
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.layout import Layout
