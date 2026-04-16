@@ -36,7 +36,6 @@ class InfinidevAgent:
         self._tech_hints: list[str] | None = None
         self._session_summaries: list[str] | None = None
         self._session_id: str | None = None
-        self._system_prompt_protocol: str | None = None
 
         # Import tools dynamically to avoid circular imports
         from infinidev.tools import get_tools_for_role

@@ -710,7 +710,7 @@ class LoopEngine(AgentEngine):
             agent=agent, agent_name=getattr(agent, "name", agent.agent_id),
             agent_role=getattr(agent, "role", "agent"),
             desc=desc, expected=expected, event_id=event_id,
-            skip_plan=bool(getattr(agent, '_system_prompt_protocol', None)),
+            skip_plan=False,
             nudge_message_template=kwargs.get('nudge_message_template'),
             state=state, file_tracker=file_tracker,
             start_iteration=state.iteration_count,
