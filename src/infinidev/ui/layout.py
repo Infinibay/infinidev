@@ -106,6 +106,16 @@ def build_layout(app_state: InfinidevApp) -> Layout:
     chat_input_area = ConditionalContainer(
         content=HSplit([
             shell_border_line,
+            ConditionalContainer(
+                content=Window(
+                    content=FormattedTextControl(lambda: [
+                        ("class:placeholder", "  Type message…  (\\ + Enter for new line)"),
+                    ]),
+                    height=1,
+                    style=f"fg:#888888 bg:{SURFACE_LIGHT}",
+                ),
+                filter=Condition(lambda: not app_state._chat_buffer.text),
+            ),
             Window(
                 content=app_state._chat_input_control,
                 height=CHAT_INPUT_HEIGHT,
