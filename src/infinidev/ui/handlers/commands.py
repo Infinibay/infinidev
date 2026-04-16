@@ -376,7 +376,12 @@ def handle_models(app: InfinidevApp, parts: list[str]) -> None:
         provider = get_provider(settings.LLM_PROVIDER)
         app.add_message("System", f"Fetching models for {provider.display_name}...", "system")
         try:
-            models = fetch_models(settings.LLM_PROVIDER, settings.LLM_API_KEY, settings.LLM_BASE_URL)
+            models = fetch_models(
+                settings.LLM_PROVIDER,
+                settings.LLM_API_KEY,
+                settings.LLM_BASE_URL,
+                raise_on_error=True,
+            )
             if models:
                 model_list = "\n".join(f"  {m}" for m in models)
                 app.add_message("System", f"Available models:\n{model_list}", "system")

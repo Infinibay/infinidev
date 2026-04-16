@@ -109,11 +109,23 @@ PROVIDERS: dict[str, ProviderConfig] = {
         display_name="Kimi (Moonshot)",
         prefix="moonshot/",
         default_base_url="https://api.moonshot.ai/v1",
-        model_list_format="static",
+        model_list_format="openai",
         static_models=[
+            "kimi-k2.6-preview",
             "kimi-k2.5",
             "kimi-k2-thinking", "kimi-k2-thinking-turbo",
             "kimi-k2-0905-preview", "kimi-k2-turbo-preview",
+        ],
+    ),
+    "kimi_coding": ProviderConfig(
+        id="kimi_coding",
+        display_name="Kimi Code Plan",
+        prefix="moonshot/",
+        default_base_url="https://api.kimi.com/coding/v1",
+        model_list_format="openai",
+        is_native=False,
+        static_models=[
+            "kimi-for-coding",
         ],
     ),
     "minimax": ProviderConfig(
@@ -199,8 +211,14 @@ def fetch_models(
     provider_id: str,
     api_key: str = "",
     base_url: str = "",
+    raise_on_error: bool = False,
 ) -> list[str]:
-    """Fetch available models for a provider. Returns prefixed model names."""
+    """Fetch available models for a provider. Returns prefixed model names.
+
+    If ``raise_on_error`` is True, HTTP/parse failures propagate instead of
+    falling back to the static list (used by ``/models list`` to surface
+    real errors to the user).
+    """
     provider = get_provider(provider_id)
     # For providers with a fixed URL, always use their default — the passed
     # base_url likely belongs to a previously-selected provider (e.g. Ollama).
@@ -225,6 +243,8 @@ def fetch_models(
             return [f"{provider.prefix}{m}" for m in provider.static_models]
     except Exception as exc:
         logger.warning("Failed to fetch models for %s: %s", provider_id, str(exc)[:200])
+        if raise_on_error:
+            raise
         # Fall back to static list
         if provider.static_models:
             return [f"{provider.prefix}{m}" for m in provider.static_models]
