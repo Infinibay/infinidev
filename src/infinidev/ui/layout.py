@@ -116,8 +116,6 @@ def build_layout(app_state: InfinidevApp) -> Layout:
 
     # ── Sidebar (right) ─────────────────────────────────────────────
 
-    sidebar_border = Window(width=1, char="│", style=f"{PRIMARY}")
-
     def _sidebar_section(title: str, content_getter, scrollable: bool = False):
         if scrollable:
             control = ScrollableTextControl(content_getter)
@@ -156,21 +154,36 @@ def build_layout(app_state: InfinidevApp) -> Layout:
 
     # ── Assemble 3-column layout ────────────────────────────────────
 
-    main_body = VSplit([
-        explorer_panel,
-        explorer_border,
-        # Content takes 70% of remaining space
-        HSplit(
-            [
-                tab_bar,
-                content_body,
-                chat_input_area,
-            ],
-            width=D(weight=70),
+    # Sidebar toggle indicator — shows when sidebar is hidden
+    from prompt_toolkit.mouse_events import MouseEventType
+
+    def _sidebar_toggle_click(mouse_event):
+        if mouse_event.event_type == MouseEventType.MOUSE_UP:
+            app_state.toggle_sidebar()
+
+    def _sidebar_indicator():
+        if app_state.sidebar_visible:
+            return FormattedText([])
+        return FormattedText([
+            (f"{PRIMARY} bold", " ◆ ", _sidebar_toggle_click),
+        ])
+
+    sidebar_toggle_indicator = ConditionalContainer(
+        content=Window(
+            content=FormattedTextControl(_sidebar_indicator),
+            width=3,
+            style=f"bg:{SURFACE_DARK}",
         ),
-        sidebar_border,
-        # Sidebar takes 30%
-        HSplit(
+        filter=Condition(lambda: not app_state.sidebar_visible),
+    )
+
+    sidebar_border_conditional = ConditionalContainer(
+        content=Window(width=1, char="│", style=f"{PRIMARY}"),
+        filter=Condition(lambda: app_state.sidebar_visible),
+    )
+
+    sidebar_content = ConditionalContainer(
+        content=HSplit(
             [
                 context_section,
                 plan_section,
@@ -181,12 +194,30 @@ def build_layout(app_state: InfinidevApp) -> Layout:
             ],
             width=D(weight=30),
         ),
+        filter=Condition(lambda: app_state.sidebar_visible),
+    )
+
+    main_body = VSplit([
+        explorer_panel,
+        explorer_border,
+        # Content takes remaining space
+        HSplit(
+            [
+                tab_bar,
+                content_body,
+                chat_input_area,
+            ],
+            width=D(weight=70),
+        ),
+        sidebar_border_conditional,
+        sidebar_content,
+        sidebar_toggle_indicator,
     ])
 
     # ── Status bar + footer ─────────────────────────────────────────
 
     app_state.status_bar_control = StatusBarControl()
-    app_state.footer_control = FooterControl()
+    app_state.footer_control = FooterControl(app_state)
 
     status_bar = Window(
         content=app_state.status_bar_control,

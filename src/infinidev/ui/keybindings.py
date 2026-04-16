@@ -97,6 +97,11 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Toggle the file explorer panel."""
         app_state.toggle_explorer()
 
+    @kb.add("c-.")  # Ctrl+. — toggle right sidebar
+    def toggle_sidebar(event):
+        """Toggle the right sidebar panel."""
+        app_state.toggle_sidebar()
+
     @kb.add("c-w")
     def close_tab(event):
         """Close the active file tab."""
@@ -154,15 +159,47 @@ def create_global_keybindings(app_state) -> KeyBindings:
 
 
 # ── Keybinding hints for the footer ────────────────────────────────────
+#
+# Each entry is (key, description, context_set).
+# context_set: which contexts this shortcut is valid in.
+#   "always"  → always shown
+#   "chat"    → shown when chat input is focused (no file open)
+#   "file"    → shown when a file tab is active
+#   "modal"   → shown when a modal dialog is open
+#
+# If context_set contains "always" it is shown unconditionally.
+# Otherwise it is shown when ANY of its contexts match the current app state.
 
-FOOTER_HINTS = [
-    ("Ctrl+C", "Clear/Quit"),
-    ("Ctrl+O", "Open file"),
-    ("Ctrl+E", "Explorer"),
-    ("F6", "Line #"),
-    ("Ctrl+W", "Close tab"),
-    ("Ctrl+S", "Save"),
-    ("Ctrl+F", "Find"),
-    ("F2", "Chat"),
-    ("Esc", "Stop task"),
+FOOTER_HINTS: list[tuple[str, str, frozenset[str]]] = [
+    ("Ctrl+C", "Clear/Quit", frozenset({"always"})),
+    ("Ctrl+O", "Open file",  frozenset({"always"})),
+    ("Ctrl+E", "Explorer",   frozenset({"always"})),
+    ("Ctrl+.", "Sidebar",    frozenset({"always"})),
+    ("F6",     "Line #",     frozenset({"file"})),
+    ("Ctrl+W", "Close tab",  frozenset({"file"})),
+    ("Ctrl+S", "Save",       frozenset({"file"})),
+    ("Ctrl+F", "Find",       frozenset({"file"})),
+    ("Ctrl+G", "Search",     frozenset({"always"})),
+    ("F2",     "Chat",       frozenset({"always"})),
+    ("Esc",    "Stop/close", frozenset({"always"})),
 ]
+
+
+def get_active_contexts(app_state) -> frozenset[str]:
+    """Return the set of active hint contexts based on current app state.
+
+    Returns a frozenset that always includes "always" and may include:
+      - "file"  — when a file tab (not chat) is active
+      - "modal" — when a dialog is open
+    """
+    contexts: set[str] = {"always"}
+
+    # File context: active tab is not "chat"
+    if getattr(app_state, "active_tab", "chat") != "chat":
+        contexts.add("file")
+
+    # Modal context: a dialog is currently open
+    if getattr(app_state, "active_dialog", None) is not None:
+        contexts.add("modal")
+
+    return frozenset(contexts)

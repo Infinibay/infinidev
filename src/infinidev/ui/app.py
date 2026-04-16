@@ -61,8 +61,17 @@ class InfinidevApp:
 
     def _init_ui_state(self) -> None:
         self.explorer_visible: bool = False
+        self.sidebar_visible: bool = True
         self.active_tab: str = "chat"
         self.active_dialog: str | None = None
+
+        # Load persisted UI state
+        try:
+            from infinidev.config.settings import settings
+            if hasattr(settings, 'UI_SIDEBAR_VISIBLE'):
+                self.sidebar_visible = settings.UI_SIDEBAR_VISIBLE
+        except Exception:
+            pass
 
     def _init_chat_subsystem(self) -> None:
         self.chat_messages: list[dict[str, Any]] = []
@@ -485,6 +494,20 @@ class InfinidevApp:
 
     def toggle_explorer(self) -> None:
         self.file_manager.toggle_explorer()
+
+    def toggle_sidebar(self) -> None:
+        """Toggle the right sidebar panel visibility."""
+        self.sidebar_visible = not self.sidebar_visible
+        self.flash_status(
+            "Sidebar visible" if self.sidebar_visible else "Sidebar hidden"
+        )
+        self.invalidate()
+        # Persist the state
+        try:
+            from infinidev.config.settings import settings
+            settings.save_user_settings({"UI_SIDEBAR_VISIBLE": self.sidebar_visible})
+        except Exception:
+            pass
 
     def _init_tree(self) -> None:
         self.file_manager._init_tree()
