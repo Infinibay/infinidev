@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import traceback
 import types
 import uuid
 from typing import Any, Optional
@@ -33,7 +34,7 @@ from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.loop.tools import build_tool_dispatch, execute_tool_call
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
-from infinidev.prompts.chat_agent import CHAT_AGENT_SYSTEM_PROMPT
+from infinidev.prompts.chat_agent import build_chat_agent_system_prompt
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
@@ -104,7 +105,7 @@ def run_chat_agent(
     tool_schemas = [tool_to_openai_schema(t) for t in tools]
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": CHAT_AGENT_SYSTEM_PROMPT},
+        {"role": "system", "content": build_chat_agent_system_prompt()},
         {"role": "user", "content": _build_user_message(user_input, session_id)},
     ]
 
@@ -285,20 +286,65 @@ def _parse_args(tc: Any) -> dict[str, Any]:
         return {}
 
 
+def _sanitize_tool_arguments(raw: Any) -> str:
+    """Normalize tool-call ``arguments`` into a clean JSON string.
+
+    Local models (gemma4, sometimes qwen) emit tool calls whose
+    ``arguments`` are either non-strings, strings with trailing noise
+    (e.g. the closing ``<tool_call|>`` marker leaked into the field),
+    or double-encoded JSON. LiteLLM's Ollama chat transformer runs
+    ``json.loads`` on this field when building the *next* request, so
+    a malformed value crashes the whole loop one iteration later —
+    with a misleading "Extra data" JSONDecodeError at serialization
+    time, not at parse time.
+
+    Strategy:
+      1. dict/list → ``json.dumps`` directly.
+      2. valid JSON string → parse and re-serialize to strip whitespace.
+      3. string with extra junk after a valid JSON prefix →
+         ``raw_decode`` to keep just the first object.
+      4. anything else → ``"{}"`` so downstream code sees a well-formed
+         empty args blob instead of crashing.
+    """
+    if isinstance(raw, (dict, list)):
+        try:
+            return json.dumps(raw)
+        except (TypeError, ValueError):
+            return "{}"
+    if not isinstance(raw, str):
+        return "{}"
+    s = raw.strip()
+    if not s:
+        return "{}"
+    try:
+        return json.dumps(json.loads(s))
+    except json.JSONDecodeError:
+        try:
+            parsed, _end = json.JSONDecoder().raw_decode(s)
+            logger.warning(
+                "Truncated malformed tool arguments (extra data after valid "
+                "JSON prefix): %r → %r", s[:80], parsed,
+            )
+            return json.dumps(parsed)
+        except (json.JSONDecodeError, ValueError):
+            logger.warning(
+                "Dropped unparseable tool arguments, falling back to '{}': %r",
+                s[:80],
+            )
+            return "{}"
+
+
 def _tool_call_to_dict(tc: Any) -> dict[str, Any]:
     """Serialize a tool_call object back to the dict shape LiteLLM
     accepts on the next call. Provider-specific message objects don't
-    serialize automatically."""
+    serialize automatically; arguments are sanitized to survive sloppy
+    outputs from local models."""
     return {
         "id": tc.id,
         "type": "function",
         "function": {
             "name": tc.function.name,
-            "arguments": (
-                tc.function.arguments
-                if isinstance(tc.function.arguments, str)
-                else json.dumps(tc.function.arguments)
-            ),
+            "arguments": _sanitize_tool_arguments(tc.function.arguments),
         },
     }
 
@@ -364,8 +410,10 @@ def _fallback_respond(
 ) -> ChatAgentResult:
     """Build a respond result from a localized fallback message.
 
-    The exception (if any) is logged — not surfaced in the reply —
-    because tracebacks in chat messages are noise.
+    When an exception is supplied the traceback is attached to the
+    result so the UI can render it inside a collapsed widget — the
+    short message still dominates the chat, but the user can expand
+    it to see the real error without digging through log files.
     """
     if exc is not None:
         logger.warning("chat_agent fallback (reason=%s): %s", reason, exc)
@@ -373,7 +421,12 @@ def _fallback_respond(
         (lang, reason),
         _FALLBACK_MESSAGES[("en", reason if (("en", reason) in _FALLBACK_MESSAGES) else "exception")],
     )
-    return ChatAgentResult(kind="respond", reply=message)
+    tb_text: str | None = None
+    if exc is not None:
+        tb_text = "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)
+        )
+    return ChatAgentResult(kind="respond", reply=message, error_traceback=tb_text)
 
 
 # ─────────────────────────────────────────────────────────────────────────
