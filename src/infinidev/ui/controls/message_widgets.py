@@ -270,12 +270,8 @@ class BorderedWidget:
 
         # Register header line (offset 0) as clickable → copy message text
         def _copy_msg(m=msg):
-            import logging
-            log = logging.getLogger("infinidev.copy_debug")
-            log.debug("_copy_msg fired for sender=%s, text_len=%d", m.get("sender"), len(m.get("text", "")))
             from infinidev.ui.clipboard import copy_to_clipboard
             ok = copy_to_clipboard(m.get("text", ""))
-            log.debug("copy_to_clipboard returned %s, _copy_feedback=%s", ok, _copy_feedback is not None)
             # Store highlight so next render shows ✓/✗ icon
             _copy_highlight[id(m)] = (_time.monotonic(), ok)
             if _copy_feedback:

@@ -19,18 +19,6 @@ from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 
 from infinidev.ui.theme import TEXT_MUTED, THINKING_FG, PRIMARY
 
-import logging
-import os
-
-_copy_log = logging.getLogger("infinidev.copy_debug")
-_copy_log_path = os.path.expanduser("~/.infinidev/copy_debug.log")
-if not _copy_log.handlers:
-    _fh = logging.FileHandler(_copy_log_path, mode="w")
-    _fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
-    _copy_log.addHandler(_fh)
-    _copy_log.setLevel(logging.DEBUG)
-
-
 
 # Minimum interval between full line rebuilds (seconds)
 _REBUILD_MIN_INTERVAL = 0.18  # ~5.5 rebuilds/sec max
@@ -75,15 +63,8 @@ class ChatHistoryControl(UIControl):
         """Handle clicks on any registered clickable line; delegate rest to Window."""
         if mouse_event.event_type == MouseEventType.MOUSE_UP:
             line_idx = mouse_event.position.y
-            _copy_log.debug(
-                "mouse MOUSE_UP at y=%d  clickable_keys=%s  match=%s",
-                line_idx,
-                sorted(self._clickable_lines.keys())[:20],
-                line_idx in self._clickable_lines,
-            )
             callback = self._clickable_lines.get(line_idx)
             if callback is not None:
-                _copy_log.debug("firing callback for line %d", line_idx)
                 callback()
                 self._line_cache = None  # rebuild on next frame
                 return None

@@ -1,6 +1,6 @@
 [project]
 name = "infinidev"
-version = "0.2.2"
+version = "0.3.1"
 description = "A terminal-based AI programming tool using agent loops."
 authors = [{ name = "Andres Borek", email = "andres.b.dev@gmail.com" }]
 dependencies = [
