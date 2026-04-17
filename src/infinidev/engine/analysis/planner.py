@@ -234,29 +234,31 @@ def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
 
 
 def _fallback_plan(escalation: EscalationPacket, reason: str) -> Plan:
-    """Last-resort plan: one step, carrying the user's request as-is.
+    """Last-resort plan: hand the request over to the developer with
+    context, and let it bootstrap its own plan via ``add_step``.
 
-    This path is a safety net; it should not fire in healthy runs. The
-    reason is LOGGED, not embedded in the overview, because the overview
-    is rendered every iteration of the developer loop and repeating a
-    debug string as context would confuse the model.
+    The overview carries the user request and chat-agent understanding
+    so the developer has context in its first prompt. ``steps`` is
+    empty — this signals the LoopEngine bootstrap branch, which tells
+    the model "no plan yet, call add_step" rather than treating a
+    single pre-seeded step as the whole plan. Previously we returned a
+    one-step plan that the LLM couldn't modify (user_approved=True),
+    which caused the developer to execute everything inside a single
+    monolithic step instead of decomposing the work.
+
+    The *reason* is LOGGED, not embedded in the overview, because the
+    overview is rendered every iteration and repeating a debug string
+    as context would confuse the model.
     """
     logger.warning("planner falling back: reason=%s", reason)
     return Plan(
         overview=(
-            "Carry out the user's request directly. No structured plan "
-            "was produced; the developer should investigate and execute "
-            "based on the original request and the chat agent's "
-            "understanding."
+            f"User request: {escalation.user_request}\n\n"
+            f"Chat agent's understanding: {escalation.understanding}\n\n"
+            "No structured plan was produced upstream. Decompose the "
+            "request into steps via add_step before executing."
         ),
-        steps=[PlanStepSpec(
-            title="Execute user request",
-            detail=(
-                f"User request: {escalation.user_request}\n\n"
-                f"Chat agent's understanding: {escalation.understanding}"
-            ),
-            expected_output="Request fulfilled; user verifies outcome.",
-        )],
+        steps=[],
     )
 
 

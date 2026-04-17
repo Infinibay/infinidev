@@ -206,6 +206,7 @@ class ManualJsonFormat(ToolCallFormat):
                 continue
 
             depth = 0
+            balanced_parsed = False
             for i, ch in enumerate(candidate[brace_start:], start=brace_start):
                 if ch == "{":
                     depth += 1
@@ -226,7 +227,27 @@ class ManualJsonFormat(ToolCallFormat):
                                         return calls
                         except (json.JSONDecodeError, TypeError):
                             pass
+                        balanced_parsed = True
                         continue
+
+            # Truncated JSON recovery: if we never reached a balanced
+            # object (depth stayed > 0 through EOF), the model was cut
+            # off mid-emission. json_repair can usually reconstruct the
+            # call from partial input. Worth one final attempt.
+            if not balanced_parsed and depth > 0:
+                try:
+                    parsed = safe_json_loads(candidate[brace_start:])
+                    if isinstance(parsed, dict):
+                        if "tool_calls" in parsed:
+                            calls = _normalize_call_list(parsed["tool_calls"])
+                            if calls:
+                                return calls
+                        if "name" in parsed:
+                            calls = _normalize_call_list([parsed])
+                            if calls:
+                                return calls
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
         return None
 

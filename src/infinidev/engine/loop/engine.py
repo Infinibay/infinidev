@@ -107,6 +107,11 @@ def _seed_state_from_plan(state, plan) -> None:
     Each step becomes a user-approved PlanStep (LLM cannot remove or
     modify them via step_complete operations). The first step is set
     active so the developer has somewhere to start.
+
+    Plans with an overview but no steps (analyst fallback path) seed
+    only the overview so the developer still has context, and then
+    drop into the LoopEngine bootstrap branch where the model is
+    instructed to call ``add_step`` to build its own decomposition.
     """
     from infinidev.engine.loop.plan_step import PlanStep
 

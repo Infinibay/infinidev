@@ -289,4 +289,35 @@ def get_litellm_params() -> dict[str, Any]:
         "anthropic-client-version": _version,
     }
 
+    # Disable thinking for Qwen3+ family served via OpenAI-compatible
+    # backends. Qwen3's Jinja template wraps tool calls inside
+    # <think>...</think> when thinking is on, which --reasoning-format
+    # deepseek then extracts into reasoning_content — trapping the
+    # tool call outside the native tool_calls slot. Passing
+    # chat_template_kwargs={"enable_thinking": false} per-request
+    # bypasses the think block entirely and lets tool_calls emit
+    # cleanly to the structured field. For an agent loop the think
+    # pass is redundant anyway — plan/summarize stages already own
+    # structured reasoning.
+    _openai_compat = {"llama_cpp", "vllm", "openai_compatible"}
+    if (
+        settings.LLM_PROVIDER in _openai_compat
+        and "qwen3" in model.lower()
+    ):
+        extra = params.setdefault("extra_body", {})
+        kwargs_map = extra.setdefault("chat_template_kwargs", {})
+        kwargs_map.setdefault("enable_thinking", False)
+
+    # MiniMax M2-family (M2, M2.1, M2.5, M2.7, ...) emits reasoning as
+    # <think>...</think> blocks in message.content by default. Without
+    # `reasoning_split: true` the tags stay in content and the TUI
+    # displays them as chat text (same class of leak we fixed for
+    # Qwen). With the flag on, MiniMax's server extracts the think
+    # block into `reasoning_content` so tool_calls and final text
+    # remain clean. The flag is recognised by MinimaxChatConfig in
+    # LiteLLM's provider layer.
+    if settings.LLM_PROVIDER == "minimax":
+        extra = params.setdefault("extra_body", {})
+        extra.setdefault("reasoning_split", True)
+
     return params

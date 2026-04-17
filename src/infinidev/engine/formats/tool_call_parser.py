@@ -207,6 +207,7 @@ from infinidev.engine.formats.tool_call_format import (
 )
 # Import all format classes to trigger @register_format registration
 from infinidev.engine.formats.gemma4_format import Gemma4Format  # noqa: F401
+from infinidev.engine.formats.hermes_xml_format import HermesXmlFormat  # noqa: F401
 from infinidev.engine.formats.qwen_format import QwenFormat  # noqa: F401
 from infinidev.engine.formats.qwen_pipe_format import QwenPipeFormat  # noqa: F401
 from infinidev.engine.formats.mistral_format import MistralFormat  # noqa: F401

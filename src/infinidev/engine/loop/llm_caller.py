@@ -31,6 +31,72 @@ if TYPE_CHECKING:
 from infinidev.engine.loop.llm_call_result import LLMCallResult
 from infinidev.engine.loop.classified_calls import ClassifiedCalls
 
+
+import re as _re
+
+# Matches the tool-call text fragments that FC-fallback may rescue.
+# When we recover a tool call from message.content, we scrub these
+# fragments so the TUI/chat layer doesn't render the raw JSON/XML.
+# Order matters — strip wrapper tags first, then bare JSON blobs.
+_STRIP_TAG_RES = [
+    _re.compile(r"<tool_call>.*?</tool_call>", _re.DOTALL),
+    _re.compile(r"<\|tool_call\|>.*?<\|/tool_call\|>", _re.DOTALL),
+    _re.compile(r"<function_call>.*?</function_call>", _re.DOTALL),
+    _re.compile(r"<function=[a-zA-Z_]\w*>.*?</function>", _re.DOTALL),
+]
+# Bare OpenAI-style JSON blob emitted inside content by some Qwen
+# templates: `{"tool_calls": [{"name": "...", ...}]}` — match a
+# balanced outer object via lazy-but-greedy fallback.
+_STRIP_JSON_RES = [
+    _re.compile(r'\{\s*"tool_calls"\s*:\s*\[.*', _re.DOTALL),
+    _re.compile(r'\{\s*"name"\s*:\s*"[a-zA-Z_]\w*"\s*,\s*"arguments"\s*:.*', _re.DOTALL),
+]
+
+
+def _strip_tool_call_markup(text: str) -> str:
+    """Remove tool-call XML/JSON fragments so content can be shown safely."""
+    for r in _STRIP_TAG_RES:
+        text = r.sub("", text)
+    for r in _STRIP_JSON_RES:
+        text = r.sub("", text)
+    return text.rstrip()
+
+
+_THINK_BLOCK_RE = _re.compile(
+    r"<(?:think|thinking|thoughts)>(.*?)</(?:think|thinking|thoughts)>",
+    _re.DOTALL | _re.IGNORECASE,
+)
+
+
+def _promote_embedded_think(message: Any) -> None:
+    """Move <think>...</think> from content → reasoning_content.
+
+    MiniMax without reasoning_split, DeepSeek-compat backends in "none"
+    reasoning mode, and a few other providers send the think block
+    embedded in message.content. The TUI would then render those tags
+    as a chat bubble. Extract them always when seen in content; if
+    reasoning_content was already populated, merge the stray blocks
+    into it so no think content is lost.
+    """
+    existing = (getattr(message, "reasoning_content", None) or "").strip()
+    content = getattr(message, "content", None) or ""
+    if not content or not _THINK_BLOCK_RE.search(content):
+        return
+    blocks = _THINK_BLOCK_RE.findall(content)
+    if not blocks:
+        return
+    cleaned = _THINK_BLOCK_RE.sub("", content).strip()
+    promoted = "\n\n".join(b.strip() for b in blocks if b.strip())
+    try:
+        if existing:
+            message.reasoning_content = f"{existing}\n\n{promoted}"
+        else:
+            message.reasoning_content = promoted
+        message.content = cleaned
+    except Exception:
+        pass
+
+
 class LLMCaller:
     """Encapsulates LLM calling with manual-TC / FC-mode branching and retry."""
 
@@ -234,6 +300,14 @@ class LLMCaller:
         if not tool_calls:
             tool_calls = self._fc_fallback_parse_text(message, action_tool_calls)
 
+        # Defense-in-depth: some providers (MiniMax without reasoning_split,
+        # or any backend that doesn't forward a "extract reasoning" flag)
+        # return <think>...</think> embedded in content instead of in the
+        # reasoning_content field. The TUI would then render the think
+        # block as a chat bubble. Detect + split here so reasoning ends up
+        # where it belongs regardless of server-side config.
+        _promote_embedded_think(message)
+
         raw = (getattr(message, "content", None) or "").strip()
         return LLMCallResult(
             tool_calls=tool_calls, message=message, raw_content=raw,
@@ -250,14 +324,34 @@ class LLMCaller:
         response and hit the guardrail path).
         """
         raw_content = (getattr(message, "content", None) or "").strip()
-        if not raw_content:
-            raw_content = (getattr(message, "reasoning_content", None) or "").strip()
-        if not raw_content:
+        reasoning_content = (getattr(message, "reasoning_content", None) or "").strip()
+        if not raw_content and not reasoning_content:
             return None
 
-        parsed = _parse_text_tool_calls(raw_content)
+        # Try content first, then reasoning (models like Qwen3.6 sometimes
+        # emit the tool-call XML inside the <think> block, which llama-server
+        # extracts into reasoning_content), then the concatenation as a
+        # last resort. Mirrors the chain used by the manual-mode caller.
+        parsed = _parse_text_tool_calls(raw_content) if raw_content else None
+        parsed_src = "content" if parsed else None
+        if not parsed and reasoning_content:
+            parsed = _parse_text_tool_calls(reasoning_content)
+            parsed_src = "reasoning" if parsed else None
+        if not parsed and raw_content and reasoning_content:
+            parsed = _parse_text_tool_calls(reasoning_content + "\n" + raw_content)
+            parsed_src = "both" if parsed else None
         if not parsed:
             return None
+
+        # Strip the tool-call text from content so the TUI/chat layer
+        # doesn't display the raw JSON/XML as a message bubble. We only
+        # touch message.content (not reasoning_content) because
+        # reasoning is already routed to the thinking panel, not chat.
+        if parsed_src in ("content", "both") and getattr(message, "content", None):
+            try:
+                message.content = _strip_tool_call_markup(message.content)
+            except Exception:
+                pass
 
         return [
             _ManualToolCall(
