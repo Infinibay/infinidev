@@ -372,26 +372,28 @@ def _run_probes(llm_params: dict[str, Any]) -> ModelCapabilities:
 
     except Exception as exc:
         exc_msg = str(exc).lower()
-        # Some providers reject tool_choice entirely
-        if "tool_choice" in exc_msg:
+        if "tools" in exc_msg or "function" in exc_msg:
+            caps.supports_function_calling = False
             caps.supports_tool_choice_required = False
-            # Try without tool_choice
+        else:
+            # Any other failure (including servers like llama-server that
+            # reject tool_choice="required" with a generic 500 "Failed to
+            # parse input" instead of a descriptive error) → treat as
+            # "required not supported" and retry with tool_choice="auto".
+            caps.supports_tool_choice_required = False
             try:
                 resp_fallback = litellm.completion(
                     **probe_params,
                     messages=_PROBE_MESSAGES,
                     tools=[_PROBE_TOOL],
+                    tool_choice="auto",
                 )
                 tc_fb = getattr(resp_fallback.choices[0].message, "tool_calls", None)
                 caps.supports_function_calling = bool(tc_fb)
+                if tc_fb:
+                    _check_thinking(caps, getattr(resp_fallback.choices[0].message, "content", "") or "")
             except Exception:
                 caps.supports_function_calling = False
-        elif "tools" in exc_msg or "function" in exc_msg:
-            # Provider rejects tools parameter entirely
-            caps.supports_function_calling = False
-            caps.supports_tool_choice_required = False
-        else:
-            raise
 
     # ── Probe 2: JSON mode ───────────────────────────────────────────
     try:

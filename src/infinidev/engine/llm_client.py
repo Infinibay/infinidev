@@ -299,11 +299,20 @@ def call_llm(
             return llm_ctx.metadata["response"]
         except Exception as exc:
             last_exc = exc
-            # Auto-drop tool_choice if the endpoint doesn't support it at all
+            # Auto-drop tool_choice if the endpoint doesn't support it at all.
+            # Some servers (e.g. llama.cpp) reject tool_choice="required" with
+            # a generic 500 "Failed to parse input" rather than a descriptive
+            # error, so match that signature too when tool_choice=required was
+            # in the outgoing request.
             err_msg = str(exc).lower()
-            if "tool_choice" in err_msg or "tool_choise" in err_msg:
+            tc_issue = (
+                "tool_choice" in err_msg
+                or "tool_choise" in err_msg
+                or (kwargs.get("tool_choice") == "required" and "failed to parse input" in err_msg)
+            )
+            if tc_issue:
                 if "tool_choice" in kwargs:
-                    logger.info("Dropping tool_choice — endpoint does not support it")
+                    logger.info("Dropping tool_choice — endpoint does not support it (err: %s)", str(exc)[:120])
                     del kwargs["tool_choice"]
                     caps.supports_tool_choice_required = False
                     continue  # retry without tool_choice
