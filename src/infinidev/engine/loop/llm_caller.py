@@ -79,6 +79,93 @@ def strip_think_blocks(text: str) -> str:
     return _THINK_BLOCK_RE.sub("", text).strip()
 
 
+class ThinkStreamFilter:
+    """Stateful streaming filter that suppresses content inside
+    ``<think>...</think>`` blocks as deltas arrive.
+
+    The chat agent emits every content delta to the TUI live via
+    ``hooks.notify_stream_chunk``. If the model opens a think block
+    mid-stream, we must not forward those characters until the block
+    closes — otherwise the TUI renders ``<think>`` as a chat bubble.
+
+    The filter is a small state machine that:
+    - buffers up to ``len("</think>")`` characters at the tail to
+      catch an opening/closing tag split across chunk boundaries,
+    - emits a chunk only once it is safely outside any think block,
+    - discards characters that fall inside an open block.
+
+    Callers feed one ``delta`` at a time and emit the return value to
+    the user. At end-of-stream, call ``flush()`` to drain any
+    held-back tail.
+    """
+
+    OPEN = "<think>"
+    CLOSE = "</think>"
+    _MAX_HOLD = max(len(OPEN), len(CLOSE))
+
+    __slots__ = ("_inside", "_pending")
+
+    def __init__(self) -> None:
+        self._inside = False
+        self._pending = ""
+
+    def feed(self, delta: str) -> str:
+        if not delta:
+            return ""
+        self._pending += delta
+        emit_parts: list[str] = []
+        while self._pending:
+            if self._inside:
+                idx = self._pending.find(self.CLOSE)
+                if idx < 0:
+                    # Still inside, nothing to emit yet. Keep only the
+                    # last few chars in case CLOSE spans chunks.
+                    if len(self._pending) > self._MAX_HOLD:
+                        self._pending = self._pending[-self._MAX_HOLD:]
+                    break
+                # Close found — discard up to and including it.
+                self._pending = self._pending[idx + len(self.CLOSE):]
+                self._inside = False
+                continue
+
+            idx = self._pending.find(self.OPEN)
+            if idx >= 0:
+                if idx > 0:
+                    emit_parts.append(self._pending[:idx])
+                self._pending = self._pending[idx + len(self.OPEN):]
+                self._inside = True
+                continue
+
+            # No OPEN seen yet, but a partial OPEN could still be
+            # forming at the tail. Hold back that much.
+            hold = 0
+            for i in range(1, min(len(self.OPEN), len(self._pending) + 1)):
+                if self._pending.endswith(self.OPEN[:i]):
+                    hold = i
+            if hold == 0:
+                emit_parts.append(self._pending)
+                self._pending = ""
+            else:
+                emit_parts.append(self._pending[:-hold])
+                self._pending = self._pending[-hold:]
+            break
+        return "".join(emit_parts)
+
+    def flush(self) -> str:
+        """End-of-stream: drain any held-back tail.
+
+        If we are still inside an unclosed think block, the tail is
+        part of the block and must be dropped.
+        """
+        if self._inside:
+            self._pending = ""
+            self._inside = False
+            return ""
+        tail = self._pending
+        self._pending = ""
+        return tail
+
+
 def promote_embedded_think(message: Any) -> None:
     """Move <think>...</think> from content → reasoning_content.
 

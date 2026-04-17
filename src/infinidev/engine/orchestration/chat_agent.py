@@ -30,7 +30,7 @@ import uuid
 from typing import Any, Optional
 
 from infinidev.config.llm import get_litellm_params_for_behavior
-from infinidev.engine.loop.llm_caller import strip_think_blocks
+from infinidev.engine.loop.llm_caller import ThinkStreamFilter, strip_think_blocks
 from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.loop.tools import build_tool_dispatch, execute_tool_call
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
@@ -526,6 +526,11 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
     emitted_per_tc: dict[int, str] = {}  # idx → chars already emitted
     content_buffer = ""
     streamed = False
+    # Suppress <think>...</think> blocks from reaching the TUI
+    # mid-stream. The filter holds back partial open-tag fragments
+    # until we know whether a block is starting, so the user never
+    # sees a stray '<think>' flash on screen.
+    content_filter = ThinkStreamFilter()
 
     for chunk in stream:
         try:
@@ -536,14 +541,17 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
         delta_content = getattr(delta, "content", None)
         if delta_content:
             content_buffer += delta_content
-            # Stream plain-text content too. Most chat-agent turns end
-            # in a tool call, but some models emit plain text as a
-            # respond-equivalent; either way the user sees it live.
-            try:
-                hooks.notify_stream_chunk("Infinidev", delta_content, "agent")
-                streamed = True
-            except Exception as exc:
-                logger.warning("notify_stream_chunk failed (content): %s", exc)
+            safe_delta = content_filter.feed(delta_content)
+            if safe_delta:
+                # Stream plain-text content too. Most chat-agent turns
+                # end in a tool call, but some models emit plain text
+                # as a respond-equivalent; either way the user sees it
+                # live — minus any think-block content.
+                try:
+                    hooks.notify_stream_chunk("Infinidev", safe_delta, "agent")
+                    streamed = True
+                except Exception as exc:
+                    logger.warning("notify_stream_chunk failed (content): %s", exc)
 
         delta_tool_calls = getattr(delta, "tool_calls", None) or []
         for tc_delta in delta_tool_calls:
@@ -573,6 +581,16 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
                                 "notify_stream_chunk failed (tool): %s", exc,
                             )
                         emitted_per_tc[idx] = current
+
+    # Flush any held-back safe tail (e.g., partial open-tag fragments
+    # that never resolved into a full <think> block).
+    tail = content_filter.flush()
+    if tail:
+        try:
+            hooks.notify_stream_chunk("Infinidev", tail, "agent")
+            streamed = True
+        except Exception as exc:
+            logger.warning("notify_stream_chunk failed (flush): %s", exc)
 
     tool_calls: list[Any] = []
     for idx, slot in sorted(accumulated.items()):
