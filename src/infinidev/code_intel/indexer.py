@@ -210,6 +210,14 @@ def index_directory(
 
     dir_path = os.path.abspath(dir_path)
 
+    # Only skip nested git repos when the root itself IS a git repo — then
+    # a nested `.git/` almost always means a vendored clone we shouldn't
+    # descend into. When the root is NOT a git repo, the workspace is a
+    # container holding multiple first-class subrepos (e.g. `~/infinibay`
+    # with backend/, frontend/, tools/), and skipping them would leave the
+    # index almost empty.
+    root_is_git_repo = os.path.isdir(os.path.join(dir_path, ".git"))
+
     # Collect file list in a single walk (avoids a second os.walk for counting)
     file_list: list[str] = []
     for root, dirs, files in os.walk(dir_path):
@@ -218,7 +226,11 @@ def index_directory(
             if d in SKIP_DIRS or d.startswith("."):
                 continue
             sub = os.path.join(root, d)
-            if sub != dir_path and os.path.isdir(os.path.join(sub, ".git")):
+            if (
+                root_is_git_repo
+                and sub != dir_path
+                and os.path.isdir(os.path.join(sub, ".git"))
+            ):
                 continue
             filtered.append(d)
         dirs[:] = filtered

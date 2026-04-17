@@ -148,7 +148,10 @@ class InfinidevApp:
         self.footer_control = None
         from infinidev.ui.controls.clickable_scrollbar import scrollable_window
         self._chat_history_window, chat_scroll_container = scrollable_window(
-            self._chat_history_control, display_arrows=True, wrap_lines=False,
+            self._chat_history_control,
+            display_arrows=True,
+            wrap_lines=False,
+            style=f"bg:{SURFACE}",
         )
         self._chat_content_window = HSplit([
             chat_scroll_container,

@@ -352,16 +352,39 @@ def run_task(
     hooks.on_phase("chat")
     agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)
     ctx = get_context_for_agent(agent_id) if agent_id else None
+    # Fall back to the current process context (thread-local / ContextVar /
+    # env) whenever the per-agent context is missing OR has a None field.
+    # An empty ToolContext() is returned when the agent was never
+    # activated — catching `ctx is not None` alone would silently pass
+    # None through, which breaks every code-intel tool with
+    # "No project context". Falling back per-field keeps partial contexts
+    # usable too (e.g. agent has project_id but not workspace_path).
+    agent_project_id = ctx.project_id if ctx and ctx.project_id is not None else get_current_project_id()
+    agent_workspace = ctx.workspace_path if ctx and ctx.workspace_path is not None else get_current_workspace_path()
+    # Last-resort fallback to the agent's own project_id attribute so
+    # tools don't crash when nothing else has been set — matches what
+    # activate_context would have written.
+    if agent_project_id is None:
+        agent_project_id = getattr(agent, "project_id", None)
     chat_result = run_chat_agent(
         user_input,
         session_id=session_id,
-        project_id=(ctx.project_id if ctx else get_current_project_id()),
-        workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
+        project_id=agent_project_id,
+        workspace_path=agent_workspace,
         hooks=hooks,
     )
 
     if chat_result.kind == "respond":
-        if chat_result.streamed:
+        if chat_result.error_traceback:
+            # Exception-fallback path: the chat loop crashed and the
+            # reply is a generic apology. Route through notify_error so
+            # the UI can show the traceback in a collapsible widget.
+            # Streaming is also cleanly terminated by the caller in
+            # chat_agent.run_chat_agent's except block.
+            hooks.notify_error(
+                "Infinidev", chat_result.reply, chat_result.error_traceback,
+            )
+        elif chat_result.streamed:
             # Streaming already showed the text to the user chunk-by-chunk.
             # Signal end-of-stream so the UI can flip the `streaming`
             # flag on the message and re-render with markdown styling

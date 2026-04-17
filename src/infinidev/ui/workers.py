@@ -86,15 +86,23 @@ def run_engine_task(app: InfinidevApp, user_input: str) -> None:
         force_gather = bool(getattr(app, "_gather_next_task", False))
         app._gather_next_task = False
 
-        result = run_task(
-            agent=app.agent,
-            user_input=user_input,
-            session_id=app.session_id,
-            engine=app.engine,
-            reviewer=app.reviewer,
-            hooks=hooks,
-            force_gather=force_gather,
-        )
+        # Activate the agent's context before run_task so the chat agent
+        # (and every tool it calls) inherits project_id and workspace_path.
+        # Without this, read-only tools like project_stats see
+        # project_id=None and return "No project context".
+        app.agent.activate_context(session_id=app.session_id)
+        try:
+            result = run_task(
+                agent=app.agent,
+                user_input=user_input,
+                session_id=app.session_id,
+                engine=app.engine,
+                reviewer=app.reviewer,
+                hooks=hooks,
+                force_gather=force_gather,
+            )
+        finally:
+            app.agent.deactivate()
 
         app._chat_history_control.show_thinking = False
         if result:

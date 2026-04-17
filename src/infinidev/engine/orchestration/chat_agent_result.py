@@ -36,6 +36,11 @@ class ChatAgentResult:
     reply: str = ""
     escalation: EscalationPacket | None = None
     streamed: bool = False
+    # Populated only by the exception-fallback path — the raw traceback
+    # that would otherwise be invisible to the user. The UI renders it
+    # inside a collapsed widget so it doesn't clutter the chat unless the
+    # user explicitly expands it.
+    error_traceback: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind == "respond":

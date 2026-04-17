@@ -364,6 +364,60 @@ class DiffWidget:
         return RenderResult(lines=lines)
 
 
+# ── ErrorWidget ────────────────────────────────────────────────────────
+
+# Styling for error messages — red border/fg so they stand out, and a
+# dim body style for the traceback so it reads as "secondary content"
+# once expanded.
+_ERROR_TITLE_FG = "#ff4444"
+_ERROR_BODY_STYLE = f"{TEXT_MUTED}"
+
+
+class ErrorWidget:
+    """Renders a chat-agent error with a collapsible traceback.
+
+    The short message (``text``) is always visible and in red. The
+    ``error_traceback`` body is hidden by default and togglable by
+    clicking the header — same pattern as :class:`DiffWidget`.
+    """
+
+    msg_type = "error"
+    group_label = "Errors"
+
+    def render(self, msg: dict[str, Any], width: int) -> RenderResult:
+        header_text = msg.get("text", "") or "Error"
+        tb_text = msg.get("error_traceback", "") or ""
+        collapsed = msg.get("collapsed", True)
+        arrow = "\u25b6" if collapsed else "\u25bc"
+
+        lines: list[list[tuple[str, str]]] = []
+
+        label = f" {arrow} {header_text}"
+        pad = " " * max(0, width - len(label))
+        lines.append([(f"{_ERROR_TITLE_FG} bold", f"{label}{pad}")])
+
+        if not collapsed and tb_text:
+            # Traceback lines rendered one-per-visual-line so the user
+            # can read the whole stack. No wrapping — long source lines
+            # just get clipped by the panel.
+            for tb_line in tb_text.rstrip().splitlines():
+                lines.append([(_ERROR_BODY_STYLE, f"  {tb_line}")])
+
+        lines.append([("", "")])
+
+        def _toggle(m=msg):
+            m["collapsed"] = not m.get("collapsed", True)
+
+        return RenderResult(lines=lines, clickable_offsets={0: _toggle})
+
+    def render_group_header(self, count: int, collapsed: bool, width: int) -> RenderResult:
+        arrow = "\u25b6" if collapsed else "\u25bc"
+        label = f" {arrow} {self.group_label} ({count})"
+        pad = " " * max(0, width - len(label))
+        lines = [[(f"{_ERROR_TITLE_FG} bold", f"{label}{pad}")]]
+        return RenderResult(lines=lines)
+
+
 # ── Register built-in widgets ──────────────────────────────────────────
 
 register(BorderedWidget("user", "Messages"))
@@ -373,3 +427,4 @@ register(BorderedWidget("think", "Thinking"))
 register(BorderedWidget("pending", "Pending"))
 register(BorderedWidget("queued", "Queued"))
 register(DiffWidget())
+register(ErrorWidget())

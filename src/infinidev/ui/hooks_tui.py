@@ -81,6 +81,27 @@ class TUIHooks:
         self._app._chat_history_control.show_thinking = True
         self._app.invalidate()
 
+    def notify_error(
+        self, speaker: str, msg: str, traceback_text: str,
+    ) -> None:
+        # Direct append so we can attach the custom fields that
+        # ErrorWidget consumes — add_message() only accepts
+        # sender/text/type.
+        self._app._chat_history_control.show_thinking = False
+        self._app.chat_messages.append({
+            "sender": speaker,
+            "text": msg,
+            "type": "error",
+            "error_traceback": traceback_text or "",
+            "collapsed": True,
+        })
+        self._app._chat_history_control.invalidate_cache()
+        self._app._chat_history_control.show_thinking = True
+        try:
+            self._app.invalidate()
+        except Exception:
+            pass
+
     def notify_stream_chunk(
         self, speaker: str, chunk: str, kind: str = "agent",
     ) -> None:

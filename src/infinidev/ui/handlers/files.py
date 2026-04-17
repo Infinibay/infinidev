@@ -145,6 +145,7 @@ class FileManager:
         from prompt_toolkit.layout.controls import FormattedTextControl as _FTC
         from prompt_toolkit.filters import Condition as _Cond
         from infinidev.ui.controls.file_editor import FileEditor
+        from infinidev.ui.theme import SURFACE, SURFACE_LIGHT
 
         app = self._app
         tab_id = file_path
@@ -171,6 +172,7 @@ class FileManager:
             content=editor.control,
             left_margins=[NumberedMargin()] if self.line_numbers_visible else [],
             wrap_lines=True,
+            style=f"bg:{SURFACE}",
         )
         # Store ref so toggle_line_numbers can update margins later
         editor._content_window = editor_content_window
@@ -178,8 +180,8 @@ class FileManager:
         editor_window = _H([
             _CC(
                 content=_H([
-                    _W(content=search.search_control, height=1),
-                    _W(content=_FTC(lambda: search.get_status_fragments()), height=1),
+                    _W(content=search.search_control, height=1, style=f"bg:{SURFACE_LIGHT}"),
+                    _W(content=_FTC(lambda: search.get_status_fragments()), height=1, style=f"bg:{SURFACE_LIGHT}"),
                 ]),
                 filter=_Cond(lambda tid=tab_id: search.visible and app.active_tab == tid),
             ),

@@ -28,6 +28,7 @@ from infinidev.ui.theme import (
     CHAT_INPUT_HEIGHT,
     STYLE_SIDEBAR_TITLE,
     PRIMARY,
+    SURFACE,
     SURFACE_DARK,
     SURFACE_LIGHT,
     SHELL_INPUT_BG,
@@ -55,6 +56,7 @@ def build_layout(app_state: InfinidevApp) -> Layout:
             (f"#ffffff bg:{PRIMARY} bold", " EXPLORER "),
         ]),
         height=1,
+        style=f"bg:{PRIMARY}",
     )
 
     explorer_body = DynamicContainer(lambda: app_state.get_explorer_content())
@@ -77,6 +79,7 @@ def build_layout(app_state: InfinidevApp) -> Layout:
     tab_bar = Window(
         content=FormattedTextControl(lambda: app_state.get_tab_bar_fragments()),
         height=1,
+        style=f"bg:{SURFACE_LIGHT}",
     )
 
     content_body = DynamicContainer(lambda: app_state.get_active_content())
@@ -138,6 +141,7 @@ def build_layout(app_state: InfinidevApp) -> Layout:
                 (STYLE_SIDEBAR_TITLE, f" {t} "),
             ]),
             height=1,
+            style=f"bg:{PRIMARY}",
         )
 
         if scrollable:
@@ -216,7 +220,7 @@ def build_layout(app_state: InfinidevApp) -> Layout:
                 steps_section,
                 actions_section,
                 logs_section,
-                Window(),  # spacer
+                Window(style=f"bg:{SURFACE_LIGHT}"),  # spacer
             ],
             width=D(weight=30),
         ),

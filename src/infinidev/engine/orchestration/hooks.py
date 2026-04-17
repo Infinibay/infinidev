@@ -39,6 +39,17 @@ class NoOpHooks:
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
         return None
 
+    def notify_error(
+        self, speaker: str, msg: str, traceback_text: str,
+    ) -> None:
+        """Surface an error message with a collapsible traceback.
+
+        UI implementations render ``msg`` inline and keep
+        ``traceback_text`` in a widget the user can expand.
+        Non-TUI implementations are free to fall back to ``notify``.
+        """
+        return None
+
     def notify_stream_chunk(
         self, speaker: str, chunk: str, kind: str = "agent",
     ) -> None:
@@ -128,6 +139,21 @@ class ClickHooks(NoOpHooks):
         fg, dim = self._SPEAKER_COLOURS.get(speaker, ("white", False))
         click.echo(click.style(f"\n[{speaker}]", fg=fg, bold=True, dim=dim))
         click.echo(msg)
+
+    def notify_error(
+        self, speaker: str, msg: str, traceback_text: str,
+    ) -> None:
+        # Classic CLI has no collapse affordance — print the short
+        # message in red and dim the traceback below it so the
+        # short message still dominates.
+        import click
+        if self._stream_active is not None:
+            click.echo("")
+            self._stream_active = None
+        click.echo(click.style(f"\n[{speaker}]", fg="red", bold=True))
+        click.echo(click.style(msg, fg="red"))
+        if traceback_text:
+            click.echo(click.style(traceback_text.rstrip(), fg="red", dim=True))
 
     def notify_stream_chunk(
         self, speaker: str, chunk: str, kind: str = "agent",

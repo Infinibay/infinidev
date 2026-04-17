@@ -94,6 +94,22 @@ def tool_to_openai_schema(tool: Any) -> dict[str, Any]:
     parameters.setdefault("type", "object")
     parameters.setdefault("properties", {})
 
+    # Zero-arg tools: pin required=[] and additionalProperties=false
+    # so strict-mode providers (OpenAI strict, Anthropic) reject
+    # hallucinated kwargs at the provider layer instead of forcing the
+    # executor to clean them up. Without the explicit required/[]
+    # signal, many open-weight models invent fields (e.g. `project_id`)
+    # because the empty-props schema doesn't feel "complete" to them.
+    if not parameters.get("properties"):
+        parameters["required"] = []
+        parameters["additionalProperties"] = False
+
+    # Strip the `description` that pydantic copies into the parameters
+    # node from the model docstring — it belongs only at the function
+    # level. Leaving it in makes some providers log warnings and is
+    # never what the OpenAI tool schema contract expects.
+    parameters.pop("description", None)
+
     return {
         "type": "function",
         "function": {

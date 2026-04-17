@@ -236,6 +236,19 @@ def execute_tool_call(
                     logger.debug("Tool %s: stripping metadata param '%s'", name, meta)
                     del args[meta]
             extra = set(args.keys()) - allowed
+            # Zero-arg tools: the rejection message "valid params are: ."
+            # is incoherent to the LLM and it concludes the tool is broken.
+            # Silently drop extras instead — the tool takes no args so there
+            # is nothing to validate, and the hallucinated kwargs are safe
+            # to ignore.
+            if extra and not allowed:
+                logger.debug(
+                    "Tool %s: zero-arg tool, dropping hallucinated kwargs %s",
+                    name, extra,
+                )
+                for k in extra:
+                    del args[k]
+                extra = set()
             if extra:
                 logger.warning("Tool %s: unexpected kwargs %s", name, extra)
                 # Stronger error message — small models that see
