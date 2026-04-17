@@ -2,15 +2,56 @@
 
 import logging
 import os
+import re
+import select
 import shlex
 import subprocess
+import time
 from typing import Type
 from pydantic import BaseModel, Field
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
+from infinidev.tools.stdin_prompt import (
+    has_stdin_input_handler,
+    request_stdin_input,
+)
 
 logger = logging.getLogger(__name__)
 from infinidev.tools.shell.execute_command_input import ExecuteCommandInput
+
+
+# Patterns that indicate a subprocess is prompting for a stdin value.
+# Matched against recent stderr output. Case-insensitive. The exact
+# matched substring is passed to the handler as ``prompt_text`` so the
+# user sees what the process asked for.
+_PROMPT_PATTERNS: tuple[re.Pattern[bytes], ...] = (
+    re.compile(rb"\[sudo\]\s+password\s+for\s+\S+\s*:", re.IGNORECASE),
+    re.compile(rb"(?m)^\s*password\s*:\s*$", re.IGNORECASE),
+    re.compile(rb"password\s+for\s+\S+\s*:", re.IGNORECASE),
+    re.compile(rb"enter\s+passphrase\b[^\n]*:", re.IGNORECASE),
+    re.compile(rb"passphrase\s*:\s*$", re.IGNORECASE | re.MULTILINE),
+    re.compile(rb"(?m)^\s*username\s*:\s*$", re.IGNORECASE),
+    re.compile(rb"(?m)^\s*login\s*:\s*$", re.IGNORECASE),
+    re.compile(rb"enter\s+pin\b[^\n]*:", re.IGNORECASE),
+    re.compile(rb"one[- ]?time\s+code\s*:", re.IGNORECASE),
+    re.compile(rb"\(yes/no(/\[[^\]]+\])?\)\?\s*$", re.IGNORECASE),
+)
+
+# After a match we remember the substring so we don't re-fire on the
+# same bytes still lingering in the stderr buffer.
+_PROMPT_SCAN_WINDOW = 512  # bytes from the end of stderr to scan
+
+
+def _detect_prompt(recent: bytes, already_seen: set[str]) -> str | None:
+    """Return the prompt text if stderr looks like an input prompt."""
+    for r in _PROMPT_PATTERNS:
+        m = r.search(recent)
+        if not m:
+            continue
+        text = m.group(0).decode(errors="replace").strip()
+        if text not in already_seen:
+            return text
+    return None
 
 
 class ExecuteCommandTool(InfinibayBaseTool):
@@ -88,25 +129,199 @@ class ExecuteCommandTool(InfinibayBaseTool):
         try:
             from infinidev.engine.static_analysis_timer import measure as _sa_measure
             with _sa_measure("subprocess_exec"):
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=effective_timeout,
-                    cwd=cwd,
-                    env=run_env,
-                )
-
-            return self._success({
-                "exit_code": result.returncode,
-                "stdout": result.stdout[-10000:] if result.stdout else "",
-                "stderr": result.stderr[-5000:] if result.stderr else "",
-                "success": result.returncode == 0,
-            })
+                if has_stdin_input_handler():
+                    result = self._run_with_stdin_detection(
+                        command, cwd, run_env, effective_timeout,
+                    )
+                else:
+                    # No UI handler registered (classic mode / no TUI).
+                    # Close stdin so interactive prompts fail fast
+                    # instead of hijacking the parent terminal.
+                    result = self._run_sealed(
+                        command, cwd, run_env, effective_timeout,
+                    )
+            return self._success(result)
 
         except subprocess.TimeoutExpired:
             return self._error(f"Command timed out after {timeout}s")
         except Exception as e:
             return self._error(f"Execution failed: {e}")
 
+    # ── Execution strategies ─────────────────────────────────────────
+
+    def _run_sealed(
+        self,
+        command: str,
+        cwd: str,
+        run_env: dict[str, str],
+        timeout: int | None,
+    ) -> dict:
+        """Run with stdin=DEVNULL so interactive prompts fail fast.
+
+        Used when no UI stdin handler is registered. Commands like
+        ``sudo`` exit with "no tty present" instead of hanging the
+        parent terminal.
+        """
+        result = subprocess.run(
+            command,
+            shell=True,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            env=run_env,
+        )
+        return {
+            "exit_code": result.returncode,
+            "stdout": (result.stdout or "")[-10000:],
+            "stderr": (result.stderr or "")[-5000:],
+            "success": result.returncode == 0,
+        }
+
+    def _run_with_stdin_detection(
+        self,
+        command: str,
+        cwd: str,
+        run_env: dict[str, str],
+        timeout: int | None,
+    ) -> dict:
+        """Spawn with stdin=PIPE and watch stderr for prompt patterns.
+
+        When a prompt is detected, ask the UI via
+        ``request_stdin_input`` for the reply (or a kill signal),
+        then write it to the child's stdin and continue streaming
+        output. Loops until the process exits or the overall timeout
+        is hit.
+        """
+        proc = subprocess.Popen(
+            command,
+            shell=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=run_env,
+            bufsize=0,
+        )
+
+        stdout_buf = bytearray()
+        stderr_buf = bytearray()
+        seen_prompts: set[str] = set()
+        # Only scan stderr bytes emitted AFTER the last handled prompt,
+        # so overlapping regexes on the same prompt text don't re-fire.
+        stderr_scan_from = 0
+        start = time.monotonic()
+        killed_reason: str | None = None
+
+        try:
+            while proc.poll() is None:
+                fds = [f for f in (proc.stdout, proc.stderr) if f is not None]
+                if not fds:
+                    break
+                try:
+                    ready, _, _ = select.select(fds, [], [], 0.25)
+                except (ValueError, OSError):
+                    break
+
+                for r in ready:
+                    try:
+                        data = os.read(r.fileno(), 4096)
+                    except OSError:
+                        data = b""
+                    if not data:
+                        continue
+                    if r is proc.stdout:
+                        stdout_buf.extend(data)
+                    else:
+                        stderr_buf.extend(data)
+
+                # Check for prompt AFTER reading fresh stderr, since
+                # the fragment may have landed just now.
+                if len(stderr_buf) > stderr_scan_from:
+                    fresh_start = max(
+                        stderr_scan_from,
+                        len(stderr_buf) - _PROMPT_SCAN_WINDOW,
+                    )
+                    window = bytes(stderr_buf[fresh_start:])
+                    prompt = _detect_prompt(window, seen_prompts)
+                    if prompt is not None:
+                        seen_prompts.add(prompt)
+                        reply = request_stdin_input(
+                            command,
+                            prompt,
+                            stdout_buf.decode(errors="replace"),
+                            stderr_buf.decode(errors="replace"),
+                        )
+                        # Advance the scan cursor so the same bytes
+                        # don't re-fire a prompt, regardless of
+                        # whether the user sent a reply or a kill.
+                        stderr_scan_from = len(stderr_buf)
+                        if reply is None:
+                            killed_reason = (
+                                f"User chose to kill the process at "
+                                f"prompt: {prompt!r}"
+                            )
+                            break
+                        try:
+                            proc.stdin.write((reply + "\n").encode())
+                            proc.stdin.flush()
+                        except (BrokenPipeError, OSError) as exc:
+                            logger.warning(
+                                "Could not write stdin reply: %s", exc,
+                            )
+
+                # Overall timeout check.
+                if timeout and (time.monotonic() - start) > timeout:
+                    killed_reason = f"Command timed out after {timeout}s"
+                    break
+
+            if killed_reason is not None:
+                self._terminate(proc)
+                return {
+                    "exit_code": -1,
+                    "stdout": stdout_buf.decode(errors="replace")[-10000:],
+                    "stderr": stderr_buf.decode(errors="replace")[-5000:],
+                    "killed_reason": killed_reason,
+                    "success": False,
+                }
+
+            # Drain any remaining output after the process exits.
+            try:
+                rest_out, rest_err = proc.communicate(timeout=2)
+                if rest_out:
+                    stdout_buf.extend(rest_out)
+                if rest_err:
+                    stderr_buf.extend(rest_err)
+            except subprocess.TimeoutExpired:
+                self._terminate(proc)
+
+            return {
+                "exit_code": proc.returncode if proc.returncode is not None else -1,
+                "stdout": stdout_buf.decode(errors="replace")[-10000:],
+                "stderr": stderr_buf.decode(errors="replace")[-5000:],
+                "success": proc.returncode == 0,
+            }
+        finally:
+            # Ensure file descriptors are closed in every branch.
+            for f in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if f is not None:
+                        f.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _terminate(proc: subprocess.Popen) -> None:
+        """Terminate a subprocess gracefully, escalating to kill."""
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except Exception:
+                pass

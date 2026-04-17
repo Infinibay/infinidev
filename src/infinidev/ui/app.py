@@ -401,6 +401,23 @@ class InfinidevApp:
         from infinidev.tools.permission import set_permission_handler
         set_permission_handler(self._handle_permission_request)
 
+        # Register stdin-prompt handler (modal shown when a running
+        # subprocess pauses for password/passphrase/etc. input).
+        from infinidev.tools.stdin_prompt import set_stdin_input_handler
+        set_stdin_input_handler(self._handle_stdin_input)
+
+        # Register the stdin-prompt Float in the layout.
+        try:
+            from infinidev.ui.dialogs.stdin_prompt import (
+                create_stdin_prompt_dialog,
+            )
+            if getattr(self, "_float_container", None) is not None:
+                self._float_container.floats.append(
+                    create_stdin_prompt_dialog(self),
+                )
+        except Exception as exc:
+            logger.warning("stdin-prompt dialog setup failed: %s", exc)
+
         # Context calculator — fetch actual model context window size
         from infinidev.ui.context_calculator import calculator
         self.context_calculator = calculator
@@ -445,6 +462,77 @@ class InfinidevApp:
         self._permission_event = None
         self._permission_waiting = False
         return approved
+
+    # ── Stdin-prompt handler ─────────────────────────────────────────
+
+    def _handle_stdin_input(
+        self,
+        command: str,
+        prompt_text: str,
+        stdout_so_far: str,
+        stderr_so_far: str,
+    ) -> "str | None":
+        """Handle stdin-prompt request from an execute_command worker.
+
+        Called from a worker thread. Populates the stdin-prompt dialog
+        state, flips ``active_dialog`` so the Float becomes visible,
+        focuses the (password-masked) reply buffer, then blocks on a
+        threading.Event. The Enter/Esc keybindings — registered in
+        ``ui/keybindings.py`` — resolve the event.
+
+        Returns the user's reply string, or None to kill the process.
+        """
+        import threading
+        from prompt_toolkit.document import Document
+        from infinidev.ui.dialogs.stdin_prompt import DIALOG_NAME as _STDIN_DIALOG
+
+        evt = threading.Event()
+        self._stdin_prompt_event = evt
+        self._stdin_prompt_result: "str | None" = None
+        self._stdin_prompt_state = {
+            "command": command,
+            "prompt_text": prompt_text,
+        }
+
+        # Populate read-only buffers. ``set_document`` with
+        # ``bypass_readonly`` is required since the buffers are
+        # read-only to prevent user edits.
+        try:
+            stdout_buf = getattr(self, "_stdin_prompt_stdout_buf", None)
+            stderr_buf = getattr(self, "_stdin_prompt_stderr_buf", None)
+            reply_buf = getattr(self, "_stdin_prompt_reply_buf", None)
+            if stdout_buf is not None:
+                stdout_buf.set_document(
+                    Document(stdout_so_far or "(no stdout yet)"),
+                    bypass_readonly=True,
+                )
+            if stderr_buf is not None:
+                stderr_buf.set_document(
+                    Document(stderr_so_far or "(no stderr yet)"),
+                    bypass_readonly=True,
+                )
+            if reply_buf is not None:
+                reply_buf.reset()
+        except Exception as exc:
+            logger.warning("stdin-prompt buffer populate failed: %s", exc)
+
+        self.active_dialog = _STDIN_DIALOG
+        # Focus the reply buffer so the user can type immediately.
+        try:
+            if self.app is not None and reply_buf is not None:
+                self.app.layout.focus(reply_buf)
+        except Exception:
+            pass
+        self.invalidate()
+
+        evt.wait()
+
+        result = self._stdin_prompt_result
+        self._stdin_prompt_event = None
+        self._stdin_prompt_result = None
+        self.active_dialog = None
+        self.invalidate()
+        return result
 
     # ── Submit handler ───────────────────────────────────────────────
 

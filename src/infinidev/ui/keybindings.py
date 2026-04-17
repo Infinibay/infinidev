@@ -153,7 +153,36 @@ def create_global_keybindings(app_state) -> KeyBindings:
     @kb.add("escape")
     def cancel_task(event):
         """Cancel the currently running task, dismiss dialog."""
+        # stdin-prompt modal: Esc means "kill the subprocess", not
+        # just close. Route to the stdin handler's resolution.
+        if (
+            getattr(app_state, "active_dialog", None) == "stdin_prompt"
+            and getattr(app_state, "_stdin_prompt_event", None) is not None
+        ):
+            app_state._stdin_prompt_result = None  # None = kill
+            app_state._stdin_prompt_event.set()
+            return
         app_state.handle_escape()
+
+    from prompt_toolkit.filters import Condition
+    _stdin_active = Condition(
+        lambda: getattr(app_state, "active_dialog", None) == "stdin_prompt"
+    )
+
+    @kb.add("enter", filter=_stdin_active)
+    def stdin_prompt_send(event):
+        """Inside the stdin-prompt modal: send the typed reply."""
+        reply_buf = getattr(app_state, "_stdin_prompt_reply_buf", None)
+        evt = getattr(app_state, "_stdin_prompt_event", None)
+        if reply_buf is None or evt is None:
+            return
+        text = reply_buf.text
+        try:
+            reply_buf.reset()  # clear masked text so it isn't reused
+        except Exception:
+            pass
+        app_state._stdin_prompt_result = text
+        evt.set()
 
     return kb
 
