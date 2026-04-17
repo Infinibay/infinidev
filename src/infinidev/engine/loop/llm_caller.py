@@ -68,7 +68,18 @@ _THINK_BLOCK_RE = _re.compile(
 )
 
 
-def _promote_embedded_think(message: Any) -> None:
+def strip_think_blocks(text: str) -> str:
+    """Remove any <think>...</think> blocks from free-form text.
+
+    Useful for the streaming path where content is assembled from
+    deltas and no message-like object is available to mutate.
+    """
+    if not text:
+        return text
+    return _THINK_BLOCK_RE.sub("", text).strip()
+
+
+def promote_embedded_think(message: Any) -> None:
     """Move <think>...</think> from content → reasoning_content.
 
     MiniMax without reasoning_split, DeepSeek-compat backends in "none"
@@ -306,7 +317,7 @@ class LLMCaller:
         # reasoning_content field. The TUI would then render the think
         # block as a chat bubble. Detect + split here so reasoning ends up
         # where it belongs regardless of server-side config.
-        _promote_embedded_think(message)
+        promote_embedded_think(message)
 
         raw = (getattr(message, "content", None) or "").strip()
         return LLMCallResult(

@@ -51,6 +51,57 @@ def _register_custom_models() -> None:
 
 _register_custom_models()
 
+
+def _install_global_response_normalizer() -> None:
+    """Wrap ``litellm.completion`` once at import time so every caller
+    — ``engine.llm_client.call_llm``, ``engine.orchestration.chat_agent``,
+    ``engine.analysis.planner``, review, summariser, etc. — gets
+    <think>...</think> blocks lifted out of ``message.content`` and
+    into ``message.reasoning_content`` before touching them.
+
+    Why a global wrapper instead of per-site calls: there are 8+
+    places in the codebase that call ``litellm.completion`` directly,
+    and new ones appear any time someone writes a helper that needs a
+    one-off LLM call. Patching every site is churn and the next new
+    one will re-introduce the leak. Normalising at the LiteLLM
+    boundary is one edit and self-maintains.
+
+    Streaming responses (generator) are passed through unchanged;
+    callers that consume streams and assemble content must call
+    ``strip_think_blocks`` on the assembled text themselves.
+    """
+    try:
+        import litellm
+        if getattr(litellm, "_infinidev_response_normalizer_installed", False):
+            return
+
+        _original = litellm.completion
+
+        def _wrapped(*args: Any, **kwargs: Any) -> Any:
+            response = _original(*args, **kwargs)
+            if kwargs.get("stream"):
+                return response
+            try:
+                from infinidev.engine.loop.llm_caller import (
+                    promote_embedded_think as _promote,
+                )
+                choices = getattr(response, "choices", None) or []
+                for choice in choices:
+                    msg = getattr(choice, "message", None)
+                    if msg is not None:
+                        _promote(msg)
+            except Exception as exc:
+                logger.debug("response normalizer skipped: %s", exc)
+            return response
+
+        litellm.completion = _wrapped
+        litellm._infinidev_response_normalizer_installed = True
+    except Exception as exc:
+        logger.debug("Could not install response normalizer: %s", exc)
+
+
+_install_global_response_normalizer()
+
 def _extract_provider(model: str) -> str:
     """Extract provider prefix from a LiteLLM model string."""
     if "/" in model:

@@ -30,6 +30,7 @@ import uuid
 from typing import Any, Optional
 
 from infinidev.config.llm import get_litellm_params_for_behavior
+from infinidev.engine.loop.llm_caller import strip_think_blocks
 from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.loop.tools import build_tool_dispatch, execute_tool_call
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
@@ -187,6 +188,10 @@ def _run_llm_loop(
 
         if stream_mode:
             content, tool_calls, streamed = _consume_stream(response, hooks)
+            # Non-stream responses are normalised globally by the
+            # litellm.completion wrapper (see config/llm.py). Streams
+            # are assembled locally, so we strip <think> blocks here.
+            content = strip_think_blocks(content)
         else:
             message = response.choices[0].message
             content = getattr(message, "content", None) or ""
