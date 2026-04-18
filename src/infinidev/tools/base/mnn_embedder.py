@@ -7,14 +7,20 @@ the ONNX path (~11 ms vs ~115 ms per query on a Ryzen APU) while
 producing bit-compatible vectors (cosine 1.0000 against ONNX across a
 diverse test corpus), so stored BLOBs remain valid.
 
-Opt-in: the embedder is only used when INFINIDEV_MNN_MODEL_PATH points at
-a converted `.mnn` file. Without the env var, callers fall back to the
-ChromaDB default embedder.
+Activation: install the `mnn` extra (`uv sync --extra mnn`). That's it —
+the embedder auto-detects the MNN install, one-shot converts ChromaDB's
+cached ONNX model on first use (~30 s), caches the result under
+`~/.infinidev/models/minilm.mnn`, and takes over transparently.
+`INFINIDEV_MNN_MODEL_PATH` is an optional override for advanced users;
+without the package installed, callers fall back to the ChromaDB default.
 """
 from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -24,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 _MAX_SEQ = 128
 _TOKENIZER_ID = "sentence-transformers/all-MiniLM-L6-v2"
+_DEFAULT_MODEL_PATH = Path.home() / ".infinidev" / "models" / "minilm.mnn"
+_CHROMADB_ONNX_PATH = (
+    Path.home() / ".cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx/model.onnx"
+)
 
 
 class MNNEmbedder:
@@ -169,49 +179,134 @@ def _patch_mnn_execstack() -> bool:
     return modified
 
 
+def _ensure_chromadb_onnx_cached() -> bool:
+    """Trigger ChromaDB's lazy ONNX download if the file isn't already cached.
+
+    ChromaDB's DefaultEmbeddingFunction downloads the model on first
+    invocation; we exploit that side effect rather than fetching it
+    ourselves (same file, same hash, fewer URLs to maintain). Returns
+    True when the ONNX file exists on disk after this call.
+    """
+    if _CHROMADB_ONNX_PATH.is_file():
+        return True
+    try:
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+        DefaultEmbeddingFunction()(["warmup"])
+    except Exception:
+        logger.warning("Could not fetch ChromaDB ONNX", exc_info=True)
+        return False
+    return _CHROMADB_ONNX_PATH.is_file()
+
+
+def _locate_mnnconvert() -> str | None:
+    """Find the mnnconvert CLI in the current venv or PATH."""
+    found = shutil.which("mnnconvert")
+    if found:
+        return found
+    venv_bin = Path(sys.executable).parent / "mnnconvert"
+    if venv_bin.is_file() and os.access(venv_bin, os.X_OK):
+        return str(venv_bin)
+    return None
+
+
+def _auto_convert_to_mnn(target: Path) -> bool:
+    """One-shot ONNX→MNN conversion. Blocking, ~30 s on a modern APU.
+
+    Applies the exec-stack ELF patch first so mnnconvert can run on
+    hardened kernels. Caches under ~/.infinidev/models so subsequent
+    sessions load instantly.
+    """
+    if not _ensure_chromadb_onnx_cached():
+        return False
+
+    _patch_mnn_execstack()
+
+    mnnconvert = _locate_mnnconvert()
+    if not mnnconvert:
+        logger.warning(
+            "mnnconvert not found on PATH; skipping MNN auto-conversion "
+            "(install the `mnn` extra or ensure the venv is active)"
+        )
+        return False
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Converting %s → %s (one-time, ~30 s)",
+        _CHROMADB_ONNX_PATH.name, target,
+    )
+    try:
+        r = subprocess.run(
+            [
+                mnnconvert, "-f", "ONNX",
+                "--modelFile", str(_CHROMADB_ONNX_PATH),
+                "--MNNModel", str(target),
+                "--bizCode", "minilm",
+                "--fp16", "--transformerFuse",
+            ],
+            capture_output=True, text=True, timeout=300,
+        )
+    except Exception:
+        logger.warning("mnnconvert invocation failed", exc_info=True)
+        return False
+    if r.returncode != 0 or not target.is_file():
+        tail = (r.stderr or r.stdout or "").splitlines()[-5:]
+        logger.warning("mnnconvert exited %d: %s", r.returncode, " | ".join(tail))
+        return False
+    logger.info("MNN model ready: %s", target)
+    return True
+
+
 _singleton_lock = threading.Lock()
 _singleton: MNNEmbedder | None = None
 
 
 def get_mnn_embedder() -> MNNEmbedder | None:
-    """Return the singleton MNNEmbedder if configured and loadable, else None.
+    """Return the singleton MNNEmbedder, or None to fall back to ChromaDB.
 
-    Configuration: set INFINIDEV_MNN_MODEL_PATH to a `.mnn` file produced
-    by `scripts/convert_minilm_to_mnn.py`. If the variable is unset or
-    the model can't be loaded, returns None so callers fall back to the
-    ChromaDB default embedder.
+    Auto-detection flow:
+      1. If the `MNN` package is not importable → return None (user didn't
+         install the extra).
+      2. Resolve the model path: `INFINIDEV_MNN_MODEL_PATH` override wins,
+         otherwise `~/.infinidev/models/minilm.mnn`.
+      3. If the model file is missing, auto-convert ChromaDB's cached ONNX
+         (one-time, ~30 s).
+      4. Load; patch hardened-kernel exec-stack on ImportError and retry.
+      5. Any failure → log + return None so callers fall back transparently.
     """
     global _singleton
     if _singleton is not None:
         return _singleton
 
-    path = os.environ.get("INFINIDEV_MNN_MODEL_PATH")
-    if not path:
-        return None
+    try:
+        import MNN  # noqa: F401
+    except ImportError:
+        return None  # extra not installed; silent fallback is correct
+    except Exception as e:
+        if "executable stack" in str(e):
+            if not _patch_mnn_execstack():
+                logger.warning("MNN blocked by hardened kernel; falling back")
+                return None
+            try:
+                import MNN  # noqa: F401
+            except Exception:
+                logger.warning("MNN still unavailable after patch", exc_info=True)
+                return None
+        else:
+            logger.warning("MNN import failed: %s", e)
+            return None
+
+    override = os.environ.get("INFINIDEV_MNN_MODEL_PATH")
+    model_path = Path(override).expanduser() if override else _DEFAULT_MODEL_PATH
 
     with _singleton_lock:
         if _singleton is not None:
             return _singleton
+        if not model_path.is_file():
+            if not _auto_convert_to_mnn(model_path):
+                return None
         try:
-            _singleton = MNNEmbedder(path)
-            logger.info("MNN embedder ready: %s", path)
-        except ImportError as e:
-            if "executable stack" in str(e):
-                # Kernel blocked the MNN .so; attempt the one-shot patch and
-                # retry. Subsequent invocations skip the patch (idempotent).
-                if _patch_mnn_execstack():
-                    try:
-                        _singleton = MNNEmbedder(path)
-                        logger.info("MNN embedder ready after execstack patch")
-                    except Exception:
-                        logger.warning(
-                            "MNN still unavailable after execstack patch; "
-                            "falling back to ChromaDB", exc_info=True,
-                        )
-                else:
-                    logger.warning("MNN blocked by hardened kernel; falling back")
-            else:
-                logger.warning("MNN import failed; falling back: %s", e)
+            _singleton = MNNEmbedder(str(model_path))
+            logger.info("MNN embedder ready: %s", model_path)
         except Exception:
             logger.warning("MNN init failed; falling back", exc_info=True)
     return _singleton

@@ -1,13 +1,13 @@
 """Convert ChromaDB's cached ONNX MiniLM-L6-v2 to MNN format.
 
-One-shot script: produces the `.mnn` file needed by the MNN embedder. Run
-it once per machine after installing infinidev + MNN. The output path is
-printed at the end; set INFINIDEV_MNN_MODEL_PATH to that path to activate
-the accelerated embedder.
+Optional pre-warm script. The MNN embedder auto-converts on first use,
+so most users never need to run this — it exists for CI images,
+read-only deployments, or anywhere the first-run conversion delay is
+inconvenient. The output path is the same one the embedder would use
+automatically (`~/.infinidev/models/minilm.mnn`).
 
 Usage:
     uv run python scripts/convert_minilm_to_mnn.py
-    # then: export INFINIDEV_MNN_MODEL_PATH=~/.infinidev/models/minilm.mnn
 """
 from __future__ import annotations
 

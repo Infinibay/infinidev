@@ -1,12 +1,14 @@
 """Smoke test for the MNN-backed embedder.
 
-Skipped unless both MNN is importable and INFINIDEV_MNN_MODEL_PATH points
-at a valid `.mnn` file. Run `scripts/convert_minilm_to_mnn.py` first to
-produce the model file locally.
+Runs when the `mnn` extra is installed — either against a cached model
+at the default path (`~/.infinidev/models/minilm.mnn`) or against an
+override from `INFINIDEV_MNN_MODEL_PATH`. Skipped when MNN itself is
+not importable.
 """
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -16,10 +18,16 @@ pytest.importorskip("MNN")
 
 @pytest.fixture
 def model_path() -> str:
-    path = os.environ.get("INFINIDEV_MNN_MODEL_PATH")
-    if not path or not os.path.isfile(path):
-        pytest.skip("INFINIDEV_MNN_MODEL_PATH not set; skipping MNN test")
-    return path
+    override = os.environ.get("INFINIDEV_MNN_MODEL_PATH")
+    candidate = Path(override).expanduser() if override else (
+        Path.home() / ".infinidev" / "models" / "minilm.mnn"
+    )
+    if not candidate.is_file():
+        pytest.skip(
+            f"No MNN model at {candidate} — run infinidev once to trigger "
+            "auto-conversion or INFINIDEV_MNN_MODEL_PATH to override"
+        )
+    return str(candidate)
 
 
 def test_mnn_matches_chromadb_onnx(model_path):

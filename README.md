@@ -152,6 +152,53 @@ Settings are stored in `.infinidev/settings.json` in your project directory. The
 | `LOOP_HISTORY_WINDOW` | `0` | Summaries to keep (0 = all) |
 | `FORGEJO_API_URL` | `""` | Forgejo API URL |
 | `FORGEJO_OWNER` | `""` | Forgejo owner |
+| `INFINIDEV_MNN_MODEL_PATH` | unset | Override for the MNN model path. Only needed to point at a custom location; leave unset to use the auto-managed default under `~/.infinidev/models/`. |
+
+## Optional: MNN-accelerated embeddings
+
+ContextRank, finding dedup, and symbol search all rely on the same
+`all-MiniLM-L6-v2` embedding model. By default this runs through
+ChromaDB's bundled ONNX Runtime on CPU, which costs ~115 ms per query
+on consumer hardware. For sessions backed by a remote LLM provider, that
+latency is visible on every pivot of the loop.
+
+Routing the same model through [MNN](https://github.com/alibaba/MNN)
+(Alibaba's inference runtime) cuts this to ~11 ms per query — roughly
+10× faster — while producing bit-compatible vectors (cosine 1.0000
+against the ONNX baseline), so embeddings already stored in the DB
+remain valid without re-indexing.
+
+### Enable
+
+```bash
+uv sync --extra mnn     # or: pip install 'infinidev[mnn]'
+uv run infinidev
+```
+
+That's it. On the first session after installing the extra, infinidev
+detects the MNN runtime, converts ChromaDB's cached ONNX model to MNN
+format (one-time, ~30 s, logged on stderr), caches it under
+`~/.infinidev/models/minilm.mnn`, and switches to the faster path for
+every subsequent session. If the extra isn't installed, nothing changes
+— infinidev keeps using the ChromaDB default embedder.
+
+The `scripts/convert_minilm_to_mnn.py` script is still available for
+pre-warming (useful in CI images or read-only deployments where the
+first-run conversion is inconvenient), but it's not required.
+
+### Notes
+
+- **CPU only today.** The MNN pip wheel does not ship with the Vulkan
+  backend compiled in, so inference runs on CPU regardless of the
+  requested backend. CPU alone is already the ~10× speedup documented
+  above; GPU would be additional.
+- **Hardened kernels.** MNN's wheel ships with an executable-stack ELF
+  flag that Arch/CachyOS/Ubuntu hardened kernels reject. The embedder
+  auto-patches the affected `.so` files on first use; no manual step
+  needed.
+- **Same model, same vectors.** The embedder produces the same 384-dim
+  output as before. Stored finding, symbol, and context embeddings
+  remain correct — no migration required.
 
 ## Architecture
 

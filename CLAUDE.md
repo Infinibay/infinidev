@@ -110,6 +110,15 @@ SQLite with tables: `projects`, `tasks`, `findings`, `artifacts`. All access goe
 
 Currently a stub — `EventBus` with no-op `emit()`. Designed for future WebSocket/external event support.
 
+### Embeddings (`tools/base/dedup.py`, `tools/base/mnn_embedder.py`)
+
+`all-MiniLM-L6-v2` is used for finding dedup (threshold 0.82), ContextRank fuzzy symbol search, and predictive/historical scoring. Two backends:
+
+- **Default**: ChromaDB's bundled ONNX Runtime — no setup, ~115 ms per query on CPU.
+- **Optional MNN**: install-and-forget via `uv sync --extra mnn`. On first call the embedder auto-converts ChromaDB's cached ONNX model (~30 s, logged), caches it under `~/.infinidev/models/minilm.mnn`, and takes over. Same 384-dim vectors (cosine 1.0000 vs ONNX — stored BLOBs compatible), ~11 ms per query, CPU-only in the current pip wheel. Auto-patches MNN's `.so` for hardened kernels. `INFINIDEV_MNN_MODEL_PATH` is an optional override for the model path, not a required toggle.
+
+`dedup._get_embed_fn()` probes MNN first when the env var is set; otherwise returns the ChromaDB default. Never swap embedding *models* (dim mismatch corrupts stored BLOBs) — only swap *runtimes*.
+
 ## Key Constraints
 
 - Loop limits: max 50 iterations, max 4 tool calls per step, max 200 total tool calls per task
