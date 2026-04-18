@@ -757,6 +757,7 @@ class LoopEngine(AgentEngine):
                         self._cr_hooks._task_id,
                         iteration,
                         cached_embedding=self._cr_hooks._task_embedding,
+                        cached_simplified_embedding=self._cr_hooks._task_embedding_simplified,
                         project_id=ctx.project_id,
                     )
                     self._cr_cached_result = cr_result

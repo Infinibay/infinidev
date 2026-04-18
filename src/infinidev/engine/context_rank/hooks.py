@@ -28,7 +28,8 @@ class ContextRankHooks:
         self._task_id: str = ""
         self._task_context_id: int | None = None
         self._active_step_context_id: int | None = None
-        self._task_embedding: bytes | None = None  # cached query embedding
+        self._task_embedding: bytes | None = None  # cached raw query embedding
+        self._task_embedding_simplified: bytes | None = None  # cached simplified query embedding (for canal 3)
 
     def start(self, session_id: str, task_id: str, task_description: str) -> None:
         """Called once at the start of execute(). Logs the task input context."""
@@ -53,7 +54,21 @@ class ContextRankHooks:
             def _embed_and_store():
                 compute_context_embedding(self._task_context_id)
                 from infinidev.tools.base.embeddings import compute_embedding
-                self._task_embedding = compute_embedding(task_description)
+                from infinidev.engine.context_rank.ranker import _simplify_query
+                raw_emb = compute_embedding(task_description)
+                self._task_embedding = raw_emb
+                # Canal 3 (fuzzy symbol search) uses a simplified query
+                # embedding to prevent conversational noise from diluting
+                # distinctive tokens. Precompute it here so rank() never
+                # blocks on a second embed call on the critical path.
+                try:
+                    simplified = _simplify_query(task_description)
+                except Exception:
+                    simplified = task_description
+                if simplified and simplified != task_description:
+                    self._task_embedding_simplified = compute_embedding(simplified)
+                else:
+                    self._task_embedding_simplified = raw_emb
             _embed_pool.submit(_embed_and_store)
 
     def on_step_activated(self, title: str, explanation: str, iteration: int, step_index: int) -> None:

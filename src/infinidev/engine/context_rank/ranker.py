@@ -284,6 +284,7 @@ def rank(
     top_k_symbols: int | None = None,
     top_k_findings: int | None = None,
     cached_embedding: bytes | None = None,
+    cached_simplified_embedding: bytes | None = None,
     project_id: int | None = None,
 ) -> ContextRankResult:
     """Compute ranked resources for prompt injection.
@@ -311,13 +312,19 @@ def rank(
     # inside hot paths and removes a hidden dependency on process state.
     workspace = _resolve_workspace()
 
-    # ── Shared embedding ─────────────────────────────────────────
-    # Compute the task embedding once and pass it to every channel
-    # that needs it.  Previously each channel fell back to
-    # `cached_embedding or compute_embedding(current_input)` which
-    # could fire up to 2 redundant embedding calls (~267ms each) on
-    # the first rank, when the background thread hadn't yet populated
-    # the cache.
+    # ── Shared embeddings ────────────────────────────────────────
+    # Two task embeddings are needed:
+    #   * raw (current_input as-is): used by canals 2 (predictive) and
+    #     4 (findings), both of which compare against corpus embeddings
+    #     that were also stored from raw text.
+    #   * simplified (stop-words filtered): used by canal 3 (fuzzy
+    #     symbol search) because its corpus — symbol names + docstring
+    #     first lines — is already concentrated, so a raw conversational
+    #     query dilutes the match. See _simplify_query docstring.
+    # Both are normally precomputed by ContextRankHooks.start() in a
+    # background thread and passed in via the cached_* kwargs.  The
+    # sync fallback below only runs if the precompute hasn't finished
+    # or the caller didn't populate the cache.
     query_embedding = cached_embedding
     if query_embedding is None:
         try:
@@ -325,6 +332,18 @@ def rank(
             query_embedding = compute_embedding(current_input)
         except Exception:
             query_embedding = None
+
+    simplified_embedding = cached_simplified_embedding
+    if simplified_embedding is None:
+        try:
+            simplified_text = _simplify_query(current_input)
+            if simplified_text and simplified_text != current_input:
+                from infinidev.tools.base.embeddings import compute_embedding
+                simplified_embedding = compute_embedding(simplified_text)
+            else:
+                simplified_embedding = query_embedding
+        except Exception:
+            simplified_embedding = query_embedding
 
     # ── Channel 1: Reactive (current session) ────────────────────
     reactive = _compute_reactive_scores(session_id, task_id, iteration)
@@ -342,7 +361,7 @@ def rank(
     # ── Channel 3: Fuzzy symbol search (embedding cosine) ────────
     mentions = _compute_mention_scores(
         current_input, project_id, workspace,
-        cached_embedding=query_embedding,
+        cached_simplified_embedding=simplified_embedding,
     )
 
     # ── Channel 4: Semantic findings (embedding similarity) ──────
@@ -829,7 +848,7 @@ def _simplify_query(text: str) -> str:
 
 def _compute_mention_scores(
     current_input: str, project_id: int, workspace: str | None = None,
-    *, cached_embedding: bytes | None = None,
+    *, cached_simplified_embedding: bytes | None = None,
 ) -> dict[str, tuple[float, str, str]]:
     """Fuzzy semantic search over per-symbol and per-file embeddings.
 
@@ -855,42 +874,23 @@ def _compute_mention_scores(
       restricted only by what the symbol_embeddings module
       considered embeddable (see ``_EMBEDDABLE_KINDS`` there).
 
-    **Query simplification (v3.1):** Before embedding, the query is
-    passed through ``_simplify_query`` which drops conversational
-    stop words ("show me the", "how do we", "what's the").  This
-    rebalances the averaged query vector so distinctive tokens
-    (identifiers, domain nouns) dominate instead of being diluted
-    by generic preamble.  The simplified text is re-embedded here
-    rather than reusing ``cached_embedding`` (which was computed
-    from the raw text for canal 2's benefit).  This costs one extra
-    ``compute_embedding`` call per rank (~200-300ms) but was the
-    only way to fix the typo-in-question case (Q2 in the smoke test).
+    **Query simplification (v3.1):** The channel uses a simplified
+    task embedding (stop-words filtered) to prevent conversational
+    noise from diluting the averaged query vector. The simplification
+    + embedding happens in ``ContextRankHooks.start`` (background
+    thread) so this function never blocks on a second embed call.
 
     Performance: for 10k embedded symbols, one np.stack + one
-    matmul is ~5ms; for 1k embedded files, ~1ms.  Query simplification
-    adds ~1ms.  Re-embed for simplified query adds ~200-300ms only
-    when simplification actually changed the input.
+    matmul is ~5ms; for 1k embedded files, ~1ms.  No embedding call
+    on the critical path.
     """
     if not current_input:
         return {}
 
-    # Query simplification: drop conversational noise words so the
-    # distinctive tokens dominate the resulting embedding.  Only
-    # re-embeds if the simplification actually changed the text,
-    # and falls back to the raw cached_embedding otherwise.
-    simplified = _simplify_query(current_input)
-    if simplified != current_input:
-        from infinidev.tools.base.embeddings import compute_embedding
-        channel_embedding = compute_embedding(simplified)
-        if channel_embedding is None:
-            channel_embedding = cached_embedding
-    else:
-        channel_embedding = cached_embedding
-
-    if channel_embedding is None:
+    if cached_simplified_embedding is None:
         return {}
 
-    query_vec = np.frombuffer(channel_embedding, dtype=np.float32)
+    query_vec = np.frombuffer(cached_simplified_embedding, dtype=np.float32)
     # Normalize the query vector once — the stored symbol vectors
     # get normalized row-wise in the matmul.
     q_norm = np.linalg.norm(query_vec)

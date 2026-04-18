@@ -430,7 +430,7 @@ class TestFuzzySymbolSearch:
         query_emb = compute_embedding("Please fix the AuthMiddleware class bug")
         result = _compute_mention_scores(
             "Please fix the AuthMiddleware class bug",
-            project_id=1, cached_embedding=query_emb,
+            project_id=1, cached_simplified_embedding=query_emb,
         )
         # AuthMiddleware should appear either as file or symbol hit
         assert any(
@@ -456,7 +456,7 @@ class TestFuzzySymbolSearch:
         query_emb = compute_embedding("Show me the AuthServise class")
         result = _compute_mention_scores(
             "Show me the AuthServise class",
-            project_id=1, cached_embedding=query_emb,
+            project_id=1, cached_simplified_embedding=query_emb,
         )
         # Should still find AuthService via embedding similarity
         assert any(
@@ -493,7 +493,7 @@ class TestFuzzySymbolSearch:
         query_emb = compute_embedding("How does token authentication validation work?")
         result = _compute_mention_scores(
             "How does token authentication validation work?",
-            project_id=1, cached_embedding=query_emb,
+            project_id=1, cached_simplified_embedding=query_emb,
         )
         # JWTValidator should rank higher than CacheWarmupScheduler
         jwt_score = max(
@@ -512,7 +512,7 @@ class TestFuzzySymbolSearch:
     def test_empty_input_returns_empty(self, cr_db):
         from infinidev.engine.context_rank.ranker import _compute_mention_scores
 
-        result = _compute_mention_scores("", 1, cached_embedding=None)
+        result = _compute_mention_scores("", 1, cached_simplified_embedding=None)
         assert result == {}
 
     def test_no_cached_embedding_returns_empty(self, cr_db):
@@ -526,7 +526,7 @@ class TestFuzzySymbolSearch:
         execute_with_retry(_seed)
 
         result = _compute_mention_scores(
-            "Show me SomeClass", project_id=1, cached_embedding=None,
+            "Show me SomeClass", project_id=1, cached_simplified_embedding=None,
         )
         assert result == {}
 
@@ -548,7 +548,7 @@ class TestFuzzySymbolSearch:
         query_emb = compute_embedding("EmbeddedOne or UnembeddedTwo please")
         result = _compute_mention_scores(
             "EmbeddedOne or UnembeddedTwo please",
-            project_id=1, cached_embedding=query_emb,
+            project_id=1, cached_simplified_embedding=query_emb,
         )
         # Only the embedded one should appear
         all_reasons = " ".join(r for _, (_, _, r) in result.items())
@@ -577,7 +577,7 @@ class TestFuzzySymbolSearch:
         query_emb = compute_embedding("How does user login validation work?")
         result = _compute_mention_scores(
             "How does user login validation work?",
-            project_id=1, cached_embedding=query_emb,
+            project_id=1, cached_simplified_embedding=query_emb,
         )
         # auth_service.py should rank higher than email_queue.py
         auth_score = result.get("src/auth_service.py", (0, "", ""))[0]
