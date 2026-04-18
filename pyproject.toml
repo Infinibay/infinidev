@@ -66,6 +66,11 @@ norecursedirs = ["tests/finetune", "tests/examples/taskqueue"]
 #   uv run pytest --override-ini="addopts="
 [project.optional-dependencies]
 cuda = ["cupy-cuda12x>=13.0.0"]
+# MNN-backed embedder — ~10x faster than ChromaDB ONNX on CPU, identical
+# output (cosine 1.0000 vs ONNX). Opt-in via INFINIDEV_MNN_MODEL_PATH.
+# Install: `pip install 'infinidev[mnn]'` then run
+# `python scripts/convert_minilm_to_mnn.py`.
+mnn = ["MNN>=3.5.0", "transformers>=4.40,<5"]
 
 [dependency-groups]
 dev = [

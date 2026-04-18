@@ -17,13 +17,28 @@ from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 logger = logging.getLogger(__name__)
 
 # Module-level singleton — matches the pattern in backend/tools/rag/base.py.
-_embed_fn: DefaultEmbeddingFunction | None = None
+_embed_fn = None
 
 
-def _get_embed_fn() -> DefaultEmbeddingFunction:
+def _get_embed_fn():
+    """Return the active embedder.
+
+    Prefers the MNN-backed embedder (~10x faster on CPU, identical output)
+    when `INFINIDEV_MNN_MODEL_PATH` is configured and loadable. Falls back
+    to ChromaDB's ONNX default otherwise.
+    """
     global _embed_fn
-    if _embed_fn is None:
-        _embed_fn = DefaultEmbeddingFunction()
+    if _embed_fn is not None:
+        return _embed_fn
+    try:
+        from infinidev.tools.base.mnn_embedder import get_mnn_embedder
+        mnn = get_mnn_embedder()
+        if mnn is not None:
+            _embed_fn = mnn
+            return _embed_fn
+    except Exception:
+        logger.debug("MNN embedder probe failed; using ChromaDB", exc_info=True)
+    _embed_fn = DefaultEmbeddingFunction()
     return _embed_fn
 
 
