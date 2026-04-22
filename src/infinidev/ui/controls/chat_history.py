@@ -293,15 +293,7 @@ class ChatHistoryControl(UIControl):
 def format_tool_chat_message(tool_name: str, detail: str,
                              error: str, output: str) -> str:
     """Format a tool call as a chat message string. Returns empty to skip."""
-    if tool_name == "execute_command":
-        cmd = detail or "..."
-        msg = f"$ {cmd}"
-        if error:
-            msg += f"\n  x {error}"
-        elif output:
-            msg += f"\n  {output}"
-        return msg
-
+    # Note: execute_command is rendered by ExecCommandWidget — see event_handler.
     if tool_name == "create_file":
         path = detail or "?"
         if error:

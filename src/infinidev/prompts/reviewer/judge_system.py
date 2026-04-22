@@ -106,7 +106,10 @@ Respond with ONLY valid JSON in one of these shapes.
   "issues": [
     {
       "severity": "blocking",
+      "category": "test_missing | test_failure | regression | logic_bug | api_break | style | docstring | structural",
       "file": "path/to/file.py",
+      "line": 42,
+      "quoted_text": "verbatim excerpt from the diff or current file at `line`",
       "description": "Clear description of the problem",
       "why": "Why this matters / impact if not fixed",
       "fix": "Specific, actionable suggestion for how to fix it"
@@ -119,13 +122,33 @@ Respond with ONLY valid JSON in one of these shapes.
 ## Critical Rules
 
 - The `## Extraction` section is authoritative. Do NOT ask for diffs.
+- **Every `blocking` issue MUST cite its evidence.** Provide `line` and
+  `quoted_text` (verbatim from the diff or current file) so the developer
+  and downstream tools can reproduce the problem.
+  - The ONLY exception is `category: "structural"` — reserved for
+    whole-file issues where a single line doesn't make sense (e.g. "test
+    file entirely absent", "module not imported anywhere"). For
+    `structural` issues, `file` alone is sufficient.
+  - Blocking issues missing `line`/`quoted_text` without the
+    `structural` exemption will be automatically demoted to `important`.
+- **`quoted_text` must be a verbatim excerpt.** Paraphrases are
+  rejected. Copy the exact characters from the diff or current file.
+- **`category` is required for every issue.** Pick the closest match
+  from the enum above.
 - Trust automated checks: `orphaned_references > 0` or
   `tests/import-check: FAILED` → you MUST REJECT and convert each
-  finding into an issue with its file/line.
+  finding into an issue. Copy the finding's `file` and `line` directly
+  and quote the offending symbol name as `quoted_text`.
+- Cross-check extractor claims against automated checks:
+  - `symbols_added` must be a subset of the file's `file_symbols`. If
+    the extractor claims a symbol that `file_symbols` doesn't list,
+    that's a `report_discrepancies`-style issue, not a real change.
+  - `test_counts.delta` is ground truth for how many tests were added.
+    Developer claims in the report that disagree with `delta` are
+    discrepancies.
 - A non-empty `report_discrepancies` means REJECT unless trivially
   benign.
 - NEVER reject for purely stylistic preferences.
-- Every blocking issue MUST include: file, description, why, fix.
 - On re-reviews (when `## Previous Review Feedback` is present), verify
   each previously flagged issue was actually addressed. Check for
   regressions — fixes can introduce new bugs.

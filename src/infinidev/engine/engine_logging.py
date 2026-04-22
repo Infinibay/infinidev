@@ -135,6 +135,34 @@ def extract_tool_detail(tool_name: str, arguments: str) -> str:
     return ""
 
 
+def _parse_exec_result(stripped: str) -> dict | None:
+    """Parse an execute_command success envelope. Returns None on mismatch."""
+    if not stripped.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    # Success envelope has at minimum exit_code + stdout/stderr keys.
+    if "exit_code" not in parsed and "stdout" not in parsed:
+        return None
+    return parsed
+
+
+def extract_exec_command_data(result: str) -> dict | None:
+    """Return structured execute_command output, or None if not a success envelope.
+
+    Used by the TUI's ExecCommandWidget to render a rich, collapsible
+    block. Returns a dict with keys: exit_code, stdout, stderr,
+    killed_reason, success.
+    """
+    if not result:
+        return None
+    return _parse_exec_result(result.strip())
+
+
 def extract_tool_output_preview(tool_name: str, result: str, max_lines: int = 4, max_width: int = 100) -> str:
     """Extract a short preview of tool output for display in the CLI.
 
@@ -156,21 +184,56 @@ def extract_tool_output_preview(tool_name: str, result: str, max_lines: int = 4,
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # For execute_command: show the actual output (most valuable)
+    # For execute_command: parse the JSON envelope and summarize
     if tool_name == "execute_command":
-        lines = stripped.splitlines()
-        # Take last N lines (most relevant for test output, build output)
-        if len(lines) > max_lines:
-            preview_lines = lines[-max_lines:]
+        data = _parse_exec_result(stripped)
+        if data is None:
+            # Not our usual envelope — fall back to a raw tail preview
+            lines = stripped.splitlines()
+            tail = lines[-max_lines:] if len(lines) > max_lines else lines
+            preview = "\n".join(
+                line[:max_width] + ("…" if len(line) > max_width else "")
+                for line in tail
+            )
+            return preview
+
+        exit_code = data.get("exit_code")
+        stdout = (data.get("stdout") or "").rstrip("\n")
+        stderr = (data.get("stderr") or "").rstrip("\n")
+        killed = data.get("killed_reason")
+
+        head = f"exit {exit_code}" if exit_code is not None else "no exit"
+        if exit_code == 0:
+            head = "✓ " + head
         else:
-            preview_lines = lines
-        preview = "\n".join(
-            line[:max_width] + ("…" if len(line) > max_width else "")
-            for line in preview_lines
-        )
-        if len(lines) > max_lines:
-            preview = f"… ({len(lines) - max_lines} lines above)\n{preview}"
-        return preview
+            head = "✗ " + head
+        if killed:
+            head += f" (killed)"
+
+        # Merge output, preferring stderr tail when there is one and
+        # stdout is empty, so failed commands don't look silent.
+        out_lines = stdout.splitlines()
+        err_lines = stderr.splitlines()
+        total_lines = len(out_lines) + len(err_lines)
+
+        tail: list[str] = []
+        remaining = max_lines
+        if out_lines:
+            tail.extend(out_lines[-remaining:])
+            remaining -= len(tail)
+        if err_lines and remaining > 0:
+            tail.extend(err_lines[-remaining:])
+
+        lines_out = [head]
+        if total_lines > max_lines:
+            lines_out.append(f"… {total_lines - len(tail)} earlier lines")
+        for line in tail:
+            lines_out.append(line[:max_width] + ("…" if len(line) > max_width else ""))
+        if not tail and not killed:
+            lines_out.append("(no output)")
+        if killed:
+            lines_out.append(f"killed: {str(killed)[:max_width]}")
+        return "\n".join(lines_out)
 
     # For file tools: show line count or brief summary
     if tool_name in ("read_file", "partial_read"):

@@ -962,3 +962,214 @@ class TestPhaseSettings:
         from infinidev.config.settings import Settings
         s = Settings()
         assert s.REVIEW_ENABLED is True
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Phase 1: Evidenced issues + deterministic signals
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestPhase1Evidenced:
+    """Tests for the evidenced-issue + deterministic-signal work."""
+
+    # ── issue_id stability ───────────────────────────────────────────
+
+    def test_issue_id_is_stable_across_runs(self):
+        from infinidev.engine.analysis.review_engine import _compute_issue_id
+
+        issue = {
+            "file": "src/a.py", "line": 42, "category": "logic_bug",
+            "severity": "blocking", "description": "off-by-one in loop bound",
+        }
+        id1 = _compute_issue_id(issue)
+        id2 = _compute_issue_id(dict(issue))
+        assert id1 == id2
+        assert len(id1) == 10
+
+        # Changing an input field changes the id.
+        id3 = _compute_issue_id({**issue, "line": 43})
+        assert id3 != id1
+
+    # ── Blocking demotion when citation missing ─────────────────────
+
+    def test_blocking_issue_without_line_is_demoted(self, caplog):
+        from infinidev.engine.analysis.review_engine import ReviewEngine
+
+        eng = ReviewEngine()
+        r = ReviewResult(verdict="REJECTED", summary="x", issues=[{
+            "severity": "blocking",
+            "category": "logic_bug",
+            "file": "src/a.py",
+            "description": "something is wrong",
+        }])
+        with caplog.at_level("WARNING"):
+            eng._validate_and_ground_issues(
+                r, file_changes_summary="", file_contents={},
+            )
+        assert r.issues[0]["severity"] == "important"
+        assert r.issues[0].get("_demoted") == "missing_citation"
+        assert any("missing citation" in rec.message for rec in caplog.records)
+
+    # ── Quote-mismatch demotion ─────────────────────────────────────
+
+    def test_quoted_text_mismatch_is_demoted_to_suggestion(self, caplog):
+        from infinidev.engine.analysis.review_engine import ReviewEngine
+
+        eng = ReviewEngine()
+        r = ReviewResult(verdict="REJECTED", summary="x", issues=[{
+            "severity": "blocking",
+            "category": "logic_bug",
+            "file": "src/a.py",
+            "line": 10,
+            "quoted_text": "this string is nowhere in the file",
+            "description": "phantom",
+        }])
+        with caplog.at_level("WARNING"):
+            eng._validate_and_ground_issues(
+                r,
+                file_changes_summary="### src/a.py (modified)\n```diff\n+ def hi(): pass\n```",
+                file_contents={"src/a.py": "def hi():\n    pass\n"},
+            )
+        assert r.issues[0]["severity"] == "suggestion"
+        assert r.issues[0].get("_demoted") == "ungrounded_quote"
+
+    def test_quoted_text_found_in_diff_is_accepted(self):
+        from infinidev.engine.analysis.review_engine import ReviewEngine
+
+        eng = ReviewEngine()
+        r = ReviewResult(verdict="REJECTED", summary="x", issues=[{
+            "severity": "blocking",
+            "category": "logic_bug",
+            "file": "src/a.py",
+            "line": 1,
+            "quoted_text": "def hi():",
+            "description": "needs work",
+        }])
+        eng._validate_and_ground_issues(
+            r,
+            file_changes_summary="",
+            file_contents={"src/a.py": "def hi():\n    pass\n"},
+        )
+        assert r.issues[0]["severity"] == "blocking"
+        assert "_demoted" not in r.issues[0]
+
+    # ── Structural exemption ────────────────────────────────────────
+
+    def test_structural_category_exempt_from_line_requirement(self):
+        from infinidev.engine.analysis.review_engine import ReviewEngine
+
+        eng = ReviewEngine()
+        r = ReviewResult(verdict="REJECTED", summary="x", issues=[{
+            "severity": "blocking",
+            "category": "structural",
+            "file": "src/a.py",
+            "description": "test file entirely missing",
+        }])
+        eng._validate_and_ground_issues(
+            r, file_changes_summary="", file_contents={},
+        )
+        # structural + no line/quote → stays blocking
+        assert r.issues[0]["severity"] == "blocking"
+        assert "_demoted" not in r.issues[0]
+
+    # ── test_counter ────────────────────────────────────────────────
+
+    def test_test_counts_computed_for_js_ts_py(self):
+        from infinidev.engine.analysis.test_counter import count_tests_in_content
+
+        js = (
+            "describe('g', () => {\n"
+            "  it('a', () => {});\n"
+            "  it.skip('b', () => {});\n"
+            "  test('c', () => {});\n"
+            "});\n"
+        )
+        ts = "it('x', () => {})\ntest('y', () => {})\n"
+        py = "def test_a():\n    pass\nasync def test_b():\n    pass\n"
+
+        assert count_tests_in_content("tests/x.test.js", js) == 3
+        assert count_tests_in_content("tests/x.test.ts", ts) == 2
+        assert count_tests_in_content("tests/test_foo.py", py) == 2
+        # Unknown extension returns None, not zero.
+        assert count_tests_in_content("foo.md", "it('x')") is None
+
+    def test_test_counter_detects_test_files(self):
+        from infinidev.engine.analysis.test_counter import looks_like_test_file
+
+        assert looks_like_test_file("tests/foo.ts") is True
+        assert looks_like_test_file("src/__tests__/bar.js") is True
+        assert looks_like_test_file("a.test.ts") is True
+        assert looks_like_test_file("foo_test.go") is True
+        assert looks_like_test_file("tests/test_x.py") is True
+        assert looks_like_test_file("src/app.py") is False
+
+    # ── Symbol grounding ────────────────────────────────────────────
+
+    def test_ground_changes_against_symbols_drops_hallucinations(self, caplog):
+        from infinidev.engine.analysis.review_engine import ReviewEngine
+
+        parsed = {
+            "changes": [
+                {"file": "a.py", "symbols_added": ["real_fn", "ghost_fn"]},
+                {"file": "b.py", "symbols_added": ["x"]},  # no file_symbols → untouched
+            ]
+        }
+        file_symbols = {"a.py": [{"name": "real_fn", "kind": "function"}]}
+
+        with caplog.at_level("WARNING"):
+            ReviewEngine._ground_changes_against_symbols(parsed, file_symbols)
+
+        assert parsed["changes"][0]["symbols_added"] == ["real_fn"]
+        assert parsed["changes"][0].get("_symbol_grounded") is True
+        assert parsed["changes"][1]["symbols_added"] == ["x"]
+        assert any("hallucinated" in rec.message for rec in caplog.records)
+
+    # ── hunk_stats ──────────────────────────────────────────────────
+
+    def test_hunk_stats_parses_diff_summary(self):
+        from infinidev.engine.analysis.review_engine import _compute_hunk_stats
+
+        summary = (
+            "### src/foo.py (modified)\n```diff\n"
+            "--- a/src/foo.py\n+++ b/src/foo.py\n"
+            "-old\n+new1\n+new2\n```\n\n"
+            "### tests/bar.test.ts (created)\n```diff\n"
+            "+it('x', () => {});\n+it('y', () => {});\n+it('z', () => {});\n```\n"
+        )
+        stats = _compute_hunk_stats(summary)
+        assert stats["src/foo.py"] == {"added": 2, "removed": 1}
+        assert stats["tests/bar.test.ts"] == {"added": 3, "removed": 0}
+
+    # ── line coercion ───────────────────────────────────────────────
+
+    def test_coerce_line_tolerates_junk(self):
+        from infinidev.engine.analysis.review_engine import _coerce_line
+
+        assert _coerce_line(42) == 42
+        assert _coerce_line("42") == 42
+        assert _coerce_line("42-58") == 42
+        assert _coerce_line("line 42") == 42
+        assert _coerce_line(None) is None
+        assert _coerce_line("") is None
+        assert _coerce_line("nope") is None
+        assert _coerce_line(True) is None  # bools rejected
+
+    # ── Feedback rendering includes citation ────────────────────────
+
+    def test_format_feedback_renders_citation_when_present(self):
+        result = ReviewResult(verdict="REJECTED", summary="x", issues=[{
+            "severity": "blocking",
+            "category": "logic_bug",
+            "file": "src/a.py",
+            "line": 42,
+            "quoted_text": "if x < y:",
+            "description": "wrong comparison",
+            "why": "off by one",
+            "fix": "use <=",
+            "id": "abc1234567",
+        }])
+        text = result.format_feedback_for_developer()
+        assert "abc1234567" in text
+        assert "logic_bug" in text
+        assert "src/a.py:42" in text
+        assert "if x < y:" in text

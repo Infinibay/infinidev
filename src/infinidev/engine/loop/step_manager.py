@@ -17,6 +17,7 @@ from infinidev.engine.engine_logging import (
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.loop.models import ActionRecord, StepResult
 from infinidev.engine.loop.behavior_rules import _EDIT_TOOLS, _READ_TOOLS
+from infinidev.engine.loop.step_summarizer import _synthesize_final
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext

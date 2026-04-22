@@ -97,9 +97,28 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
                 action_text += f"   {line}\n"
         app._actions_text = action_text.rstrip()
 
-        chat_msg = format_tool_chat_message(tool_name, tool_detail, tool_error, tool_output)
-        if chat_msg:
-            app.add_message("Tool", chat_msg, "system")
+        # Tools with rich dedicated widgets get their own chat message type.
+        if tool_name == "execute_command" and (data.get("exec_data") or tool_error):
+            exec_data = data.get("exec_data") or {}
+            app.chat_messages.append({
+                "sender": "Shell",
+                "text": tool_detail or "",
+                "type": "exec",
+                "cmd": tool_detail or "",
+                "exit_code": exec_data.get("exit_code"),
+                "stdout": exec_data.get("stdout") or "",
+                "stderr": exec_data.get("stderr") or "",
+                "killed_reason": exec_data.get("killed_reason"),
+                "tool_error": tool_error or "",
+                "collapsed": True,
+                "visible": True,
+            })
+            app._chat_history_control.invalidate_cache()
+            app.invalidate()
+        else:
+            chat_msg = format_tool_chat_message(tool_name, tool_detail, tool_error, tool_output)
+            if chat_msg:
+                app.add_message("Tool", chat_msg, "system")
 
         app.update_context_tokens(
             task_tokens=data.get("tokens_total", 0),

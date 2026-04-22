@@ -201,19 +201,25 @@ class TestGracefulFailureModes:
         assert result.kind == "respond"
         assert "Hola" in result.reply
 
-    def test_max_iterations_without_terminator_falls_back(self, patch_litellm):
+    def test_max_iterations_without_terminator_auto_escalates(self, patch_litellm):
         # Every response is a read call; none ever terminates.
+        # Budget exhaustion is a feature: instead of apologising to the
+        # user, the chat agent synthesizes an EscalationPacket so the
+        # developer can pick up the investigation with context.
         patch_litellm([
             _response([_tc("list_directory", {"file_path": "."}, f"tc-{i}")])
             for i in range(5)
         ])
         result = run_chat_agent("hola", max_iterations=5)
-        assert result.kind == "respond"
-        # Falls back with a neutral "happy to keep going" message —
-        # never blames the user for the agent hitting its own ceiling.
-        assert "reformul" not in result.reply.lower()
-        assert "rephrase" not in result.reply.lower()
-        assert result.reply  # non-empty
+        assert result.kind == "escalate"
+        assert result.escalation is not None
+        assert result.escalation.user_request == "hola"
+        assert "max_iter" in result.escalation.user_signal
+        # The synthesized understanding should carry the raw request
+        # and at least a hint of the tools invoked — that's the point
+        # of the handoff.
+        assert "hola" in result.escalation.understanding
+        assert "list_directory" in result.escalation.understanding
 
     def test_llm_raises_returns_respond(self, patch_litellm, monkeypatch):
         patch_litellm([])
@@ -237,29 +243,30 @@ class TestLanguageAwareFallbacks:
         # Empty short-circuits to "(empty message)" regardless of lang.
         assert result.reply == "(empty message)"
 
-    def test_max_iter_spanish(self, patch_litellm):
+    def test_max_iter_spanish_preview(self, patch_litellm):
+        # On auto-escalation the user-facing preview must be localized
+        # to the user's language — it's what the pipeline shows before
+        # the planner runs.
         patch_litellm([
             _response([_tc("list_directory", {"file_path": "."}, f"tc-{i}")])
             for i in range(5)
         ])
         result = run_chat_agent("¿qué hace este proyecto?", max_iterations=5)
-        assert result.kind == "respond"
-        # Neutral Spanish wrap-up — mentions "investigué" or "seguimos",
-        # never tells the user to rephrase.
-        lower = result.reply.lower()
-        assert any(w in lower for w in ("investigué", "seguimos", "contame"))
-        assert "reformul" not in lower
+        assert result.kind == "escalate"
+        preview = result.escalation.user_visible_preview.lower()
+        assert any(w in preview for w in ("investigué", "developer", "contexto"))
 
-    def test_max_iter_english(self, patch_litellm):
+    def test_max_iter_english_preview(self, patch_litellm):
         patch_litellm([
             _response([_tc("list_directory", {"file_path": "."}, f"tc-{i}")])
             for i in range(5)
         ])
         result = run_chat_agent("what does this project do?", max_iterations=5)
-        assert result.kind == "respond"
-        lower = result.reply.lower()
-        assert any(w in lower for w in ("investigated", "keep going", "what you want"))
-        assert "rephrase" not in lower
+        assert result.kind == "escalate"
+        preview = result.escalation.user_visible_preview.lower()
+        assert any(w in preview for w in ("investigated", "developer", "context"))
+        # English preview must not carry Spanish diacritics.
+        assert not any(ch in preview for ch in "¿¡ñ")
 
     def test_llm_exception_english_fallback(self, patch_litellm, monkeypatch):
         patch_litellm([])

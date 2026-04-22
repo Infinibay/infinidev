@@ -9,9 +9,125 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# Matches the per-file header emitted by engine.get_changed_files_summary()
+# (see engine/loop/engine.py ~line 294): "### path (action)" optionally
+# followed by ", no diff". This is the canonical source of truth for the
+# file set — we grep it rather than asking the LLM to enumerate.
+_FILE_HEADER_RE = re.compile(r"^###\s+(.+?)\s+\(([^)]+)\)\s*$", re.MULTILINE)
+
+
+def _coerce_line(value: Any) -> int | None:
+    """Coerce the judge's ``line`` field to an int or None.
+
+    The LLM sometimes returns strings ("42"), sometimes floats, sometimes
+    a range like "42-58". We accept the first integer we find; anything
+    else becomes None.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    s = str(value).strip()
+    if not s:
+        return None
+    m = re.search(r"-?\d+", s)
+    if m is None:
+        return None
+    try:
+        return int(m.group(0))
+    except ValueError:
+        return None
+
+
+def _quote_is_grounded(
+    quoted: str,
+    file_path: str,
+    file_contents: dict[str, str],
+    file_changes_summary: str,
+) -> bool:
+    """Verify ``quoted`` appears verbatim in the cited file or the diff.
+
+    Normalizes both sides by collapsing runs of whitespace so minor
+    formatting drift doesn't trigger a false demotion. The string must
+    still appear in the post-edit file contents (if we have them for
+    ``file_path``) or anywhere in ``file_changes_summary``.
+
+    Absent content and an absent quote both return False — the caller
+    treats that as "couldn't verify" and demotes.
+    """
+    if not quoted:
+        return False
+    needle = _normalize_whitespace(quoted)
+    if not needle:
+        return False
+
+    content = file_contents.get(file_path) if file_path else None
+    if content and needle in _normalize_whitespace(content):
+        return True
+    if file_changes_summary and needle in _normalize_whitespace(file_changes_summary):
+        return True
+    return False
+
+
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_whitespace(text: str) -> str:
+    """Collapse runs of whitespace to single spaces for fuzzy containment."""
+    return _WS_RE.sub(" ", text).strip()
+
+
+def _compute_issue_id(issue: dict) -> str:
+    """Assign a 10-char sha1 hash derived from the issue's grounded fields.
+
+    Stable across the extractor's retry-once loop and across rework
+    rounds — the same issue re-emitted gets the same id, enabling
+    dedup and cross-round tracking.
+
+    Uses the POST-validation severity so a demoted issue changes id;
+    a demoted issue is effectively a different claim.
+    """
+    import hashlib
+    desc = str(issue.get("description") or "")[:80]
+    desc = _WS_RE.sub(" ", desc).strip().lower()
+    parts = [
+        str(issue.get("file") or "").strip(),
+        str(issue.get("line") if issue.get("line") is not None else ""),
+        str(issue.get("category") or "").strip().lower(),
+        str(issue.get("severity") or "").strip().lower(),
+        desc,
+    ]
+    key = "|".join(parts).encode("utf-8")
+    return hashlib.sha1(key).hexdigest()[:10]
+
+
+def _extract_changed_files_from_summary(summary: str) -> list[tuple[str, str]]:
+    """Parse ``get_changed_files_summary`` output into (path, action) pairs.
+
+    Deterministic ground truth for the diff's file set. Used to validate
+    and backfill the extractor LLM's ``changes[]`` output, which is
+    empirically prone to dropping files on large diffs.
+    """
+    if not summary:
+        return []
+    pairs: list[tuple[str, str]] = []
+    for m in _FILE_HEADER_RE.finditer(summary):
+        path = m.group(1).strip()
+        action_raw = m.group(2).strip()
+        # "modified, no diff" → action="modified"
+        action = action_raw.split(",", 1)[0].strip()
+        pairs.append((path, action))
+    return pairs
 
 
 # Multi-pass temperatures: extraction is maximally deterministic; the
@@ -128,6 +244,12 @@ class ReviewEngine:
                     plan_steps=plan_steps,
                 )
             if extraction is not None:
+                # Symbol grounding runs here (not inside extraction) because
+                # `file_symbols` is part of automated_checks, which runs in
+                # parallel with the extractor — they're both available now.
+                self._ground_changes_against_symbols(
+                    extraction, automated_checks.get("file_symbols") or {},
+                )
                 result = self._run_judgment_pass(
                     llm_params=llm_params,
                     extraction=extraction,
@@ -154,6 +276,14 @@ class ReviewEngine:
                 plan_steps=plan_steps,
                 automated_checks=automated_checks,
             )
+
+        # Ground every issue in the diff/file before anyone downstream
+        # (feedback formatter, telemetry, future appeal) can trust them.
+        self._validate_and_ground_issues(
+            result,
+            file_changes_summary=file_changes_summary,
+            file_contents=file_contents,
+        )
 
         event_bus.emit("review_complete", 0, "", {
             "verdict": result.verdict,
@@ -254,6 +384,7 @@ class ReviewEngine:
                 raw = (response.choices[0].message.content or "").strip()
                 parsed = self._parse_extraction(raw)
                 if parsed is not None:
+                    self._ground_changes_against_diff(parsed, file_changes_summary)
                     return parsed
             except Exception as exc:
                 logger.warning("ReviewEngine: extractor LLM call failed: %s", exc)
@@ -264,6 +395,119 @@ class ReviewEngine:
             ]
 
         return None
+
+    @staticmethod
+    def _ground_changes_against_diff(parsed: dict, file_changes_summary: str) -> None:
+        """Ensure ``parsed['changes']`` covers every file in the diff.
+
+        The extractor LLM sometimes omits files on large diffs (observed
+        in practice: reports "3 test files" when 5 were added). We parse
+        the canonical file set from the diff summary and append stub
+        entries for anything the LLM missed, so the judge pass always
+        sees the real file list — even if with minimal detail for the
+        omitted ones. A warning is logged so the drop is observable in
+        metrics without silently overriding a working extraction.
+
+        Previously named ``_backfill_missing_files``; the new name
+        reflects that this is one of a pair of grounding passes
+        (:meth:`_ground_changes_against_symbols` handles symbol claims).
+        """
+        canonical = _extract_changed_files_from_summary(file_changes_summary)
+        if not canonical:
+            return
+
+        changes = parsed.get("changes")
+        if not isinstance(changes, list):
+            changes = []
+            parsed["changes"] = changes
+
+        existing_paths = {
+            str(c.get("file") or "").strip()
+            for c in changes
+            if isinstance(c, dict)
+        }
+
+        missing: list[tuple[str, str]] = [
+            (path, action)
+            for path, action in canonical
+            if path and path not in existing_paths
+        ]
+        if not missing:
+            return
+
+        logger.warning(
+            "Reviewer extraction dropped %d/%d files — backfilling: %s",
+            len(missing), len(canonical),
+            ", ".join(p for p, _ in missing[:5]) + ("…" if len(missing) > 5 else ""),
+        )
+        action_map = {"created": "added", "modified": "modified", "deleted": "deleted"}
+        for path, action in missing:
+            changes.append({
+                "file": path,
+                "kind": action_map.get(action, "modified"),
+                "symbols_added": [],
+                "symbols_removed": [],
+                "line_range": "",
+                "summary": "(present in diff but not captured by extractor; see diff for details)",
+                "notable_lines": [],
+                "_backfilled": True,
+            })
+
+    @staticmethod
+    def _ground_changes_against_symbols(
+        parsed: dict,
+        file_symbols: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Filter hallucinated entries out of ``symbols_added`` claims.
+
+        The extractor LLM occasionally invents symbol names that aren't
+        in the file — either misremembering the diff or confabulating
+        "canonical" names. ``file_symbols`` is the post-edit ground
+        truth from the code-intel index. For every change entry whose
+        file has symbols indexed, we drop any ``symbols_added`` entry
+        that isn't present in the real symbol list.
+
+        ``symbols_removed`` is left untouched — we don't have
+        pre-edit symbols in this phase (follow-up work), so we can't
+        validate removal claims yet.
+
+        A warning per filtered symbol keeps the drift observable.
+        """
+        if not file_symbols:
+            return
+        changes = parsed.get("changes")
+        if not isinstance(changes, list):
+            return
+
+        for entry in changes:
+            if not isinstance(entry, dict):
+                continue
+            path = str(entry.get("file") or "").strip()
+            if not path or path not in file_symbols:
+                continue
+            real_names = {s.get("name") for s in file_symbols[path] if s.get("name")}
+            if not real_names:
+                continue
+            claimed = entry.get("symbols_added") or []
+            if not isinstance(claimed, list):
+                continue
+            kept: list[str] = []
+            dropped: list[str] = []
+            for name in claimed:
+                if isinstance(name, str) and name in real_names:
+                    kept.append(name)
+                else:
+                    dropped.append(str(name))
+            if dropped:
+                logger.warning(
+                    "Extractor symbols_added dropped %d hallucinated name(s) "
+                    "for %s: %s (real symbols in file: %s)",
+                    len(dropped), path,
+                    ", ".join(dropped[:5]) + ("…" if len(dropped) > 5 else ""),
+                    ", ".join(sorted(real_names)[:8]),
+                )
+                entry["symbols_added"] = kept
+                entry.setdefault("_symbol_grounded", True)
 
     @staticmethod
     def _parse_extraction(raw: str) -> dict | None:
@@ -611,6 +855,97 @@ class ReviewEngine:
         """Whether we can do another review-rework cycle."""
         return self._review_count < self._max_reviews
 
+    # ── Post-judge validation ───────────────────────────────────────────
+
+    def _validate_and_ground_issues(
+        self,
+        result: ReviewResult,
+        *,
+        file_changes_summary: str,
+        file_contents: dict[str, str],
+    ) -> None:
+        """Demote unsupported issues, verify citations, assign stable IDs.
+
+        Applied to every ReviewResult right after the judge returns —
+        covers both multi-pass and single-pass flows. Three checks per
+        issue, in order:
+
+        1. Blocking + non-structural without ``line`` or ``quoted_text``
+           → demoted to ``important`` with a warning. The judge's
+           instructions require citations; if it didn't follow, we don't
+           trust it enough to reject on that issue alone.
+        2. ``quoted_text`` present but not found in the diff or the
+           post-edit file → demoted to ``suggestion`` + warning. A
+           hallucinated quote is strong evidence the issue itself is a
+           confabulation.
+        3. ``id`` computed via deterministic hash (see
+           ``_compute_issue_id``) so downstream code can dedup across
+           retries without relying on LLM-stable ordering.
+        """
+        if not result.issues:
+            return
+
+        for issue in result.issues:
+            if not isinstance(issue, dict):
+                continue
+
+            severity = str(issue.get("severity") or "").lower() or "important"
+            category = str(issue.get("category") or "").lower() or "uncategorized"
+            line = _coerce_line(issue.get("line"))
+            quoted = str(issue.get("quoted_text") or "").strip()
+            file_path = str(issue.get("file") or "").strip()
+
+            issue["severity"] = severity
+            issue["category"] = category
+            issue["line"] = line
+            issue["quoted_text"] = quoted
+
+            # Rule 1: blocking non-structural issues must carry evidence.
+            if severity == "blocking" and category != "structural":
+                if line is None or not quoted:
+                    logger.warning(
+                        "Review issue demoted blocking→important (missing citation): "
+                        "file=%s category=%s description=%.80s",
+                        file_path, category, issue.get("description", ""),
+                    )
+                    issue["severity"] = "important"
+                    issue.setdefault("_demoted", "missing_citation")
+
+            # Rule 2: verify the quote actually appears in the diff or
+            # post-edit file. Hallucinated quotes are strong evidence
+            # the judge fabricated the issue itself.
+            if quoted:
+                found = _quote_is_grounded(
+                    quoted, file_path, file_contents, file_changes_summary,
+                )
+                if not found:
+                    logger.warning(
+                        "Review issue demoted %s→suggestion (quoted_text not found in "
+                        "file or diff): file=%s line=%s quote=%.60s",
+                        issue["severity"], file_path, line, quoted,
+                    )
+                    issue["severity"] = "suggestion"
+                    issue.setdefault("_demoted", "ungrounded_quote")
+
+            # Rule 3: stable id. Computed from the FINAL severity so a
+            # demotion changes the id — an issue's post-validation
+            # identity is what downstream code should track.
+            issue["id"] = _compute_issue_id(issue)
+
+        # If every blocking issue got demoted, the verdict flag should
+        # reflect reality. Leave the verdict string untouched (it's the
+        # judge's authoritative output) but callers reading
+        # ``is_rejected`` plus issue severities will now see consistency.
+        blocking_left = [
+            i for i in result.issues
+            if isinstance(i, dict) and str(i.get("severity")).lower() == "blocking"
+        ]
+        if result.is_rejected and not blocking_left:
+            logger.info(
+                "All blocking issues were demoted during validation — verdict "
+                "remains REJECTED but no blocking issues survive."
+            )
+
     @staticmethod
     def _completion_with_caching(
         llm_params: dict,
@@ -672,6 +1007,43 @@ class ReviewEngine:
         if len(missing) > 5:
             lines.append(f"    • ... {len(missing) - 5} more")
 
+        test_counts = checks.get("test_counts") or {}
+        if test_counts:
+            total_added = sum(
+                max(0, v.get("delta", 0)) for v in test_counts.values()
+            )
+            lines.append(
+                f"- test_counts: {len(test_counts)} test file(s), "
+                f"{total_added} new test case(s) added in total"
+            )
+            for path, v in list(test_counts.items())[:15]:
+                lines.append(
+                    f"    • {path}: {v.get('before', 0)} → {v.get('after', 0)} "
+                    f"(Δ {v.get('delta', 0):+d})"
+                )
+
+        file_symbols = checks.get("file_symbols") or {}
+        if file_symbols:
+            lines.append(
+                f"- file_symbols: ground truth for extractor's symbols_added claims "
+                f"({len(file_symbols)} file(s) covered)"
+            )
+            for path, syms in list(file_symbols.items())[:10]:
+                names = ", ".join(s.get("name", "?") for s in syms[:8])
+                more = f" (+{len(syms) - 8})" if len(syms) > 8 else ""
+                lines.append(f"    • {path}: {names}{more}")
+
+        hunk_stats = checks.get("hunk_stats") or {}
+        if hunk_stats:
+            total_add = sum(v.get("added", 0) for v in hunk_stats.values())
+            total_rem = sum(v.get("removed", 0) for v in hunk_stats.values())
+            lines.append(
+                f"- hunk_stats: +{total_add} −{total_rem} across "
+                f"{len(hunk_stats)} file(s)"
+            )
+            for path, v in list(hunk_stats.items())[:15]:
+                lines.append(f"    • {path}: +{v.get('added', 0)} −{v.get('removed', 0)}")
+
         return "\n".join(lines)
 
 
@@ -679,12 +1051,25 @@ def collect_automated_checks(
     changed_files: list[str],
     file_tracker: Any = None,
     verification_passed: bool | None = None,
+    file_changes_summary: str = "",
 ) -> dict[str, Any]:
     """Gather deterministic check results to feed into the reviewer.
 
     Runs orphaned-reference and missing-docstring checks against the
     code-intel index for the given changed files. Resilient: any single
     check that errors returns an empty list for that key.
+
+    Additional deterministic signals folded into the result:
+
+    * ``test_counts`` — per test-file before/after/delta, computed by
+      regex over the raw file content (see :mod:`.test_counter`). Grounds
+      the judge against developer-report claims like "added 10 tests".
+    * ``file_symbols`` — per changed file, the list of top-level symbols
+      currently in the index. Catches extractor claims that a symbol was
+      added/modified when no such symbol exists in the file.
+    * ``hunk_stats`` — per file, the count of added/removed lines parsed
+      from ``file_changes_summary``. A cheap sanity check on the
+      extractor's ``line_range`` field.
     """
     from infinidev.code_intel.analyzer import (
         check_missing_docstrings, check_orphaned_references,
@@ -696,6 +1081,9 @@ def collect_automated_checks(
         "verification_passed": verification_passed,
         "orphaned_references": [],
         "missing_docstrings": [],
+        "test_counts": {},
+        "file_symbols": {},
+        "hunk_stats": {},
     }
 
     # Reindex changed files so the checks see post-edit state
@@ -737,7 +1125,134 @@ def collect_automated_checks(
         except Exception as exc:
             logger.debug("Missing-docstrings check failed for %s: %s", p, exc)
 
+    # ── Deterministic signals for the judge ─────────────────────────────
+    # These kill whole classes of LLM hallucination: "added 10 tests"
+    # checked against regex count, "added function foo" checked against
+    # the index, and "line_range 42-58" checked against actual +/- counts.
+    try:
+        result["test_counts"] = _compute_test_counts(abs_changed, file_tracker)
+    except Exception as exc:
+        logger.debug("test_counts check failed: %s", exc)
+
+    try:
+        result["file_symbols"] = _compute_file_symbols(project_id, abs_changed)
+    except Exception as exc:
+        logger.debug("file_symbols check failed: %s", exc)
+
+    if file_changes_summary:
+        try:
+            result["hunk_stats"] = _compute_hunk_stats(file_changes_summary)
+        except Exception as exc:
+            logger.debug("hunk_stats check failed: %s", exc)
+
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Deterministic signal helpers
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _compute_test_counts(abs_changed: list[str], file_tracker: Any) -> dict[str, dict[str, int]]:
+    """Count test cases before/after for each changed test file.
+
+    Pulls before-content from the ``file_tracker``'s ``_originals`` and
+    after-content from ``_current`` (both set as edits flow through
+    ``FileChangeTracker.record``). Files not in the tracker fall back to
+    reading the current file from disk, with ``before`` treated as empty.
+    """
+    from infinidev.engine.analysis.test_counter import (
+        count_tests_for_files, looks_like_test_file,
+    )
+
+    entries: list[tuple[str, str | None, str | None]] = []
+    for path in abs_changed:
+        if not looks_like_test_file(path):
+            continue
+        before: str | None = None
+        after: str | None = None
+        if file_tracker is not None:
+            try:
+                # FileChangeTracker stores by abspath internally.
+                before = file_tracker._originals.get(path)
+                after = file_tracker._current.get(path)
+            except Exception:
+                pass
+        if after is None:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    after = f.read()
+            except OSError:
+                after = None
+        entries.append((path, before, after))
+
+    return count_tests_for_files(entries)
+
+
+def _compute_file_symbols(project_id: int, abs_changed: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """Return the top-level symbols currently indexed for each changed file.
+
+    Uses the post-edit index (reindex runs before this helper). The judge
+    uses this to validate extractor claims like ``symbols_added: ["foo"]``
+    — if ``foo`` isn't in the file's symbol list, the judge knows the
+    extractor hallucinated.
+
+    Full before/after symbol delta is follow-up work; getting pre-edit
+    symbols would require a separate tree-sitter pass on the tracker's
+    ``_originals`` content and isn't worth the complexity for this phase.
+    """
+    from infinidev.code_intel.query import list_symbols
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    for path in abs_changed:
+        try:
+            syms = list_symbols(project_id, path, limit=100)
+        except Exception:
+            continue
+        if not syms:
+            continue
+        out[path] = [
+            {"name": s.name, "kind": s.kind, "line": s.line_start}
+            for s in syms
+            # Filter to top-level-ish kinds; drop locals/params.
+            if s.kind in ("class", "function", "method", "interface", "enum")
+        ]
+    return out
+
+
+_HUNK_HEADER_RE = re.compile(r"^###\s+(.+?)\s+\(", re.MULTILINE)
+
+
+def _compute_hunk_stats(file_changes_summary: str) -> dict[str, dict[str, int]]:
+    """Count +/- lines per file by parsing the diff summary.
+
+    The summary is the output of ``engine.get_changed_files_summary()``:
+    sections headed by ``### path (action)`` followed by a fenced diff.
+    We walk the string section by section, counting lines that start with
+    ``+`` or ``-`` but aren't diff headers (``+++``/``---``).
+    """
+    stats: dict[str, dict[str, int]] = {}
+    # Split on the file headers, keeping the path as the section key.
+    positions = [(m.start(), m.group(1).strip()) for m in _HUNK_HEADER_RE.finditer(file_changes_summary)]
+    if not positions:
+        return stats
+    positions.append((len(file_changes_summary), ""))  # sentinel end
+
+    for i in range(len(positions) - 1):
+        start, path = positions[i]
+        end, _ = positions[i + 1]
+        block = file_changes_summary[start:end]
+        added = 0
+        removed = 0
+        for line in block.splitlines():
+            if line.startswith("+++") or line.startswith("---"):
+                continue
+            if line.startswith("+"):
+                added += 1
+            elif line.startswith("-"):
+                removed += 1
+        stats[path] = {"added": added, "removed": removed}
+    return stats
 
 
 def run_review_rework_loop(
@@ -860,6 +1375,7 @@ def run_review_rework_loop(
                     changed_files=changed_files,
                     file_tracker=tracker,
                     verification_passed=True,
+                    file_changes_summary=file_changes_summary,
                 )
                 pre_extraction = ext_future.result()
                 automated = checks_future.result()
@@ -868,6 +1384,7 @@ def run_review_rework_loop(
                 changed_files=changed_files,
                 file_tracker=tracker,
                 verification_passed=True,
+                file_changes_summary=file_changes_summary,
             )
 
         review = reviewer.review(

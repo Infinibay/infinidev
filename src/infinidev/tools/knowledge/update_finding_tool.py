@@ -149,13 +149,14 @@ class UpdateFindingTool(InfinibayBaseTool):
                 params,
             )
 
+            new_row = conn.execute(
+                "SELECT topic, content, status FROM findings WHERE id = ?",
+                (finding_id,),
+            ).fetchone()
+
             # Re-compute embedding if title or content changed
             if title is not None or content is not None:
                 try:
-                    new_row = conn.execute(
-                        "SELECT topic, content FROM findings WHERE id = ?",
-                        (finding_id,),
-                    ).fetchone()
                     from infinidev.tools.base.embeddings import store_finding_embedding
                     store_finding_embedding(
                         conn, finding_id,
@@ -165,7 +166,7 @@ class UpdateFindingTool(InfinibayBaseTool):
                     pass
 
             conn.commit()
-            return {"topic": row["topic"], "status": row["status"]}
+            return {"topic": new_row["topic"], "status": new_row["status"]}
 
         try:
             result = execute_with_retry(_update)

@@ -428,3 +428,165 @@ register(BorderedWidget("pending", "Pending"))
 register(BorderedWidget("queued", "Queued"))
 register(DiffWidget())
 register(ErrorWidget())
+
+
+# ── ExecCommandWidget ──────────────────────────────────────────────────
+
+_EXEC_PROMPT_FG = "#ffaa00"          # the `$` prompt
+_EXEC_CMD_FG    = "#d0e4ff"          # the command itself
+_EXEC_OK_FG     = "#44ff44"          # ✓ exit 0
+_EXEC_FAIL_FG   = "#ff5577"          # ✗ exit N / killed
+_EXEC_META_FG   = TEXT_MUTED         # line counts, "earlier lines" hint
+_EXEC_OUT_FG    = "#c8c8c8"          # stdout body
+_EXEC_ERR_FG    = "#d48a8a"          # stderr body (dim red)
+
+# Cap output rendered in expanded view — the full stdout/stderr still
+# lives in the message dict (users can expand again after scrollback);
+# this just keeps a runaway build log from swamping the viewport.
+_EXEC_COLLAPSED_TAIL = 3
+_EXEC_EXPANDED_STDOUT = 40
+_EXEC_EXPANDED_STDERR = 20
+
+
+def _truncate(s: str, width: int) -> str:
+    if len(s) <= width:
+        return s
+    return s[: max(1, width - 1)] + "…"
+
+
+class ExecCommandWidget:
+    """Renders an ``execute_command`` result as a collapsible block.
+
+    The chat message carries the structured fields produced by
+    ``event_handler`` (cmd, exit_code, stdout, stderr, killed_reason,
+    tool_error). Collapsed view shows a one-line header plus the last
+    few output lines so the user senses the punchline without
+    expanding. Expanded view shows a deeper tail, separated per-stream,
+    with an "earlier lines" hint when truncated.
+    """
+
+    msg_type = "exec"
+    group_label = "Shell commands"
+
+    def render(self, msg: dict[str, Any], width: int) -> RenderResult:
+        cmd = msg.get("cmd") or "(empty)"
+        exit_code = msg.get("exit_code")
+        stdout = msg.get("stdout") or ""
+        stderr = msg.get("stderr") or ""
+        killed = msg.get("killed_reason")
+        tool_error = msg.get("tool_error") or ""
+        collapsed = msg.get("collapsed", True)
+
+        arrow = "▶" if collapsed else "▼"
+        success = (exit_code == 0) and not killed and not tool_error
+
+        # Status chip
+        if tool_error:
+            status_text, status_style = f"✗ {_truncate(tool_error, 40)}", _EXEC_FAIL_FG + " bold"
+        elif killed:
+            status_text, status_style = "✗ killed", _EXEC_FAIL_FG + " bold"
+        elif exit_code is None:
+            status_text, status_style = "·", _EXEC_META_FG
+        elif success:
+            status_text, status_style = "✓ exit 0", _EXEC_OK_FG + " bold"
+        else:
+            status_text, status_style = f"✗ exit {exit_code}", _EXEC_FAIL_FG + " bold"
+
+        out_lines = stdout.splitlines()
+        err_lines = stderr.splitlines()
+        total = len(out_lines) + len(err_lines)
+        meta = f"{total} line{'s' if total != 1 else ''}"
+        if len(err_lines) and len(out_lines):
+            meta += f" ({len(err_lines)} err)"
+        elif len(err_lines):
+            meta = f"{len(err_lines)} stderr line{'s' if len(err_lines) != 1 else ''}"
+
+        lines: list[list[tuple[str, str]]] = []
+        clickable: dict[int, Callable[[], None]] = {}
+
+        # ── Header line: "▶ $ cmd…   ✓ exit 0   ·   12 lines"
+        cmd_width = max(
+            10,
+            width - 6 - len(status_text) - len(meta) - 6,
+        )
+        cmd_display = _truncate(cmd, cmd_width)
+        header_frags: list[tuple[str, str]] = [
+            (_EXEC_META_FG, f" {arrow} "),
+            (_EXEC_PROMPT_FG + " bold", "$ "),
+            (_EXEC_CMD_FG, cmd_display),
+            ("", "  "),
+            (status_style, status_text),
+            ("", "  "),
+            (_EXEC_META_FG, f"· {meta}"),
+        ]
+        used = sum(len(t) for _, t in header_frags)
+        if used < width:
+            header_frags.append(("", " " * (width - used)))
+        lines.append(header_frags)
+
+        def _toggle(m=msg):
+            m["collapsed"] = not m.get("collapsed", True)
+        clickable[0] = _toggle
+
+        # ── Body ────────────────────────────────────────────────────────
+        body_limit_stdout = _EXEC_COLLAPSED_TAIL if collapsed else _EXEC_EXPANDED_STDOUT
+        body_limit_stderr = _EXEC_COLLAPSED_TAIL if collapsed else _EXEC_EXPANDED_STDERR
+
+        def _render_stream(
+            stream_lines: list[str],
+            limit: int,
+            style: str,
+            label: str | None,
+        ) -> None:
+            if not stream_lines:
+                return
+            tail = stream_lines[-limit:]
+            hidden = len(stream_lines) - len(tail)
+            if label and not collapsed:
+                lines.append([(_EXEC_META_FG + " italic", f"   — {label} —")])
+            if hidden > 0:
+                lines.append([(_EXEC_META_FG, f"   … {hidden} earlier line{'s' if hidden != 1 else ''}")])
+            indent = "   "
+            inner_width = max(10, width - len(indent))
+            for ln in tail:
+                lines.append([(style, indent + _truncate(ln, inner_width))])
+
+        if tool_error:
+            # Tool-level failure (permission denied, timeout before start, …).
+            lines.append([(_EXEC_FAIL_FG, f"   ✗ {_truncate(tool_error, max(10, width - 6))}")])
+        elif collapsed:
+            # Merge last-N lines across streams so the user sees the
+            # punchline without any section headers.
+            merged = [(l, _EXEC_OUT_FG) for l in out_lines] + [(l, _EXEC_ERR_FG) for l in err_lines]
+            tail = merged[-_EXEC_COLLAPSED_TAIL:]
+            hidden = len(merged) - len(tail)
+            if hidden > 0:
+                lines.append([(_EXEC_META_FG, f"   … {hidden} earlier line{'s' if hidden != 1 else ''}")])
+            indent = "   "
+            inner_width = max(10, width - len(indent))
+            for ln, style in tail:
+                lines.append([(style, indent + _truncate(ln, inner_width))])
+            if not tail and not killed:
+                lines.append([(_EXEC_META_FG + " italic", "   (no output)")])
+        else:
+            _render_stream(out_lines, body_limit_stdout, _EXEC_OUT_FG, "stdout" if err_lines else None)
+            _render_stream(err_lines, body_limit_stderr, _EXEC_ERR_FG, "stderr")
+            if not out_lines and not err_lines and not killed:
+                lines.append([(_EXEC_META_FG + " italic", "   (no output)")])
+
+        if killed:
+            lines.append([(_EXEC_FAIL_FG, f"   killed: {_truncate(str(killed), max(10, width - 13))}")])
+
+        lines.append([("", "")])
+        return RenderResult(lines=lines, clickable_offsets=clickable)
+
+    def render_group_header(self, count: int, collapsed: bool, width: int) -> RenderResult:
+        arrow = "▶" if collapsed else "▼"
+        label = f" {arrow} {self.group_label} ({count})"
+        style = f"{_EXEC_PROMPT_FG} bold"
+        pad = " " * max(0, width - len(label))
+        lines = [[(style, f"{label}{pad}")]]
+        return RenderResult(lines=lines)
+
+
+register(ExecCommandWidget())

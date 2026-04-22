@@ -56,6 +56,12 @@ def _on_post_tool(ctx: HookContext) -> None:
     tool_error = _extract_error(result)
     tool_preview = _extract_preview(ctx.tool_name, result) if result else ""
 
+    # Structured data for tools with rich TUI widgets (execute_command).
+    exec_data: dict | None = None
+    if ctx.tool_name == "execute_command" and result and not tool_error:
+        from infinidev.engine.engine_logging import extract_exec_command_data
+        exec_data = extract_exec_command_data(result)
+
     # Classic CLI logging (no-op when TUI is active)
     _cli_log_tool(ctx, tool_detail, tool_error, tool_preview)
 
@@ -66,6 +72,7 @@ def _on_post_tool(ctx: HookContext) -> None:
         "tool_detail": tool_detail,
         "tool_error": tool_error,
         "tool_output_preview": tool_preview,
+        "exec_data": exec_data,
         "call_num": ctx.metadata.get("call_num", 0),
         "total_calls": ctx.metadata.get("total_calls", 0),
         "iteration": ctx.metadata.get("iteration", 0),

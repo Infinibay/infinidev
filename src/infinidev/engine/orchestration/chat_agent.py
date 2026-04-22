@@ -105,6 +105,19 @@ def run_chat_agent(
     dispatch = build_tool_dispatch(tools)
     tool_schemas = [tool_to_openai_schema(t) for t in tools]
 
+    # ContextRank integration: log the chat turn's task_input and every
+    # read-only tool call the model makes. This lets the developer's
+    # later rank() pick up on files/symbols the chat agent already found
+    # relevant — warm-starting the next tier of the pipeline instead of
+    # discarding the chat's investigation work.
+    from infinidev.engine.context_rank.hooks import ContextRankHooks
+    cr_hooks = ContextRankHooks()
+    if session_id:
+        try:
+            cr_hooks.start(session_id, agent_id, user_input)
+        except Exception:
+            logger.debug("ContextRank start failed for chat agent", exc_info=True)
+
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": build_chat_agent_system_prompt()},
         {"role": "user", "content": _build_user_message(user_input, session_id)},
@@ -118,6 +131,8 @@ def run_chat_agent(
             user_input=user_input,
             max_iterations=max_iterations,
             hooks=hooks,
+            cr_hooks=cr_hooks,
+            project_id=project_id,
         )
     except Exception as exc:
         logger.exception("Chat agent loop failed")
@@ -132,6 +147,10 @@ def run_chat_agent(
                 pass
         return _fallback_respond(_detect_lang(user_input), exc=exc)
     finally:
+        try:
+            cr_hooks.finish()
+        except Exception:
+            logger.debug("ContextRank finish failed for chat agent", exc_info=True)
         clear_agent_context(agent_id)
 
 
@@ -148,14 +167,56 @@ def _run_llm_loop(
     user_input: str,
     max_iterations: int,
     hooks: Any | None = None,
+    cr_hooks: Any | None = None,
+    project_id: int | None = None,
 ) -> ChatAgentResult:
     import litellm
 
     base_kwargs = get_litellm_params_for_behavior()
     stream_mode = hooks is not None
     budget_nudged = False
+    cr_injected = False  # True once we've spliced ContextRank into `messages`
 
     for iteration in range(max_iterations):
+        # ── Lazy ContextRank injection ─────────────────────────────────
+        # Skip the first iteration entirely — trivial chats ("hola",
+        # "gracias") terminate there and never need a file list. Starting
+        # at iteration 1 means: the model used at least one read/search
+        # call, so it's investigating, and the chat's own tool calls have
+        # been fed back to the ranker via on_tool_call — so rank() sees
+        # those signals when scoring. Inject exactly once per turn; the
+        # fresh per-tool signals already flow through the logger and will
+        # affect the developer's later rank() if the chat escalates.
+        if not cr_injected and iteration >= 1 and cr_hooks is not None and cr_hooks._enabled:
+            try:
+                from infinidev.config.settings import settings as _cr_settings
+                if _cr_settings.CONTEXT_RANK_ENABLED:
+                    from infinidev.engine.context_rank.ranker import rank as _cr_rank
+                    from infinidev.engine.loop.context import _render_context_rank
+                    cr_result = _cr_rank(
+                        user_input,
+                        cr_hooks._session_id,
+                        cr_hooks._task_id,
+                        iteration,
+                        cached_embedding=cr_hooks._task_embedding,
+                        cached_simplified_embedding=cr_hooks._task_embedding_simplified,
+                        project_id=project_id,
+                    )
+                    rendered = _render_context_rank(cr_result)
+                    if rendered:
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "[System: relevance hints from prior work in "
+                                "this project — not a new user message]\n"
+                                + rendered
+                            ),
+                        })
+            except Exception:
+                logger.debug("ContextRank injection failed in chat agent", exc_info=True)
+            # Mark as attempted either way — don't retry every iteration.
+            cr_injected = True
+
         # Near the end of the budget, nudge the model to wrap up.
         # We don't want to mid-response ambush the LLM, so this fires
         # exactly once on the second-to-last iteration, giving it two
@@ -229,6 +290,16 @@ def _run_llm_loop(
             result = execute_tool_call(
                 dispatch, tc.function.name, tc.function.arguments,
             )
+            if cr_hooks is not None:
+                try:
+                    from infinidev.engine.engine_logging import extract_tool_error
+                    was_error = bool(extract_tool_error(result))
+                    cr_hooks.on_tool_call(
+                        tc.function.name, tc.function.arguments, iteration,
+                        was_error=was_error,
+                    )
+                except Exception:
+                    logger.debug("ContextRank tool call log failed", exc_info=True)
             trimmed = result if len(result) <= _MAX_RESULT_CHARS else (
                 result[:_MAX_RESULT_CHARS] + "\n...[truncated]"
             )
@@ -238,10 +309,21 @@ def _run_llm_loop(
                 "content": trimmed,
             })
 
-    # Max iterations reached without terminator. Return a graceful
-    # respond so the user sees SOMETHING — never a silent return.
-    logger.warning("Chat agent hit max_iterations=%d without terminator", max_iterations)
-    return _fallback_respond(_detect_lang(user_input), reason="max_iter")
+    # Max iterations reached without terminator. Instead of stranding
+    # the user with an apology, synthesize an escalation packet from
+    # the transcript so the planner/developer receives both the user's
+    # original request and whatever the chat agent managed to gather.
+    # The chat agent exhausted its own budget — that's a signal the
+    # request is non-trivial, which is exactly when escalating helps.
+    logger.info(
+        "Chat agent reached max_iterations=%d; auto-escalating to developer",
+        max_iterations,
+    )
+    return _build_max_iter_escalation(
+        messages=messages,
+        user_input=user_input,
+        iterations=max_iterations,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -276,6 +358,106 @@ def _build_escalate(tc: Any, user_input: str) -> ChatAgentResult:
         user_visible_preview=(args.get("user_visible_preview") or "").strip(),
         user_signal=(args.get("user_signal") or "").strip(),
         suggested_flow="develop",  # v1 restriction
+    )
+    return ChatAgentResult(kind="escalate", escalation=packet)
+
+
+def _build_max_iter_escalation(
+    *, messages: list[dict[str, Any]], user_input: str, iterations: int,
+) -> ChatAgentResult:
+    """Synthesize an EscalationPacket when the chat agent exhausts its
+    iteration budget without calling a terminator.
+
+    We cannot ask the LLM for a clean ``escalate`` — that's exactly
+    the budget that just ran out. Instead we walk the transcript
+    deterministically:
+
+    * ``understanding`` is a synthetic summary listing the tool names
+      the chat agent invoked. It is intentionally honest about being
+      a budget-forced escalation so the planner doesn't treat it as
+      a confident handoff.
+    * ``opened_files`` harvests any ``path`` / ``file_path`` / ``file``
+      argument across every tool call, which covers file reads and
+      code-intel lookups uniformly without a per-tool whitelist.
+    * ``user_signal`` is marked as auto so downstream logs can tell
+      this apart from a model-chosen escalation.
+    """
+    tool_names: list[str] = []
+    opened: list[str] = []
+    seen_files: set[str] = set()
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        for tc in msg.get("tool_calls") or []:
+            fn = (tc.get("function") or {})
+            name = fn.get("name")
+            if not name or name in ("respond", "escalate"):
+                continue
+            tool_names.append(name)
+            raw_args = fn.get("arguments") or "{}"
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except json.JSONDecodeError:
+                args = {}
+            if not isinstance(args, dict):
+                continue
+            for key in ("path", "file_path", "file"):
+                val = args.get(key)
+                if isinstance(val, str) and val and val not in seen_files:
+                    seen_files.add(val)
+                    opened.append(val)
+
+    lang = _detect_lang(user_input)
+    if tool_names:
+        counts: dict[str, int] = {}
+        for n in tool_names:
+            counts[n] = counts.get(n, 0) + 1
+        tools_summary = ", ".join(
+            f"{n}×{c}" if c > 1 else n for n, c in counts.items()
+        )
+    else:
+        tools_summary = "(none)"
+
+    if lang == "es":
+        understanding = (
+            f"[Auto-escalación: el chat agent agotó su presupuesto de "
+            f"{iterations} iteraciones sin concluir.] "
+            f"Pedido textual del usuario: {user_input.strip()!r}. "
+            f"Tools que alcancé a invocar: {tools_summary}. "
+            f"Archivos consultados: "
+            f"{', '.join(opened) if opened else '(ninguno)'}. "
+            f"No llegué a sintetizar una respuesta final; pasá al "
+            f"developer con este contexto para que continúe la "
+            f"investigación y/o implemente lo que el usuario pide."
+        )
+        preview = (
+            "Investigué bastante sin cerrar la respuesta — paso el "
+            "contexto al developer para continuar."
+        )
+    else:
+        understanding = (
+            f"[Auto-escalation: the chat agent exhausted its "
+            f"{iterations}-iteration budget without concluding.] "
+            f"Literal user request: {user_input.strip()!r}. "
+            f"Tools I managed to invoke: {tools_summary}. "
+            f"Files inspected: "
+            f"{', '.join(opened) if opened else '(none)'}. "
+            f"I did not synthesize a final answer; hand this context "
+            f"to the developer to continue the investigation and/or "
+            f"implement what the user is asking for."
+        )
+        preview = (
+            "I investigated extensively without wrapping up — handing "
+            "context to the developer to continue."
+        )
+
+    packet = EscalationPacket(
+        user_request=user_input.strip(),
+        understanding=understanding,
+        opened_files=opened,
+        user_visible_preview=preview,
+        user_signal="(auto-escalate: max_iter)",
+        suggested_flow="develop",
     )
     return ChatAgentResult(kind="escalate", escalation=packet)
 
@@ -361,17 +543,10 @@ def _tool_call_to_dict(tc: Any) -> dict[str, Any]:
 # is good enough here (greetings / action verbs / punctuation cover most
 # short chats); the LLM still handles the normal path.
 _FALLBACK_MESSAGES: dict[tuple[str, str], str] = {
-    # max_iter fires only when even the end-of-budget nudge didn't
-    # produce a terminator. Message stays neutral — it's our ceiling,
-    # not the user's prompt, that ran out. We don't blame them.
-    ("es", "max_iter"): (
-        "Investigué bastante y no terminé de cerrar la respuesta. "
-        "Si querés seguimos desde acá; contame qué querés que haga."
-    ),
-    ("en", "max_iter"): (
-        "I investigated quite a bit but didn't wrap up a final answer. "
-        "Happy to keep going from here — let me know what you want next."
-    ),
+    # Note: "max_iter" does NOT appear here. When the chat agent
+    # exhausts its budget without a terminator, the loop synthesizes
+    # an EscalationPacket (see _build_max_iter_escalation) and hands
+    # off to the planner/developer instead of replying to the user.
     ("es", "empty_respond"): "No supe cómo contestarte. ¿Podrías reformular?",
     ("en", "empty_respond"): "I don't know how to answer that. Could you rephrase?",
     ("es", "empty_escalate"): (
