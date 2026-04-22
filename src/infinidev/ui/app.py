@@ -545,8 +545,14 @@ class InfinidevApp:
 
     def _handle_submit(self, user_text: str) -> None:
         """Called when user presses Enter in chat input."""
+        import logging as _log
+        _sublogger = _log.getLogger("infinidev.tui.submit")
+        _sublogger.warning("[SUBMIT] enter %r engine_running=%s",
+                           user_text, getattr(self, "_engine_running", None))
         self._autocomplete.dismiss()
+        _sublogger.warning("[SUBMIT] autocomplete dismissed")
         self.add_message("You", user_text, "user")
+        _sublogger.warning("[SUBMIT] message added")
 
         # Permission response
         if self._permission_waiting and self._permission_event is not None:
@@ -581,7 +587,9 @@ class InfinidevApp:
         if user_text.startswith("!"):
             self._execute_shell_command(user_text[1:])
         elif user_text.startswith("/"):
+            _sublogger.warning("[SUBMIT] dispatching slash command")
             self.handle_command(user_text)
+            _sublogger.warning("[SUBMIT] slash command returned")
         else:
             if self._engine_running:
                 # Inject message into the running loop — will appear in next iteration

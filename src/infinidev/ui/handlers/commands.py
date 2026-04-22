@@ -16,12 +16,19 @@ if TYPE_CHECKING:
 
 def handle_command(app: InfinidevApp, cmd_text: str) -> None:
     """Dispatch a /command to the appropriate handler."""
+    import logging as _log
+    _logger = _log.getLogger("infinidev.tui.cmd")
+    _logger.warning("[CMD] dispatch %r engine_running=%s",
+                    cmd_text, getattr(app, "_engine_running", None))
+
     parts = cmd_text.split()
     cmd = parts[0].lower()
 
     handler = _COMMAND_TABLE.get(cmd)
     if handler:
+        _logger.warning("[CMD] calling handler for %s", cmd)
         handler(app, parts)
+        _logger.warning("[CMD] handler for %s returned", cmd)
     else:
         app.add_message("System", f"Unknown command: {cmd}", "system")
 
