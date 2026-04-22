@@ -335,7 +335,14 @@ class DialogManager:
     # ── Debug panel ────────────────────────────────────────────────
 
     def open_debug(self) -> None:
-        """Open the debug panel modal (lazy-inits on first call)."""
+        """Open the debug panel modal (lazy-inits on first call).
+
+        Showing the dialog must NEVER block the prompt_toolkit event loop.
+        The snapshot of engine + behavior-scorer state can contend with the
+        worker thread (the scorer's lock, the engine's mutated lists), so the
+        dialog opens immediately with whatever state is already cached and a
+        background thread refreshes it.
+        """
         if self._debug_state is None:
             self._init_debug_dialog()
 
@@ -344,58 +351,17 @@ class DialogManager:
         state.scroll = 0
         state.focus = "sections"
 
-        # Populate data from engine
-        engine = self._app.engine
-        if engine is None:
-            state.session_notes = []
-            state.task_notes = []
-            state.history = []
-            state.plan_text = ""
-            state.state_info = {}
-        else:
-            state.session_notes = list(engine.session_notes)
-            last = getattr(engine, "_last_state", None)
-            if last:
-                state.task_notes = list(last.notes)
-                state.history = list(last.history)
-                state.plan_text = last.plan.render() if last.plan.steps else ""
-                state.state_info = {
-                    "iteration": last.iteration_count,
-                    "tool_calls": last.total_tool_calls,
-                    "total_tokens": f"{last.total_tokens:,}",
-                    "last_prompt_tokens": f"{last.last_prompt_tokens:,}",
-                    "last_completion_tokens": f"{last.last_completion_tokens:,}",
-                    "notes_count": len(last.notes),
-                    "opened_files": len(last.opened_files),
-                    "cache_creation_tokens": f"{last.cache_creation_tokens:,}",
-                    "cache_read_tokens": f"{last.cache_read_tokens:,}",
-                    "cached_tokens": f"{last.cached_tokens:,}",
-                }
-            else:
-                state.task_notes = []
-                state.history = []
-                state.plan_text = ""
-                state.state_info = {}
-
-        # Behavior subsystem snapshot — independent of engine state
-        try:
-            from infinidev.engine.behavior.scorer import BehaviorScorer
-            scorer = BehaviorScorer.instance()
-            state.behavior_scores = sorted(
-                [(agent_id, score) for (_pid, agent_id), score in scorer.all_scores().items()],
-                key=lambda x: x[0],
-            )
-            state.behavior_events = scorer.history()
-        except Exception:
-            state.behavior_scores = []
-            state.behavior_events = []
-
+        # Open the dialog right away — UI-thread work from here on must be O(1).
         self._app.active_dialog = "debug_panel"
         try:
             self._app.app.layout.focus(self._debug_sections_window)
         except Exception:
             pass
         self._app.invalidate()
+
+        # Refresh state off-thread so a slow snapshot can never freeze the TUI.
+        from infinidev.ui.workers import run_in_background
+        run_in_background(self._app, _refresh_debug_state, self._app, state)
 
     def _init_debug_dialog(self) -> None:
         """Create the debug panel dialog and register as a Float."""
@@ -501,3 +467,85 @@ class DialogManager:
         )
         if app._float_container:
             app._float_container.floats.append(dialog_float)
+
+
+# ── Debug panel: off-thread snapshot ───────────────────────────────────
+
+def _safe_list_copy(src) -> list:
+    """Copy a list that another thread may be mutating.
+
+    list(x) on a list being appended to from another thread is usually safe
+    under the GIL, but raises RuntimeError in edge cases. Retry a few times
+    then give up with an empty list rather than propagating.
+    """
+    for _ in range(3):
+        try:
+            return list(src)
+        except RuntimeError:
+            continue
+    return []
+
+
+def _refresh_debug_state(app, state) -> None:
+    """Collect engine + scorer state into ``state``. Runs off the UI thread.
+
+    Must never raise — the UI is already showing the dialog.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    engine = app.engine
+    if engine is None:
+        state.session_notes = []
+        state.task_notes = []
+        state.history = []
+        state.plan_text = ""
+        state.state_info = {}
+    else:
+        try:
+            state.session_notes = _safe_list_copy(engine.session_notes)
+            last = getattr(engine, "_last_state", None)
+            if last:
+                state.task_notes = _safe_list_copy(last.notes)
+                state.history = _safe_list_copy(last.history)
+                try:
+                    state.plan_text = last.plan.render() if last.plan.steps else ""
+                except Exception:
+                    state.plan_text = ""
+                state.state_info = {
+                    "iteration": last.iteration_count,
+                    "tool_calls": last.total_tool_calls,
+                    "total_tokens": f"{last.total_tokens:,}",
+                    "last_prompt_tokens": f"{last.last_prompt_tokens:,}",
+                    "last_completion_tokens": f"{last.last_completion_tokens:,}",
+                    "notes_count": len(state.task_notes),
+                    "opened_files": len(last.opened_files),
+                    "cache_creation_tokens": f"{last.cache_creation_tokens:,}",
+                    "cache_read_tokens": f"{last.cache_read_tokens:,}",
+                    "cached_tokens": f"{last.cached_tokens:,}",
+                }
+            else:
+                state.task_notes = []
+                state.history = []
+                state.plan_text = ""
+                state.state_info = {}
+        except Exception as exc:
+            logger.warning("Debug snapshot: engine read failed: %s", exc)
+
+    try:
+        from infinidev.engine.behavior.scorer import BehaviorScorer
+        scorer = BehaviorScorer.instance()
+        state.behavior_scores = sorted(
+            [(agent_id, score) for (_pid, agent_id), score in scorer.all_scores().items()],
+            key=lambda x: x[0],
+        )
+        state.behavior_events = scorer.history()
+    except Exception as exc:
+        logger.warning("Debug snapshot: behavior scorer read failed: %s", exc)
+        state.behavior_scores = []
+        state.behavior_events = []
+
+    try:
+        app.invalidate()
+    except Exception:
+        pass
