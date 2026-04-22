@@ -56,11 +56,14 @@ MALFORMED_TOOL_PATTERNS = (
     "unexpected end of json",
     "failed to parse json",
     "failed to parse input",
+    "failed to parse tool call arguments",  # OpenAI-compatible servers (e.g. llama-server)
     "unexpected token",
     "unterminated string",
+    "missing closing quote",                # nlohmann/json-based servers
+    "syntax error while parsing",           # nlohmann/json-based servers
     "after top-level value",
     "after object key:value pair",
-    "must be in json format",           # DashScope/Qwen
+    "must be in json format",               # DashScope/Qwen
 )
 
 

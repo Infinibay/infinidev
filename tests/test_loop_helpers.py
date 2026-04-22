@@ -70,6 +70,21 @@ class TestMalformedToolCallDetection:
         """Random error not detected as malformed."""
         assert _is_malformed_tool_call(Exception("connection refused")) is False
 
+    def test_openai_compat_parse_error_detected(self):
+        """OpenAI-compatible 500s that wrap a JSON parse error must be malformed,
+        not transient — otherwise ``is_transient`` matches ``internal server error``
+        and wastes all retries on a deterministic failure that then crashes the loop.
+        """
+        msg = (
+            "litellm.InternalServerError: InternalServerError: Custom_openaiException "
+            "- Failed to parse tool call arguments as JSON: "
+            "[json.exception.parse_error.101] parse error at line 1, column 7993: "
+            "syntax error while parsing value - invalid string: missing closing quote"
+        )
+        from infinidev.engine.llm_client import is_transient
+        assert _is_malformed_tool_call(Exception(msg)) is True
+        assert is_transient(Exception(msg)) is False
+
 
 # ── _parse_text_tool_calls ───────────────────────────────────────────────────
 
