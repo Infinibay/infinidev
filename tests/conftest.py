@@ -127,6 +127,85 @@ def auto_approve_permissions():
     settings.FILE_OPERATIONS_PERMISSION = orig_file
 
 
+@pytest.fixture(autouse=True)
+def _reset_db_conn_cache():
+    """Drop the process-wide pooled SQLite connection between tests.
+
+    The connection cache in ``infinidev.code_intel._db`` is keyed on
+    ``settings.DB_PATH`` and *should* re-open when the path changes,
+    but several tests mutate ``DB_PATH`` only inside a fixture and
+    leave a stale connection bound to a temp file that gets unlinked
+    on teardown. The next test then talks to a closed-over file
+    descriptor or, worse, to a recycled inode that holds rows from a
+    previous run. Forcing a clean slate here avoids that whole class
+    of leak.
+    """
+    yield
+    try:
+        from infinidev.code_intel._db import _conn_cache
+        cached = getattr(_conn_cache, "conn", None)
+        if cached is not None:
+            try:
+                cached.close()
+            except Exception:
+                pass
+        _conn_cache.conn = None
+        _conn_cache.path = None
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_tool_context_thread_locals():
+    """Clear the tool-context thread-local + ContextVar storage between tests.
+
+    ``clear_agent_context`` removes the process-global dict entry but
+    leaves the ``threading.local`` (``_tls``) and the ``ContextVar``
+    backing store populated. Tests that patch
+    ``get_current_project_id`` / ``get_current_agent_id`` to return
+    None therefore see leftover values from earlier tests that ran
+    ``set_context``, breaking assertions like "raises when no project_id".
+    """
+    yield
+    try:
+        from infinidev.tools.base.context import (
+            _tls, _project_id_var, _agent_id_var, _agent_run_id_var,
+            _session_id_var, _workspace_path_var, _agent_contexts,
+            _agent_contexts_lock,
+        )
+        for attr in ("project_id", "agent_id", "agent_run_id",
+                     "session_id", "workspace_path"):
+            if hasattr(_tls, attr):
+                delattr(_tls, attr)
+        _project_id_var.set(None)
+        _agent_id_var.set(None)
+        _agent_run_id_var.set(None)
+        _session_id_var.set(None)
+        _workspace_path_var.set(None)
+        with _agent_contexts_lock:
+            _agent_contexts.clear()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_capabilities_singleton():
+    """Reset the model-capabilities singleton between tests.
+
+    ``probe_model`` mutates a module-level ``_capabilities`` object;
+    tests that probe with mocked litellm leave that singleton in a
+    state that causes downstream tests asserting against a fresh
+    capabilities object to see stale flags (e.g. ``probed=True``,
+    ``supports_function_calling=False``).
+    """
+    yield
+    try:
+        import infinidev.config.model_capabilities as _mc
+        _mc._reset_capabilities()
+    except Exception:
+        pass
+
+
 def pytest_ignore_collect(collection_path, config):
     """Ignore interactive tests by default unless INFINIDEV_RUN_INTERACTIVE_TESTS=1."""
     import os

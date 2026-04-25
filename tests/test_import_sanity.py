@@ -19,6 +19,31 @@ from __future__ import annotations
 import importlib
 import sys
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_infinidev_modules():
+    """Snapshot ``sys.modules`` for ``infinidev.*`` and restore on teardown.
+
+    ``_fresh_import`` blows away every cached ``infinidev`` module so the
+    next ``importlib.import_module`` runs the import graph from scratch
+    (the only way to detect a top-level circular-import regression).
+    Without restoration, subsequent tests in the suite end up with mixed
+    module identities — they hold references to the *old* ``settings``
+    singleton or DB connection cache while freshly imported submodules
+    bind to a *new* one. The most visible symptom is fixtures setting
+    ``settings.DB_PATH = temp_db_path`` while production code reads from
+    a different ``settings`` object pointing at the user's real
+    ``~/.infinidev/infinidev.db`` (UNIQUE-constraint failures across
+    tests that should be isolated).
+    """
+    saved = {n: m for n, m in sys.modules.items() if n.startswith("infinidev")}
+    yield
+    for name in [n for n in sys.modules if n.startswith("infinidev")]:
+        del sys.modules[name]
+    sys.modules.update(saved)
+
 
 def _fresh_import(modname: str):
     """Drop every cached module under ``infinidev`` and re-import *modname*.

@@ -162,12 +162,13 @@ class TestDefensiveFallbacks:
             })]),
         ])
         plan = run_planner(_sample_escalation())
-        # Fallback plan has a neutral overview (no debug-reason prose that
-        # would repeat every iteration as <plan-overview>). The user's
-        # original request lives in the step's detail instead.
-        assert "Carry out the user's request" in plan.overview
-        assert len(plan.steps) == 1
-        assert "arreglá el bug" in plan.steps[0].detail
+        # Fallback hands off to the developer with empty steps so the
+        # LoopEngine bootstrap branch tells the model to call add_step.
+        # The user request and chat-agent understanding live in the
+        # overview as context for the developer's first prompt.
+        assert plan.steps == []
+        assert "arreglá el bug" in plan.overview
+        assert "add_step" in plan.overview
 
     def test_zero_steps_falls_back(self, patch_litellm):
         patch_litellm([
@@ -177,13 +178,14 @@ class TestDefensiveFallbacks:
             })]),
         ])
         plan = run_planner(_sample_escalation())
-        assert len(plan.steps) >= 1  # fallback plan has at least one step
+        assert plan.steps == []
+        assert "arreglá el bug" in plan.overview
 
     def test_text_reply_without_tool_calls_falls_back(self, patch_litellm):
         patch_litellm([_resp(content="Sure, I'll plan that.", tool_calls=None)])
         plan = run_planner(_sample_escalation())
-        # Fallback produced a single-step plan.
-        assert len(plan.steps) == 1
+        assert plan.steps == []
+        assert "arreglá el bug" in plan.overview
 
     def test_llm_error_falls_back(self, patch_litellm, monkeypatch):
         patch_litellm([])
@@ -193,7 +195,8 @@ class TestDefensiveFallbacks:
         monkeypatch.setattr(_lit, "completion", _boom)
         plan = run_planner(_sample_escalation())
         assert isinstance(plan, Plan)
-        assert len(plan.steps) == 1
+        assert plan.steps == []
+        assert "arreglá el bug" in plan.overview
 
 
 class TestToolboxIntegrity:

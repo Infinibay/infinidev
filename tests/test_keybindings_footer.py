@@ -81,9 +81,9 @@ class TestFooterHintsStructure:
         assert len(always_hints) > 0, "Need at least one 'always' hint"
 
     def test_sidebar_hint_present(self):
-        """Ctrl+. (Sidebar) must be in FOOTER_HINTS."""
+        """Alt+. (Sidebar) must be in FOOTER_HINTS."""
         keys = {k for k, _d, _ctx in FOOTER_HINTS}
-        assert "Ctrl+." in keys
+        assert "Alt+." in keys
 
 
 # ── Context-based filtering ───────────────────────────────────────────────
@@ -94,7 +94,7 @@ class TestContextFiltering:
 
     # Keys that should always be visible
     ALWAYS_KEYS = {
-        "Ctrl+C", "Ctrl+O", "Ctrl+E", "Ctrl+.", "Ctrl+G", "F2", "Esc",
+        "Ctrl+C", "Ctrl+O", "Ctrl+E", "Alt+.", "Ctrl+G", "F2", "Esc",
     }
 
     # Keys only visible in file context

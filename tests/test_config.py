@@ -165,13 +165,16 @@ class TestModelCapabilities:
 
     @patch("litellm.completion")
     def test_probe_exception_uses_defaults(self, mock_completion):
-        """Top-level exception falls back to defaults."""
+        """Per-probe exceptions set conservative negatives, not raw defaults."""
         from infinidev.config.model_capabilities import probe_model
         mock_completion.side_effect = Exception("Connection refused")
         caps = probe_model({"model": "test"})
         assert caps.probed is True
-        # Defaults to True (optimistic)
-        assert caps.supports_function_calling is True
+        # When every probe call raises, the safer assumption is "no FC"
+        # — emitting tools to a model that can't handle them produces
+        # worse failures than running in manual mode.
+        assert caps.supports_function_calling is False
+        assert caps.supports_tool_choice_required is False
 
     def test_reset_capabilities(self):
         """_reset_capabilities restores defaults, then auto-detection re-probes."""

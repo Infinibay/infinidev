@@ -80,9 +80,11 @@ class _FakeEngine:
         task_prompt: tuple[str, str],
         verbose: bool = True,
         initial_plan: Plan | None = None,
+        initial_attachments: list[Any] | None = None,
     ) -> str:
         self.captured_initial_plan = initial_plan
         self.captured_task_prompt = task_prompt
+        self.captured_initial_attachments = initial_attachments
         return self.result_text
 
     def has_file_changes(self) -> bool:
