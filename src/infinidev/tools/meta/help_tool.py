@@ -14,7 +14,7 @@ from infinidev.tools.meta.help_input import HelpInput
 # ---------------------------------------------------------------------------
 
 _CATEGORY_INDEX = {
-    "file": ["read_file", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "list_directory", "glob", "code_search"],
+    "file": ["read_file", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "list_directory", "glob", "code_search", "view_image"],
     "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure", "analyze_code"],
     "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "rename_symbol", "move_symbol"],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
@@ -173,6 +173,23 @@ WEB TOOLS
   web_fetch(url, format?)          — Fetch content from a URL (markdown or text)""",
 
     # ── Individual tools ──────────────────────────────────────────────────
+
+    "view_image": """\
+view_image(file_path)
+
+Load an image file so it becomes visible to the model in the next turn.
+Only available when the configured model supports vision (e.g. GPT-4o, Claude
+3, Gemini 1.5, Ollama llava / qwen-vl). If the model does not support vision,
+this tool is not exposed.
+
+PARAMS:
+  file_path (str, required) — Path to a .png/.jpg/.jpeg/.gif/.webp/.bmp file.
+                              Absolute or workspace-relative.
+
+RETURNS: A short text line confirming the image was loaded. The image itself
+         is injected as a multimodal content block in the subsequent message,
+         so a follow-up model turn can describe or reason about it.
+""",
 
     "read_file": """\
 read_file(file_path, offset?, limit?)

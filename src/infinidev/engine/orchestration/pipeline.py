@@ -176,6 +176,7 @@ def _run_execution_phase(
     session_id: str,
     use_phase_engine: bool,
     hooks: OrchestrationHooks,
+    initial_attachments: list[Any] | None = None,
 ) -> tuple[str, Any]:
     """Execution: dispatch to LoopEngine (or PhaseEngine for ``--think``).
 
@@ -218,6 +219,7 @@ def _run_execution_phase(
                 task_prompt=task_prompt,
                 verbose=True,
                 initial_plan=plan,
+                initial_attachments=initial_attachments,
             )
             used_engine = engine
         if not result or not result.strip():
@@ -308,6 +310,7 @@ def run_task(
     hooks: OrchestrationHooks,
     use_phase_engine: bool = False,
     force_gather: bool = False,
+    attachments: list[Any] | None = None,
 ) -> str:
     """Run a complete task through the chat-agent-first pipeline.
 
@@ -372,6 +375,7 @@ def run_task(
         project_id=agent_project_id,
         workspace_path=agent_workspace,
         hooks=hooks,
+        attachments=attachments,
     )
 
     if chat_result.kind == "respond":
@@ -447,6 +451,7 @@ def run_task(
         session_id=session_id,
         use_phase_engine=use_phase_engine,
         hooks=hooks,
+        initial_attachments=list(escalation.attachments) if escalation.attachments else None,
     )
 
     # ── Review ──────────────────────────────────────────────────────────

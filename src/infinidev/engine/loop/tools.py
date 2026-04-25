@@ -126,11 +126,17 @@ def execute_tool_call(
     name: str,
     arguments: str | dict[str, Any],
     hook_metadata: dict[str, Any] | None = None,
+    attachments_out: list | None = None,
 ) -> str:
     """Execute a tool call and return the result as a string.
 
     Calls ``tool._run()`` directly (bypassing CrewAI's ``BaseTool.run()``)
     with kwargs filtering to strip hallucinated parameters.
+
+    If ``attachments_out`` is provided and the tool returned a
+    ``ToolResult`` with image attachments, those ``ImageAttachment`` objects
+    are appended to it. The returned string is always plain text, safe to
+    embed in a ``role=tool`` message.
     """
     tool, name = _resolve_tool(dispatch, name)
 
@@ -379,7 +385,18 @@ def execute_tool_call(
     # Execute
     try:
         result = tool._run(**args)
-        result_str = str(result) if result is not None else ""
+        # Unwrap ToolResult (text + optional image attachments). The text
+        # goes into the role=tool message; attachments are surfaced via
+        # attachments_out so the engine can push them as a follow-up
+        # multimodal user message.
+        from infinidev.tools.base.base_tool import ToolResult, normalize_tool_result
+        if isinstance(result, ToolResult):
+            text, atts = normalize_tool_result(result)
+            result_str = text
+            if attachments_out is not None and atts:
+                attachments_out.extend(atts)
+        else:
+            result_str = str(result) if result is not None else ""
     except Exception as exc:
         logger.warning("Tool %s raised %s: %s", name, type(exc).__name__, exc)
         suggestion = _suggest_alternative(name, str(exc))

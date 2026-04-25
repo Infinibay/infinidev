@@ -3,6 +3,7 @@ from infinidev.tools.file import (
     ListDirectoryTool, CodeSearchTool, GlobTool,
     CreateFileTool, ReplaceLinesTool,
     AddContentAfterLineTool, AddContentBeforeLineTool,
+    ViewImageTool,
 )
 from infinidev.tools.meta import HelpTool
 from infinidev.tools.meta.plan_tools import AddStepTool, ModifyStepTool, RemoveStepTool
@@ -34,7 +35,11 @@ from infinidev.tools.code_intel import (
     IterSymbolsTool, ProjectStatsTool,
 )
 
-FILE_TOOLS = [ReadFileTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ListDirectoryTool, CodeSearchTool, GlobTool]
+FILE_TOOLS = [ReadFileTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ListDirectoryTool, CodeSearchTool, GlobTool, ViewImageTool]
+# Tools that only make sense when the model can see images.
+# Filtered out in get_tools_for_role when supports_vision is False so they
+# never reach the schema the LLM sees.
+VISION_ONLY_TOOLS = {ViewImageTool}
 META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool, DeclareTestCommandTool, TailTestOutputTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
@@ -80,7 +85,12 @@ SMALL_MODEL_TOOLS = [
 ]
 
 
-def get_tools_for_role(role: str, *, small_model: bool = False) -> list:
+def get_tools_for_role(
+    role: str,
+    *,
+    small_model: bool = False,
+    supports_vision: bool | None = None,
+) -> list:
     """Simplified tool selection for the CLI.
 
     role="chat_agent" returns only tools whose class declares
@@ -88,12 +98,37 @@ def get_tools_for_role(role: str, *, small_model: bool = False) -> list:
     pipeline; the whitelist at the schema level is the security boundary
     — prompt rules alone cannot stop a model from calling a write tool
     if the schema exposes it.
+
+    ``supports_vision`` gates VISION_ONLY_TOOLS. When None, it's looked up
+    from the model capability cache at call time so existing callers don't
+    have to be updated.
     """
+    if supports_vision is None:
+        # Use the lightweight vision check directly — it only consults
+        # LiteLLM's static metadata table. Going through
+        # get_model_capabilities() would trigger a full capability probe
+        # (Ollama /api/show or a live litellm.completion for
+        # openai_compatible/vllm), which is too heavy a side-effect for a
+        # tool-list lookup and breaks tests that patch litellm.completion.
+        try:
+            from infinidev.config.model_capabilities import _detect_vision_support
+            supports_vision = _detect_vision_support()
+        except Exception:
+            supports_vision = False
+
+    def _vision_filter(classes: list) -> list:
+        if supports_vision:
+            return classes
+        return [c for c in classes if c not in VISION_ONLY_TOOLS]
+
     # CHAT_AGENT_TOOLS (respond, escalate) are NOT in the developer
     # toolset — they're exclusive to the chat agent tier. The developer
     # uses step_complete for termination; the chat agent uses respond
     # and escalate.
-    all_tool_classes = FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS + DOCS_TOOLS + CODE_INTEL_TOOLS + META_TOOLS
+    all_tool_classes = _vision_filter(
+        FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS
+        + CHAT_TOOLS + DOCS_TOOLS + CODE_INTEL_TOOLS + META_TOOLS
+    )
     if role == "chat_agent":
         # Instantiate each tool and keep only the read-only ones. Pydantic
         # moves class-level field defaults into model_fields so getattr on
@@ -109,5 +144,5 @@ def get_tools_for_role(role: str, *, small_model: bool = False) -> list:
         read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
         return read_only + [cls() for cls in PLANNER_TOOLS]
     if small_model:
-        return [cls() for cls in SMALL_MODEL_TOOLS]
+        return [cls() for cls in _vision_filter(SMALL_MODEL_TOOLS)]
     return [cls() for cls in all_tool_classes]

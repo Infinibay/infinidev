@@ -75,6 +75,11 @@ class InfinidevApp:
 
     def _init_chat_subsystem(self) -> None:
         self.chat_messages: list[dict[str, Any]] = []
+        # Attachment tray: images queued for the next submit via /attach or
+        # drag-drop auto-detect. Drained when the user submits the message
+        # that actually carries them.
+        from infinidev.ui.attachments import AttachmentTray
+        self.attachment_tray = AttachmentTray()
         self._chat_history_control = ChatHistoryControl(self.chat_messages)
         self._autocomplete = AutocompleteState(on_select=self._apply_autocomplete)
         self._chat_buffer, self._chat_input_control, self._chat_input_kb = \
@@ -584,6 +589,13 @@ class InfinidevApp:
             self._plan_review_event.set()
             return
 
+        # /attach <path> queues an image for the next submit. Handled here
+        # (before the generic slash dispatcher) because it never initiates
+        # a turn by itself — it just accumulates state.
+        if user_text.startswith("/attach ") or user_text.strip() == "/attach":
+            self._handle_attach_command(user_text)
+            return
+
         if user_text.startswith("!"):
             self._execute_shell_command(user_text[1:])
         elif user_text.startswith("/"):
@@ -591,13 +603,24 @@ class InfinidevApp:
             self.handle_command(user_text)
             _sublogger.warning("[SUBMIT] slash command returned")
         else:
+            # Auto-detect image paths the user may have dragged into the
+            # terminal (they land as plain text in the input buffer).
+            cleaned_text, attachments = self._resolve_attachments(user_text)
             if self._engine_running:
                 # Inject message into the running loop — will appear in next iteration
                 if self.engine is not None:
-                    self.engine.inject_message(user_text)
+                    self.engine.inject_message(cleaned_text)
+                    if attachments:
+                        self.add_message(
+                            "System",
+                            "Note: images attached mid-task aren't forwarded "
+                            "to the running agent — send them at the start "
+                            "of a new turn.",
+                            "system",
+                        )
                     self.add_message("System", "Message injected — the agent will see it on its next LLM call.", "system")
                 else:
-                    self._pending_inputs.append(user_text)
+                    self._pending_inputs.append(cleaned_text)
                     self.add_message("System", "Queued — waiting for current task to finish.", "system")
             else:
                 self._engine_running = True
@@ -605,7 +628,101 @@ class InfinidevApp:
                 self.invalidate()
                 self._ensure_engine()
                 from infinidev.ui.workers import run_in_background, run_engine_task
-                run_in_background(self, run_engine_task, self, user_text, exclusive=True)
+                run_in_background(
+                    self, run_engine_task, self, cleaned_text,
+                    attachments, exclusive=True,
+                )
+
+    def _handle_attach_command(self, user_text: str) -> None:
+        """Process the ``/attach <source>`` inline command.
+
+        ``<source>`` is one or more of:
+          - local file path (absolute or workspace-relative)
+          - ``data:image/<mime>;base64,<blob>`` URL (pasted)
+          - ``http(s)://.../foo.png`` URL (image fetched server-side)
+        """
+        from infinidev.ui.attachments import (
+            _tokenize, extract_urls, load_attachments_from_sources,
+        )
+
+        arg = user_text[len("/attach"):].strip()
+        if not arg:
+            self.add_message(
+                "System",
+                "Usage: /attach <source>. Source may be a file path "
+                "(.png/.jpg/.jpeg/.gif/.webp/.bmp), a data URL "
+                "(data:image/...;base64,...), or a public https URL "
+                "ending in an image extension.",
+                "system",
+            )
+            return
+
+        # Pull any data URLs / http URLs out first — they contain characters
+        # (``/``, ``+``, ``=``, ``?``) that would confuse shlex tokenisation.
+        remainder, data_urls, http_urls = extract_urls(arg)
+        sources: list[str] = list(data_urls) + list(http_urls)
+        if remainder:
+            sources.extend(_tokenize(remainder))
+
+        loaded, errors = load_attachments_from_sources(sources)
+        for att in loaded:
+            self.attachment_tray.add(att)
+        if loaded:
+            names = ", ".join(a.short_repr() for a in loaded)
+            self.add_message("System", f"Attached: {names}", "system")
+        for err in errors:
+            self.add_message("System", f"Attach failed — {err}", "system")
+        if len(self.attachment_tray):
+            self._actions_text = self.attachment_tray.summary()
+            self.invalidate()
+
+    def _resolve_attachments(self, user_text: str) -> tuple[str, list]:
+        """Combine the tray with any paths/URLs auto-detected in ``user_text``.
+
+        Returns ``(cleaned_text, attachments)`` and drains the tray. The
+        auto-detection handles three forms in this order so SSH users and
+        local users share the same ergonomics:
+
+          1. Pasted ``data:image/...;base64,...`` URLs (SSH / any clipboard).
+          2. Pasted ``https://...foo.png`` URLs (public / signed CDN links).
+          3. Local file paths dropped into the terminal.
+        """
+        from infinidev.ui.attachments import (
+            extract_image_paths,
+            extract_urls,
+            load_attachments_from_paths,
+            load_attachments_from_sources,
+        )
+        # URL detection first — data URLs contain characters that would
+        # break path tokenisation and must be peeled off up front.
+        text_sans_urls, data_urls, http_urls = extract_urls(user_text)
+        url_attachments, url_errors = load_attachments_from_sources(
+            list(data_urls) + list(http_urls)
+        )
+        for err in url_errors:
+            self.add_message("System", f"Image skipped — {err}", "system")
+
+        cleaned, detected_paths = extract_image_paths(text_sans_urls)
+        extra, errors = load_attachments_from_paths(detected_paths)
+        for err in errors:
+            self.add_message("System", f"Image skipped — {err}", "system")
+        tray_items = self.attachment_tray.take_all()
+        all_attachments = tray_items + url_attachments + extra
+        if all_attachments:
+            # Mention vision gating when the configured model can't see them.
+            try:
+                from infinidev.config.model_capabilities import _detect_vision_support
+                if not _detect_vision_support():
+                    self.add_message(
+                        "System",
+                        f"Note: {len(all_attachments)} image(s) attached, "
+                        "but the current model does not support vision — "
+                        "the model will only see their paths.",
+                        "system",
+                    )
+            except Exception:
+                pass
+        return cleaned, all_attachments
 
     # ── Command handler ──────────────────────────────────────────────
 

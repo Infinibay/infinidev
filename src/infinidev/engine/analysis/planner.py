@@ -65,9 +65,29 @@ def run_planner(
     dispatch = build_tool_dispatch(tools)
     tool_schemas = [tool_to_openai_schema(t) for t in tools]
 
+    # If the user attached images in chat and the escalation forwarded
+    # them, make them visible to the planner too (it may need to decide
+    # scope based on what the image actually shows). Text-only fallback
+    # for non-vision models so the paths are at least mentioned.
+    _user_text = _render_handoff(escalation)
+    _user_content: Any = _user_text
+    if escalation.attachments:
+        try:
+            from infinidev.config.model_capabilities import _detect_vision_support
+            _supports_vision = _detect_vision_support()
+        except Exception:
+            _supports_vision = False
+        from infinidev.engine.multimodal import (
+            build_user_content, mention_paths_as_text,
+        )
+        if _supports_vision:
+            _user_content = build_user_content(_user_text, escalation.attachments)
+        else:
+            _user_content = mention_paths_as_text(_user_text, escalation.attachments)
+
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": ANALYST_PLANNER_SYSTEM_PROMPT},
-        {"role": "user", "content": _render_handoff(escalation)},
+        {"role": "user", "content": _user_content},
     ]
 
     try:

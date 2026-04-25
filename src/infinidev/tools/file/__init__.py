@@ -7,10 +7,12 @@ from .glob_tool import GlobTool
 from .create_file import CreateFileTool
 from .replace_lines import ReplaceLinesTool
 from .insert_lines import AddContentAfterLineTool, AddContentBeforeLineTool
+from .view_image import ViewImageTool
 
 __all__ = [
     "ReadFileTool", "WriteFileTool", "MultiEditFileTool",
     "ListDirectoryTool", "CodeSearchTool", "GlobTool",
     "CreateFileTool", "ReplaceLinesTool",
     "AddContentAfterLineTool", "AddContentBeforeLineTool",
+    "ViewImageTool",
 ]

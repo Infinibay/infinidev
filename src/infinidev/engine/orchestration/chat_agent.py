@@ -63,6 +63,7 @@ def run_chat_agent(
     workspace_path: Optional[str] = None,
     max_iterations: int = _DEFAULT_MAX_ITERATIONS,
     hooks: Any | None = None,
+    attachments: list[Any] | None = None,
 ) -> ChatAgentResult:
     """Run one turn of the chat agent and return its result.
 
@@ -93,6 +94,16 @@ def run_chat_agent(
     # developer each own independent slots that do not stomp each other.
     # clear_agent_context in `finally` ensures no leak across turns.
     agent_id = f"chat-agent-{uuid.uuid4().hex[:8]}"
+    # Vision gating: when the model can't see images, demote any
+    # attachments to text paths so the model at least knows they were
+    # referenced, and drop tools/content-blocks that require vision.
+    # Use the lightweight LiteLLM static check here — going through
+    # get_model_capabilities() would trigger a full provider probe.
+    try:
+        from infinidev.config.model_capabilities import _detect_vision_support
+        _supports_vision = _detect_vision_support()
+    except Exception:
+        _supports_vision = False
     tools = get_tools_for_role("chat_agent")
     bind_tools_to_agent(tools, agent_id)
     set_context(
@@ -120,11 +131,17 @@ def run_chat_agent(
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": build_chat_agent_system_prompt()},
-        {"role": "user", "content": _build_user_message(user_input, session_id)},
+        {
+            "role": "user",
+            "content": _build_user_message(
+                user_input, session_id,
+                attachments=attachments, supports_vision=_supports_vision,
+            ),
+        },
     ]
 
     try:
-        return _run_llm_loop(
+        result = _run_llm_loop(
             messages=messages,
             tool_schemas=tool_schemas,
             dispatch=dispatch,
@@ -134,6 +151,25 @@ def run_chat_agent(
             cr_hooks=cr_hooks,
             project_id=project_id,
         )
+        # Carry the attachments through the escalation packet so the
+        # planner and developer can also see the images the user
+        # attached in chat.
+        if (
+            attachments
+            and result.kind == "escalate"
+            and result.escalation is not None
+        ):
+            # EscalationPacket is a frozen dataclass — use dataclasses.replace
+            # to inject the attachments without mutating the existing instance.
+            from dataclasses import replace as _dc_replace
+            result = ChatAgentResult(
+                kind="escalate",
+                reply=result.reply,
+                escalation=_dc_replace(result.escalation, attachments=list(attachments)),
+                streamed=result.streamed,
+                error_traceback=result.error_traceback,
+            )
+        return result
     except Exception as exc:
         logger.exception("Chat agent loop failed")
         # If the exception interrupted a stream-in-progress, finalize
@@ -614,7 +650,13 @@ def _fallback_respond(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _build_user_message(user_input: str, session_id: Optional[str]) -> str:
+def _build_user_message(
+    user_input: str,
+    session_id: Optional[str],
+    *,
+    attachments: list[Any] | None = None,
+    supports_vision: bool = False,
+) -> str | list[dict[str, Any]]:
     """Combine the session-history snapshot and the current user input
     into a SINGLE ``role="user"`` message.
 
@@ -622,6 +664,11 @@ def _build_user_message(user_input: str, session_id: Optional[str]) -> str:
     strictly alternates), so we merge: the snapshot is rendered first,
     then the actual request. The snapshot is optional — missing /
     empty session id / DB failure all degrade gracefully.
+
+    When the caller provides ``attachments`` and the model ``supports_vision``,
+    the return value becomes a list of OpenAI-style content blocks
+    (text + one ``image_url`` block per attachment). Otherwise attachments
+    are inlined as a text footnote so the model at least sees the paths.
     """
     trimmed = user_input.strip()
     turns: list[tuple[str, str]] = []
@@ -637,20 +684,31 @@ def _build_user_message(user_input: str, session_id: Optional[str]) -> str:
                 "without snapshot): %s", exc,
             )
             turns = []
-    if not turns:
-        return trimmed
-    lines = [
-        "Recent conversation (for context; use tools to reground facts):",
-    ]
-    for role, content in turns:
-        tag = "USER" if role == "user" else "AGENT"
-        lines.append(f'<turn role="{tag}">')
-        lines.append(content)
-        lines.append("</turn>")
-    lines.append("")
-    lines.append("Current user message:")
-    lines.append(trimmed)
-    return "\n".join(lines)
+    if turns:
+        lines = [
+            "Recent conversation (for context; use tools to reground facts):",
+        ]
+        for role, content in turns:
+            tag = "USER" if role == "user" else "AGENT"
+            lines.append(f'<turn role="{tag}">')
+            lines.append(content)
+            lines.append("</turn>")
+        lines.append("")
+        lines.append("Current user message:")
+        lines.append(trimmed)
+        text = "\n".join(lines)
+    else:
+        text = trimmed
+
+    if attachments:
+        from infinidev.engine.multimodal import (
+            build_user_content,
+            mention_paths_as_text,
+        )
+        if supports_vision:
+            return build_user_content(text, attachments)
+        return mention_paths_as_text(text, attachments)
+    return text
 
 
 # ─────────────────────────────────────────────────────────────────────────

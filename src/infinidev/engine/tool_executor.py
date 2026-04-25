@@ -453,17 +453,30 @@ def execute_tool_calls_parallel(
     batch: list,
     tool_dispatch: dict,
     hook_metadata: dict[str, Any] | None = None,
+    attachments_by_tc: dict | None = None,
 ) -> list[tuple]:
     """Execute a batch of read-only tool calls in parallel.
 
     Returns list of (tc, result) tuples in original order.
+
+    If ``attachments_by_tc`` is provided, any image attachments returned by a
+    tool (as ``ToolResult.attachments``) are stored keyed by ``tc.id`` so the
+    caller can push them back as a multimodal follow-up message.
     """
+    def _attach_list(tc) -> list | None:
+        if attachments_by_tc is None:
+            return None
+        lst: list = []
+        attachments_by_tc[tc.id] = lst
+        return lst
+
     if len(batch) <= 1:
         results = []
         for tc in batch:
             result = execute_tool_call(
                 tool_dispatch, tc.function.name, tc.function.arguments,
                 hook_metadata=hook_metadata,
+                attachments_out=_attach_list(tc),
             )
             results.append((tc, result))
         return results
@@ -474,6 +487,7 @@ def execute_tool_calls_parallel(
         result = execute_tool_call(
             tool_dispatch, tc.function.name, tc.function.arguments,
             hook_metadata=hook_metadata,
+            attachments_out=_attach_list(tc),
         )
         return (tc, result)
 

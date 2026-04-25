@@ -354,6 +354,7 @@ class LoopEngine(AgentEngine):
         nudge_message_template: str | None = None,
         summarizer_enabled: bool | None = None,
         initial_plan: Any | None = None,
+        initial_attachments: list[Any] | None = None,
     ) -> str:
         """Plan-execute-summarize loop.
 
@@ -384,6 +385,11 @@ class LoopEngine(AgentEngine):
         )
         if initial_plan is not None:
             _seed_state_from_plan(ctx.state, initial_plan)
+        # Stash attachments on the engine instance so the per-iteration
+        # prompt builder can re-emit them every turn (the prompt is
+        # rebuilt from scratch each iteration). Only kept for the
+        # duration of this execute() call.
+        self._initial_attachments = list(initial_attachments or [])
         llm_caller, tool_proc, guard, step_mgr = self._init_execution(ctx, task_prompt)
         consecutive_all_done = 0
 
@@ -781,9 +787,24 @@ class LoopEngine(AgentEngine):
                 skip_plan=ctx.skip_plan,
                 small_model=ctx.is_small,
             )
+        user_content: Any = user_prompt
+        _atts = getattr(self, "_initial_attachments", None) or []
+        if _atts:
+            try:
+                from infinidev.config.model_capabilities import _detect_vision_support
+                _supports_vision = _detect_vision_support()
+            except Exception:
+                _supports_vision = False
+            from infinidev.engine.multimodal import (
+                build_user_content, mention_paths_as_text,
+            )
+            if _supports_vision:
+                user_content = build_user_content(user_prompt, _atts)
+            else:
+                user_content = mention_paths_as_text(user_prompt, _atts)
         return [
             {"role": "system", "content": ctx.system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_content},
         ]
 
     def _run_inner_loop(
@@ -1169,6 +1190,12 @@ class LoopEngine(AgentEngine):
         }
         batches = _batch_tool_calls(classified.regular)
 
+        # Collected per-batch: maps tc.id -> list[ImageAttachment] for tools
+        # (e.g. view_image) that returned a multimodal ToolResult. These get
+        # pushed as a follow-up role=user multimodal message in
+        # _process_tool_results when the model supports vision.
+        attachments_by_tc: dict[str, list] = {}
+
         for batch in batches:
             is_parallel = len(batch) > 1 and batch[0].function.name not in _WRITE_TOOLS
 
@@ -1177,7 +1204,11 @@ class LoopEngine(AgentEngine):
                 _tool_hook_meta["total_calls"] = ctx.state.total_tool_calls + 1
                 _tool_hook_meta["project_id"] = ctx.project_id
                 _tool_hook_meta["agent_id"] = ctx.agent_id
-                batch_results = _execute_tool_calls_parallel(batch, ctx.tool_dispatch, hook_metadata=_tool_hook_meta)
+                batch_results = _execute_tool_calls_parallel(
+                    batch, ctx.tool_dispatch,
+                    hook_metadata=_tool_hook_meta,
+                    attachments_by_tc=attachments_by_tc,
+                )
             else:
                 batch_results = []
                 for _bi, tc in enumerate(batch):
@@ -1186,7 +1217,13 @@ class LoopEngine(AgentEngine):
                     _tool_hook_meta["total_calls"] = ctx.state.total_tool_calls + _bi + 1
                     _tool_hook_meta["project_id"] = ctx.project_id
                     _tool_hook_meta["agent_id"] = ctx.agent_id
-                    result = execute_tool_call(ctx.tool_dispatch, tc.function.name, tc.function.arguments, hook_metadata=_tool_hook_meta)
+                    att_list: list = []
+                    attachments_by_tc[tc.id] = att_list
+                    result = execute_tool_call(
+                        ctx.tool_dispatch, tc.function.name, tc.function.arguments,
+                        hook_metadata=_tool_hook_meta,
+                        attachments_out=att_list,
+                    )
                     _maybe_emit_file_change(tc.function.name, tc.function.arguments, result, _pre, ctx.file_tracker, ctx.project_id, ctx.agent_id)
                     batch_results.append((tc, result))
 
@@ -1202,6 +1239,7 @@ class LoopEngine(AgentEngine):
             action_tool_calls = self._process_tool_results(
                 ctx, batch_results, messages, action_tool_calls,
                 iteration, is_parallel, guard, tracker, tool_results_text,
+                attachments_by_tc=attachments_by_tc,
             )
             ctx.state.tick_opened_files(1)
 
@@ -1225,6 +1263,8 @@ class LoopEngine(AgentEngine):
         action_tool_calls: int, iteration: int, is_parallel: bool,
         guard: LoopGuard, tracker: BehaviorTracker,
         tool_results_text: list[str],
+        *,
+        attachments_by_tc: dict | None = None,
     ) -> int:
         """Process results from one batch. Returns updated action_tool_calls."""
         _pending_nudge: str | None = None
@@ -1261,6 +1301,45 @@ class LoopEngine(AgentEngine):
                 tool_results_text.append(f"[Tool: {tc.function.name}] Result:\n{result_with_counter}")
             else:
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_with_counter})
+
+            # Push any image attachments produced by this tool as a
+            # follow-up role=user multimodal message. Many providers
+            # reject content-blocks inside role=tool messages, so a
+            # separate user message is the most portable path. Only
+            # emitted when the model supports vision and we're not in
+            # manual (text-only) tool-calling mode.
+            if (
+                not ctx.manual_tc
+                and attachments_by_tc is not None
+            ):
+                _atts = attachments_by_tc.get(tc.id) or []
+                if _atts:
+                    try:
+                        from infinidev.config.model_capabilities import (
+                            _detect_vision_support,
+                        )
+                        _supports_vision = _detect_vision_support()
+                    except Exception:
+                        _supports_vision = False
+                    if _supports_vision:
+                        _blocks = [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"[Images attached by tool "
+                                    f"`{tc.function.name}` — {len(_atts)} "
+                                    f"image(s)]"
+                                ),
+                            }
+                        ]
+                        for _att in _atts:
+                            _blocks.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": _att.data_url},
+                                }
+                            )
+                        messages.append({"role": "user", "content": _blocks})
 
             action_tool_calls += 1
             ctx.state.total_tool_calls += 1

@@ -6,9 +6,13 @@ import logging
 import os
 import sqlite3
 from abc import ABC
-from typing import Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from crewai.tools import BaseTool
+
+if TYPE_CHECKING:
+    from infinidev.engine.multimodal import ImageAttachment
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.context import (
@@ -23,6 +27,35 @@ from infinidev.tools.base.context import (
 from infinidev.tools.base.db import DBConnection, execute_with_retry, get_db_path
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolResult:
+    """Structured tool return value carrying text plus optional image attachments.
+
+    Tools can return either a plain ``str`` (existing behavior, unchanged) or
+    a ``ToolResult``. The loop engine unwraps the text into the ``role=tool``
+    message and, when the model supports vision, appends any attachments as a
+    follow-up ``role=user`` multimodal message.
+    """
+
+    text: str
+    attachments: list["ImageAttachment"] = field(default_factory=list)
+
+
+def normalize_tool_result(value: Any) -> tuple[str, list["ImageAttachment"]]:
+    """Turn any ``_run`` return value into ``(text, attachments)``.
+
+    - ``str`` → returned unchanged with an empty attachment list.
+    - ``ToolResult`` → unwrapped.
+    - anything else → coerced to ``str()`` (matches the prior behavior where
+      tools occasionally returned ints / dicts).
+    """
+    if isinstance(value, ToolResult):
+        return value.text, list(value.attachments)
+    if isinstance(value, str):
+        return value, []
+    return str(value), []
 
 
 class InfinibayBaseTool(BaseTool, ABC):

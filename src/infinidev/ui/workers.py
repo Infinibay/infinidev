@@ -52,7 +52,11 @@ def run_in_background(app: InfinidevApp, fn: Callable, *args, exclusive: bool = 
     return future
 
 
-def run_engine_task(app: InfinidevApp, user_input: str) -> None:
+def run_engine_task(
+    app: InfinidevApp,
+    user_input: str,
+    attachments: list | None = None,
+) -> None:
     """Run the main engine pipeline in a background thread.
 
     Thin adapter over :func:`engine.orchestration.run_task`. Persists
@@ -100,6 +104,7 @@ def run_engine_task(app: InfinidevApp, user_input: str) -> None:
                 reviewer=app.reviewer,
                 hooks=hooks,
                 force_gather=force_gather,
+                attachments=attachments,
             )
         finally:
             app.agent.deactivate()

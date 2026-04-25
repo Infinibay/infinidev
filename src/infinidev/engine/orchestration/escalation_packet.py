@@ -44,3 +44,9 @@ class EscalationPacket:
     opened_files: list[str] = field(default_factory=list)
     user_visible_preview: str = ""
     user_signal: str = ""
+    # Images the user attached in the chat turn that triggered the
+    # escalation. Forwarded so the planner and the developer loop can
+    # inject them into their own initial multimodal user message.
+    # Typed loosely (``list``) to avoid an import cycle with
+    # ``engine.multimodal``.
+    attachments: list = field(default_factory=list)
