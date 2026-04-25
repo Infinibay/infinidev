@@ -144,6 +144,7 @@ class LoopEngine(AgentEngine):
         self._last_total_tool_calls: int = 0
         self._nudge_threshold_override: int | None = None
         self._summarizer_override: bool | None = None
+        self._supports_vision_cached: bool | None = None
         self._cancel_event: __import__('threading').Event = __import__('threading').Event()
         self.session_notes: list[str] = []  # Persist across tasks within a session
         # Thread-safe queue for user messages injected mid-task
@@ -325,12 +326,13 @@ class LoopEngine(AgentEngine):
     def get_file_contents(self) -> dict[str, str]:
         """Return path → current content for each changed file."""
         import os as _os
+        from infinidev.engine.tool_executor import MAX_TRACK_FILE_SIZE
         if self._last_file_tracker is None:
             return {}
         result = {}
         for path in self._last_file_tracker.get_all_paths():
             with best_effort("failed to read tracked file %s", path):
-                if _os.path.isfile(path) and _os.path.getsize(path) <= _MAX_TRACK_FILE_SIZE:
+                if _os.path.isfile(path) and _os.path.getsize(path) <= MAX_TRACK_FILE_SIZE:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         result[path] = f.read()
         return result
@@ -385,11 +387,13 @@ class LoopEngine(AgentEngine):
         )
         if initial_plan is not None:
             _seed_state_from_plan(ctx.state, initial_plan)
-        # Stash attachments on the engine instance so the per-iteration
-        # prompt builder can re-emit them every turn (the prompt is
-        # rebuilt from scratch each iteration). Only kept for the
-        # duration of this execute() call.
+        # Stash attachments on the engine instance for the first
+        # iteration only — subsequent turns rebuild the prompt from
+        # compact summaries and don't need the raw payload.
         self._initial_attachments = list(initial_attachments or [])
+        # Reset cached vision-capability probe: the configured model can
+        # change between execute() calls.
+        self._supports_vision_cached = None
         llm_caller, tool_proc, guard, step_mgr = self._init_execution(ctx, task_prompt)
         consecutive_all_done = 0
 
@@ -598,7 +602,7 @@ class LoopEngine(AgentEngine):
             result = step_result.final_answer or step_result.summary
             result = step_mgr.finish(ctx, "done", iteration, result)
             return self._apply_guardrail(
-                result, ctx.guardrail, ctx.guardrail_max_retries,
+                ctx, result, ctx.guardrail, ctx.guardrail_max_retries,
                 ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
                 ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
                 max_per_action=ctx.max_per_action,
@@ -610,7 +614,7 @@ class LoopEngine(AgentEngine):
         if consecutive_all_done >= 2 and ctx.state.plan.steps and not ctx.state.plan.has_pending:
             result = step_mgr.finish(ctx, "done", iteration, step_result.summary)
             return self._apply_guardrail(
-                result, ctx.guardrail, ctx.guardrail_max_retries,
+                ctx, result, ctx.guardrail, ctx.guardrail_max_retries,
                 ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
                 ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
                 max_per_action=ctx.max_per_action,
@@ -788,17 +792,22 @@ class LoopEngine(AgentEngine):
                 small_model=ctx.is_small,
             )
         user_content: Any = user_prompt
+        # Attachments only travel with the first iteration's user turn:
+        # subsequent turns rebuild the prompt from compact summaries, and
+        # re-sending the base64 payload bloats context and (for billed
+        # vision providers) multiplies cost per iteration.
         _atts = getattr(self, "_initial_attachments", None) or []
-        if _atts:
-            try:
-                from infinidev.config.model_capabilities import _detect_vision_support
-                _supports_vision = _detect_vision_support()
-            except Exception:
-                _supports_vision = False
+        if _atts and iteration == ctx.start_iteration:
+            if self._supports_vision_cached is None:
+                try:
+                    from infinidev.config.model_capabilities import _detect_vision_support
+                    self._supports_vision_cached = _detect_vision_support()
+                except Exception:
+                    self._supports_vision_cached = False
             from infinidev.engine.multimodal import (
                 build_user_content, mention_paths_as_text,
             )
-            if _supports_vision:
+            if self._supports_vision_cached:
                 user_content = build_user_content(user_prompt, _atts)
             else:
                 user_content = mention_paths_as_text(user_prompt, _atts)
@@ -1441,6 +1450,7 @@ class LoopEngine(AgentEngine):
 
     def _apply_guardrail(
         self,
+        ctx: ExecutionContext,
         result: str,
         guardrail: Any | None,
         max_retries: int,
@@ -1521,7 +1531,7 @@ class LoopEngine(AgentEngine):
                                     })
                                     break
                                 _pre_content_g = _capture_pre_content(
-                                    tc.function.name, tc.function.arguments, file_tracker,
+                                    tc.function.name, tc.function.arguments, ctx.file_tracker,
                                 )
                                 tc_result = execute_tool_call(
                                     tool_dispatch,
@@ -1530,8 +1540,8 @@ class LoopEngine(AgentEngine):
                                 )
                                 _maybe_emit_file_change(
                                     tc.function.name, tc.function.arguments, tc_result,
-                                    _pre_content_g, file_tracker,
-                                    agent.project_id, agent.agent_id,
+                                    _pre_content_g, ctx.file_tracker,
+                                    ctx.project_id, ctx.agent_id,
                                 )
                                 messages.append({
                                     "role": "tool",

@@ -317,7 +317,12 @@ def call_llm(
                 if "tool_choice" in kwargs:
                     logger.info("Dropping tool_choice — endpoint does not support it (err: %s)", str(exc)[:120])
                     del kwargs["tool_choice"]
-                    caps.supports_tool_choice_required = False
+                    # Only memoize the negative if the failure is not
+                    # transient — a one-off network blip should not
+                    # permanently flip the global capability flag for the
+                    # rest of the process.
+                    if not is_transient(exc):
+                        caps.supports_tool_choice_required = False
                     continue  # retry without tool_choice
             if not is_transient(exc) or attempt == LLM_RETRIES:
                 raise
