@@ -206,6 +206,29 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             else:
                 app._thinking_text = reasoning
 
+    elif event_type == "loop_assistant_message":
+        # Pair-programming critic spoke up. Sender is one of three
+        # stable strings ("Assistant · REJECT" / "RECOMMEND" / "INFO")
+        # so theme.NAME_COLORS can paint each severity a different
+        # color. Model name and source (tools vs step_complete) move
+        # into a thin context line above the body — keeps the
+        # sender stable for color matching while preserving metadata.
+        action = data.get("action", "information")
+        message = (data.get("message") or "").strip()
+        if message:
+            model = data.get("model") or "assistant"
+            source = data.get("source") or "tools"
+            tag_map = {
+                "reject": "REJECT",
+                "recommendation": "RECOMMEND",
+                "information": "INFO",
+            }
+            tag = tag_map.get(action, "INFO")
+            sender = f"Assistant · {tag}"
+            src_suffix = "" if source == "tools" else f" · re: {source}"
+            body = f"({model}{src_suffix})\n{message}"
+            app.add_message(sender, body, "system")
+
     elif event_type == "loop_behavior_update":
         # Intentionally silent — verdicts are inspected via /debug → Behavior.
         # No chat message, no log line. The BehaviorScorer already stored

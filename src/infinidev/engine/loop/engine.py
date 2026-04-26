@@ -25,6 +25,7 @@ from infinidev.engine.loop.context import (
     build_system_prompt,
     build_tools_prompt_section,
 )
+from infinidev.engine.loop.critic import AssistantCritic, CriticVerdict
 from infinidev.engine.loop.models import (
     ActionRecord,
     LoopState,
@@ -155,6 +156,99 @@ class LoopEngine(AgentEngine):
         self._cr_hooks = ContextRankHooks()
         self._cr_cached_result: Any | None = None
         self._cr_last_pivot_key: tuple[int, str] | None = None
+        # Pair-programming critic. Lazily built on first use so a
+        # disabled feature pays zero cost. Reset between runs is
+        # implicit — the descriptions captured at build time are
+        # stable across iterations.
+        self._critic: AssistantCritic | None = None
+        self._critic_init_failed: bool = False
+        # Critic observations made on `step_complete` calls survive
+        # the inner-loop break by sitting here until the NEXT step's
+        # preamble drains them onto its fresh messages list.
+        self._pending_critic_messages: list[dict[str, Any]] = []
+
+    def _get_or_build_critic(self, ctx: "ExecutionContext") -> AssistantCritic | None:
+        """Lazy-init the assistant critic on first use of the run.
+
+        Returns ``None`` when the feature is disabled OR a previous
+        init attempt already failed (we don't retry per-step — a bad
+        config should fail loud once and then be silently absent).
+        """
+        if not settings.ASSISTANT_LLM_ENABLED:
+            return None
+        if self._critic is not None:
+            return self._critic
+        if self._critic_init_failed:
+            return None
+        try:
+            descriptions: dict[str, str] = {}
+            for name, tool in (ctx.tool_dispatch or {}).items():
+                desc = getattr(tool, "description", None) or ""
+                descriptions[name] = desc
+            self._critic = AssistantCritic(descriptions)
+            return self._critic
+        except Exception as exc:
+            logger.warning(
+                "assistant critic init failed (%s); disabling for this run", exc,
+            )
+            self._critic_init_failed = True
+            return None
+
+    def _inject_critic_message(
+        self,
+        ctx: "ExecutionContext",
+        messages: list[dict[str, Any]],
+        verdict: CriticVerdict,
+        *,
+        source: str,
+    ) -> None:
+        """Anchor the critic's observation next to the tool that triggered it.
+
+        Models weight nearby tokens more heavily, so we append the
+        verdict to the LAST ``role: "tool"`` message's content rather
+        than tacking on a separate user-role message at the end. That
+        keeps the critique inside the same attentional block as the
+        principal's own action output. If no tool message is present
+        (defensive — shouldn't happen on the regular-tools path), we
+        fall back to a user-role append.
+
+        ``source`` is "tools" for normal tool-call review and
+        "step_complete" for end-of-step review; it lets the UI
+        annotate the message origin if it cares.
+        """
+        if verdict.is_silent:
+            return
+        critic = self._critic
+        model_tag = critic.model_short_name if critic else "assistant"
+        note = f"\n\n--- critic note ---\n[ASSISTANT ({model_tag}) - {verdict.action}]: {verdict.message}"
+
+        last_tool_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "tool":
+                last_tool_idx = i
+                break
+
+        if last_tool_idx >= 0:
+            existing = messages[last_tool_idx].get("content") or ""
+            if not isinstance(existing, str):
+                existing = str(existing)
+            messages[last_tool_idx]["content"] = existing + note
+        else:
+            messages.append({"role": "user", "content": note.lstrip("\n")})
+        try:
+            _emit_loop_event(
+                "loop_assistant_message",
+                ctx.project_id,
+                ctx.agent_id,
+                {
+                    "action": verdict.action,
+                    "message": verdict.message,
+                    "model": model_tag,
+                    "source": source,
+                },
+            )
+        except Exception:
+            pass
 
     def inject_message(self, message: str) -> None:
         """Inject a user message into the running loop (thread-safe).
@@ -503,6 +597,13 @@ class LoopEngine(AgentEngine):
         """Build messages, log step start, dispatch PRE_STEP hook."""
         ctx.state.iteration_count = iteration + 1
         messages = self._build_iteration_messages(ctx, iteration)
+        # Drain any critic followups carried over from the previous
+        # step (e.g. step_complete review). These were captured AFTER
+        # the previous step finished and need a fresh messages list
+        # to attach to.
+        if self._pending_critic_messages:
+            messages.extend(self._pending_critic_messages)
+            self._pending_critic_messages = []
         with best_effort("_trace_iter_prompt failed"):
             _trace_iter_prompt(iteration + 1, messages[0].get("content", ""), messages[1].get("content", ""))
 
@@ -923,9 +1024,44 @@ class LoopEngine(AgentEngine):
                     guard.reset_read_counter()
 
                 if classified.regular:
-                    action_tool_calls = self._execute_regular_tools(
-                        ctx, classified, messages, result, action_tool_calls, iteration, guard, tracker,
-                    )
+                    critic = self._get_or_build_critic(ctx)
+                    if critic is not None:
+                        # Run the critic in parallel with tool execution.
+                        # The verdict is purely informative — never blocks
+                        # or alters the tool result. ThreadPoolExecutor
+                        # keeps both the principal-side I/O and the
+                        # critic LLM call (on a different GPU/endpoint)
+                        # happening at the same wall clock, so the
+                        # critic adds ~0 latency in the steady state.
+                        import concurrent.futures as _futures
+                        # Snapshot messages BEFORE _execute_regular_tools
+                        # mutates them — the critic should see exactly
+                        # what the principal saw, not the post-execution
+                        # state.
+                        crit_msgs_snapshot = list(messages)
+                        crit_calls_snapshot = list(classified.regular)
+                        with _futures.ThreadPoolExecutor(max_workers=2) as _ex:
+                            _tools_fut = _ex.submit(
+                                self._execute_regular_tools,
+                                ctx, classified, messages, result, action_tool_calls, iteration, guard, tracker,
+                            )
+                            _critic_fut = _ex.submit(
+                                critic.review, crit_msgs_snapshot, crit_calls_snapshot,
+                            )
+                            action_tool_calls = _tools_fut.result()
+                            try:
+                                verdict = _critic_fut.result()
+                            except Exception as _crit_exc:
+                                logger.warning("assistant critic raised: %s", _crit_exc)
+                                verdict = None
+                        if verdict is not None and not verdict.is_silent:
+                            self._inject_critic_message(
+                                ctx, messages, verdict, source="tools",
+                            )
+                    else:
+                        action_tool_calls = self._execute_regular_tools(
+                            ctx, classified, messages, result, action_tool_calls, iteration, guard, tracker,
+                        )
                     if self._cancel_event.is_set():
                         break
                     # Expire old thinking content to save context window
@@ -1024,6 +1160,40 @@ class LoopEngine(AgentEngine):
                         ctx, messages, classified.step_complete.id,
                     ):
                         continue  # Re-enter the loop, don't break.
+
+                    # Pair-programming critic on step_complete. Synchronous
+                    # because there's no tool execution to parallelise — the
+                    # principal is about to break out of the inner loop. The
+                    # verdict is queued for the NEXT step's preamble (the
+                    # current messages list dies with the break).
+                    if settings.ASSISTANT_LLM_INCLUDE_STEP_COMPLETE:
+                        critic = self._get_or_build_critic(ctx)
+                        if critic is not None:
+                            try:
+                                verdict = critic.review(messages, [classified.step_complete])
+                            except Exception as _crit_exc:
+                                logger.warning("assistant critic (step_complete) raised: %s", _crit_exc)
+                                verdict = None
+                            if verdict is not None and not verdict.is_silent:
+                                model_tag = critic.model_short_name
+                                prefix = f"[ASSISTANT ({model_tag}) - {verdict.action}] (re: step_complete): "
+                                self._pending_critic_messages.append({
+                                    "role": "user",
+                                    "content": prefix + verdict.message,
+                                })
+                                try:
+                                    _emit_loop_event(
+                                        "loop_assistant_message",
+                                        ctx.project_id, ctx.agent_id,
+                                        {
+                                            "action": verdict.action,
+                                            "message": verdict.message,
+                                            "model": model_tag,
+                                            "source": "step_complete",
+                                        },
+                                    )
+                                except Exception:
+                                    pass
 
                     step_result = _parse_step_complete_args(classified.step_complete.function.arguments)
                     break

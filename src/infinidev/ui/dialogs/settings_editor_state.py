@@ -36,6 +36,16 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
         ("LLM_TIMEOUT", "LLM request timeout in seconds", "int"),
     ],
+    "Assistant LLM": [
+        ("ASSISTANT_LLM_ENABLED", "Enable pair-programming critic (runs in parallel)", "bool"),
+        ("ASSISTANT_LLM_PROVIDER", "Assistant provider (empty = reuse main)",
+         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
+        ("ASSISTANT_LLM_MODEL", "Assistant model", "select_dynamic:assistant_models"),
+        ("ASSISTANT_LLM_BASE_URL", "Assistant API base URL (auto-filled)", "str"),
+        ("ASSISTANT_LLM_API_KEY", "Assistant API key (auto-filled)", "str"),
+        ("ASSISTANT_LLM_TIMEOUT", "Assistant request timeout (seconds)", "int"),
+        ("ASSISTANT_LLM_INCLUDE_STEP_COMPLETE", "Critique step_complete calls", "bool"),
+    ],
     "Embedding": [
         ("EMBEDDING_PROVIDER", "Embedding provider", "select:ollama,openai,huggingface"),
         ("EMBEDDING_MODEL", "Embedding model name", "str"),
@@ -162,6 +172,7 @@ class SettingsEditorState:
         self._on_edit_start = on_edit_start
         self._ollama_models: list[str] | None = None  # cached model list (main LLM)
         self._behavior_models: list[str] | None = None  # cached model list (behavior judge)
+        self._assistant_models: list[str] | None = None  # cached model list (assistant critic)
         self._pending_changes: dict[str, str] = {}  # unsaved changes for cross-field deps
 
         # Dropdown picker state
@@ -230,6 +241,8 @@ class SettingsEditorState:
             return self._fetch_provider_models()
         if stype == "select_dynamic:behavior_models":
             return self._fetch_behavior_models()
+        if stype == "select_dynamic:assistant_models":
+            return self._fetch_assistant_models()
         if stype.startswith("select:"):
             return stype[7:].split(",")
         return []
@@ -268,6 +281,50 @@ class SettingsEditorState:
         except Exception:
             self._ollama_models = []
         return self._ollama_models
+
+    def _is_assistant_free_text_model(self) -> bool:
+        """Return True if the *assistant* provider uses free-text model input."""
+        from infinidev.config.settings import settings
+        from infinidev.config.providers import get_provider
+        provider_id = (
+            self._pending_changes.get("ASSISTANT_LLM_PROVIDER")
+            or settings.ASSISTANT_LLM_PROVIDER
+            or settings.LLM_PROVIDER
+        )
+        provider = get_provider(provider_id)
+        return provider.model_list_format == "free_text"
+
+    def _fetch_assistant_models(self) -> list[str]:
+        """Fetch available models for the ASSISTANT critic provider (cached).
+
+        Each ASSISTANT_LLM_* field falls back to the matching main
+        LLM_* setting when empty, so a partially-configured assistant
+        endpoint still gets a usable list.
+        """
+        if self._assistant_models is not None:
+            return self._assistant_models
+        try:
+            from infinidev.config.settings import settings
+            from infinidev.config.providers import fetch_models
+            provider_id = (
+                self._pending_changes.get("ASSISTANT_LLM_PROVIDER")
+                or settings.ASSISTANT_LLM_PROVIDER
+                or settings.LLM_PROVIDER
+            )
+            api_key = (
+                self._pending_changes.get("ASSISTANT_LLM_API_KEY")
+                or settings.ASSISTANT_LLM_API_KEY
+                or settings.LLM_API_KEY
+            )
+            base_url = (
+                self._pending_changes.get("ASSISTANT_LLM_BASE_URL")
+                or settings.ASSISTANT_LLM_BASE_URL
+                or settings.LLM_BASE_URL
+            )
+            self._assistant_models = fetch_models(provider_id, api_key, base_url)
+        except Exception:
+            self._assistant_models = []
+        return self._assistant_models
 
     def _fetch_behavior_models(self) -> list[str]:
         """Fetch available models for the BEHAVIOR judge provider (cached).
@@ -332,12 +389,20 @@ class SettingsEditorState:
                 if self._on_edit_start:
                     self._on_edit_start()
                 return
+            if key == "ASSISTANT_LLM_MODEL" and self._is_assistant_free_text_model():
+                self.editing = True
+                self.edit_buffer.set_document(
+                    Document(str(value)), bypass_readonly=True
+                )
+                if self._on_edit_start:
+                    self._on_edit_start()
+                return
 
             # Open dropdown picker
             options = self._get_select_options(stype)
             if not options:
                 # No models found (server down?) — fall back to text input
-                if key in ("LLM_MODEL", "BEHAVIOR_LLM_MODEL"):
+                if key in ("LLM_MODEL", "BEHAVIOR_LLM_MODEL", "ASSISTANT_LLM_MODEL"):
                     self.editing = True
                     self.edit_buffer.set_document(
                         Document(str(value)), bypass_readonly=True
@@ -468,6 +533,16 @@ class SettingsEditorState:
                     self._pending_changes[key] = value
                     self._behavior_models = None
 
+                # Assistant critic: same parallel logic as behavior judge
+                if key == "ASSISTANT_LLM_PROVIDER":
+                    self._on_assistant_provider_change(value)
+                if key in ("ASSISTANT_LLM_API_KEY", "ASSISTANT_LLM_BASE_URL"):
+                    self._pending_changes[key] = value
+                    self._assistant_models = None
+                # Main creds also affect the assistant fallback list
+                if key in ("LLM_API_KEY", "LLM_BASE_URL"):
+                    self._assistant_models = None
+
         except Exception:
             pass
         if self._on_save:
@@ -500,6 +575,48 @@ class SettingsEditorState:
 
         # Clear cached model list so it re-fetches for new provider
         self._ollama_models = None
+
+    def _on_assistant_provider_change(self, provider_id: str) -> None:
+        """Update related ASSISTANT_LLM_* settings when the critic provider changes.
+
+        Mirrors :meth:`_on_provider_change` but scoped to the
+        assistant critic. Empty ``provider_id`` clears all
+        ASSISTANT_LLM_* overrides so the fallback in
+        ``get_litellm_params_for_assistant`` reuses the main LLM.
+        """
+        from infinidev.config.settings import settings, reload_all
+        from infinidev.config.providers import get_provider
+
+        if not provider_id:
+            updates = {
+                "ASSISTANT_LLM_PROVIDER": "",
+                "ASSISTANT_LLM_MODEL": "",
+                "ASSISTANT_LLM_BASE_URL": "",
+                "ASSISTANT_LLM_API_KEY": "",
+            }
+            settings.save_user_settings(updates)
+            reload_all()
+            self._pending_changes.update(updates)
+            self._assistant_models = None
+            return
+
+        provider = get_provider(provider_id)
+
+        updates: dict = {}
+        if provider.default_base_url:
+            updates["ASSISTANT_LLM_BASE_URL"] = provider.default_base_url
+        updates["ASSISTANT_LLM_MODEL"] = ""
+        if not provider.api_key_required:
+            updates["ASSISTANT_LLM_API_KEY"] = "ollama"
+        else:
+            updates["ASSISTANT_LLM_API_KEY"] = ""
+
+        if updates:
+            settings.save_user_settings(updates)
+            reload_all()
+            self._pending_changes.update(updates)
+
+        self._assistant_models = None
 
     def _on_behavior_provider_change(self, provider_id: str) -> None:
         """Update related BEHAVIOR_LLM_* settings when the judge provider changes.

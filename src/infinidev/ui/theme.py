@@ -50,6 +50,11 @@ NAME_COLORS = {
     "Verifier": "#5ab87a",
     "Shell": "#a0a0a0",
     "System": "#888888",
+    # Pair-programming critic verdicts — one color per severity so
+    # the user can scan and spot rejects/recs at a glance.
+    "Assistant · REJECT": "#ff5577",
+    "Assistant · RECOMMEND": "#ffaa44",
+    "Assistant · INFO": "#5ab8d4",
 }
 
 # ── Diff colors ─────────────────────────────────────────────────────────

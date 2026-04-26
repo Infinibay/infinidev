@@ -231,6 +231,23 @@ class Settings(BaseSettings):
     BEHAVIOR_CHECKER_PROMPT_POLLUTION: bool = False
     BEHAVIOR_CHECKER_PLAN_QUALITY: bool = True
 
+    # Assistant LLM — pair-programming critic running on a second GPU.
+    # When enabled, a second model runs in parallel with the principal's
+    # tool execution and emits a short observation that is injected into
+    # the next iteration's context. Purely informative: never blocks,
+    # never forces retries, never vetoes. The principal reads the
+    # observation and decides what to do.
+    # Each ASSISTANT_LLM_* field is "" by default → falls back to the
+    # matching LLM_* main setting, so a typical setup only needs to
+    # toggle ENABLED + override MODEL/BASE_URL.
+    ASSISTANT_LLM_ENABLED: bool = False
+    ASSISTANT_LLM_PROVIDER: str = ""
+    ASSISTANT_LLM_MODEL: str = ""
+    ASSISTANT_LLM_BASE_URL: str = ""
+    ASSISTANT_LLM_API_KEY: str = ""
+    ASSISTANT_LLM_TIMEOUT: int = 600
+    ASSISTANT_LLM_INCLUDE_STEP_COMPLETE: bool = True
+
     # ContextRank (cross-session context prioritization)
     CONTEXT_RANK_ENABLED: bool = False
     CONTEXT_RANK_TOP_K_FILES: int = 5

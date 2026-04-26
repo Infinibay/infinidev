@@ -280,6 +280,61 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
     return params
 
 
+def get_litellm_params_for_assistant() -> dict[str, Any]:
+    """Build litellm params for the assistant pair-programming critic.
+
+    Each ``ASSISTANT_LLM_*`` setting is optional and falls back to the
+    matching ``LLM_*`` main setting when empty. Designed for a setup
+    where the principal runs on GPU0 and the critic runs on a second
+    Ollama instance pinned to GPU1 (different ``api_base``), so both
+    31B-class models stay hot in VRAM without tensor splitting.
+    """
+    model = (settings.ASSISTANT_LLM_MODEL or "").strip() or settings.LLM_MODEL
+    if not model:
+        raise RuntimeError("No assistant model and no main LLM_MODEL configured.")
+
+    if model.startswith("ollama/"):
+        model = "ollama_chat/" + model[len("ollama/"):]
+
+    provider_id = (settings.ASSISTANT_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
+    api_key = (settings.ASSISTANT_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
+    base_url = (settings.ASSISTANT_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
+
+    params: dict[str, Any] = {"model": model}
+    if api_key:
+        params["api_key"] = api_key
+
+    try:
+        from infinidev.config.providers import get_provider
+        provider = get_provider(provider_id)
+        is_native = bool(getattr(provider, "is_native", False))
+    except Exception:
+        is_native = _extract_provider(model) in {
+            "deepseek", "anthropic", "gemini", "openai",
+        }
+    if base_url and not is_native:
+        params["api_base"] = base_url
+
+    if settings.ASSISTANT_LLM_TIMEOUT:
+        params["timeout"] = float(settings.ASSISTANT_LLM_TIMEOUT)
+
+    if provider_id == "ollama" and settings.OLLAMA_NUM_CTX > 0:
+        params["num_ctx"] = settings.OLLAMA_NUM_CTX
+
+    from importlib.metadata import version as _pkg_version
+    try:
+        _version = _pkg_version("infinidev")
+    except Exception:
+        _version = "0.1.0"
+    params["extra_headers"] = {
+        "User-Agent": f"infinidev/{_version}",
+        "X-Client-Name": "infinidev-assistant",
+        "X-Client-Version": _version,
+    }
+
+    return params
+
+
 def get_litellm_params() -> dict[str, Any]:
     """Return kwargs suitable for ``litellm.completion(**params, messages=...)``."""
     model = settings.LLM_MODEL

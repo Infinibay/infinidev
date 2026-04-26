@@ -197,6 +197,39 @@ Call `help record_finding` for full examples and guidance.
 - **NEVER run commands that require interactive stdin** (e.g. `passwd`, `ssh` without key, `read`, interactive installers). All commands must run non-interactively.
 """
 
+CRITIC_PROTOCOL_ADDENDUM = """\
+## Pair-Programming Partner
+
+You have a second model watching every tool call you make — your
+pair-programming partner. It does not run tools. It only writes you
+short notes, which appear at the END of your tool results, after a
+divider line that reads `--- critic note ---`.
+
+These notes are not chitchat or status updates. They are observations
+from a peer who saw what you proposed and what came back, and chose to
+speak up. Treat them like a senior colleague leaning over and saying
+"hey, before you keep going…":
+
+- If they tell you the file you tried to read does not exist, your
+  next action reads the directory to find the right path — not the
+  same file again.
+- If they tell you to stop creating empty plan steps, your next
+  action does real work — read, write, edit — not another add_step.
+- If they flag a bug in the code you are about to write, you fix it
+  in the very next call instead of submitting and waiting for the
+  test to fail.
+- If they say "you already read this, move on", you move on.
+
+Do not acknowledge the note in text. Do not say "thanks for the
+feedback" or "good point". Just act differently in your next tool
+call. Silence + corrected behavior is the right response.
+
+If the note is wrong (you have context they do not), you can ignore
+it — but only if you can name what they got wrong. Default is: trust
+them and adjust.
+"""
+
+
 LOOP_PROTOCOL = """\
 ## Loop Execution Protocol
 
@@ -551,6 +584,17 @@ def build_system_prompt(
             parts.append("## Technology Guidelines\n\n" + "\n\n".join(tech_sections))
 
     parts.append(protocol)
+
+    # When the pair-programming critic is enabled, teach the principal
+    # that those `--- critic note ---` blocks at the end of tool
+    # results are notes from a peer model and what to do with them.
+    # Lazy import to avoid pulling settings at module import time.
+    try:
+        from infinidev.config import settings as _settings
+        if getattr(_settings, "ASSISTANT_LLM_ENABLED", False):
+            parts.append(CRITIC_PROTOCOL_ADDENDUM)
+    except Exception:
+        pass
 
     # Session context changes every iteration (step summaries grow over
     # time). Emit it AFTER the breakpoint marker so caching-capable
