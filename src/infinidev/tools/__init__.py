@@ -143,6 +143,16 @@ def get_tools_for_role(
         # list.
         read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
         return read_only + [cls() for cls in PLANNER_TOOLS]
+    if role == "assistant_critic":
+        # The pair-programming critic gets read-only exploration tools
+        # so it can verify the principal's claims (read the file the
+        # principal says it read, run code_search to confirm a pattern
+        # exists, etc.) before emitting a verdict. The critic's
+        # terminator is ``emit_verdict`` (registered separately in
+        # ``critic.py``), so we don't add chat_agent terminators here.
+        # Tight budget enforced by the critic's own sub-loop, not the
+        # tool list.
+        return [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
     if small_model:
         return [cls() for cls in _vision_filter(SMALL_MODEL_TOOLS)]
     return [cls() for cls in all_tool_classes]

@@ -492,6 +492,30 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_context ON cr_interactions(context_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_session ON cr_interactions(session_id)")
 
+        # Reasoning-pattern catalog for the assistant critic. Each row
+        # is one *signature* of a reasoning failure mode (e.g. one
+        # phrasing of "victory_lap"), embedded for cosine similarity at
+        # detection time. Multiple signatures share a pattern_name; the
+        # detector matches against the closest signature per pattern.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS critic_reasoning_patterns (
+                id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern_name             TEXT NOT NULL,
+                signature                TEXT NOT NULL,
+                embedding                BLOB NOT NULL,
+                threshold                REAL NOT NULL DEFAULT 0.75,
+                socratic_question        TEXT NOT NULL,
+                triggered_check          TEXT,
+                created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                confirmed_useful_count   INTEGER DEFAULT 0,
+                UNIQUE(pattern_name, signature)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patterns_name "
+            "ON critic_reasoning_patterns(pattern_name)"
+        )
+
         # Pre-computed per-node scores snapshotted at session/task end.
         # Avoids recalculating historical scores from raw interactions.
         conn.execute("""

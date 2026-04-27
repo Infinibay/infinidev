@@ -23,5 +23,16 @@ class ReplaceLinesInput(BaseModel):
     end_line: int = Field(
         ..., description="Last line to replace (1-based, inclusive)"
     )
+    rationale: str = Field(
+        ...,
+        min_length=30,
+        description=(
+            "REQUIRED. Brief explanation of WHAT this edit does and WHY "
+            "it's needed (≥30 chars). The assistant critic reads this "
+            "to verify the change matches the active step. Do NOT write "
+            "generic phrases like 'fixing the bug' — name the specific "
+            "behaviour change and the reason for it."
+        ),
+    )
 
 

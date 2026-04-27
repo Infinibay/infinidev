@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.file_change_tracker import FileChangeTracker
+
+if TYPE_CHECKING:
+    from infinidev.engine.orchestration.task_schema import Task
 
 
 @dataclass
@@ -52,6 +55,13 @@ class ExecutionContext:
 
     # Behavior flags
     skip_plan: bool = False  # True for agents that don't use plan management (e.g. analyst)
+
+    # Structured task spec — when set, the prompt builder renders the
+    # task via ``render_task_xml`` instead of the legacy plain
+    # ``<task>desc</task>`` block. Both the principal and (via shared
+    # message history) the assistant critic see the same rendering.
+    # ``None`` is the legacy path: the engine falls back to ``desc``.
+    task: "Task | None" = None
 
     # Phase-specific over-budget warning. Used by the analyst (and any
     # future restricted-tools phase) to override the developer-oriented

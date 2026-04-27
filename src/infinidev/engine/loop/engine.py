@@ -186,6 +186,14 @@ class LoopEngine(AgentEngine):
                 desc = getattr(tool, "description", None) or ""
                 descriptions[name] = desc
             self._critic = AssistantCritic(descriptions)
+            # Register as active so ``ConsultAssistantTool`` (the
+            # principal-facing bridge tool) can reach the critic
+            # without dependency-injection through the tool factory.
+            try:
+                from infinidev.engine.loop.critic import set_active_critic
+                set_active_critic(self._critic)
+            except Exception:
+                logger.debug("set_active_critic failed", exc_info=True)
             return self._critic
         except Exception as exc:
             logger.warning(
@@ -334,31 +342,41 @@ class LoopEngine(AgentEngine):
             + "\n\n---\n\n".join(drained)
         )
 
-        # Anthropic requires exactly one tool_result per tool_use_id.
-        # Locate the tool_result we already appended for this
-        # step_complete id (the "{\"status\": \"acknowledged\"}" stub
-        # from _execute_regular_tools / _build_pseudo_only_messages) and
-        # overwrite its content in place. Appending a second tool
-        # message with the same id is valid on OpenAI but rejected by
-        # the Anthropic API (each tool_use must have a single result).
-        replaced = False
+        self._overwrite_step_complete_tool_result(
+            messages, step_complete_id, rejection_body,
+        )
+        return True
+
+    @staticmethod
+    def _overwrite_step_complete_tool_result(
+        messages: list[dict[str, Any]],
+        step_complete_id: str,
+        new_body: str,
+    ) -> None:
+        """Override the ``acknowledged`` stub on a step_complete tool id.
+
+        Anthropic requires exactly one tool_result per tool_use_id, so
+        we locate the existing tool message (the "acknowledged" stub
+        appended by ``_execute_regular_tools`` /
+        ``_build_pseudo_only_messages``) and rewrite its content in
+        place rather than appending a second one. On OpenAI both
+        approaches work; on Anthropic appending duplicates raises.
+        Falls back to a fresh append if no prior result is found —
+        that path keeps the loop well-formed even if the assumption
+        breaks.
+        """
         for msg in reversed(messages):
             if (
                 msg.get("role") == "tool"
                 and msg.get("tool_call_id") == step_complete_id
             ):
-                msg["content"] = rejection_body
-                replaced = True
-                break
-        if not replaced:
-            # No prior tool_result to override (shouldn't normally
-            # happen, but keep the loop well-formed if it does).
-            messages.append({
-                "role": "tool",
-                "tool_call_id": step_complete_id,
-                "content": rejection_body,
-            })
-        return True
+                msg["content"] = new_body
+                return
+        messages.append({
+            "role": "tool",
+            "tool_call_id": step_complete_id,
+            "content": new_body,
+        })
 
     def cancel(self) -> None:
         """Signal the engine to stop after the current tool call."""
@@ -451,6 +469,7 @@ class LoopEngine(AgentEngine):
         summarizer_enabled: bool | None = None,
         initial_plan: Any | None = None,
         initial_attachments: list[Any] | None = None,
+        task: Any | None = None,
     ) -> str:
         """Plan-execute-summarize loop.
 
@@ -478,6 +497,7 @@ class LoopEngine(AgentEngine):
             nudge_threshold=nudge_threshold,
             nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
+            task=task,
         )
         if initial_plan is not None:
             _seed_state_from_plan(ctx.state, initial_plan)
@@ -830,6 +850,7 @@ class LoopEngine(AgentEngine):
             nudge_message_template=kwargs.get('nudge_message_template'),
             state=state, file_tracker=file_tracker,
             start_iteration=state.iteration_count,
+            task=kwargs.get('task'),
         )
 
     def _build_iteration_messages(
@@ -890,6 +911,7 @@ class LoopEngine(AgentEngine):
                 session_notes=self.session_notes if self.session_notes else None,
                 user_messages=injected if injected else None,
                 skip_plan=ctx.skip_plan,
+                task=ctx.task,
                 small_model=ctx.is_small,
             )
         user_content: Any = user_prompt
@@ -992,13 +1014,6 @@ class LoopEngine(AgentEngine):
             except Exception as _trace_err:
                 logger.warning("reasoning trace emit failed: %s", _trace_err)
 
-            # Emit reasoning content in FC mode (no streaming available).
-            # Send full reasoning to both THINKING panel and chat.
-            if result.reasoning_content and not ctx.manual_tc:
-                _emit_loop_event("loop_think", ctx.project_id, ctx.agent_id, {
-                    "reasoning": result.reasoning_content,
-                })
-
             if result.should_retry:
                 continue
             if result.forced_step_result:
@@ -1040,13 +1055,22 @@ class LoopEngine(AgentEngine):
                         # state.
                         crit_msgs_snapshot = list(messages)
                         crit_calls_snapshot = list(classified.regular)
+                        # Thread the principal's current-turn reasoning to the
+                        # critic out-of-band — it's stripped from message
+                        # history (see ContextManager.expire_thinking) so the
+                        # critic would otherwise only see the actions, not
+                        # the thinking that produced them.
+                        crit_reasoning_snapshot = getattr(result, "reasoning_content", None)
                         with _futures.ThreadPoolExecutor(max_workers=2) as _ex:
                             _tools_fut = _ex.submit(
                                 self._execute_regular_tools,
                                 ctx, classified, messages, result, action_tool_calls, iteration, guard, tracker,
                             )
                             _critic_fut = _ex.submit(
-                                critic.review, crit_msgs_snapshot, crit_calls_snapshot,
+                                critic.review,
+                                crit_msgs_snapshot,
+                                crit_calls_snapshot,
+                                crit_reasoning_snapshot,
                             )
                             action_tool_calls = _tools_fut.result()
                             try:
@@ -1163,19 +1187,65 @@ class LoopEngine(AgentEngine):
 
                     # Pair-programming critic on step_complete. Synchronous
                     # because there's no tool execution to parallelise — the
-                    # principal is about to break out of the inner loop. The
-                    # verdict is queued for the NEXT step's preamble (the
-                    # current messages list dies with the break).
+                    # principal is about to break out of the inner loop.
+                    #
+                    # ``reject`` is special here: it actually BLOCKS the
+                    # step from closing. We overwrite the step_complete
+                    # tool_result with the critic's objection (same
+                    # mechanism used for late mid-step user messages —
+                    # see ``_reject_step_complete_on_late_message``) and
+                    # ``continue`` the inner loop so the model gets one
+                    # more turn to address the concern. Other verdicts
+                    # (information / recommendation) are advisory: queued
+                    # for the NEXT step's preamble, the current messages
+                    # list dies with the break.
                     if settings.ASSISTANT_LLM_INCLUDE_STEP_COMPLETE:
                         critic = self._get_or_build_critic(ctx)
                         if critic is not None:
                             try:
-                                verdict = critic.review(messages, [classified.step_complete])
+                                verdict = critic.review(
+                                    messages,
+                                    [classified.step_complete],
+                                    getattr(result, "reasoning_content", None),
+                                )
                             except Exception as _crit_exc:
                                 logger.warning("assistant critic (step_complete) raised: %s", _crit_exc)
                                 verdict = None
                             if verdict is not None and not verdict.is_silent:
                                 model_tag = critic.model_short_name
+                                if verdict.action == "reject":
+                                    rejection_body = (
+                                        f"step_complete REJECTED by the assistant critic "
+                                        f"({model_tag}). Address the objection below before "
+                                        f"closing this step — either fix the issue and call "
+                                        f"step_complete again, or push back with a brief "
+                                        f"explanation if you disagree.\n\n"
+                                        f"Critic objection:\n{verdict.message}"
+                                    )
+                                    self._overwrite_step_complete_tool_result(
+                                        messages, classified.step_complete.id, rejection_body,
+                                    )
+                                    try:
+                                        _emit_loop_event(
+                                            "loop_assistant_message",
+                                            ctx.project_id, ctx.agent_id,
+                                            {
+                                                "action": verdict.action,
+                                                "message": verdict.message,
+                                                "model": model_tag,
+                                                "source": "step_complete",
+                                                "blocked": True,
+                                            },
+                                        )
+                                    except Exception:
+                                        pass
+                                    _emit_log(
+                                        "info",
+                                        f"⚠ step_complete blocked by assistant critic "
+                                        f"({model_tag}): {verdict.message[:120]}",
+                                        project_id=ctx.project_id, agent_id=ctx.agent_id,
+                                    )
+                                    continue  # Re-enter the loop, don't break.
                                 prefix = f"[ASSISTANT ({model_tag}) - {verdict.action}] (re: step_complete): "
                                 self._pending_critic_messages.append({
                                     "role": "user",
@@ -1445,8 +1515,18 @@ class LoopEngine(AgentEngine):
         *,
         attachments_by_tc: dict | None = None,
     ) -> int:
-        """Process results from one batch. Returns updated action_tool_calls."""
+        """Process results from one batch. Returns updated action_tool_calls.
+
+        Image-attachment messages are collected during the per-tool loop
+        and flushed AFTER all tool results are appended. Some providers
+        (e.g. Minimax) reject conversations where a ``user``-role message
+        appears between an ``assistant`` with ``tool_calls`` and the
+        ``tool`` result for one of those calls — strict
+        "tool result must follow tool call" ordering. Deferring keeps
+        the assistant→tool block contiguous regardless of provider.
+        """
         _pending_nudge: str | None = None
+        _pending_image_msgs: list[dict[str, Any]] = []
         for tc, result in batch_results:
             _tool_error = _extract_tool_error(result)
             guard.on_tool_result(tc.function.name, tc.function.arguments, bool(_tool_error))
@@ -1518,7 +1598,11 @@ class LoopEngine(AgentEngine):
                                     "image_url": {"url": _att.data_url},
                                 }
                             )
-                        messages.append({"role": "user", "content": _blocks})
+                        # Defer until after all tool results in this
+                        # batch are appended — see docstring.
+                        _pending_image_msgs.append(
+                            {"role": "user", "content": _blocks}
+                        )
 
             action_tool_calls += 1
             ctx.state.total_tool_calls += 1
@@ -1546,6 +1630,13 @@ class LoopEngine(AgentEngine):
                         f"Call step_complete now. If the step is not finished, set status=\'continue\' "
                         f"and add/modify next_steps to capture the remaining work."
                     )
+
+        # Flush any deferred image-attachment messages now that ALL
+        # tool results in this batch have been appended. This preserves
+        # the strict assistant(tool_calls) → tool(...) ordering required
+        # by Minimax and similar providers.
+        for _img_msg in _pending_image_msgs:
+            messages.append(_img_msg)
 
         if _pending_nudge is not None:
             if ctx.manual_tc:

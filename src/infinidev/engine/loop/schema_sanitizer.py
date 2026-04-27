@@ -142,6 +142,21 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "Structured summary (~150 tokens): Read: files+findings | Changed: files+edits | Remaining: next work | Decisions: key choices. Skip empty categories.",
                 },
+                "evidence_summary": {
+                    "type": "string",
+                    "description": (
+                        "REQUIRED. Concrete evidence that the step's "
+                        "objective was reached: which command(s) you "
+                        "ran and their outcome, which file(s) you "
+                        "re-read after editing, which test(s) "
+                        "passed. ≥30 chars. Do NOT write 'looks "
+                        "good' or 'should work' — name the actual "
+                        "verification. The assistant critic uses this "
+                        "field to decide whether to accept or reject "
+                        "the step closure."
+                    ),
+                    "minLength": 30,
+                },
                 "status": {
                     "type": "string",
                     "enum": ["continue", "done", "blocked", "explore"],
@@ -152,7 +167,7 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
                     "description": "When status=done, the final result to return",
                 },
             },
-            "required": ["summary", "status"],
+            "required": ["summary", "status", "evidence_summary"],
         },
     },
 }

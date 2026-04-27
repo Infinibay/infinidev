@@ -101,7 +101,13 @@ class ExecuteCommandTool(InfinibayBaseTool):
         timeout: int = 60,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        rationale: str = "",
     ) -> str:
+        # rationale is enforced as required at the schema level (≥30
+        # chars). Consumed by the critic via the tool_call args, not
+        # by the executor — so we accept it here for kwarg parity and
+        # discard it.
+        del rationale
         if not isinstance(command, str):
             command = str(command) if command else ""
         if not command or not command.strip():

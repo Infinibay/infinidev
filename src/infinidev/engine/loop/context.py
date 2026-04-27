@@ -627,6 +627,7 @@ def build_iteration_prompt(
     user_messages: list[str] | None = None,
     skip_plan: bool = False,
     small_model: bool = False,
+    task: Any | None = None,  # infinidev.engine.orchestration.task_schema.Task
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
@@ -641,8 +642,22 @@ def build_iteration_prompt(
     _append_if(parts, _render_context_rank(context_rank_result))
     _append_if(parts, _render_workspace())
 
-    # Task description
-    parts.append(f"<task>\n{description}\n</task>")
+    # Task: prefer the structured ``Task`` rendering when available
+    # (set by the engine when the orchestration layer built one). Both
+    # the principal AND the critic (via shared message history) see
+    # the same block, so this is a single point of truth for "what
+    # is the user asking for". Fall back to the legacy plain-text
+    # block when no Task object was passed (legacy callers, tests).
+    if task is not None:
+        try:
+            from infinidev.engine.orchestration.task_renderer import render_task_xml
+            parts.append(render_task_xml(task))
+        except Exception:
+            # Defensive: if rendering somehow fails, never lose the
+            # task — fall through to the plain block.
+            parts.append(f"<task>\n{description}\n</task>")
+    else:
+        parts.append(f"<task>\n{description}\n</task>")
 
     # Reactive guidance — pre-baked how-to advice queued by the engine
     # at the end of the previous step when a stuck-pattern was detected.

@@ -177,6 +177,7 @@ def _run_execution_phase(
     use_phase_engine: bool,
     hooks: OrchestrationHooks,
     initial_attachments: list[Any] | None = None,
+    task: Any | None = None,
 ) -> tuple[str, Any]:
     """Execution: dispatch to LoopEngine (or PhaseEngine for ``--think``).
 
@@ -220,6 +221,7 @@ def _run_execution_phase(
                 verbose=True,
                 initial_plan=plan,
                 initial_attachments=initial_attachments,
+                task=task,
             )
             used_engine = engine
         if not result or not result.strip():
@@ -432,6 +434,21 @@ def run_task(
         flow_config.expected_output,
     )
 
+    # Wrap the user free-text into a structured ``Task`` artefact so
+    # the developer prompt and the assistant critic both see the same
+    # XML-rendered spec. Today this is auto-synthesised from the user
+    # request; in a follow-up the chat agent / planner can produce a
+    # richer Task with explicit acceptance criteria, out_of_scope, etc.
+    # If construction fails (e.g. user_request too short), we fall
+    # back to ``None`` and the legacy plain ``<task>`` block is used —
+    # the pipeline never breaks because of an enrichment failure.
+    structured_task: Any | None = None
+    try:
+        from infinidev.engine.orchestration.task_schema import task_from_free_text
+        structured_task = task_from_free_text(escalation.user_request)
+    except Exception:
+        logger.debug("structured Task synthesis failed; using legacy <task>", exc_info=True)
+
     # ── Gather ──────────────────────────────────────────────────────────
     task_prompt = _run_gather_phase(
         user_input=user_input,
@@ -452,6 +469,7 @@ def run_task(
         use_phase_engine=use_phase_engine,
         hooks=hooks,
         initial_attachments=list(escalation.attachments) if escalation.attachments else None,
+        task=structured_task,
     )
 
     # ── Review ──────────────────────────────────────────────────────────

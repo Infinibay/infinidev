@@ -31,7 +31,14 @@ class ReplaceLinesTool(InfinibayBaseTool):
         content: str,
         start_line: int,
         end_line: int,
+        rationale: str = "",
     ) -> str:
+        # rationale is enforced as required at the schema level (≥30
+        # chars). The default here is a defensive fallback for legacy
+        # callers (e.g. tests that build args dicts directly); the LLM
+        # path always populates it because pydantic rejects calls that
+        # don't.
+        del rationale  # consumed by the critic via tool_call args, not the executor
         path = self._resolve_path(os.path.expanduser(file_path))
 
         access_err = guard_file_access(self, path, "replace_lines")
