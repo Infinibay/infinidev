@@ -82,10 +82,16 @@ _root = logging.getLogger()
 # own module-level side effects, then install ours (or a NullHandler).
 _root.handlers.clear()
 if _handlers:
-    _root.setLevel(_log_level)
+    # Keep root at WARNING so DEBUG/INFO from stdlib (asyncio's
+    # "Using selector: EpollSelector", urllib3 connection pool
+    # chatter, etc.) doesn't flood the file when a user asks for
+    # DEBUG. Apply the user's chosen level only to the `infinidev`
+    # tree — that's the part they actually want to inspect.
+    _root.setLevel(logging.WARNING)
     for _h in _handlers:
         _h.setFormatter(logging.Formatter("%(message)s"))
         _root.addHandler(_h)
+    logging.getLogger("infinidev").setLevel(_log_level)
 else:
     # Silent default — absorb every log record.
     _root.setLevel(logging.CRITICAL)

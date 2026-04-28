@@ -226,6 +226,13 @@ class InfinibayBaseTool(BaseTool, ABC):
     def _log_tool_usage(self, message: str, progress: int | None = None):
         """Record tool usage in status_updates for audit."""
         project_id = self.project_id
+        # Short-circuit when there's no project context (e.g. tools
+        # bound to the assistant critic's synthetic agent_id, which is
+        # never associated with a project). Without this, every critic
+        # read tool throws a NOT NULL IntegrityError that floods the
+        # logs at DEBUG level and pollutes any post-mortem.
+        if project_id is None:
+            return
         agent_id = self.agent_id or "unknown"
         agent_run_id = self.agent_run_id
 
