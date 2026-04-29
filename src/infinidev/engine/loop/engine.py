@@ -147,6 +147,11 @@ class LoopEngine(AgentEngine):
         self._summarizer_override: bool | None = None
         self._supports_vision_cached: bool | None = None
         self._cancel_event: __import__('threading').Event = __import__('threading').Event()
+        # Optional OrchestrationHooks. When set by the caller (typically
+        # the pipeline before execute()), the engine forwards file-change
+        # and step-start callbacks so a UI can render live progress.
+        # Plumbing via attribute keeps execute()'s signature stable.
+        self._hooks: object | None = None
         self.session_notes: list[str] = []  # Persist across tasks within a session
         # Thread-safe queue for user messages injected mid-task
         import queue as _queue_mod
@@ -1473,7 +1478,7 @@ class LoopEngine(AgentEngine):
                         hook_metadata=_tool_hook_meta,
                         attachments_out=att_list,
                     )
-                    _maybe_emit_file_change(tc.function.name, tc.function.arguments, result, _pre, ctx.file_tracker, ctx.project_id, ctx.agent_id)
+                    _maybe_emit_file_change(tc.function.name, tc.function.arguments, result, _pre, ctx.file_tracker, ctx.project_id, ctx.agent_id, self._hooks)
                     batch_results.append((tc, result))
 
             if self._cancel_event.is_set():
@@ -1802,7 +1807,7 @@ class LoopEngine(AgentEngine):
                                 _maybe_emit_file_change(
                                     tc.function.name, tc.function.arguments, tc_result,
                                     _pre_content_g, ctx.file_tracker,
-                                    ctx.project_id, ctx.agent_id,
+                                    ctx.project_id, ctx.agent_id, self._hooks,
                                 )
                                 messages.append({
                                     "role": "tool",

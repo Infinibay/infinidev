@@ -127,6 +127,35 @@ class StepManager:
             if step_result.next_steps:
                 ctx.state.plan.apply_operations(step_result.next_steps)
             ctx.state.plan.activate_next()
+        # Notify a UI hook (if any) that a new step is now active. Best
+        # effort — never let a hook error interrupt the engine loop.
+        self._emit_step_start(ctx)
+
+    def _emit_step_start(self, ctx: ExecutionContext) -> None:
+        hooks = getattr(self._engine, "_hooks", None)
+        if hooks is None:
+            return
+        cb = getattr(hooks, "on_step_start", None)
+        if not callable(cb):
+            return
+        try:
+            steps = list(ctx.state.plan.steps)
+            active = ctx.state.plan.active_step
+            if active is None:
+                return
+            all_steps = [
+                {
+                    "index": s.index,
+                    "title": s.title,
+                    "status": s.status,
+                    "user_approved": s.user_approved,
+                }
+                for s in steps
+            ]
+            completed = [s.index for s in steps if s.status == "done"]
+            cb(active.index, len(steps), all_steps, completed)
+        except Exception:
+            pass
 
     def summarize_and_record(
         self, ctx: ExecutionContext, step_result: StepResult,

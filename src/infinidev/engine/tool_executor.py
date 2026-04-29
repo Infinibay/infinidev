@@ -567,8 +567,14 @@ def maybe_emit_file_change(
     tracker: FileChangeTracker,
     project_id: int,
     agent_id: str,
+    hooks: object | None = None,
 ) -> None:
-    """After a write/edit tool call, record the change and emit a TUI event."""
+    """After a write/edit tool call, record the change and emit a TUI event.
+
+    When ``hooks`` is provided and exposes ``on_file_change(path)``,
+    forward the absolute path so an OrchestrationHooks consumer (e.g.
+    a UI WebSocket bridge) can render the change in real time.
+    """
     import os as _os
     if tool_name not in FILE_CHANGE_TOOLS or not tracker.active:
         return
@@ -610,6 +616,15 @@ def maybe_emit_file_change(
         "action": tracker.get_action(file_path),
         "num_changes": tracker.get_change_count(file_path),
     })
+
+    # Public hooks notification — best effort, never block the tool path.
+    if hooks is not None:
+        try:
+            on_change = getattr(hooks, "on_file_change", None)
+            if callable(on_change):
+                on_change(file_path)
+        except Exception:
+            pass
 
     # Forward silent-deletion info from the tool result to the tracker so
     # the post-task verification can catch orphaned references.

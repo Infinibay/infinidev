@@ -353,6 +353,17 @@ def run_task(
         get_current_workspace_path,
     )
 
+    # Plumb the orchestration hooks into the engine so the inner loop
+    # can forward on_file_change / on_step_start as the worker
+    # advances — including during the rework loop, which calls
+    # engine.execute() again. The attribute is the only place hooks
+    # need to live; engine.execute() does not take them as a kwarg
+    # to keep its public signature stable.
+    try:
+        setattr(engine, "_hooks", hooks)
+    except AttributeError:
+        pass
+
     # ── Chat agent ──────────────────────────────────────────────────────
     hooks.on_phase("chat")
     agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)
