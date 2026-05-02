@@ -36,9 +36,16 @@ def clone_or_cache(repo: str, cache_dir: Path) -> Path:
             log.warning("Failed to fetch updates for %s, using stale cache", repo)
         return cached
 
-    log.info("Cloning %s into cache...", repo)
+    log.info("Cloning %s into cache (full bare)...", repo)
     url = f"https://github.com/{repo}.git"
-    _run(["git", "clone", "--bare", url, str(cached)], timeout=600)
+    # Full bare clone (1800 s timeout for Django/matplotlib over
+    # residential connections). The previous attempt with
+    # ``--filter=blob:none`` (treeless) saved disk and clone time
+    # but broke checkout — the local clone of the bare cache lost
+    # access to the GitHub origin needed for on-demand blob fetches,
+    # so every instance ended up with an empty working tree. Full
+    # bare clone is the boring-but-working choice.
+    _run(["git", "clone", "--bare", url, str(cached)], timeout=1800)
     return cached
 
 

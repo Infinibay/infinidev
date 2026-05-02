@@ -618,7 +618,8 @@ class InfinidevApp:
                             "of a new turn.",
                             "system",
                         )
-                    self.add_message("System", "Message injected — the agent will see it on its next LLM call.", "system")
+                    # No "injected" confirmation — the user already
+                    # expects this behaviour; the line was just noise.
                 else:
                     self._pending_inputs.append(cleaned_text)
                     self.add_message("System", "Queued — waiting for current task to finish.", "system")

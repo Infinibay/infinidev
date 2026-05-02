@@ -127,6 +127,21 @@ PROVIDERS: dict[str, ProviderConfig] = {
             "MiniMax-M2.5", "MiniMax-M2.1",
         ],
     ),
+    "mistral": ProviderConfig(
+        id="mistral",
+        display_name="Mistral (La Plateforme)",
+        prefix="mistral/",
+        default_base_url="https://api.mistral.ai/v1",
+        model_list_format="openai",
+        is_native=True,
+        static_models=[
+            "mistral-large-latest", "mistral-medium-latest", "mistral-small-latest",
+            "ministral-3b-latest", "ministral-8b-latest",
+            "magistral-medium-latest", "magistral-small-latest",
+            "codestral-latest", "devstral-medium-latest", "devstral-small-latest",
+            "pixtral-large-latest",
+        ],
+    ),
     "openrouter": ProviderConfig(
         id="openrouter",
         display_name="OpenRouter",

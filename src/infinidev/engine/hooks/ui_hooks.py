@@ -62,8 +62,17 @@ def _on_post_tool(ctx: HookContext) -> None:
         from infinidev.engine.engine_logging import extract_exec_command_data
         exec_data = extract_exec_command_data(result)
 
-    # Classic CLI logging (no-op when TUI is active)
-    _cli_log_tool(ctx, tool_detail, tool_error, tool_preview)
+    # Parse the raw arguments dict so the UI can render tool-specific
+    # parameter views (e.g. code_interpreter shows the full code, not
+    # just a 1-line tool_detail).
+    if isinstance(ctx.arguments, dict):
+        tool_args_dict: dict = ctx.arguments
+    else:
+        try:
+            parsed = json.loads(ctx.arguments) if ctx.arguments else {}
+            tool_args_dict = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            tool_args_dict = {}
 
     event_bus.emit("loop_tool_call", ctx.project_id, ctx.agent_id, {
         "agent_id": ctx.agent_id,
@@ -72,6 +81,11 @@ def _on_post_tool(ctx: HookContext) -> None:
         "tool_detail": tool_detail,
         "tool_error": tool_error,
         "tool_output_preview": tool_preview,
+        # Full structured payload so the TUI can render every parameter
+        # of every tool. The legacy "preview" / "detail" fields stay for
+        # back-compat with the classic CLI renderer.
+        "tool_arguments": tool_args_dict,
+        "tool_result_full": result,
         "exec_data": exec_data,
         "call_num": ctx.metadata.get("call_num", 0),
         "total_calls": ctx.metadata.get("total_calls", 0),
@@ -100,11 +114,6 @@ def _on_think(ctx: HookContext) -> None:
     reasoning = (ctx.result or "").strip()
     if not reasoning:
         return
-
-    # Classic CLI
-    if not event_bus.has_subscribers:
-        from infinidev.engine.engine_logging import log as _log, DIM as _DIM, RESET as _RESET
-        _log(f"  {_DIM}💭 {reasoning[:200]}{_RESET}")
 
     event_bus.emit("loop_think", ctx.project_id, ctx.agent_id, {
         "reasoning": reasoning,
@@ -196,36 +205,14 @@ def _on_post_step(ctx: HookContext) -> None:
     })
 
 
-# ── Classic CLI logging helper ───────────────────────────────────────────
-
-def _cli_log_tool(
-    ctx: HookContext,
-    tool_detail: str,
-    tool_error: str,
-    tool_preview: str,
-) -> None:
-    """Log tool call to stderr in classic CLI mode (no-op when TUI is active)."""
-    if event_bus.has_subscribers:
-        return
-    from infinidev.engine.engine_logging import (
-        log as _log, log_tool as _log_tool,
-        BLUE as _BLUE, DIM as _DIM, RED as _RED, RESET as _RESET,
-    )
-    meta = ctx.metadata
-    agent_name = meta.get("agent_name", ctx.agent_id)
-    iteration = meta.get("iteration", 0)
-    call_num = meta.get("call_num", 0)
-    total_calls = meta.get("total_calls", 0)
-
-    if meta.get("verbose", True):
-        _log_tool(agent_name, iteration + 1, ctx.tool_name, call_num, total_calls)
-        if tool_detail:
-            _log(f"{_BLUE}│{_RESET}     {_DIM}{tool_detail}{_RESET}")
-        if tool_error:
-            _log(f"{_BLUE}│{_RESET}     {_RED}✗ {tool_error}{_RESET}")
-        elif tool_preview:
-            for line in tool_preview.splitlines():
-                _log(f"{_BLUE}│{_RESET}     {_DIM}{line}{_RESET}")
+# Note: the legacy `_cli_log_tool` helper used to print directly to
+# stderr when no event_bus subscribers were attached. It was removed
+# along with its `event_bus.has_subscribers` gate, which had a subtle
+# bug: any subscriber (including the classic-mode logger bridge) would
+# silently disable tool-call output. Classic mode now subscribes a
+# proper renderer (`infinidev.cli.classic_renderer.ClassicRenderer`)
+# that paints the same information to the terminal, so events are the
+# single source of truth for output.
 
 
 # ── Registration ─────────────────────────────────────────────────────────

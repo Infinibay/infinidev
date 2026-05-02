@@ -203,6 +203,114 @@ def _bootstrap_single_prompt_runtime() -> None:
         pass
 
 
+# ── Classic-mode play-by-play log bridge ────────────────────────────────
+#
+# In TUI mode the event bus drives the chat panel: every tool call,
+# critic verdict, think block, etc. shows up live on screen. In classic
+# / ``--no-tui`` mode (which the bench uses) there is NO subscriber, so
+# all those events evaporate — the user only sees raw stderr from
+# ``log()`` calls, which makes runs feel like they hang silently.
+# The bridge below subscribes once and re-emits each event as a
+# Python ``logging`` record, so anything routed to ``INFINIDEV_LOG_FILE``
+# captures the full play-by-play. Registration is gated on the absence
+# of any other subscriber to avoid double-logging when both the bridge
+# and a TUI are active.
+
+_EVENT_LOG = logging.getLogger("infinidev.events")
+
+
+def _truncate(text: str | None, limit: int = 220) -> str:
+    if not text:
+        return ""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[:limit] + "…"
+
+
+def _format_event(event_type: str, data: dict) -> str | None:
+    """Render an EventBus event as a single human-readable log line.
+
+    Returns ``None`` for events that should be silently dropped (e.g.
+    ``loop_thinking_chunk`` which fires per-token and would flood the
+    log). The other handlers favour brevity over completeness — the
+    raw event still exists on the bus for any other consumer.
+    """
+    if event_type in ("loop_thinking_chunk", "loop_stream_status",
+                      "loop_llm_call_start", "loop_state",
+                      "loop_file_changed", "loop_behavior_update"):
+        return None
+    if event_type == "loop_start":
+        return f"▶ start: {_truncate(data.get('prompt'), 120)}"
+    if event_type == "loop_step_update":
+        i = data.get("iteration", "?")
+        title = _truncate(data.get("step_title"), 80)
+        status = data.get("status", "")
+        return f"── step {i} [{status}]: {title}"
+    if event_type == "loop_think":
+        return f"💭 think: {_truncate(data.get('reasoning'), 280)}"
+    if event_type == "loop_tool_call":
+        name = data.get("tool_name", "?")
+        detail = _truncate(data.get("tool_detail"), 80)
+        err = data.get("tool_error") or ""
+        call = data.get("call_num", 0)
+        tokens = data.get("tokens_total", 0)
+        suffix = f"  ❌ {_truncate(err, 120)}" if err else ""
+        return f"🔧 {name}({detail}) [#{call} · {tokens}tk]{suffix}"
+    if event_type == "loop_user_message":
+        return f"💬 → user: {_truncate(data.get('message'), 220)}"
+    if event_type == "loop_assistant_message":
+        action = data.get("action", "?")
+        msg = _truncate(data.get("message"), 320)
+        model = data.get("model", "")
+        blocked = " [BLOCKING]" if data.get("blocked") else ""
+        return f"🤝 critic ({model}) [{action}]{blocked}: {msg}"
+    if event_type == "loop_log":
+        lvl = data.get("level", "info").upper()
+        return f"[{lvl}] {_truncate(data.get('message'), 320)}"
+    if event_type in ("loop_finished", "loop_end"):
+        summary = _truncate(data.get("summary") or data.get("reason"), 160)
+        return f"✓ done: {summary}" if summary else "✓ done"
+    return f"· {event_type}: {_truncate(str(data), 200)}"
+
+
+def _install_classic_event_bridge() -> None:
+    """Register a logger-only EventBus subscriber for ``INFINIDEV_LOG_FILE``.
+
+    Previously this ran unconditionally at module import time and
+    secondary handlers in ``ui_hooks.py`` keyed off
+    ``event_bus.has_subscribers`` — which made the inline classic-mode
+    output disappear the moment this bridge attached. We now gate the
+    bridge on ``INFINIDEV_LOG_FILE`` so it only attaches when the user
+    actually wants a file log; classic-mode terminal output is the
+    job of :class:`infinidev.cli.classic_renderer.ClassicRenderer`,
+    which is registered explicitly from ``_run_main``.
+    """
+    if not _log_file_path:
+        return
+    try:
+        from infinidev.flows.event_listeners import event_bus
+    except Exception:
+        return
+
+    def _bridge(event_type: str, project_id: int, agent_id: str, data: dict) -> None:
+        try:
+            line = _format_event(event_type, data)
+            if line:
+                _EVENT_LOG.info(line)
+        except Exception:
+            # Logging must never break the engine — swallow everything.
+            pass
+
+    try:
+        event_bus.subscribe(_bridge)
+    except Exception:
+        pass
+
+
+# Only attaches when INFINIDEV_LOG_FILE is set. Coexists with the
+# classic renderer (both are independent subscribers).
+_install_classic_event_bridge()
+
+
 def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
 
@@ -330,11 +438,72 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         run_task, run_flow_task, ClickHooks,
     )
     from infinidev.db.service import store_conversation_turn
+    from infinidev.cli.classic_renderer import (
+        ClassicRenderer, SessionStatus, PermissionQueue,
+        make_permission_handler, make_status_renderer, status_bar_style,
+        render_status_table, hr, run_with_live_status,
+    )
+    from prompt_toolkit.patch_stdout import patch_stdout
+    from prompt_toolkit.key_binding import KeyBindings
 
-    click.echo(click.style("Welcome to Infinidev CLI (Classic Mode)!", fg="cyan", bold=True))
-    click.echo("Type your instructions or /help for commands.")
+    # ── Session state + renderer ─────────────────────────────────────
+    status = SessionStatus(
+        provider=settings.LLM_PROVIDER,
+        model=settings.LLM_MODEL.split("/", 1)[-1] if "/" in settings.LLM_MODEL else settings.LLM_MODEL,
+        critic_enabled=bool(getattr(settings, "ASSISTANT_LLM_ENABLED", False)),
+        critic_model=(
+            (getattr(settings, "ASSISTANT_LLM_MODEL", "") or settings.LLM_MODEL).split("/", 1)[-1]
+            if (getattr(settings, "ASSISTANT_LLM_MODEL", "") or settings.LLM_MODEL)
+            else ""
+        ),
+    )
+    renderer = ClassicRenderer(status)
+    renderer.subscribe()
 
-    session = PromptSession(history=FileHistory(str(get_base_dir() / "history")))
+    # ── Banner ───────────────────────────────────────────────────────
+    click.echo(click.style("Infinidev — Classic Mode", bold=True))
+    click.echo(click.style(
+        f"  model: {status.model}   provider: {status.provider}"
+        + (f"   critic: {status.critic_model}" if status.critic_enabled else "   critic: off"),
+        dim=True,
+    ))
+    click.echo(click.style("  /help · /status · Ctrl+C cancel · Ctrl+D quit", dim=True))
+    click.echo(hr())
+
+    # Final-result renderer: tries Rich Markdown, falls back to plain.
+    def _render_final(text: str | None) -> None:
+        if not text:
+            click.echo("Done.")
+            return
+        try:
+            from rich.console import Console
+            from rich.markdown import Markdown
+            Console(file=sys.stdout, force_terminal=sys.stdout.isatty()).print(Markdown(text))
+        except Exception:
+            click.echo(text)
+
+    # ── prompt_toolkit session with status bar ───────────────────────
+    kb = KeyBindings()
+
+    @kb.add("c-l")
+    def _(event):
+        # Clear screen; redraw prompt.
+        click.clear()
+        event.app.renderer.reset()
+
+    @kb.add("escape", "enter")
+    def _(event):
+        # Alt+Enter inserts newline (multi-line mode opt-in).
+        event.current_buffer.insert_text("\n")
+
+    session = PromptSession(
+        history=FileHistory(str(get_base_dir() / "history")),
+        bottom_toolbar=make_status_renderer(status),
+        style=status_bar_style(),
+        refresh_interval=0.5,
+        key_bindings=kb,
+        multiline=False,
+    )
 
     agent = InfinidevAgent(agent_id="cli_agent")
     session_id = str(uuid.uuid4())
@@ -344,21 +513,42 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     _gather_next_task = False
     _use_phase_engine = False
 
-    # Permission handler — kept inline because click.confirm() needs the
-    # caller's stdin. Could be moved to ClickHooks later if more permission
-    # surfaces appear, but one callsite doesn't earn an abstraction yet.
-    def _classic_permission_handler(tool_name: str, description: str, details: str) -> bool:
-        click.echo(click.style(f"\n⚠ Permission required: {description}", fg="yellow", bold=True))
-        click.echo(click.style(f"  {details}", fg="yellow"))
-        return click.confirm("  Allow?", default=False)
-
+    # Inline permission handler — bridges engine worker thread → main.
+    pq = PermissionQueue()
     from infinidev.tools.permission import set_permission_handler
-    set_permission_handler(_classic_permission_handler)
+    set_permission_handler(make_permission_handler(pq))
 
+    def _drain_permission_requests() -> None:
+        """Pop any pending permission requests and prompt the user."""
+        while True:
+            req = pq.pending()
+            if req is None:
+                return
+            click.echo(click.style(
+                f"\n⚠ Permission required: {req.description}",
+                fg="yellow", bold=True,
+            ))
+            if req.details:
+                click.echo(click.style(f"  {req.details}", fg="yellow"))
+            try:
+                ans = session.prompt("  Allow? [y/N] ").strip().lower()
+                req.result = ans in ("y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                req.result = False
+            finally:
+                req.done.set()
+
+    # ── REPL loop ────────────────────────────────────────────────────
     while True:
         try:
-            user_input = session.prompt("infinidev> ")
+            with patch_stdout(raw=True):
+                user_input = session.prompt("infinidev ▸ ")
             if not user_input.strip():
+                continue
+
+            # /status: render the SessionStatus dump and continue.
+            if user_input.strip() == "/status":
+                click.echo(render_status_table(status))
                 continue
 
             _fallthrough_to_pipeline = False
@@ -366,43 +556,52 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                 cmd_result = handle_command(user_input)
 
                 if isinstance(cmd_result, tuple) and cmd_result[0] == "prompt":
-                    # /refactor and friends — rewrite user_input and fall through.
                     user_input = cmd_result[1]
                     _fallthrough_to_pipeline = True
 
                 elif isinstance(cmd_result, tuple) and cmd_result[0] in ("explore", "brainstorm"):
                     flow_name, problem = cmd_result
-                    click.echo(click.style(f"[{flow_name}] {problem}", fg="yellow"))
-                    result = run_flow_task(
-                        agent=agent, flow=flow_name,
-                        task_prompt=(problem, ""),
-                        session_id=session_id, engine=engine, hooks=hooks,
-                        use_tree_engine=True,
+                    click.echo(click.style(f"[{flow_name}] {problem}", dim=True))
+                    result = run_with_live_status(
+                        engine,
+                        lambda: run_flow_task(
+                            agent=agent, flow=flow_name,
+                            task_prompt=(problem, ""),
+                            session_id=session_id, engine=engine, hooks=hooks,
+                            use_tree_engine=True,
+                        ),
+                        status,
                     )
-                    click.echo(click.style(f"\n{flow_name.title()} Result:", fg="green", bold=True))
-                    click.echo(result)
+                    _drain_permission_requests()
+                    click.echo(click.style(f"\n{flow_name.title()} Result:", bold=True))
+                    _render_final(result)
                     continue
 
                 elif cmd_result == "init":
                     from infinidev.prompts.init_project import (
                         INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT,
                     )
-                    click.echo(click.style("[init] Exploring and documenting project...", fg="yellow"))
-                    result = run_flow_task(
-                        agent=agent, flow="document",
-                        task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
-                        session_id=session_id, engine=engine, hooks=hooks,
+                    click.echo(click.style("[init] Exploring and documenting project...", dim=True))
+                    result = run_with_live_status(
+                        engine,
+                        lambda: run_flow_task(
+                            agent=agent, flow="document",
+                            task_prompt=(INIT_TASK_DESCRIPTION, INIT_EXPECTED_OUTPUT),
+                            session_id=session_id, engine=engine, hooks=hooks,
+                        ),
+                        status,
                     )
-                    click.echo(click.style("\nInit Result:", fg="green", bold=True))
-                    click.echo(result)
+                    _drain_permission_requests()
+                    click.echo(click.style("\nInit Result:", bold=True))
+                    _render_final(result)
                     continue
 
                 elif cmd_result == "think":
                     _gather_next_task = True
                     _use_phase_engine = True
                     click.echo(click.style(
-                        "Phase mode enabled: ANALYZE → PLAN → EXECUTE. Send your task.",
-                        fg="cyan",
+                        "Phase mode: ANALYZE → PLAN → EXECUTE. Send your task.",
+                        dim=True,
                     ))
 
                 if not _fallthrough_to_pipeline:
@@ -412,19 +611,33 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             # on the next task. The pipeline itself does NOT reload.
             from infinidev.config.settings import reload_all
             reload_all()
+            # Refresh status with potentially-new model/provider/critic.
+            status.provider = settings.LLM_PROVIDER
+            status.model = (
+                settings.LLM_MODEL.split("/", 1)[-1]
+                if "/" in settings.LLM_MODEL else settings.LLM_MODEL
+            )
+            status.critic_enabled = bool(getattr(settings, "ASSISTANT_LLM_ENABLED", False))
+            critic_full = getattr(settings, "ASSISTANT_LLM_MODEL", "") or settings.LLM_MODEL
+            status.critic_model = critic_full.split("/", 1)[-1] if "/" in critic_full else critic_full
 
             store_conversation_turn(session_id, "user", user_input)
 
-            result = run_task(
-                agent=agent,
-                user_input=user_input,
-                session_id=session_id,
-                engine=engine,
-                reviewer=reviewer,
-                hooks=hooks,
-                use_phase_engine=_use_phase_engine,
-                force_gather=_gather_next_task,
+            result = run_with_live_status(
+                engine,
+                lambda: run_task(
+                    agent=agent,
+                    user_input=user_input,
+                    session_id=session_id,
+                    engine=engine,
+                    reviewer=reviewer,
+                    hooks=hooks,
+                    use_phase_engine=_use_phase_engine,
+                    force_gather=_gather_next_task,
+                ),
+                status,
             )
+            _drain_permission_requests()
             _gather_next_task = False
             _use_phase_engine = False
 
@@ -435,16 +648,25 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             )
 
             if result:
-                click.echo(click.style("\nFinal Result:", fg="green", bold=True))
-                click.echo(result)
+                click.echo(click.style("\nFinal Result:", bold=True))
+                _render_final(result)
 
         except KeyboardInterrupt:
+            # Force-interrupt path: a second Ctrl+C inside the live-status
+            # app surfaces here. Drop the pending turn and prompt again.
+            click.echo(click.style("\n[interrupted]", dim=True))
             continue
         except EOFError:
             break
         except Exception as e:
             click.echo(click.style(f"Error: {e}", fg="red"))
             logging.exception("Error in main loop")
+
+    # Graceful renderer detach on exit.
+    try:
+        renderer.unsubscribe()
+    except Exception:
+        pass
 
     # Cleanup background services — the IndexQueue was started inside
     # _bootstrap_single_prompt_runtime() and registered globally; fetch

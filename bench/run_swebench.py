@@ -113,14 +113,41 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
     log.info("=== Running instance: %s ===", instance_id)
     log.info("Repo: %s | Base commit: %s", repo, base_commit[:12])
 
-    # Setup repo
-    instance_dir = setup_instance(
-        repo=repo,
-        base_commit=base_commit,
-        workdir=config.workdir,
-        cache_dir=config.cache_dir,
-        instance_id=instance_id,
-    )
+    # Setup repo. A clone/checkout failure (network timeout, GitHub
+    # rate limit, missing commit) used to abort the entire bench
+    # because the exception propagated past the caller. With 100+
+    # instances any single infra hiccup would burn the whole run —
+    # so we trap setup errors per-instance and return an empty
+    # prediction with a marker name. The bench then continues with
+    # the next instance instead of dying.
+    try:
+        instance_dir = setup_instance(
+            repo=repo,
+            base_commit=base_commit,
+            workdir=config.workdir,
+            cache_dir=config.cache_dir,
+            instance_id=instance_id,
+        )
+    except Exception:
+        log.exception("setup_instance failed for %s; skipping", instance_id)
+        return {
+            "instance_id": instance_id,
+            "model_name_or_path": f"{config.model or 'settings-default'} [setup_failed]",
+            "model_patch": "",
+        }
+
+    # Settings live in ``cwd / .infinidev / settings.json`` (see
+    # ``infinidev.config.settings._get_base_dir``). The bench runs each
+    # instance from its own checkout dir, where that file is absent —
+    # without copying the user's settings into place infinidev falls
+    # back to schema defaults (Ollama localhost), producing connection
+    # errors against any remote-API config. Mirror the chosen file
+    # into the instance's ``.infinidev/`` so the subprocess sees the
+    # same provider/model/key the user runs interactively.
+    if config.settings_source and Path(config.settings_source).exists():
+        target_settings = instance_dir / ".infinidev" / "settings.json"
+        target_settings.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(config.settings_source, target_settings)
 
     prompt = build_prompt(instance)
     result = {
@@ -139,12 +166,18 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
         # Always use the project's source via python -m to ensure latest code
         cmd = [sys.executable, "-m", "infinidev.cli.main"]
 
+        # ``--model`` only forwarded when explicitly set: otherwise the
+        # CLI would receive a benchmark-default that overrides
+        # ``LLM_MODEL`` from settings.json without overriding the
+        # matching ``LLM_BASE_URL`` / ``LLM_PROVIDER`` / ``LLM_API_KEY``,
+        # producing a model-vs-endpoint mismatch (e.g. an Ollama-prefix
+        # model routed to a remote provider's URL → connection error).
+        cli_args = ["--prompt", prompt, "--no-tui"]
+        if config.model:
+            cli_args.extend(["--model", config.model])
+
         proc = subprocess.run(
-            cmd + [
-                "--prompt", prompt,
-                "--model", config.model,
-                "--no-tui",
-            ],
+            cmd + cli_args,
             cwd=str(instance_dir),
             stdout=subprocess.PIPE,
             stderr=None,  # Let stderr flow through to terminal
@@ -167,8 +200,21 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
             log.info("Patch for %s: %d lines", instance_id, lines)
 
     except subprocess.TimeoutExpired:
-        log.error("TIMEOUT on %s after %ds", instance_id, config.timeout)
-        result["model_patch"] = ""
+        # The subprocess was killed mid-flight, but any file edits
+        # the model already wrote are still on disk and ``git diff``
+        # picks them up. Discarding them just because we ran out of
+        # wall-clock would lose real work — a partial fix is more
+        # useful for SWE-bench scoring than an empty patch.
+        log.error("TIMEOUT on %s after %ds — capturing partial patch",
+                  instance_id, config.timeout)
+        try:
+            result["model_patch"] = get_patch(instance_dir)
+            if result["model_patch"].strip():
+                log.info("Salvaged partial patch for %s (%d lines)",
+                         instance_id, result["model_patch"].count("\n"))
+        except Exception:
+            log.exception("Failed to capture partial patch for %s", instance_id)
+            result["model_patch"] = ""
     except Exception:
         log.exception("Error running %s", instance_id)
         result["model_patch"] = ""

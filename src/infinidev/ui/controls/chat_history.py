@@ -47,14 +47,21 @@ class ChatHistoryControl(UIControl):
         # Rebuild throttle
         self._last_rebuild: float = 0.0
     def invalidate_cache(self) -> None:
-        """Mark cache as stale and scroll to bottom.
+        """Mark cache as stale.
 
-        The actual rebuild is deferred to the next create_content() call
-        and throttled to avoid excessive rebuilds during rapid event bursts.
+        Preserves the user's scroll position. The actual rebuild is
+        deferred to the next ``create_content()`` call and throttled
+        to avoid excessive rebuilds during rapid event bursts.
+
+        Previously this method also forced ``_follow_tail = True`` and
+        ``_scroll_offset = 0`` on every new message, which yanked the
+        viewport to the bottom each time a tool call arrived — making
+        it impossible to read older content while the agent worked.
+        Now scroll position is fully under user control: only the
+        ``end`` / ``pagedown`` keys, or scrolling all the way down with
+        the mouse wheel, re-engage tail-following.
         """
         self._line_cache = None
-        self._follow_tail = True
-        self._scroll_offset = 0
 
     def is_focusable(self) -> bool:
         return True
@@ -70,10 +77,17 @@ class ChatHistoryControl(UIControl):
                 return None
         return NotImplemented
 
+    # Wheel-tick stride: how many lines each mouse-wheel tick scrolls.
+    # Matches the ClickableScrollbar behaviour (3 lines/tick) so the
+    # chat body and the scrollbar feel equally responsive — without this,
+    # wheeling on the chat body felt like "nothing happens" because
+    # prompt_toolkit's default Window scroll calls ``move_cursor_up/down``
+    # once per tick.
+    _WHEEL_STRIDE = 3
+
     def move_cursor_down(self) -> None:
         """Called by Window._scroll_down() on mouse wheel down."""
-        if self._scroll_offset > 0:
-            self._scroll_offset -= 1
+        self._scroll_offset = max(0, self._scroll_offset - self._WHEEL_STRIDE)
         if self._scroll_offset == 0:
             self._follow_tail = True
 
@@ -81,37 +95,53 @@ class ChatHistoryControl(UIControl):
         """Called by Window._scroll_up() on mouse wheel up."""
         self._follow_tail = False
         self._scroll_offset = min(
-            self._scroll_offset + 1,
+            self._scroll_offset + self._WHEEL_STRIDE,
             max(0, self._line_count - 1),
         )
+
+    # ── Public scroll API (callable from global keybindings) ──────────
+    # These mirror the per-control bindings below but can be invoked
+    # regardless of which widget has focus — see
+    # ``ui/keybindings.py:create_global_keybindings``.
+
+    def page_up(self, lines: int = 15) -> None:
+        self._follow_tail = False
+        self._scroll_offset = min(
+            self._scroll_offset + lines,
+            max(0, self._line_count - 1),
+        )
+
+    def page_down(self, lines: int = 15) -> None:
+        self._scroll_offset = max(0, self._scroll_offset - lines)
+        if self._scroll_offset == 0:
+            self._follow_tail = True
+
+    def scroll_home(self) -> None:
+        self._follow_tail = False
+        self._scroll_offset = max(0, self._line_count - 1)
+
+    def scroll_end(self) -> None:
+        self._follow_tail = True
+        self._scroll_offset = 0
 
     def get_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
 
         @kb.add("pageup")
         def _pgup(event):
-            self._follow_tail = False
-            self._scroll_offset = min(
-                self._scroll_offset + 15,
-                max(0, self._line_count - 1),
-            )
+            self.page_up()
 
         @kb.add("pagedown")
         def _pgdn(event):
-            self._scroll_offset = max(0, self._scroll_offset - 15)
-            if self._scroll_offset == 0:
-                self._follow_tail = True
+            self.page_down()
 
         @kb.add("home")
         def _home(event):
-            self._follow_tail = False
-            self._scroll_offset = max(0, self._line_count - 1)
+            self.scroll_home()
 
         @kb.add("end")
         def _end(event):
-            self._follow_tail = True
-            self._scroll_offset = 0
-
+            self.scroll_end()
 
         return kb
 
@@ -226,6 +256,12 @@ class ChatHistoryControl(UIControl):
         from infinidev.ui.controls.message_groups import identify_groups
         from infinidev.ui.controls.message_widgets import get_widget
 
+        # Snapshot the previous line count BEFORE we rebuild. After the
+        # rebuild we'll bump _scroll_offset by the delta when the user
+        # is scrolled up, so the visible content stays anchored at the
+        # same position instead of drifting down with new entries.
+        prev_line_count = self._line_count
+
         lines: list[list[tuple[str, str]]] = []
         self._clickable_lines = {}
         groups = identify_groups(self._messages)
@@ -272,6 +308,20 @@ class ChatHistoryControl(UIControl):
                 lines.extend(result.lines)
                 for offset, cb in result.clickable_offsets.items():
                     self._clickable_lines[start + offset] = cb
+        # Anchor compensation: if the user is scrolled up (tail-follow
+        # disabled), bump _scroll_offset by the number of newly-rendered
+        # lines so cursor_y (computed as line_count-1-offset) stays
+        # the same — they keep seeing the same content, while new
+        # entries pile up below the viewport.
+        new_line_count = len(lines)
+        if not self._follow_tail and prev_line_count > 0:
+            delta = new_line_count - prev_line_count
+            if delta > 0:
+                self._scroll_offset = min(
+                    self._scroll_offset + delta,
+                    max(0, new_line_count - 1),
+                )
+
         self._line_cache = lines
         self._cache_len = msg_count
         self._cache_width = width

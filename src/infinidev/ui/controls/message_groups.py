@@ -22,11 +22,21 @@ class MessageGroup:
         return len(self.messages) > 1
 
 
+# Types that must NEVER be folded into multi-message groups. The user
+# wants every tool call, every diff, every exec block, every think and
+# every error visible permanently — no accordion. Each message of these
+# types is rendered as its own singleton group.
+NEVER_GROUP_TYPES: frozenset[str] = frozenset({
+    "tool_call", "exec", "diff", "error", "think",
+})
+
+
 def identify_groups(messages: list[dict[str, Any]]) -> list[MessageGroup]:
     """Scan messages into groups of consecutive same-type visible messages.
 
     Hidden messages (visible=False) are skipped entirely.
-    Each group holds references to the original message dicts.
+    Types in :data:`NEVER_GROUP_TYPES` are forced to singleton groups so
+    the chat never collapses tool calls / diffs / thinking under a header.
     """
     groups: list[MessageGroup] = []
     i = 0
@@ -39,6 +49,13 @@ def identify_groups(messages: list[dict[str, Any]]) -> list[MessageGroup]:
             continue
 
         msg_type = msg.get("type", "agent")
+
+        # Singleton-only types: emit one group per message and move on.
+        if msg_type in NEVER_GROUP_TYPES:
+            groups.append(MessageGroup(msg_type=msg_type, messages=[msg], start_index=i))
+            i += 1
+            continue
+
         run = [msg]
         start = i
         j = i + 1

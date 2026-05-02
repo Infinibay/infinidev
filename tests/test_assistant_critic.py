@@ -177,7 +177,7 @@ class TestAssistantCriticReview:
         # principal's protocol/tool-schema rules and try to play driver.
         sent_msgs = call.call_args.args[1]
         assert sent_msgs[0]["role"] == "system"
-        assert "pair programming" in sent_msgs[0]["content"].lower()
+        assert "emit_verdict" in sent_msgs[0]["content"].lower()
         # No principal system message should leak through.
         assert not any(
             m["role"] == "system" and "PROTOCOL" in m["content"]
@@ -198,7 +198,13 @@ class TestAssistantCriticReview:
                          [_make_tc("read_file", {"path": "a"})])
         assert v is None  # silent fallback, never blocks
 
-    def test_review_returns_none_on_malformed_json(self, fake_assistant_params):
+    def test_review_text_without_tool_call_becomes_information(self, fake_assistant_params):
+        """When the model responds with plain text (no emit_verdict tool
+        call, no JSON, no prefix), the text reaches the principal as an
+        ``information`` verdict. This is the deliberate text-fallback
+        channel — the critic's input always reaches the principal,
+        even when the model ignores the tool schema entirely.
+        """
         c = AssistantCritic({"read_file": "Reads"})
         with patch(
             "infinidev.engine.llm_client.call_llm",
@@ -206,7 +212,9 @@ class TestAssistantCriticReview:
         ):
             v = c.review([{"role": "user", "content": "x"}],
                          [_make_tc("read_file", {"path": "a"})])
-        assert v is None
+        assert v is not None
+        assert v.action == "information"
+        assert v.message == "the model just rambled"
 
     def test_thinking_in_response_is_not_propagated(self, fake_assistant_params):
         """The critic's reasoning must be discarded — only JSON survives.
@@ -237,12 +245,19 @@ class TestEngineDefaultDisabled:
         """With the feature flag off, engine state must show no critic.
 
         This is the contract that lets the parallel-execution branch be
-        a pure no-op for the 99% of users who haven't opted in.
+        a pure no-op for the 99% of users who haven't opted in. The
+        test forces the flag off locally rather than asserting the
+        live ``settings`` value, since a developer's own
+        ``~/.infinidev/settings.json`` may legitimately enable it.
         """
         from infinidev.engine.loop.engine import LoopEngine
         from infinidev.config.settings import settings as _settings
 
-        assert _settings.ASSISTANT_LLM_ENABLED is False
-        eng = LoopEngine()
-        assert eng._critic is None
-        assert eng._pending_critic_messages == []
+        prior = _settings.ASSISTANT_LLM_ENABLED
+        _settings.ASSISTANT_LLM_ENABLED = False
+        try:
+            eng = LoopEngine()
+            assert eng._critic is None
+            assert eng._pending_critic_messages == []
+        finally:
+            _settings.ASSISTANT_LLM_ENABLED = prior

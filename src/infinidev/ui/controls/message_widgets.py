@@ -590,3 +590,9 @@ class ExecCommandWidget:
 
 
 register(ExecCommandWidget())
+
+
+# Register the unified ToolCallWidget so every tool call lands in chat
+# with its full args + result, no accordion. The import triggers the
+# `register(ToolCallWidget())` call at the bottom of that module.
+from infinidev.ui.controls import tool_call_widget  # noqa: F401, E402

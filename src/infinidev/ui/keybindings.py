@@ -150,6 +150,26 @@ def create_global_keybindings(app_state) -> KeyBindings:
         app_state.focus_sidebar()
 
 
+    # ── Chat scroll: route PageUp/PageDown globally so they work
+    #    regardless of which control owns focus. Home/End stay local
+    #    to the chat control to avoid hijacking buffer Home/End.
+    def _chat_ctrl():
+        return getattr(app_state, "_chat_history_control", None)
+
+    @kb.add("pageup")
+    def chat_page_up(event):
+        ctrl = _chat_ctrl()
+        if ctrl is not None:
+            ctrl.page_up()
+            event.app.invalidate()
+
+    @kb.add("pagedown")
+    def chat_page_down(event):
+        ctrl = _chat_ctrl()
+        if ctrl is not None:
+            ctrl.page_down()
+            event.app.invalidate()
+
     @kb.add("escape")
     def cancel_task(event):
         """Cancel the currently running task, dismiss dialog."""

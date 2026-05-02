@@ -1,6 +1,6 @@
 [project]
 name = "infinidev"
-version = "0.5.2"
+version = "0.6.0"
 description = "A terminal-based AI programming tool using agent loops."
 authors = [{ name = "Andres Borek", email = "andres.b.dev@gmail.com" }]
 dependencies = [
@@ -75,4 +75,5 @@ mnn = ["MNN>=3.5.0", "transformers>=4.40,<5"]
 [dependency-groups]
 dev = [
     "pytest-asyncio>=1.3.0",
+    "swebench>=4.1.0",
 ]

@@ -6,8 +6,14 @@ from pathlib import Path
 
 @dataclass
 class BenchConfig:
-    # Model (LiteLLM format)
-    model: str = "ollama_chat/qwen3.5:27b"
+    # Model (LiteLLM format). Empty = use whatever is in
+    # ~/.infinidev/settings.json. Setting an explicit value forwards
+    # it via ``--model`` to the CLI, which only overrides
+    # ``LLM_MODEL`` — not ``LLM_BASE_URL`` / ``LLM_PROVIDER`` /
+    # ``LLM_API_KEY``. Combining a foreign model name with the
+    # current settings' endpoint usually produces a mismatch, so the
+    # safe default is to inherit from settings.
+    model: str = ""
     # HuggingFace dataset name
     dataset: str = "princeton-nlp/SWE-bench_Lite"
     split: str = "test"
@@ -25,6 +31,12 @@ class BenchConfig:
     cache_dir: Path = Path("/tmp/infinidev-bench/.cache")
     # Resume from existing predictions (skip already-done instances)
     resume: bool = True
+    # Settings.json to mirror into each instance's ``.infinidev/``
+    # before running. Defaults to the user's home settings (the same
+    # one ``infinidev`` reads when launched from $HOME). Empty string
+    # disables the copy and lets infinidev fall back to schema
+    # defaults — almost certainly wrong unless you know why.
+    settings_source: Path = Path.home() / ".infinidev" / "settings.json"
 
     def __post_init__(self):
         self.workdir = Path(self.workdir)

@@ -78,7 +78,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         )
 
     elif event_type == "loop_tool_call":
-        # Clear streaming state — tool is now executing
+        # Clear streaming state — tool is now executing.
         app._streaming_tool_name = None
         app._streaming_token_count = 0
 
@@ -86,7 +86,11 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         tool_detail = data.get("tool_detail", "")
         tool_error = data.get("tool_error", "")
         tool_output = data.get("tool_output_preview", "")
+        tool_args = data.get("tool_arguments") or {}
+        tool_result_full = data.get("tool_result_full") or ""
 
+        # Sidebar action text — unchanged. The chat row carries the
+        # full payload now.
         action_text = f">> {tool_name}\n"
         if tool_detail:
             action_text += f"   {tool_detail}\n"
@@ -97,28 +101,21 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
                 action_text += f"   {line}\n"
         app._actions_text = action_text.rstrip()
 
-        # Tools with rich dedicated widgets get their own chat message type.
-        if tool_name == "execute_command" and (data.get("exec_data") or tool_error):
-            exec_data = data.get("exec_data") or {}
-            app.chat_messages.append({
-                "sender": "Shell",
-                "text": tool_detail or "",
-                "type": "exec",
-                "cmd": tool_detail or "",
-                "exit_code": exec_data.get("exit_code"),
-                "stdout": exec_data.get("stdout") or "",
-                "stderr": exec_data.get("stderr") or "",
-                "killed_reason": exec_data.get("killed_reason"),
-                "tool_error": tool_error or "",
-                "collapsed": True,
-                "visible": True,
-            })
-            app._chat_history_control.invalidate_cache()
-            app.invalidate()
-        else:
-            chat_msg = format_tool_chat_message(tool_name, tool_detail, tool_error, tool_output)
-            if chat_msg:
-                app.add_message("Tool", chat_msg, "system")
+        # EVERY tool call lands in chat as a unified `tool_call` message,
+        # rendered by ToolCallWidget. No more silent drops, no accordion.
+        app.chat_messages.append({
+            "sender": "Tool",
+            "text": tool_detail or tool_name,
+            "type": "tool_call",
+            "tool_name": tool_name,
+            "args": tool_args if isinstance(tool_args, dict) else {},
+            "result": tool_result_full,
+            "error": tool_error,
+            "exec_data": data.get("exec_data"),
+            "visible": True,
+        })
+        app._chat_history_control.invalidate_cache()
+        app.invalidate()
 
         app.update_context_tokens(
             task_tokens=data.get("tokens_total", 0),
@@ -149,7 +146,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             "diff_text": diff,
             "diff_path": path,
             "diff_action": action,
-            "collapsed": True,
+            "collapsed": False,  # always expanded — user wants no accordion
         })
         app._chat_history_control.invalidate_cache()
         app.invalidate()
@@ -168,7 +165,18 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         tool_name = data.get("tool_name")
 
         if phase == "done":
-            # Stream finished (or failed) — clear streaming UI state
+            # Stream finished (or failed) — clear streaming UI state.
+            # Also flush the accumulated native thinking buffer into the
+            # chat as a `think` message so extended-thinking models leave
+            # a permanent trail (the sidebar gets cleared on the next
+            # step transition; without this flush the reasoning is lost).
+            buf = (getattr(app, "_thinking_text", "") or "").strip()
+            if buf:
+                # Strip the leading "..." truncation marker the sidebar
+                # adds when the buffer overflows.
+                clean = buf.lstrip(".").lstrip()
+                if clean:
+                    app.add_message("Thinking", clean, "think")
             app._streaming_tool_name = None
             app._streaming_token_count = 0
         elif phase == "tool_detected" and tool_name:
