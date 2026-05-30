@@ -24,6 +24,10 @@ from infinidev.tools.knowledge import (
 from infinidev.tools.chat import SendMessageTool
 from infinidev.tools.chat_agent import RespondTool, EscalateTool
 from infinidev.tools.planner import EmitPlanTool
+from infinidev.tools.council import (
+    COUNCIL_MEMBER_TOOLS as _COUNCIL_MEMBER_TOOLS,
+    COUNCIL_MODERATOR_TOOLS as _COUNCIL_MODERATOR_TOOLS,
+)
 from infinidev.tools.docs import DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool
 from infinidev.tools.code_intel import (
     FindDefinitionTool, FindReferencesTool, ListSymbolsTool, SearchSymbolsTool,
@@ -59,6 +63,11 @@ CHAT_AGENT_TOOLS = [RespondTool, EscalateTool]
 # developer. The planner orchestrator reads its args directly as the
 # final artifact of the planning turn.
 PLANNER_TOOLS = [EmitPlanTool]
+# Exclusive to the council tiers — schema-level terminators read
+# directly by the council orchestrator (see engine/council/). Members
+# get post/conclude; the moderator gets seed/verdict/synthesize.
+COUNCIL_MEMBER_TOOLS = _COUNCIL_MEMBER_TOOLS
+COUNCIL_MODERATOR_TOOLS = _COUNCIL_MODERATOR_TOOLS
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
 CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool, FindSimilarMethodsTool, SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool]
 
@@ -153,6 +162,20 @@ def get_tools_for_role(
         # Tight budget enforced by the critic's own sub-loop, not the
         # tool list.
         return [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
+    if role == "council_member":
+        # A council subagent: read-only exploration (codebase + web — the
+        # web tools are now is_read_only, so they flow in here) plus the
+        # channel terminators (channel_post, conclude). It can NEVER
+        # write — the council is a design/research phase, enforced at the
+        # schema level.
+        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
+        return read_only + [cls() for cls in COUNCIL_MEMBER_TOOLS]
+    if role == "council_moderator":
+        # The orchestrator of the council: same read-only exploration
+        # plus its three terminators (seed_council, council_verdict,
+        # synthesize_brief).
+        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
+        return read_only + [cls() for cls in COUNCIL_MODERATOR_TOOLS]
     if small_model:
         return [cls() for cls in _vision_filter(SMALL_MODEL_TOOLS)]
     return [cls() for cls in all_tool_classes]

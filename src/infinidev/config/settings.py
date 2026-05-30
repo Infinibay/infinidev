@@ -170,6 +170,38 @@ class Settings(BaseSettings):
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True
 
+    # Council (multi-agent deliberation, opt-in design/research phase).
+    # The feature is available by default but only FIRES when the chat
+    # agent flags council_requested (user asked for it, or judged the
+    # task complex). It is expensive, so it never runs implicitly.
+    COUNCIL_ENABLED: bool = True
+    # Optional model override for ALL council agents (members + moderator).
+    # Empty → reuse the behavior-judge model (same as chat agent/planner).
+    # Point this at a cloud provider for real parallelism, since local
+    # Ollama serialises concurrent members at the GPU.
+    COUNCIL_MODEL: str = ""
+    COUNCIL_MAX_MEMBERS: int = 5          # hard upper bound on roster size
+    COUNCIL_MAX_ROUNDS: int = 3           # runaway guard; moderator may stop earlier
+    # Iterations per member per round (each = one LLM call). This is a
+    # runaway guard, NOT a quality gate: a member should be able to
+    # investigate deeply — chain many web_search/web_fetch calls, read
+    # several files, follow references — before it channel_posts or
+    # concludes. Keep it generous so research is never cut off
+    # mid-investigation; the loop terminates as soon as the member calls
+    # a terminator, so most turns end well under the cap.
+    COUNCIL_MEMBER_MAX_ITERS: int = 60
+    # Iterations for the moderator's exploration-heavy turns (seeding the
+    # roster, and synthesising the final brief). Generous like the member
+    # cap: framing good personas and grounding the brief both benefit
+    # from real codebase/web exploration. The convergence-judge turn is
+    # separately capped low (it just needs to read the digest and vote).
+    COUNCIL_MODERATOR_MAX_ITERS: int = 60
+    COUNCIL_MAX_CONCURRENCY: int = 4      # members run in parallel up to this many
+    # Off by default: the chat agent may PROPOSE a council on complexity,
+    # but auto-triggering without a user signal risks the model's own
+    # over-estimation. Reserved for a future opt-in.
+    COUNCIL_AUTO_TRIGGER: bool = False
+
     # Multi-pass code review: split extraction from judgment for complex diffs.
     # "off" = always single-pass | "auto" = split when complexity > threshold
     # | "always" = always two passes.

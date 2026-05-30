@@ -11,7 +11,7 @@ break into steps. No parallel enriched-prompt strings, no
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -50,3 +50,16 @@ class EscalationPacket:
     # Typed loosely (``list``) to avoid an import cycle with
     # ``engine.multimodal``.
     attachments: list = field(default_factory=list)
+    # ── Council (multi-agent deliberation) ──────────────────────────────
+    # When the chat agent detects the user asked for a multi-agent
+    # debate ("usá varios subagentes", "que debatan", "armá un consejo")
+    # — or judged a design/research task complex enough — it sets
+    # ``council_requested``. The pipeline then runs the council phase
+    # (engine/council/) before the planner. ``council_focus`` narrows
+    # the deliberation: "design", "research", or "both".
+    council_requested: bool = False
+    council_focus: Literal["design", "research", "both"] = "design"
+    # The synthesised DesignBrief, attached AFTER the council runs (the
+    # chat agent never sets this). Typed loosely to avoid importing
+    # engine.council at packet-definition time.
+    design_brief: Any | None = None

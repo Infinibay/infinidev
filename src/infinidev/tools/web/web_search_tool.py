@@ -17,6 +17,10 @@ from infinidev.tools.web.web_search_input import WebSearchInput
 
 
 class WebSearchTool(InfinibayBaseTool):
+    # Fetches external results; never mutates the workspace, so it counts
+    # as read-only for role filtering (chat agent, planner, critic, and
+    # council members can all use it to ground claims).
+    is_read_only: bool = True
     name: str = "web_search"
     description: str = (
         "Search the web using DuckDuckGo. "

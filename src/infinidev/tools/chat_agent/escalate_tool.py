@@ -53,6 +53,26 @@ class EscalateInput(BaseModel):
             "Future versions may add 'sysadmin'. Default is 'develop'."
         ),
     )
+    council_requested: bool = Field(
+        False,
+        description=(
+            "Set True when the user explicitly asked for a multi-agent "
+            "debate ('usá varios subagentes', 'que debatan el diseño', "
+            "'armá un consejo', 'multiagente') OR when the task is a "
+            "genuinely complex DESIGN/RESEARCH problem where several "
+            "perspectives debating would beat a single pass. Triggers a "
+            "deliberation phase before the planner. Leave False for "
+            "ordinary implementation work — the council is expensive."
+        ),
+    )
+    council_focus: str = Field(
+        "design",
+        description=(
+            "What the council should deliberate: 'design' (how to build "
+            "it), 'research' (find facts/options first), or 'both'. Only "
+            "meaningful when council_requested is True."
+        ),
+    )
 
 
 class EscalateTool(InfinibayBaseTool):
@@ -78,6 +98,8 @@ class EscalateTool(InfinibayBaseTool):
         opened_files: list[str] | None = None,
         user_signal: str = "",
         suggested_flow: str = "develop",
+        council_requested: bool = False,
+        council_focus: str = "design",
     ) -> str:
         # As with RespondTool, the orchestrator reads tool_call args
         # directly. This _run is the safe fallback if the tool ever
@@ -89,4 +111,6 @@ class EscalateTool(InfinibayBaseTool):
             "opened_files": opened_files or [],
             "user_signal": user_signal,
             "suggested_flow": suggested_flow,
+            "council_requested": council_requested,
+            "council_focus": council_focus,
         })

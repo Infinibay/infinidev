@@ -387,6 +387,9 @@ def _build_escalate(tc: Any, user_input: str) -> ChatAgentResult:
     opened = args.get("opened_files") or []
     if not isinstance(opened, list):
         opened = []
+    focus = (args.get("council_focus") or "design").strip().lower()
+    if focus not in ("design", "research", "both"):
+        focus = "design"
     packet = EscalationPacket(
         user_request=user_input.strip(),
         understanding=understanding,
@@ -394,6 +397,8 @@ def _build_escalate(tc: Any, user_input: str) -> ChatAgentResult:
         user_visible_preview=(args.get("user_visible_preview") or "").strip(),
         user_signal=(args.get("user_signal") or "").strip(),
         suggested_flow="develop",  # v1 restriction
+        council_requested=bool(args.get("council_requested")),
+        council_focus=focus,  # type: ignore[arg-type]
     )
     return ChatAgentResult(kind="escalate", escalation=packet)
 

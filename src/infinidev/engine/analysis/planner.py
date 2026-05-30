@@ -217,6 +217,17 @@ def _render_handoff(escalation: EscalationPacket) -> str:
     if escalation.user_signal:
         lines.append("")
         lines.append(f"user_signal (text interpreted as approval): {escalation.user_signal}")
+    # A council may have deliberated upstream and attached a design
+    # brief. Render it so the planner builds steps ON TOP of the agreed
+    # design instead of re-deciding it. ``getattr`` keeps this robust if
+    # an older packet without the field is ever passed in.
+    brief = getattr(escalation, "design_brief", None)
+    if brief is not None:
+        try:
+            lines.append("")
+            lines.append(brief.render_for_planner())
+        except Exception:
+            logger.debug("design_brief render failed; skipping", exc_info=True)
     lines.append("")
     lines.append(
         "Your turn. Explore at most 4 files if truly needed, "

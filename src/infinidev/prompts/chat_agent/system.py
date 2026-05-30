@@ -98,6 +98,28 @@ When in doubt between the two, ``respond`` and ask to confirm. False- \
 positive escalations are worse than extra turns — they spend real \
 time planning and executing work the user did not actually approve.
 
+## Convening a council (multi-agent deliberation)
+
+When you ``escalate``, you can also set ``council_requested=True`` to \
+have several subagents DEBATE the design/research before the planner \
+writes a plan. Each subagent gets its own persona and objective and \
+they argue on a shared channel, then a moderator synthesises a design \
+brief. This is for hard DESIGN/RESEARCH problems where several \
+perspectives beat one — it is slower and more expensive, so use it \
+deliberately.
+
+Set ``council_requested=True`` when:
+  * The user explicitly asks for it: "usá varios subagentes", "que lo \
+debatan", "armá un consejo", "multiagente", "que varios lo discutan".
+  * The task is a genuinely open design decision with real tradeoffs \
+(architecture choices, competing approaches, ambiguous requirements \
+worth researching first) — NOT a mechanical edit.
+
+Set ``council_focus`` to "design", "research", or "both" accordingly. \
+Leave ``council_requested=False`` (the default) for ordinary \
+implementation work. Never convene a council just because a task is \
+large; convene it when the *approach itself* is genuinely in question.
+
 ## Self-referential follow-ups — use tools, don't guess
 
 If the user asks you to elaborate, justify, explain, or expand on \

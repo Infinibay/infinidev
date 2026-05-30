@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-Phase = Literal["chat", "analysis", "gather", "execute", "review", "idle"]
+Phase = Literal[
+    "chat", "council", "analysis", "gather", "execute", "review", "idle",
+]
 
 
 @runtime_checkable
@@ -165,6 +167,100 @@ def _run_gather_phase(
     except Exception as exc:
         hooks.on_status("warn", f"Gather failed (proceeding without): {exc}")
         return task_prompt
+
+
+def _run_council_phase(
+    *,
+    escalation: Any,
+    session_id: str,
+    project_id: int | None,
+    workspace_path: str | None,
+    hooks: OrchestrationHooks,
+) -> Any:
+    """Multi-agent deliberation between escalate and the planner.
+
+    Runs ONLY when ``escalation.council_requested`` is set and the
+    feature is enabled. Returns a possibly-updated EscalationPacket
+    carrying the synthesised ``design_brief`` (and, if the council hit a
+    genuine product fork, the user's answer folded into the request).
+
+    Soft-fails: any problem returns the original escalation unchanged, so
+    the pipeline always proceeds to the planner. The council enriches the
+    handoff; it is never load-bearing for correctness.
+    """
+    from dataclasses import replace as _dc_replace
+    from infinidev.config.settings import settings as _settings
+
+    if not getattr(escalation, "council_requested", False):
+        return escalation
+    if not _settings.COUNCIL_ENABLED:
+        return escalation
+
+    hooks.on_phase("council")
+    hooks.on_status("info", "Convening multi-agent council...")
+
+    try:
+        from infinidev.engine.council import run_council
+
+        # Build the deliberation handoff from the escalation packet —
+        # the council debates around the user's request and the chat
+        # agent's understanding.
+        handoff = (
+            f"User request (verbatim):\n  {escalation.user_request}\n\n"
+            f"Chat agent's understanding:\n  {escalation.understanding}\n\n"
+            f"Council focus: {escalation.council_focus}"
+        )
+        if escalation.opened_files:
+            handoff += "\n\nFiles already inspected upstream:\n" + "\n".join(
+                f"  - {p}" for p in escalation.opened_files
+            )
+
+        brief = run_council(
+            handoff,
+            session_id=session_id,
+            project_id=project_id,
+            workspace_path=workspace_path,
+            hooks=hooks,
+        )
+    except Exception as exc:
+        logger.error("Council phase failed: %s", exc, exc_info=True)
+        hooks.on_status("warn", f"Council failed (proceeding): {exc}")
+        return escalation
+
+    if brief is None:
+        return escalation
+
+    # Conditional user approval: only interrupt when the council flagged
+    # a genuine product fork it must not decide alone. Otherwise flow
+    # straight through. (See DesignBrief.user_decision_required.)
+    enriched_request = escalation.user_request
+    if brief.user_decision_required and brief.open_questions_for_user:
+        answer = hooks.ask_user(brief.render_questions_for_user(), "text")
+        if answer and answer.strip():
+            enriched_request = (
+                f"{escalation.user_request}\n\n"
+                f"[User decision on the council's open question(s)]: "
+                f"{answer.strip()}"
+            )
+            hooks.on_status("approved", "Incorporating your decision.")
+        else:
+            # Non-interactive or skipped — proceed with the council's
+            # recommendation and note the unanswered questions as risks.
+            hooks.on_status(
+                "warn",
+                "No decision provided — proceeding with the council's "
+                "recommended approach.",
+            )
+
+    # Surface a short summary to the user (non-blocking).
+    try:
+        hooks.notify("Council", brief.render_user_preview(), "agent")
+    except Exception:
+        pass
+
+    return _dc_replace(
+        escalation, user_request=enriched_request, design_brief=brief,
+    )
 
 
 def _run_execution_phase(
@@ -417,6 +513,18 @@ def run_task(
     assert escalation is not None  # enforced by ChatAgentResult invariants
     if escalation.user_visible_preview:
         hooks.notify("Infinidev", escalation.user_visible_preview, "agent")
+
+    # ── Council (optional multi-agent deliberation) ─────────────────────
+    # Runs only when the chat agent flagged council_requested. Enriches
+    # the escalation with a synthesised design_brief that the planner
+    # then reads. Soft-fails to the original escalation.
+    escalation = _run_council_phase(
+        escalation=escalation,
+        session_id=session_id,
+        project_id=(ctx.project_id if ctx else get_current_project_id()),
+        workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
+        hooks=hooks,
+    )
 
     hooks.on_phase("analysis")
     hooks.on_status("info", "Planning...")

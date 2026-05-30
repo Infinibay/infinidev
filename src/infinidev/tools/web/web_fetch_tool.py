@@ -14,6 +14,9 @@ from infinidev.tools.web.web_fetch_input import WebFetchInput
 
 
 class WebFetchTool(InfinibayBaseTool):
+    # Read-only with respect to the workspace — retrieves a URL, never
+    # writes. Exposed to the read-only exploration tiers.
+    is_read_only: bool = True
     name: str = "web_fetch"
     description: str = (
         "Fetch and extract readable content from a URL. "

@@ -21,6 +21,9 @@ _CACHE_MAX = 50
 
 
 class CodeSearchWebTool(InfinibayBaseTool):
+    # Searches the web for code examples; no workspace mutation, so it is
+    # read-only for role filtering.
+    is_read_only: bool = True
     name: str = "code_search_web"
     description: str = (
         "Search the web for code examples, API documentation, and programming "

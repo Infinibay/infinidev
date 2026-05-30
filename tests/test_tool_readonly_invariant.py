@@ -28,9 +28,14 @@ from infinidev.tools.knowledge import (
 )
 from infinidev.tools.shell import ExecuteCommandTool, CodeInterpreterTool
 from infinidev.tools.chat import SendMessageTool
+from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
 
 
-# The canonical 18 tools that MUST be classified as read-only.
+# The canonical tools that MUST be classified as read-only. The web
+# tools (web_search/web_fetch/code_search_web) join the set: they fetch
+# external content but never mutate the workspace, so the read-only
+# exploration tiers (chat agent, planner, critic, council) may use them
+# to ground claims.
 EXPECTED_READ_ONLY = {
     ReadFileTool, ListDirectoryTool, CodeSearchTool, GlobTool,
     FindReferencesTool, GetSymbolCodeTool, ListSymbolsTool, SearchSymbolsTool,
@@ -38,6 +43,7 @@ EXPECTED_READ_ONLY = {
     SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool,
     GitDiffTool, GitStatusTool,
     ReadFindingsTool, SearchFindingsTool,
+    WebSearchTool, WebFetchTool, CodeSearchWebTool,
 }
 
 # Tools that MUST remain write-capable — forbidden in chat_agent whitelist.

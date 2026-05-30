@@ -43,6 +43,7 @@ class TUIHooks:
         # tag. Idle clears both so the panel returns to its resting state.
         labels = {
             "chat":     "Thinking...",
+            "council":  "Council deliberating...",
             "analysis": "Planning...",
             "gather":   "Gathering context...",
             "execute":  "Working...",
