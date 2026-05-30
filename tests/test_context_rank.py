@@ -1165,6 +1165,115 @@ class TestImportGraphPathNormalization:
         assert _IMPORT_IN_PROPAGATION > _IMPORT_OUT_PROPAGATION
 
 
+class TestKenRankerImprovements:
+    """Regression coverage for Ken-derived context-rank channels."""
+
+    def test_literal_content_scores_find_api_like_tokens(self, cr_db, tmp_path):
+        from infinidev.engine.context_rank.ranker import _compute_literal_content_scores
+
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "commands.py"
+        target.write_text("def exec_command(cmd):\n    return cmd\n")
+
+        def _seed(conn):
+            _insert_file(conn, file_path="src/commands.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        scores = _compute_literal_content_scores(
+            "inspect exec_command behavior",
+            project_id=1,
+            workspace=str(tmp_path),
+        )
+
+        assert "src/commands.py" in scores
+        assert scores["src/commands.py"][2].startswith("literal:")
+
+    def test_lexical_scores_match_plain_language_to_names(self, cr_db, tmp_path):
+        from infinidev.engine.context_rank.ranker import _compute_lexical_scores
+
+        def _seed(conn):
+            _insert_file(conn, file_path="src/ranker/output.py")
+            _insert_symbol(
+                conn,
+                name="render_block",
+                qualified_name="render_block",
+                file_path="src/ranker/output.py",
+                kind="function",
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        scores = _compute_lexical_scores(
+            "inspect render block output",
+            project_id=1,
+            session_id="sess-1",
+            workspace=str(tmp_path),
+        )
+
+        assert "src/ranker/output.py" in scores
+        assert any("render_block" in target for target in scores)
+
+    def test_symbol_file_affinity_surfaces_containing_file(self, cr_db, tmp_path):
+        from infinidev.engine.context_rank.ranker import _apply_symbol_file_affinity
+
+        def _seed(conn):
+            _insert_symbol(
+                conn,
+                name="render_block",
+                qualified_name="render_block",
+                file_path="src/ranker/output.py",
+            )
+            conn.commit()
+        execute_with_retry(_seed)
+
+        scores = {"render_block": (4.0, "symbol", "lexical")}
+        boosted = _apply_symbol_file_affinity(scores, project_id=1, workspace=str(tmp_path))
+
+        assert "src/ranker/output.py" in boosted
+        assert "symbol-file" in boosted["src/ranker/output.py"][2]
+
+    def test_test_affinity_links_source_and_test_files(self, cr_db):
+        from infinidev.engine.context_rank.ranker import _apply_test_affinity
+
+        def _seed(conn):
+            _insert_file(conn, file_path="src/status.py")
+            _insert_file(conn, file_path="tests/test_status.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        scores = {"src/status.py": (3.0, "file", "seeded")}
+        boosted = _apply_test_affinity(scores, project_id=1)
+
+        assert "tests/test_status.py" in boosted
+        assert "test-affinity" in boosted["tests/test_status.py"][2]
+
+    def test_drop_missing_paths_only_removes_indexed_stale_files(self, cr_db, tmp_path):
+        from infinidev.engine.context_rank.ranker import _drop_missing_paths
+
+        live = tmp_path / "src" / "live.py"
+        live.parent.mkdir()
+        live.write_text("print('live')\n")
+
+        def _seed(conn):
+            _insert_file(conn, file_path="src/live.py")
+            _insert_file(conn, file_path="src/stale.py")
+            conn.commit()
+        execute_with_retry(_seed)
+
+        scores = {
+            "src/live.py": (2.0, "file", "seeded"),
+            "src/stale.py": (2.0, "file", "seeded"),
+            "unindexed.py": (2.0, "file", "reactive"),
+        }
+        filtered = _drop_missing_paths(scores, workspace=str(tmp_path))
+
+        assert "src/live.py" in filtered
+        assert "src/stale.py" not in filtered
+        assert "unindexed.py" in filtered
+
+
 # ── Query simplification via Zipf frequency ─────────────────────────────
 
 

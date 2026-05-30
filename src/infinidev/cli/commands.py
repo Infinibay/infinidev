@@ -77,6 +77,92 @@ def handle_command(cmd_text: str):
             click.echo("  /models list       - List available Ollama models")
             click.echo("  /models set <name> - Change current model")
         return True
+    elif cmd in ("/openai", "/codex"):
+        subcmd = parts[1].lower() if len(parts) > 1 else "status"
+        from infinidev.config.openai_auth import (
+            codex_auth_status,
+            complete_codex_oauth_flow,
+            resolve_provider_api_key,
+            start_codex_oauth_flow,
+        )
+
+        if subcmd == "use-api":
+            model = parts[2] if len(parts) > 2 else "openai/gpt-5.5"
+            if "/" not in model:
+                model = f"openai/{model}"
+            settings.save_user_settings({
+                "LLM_PROVIDER": "openai",
+                "LLM_MODEL": model,
+                "LLM_BASE_URL": "https://api.openai.com/v1",
+                "LLM_API_KEY": "",
+            })
+            from infinidev.config.settings import reload_all
+            reload_all()
+            from infinidev.config.model_capabilities import _reset_capabilities
+            _reset_capabilities()
+            click.echo(click.style(f"OpenAI API provider enabled: {model}", fg="green"))
+            click.echo("Set OPENAI_API_KEY in your environment, or set LLM_API_KEY in /settings.")
+            return True
+
+        if subcmd == "login":
+            flow = start_codex_oauth_flow()
+            click.echo(click.style("OpenAI Codex subscription OAuth:", bold=True))
+            click.echo("Open this URL in your browser, sign in, then paste the redirect URL/code with `/codex complete ...`:")
+            click.echo(flow.authorization_url)
+            return True
+
+        if subcmd == "complete":
+            value = " ".join(parts[2:])
+            if not value:
+                click.echo(click.style("Usage: /codex complete <redirect-url-or-code>", fg="yellow"))
+                return True
+            try:
+                token = complete_codex_oauth_flow(value)
+                click.echo(click.style(f"Codex OAuth authenticated ({token.plan_type or 'plan unknown'}).", fg="green"))
+            except Exception as exc:
+                click.echo(click.style(f"Codex OAuth failed: {exc}", fg="red"))
+            return True
+
+        if subcmd == "use-subscription":
+            model = parts[2] if len(parts) > 2 else "openai_codex/gpt-5.2-medium"
+            if "/" not in model:
+                model = f"openai_codex/{model}"
+            settings.save_user_settings({
+                "LLM_PROVIDER": "openai_codex",
+                "LLM_MODEL": model,
+                "LLM_BASE_URL": "https://chatgpt.com/backend-api/codex",
+                "LLM_API_KEY": "",
+            })
+            from infinidev.config.settings import reload_all
+            reload_all()
+            from infinidev.config.model_capabilities import _reset_capabilities
+            _reset_capabilities()
+            click.echo(click.style(f"OpenAI Codex subscription provider enabled: {model}", fg="green"))
+            return True
+
+        status = codex_auth_status()
+        api_key = resolve_provider_api_key("openai", settings.LLM_API_KEY)
+        click.echo(click.style("OpenAI configuration:", bold=True))
+        click.echo(f"  API key:       {'configured' if api_key else 'not configured'}")
+        click.echo(f"  Provider:      {settings.LLM_PROVIDER}")
+        click.echo(f"  Model:         {settings.LLM_MODEL}")
+        click.echo(click.style("Codex subscription OAuth:", bold=True))
+        click.echo(f"  Codex CLI:     {'available' if status.cli_available else 'not found'}")
+        if status.authenticated is True:
+            auth_text = "authenticated"
+        elif status.authenticated is False:
+            auth_text = "not authenticated"
+        else:
+            auth_text = "unknown"
+        click.echo(f"  Auth:          {auth_text}")
+        click.echo(f"  Detail:        {status.message}")
+        click.echo("\nCommands:")
+        click.echo("  /openai use-api [model]          - Use normal OpenAI API key auth")
+        click.echo("  /codex use-subscription [model]  - Use ChatGPT Codex subscription auth")
+        click.echo("  /codex login                     - Print OAuth URL")
+        click.echo("  /codex complete <url-or-code>    - Finish OAuth login")
+        click.echo("  /openai status                   - Show API/Codex auth status")
+        return True
     elif cmd in ("/exit", "/quit"):
         click.echo("Goodbye!")
         sys.exit(0)
@@ -124,6 +210,10 @@ def handle_command(cmd_text: str):
         click.echo(click.style("Available commands:", bold=True))
         click.echo("  /models            - Show current model configuration")
         click.echo("  /models set <name> - Change Ollama model (e.g., /models set llama3)")
+        click.echo("  /openai status     - Show OpenAI API and Codex OAuth status")
+        click.echo("  /openai use-api [model] - Configure normal OpenAI API key auth")
+        click.echo("  /codex login       - Print Codex subscription OAuth URL")
+        click.echo("  /codex complete <url-or-code> - Finish Codex OAuth login")
         click.echo("  /settings          - Show current settings")
         click.echo("  /settings <key>    - Show specific setting")
         click.echo("  /settings <key> <val> - Change setting")

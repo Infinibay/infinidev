@@ -204,6 +204,101 @@ _FRESH_MAX_MULT = 1.3
 _FRESH_DECAY_DAYS = 100  # smaller = faster decay; 100 gives ~30d visible effect
 _FRESH_SECONDS_PER_DAY = 86400
 
+# ── Ken-derived direct intent channels ───────────────────────────────
+
+_PATH_RE = re.compile(r"\b[\w./\-]+\.[a-zA-Z]{1,5}\b(?::\d+(?:-\d+)?)?")
+_IDENT_RE = re.compile(r"`([^`\n]+)`|\b([A-Z][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\b")
+_SNAKE_IDENT_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]*\b")
+_KNOWN_EXTS = frozenset({
+    "py", "pyi", "js", "jsx", "ts", "tsx", "json", "toml", "yaml", "yml",
+    "md", "rs", "go", "java", "c", "h", "cpp", "hpp", "cs", "php", "rb",
+    "kt", "kts", "css", "html", "xml", "sh", "bash", "sql",
+})
+_EXPLICIT_FILE_SCORE = 6.0
+_EXPLICIT_SYMBOL_SCORE = 5.5
+
+_LITERAL_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{2,}")
+_LITERAL_PAIR_LEFT = frozenset({"apply", "exec", "execute", "read", "write", "replace", "insert", "context", "max", "min"})
+_LITERAL_PAIR_RIGHT = frozenset({"patch", "command", "file", "lines", "rank", "chars", "tokens", "budget", "context"})
+_LITERAL_MAX_FILE_BYTES = 512_000
+_LITERAL_FILE_MIN_OVERLAP = 1
+_LITERAL_FILE_BASE = 1.2
+_LITERAL_FILE_SCALE = 0.6
+_LITERAL_FILE_MAX_SCORE = 3.0
+
+_LEXICAL_FILE_MIN_OVERLAP = 1
+_LEXICAL_SYMBOL_MIN_OVERLAP = 1
+_LEXICAL_FILE_SCALE = 1.4
+_LEXICAL_SYMBOL_SCALE = 1.8
+_LEXICAL_EXACT_SYMBOL_BONUS = 1.0
+_LEXICAL_KIND_BONUS = 1.2
+_LEXICAL_GENERIC_EXACT_SYMBOLS = frozenset({"chars", "class", "code", "context", "file", "source", "stats", "test"})
+_CONTEXTUAL_LEXICAL_RECENT_PROMPTS = 3
+_CONTEXTUAL_LEXICAL_BONUS = 0.6
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
+_CONTINUATION_RE = re.compile(
+    r"\b(continue|continuing|keep going|carry on|resume|sigue|seguir|continua|"
+    r"continuar|contin[uú]a|segu[ií]|seguimos)\b",
+    re.IGNORECASE,
+)
+_LEXICAL_STOPWORDS = frozenset(
+    "the and for with from into this that what where when why how fix bug error "
+    "traceback file line test tests code src function class method module "
+    "este esta esto ese esa eso con para que por los las una uno momento ahora "
+    "sigue seguir continua continuar continuemos seguimos path foco extra cual "
+    "quien donde cuando como clase codigo código fichero archivo funcion función".split()
+)
+_TOKEN_ALIASES = {
+    "scheduler": {"sched"},
+    "scheduling": {"sched"},
+    "parsear": {"parse", "parser", "parsers", "parsed"},
+    "parsea": {"parse", "parser", "parsers", "parsed"},
+    "parseo": {"parse", "parser", "parsers", "parsed"},
+    "parse": {"parser", "parsers", "parsed"},
+    "parser": {"parse", "parsers", "parsed"},
+    "parsing": {"parse", "parser", "parsers", "parsed"},
+    "archivo": {"file", "source"},
+    "fichero": {"file", "source"},
+    "codigo": {"code", "source"},
+    "código": {"code", "source"},
+    "clase": {"class"},
+}
+
+_SYMBOL_TARGET_RE = re.compile(r"^(?P<qualname>.+) \((?P<path>.+):(?P<line>\d+)\)$")
+_SYMBOL_FILE_AFFINITY_MIN_SYMBOL_SCORE = 1.5
+_SYMBOL_FILE_AFFINITY_MAX_SYMBOLS = 8
+_SYMBOL_FILE_AFFINITY_PROPAGATION = 0.35
+_SYMBOL_FILE_AFFINITY_MIN_SCORE = 0.7
+_SYMBOL_FILE_AFFINITY_MAX_SCORE = 2.0
+
+_TEST_AFFINITY_ANCHOR_MIN_SCORE = 1.0
+_TEST_AFFINITY_MAX_ANCHORS = 5
+_TEST_AFFINITY_PROPAGATION = 0.35
+_TEST_AFFINITY_MIN_SCORE = 0.5
+_TEST_SOURCE_AFFINITY_MIN_SCORE = 1.0
+
+_IMPLEMENTATION_INTENT_RE = re.compile(
+    r"\b(implement(?:ed|ation|s)?|where\s+is|where\s+are|source|logic)\b",
+    re.IGNORECASE,
+)
+_TEST_INTENT_RE = re.compile(r"\b(test|tests|testing|failing|failure|pytest|spec)\b", re.IGNORECASE)
+_IMPLEMENTATION_TEST_DEMOTE = 0.45
+_IMPLEMENTATION_SOURCE_BONUS = 0.3
+
+_LANGUAGE_INTENTS = {
+    "c": {"c"},
+    "go": {"go", "golang"},
+    "java": {"java"},
+    "javascript": {"javascript", "js"},
+    "python": {"python", "py"},
+    "rust": {"rust", "rs"},
+    "typescript": {"typescript", "ts"},
+}
+_LANGUAGE_TARGET_RE = re.compile(r"^(?:src/(?:infinidev/)?(?:code_intel/)?parsers/|tests/(?:parsers/)?test_)(?P<lang>[a-z]+)")
+_LANGUAGE_FILE_BONUS = 0.4
+_LANGUAGE_SYMBOL_BONUS = 0.3
+_LANGUAGE_MISMATCH_DEMOTE = 0.55
+
 
 # ── Outlier detection constants ──
 # MAD-based outlier detection uses ``median + K * MAD * MAD_SCALE``
@@ -364,6 +459,11 @@ def rank(
         cached_simplified_embedding=simplified_embedding,
     )
 
+    # ── Ken direct-intent fallbacks ──────────────────────────────
+    explicit = _compute_explicit_mention_scores(current_input, project_id, workspace)
+    literal = _compute_literal_content_scores(current_input, project_id, workspace)
+    lexical = _compute_lexical_scores(current_input, project_id, session_id, workspace)
+
     # ── Channel 4: Semantic findings (embedding similarity) ──────
     findings = _compute_finding_scores(query_embedding, current_input, project_id)
 
@@ -373,12 +473,17 @@ def rank(
     # docstring's first line.
 
     # ── Merge all independent channels (max per target) ──────────
-    combined = _merge_channels(blended, mentions, findings)
+    combined = _merge_channels(blended, explicit, mentions, literal, lexical, findings)
 
     # ── Post-processing boosts ───────────────────────────────────
+    combined = _apply_symbol_file_affinity(combined, project_id, workspace)
     combined = _apply_cooccurrence_boost(combined)
     combined = _apply_import_boost(combined, project_id, workspace)
+    combined = _apply_test_affinity(combined, project_id)
+    combined = _apply_implementation_intent(combined, current_input)
+    combined = _apply_language_intent(combined, current_input)
     combined = _apply_freshness_boost(combined, workspace)
+    combined = _drop_missing_paths(combined, workspace)
 
     # ── Confidence gate ──────────────────────────────────────────
     # Check the max score across ALL raw channels (pre-merge), not
@@ -386,7 +491,7 @@ def rank(
     # when there's no predictive data, but the raw signal may be strong.
     min_confidence = getattr(settings, "CONTEXT_RANK_MIN_CONFIDENCE", 0.5)
     all_raw = [
-        s for ch in (reactive, predictive, mentions, findings)
+        s for ch in (reactive, predictive, explicit, mentions, literal, lexical, findings)
         for s, _, _ in ch.values()
     ]
     if not combined or (not all_raw or max(all_raw) < min_confidence):
@@ -1144,6 +1249,409 @@ def _compute_finding_scores(
 # ``symbol_embeddings._build_symbol_text`` for the embedding format.
 
 
+# ── Ken-derived channels: explicit, literal, lexical ────────────────
+
+def _compute_explicit_mention_scores(
+    current_input: str,
+    project_id: int,
+    workspace: str | None = None,
+) -> dict[str, tuple[float, str, str]]:
+    """Score files and symbols explicitly named in the prompt."""
+    if not current_input:
+        return {}
+
+    result: dict[str, tuple[float, str, str]] = {}
+
+    raw_paths = {_strip_line_suffix(m.group(0)) for m in _PATH_RE.finditer(current_input)}
+    path_candidates = {
+        _normalize_path(p.strip("`'\"()[]{}.,;"), workspace)
+        for p in raw_paths
+        if _looks_like_source_path(p)
+    }
+    if path_candidates:
+        try:
+            def _fetch_files(conn, pid=project_id):
+                return conn.execute(
+                    "SELECT file_path FROM ci_files WHERE project_id = ?",
+                    (pid,),
+                ).fetchall()
+            rows = execute_with_retry(_fetch_files)
+        except Exception:
+            rows = []
+        indexed = {_normalize_path(r["file_path"], workspace) for r in rows}
+        for path in path_candidates:
+            if path in indexed or _path_exists(workspace, path):
+                result[path] = (_EXPLICIT_FILE_SCORE, "file", "explicit path mention")
+
+    idents: set[str] = set()
+    for match in _IDENT_RE.finditer(current_input):
+        ident = (match.group(1) or match.group(2) or "").strip()
+        if ident:
+            idents.add(ident)
+    idents.update(_SNAKE_IDENT_RE.findall(current_input))
+    idents = {i.strip("`'\"()[]{}.,;") for i in idents if len(i.strip("_")) >= _MIN_IDENT_LEN}
+
+    if idents:
+        try:
+            def _fetch_symbols(conn, pid=project_id):
+                placeholders = ",".join("?" * len(idents))
+                return conn.execute(
+                    "SELECT name, qualified_name, file_path, line_start "
+                    "FROM ci_symbols "
+                    f"WHERE project_id = ? AND (name IN ({placeholders}) "
+                    f"OR qualified_name IN ({placeholders}))",
+                    (pid, *idents, *idents),
+                ).fetchall()
+            rows = execute_with_retry(_fetch_symbols)
+        except Exception:
+            rows = []
+        for row in rows:
+            name = row["qualified_name"] or row["name"]
+            file_path = _normalize_path(row["file_path"], workspace)
+            target = _format_symbol_target(name, file_path, row["line_start"])
+            result[target] = (
+                _EXPLICIT_SYMBOL_SCORE,
+                "symbol",
+                f"explicit symbol mention: {row['name']}",
+            )
+    return result
+
+
+def _compute_literal_content_scores(
+    current_input: str,
+    project_id: int,
+    workspace: str | None = None,
+) -> dict[str, tuple[float, str, str]]:
+    """Score files containing exact API-like prompt tokens.
+
+    This rescues stringly contracts such as ``exec_command``,
+    environment names, protocol constants, and dashed CLI flags that
+    embeddings and name-token matching can miss.
+    """
+    tokens = _literal_tokens(current_input)
+    if not tokens:
+        return {}
+    if workspace is None:
+        workspace = _resolve_workspace()
+
+    try:
+        def _fetch_files(conn, pid=project_id):
+            return conn.execute(
+                "SELECT file_path FROM ci_files WHERE project_id = ?",
+                (pid,),
+            ).fetchall()
+        rows = execute_with_retry(_fetch_files)
+    except Exception:
+        return {}
+
+    result: dict[str, tuple[float, str, str]] = {}
+    for row in rows:
+        path = _normalize_path(row["file_path"], workspace)
+        if not _literal_candidate_path(path):
+            continue
+        abs_path = path if os.path.isabs(path) else os.path.join(workspace, path)
+        try:
+            if not os.path.isfile(abs_path) or os.path.getsize(abs_path) > _LITERAL_MAX_FILE_BYTES:
+                continue
+            with open(abs_path, encoding="utf-8", errors="ignore") as f:
+                text = f.read().lower()
+        except OSError:
+            continue
+        overlap = {token for token in tokens if token.lower() in text}
+        if len(overlap) < _LITERAL_FILE_MIN_OVERLAP:
+            continue
+        score = min(_LITERAL_FILE_MAX_SCORE, _LITERAL_FILE_BASE + _LITERAL_FILE_SCALE * len(overlap))
+        result[path] = (score, "file", f"literal:{','.join(sorted(overlap)[:3])}")
+    return result
+
+
+def _compute_lexical_scores(
+    current_input: str,
+    project_id: int,
+    session_id: str,
+    workspace: str | None = None,
+) -> dict[str, tuple[float, str, str]]:
+    """Name-token fallback for plain-language code descriptions."""
+    project_stopwords = _project_stopwords(workspace)
+    query_tokens = _name_tokens(current_input, extra_stopwords=project_stopwords)
+    reason_prefix = "lexical"
+    score_bonus = 0.0
+    if not query_tokens or _CONTINUATION_RE.search(current_input):
+        context_tokens = _recent_session_prompt_tokens(
+            session_id,
+            current_input,
+            extra_stopwords=project_stopwords,
+        )
+        if context_tokens:
+            query_tokens |= context_tokens
+            reason_prefix = "lexical-context"
+            score_bonus = _CONTEXTUAL_LEXICAL_BONUS
+    if not query_tokens:
+        return {}
+
+    result: dict[str, tuple[float, str, str]] = {}
+    result.update(_lexical_file_scores(
+        query_tokens,
+        project_id,
+        workspace,
+        reason_prefix=reason_prefix,
+        score_bonus=score_bonus,
+        extra_stopwords=project_stopwords,
+    ))
+    result.update(_lexical_symbol_scores(
+        query_tokens,
+        project_id,
+        workspace,
+        reason_prefix=reason_prefix,
+        score_bonus=score_bonus,
+        extra_stopwords=project_stopwords,
+    ))
+    return result
+
+
+def _lexical_file_scores(
+    query_tokens: set[str],
+    project_id: int,
+    workspace: str | None,
+    *,
+    reason_prefix: str,
+    score_bonus: float,
+    extra_stopwords: set[str] | None,
+) -> dict[str, tuple[float, str, str]]:
+    try:
+        def _fetch(conn, pid=project_id):
+            return conn.execute(
+                "SELECT file_path FROM ci_files WHERE project_id = ?",
+                (pid,),
+            ).fetchall()
+        rows = execute_with_retry(_fetch)
+    except Exception:
+        return {}
+
+    out: dict[str, tuple[float, str, str]] = {}
+    for row in rows:
+        path = _normalize_path(row["file_path"], workspace)
+        tokens = _name_tokens(path, extra_stopwords=extra_stopwords)
+        overlap = query_tokens & tokens
+        if len(overlap) < _LEXICAL_FILE_MIN_OVERLAP:
+            continue
+        score = min(_LEXICAL_FILE_SCALE + score_bonus, 0.6 + 0.4 * len(overlap) + score_bonus)
+        out[path] = (score, "file", f"{reason_prefix}:{','.join(sorted(overlap)[:3])}")
+    return out
+
+
+def _lexical_symbol_scores(
+    query_tokens: set[str],
+    project_id: int,
+    workspace: str | None,
+    *,
+    reason_prefix: str,
+    score_bonus: float,
+    extra_stopwords: set[str] | None,
+) -> dict[str, tuple[float, str, str]]:
+    try:
+        def _fetch(conn, pid=project_id):
+            return conn.execute(
+                "SELECT name, qualified_name, kind, file_path, line_start "
+                "FROM ci_symbols WHERE project_id = ?",
+                (pid,),
+            ).fetchall()
+        rows = execute_with_retry(_fetch)
+    except Exception:
+        return {}
+
+    out: dict[str, tuple[float, str, str]] = {}
+    for row in rows:
+        kind = str(row["kind"] or "")
+        name = str(row["name"] or "")
+        qual = str(row["qualified_name"] or name)
+        tokens = _name_tokens(f"{kind} {qual} {name}", extra_stopwords=extra_stopwords)
+        overlap = query_tokens & tokens
+        if len(overlap) < _LEXICAL_SYMBOL_MIN_OVERLAP:
+            continue
+        exact_name = name.strip("_").lower()
+        exact_bonus = (
+            _LEXICAL_EXACT_SYMBOL_BONUS
+            if exact_name in query_tokens and exact_name not in _LEXICAL_GENERIC_EXACT_SYMBOLS
+            else 0.0
+        )
+        kind_bonus = _LEXICAL_KIND_BONUS if kind.lower() in query_tokens else 0.0
+        score = min(
+            _LEXICAL_SYMBOL_SCALE + _LEXICAL_EXACT_SYMBOL_BONUS + _LEXICAL_KIND_BONUS + score_bonus,
+            0.8 + 0.5 * len(overlap) + exact_bonus + kind_bonus + score_bonus,
+        )
+        reason = f"{reason_prefix}:{','.join(sorted(overlap)[:3])}"
+        if exact_bonus:
+            reason += "+exact"
+        if kind_bonus:
+            reason += "+kind"
+        file_path = _normalize_path(row["file_path"], workspace)
+        target = _format_symbol_target(qual, file_path, row["line_start"])
+        out[target] = (score, "symbol", reason)
+    return out
+
+
+# ── Post-processing: Ken-derived affinity and intent boosts ─────────
+
+def _apply_symbol_file_affinity(
+    scores: dict[str, tuple[float, str, str]],
+    project_id: int,
+    workspace: str | None = None,
+) -> dict[str, tuple[float, str, str]]:
+    """Surface containing files for high-confidence symbol hits."""
+    symbols = [
+        (target, score)
+        for target, (score, target_type, _) in scores.items()
+        if target_type == "symbol" and score >= _SYMBOL_FILE_AFFINITY_MIN_SYMBOL_SCORE
+    ]
+    symbols.sort(key=lambda x: x[1], reverse=True)
+    best_by_path: dict[str, tuple[float, str]] = {}
+    for symbol_target, symbol_score in symbols[:_SYMBOL_FILE_AFFINITY_MAX_SYMBOLS]:
+        path = _symbol_file_path(symbol_target, project_id, workspace)
+        if not path:
+            continue
+        contribution = min(
+            _SYMBOL_FILE_AFFINITY_MAX_SCORE,
+            max(_SYMBOL_FILE_AFFINITY_MIN_SCORE, symbol_score * _SYMBOL_FILE_AFFINITY_PROPAGATION),
+        )
+        current = best_by_path.get(path)
+        if current is None or contribution > current[0]:
+            best_by_path[path] = (contribution, symbol_target)
+
+    for path, (contribution, symbol_target) in best_by_path.items():
+        if path in scores:
+            score, target_type, reason = scores[path]
+            scores[path] = (score + contribution, target_type, _append_reason(reason, f"symbol-file+{contribution:.1f}"))
+        else:
+            scores[path] = (contribution, "file", f"symbol-file({symbol_target})")
+    return scores
+
+
+def _apply_test_affinity(
+    scores: dict[str, tuple[float, str, str]],
+    project_id: int,
+) -> dict[str, tuple[float, str, str]]:
+    """Surface obvious source/test counterparts for strong file anchors."""
+    anchors = [
+        (target, score)
+        for target, (score, target_type, _) in scores.items()
+        if target_type == "file" and score >= _TEST_AFFINITY_ANCHOR_MIN_SCORE
+    ]
+    anchors.sort(key=lambda x: x[1], reverse=True)
+    anchors = anchors[:_TEST_AFFINITY_MAX_ANCHORS]
+    if not anchors:
+        return scores
+    try:
+        def _fetch(conn, pid=project_id):
+            return conn.execute(
+                "SELECT file_path FROM ci_files WHERE project_id = ?",
+                (pid,),
+            ).fetchall()
+        rows = execute_with_retry(_fetch)
+    except Exception:
+        return scores
+    all_paths = [r["file_path"] for r in rows]
+
+    for anchor, anchor_score in anchors:
+        test_to_source = _is_test_path(anchor)
+        related = (
+            _related_source_files(anchor, all_paths)
+            if test_to_source
+            else _related_tests(anchor, all_paths)
+        )
+        if not related:
+            continue
+        min_score = _TEST_SOURCE_AFFINITY_MIN_SCORE if test_to_source else _TEST_AFFINITY_MIN_SCORE
+        contribution = max(min_score, anchor_score * _TEST_AFFINITY_PROPAGATION)
+        for path in related:
+            if path in scores:
+                score, target_type, reason = scores[path]
+                scores[path] = (score + contribution, target_type, _append_reason(reason, f"test-affinity+{contribution:.1f}"))
+            else:
+                scores[path] = (contribution, "file", f"test-affinity({anchor})")
+    return scores
+
+
+def _apply_implementation_intent(
+    scores: dict[str, tuple[float, str, str]],
+    current_input: str,
+) -> dict[str, tuple[float, str, str]]:
+    """Prefer implementation files over tests for source-location prompts."""
+    if _TEST_INTENT_RE.search(current_input) or _IMPLEMENTATION_INTENT_RE.search(current_input) is None:
+        return scores
+    for target, (score, target_type, reason) in list(scores.items()):
+        if target_type != "file":
+            continue
+        if _is_test_path(target):
+            scores[target] = (
+                score * _IMPLEMENTATION_TEST_DEMOTE,
+                target_type,
+                _append_reason(reason, f"impl-intent×{_IMPLEMENTATION_TEST_DEMOTE:.2f}"),
+            )
+        else:
+            scores[target] = (
+                score + _IMPLEMENTATION_SOURCE_BONUS,
+                target_type,
+                _append_reason(reason, f"impl-intent+{_IMPLEMENTATION_SOURCE_BONUS:.1f}"),
+            )
+    return scores
+
+
+def _apply_language_intent(
+    scores: dict[str, tuple[float, str, str]],
+    current_input: str,
+) -> dict[str, tuple[float, str, str]]:
+    """Prefer parser files/symbols for languages explicitly named in the prompt."""
+    wanted = _prompt_languages(current_input)
+    if not wanted:
+        return scores
+    for target, (score, target_type, reason) in list(scores.items()):
+        path = target if target_type == "file" else _symbol_target_path(target)
+        if not path:
+            continue
+        lang = _parser_path_language(path)
+        if lang is None:
+            continue
+        if lang in wanted:
+            bonus = _LANGUAGE_FILE_BONUS if target_type == "file" else _LANGUAGE_SYMBOL_BONUS
+            scores[target] = (score + bonus, target_type, _append_reason(reason, f"lang-intent+{bonus:.1f}"))
+        else:
+            scores[target] = (
+                score * _LANGUAGE_MISMATCH_DEMOTE,
+                target_type,
+                _append_reason(reason, f"lang-intent×{_LANGUAGE_MISMATCH_DEMOTE:.2f}"),
+            )
+    return scores
+
+
+def _drop_missing_paths(
+    scores: dict[str, tuple[float, str, str]],
+    workspace: str | None = None,
+) -> dict[str, tuple[float, str, str]]:
+    """Remove indexed files/symbols whose indexed path no longer exists."""
+    if workspace is None:
+        workspace = _resolve_workspace()
+    try:
+        def _fetch_indexed(conn):
+            return conn.execute("SELECT file_path FROM ci_files").fetchall()
+        indexed_paths = {
+            _normalize_path(row["file_path"], workspace)
+            for row in execute_with_retry(_fetch_indexed)
+        }
+    except Exception:
+        indexed_paths = set()
+    filtered: dict[str, tuple[float, str, str]] = {}
+    for target, data in scores.items():
+        _score, target_type, _reason = data
+        if target_type == "finding":
+            filtered[target] = data
+            continue
+        path = target if target_type == "file" else _symbol_target_path(target)
+        if path is None or path not in indexed_paths or _path_exists(workspace, path):
+            filtered[target] = data
+    return filtered
+
+
 # ── Post-processing: Co-occurrence boost ────────────────────────────
 
 def _apply_cooccurrence_boost(
@@ -1353,6 +1861,235 @@ def _normalize_path(path: str, workspace: str | None = None) -> str:
         if path.startswith(ws + "/"):
             return path[len(ws) + 1:]
     return path
+
+
+def _path_exists(workspace: str | None, rel: str) -> bool:
+    try:
+        path = rel if os.path.isabs(rel) else os.path.join(workspace or _resolve_workspace(), rel)
+        return os.path.exists(path)
+    except OSError:
+        return False
+
+
+def _strip_line_suffix(raw: str) -> str:
+    return re.sub(r":\d+(?:-\d+)?$", "", raw)
+
+
+def _looks_like_source_path(path: str) -> bool:
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    return ext in _KNOWN_EXTS
+
+
+def _format_symbol_target(name: str, file_path: str | None, line_start: Any) -> str:
+    if file_path and line_start:
+        try:
+            line = int(line_start)
+            return f"{name} ({file_path}:{line})"
+        except (TypeError, ValueError):
+            pass
+    return name
+
+
+def _symbol_target_path(target: str) -> str | None:
+    match = _SYMBOL_TARGET_RE.match(target)
+    if match:
+        return match.group("path")
+    return None
+
+
+def _symbol_file_path(
+    target: str,
+    project_id: int,
+    workspace: str | None = None,
+) -> str | None:
+    path = _symbol_target_path(target)
+    if path:
+        return _normalize_path(path, workspace)
+    try:
+        def _query(conn, pid=project_id, t=target):
+            return conn.execute(
+                "SELECT file_path FROM ci_symbols "
+                "WHERE project_id = ? AND (qualified_name = ? OR name = ?) "
+                "ORDER BY line_start LIMIT 1",
+                (pid, t, t),
+            ).fetchone()
+        row = execute_with_retry(_query)
+    except Exception:
+        return None
+    return None if row is None else _normalize_path(row["file_path"], workspace)
+
+
+def _literal_candidate_path(path: str) -> bool:
+    # Avoid benchmark answer keys and generated model/data artifacts.
+    return not (
+        path.startswith("examples/bench/")
+        or path.startswith("finetune/output/")
+        or path.startswith("finetune/repos/")
+    )
+
+
+def _literal_tokens(prompt: str) -> set[str]:
+    raw_list = [
+        token.strip("`'\"()[]{}").lower()
+        for token in _LITERAL_TOKEN_RE.findall(prompt)
+    ]
+    raw = set(raw_list)
+    out: set[str] = set()
+    stopwords = _COMMON_WORDS | _LEXICAL_STOPWORDS
+    for token in raw:
+        if len(token) < 4 or token in stopwords:
+            continue
+        if "_" in token or "." in token or "-" in token:
+            out.add(token)
+    meaningful = [
+        token
+        for token in raw_list
+        if len(token) >= 3 and token not in stopwords
+    ]
+    for left, right in zip(meaningful, meaningful[1:]):
+        if left in _LITERAL_PAIR_LEFT or right in _LITERAL_PAIR_RIGHT:
+            out.add(f"{left}_{right}")
+            out.add(f"{left}-{right}")
+    return out
+
+
+def _name_tokens(text: str, *, extra_stopwords: set[str] | None = None) -> set[str]:
+    parts: set[str] = set()
+    normalized = text.replace("-", "_").replace(".", "_").replace("/", "_")
+    for raw in _WORD_RE.findall(normalized):
+        for piece in raw.split("_"):
+            parts.update(_split_camel(piece))
+    raw_tokens = {p.lower() for p in parts if len(p) >= 3}
+    stopwords = _LEXICAL_STOPWORDS if not extra_stopwords else _LEXICAL_STOPWORDS | extra_stopwords
+    tokens = {p for p in raw_tokens if p not in stopwords}
+    for token in raw_tokens:
+        tokens.update(_TOKEN_ALIASES.get(token, set()))
+    return tokens
+
+
+def _split_camel(text: str) -> list[str]:
+    return re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)|\d+", text)
+
+
+def _project_stopwords(workspace: str | None) -> set[str]:
+    if not workspace:
+        return set()
+    tokens = _name_tokens(os.path.basename(os.path.abspath(workspace)))
+    return {token for token in tokens if len(token) >= 3}
+
+
+def _recent_session_prompt_tokens(
+    session_id: str,
+    current_prompt: str,
+    *,
+    extra_stopwords: set[str] | None = None,
+) -> set[str]:
+    try:
+        def _fetch(conn, sid=session_id):
+            return conn.execute(
+                "SELECT content FROM cr_contexts "
+                "WHERE session_id = ? AND context_type IN ('task_input', 'user_prompt') "
+                "ORDER BY id DESC LIMIT ?",
+                (sid, _CONTEXTUAL_LEXICAL_RECENT_PROMPTS + 1),
+            ).fetchall()
+        rows = execute_with_retry(_fetch)
+    except Exception:
+        return set()
+    tokens: set[str] = set()
+    skipped_current = False
+    used = 0
+    for row in rows:
+        content = str(row["content"])
+        if not skipped_current and content == current_prompt:
+            skipped_current = True
+            continue
+        tokens.update(_name_tokens(content, extra_stopwords=extra_stopwords))
+        used += 1
+        if used >= _CONTEXTUAL_LEXICAL_RECENT_PROMPTS:
+            break
+    return tokens
+
+
+def _related_tests(source_path: str, all_paths: list[str]) -> list[str]:
+    stem = source_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    if not stem or stem.startswith("test_"):
+        return []
+    candidates = {
+        f"test_{stem}.py", f"{stem}_test.py", f"{stem}.test.py",
+        f"test_{stem}.ts", f"{stem}.test.ts", f"{stem}.spec.ts",
+        f"test_{stem}.js", f"{stem}.test.js", f"{stem}.spec.js",
+    }
+    out = [
+        path for path in all_paths
+        if path.rsplit("/", 1)[-1] in candidates
+        or (_is_test_path(path) and stem.lower() in path.rsplit("/", 1)[-1].lower())
+    ]
+    return sorted(set(out))
+
+
+def _related_source_files(test_path: str, all_paths: list[str]) -> list[str]:
+    stem = _source_stem_from_test(test_path)
+    if not stem:
+        return []
+    candidates = {
+        f"{stem}.py", f"{stem}.pyi", f"{stem}.ts", f"{stem}.tsx",
+        f"{stem}.js", f"{stem}.jsx", f"{stem}.go", f"{stem}.rs",
+        f"{stem}.java",
+    }
+    return sorted({
+        path for path in all_paths
+        if not _is_test_path(path) and path.rsplit("/", 1)[-1] in candidates
+    })
+
+
+def _source_stem_from_test(path: str) -> str:
+    name = path.rsplit("/", 1)[-1]
+    stem = name.rsplit(".", 1)[0]
+    for suffix in (".test", ".spec", "_test"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    if stem.startswith("test_"):
+        stem = stem[5:]
+    return stem
+
+
+def _is_test_path(path: str) -> bool:
+    lower = path.lower()
+    name = lower.rsplit("/", 1)[-1]
+    return (
+        "/test/" in lower
+        or "/tests/" in lower
+        or lower.startswith("test/")
+        or lower.startswith("tests/")
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
+def _prompt_languages(prompt: str) -> set[str]:
+    tokens = {token.lower() for token in re.findall(r"[A-Za-z][A-Za-z0-9_+-]*", prompt)}
+    out: set[str] = set()
+    for lang, aliases in _LANGUAGE_INTENTS.items():
+        if tokens & aliases:
+            out.add(lang)
+    return out
+
+
+def _parser_path_language(path: str) -> str | None:
+    match = _LANGUAGE_TARGET_RE.match(path)
+    if not match:
+        return None
+    lang = match.group("lang")
+    return lang if lang in _LANGUAGE_INTENTS else None
+
+
+def _append_reason(existing: str, more: str) -> str:
+    if not existing:
+        return more
+    return f"{existing} + {more}"
 
 
 # ── Merge & helpers ──────────────────────────────────────────────────

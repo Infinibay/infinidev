@@ -22,7 +22,7 @@ class ProviderConfig:
     default_base_url: str
     api_key_required: bool = True
     base_url_editable: bool = False
-    model_list_format: str = "static"        # ollama, openai, anthropic, gemini, static
+    model_list_format: str = "static"        # ollama, openai, anthropic, gemini, codex, static
     static_models: list[str] = field(default_factory=list)
     is_native: bool = False                  # LiteLLM handles endpoint natively
 
@@ -47,8 +47,33 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=True,
         static_models=[
-            "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
+            "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
+            "gpt-5.3-codex", "gpt-5.3-codex-spark",
             "o3", "o3-pro", "o3-mini", "o4-mini",
+        ],
+    ),
+    "openai_codex": ProviderConfig(
+        id="openai_codex",
+        display_name="OpenAI Codex Subscription",
+        prefix="openai_codex/",
+        default_base_url="https://chatgpt.com/backend-api/codex",
+        api_key_required=False,
+        model_list_format="codex",
+        static_models=[
+            "gpt-5.5", "gpt-5.5-none", "gpt-5.5-low", "gpt-5.5-medium",
+            "gpt-5.5-high", "gpt-5.5-xhigh",
+            "gpt-5.2", "gpt-5.2-none", "gpt-5.2-low", "gpt-5.2-medium",
+            "gpt-5.2-high", "gpt-5.2-xhigh",
+            "gpt-5.2-codex", "gpt-5.2-codex-low", "gpt-5.2-codex-medium",
+            "gpt-5.2-codex-high", "gpt-5.2-codex-xhigh",
+            "gpt-5.1-codex-max", "gpt-5.1-codex-max-low",
+            "gpt-5.1-codex-max-medium", "gpt-5.1-codex-max-high",
+            "gpt-5.1-codex-max-xhigh", "gpt-5.1-codex", "gpt-5.1-codex-low",
+            "gpt-5.1-codex-medium", "gpt-5.1-codex-high",
+            "gpt-5.1-codex-mini", "gpt-5.1-codex-mini-medium",
+            "gpt-5.1-codex-mini-high", "gpt-5.1", "gpt-5.1-none",
+            "gpt-5.1-low", "gpt-5.1-medium", "gpt-5.1-high",
+            "codex-mini-latest", "gpt-5-codex", "gpt-5-codex-mini", "gpt-5",
         ],
     ),
     "anthropic": ProviderConfig(
@@ -242,6 +267,9 @@ def fetch_models(
             return _fetch_anthropic(url, api_key, provider.prefix)
         elif provider.model_list_format == "gemini":
             return _fetch_gemini(url, api_key, provider.prefix)
+        elif provider.model_list_format == "codex":
+            from infinidev.config.codex_subscription import fetch_models as _fetch_codex
+            return _fetch_codex(provider.prefix, url)
         else:
             return [f"{provider.prefix}{m}" for m in provider.static_models]
     except Exception as exc:

@@ -1,0 +1,57 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ken hook session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ken hook user-prompt"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|functions.exec_command|functions.apply_patch|functions.view_image",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ken hook tool-call --phase pre"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch|functions.exec_command|functions.apply_patch|functions.view_image",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ken hook tool-call --phase post"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ken hook stop"
+          }
+        ]
+      }
+    ]
+  }
+}

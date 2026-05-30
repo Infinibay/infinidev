@@ -30,16 +30,19 @@ DIALOG_NAME = "settings_editor"
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
-        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
+        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,openai_codex,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
         ("LLM_MODEL", "LLM model", "select_dynamic:provider_models"),
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
+        ("CODEX_OAUTH_START", "Generate and copy ChatGPT OAuth URL for Codex subscription", "codex_oauth_start"),
+        ("CODEX_OAUTH_CODE", "Paste the OAuth redirect URL or code from the browser", "codex_oauth_code"),
+        ("CODEX_OAUTH_STATUS", "Codex subscription OAuth status", "codex_oauth_status"),
         ("LLM_TIMEOUT", "LLM request timeout in seconds", "int"),
     ],
     "Assistant LLM": [
         ("ASSISTANT_LLM_ENABLED", "Enable pair-programming critic (runs in parallel)", "bool"),
         ("ASSISTANT_LLM_PROVIDER", "Assistant provider (empty = reuse main)",
-         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
+         "select:,ollama,llama_cpp,vllm,openai,openai_codex,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
         ("ASSISTANT_LLM_MODEL", "Assistant model", "select_dynamic:assistant_models"),
         ("ASSISTANT_LLM_BASE_URL", "Assistant API base URL (auto-filled)", "str"),
         ("ASSISTANT_LLM_API_KEY", "Assistant API key (auto-filled)", "str"),
@@ -134,7 +137,7 @@ def _build_behavior_section() -> list[tuple[str, str, str]]:
          "int"),
         # Independent LLM endpoint for the judge — empty = reuse main LLM_*
         ("BEHAVIOR_LLM_PROVIDER", "Behavior judge provider (empty = reuse main)",
-         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
+         "select:,ollama,llama_cpp,vllm,openai,openai_codex,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,openai_compatible"),
         ("BEHAVIOR_LLM_MODEL", "Behavior judge model", "select_dynamic:behavior_models"),
         ("BEHAVIOR_LLM_BASE_URL", "Behavior judge API base URL (auto-filled)", "str"),
         ("BEHAVIOR_LLM_API_KEY", "Behavior judge API key (auto-filled)", "str"),
@@ -174,6 +177,9 @@ class SettingsEditorState:
         self._behavior_models: list[str] | None = None  # cached model list (behavior judge)
         self._assistant_models: list[str] | None = None  # cached model list (assistant critic)
         self._pending_changes: dict[str, str] = {}  # unsaved changes for cross-field deps
+        self.codex_oauth_url: str = ""
+        self.codex_oauth_message: str = ""
+        self.codex_oauth_error: str = ""
 
         # Dropdown picker state
         self.dropdown_open: bool = False
@@ -206,7 +212,17 @@ class SettingsEditorState:
 
     @property
     def current_settings(self) -> list[tuple[str, str, str]]:
-        return SETTINGS_SECTIONS.get(self.current_section, [])
+        rows = SETTINGS_SECTIONS.get(self.current_section, [])
+        if self.current_section != "LLM":
+            return rows
+        try:
+            from infinidev.config.settings import settings
+            provider_id = self._pending_changes.get("LLM_PROVIDER", settings.LLM_PROVIDER)
+        except Exception:
+            provider_id = ""
+        if provider_id == "openai_codex":
+            return rows
+        return [row for row in rows if not row[0].startswith("CODEX_OAUTH_")]
 
     @property
     def current_setting(self) -> tuple[str, str, str] | None:
@@ -216,11 +232,30 @@ class SettingsEditorState:
         return None
 
     def _get_value(self, key: str) -> Any:
+        if key == "CODEX_OAUTH_START":
+            return self.codex_oauth_url or "Start OAuth"
+        if key == "CODEX_OAUTH_CODE":
+            return ""
+        if key == "CODEX_OAUTH_STATUS":
+            return self._codex_oauth_status_text()
         try:
             from infinidev.config.settings import settings
             return getattr(settings, key, "?")
         except Exception:
             return "?"
+
+    def _codex_oauth_status_text(self) -> str:
+        if self.codex_oauth_error:
+            return self.codex_oauth_error
+        if self.codex_oauth_message:
+            return self.codex_oauth_message
+        try:
+            from infinidev.config.openai_auth import load_codex_oauth_token
+            token = load_codex_oauth_token(refresh_if_needed=False)
+            suffix = f" ({token.plan_type})" if token.plan_type else ""
+            return f"Authenticated{suffix}"
+        except Exception:
+            return "Not authenticated"
 
     def move_section(self, delta: int) -> None:
         self.section_cursor = max(0, min(len(self.sections) - 1, self.section_cursor + delta))
@@ -366,6 +401,20 @@ class SettingsEditorState:
         key, desc, stype = setting
         value = self._get_value(key)
 
+        if stype == "codex_oauth_start":
+            self.start_codex_oauth()
+            return
+
+        if stype == "codex_oauth_code":
+            self.editing = True
+            self.edit_buffer.set_document(Document(""), bypass_readonly=True)
+            if self._on_edit_start:
+                self._on_edit_start()
+            return
+
+        if stype == "codex_oauth_status":
+            return
+
         if stype == "bool":
             # Toggle immediately
             new_val = not bool(value)
@@ -444,7 +493,10 @@ class SettingsEditorState:
         if not setting:
             return
         key, desc, stype = setting
-        self._save(key, self.edit_buffer.text)
+        if stype == "codex_oauth_code":
+            self.complete_codex_oauth(self.edit_buffer.text)
+        else:
+            self._save(key, self.edit_buffer.text)
         self.editing = False
         # Move focus back to settings panel — the edit buffer is now hidden
         # and leaving focus there hangs prompt_toolkit.
@@ -495,6 +547,67 @@ class SettingsEditorState:
         self._dropdown_key = ""
         if self._on_focus_change:
             self._on_focus_change("settings")
+
+    def start_codex_oauth(self) -> None:
+        """Start ChatGPT OAuth, copy the URL, and expose it in the panel."""
+        try:
+            from infinidev.config.openai_auth import start_codex_oauth_flow
+            from infinidev.ui.clipboard import copy_to_clipboard
+            flow = start_codex_oauth_flow()
+            self.codex_oauth_url = flow.authorization_url
+            try:
+                copied = copy_to_clipboard(flow.authorization_url)
+            except Exception:
+                copied = False
+            if copied:
+                self.codex_oauth_message = (
+                    "OAuth URL copied to clipboard. Open it, sign in, "
+                    "then paste redirect/code below"
+                )
+            else:
+                self.codex_oauth_message = (
+                    "OAuth URL generated, but automatic copy failed. "
+                    "Terminal may block OSC52; copy it from the wrapped URL below"
+                )
+            self.codex_oauth_error = ""
+        except Exception as exc:
+            self.codex_oauth_error = f"OAuth start failed: {exc}"
+
+    def complete_codex_oauth(self, value: str) -> None:
+        """Complete ChatGPT OAuth and verify it against the Codex API."""
+        try:
+            from infinidev.config.openai_auth import complete_codex_oauth_flow
+            from infinidev.config.codex_subscription import (
+                fetch_models as fetch_codex_models,
+                fetch_remote_model_slugs,
+            )
+            from infinidev.config.settings import settings, reload_all
+
+            token = complete_codex_oauth_flow(value)
+            remote_models = fetch_remote_model_slugs()
+            if not remote_models:
+                raise RuntimeError("OAuth succeeded, but Codex returned no account models.")
+            models = fetch_codex_models()
+            if not models:
+                raise RuntimeError("OAuth succeeded, but no Codex presets are available.")
+
+            current_model = self._pending_changes.get("LLM_MODEL", settings.LLM_MODEL)
+            selected_model = current_model if current_model in models else models[0]
+            if selected_model != settings.LLM_MODEL:
+                settings.save_user_settings({"LLM_MODEL": selected_model})
+                reload_all()
+            self._pending_changes["LLM_MODEL"] = selected_model
+            self._ollama_models = models
+
+            suffix = f" ({token.plan_type})" if token.plan_type else ""
+            model_label = selected_model.split("/", 1)[1] if "/" in selected_model else selected_model
+            self.codex_oauth_message = (
+                f"Authenticated{suffix}. Backend reports {len(remote_models)} model(s); "
+                f"{len(models)} preset(s) available. Using {model_label}"
+            )
+            self.codex_oauth_error = ""
+        except Exception as exc:
+            self.codex_oauth_error = f"OAuth failed: {exc}"
 
     def _save(self, key: str, value: str) -> None:
         """Save a setting value."""
@@ -560,8 +673,10 @@ class SettingsEditorState:
             updates["LLM_BASE_URL"] = provider.default_base_url
         # Clear model — old model won't be valid for new provider
         updates["LLM_MODEL"] = ""
-        # Set API key: "ollama" placeholder for local, empty for cloud providers
-        if not provider.api_key_required:
+        if provider_id == "openai_codex":
+            updates["LLM_MODEL"] = "openai_codex/gpt-5.2-medium"
+            updates["LLM_API_KEY"] = ""
+        elif not provider.api_key_required:
             updates["LLM_API_KEY"] = "ollama"
         else:
             # Clear the key so user must enter their own — don't send "ollama" to cloud APIs

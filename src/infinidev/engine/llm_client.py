@@ -236,6 +236,18 @@ def call_llm(
     import litellm
     from infinidev.config.model_capabilities import get_model_capabilities
 
+    if settings.LLM_PROVIDER == "openai_codex":
+        from infinidev.config.codex_subscription import completion as codex_completion
+        return codex_completion(
+            params=params,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            stream=on_thinking_chunk is not None,
+            on_thinking_chunk=on_thinking_chunk,
+            on_stream_status=on_stream_status,
+        )
+
     caps = get_model_capabilities()
 
     kwargs: dict[str, Any] = {**params, "messages": messages}

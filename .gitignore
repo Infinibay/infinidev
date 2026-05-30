@@ -52,3 +52,7 @@ finetune/output/finetune.db
 finetune/output/training_log*.txt
 finetune/__pycache__/
 unsloth_compiled_cache/
+
+
+# ken — local index, daemon socket, logs
+.ken/
