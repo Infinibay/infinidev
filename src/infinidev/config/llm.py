@@ -6,7 +6,6 @@ import logging
 import re
 from typing import Any
 from infinidev.config.settings import settings
-from infinidev.config.openai_auth import resolve_provider_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -79,27 +78,6 @@ def _install_global_response_normalizer() -> None:
         _original = litellm.completion
 
         def _wrapped(*args: Any, **kwargs: Any) -> Any:
-            model = str(kwargs.get("model") or (args[0] if args else ""))
-            if model.startswith("openai_codex/"):
-                from infinidev.config.codex_subscription import (
-                    completion as _codex_completion,
-                    response_to_stream_chunks as _codex_stream_chunks,
-                )
-                stream = bool(kwargs.get("stream"))
-                params = {
-                    k: v for k, v in kwargs.items()
-                    if k not in {"messages", "tools", "tool_choice", "stream"}
-                }
-                params.setdefault("model", model)
-                response = _codex_completion(
-                    params=params,
-                    messages=kwargs.get("messages") or [],
-                    tools=kwargs.get("tools"),
-                    tool_choice=kwargs.get("tool_choice", "auto"),
-                    stream=stream,
-                )
-                return _codex_stream_chunks(response) if stream else response
-
             response = _original(*args, **kwargs)
             if kwargs.get("stream"):
                 return response
@@ -208,7 +186,6 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
     provider_id = (settings.REVIEW_EXTRACTOR_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
     api_key = (settings.REVIEW_EXTRACTOR_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
     base_url = (settings.REVIEW_EXTRACTOR_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
-    api_key = resolve_provider_api_key(provider_id, api_key)
 
     params: dict[str, Any] = {"model": model}
     if api_key:
@@ -264,7 +241,6 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
     provider_id = (settings.BEHAVIOR_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
     api_key = (settings.BEHAVIOR_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
     base_url = (settings.BEHAVIOR_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
-    api_key = resolve_provider_api_key(provider_id, api_key)
 
     params: dict[str, Any] = {"model": model}
     if api_key:
@@ -323,7 +299,6 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
     provider_id = (settings.ASSISTANT_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
     api_key = (settings.ASSISTANT_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
     base_url = (settings.ASSISTANT_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
-    api_key = resolve_provider_api_key(provider_id, api_key)
 
     params: dict[str, Any] = {"model": model}
     if api_key:
@@ -374,9 +349,8 @@ def get_litellm_params() -> dict[str, Any]:
 
     params: dict[str, Any] = {"model": model}
 
-    api_key = resolve_provider_api_key(settings.LLM_PROVIDER, settings.LLM_API_KEY)
-    if api_key:
-        params["api_key"] = api_key
+    if settings.LLM_API_KEY:
+        params["api_key"] = settings.LLM_API_KEY
 
     if settings.LLM_BASE_URL and not _is_native_provider(model):
         params["api_base"] = settings.LLM_BASE_URL

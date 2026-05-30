@@ -103,12 +103,6 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
         supports_json_mode=True,
         probed=True,
     ),
-    "openai_codex": ModelCapabilities(
-        supports_function_calling=True,
-        supports_tool_choice_required=True,
-        supports_json_mode=True,
-        probed=True,
-    ),
     "anthropic": ModelCapabilities(
         supports_function_calling=True,
         supports_tool_choice_required=True,

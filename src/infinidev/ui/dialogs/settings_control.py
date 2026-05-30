@@ -8,7 +8,7 @@ from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEventType
 
 from infinidev.ui.theme import (
-    PRIMARY, TEXT, TEXT_MUTED, ACCENT, SUCCESS, ERROR,
+    PRIMARY, TEXT, TEXT_MUTED, ACCENT, SUCCESS,
     SURFACE_LIGHT,
 )
 from infinidev.ui.dialogs.settings_editor_state import SettingsEditorState
@@ -83,7 +83,6 @@ class SettingsControl(UIControl):
                        preview_search: bool = False) -> UIContent:
         settings = self._state.current_settings
         lines = []
-        selected_line = 0
         active_panel = self._state.focus_panel == "settings"
 
         for i, (key, desc, stype) in enumerate(settings):
@@ -98,9 +97,6 @@ class SettingsControl(UIControl):
             pad = " " * max(0, width - len(key) - 2)
             lines.append([(key_style, f" {key}{pad} ")])
 
-            if selected:
-                selected_line = len(lines)
-
             # Line 2: value with type indicator
             #
             # Special case: THINKING_BUDGET_TOKENS shows the preset value
@@ -109,40 +105,7 @@ class SettingsControl(UIControl):
             budget_preset = str(self._state._get_value("THINKING_BUDGET")).lower() if is_budget_tokens else ""
             is_budget_readonly = is_budget_tokens and budget_preset != "custom"
 
-            if stype == "codex_oauth_start":
-                current_val = str(value)
-                if current_val == "Start OAuth":
-                    lines.append([
-                        (f"{TEXT}", "   > "),
-                        (f"{ACCENT} bold", "Start OAuth login and copy URL"),
-                    ])
-                else:
-                    lines.append([(f"{TEXT}", "   URL:")])
-                    chunk_width = max(24, width - 6)
-                    for start in range(0, len(current_val), chunk_width):
-                        lines.append([(f"{ACCENT}", "   " + current_val[start:start + chunk_width])])
-            elif stype == "codex_oauth_code":
-                if selected and self._state.editing:
-                    edit_text = self._state.edit_buffer.text
-                    shown = edit_text if len(edit_text) <= max(10, width - 12) else edit_text[:max(7, width - 15)] + "..."
-                    lines.append([
-                        (f"bg:{SURFACE_LIGHT} {TEXT}", f"   > "),
-                        (f"bg:{SURFACE_LIGHT} #ffffff bold", shown),
-                        (f"bg:{SURFACE_LIGHT} {TEXT_MUTED}", " (Enter=save)"),
-                    ])
-                else:
-                    lines.append([
-                        (f"{TEXT}", "   > "),
-                        (f"{ACCENT} bold", "Paste redirect URL or code"),
-                    ])
-            elif stype == "codex_oauth_status":
-                val = str(value)
-                color = ERROR if val.startswith("OAuth failed") or val.startswith("OAuth start failed") or val == "Not authenticated" else SUCCESS
-                lines.append([
-                    (f"{TEXT}", "   = "),
-                    (f"{color} bold", val),
-                ])
-            elif is_budget_readonly:
+            if is_budget_readonly:
                 # Show the preset's token count as read-only
                 preset_label = _THINKING_PRESET_TOKENS.get(budget_preset, str(value))
                 lines.append([
@@ -195,12 +158,16 @@ class SettingsControl(UIControl):
             return lines[i] if 0 <= i < len(lines) else []
 
         # Report a cursor position so the enclosing Window auto-scrolls
-        # to keep the selected setting visible. Some virtual rows render
-        # extra wrapped lines, so track the selected row while building.
+        # to keep the selected setting visible. Each setting row occupies
+        # 3 lines (key / value / description); anchor on the value line.
+        cursor_row = 0
+        if settings:
+            idx = max(0, min(self._state.setting_cursor, len(settings) - 1))
+            cursor_row = idx * 3 + 1
         return UIContent(
             get_line=get_line,
             line_count=len(lines),
-            cursor_position=Point(x=0, y=selected_line),
+            cursor_position=Point(x=0, y=cursor_row),
             show_cursor=False,
         )
 
