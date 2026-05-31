@@ -641,6 +641,7 @@ def build_iteration_prompt(
     _append_if(parts, _render_project_knowledge(project_knowledge))
     _append_if(parts, _render_context_rank(context_rank_result))
     _append_if(parts, _render_workspace())
+    _append_if(parts, _render_background_tasks())
 
     # Task: prefer the structured ``Task`` rendering when available
     # (set by the engine when the orchestration layer built one). Both
@@ -1079,6 +1080,45 @@ def _render_workspace() -> str:
         f"<workspace>\nCurrent working directory: {workspace}\n"
         "All relative file paths are resolved against this directory.\n</workspace>"
     )
+
+
+def _render_background_tasks() -> str:
+    """Render the ``<background-tasks>`` block for in-flight background commands.
+
+    Reads the process-global background task manager. Surfaces every task the
+    agent launched with ``run_in_background`` so it remembers what is still
+    running (and notices when a background command has died). Output is NOT
+    inlined here — the agent calls ``background_status`` for that — we only
+    show the label, status, runtime, and exit code so the section stays cheap.
+    """
+    try:
+        from infinidev.tools.shell.background_manager import get_background_manager
+    except Exception:
+        return ""
+
+    tasks = get_background_manager().list()
+    if not tasks:
+        return ""
+
+    lines = [
+        "<background-tasks>",
+        "Commands you started with run_in_background. They are running (or "
+        "have finished) independently of your turn. Use background_status to "
+        "read their output and stop_background_task to stop one.",
+    ]
+    for t in tasks:
+        runtime = t.runtime_seconds()
+        if t.status == "running":
+            state_str = f"running for {runtime:.0f}s"
+        elif t.status == "killed":
+            state_str = f"stopped after {runtime:.0f}s"
+        else:
+            code = t.exit_code if t.exit_code is not None else "?"
+            verdict = "ok" if t.exit_code == 0 else f"FAILED (exit {code})"
+            state_str = f"exited {verdict} after {runtime:.0f}s"
+        lines.append(f"  [{t.id}] {t.description} — {state_str}")
+    lines.append("</background-tasks>")
+    return "\n".join(lines)
 
 
 def _render_opened_files(state: LoopState) -> str:

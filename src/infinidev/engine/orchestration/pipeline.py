@@ -169,6 +169,61 @@ def _run_gather_phase(
         return task_prompt
 
 
+def _run_elaboration_phase(
+    *,
+    escalation: Any,
+    session_id: str,
+    project_id: int | None,
+    workspace_path: str | None,
+    hooks: OrchestrationHooks,
+) -> Any:
+    """Turn the vague request into a GroundedSpec before planning.
+
+    Runs once per task on the single configured model. Returns a
+    possibly-updated EscalationPacket carrying ``grounded_spec``. Soft-fails:
+    any problem (or the complexity gate skipping it) returns the original
+    escalation unchanged — elaboration enriches the handoff, it is never
+    load-bearing for correctness.
+    """
+    from dataclasses import replace as _dc_replace
+    from infinidev.config.settings import settings as _settings
+
+    if not _settings.SPEC_ELABORATION_ENABLED:
+        return escalation
+
+    try:
+        from infinidev.engine.analysis.spec_elaborator import elaborate, should_elaborate
+
+        if not should_elaborate(escalation):
+            return escalation
+
+        hooks.on_phase("analysis")
+        hooks.on_status("info", "Elaborating the spec...")
+        spec = elaborate(
+            escalation,
+            session_id=session_id,
+            project_id=project_id,
+            workspace_path=workspace_path,
+        )
+        if spec is None:
+            return escalation
+
+        # Surface open product questions to the user (v1: non-blocking —
+        # shown so they can correct course; v2 adds suspend/resume).
+        if spec.clarifications_needed:
+            qs = "\n".join(f"  • {q}" for q in spec.clarifications_needed)
+            hooks.notify(
+                "Infinidev",
+                "Antes de implementar, hay decisiones de producto que son tuyas "
+                f"(asumo defaults razonables si no respondés):\n{qs}",
+                "agent",
+            )
+        return _dc_replace(escalation, grounded_spec=spec)
+    except Exception:
+        logger.debug("Spec elaboration phase failed; proceeding raw", exc_info=True)
+        return escalation
+
+
 def _run_council_phase(
     *,
     escalation: Any,
@@ -513,6 +568,18 @@ def run_task(
     assert escalation is not None  # enforced by ChatAgentResult invariants
     if escalation.user_visible_preview:
         hooks.notify("Infinidev", escalation.user_visible_preview, "agent")
+
+    # ── Spec elaboration (vague request → grounded spec) ────────────────
+    # Runs before the council/planner so both build on a grounded spec
+    # instead of the raw request. Single configured model; soft-fails to
+    # the original escalation (returns None → no grounded_spec attached).
+    escalation = _run_elaboration_phase(
+        escalation=escalation,
+        session_id=session_id,
+        project_id=(ctx.project_id if ctx else get_current_project_id()),
+        workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
+        hooks=hooks,
+    )
 
     # ── Council (optional multi-agent deliberation) ─────────────────────
     # Runs only when the chat agent flagged council_requested. Enriches

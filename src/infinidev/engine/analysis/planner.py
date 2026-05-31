@@ -217,6 +217,16 @@ def _render_handoff(escalation: EscalationPacket) -> str:
     if escalation.user_signal:
         lines.append("")
         lines.append(f"user_signal (text interpreted as approval): {escalation.user_signal}")
+    # The spec-elaboration loop may have attached a GroundedSpec (scope,
+    # resolved facts, assumptions, design direction). Render it so the
+    # planner decomposes a COMPLETE spec rather than the raw request.
+    spec = getattr(escalation, "grounded_spec", None)
+    if spec is not None:
+        try:
+            lines.append("")
+            lines.append(spec.render_for_planner())
+        except Exception:
+            logger.debug("grounded_spec render failed; skipping", exc_info=True)
     # A council may have deliberated upstream and attached a design
     # brief. Render it so the planner builds steps ON TOP of the agreed
     # design instead of re-deciding it. ``getattr`` keeps this robust if

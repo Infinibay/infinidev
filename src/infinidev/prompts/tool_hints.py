@@ -74,6 +74,20 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "symbols). 13 code-intel helpers pre-imported — use `help` tool for details.",
         "code_interpreter(code='rows = iter_symbols(kind=\"method\", parent=\"Foo\")\\nprint(len(rows))')",
     ),
+    "run_in_background": (
+        "Start a long-running command in the background (dev server, watcher) "
+        "and keep working. Returns a task id tracked in <background-tasks>.",
+        "run_in_background(command='npm run dev', description='vite dev server')",
+    ),
+    "background_status": (
+        "Check a background task: status, runtime, and captured stdout/stderr "
+        "(omit task_id to list all)",
+        "background_status(task_id='bg-1')",
+    ),
+    "stop_background_task": (
+        "Stop a background task (force=True to SIGKILL immediately)",
+        "stop_background_task(task_id='bg-1')",
+    ),
     "iter_symbols": (
         "Walk all indexed symbols (no search term needed)",
         "iter_symbols(kind='method', parent='UserService')",
@@ -91,6 +105,10 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Fetch and read a web page",
         "web_fetch(url='https://docs.python.org/3/...')",
     ),
+    "code_search_web": (
+        "Search the web specifically for code, API usage, and error solutions",
+        "code_search_web(query='fastapi background task example')",
+    ),
     # Knowledge
     "record_finding": (
         "Save a finding to the knowledge base",
@@ -103,6 +121,55 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "read_findings": (
         "Read all findings",
         "read_findings()",
+    ),
+    "search_knowledge": (
+        "Full-text search across all saved knowledge (findings + reports)",
+        "search_knowledge(query='auth AND token')",
+    ),
+    "update_finding": (
+        "Edit the content/topic of an existing finding by id",
+        "update_finding(finding_id=12, content='uses JWT RS256, not HS256')",
+    ),
+    "validate_finding": (
+        "Mark a finding as verified/confirmed",
+        "validate_finding(finding_id=12)",
+    ),
+    "reject_finding": (
+        "Mark a finding as wrong/rejected (keeps it for audit)",
+        "reject_finding(finding_id=12, reason='superseded by newer finding')",
+    ),
+    "delete_finding": (
+        "Permanently delete a finding by id",
+        "delete_finding(finding_id=12)",
+    ),
+    "summarize_findings": (
+        "Condense the session's findings into a compact summary",
+        "summarize_findings()",
+    ),
+    "write_report": (
+        "Save a longer structured report (markdown) as an artifact",
+        "write_report(title='Auth audit', content='## Findings\\n...')",
+    ),
+    "read_report": (
+        "Read a saved report by id (omit id to list reports)",
+        "read_report(report_id=3)",
+    ),
+    "delete_report": (
+        "Delete a saved report artifact by id",
+        "delete_report(artifact_id=3)",
+    ),
+    # Library documentation cache
+    "find_documentation": (
+        "Look up cached documentation for a library",
+        "find_documentation(library_name='fastapi', topic='background tasks')",
+    ),
+    "update_documentation": (
+        "Save/update cached documentation for a library",
+        "update_documentation(library_name='fastapi', content='...')",
+    ),
+    "delete_documentation": (
+        "Remove cached documentation for a library",
+        "delete_documentation(library_name='fastapi')",
     ),
     # Code intelligence
     "find_definition": (
@@ -144,6 +211,49 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "analyze_code": (
         "Detect broken imports, undefined symbols, unused code",
         "analyze_code(file_path='src/auth.py')",
+    ),
+    "rename_symbol": (
+        "Rename a symbol everywhere it is referenced (definition + call sites)",
+        "rename_symbol(symbol='AuthService.verify_token', new_name='check_token')",
+    ),
+    "move_symbol": (
+        "Move a function/method to another file, updating imports",
+        "move_symbol(symbol='helpers.slugify', target_file='src/text_utils.py')",
+    ),
+    "find_similar_methods": (
+        "Find methods structurally similar to a given one (duplication hunting)",
+        "find_similar_methods(qualified_name='UserService.create')",
+    ),
+    "search_by_docstring": (
+        "Semantic search for symbols by what they DO, not their name",
+        "search_by_docstring(query='validate an auth token and return claims')",
+    ),
+    # Plan management (developer loop pseudo-tools)
+    "add_step": (
+        "Add a step to the execution plan (name the FILE, FUNCTION, and CHANGE)",
+        "add_step(title='auth.py verify_token: add expiry check')",
+    ),
+    "modify_step": (
+        "Edit a pending step's title/detail by index",
+        "modify_step(index=2, title='auth.py: also handle missing exp claim')",
+    ),
+    "remove_step": (
+        "Remove a pending step from the plan by index",
+        "remove_step(index=3)",
+    ),
+    # Project introspection
+    "declare_test_command": (
+        "Tell the engine which command runs this project's tests",
+        "declare_test_command(command_pattern='pytest')",
+    ),
+    "tail_test_output": (
+        "Re-read the most recent test run's output (failures, full, or tail)",
+        "tail_test_output(mode='failures')",
+    ),
+    # Communication
+    "send_message": (
+        "Send a message to the user (progress update or a question)",
+        "send_message(message='Found the bug in auth.py:42 — fixing now')",
     ),
     # Meta
     "help": (
@@ -187,14 +297,27 @@ def build_tool_usage_section(available_tools: set[str]) -> str:
         ("Reading", ["read_file", "list_directory", "glob",
                      "code_search", "get_symbol_code", "list_symbols",
                      "search_symbols", "find_definition", "find_references",
+                     "find_similar_methods", "search_by_docstring",
+                     "iter_symbols", "project_stats",
                      "project_structure", "analyze_code"]),
         ("Writing", ["create_file", "replace_lines", "edit_symbol",
-                     "add_symbol", "remove_symbol", "add_content_after_line",
+                     "add_symbol", "remove_symbol", "rename_symbol",
+                     "move_symbol", "add_content_after_line",
                      "add_content_before_line"]),
-        ("Execution", ["execute_command", "code_interpreter"]),
+        ("Execution", ["execute_command", "code_interpreter",
+                       "run_in_background", "background_status",
+                       "stop_background_task"]),
         ("Git", ["git_branch", "git_commit", "git_diff", "git_status"]),
-        ("Web", ["web_search", "web_fetch"]),
-        ("Knowledge", ["record_finding", "search_findings", "read_findings"]),
+        ("Web", ["web_search", "web_fetch", "code_search_web"]),
+        ("Knowledge", ["record_finding", "search_findings", "read_findings",
+                       "search_knowledge", "update_finding", "validate_finding",
+                       "reject_finding", "delete_finding", "summarize_findings",
+                       "write_report", "read_report", "delete_report"]),
+        ("Library docs", ["find_documentation", "update_documentation",
+                          "delete_documentation"]),
+        ("Planning", ["add_step", "modify_step", "remove_step",
+                      "declare_test_command", "tail_test_output"]),
+        ("Communication", ["send_message"]),
         ("Meta", ["help"]),
     ]
 

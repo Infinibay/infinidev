@@ -54,6 +54,48 @@ def _detect_prompt(recent: bytes, already_seen: set[str]) -> str | None:
     return None
 
 
+def check_command_permission(
+    command: str, *, description: str = "Execute shell command"
+) -> str | None:
+    """Enforce the EXECUTE_COMMANDS_PERMISSION policy for ``command``.
+
+    Returns an error string if the command is denied, or ``None`` if it may
+    run. Shared by every tool that spawns a shell command (foreground
+    execute_command and the background runner) so the policy lives in one
+    place. ``description`` is shown to the user only in ``ask`` mode.
+    """
+    mode = settings.EXECUTE_COMMANDS_PERMISSION
+
+    if mode == "auto_approve":
+        return None
+
+    if mode == "allowed_list":
+        allowed = settings.ALLOWED_COMMANDS_LIST
+        if not allowed:
+            return "Command denied: no commands in allowed list"
+        # Check if the command's base executable is in the allowed list
+        try:
+            base_cmd = shlex.split(command)[0]
+        except ValueError:
+            base_cmd = command.split()[0] if command.split() else command
+        if base_cmd not in allowed and command not in allowed:
+            return f"Command denied: '{base_cmd}' not in allowed list"
+        return None
+
+    if mode == "ask":
+        from infinidev.tools.permission import request_permission
+        approved = request_permission(
+            tool_name="execute_command",
+            description=description,
+            details=command,
+        )
+        if not approved:
+            return f"Command denied by user: {command}"
+        return None
+
+    return None  # Unknown mode — allow
+
+
 class ExecuteCommandTool(InfinibayBaseTool):
     name: str = "execute_command"
     description: str = (
@@ -64,36 +106,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
 
     def _check_permission(self, command: str) -> str | None:
         """Check command execution permission. Returns error string or None if allowed."""
-        mode = settings.EXECUTE_COMMANDS_PERMISSION
-
-        if mode == "auto_approve":
-            return None
-
-        if mode == "allowed_list":
-            allowed = settings.ALLOWED_COMMANDS_LIST
-            if not allowed:
-                return f"Command denied: no commands in allowed list"
-            # Check if the command's base executable is in the allowed list
-            try:
-                base_cmd = shlex.split(command)[0]
-            except ValueError:
-                base_cmd = command.split()[0] if command.split() else command
-            if base_cmd not in allowed and command not in allowed:
-                return f"Command denied: '{base_cmd}' not in allowed list"
-            return None
-
-        if mode == "ask":
-            from infinidev.tools.permission import request_permission
-            approved = request_permission(
-                tool_name="execute_command",
-                description=f"Execute shell command",
-                details=command,
-            )
-            if not approved:
-                return f"Command denied by user: {command}"
-            return None
-
-        return None  # Unknown mode — allow
+        return check_command_permission(command)
 
     def _run(
         self,

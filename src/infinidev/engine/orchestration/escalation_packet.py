@@ -63,3 +63,9 @@ class EscalationPacket:
     # chat agent never sets this). Typed loosely to avoid importing
     # engine.council at packet-definition time.
     design_brief: Any | None = None
+    # The GroundedSpec produced by the spec-elaboration loop, attached
+    # BEFORE the council/planner run (the chat agent never sets this).
+    # Turns the vague request into a grounded spec the planner builds on.
+    # Typed loosely (``engine.analysis.grounded_spec.GroundedSpec``) to
+    # avoid an import at packet-definition time.
+    grounded_spec: Any | None = None

@@ -192,7 +192,10 @@ _DEVELOP_TOOL_USAGE_FULL = """\
 - **edit_symbol**(symbol, new_code): Replace a function/method body by symbol name.
   Use for editing whole methods when you know the symbol name.
 - **add_symbol** / **remove_symbol**: Add or remove functions/methods by symbol name.
-- **execute_command**: Run shell commands — build, test, lint, install.
+- **execute_command**: Run shell commands — build, test, lint, install. Blocks until the command finishes.
+- **run_in_background**(command, description): Start a long-running command (dev server, file/test watcher)
+  WITHOUT blocking. Returns a task id; the task stays listed in <background-tasks> so you remember it.
+  Use **background_status** to read its stdout/stderr and runtime, and **stop_background_task** to stop it.
 - **git_diff** / **git_status**: Review your changes. Do not commit or push unless asked.
 - **add_note**(note): Save key information for later steps. Your context resets
   each step — notes are the ONLY way to remember details like file paths,

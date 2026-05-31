@@ -118,6 +118,16 @@ class Settings(BaseSettings):
     LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
     LOOP_GUIDANCE_ENABLED: bool = True  # Inject pre-baked how-to advice when small models get stuck
     LOOP_GUIDANCE_MAX_PER_TASK: int = 3  # Hard cap on guidance entries per task
+
+    # ── Spec elaboration ─────────────────────────────────────────────
+    # Turns a vague requirement into a grounded spec BEFORE planning.
+    # Runs once per task between the chat agent's escalation and the
+    # planner, on the single configured model. See engine/analysis/
+    # spec_elaborator.py and docs_spec_elaboration_loop.md.
+    SPEC_ELABORATION_ENABLED: bool = True
+    SPEC_ELABORATION_MIN_CHARS: int = 40  # Skip elaboration for requests shorter than this (trivial)
+    SPEC_ELABORATION_MAX_EVIDENCE_CALLS: int = 4  # Read-only tool calls budget in the grounding pass
+    SPEC_ELABORATION_CANDIDATES: int = 3  # N candidate design directions generated in the critique pass
     # NB: static-analysis latency reporting is opt-in via the
     # INFINIDEV_ENABLE_SA_TIMER env var, not a settings field — see
     # ``engine.static_analysis_timer.is_enabled``.

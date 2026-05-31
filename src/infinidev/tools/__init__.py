@@ -13,7 +13,10 @@ from infinidev.tools.git import (
     GitBranchTool, GitCommitTool,
     GitDiffTool, GitStatusTool,
 )
-from infinidev.tools.shell import ExecuteCommandTool, CodeInterpreterTool
+from infinidev.tools.shell import (
+    ExecuteCommandTool, CodeInterpreterTool,
+    RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+)
 from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
 from infinidev.tools.knowledge import (
     RecordFindingTool, ReadFindingsTool, SearchFindingsTool,
@@ -46,7 +49,10 @@ FILE_TOOLS = [ReadFileTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLin
 VISION_ONLY_TOOLS = {ViewImageTool}
 META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool, DeclareTestCommandTool, TailTestOutputTool]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
-SHELL_TOOLS = [ExecuteCommandTool, CodeInterpreterTool]
+SHELL_TOOLS = [
+    ExecuteCommandTool, CodeInterpreterTool,
+    RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+]
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
 KNOWLEDGE_TOOLS = [
     RecordFindingTool, ReadFindingsTool, SearchFindingsTool,
@@ -79,8 +85,9 @@ SMALL_MODEL_TOOLS = [
     ListDirectoryTool, CodeSearchTool, GlobTool,
     # Git (3)
     GitCommitTool, GitDiffTool, GitStatusTool,
-    # Shell (2)
+    # Shell (5)
     ExecuteCommandTool, CodeInterpreterTool,
+    RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
     # Knowledge (2)
     RecordFindingTool, SearchFindingsTool,
     # Code intelligence (8)
