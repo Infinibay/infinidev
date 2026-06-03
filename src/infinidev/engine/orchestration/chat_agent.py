@@ -655,6 +655,22 @@ def _fallback_respond(
 # ─────────────────────────────────────────────────────────────────────────
 
 
+# Session ids queued for a one-shot full-history replay. Set by the
+# resume path (`-c`/`--resume`) so the FIRST turn after reopening a
+# session shows the model the entire prior conversation, not just the
+# usual 6-turn tail. Consumed once, then the session reverts to the
+# normal compact window — so continuity is paid for exactly once.
+_FULL_HISTORY_ONCE: set[str] = set()
+_RESUME_HISTORY_LIMIT = 200
+
+
+def request_full_history_once(session_id: str) -> None:
+    """Make the next ``_build_user_message`` for ``session_id`` replay the
+    full conversation instead of the 6-turn tail. Idempotent."""
+    if session_id:
+        _FULL_HISTORY_ONCE.add(session_id)
+
+
 def _build_user_message(
     user_input: str,
     session_id: Optional[str],
@@ -680,8 +696,15 @@ def _build_user_message(
     if session_id:
         try:
             from infinidev.db.service import get_recent_turns_full
+            # On the first turn of a resumed session, replay everything;
+            # otherwise the usual compact tail. The flag self-consumes.
+            if session_id in _FULL_HISTORY_ONCE:
+                _FULL_HISTORY_ONCE.discard(session_id)
+                limit = _RESUME_HISTORY_LIMIT
+            else:
+                limit = 6
             turns = get_recent_turns_full(
-                session_id, limit=6, max_chars_per_turn=2000,
+                session_id, limit=limit, max_chars_per_turn=2000,
             )
         except Exception as exc:
             logger.warning(
@@ -693,8 +716,12 @@ def _build_user_message(
         lines = [
             "Recent conversation (for context; use tools to reground facts):",
         ]
+        _ROLE_TAGS = {"user": "USER", "work_summary": "WORK_LOG"}
         for role, content in turns:
-            tag = "USER" if role == "user" else "AGENT"
+            # WORK_LOG = hidden internal record of work the developer loop
+            # completed last turn (see work_summary.py); not a user-facing
+            # message and not something to echo back.
+            tag = _ROLE_TAGS.get(role, "AGENT")
             lines.append(f'<turn role="{tag}">')
             lines.append(content)
             lines.append("</turn>")

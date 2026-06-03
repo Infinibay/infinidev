@@ -168,6 +168,40 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_conv_session
             ON conversation_turns(session_id, created_at)
         """)
+        # Session registry — one row per CLI/TUI session. Lets `-c`/`--resume`
+        # find the most-recent session for a workspace without scanning
+        # conversation_turns. `title` is the first user message (truncated),
+        # used as the human label in the resume picker.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id     TEXT PRIMARY KEY,
+                project_id     INTEGER,
+                workspace_path TEXT,
+                title          TEXT,
+                turn_count     INTEGER NOT NULL DEFAULT 0,
+                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_workspace
+            ON sessions(workspace_path, last_active_at)
+        """)
+        # Persisted session notes. The loop engine keeps `session_notes` in
+        # memory across tasks within a run; this table makes them survive
+        # process exit so a resumed session re-loads what it learned.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_notes (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                note_text  TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_session_notes_session
+            ON session_notes(session_id, created_at)
+        """)
         # Library documentation storage with FTS5 search
         conn.execute("""
             CREATE TABLE IF NOT EXISTS library_docs (
@@ -603,14 +637,170 @@ def init_db():
 def store_conversation_turn(
     session_id: str, role: str, content: str, summary: str | None = None
 ) -> None:
-    """Store a conversation turn in the database."""
+    """Store a conversation turn in the database.
+
+    Also keeps the ``sessions`` registry fresh: every turn bumps
+    ``last_active_at`` and ``turn_count`` so ``-c`` can find the
+    most-recently-active session. The UPDATE is a no-op if no session
+    row exists yet (e.g. a turn stored before ``register_session`` ran),
+    so this never fails on legacy callers.
+    """
     def _insert(conn):
         conn.execute(
             "INSERT INTO conversation_turns (session_id, role, content, summary) VALUES (?, ?, ?, ?)",
             (session_id, role, content, summary),
         )
+        conn.execute(
+            "UPDATE sessions SET last_active_at = strftime('%Y-%m-%d %H:%M:%f','now'), "
+            "turn_count = turn_count + 1 WHERE session_id = ?",
+            (session_id,),
+        )
+        # Backfill the title from the first user message if still blank.
+        if role == "user" and content:
+            conn.execute(
+                "UPDATE sessions SET title = ? "
+                "WHERE session_id = ? AND (title IS NULL OR title = '')",
+                (content.strip()[:80], session_id),
+            )
         conn.commit()
     execute_with_retry(_insert)
+
+
+def register_session(
+    session_id: str,
+    workspace_path: str | None = None,
+    project_id: int = 1,
+) -> None:
+    """Create (or refresh) the ``sessions`` row for a session.
+
+    Called once at CLI/TUI startup. Idempotent — resuming an existing
+    session re-touches ``last_active_at`` without clobbering its title
+    or turn_count.
+    """
+    def _upsert(conn):
+        conn.execute(
+            """
+            INSERT INTO sessions (session_id, project_id, workspace_path, last_active_at)
+            VALUES (?, ?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+            ON CONFLICT(session_id) DO UPDATE SET
+                last_active_at = strftime('%Y-%m-%d %H:%M:%f','now'),
+                workspace_path = COALESCE(excluded.workspace_path, sessions.workspace_path)
+            """,
+            (session_id, project_id, workspace_path),
+        )
+        conn.commit()
+    execute_with_retry(_upsert)
+
+
+def get_last_session(workspace_path: str | None = None) -> dict | None:
+    """Return the most-recently-active session, or None.
+
+    When ``workspace_path`` is given, only sessions from that directory
+    are considered (the ``-c`` "continue this project" semantics). With
+    no match there, returns None so the caller can fall back to a fresh
+    session rather than resurrecting unrelated work.
+    """
+    def _query(conn):
+        if workspace_path:
+            row = conn.execute(
+                "SELECT * FROM sessions WHERE workspace_path = ? "
+                "ORDER BY last_active_at DESC LIMIT 1",
+                (workspace_path,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM sessions ORDER BY last_active_at DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+    return execute_with_retry(_query)
+
+
+def list_recent_sessions(
+    workspace_path: str | None = None, limit: int = 20
+) -> list[dict]:
+    """Return recent sessions (newest first) for the resume picker.
+
+    Sessions with zero turns are skipped — they're empty shells from a
+    launch that never sent a message. When ``workspace_path`` is given,
+    scoping is preferred but NOT exclusive: if the directory has fewer
+    than ``limit`` sessions we still only show that directory's work
+    (cross-directory noise is worse than a short list).
+    """
+    def _query(conn):
+        if workspace_path:
+            rows = conn.execute(
+                "SELECT * FROM sessions WHERE workspace_path = ? AND turn_count > 0 "
+                "ORDER BY last_active_at DESC LIMIT ?",
+                (workspace_path, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM sessions WHERE turn_count > 0 "
+                "ORDER BY last_active_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    return execute_with_retry(_query) or []
+
+
+def persist_session_note(session_id: str, note_text: str) -> None:
+    """Persist one session note so a resumed session can re-load it."""
+    if not (session_id and note_text):
+        return
+    def _insert(conn):
+        conn.execute(
+            "INSERT INTO session_notes (session_id, note_text) VALUES (?, ?)",
+            (session_id, note_text),
+        )
+        conn.commit()
+    execute_with_retry(_insert)
+
+
+def get_session_notes(session_id: str, limit: int = 50) -> list[str]:
+    """Return persisted session notes (oldest first) for a session."""
+    def _query(conn):
+        rows = conn.execute(
+            "SELECT note_text FROM session_notes WHERE session_id = ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+        return [r["note_text"] for r in rows if r["note_text"]]
+    return execute_with_retry(_query) or []
+
+
+def get_all_turns(
+    session_id: str, limit: int = 200, max_chars_per_turn: int = 2000
+) -> list[tuple[str, str]]:
+    """Return up to ``limit`` turns (oldest first) as ``(role, content)``.
+
+    Powers two resume needs: repainting the prior conversation into the
+    UI scrollback (zero token cost) and seeding the model with the full
+    history on the first resumed turn. Per-turn content is capped like
+    :func:`get_recent_turns_full` so one huge reply can't dominate.
+    """
+    def _query(conn):
+        # Exclude hidden work-summary turns: this powers the UI scrollback
+        # repaint, and those turns are internal hand-off notes the user is
+        # never meant to see. The model still gets them via
+        # get_recent_turns_full().
+        rows = conn.execute(
+            "SELECT role, content FROM conversation_turns WHERE session_id = ? "
+            "AND role != 'work_summary' "
+            "ORDER BY created_at ASC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+        results: list[tuple[str, str]] = []
+        for row in rows:
+            content = row["content"] or ""
+            if not content:
+                continue
+            if len(content) > max_chars_per_turn:
+                head = content[: max_chars_per_turn // 2]
+                tail = content[-(max_chars_per_turn // 2):]
+                content = f"{head}\n\n[...truncated middle...]\n\n{tail}"
+            results.append((row["role"], content))
+        return results
+    return execute_with_retry(_query) or []
 
 
 def get_recent_turns_full(
@@ -665,7 +855,7 @@ def get_recent_summaries(session_id: str, limit: int = 10) -> list[str]:
             """\
             SELECT role, summary, content
             FROM conversation_turns
-            WHERE session_id = ?
+            WHERE session_id = ? AND role != 'work_summary'
             ORDER BY created_at DESC
             LIMIT ?
             """,

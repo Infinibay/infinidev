@@ -142,6 +142,7 @@ class LoopEngine(AgentEngine):
     def __init__(self) -> None:
         self._last_file_tracker: FileChangeTracker | None = None
         self._last_state: LoopState | None = None
+        self._last_status: str = ""  # terminal status of the last execute()
         self._last_total_tool_calls: int = 0
         self._nudge_threshold_override: int | None = None
         self._summarizer_override: bool | None = None
@@ -153,6 +154,7 @@ class LoopEngine(AgentEngine):
         # Plumbing via attribute keeps execute()'s signature stable.
         self._hooks: object | None = None
         self.session_notes: list[str] = []  # Persist across tasks within a session
+        self._session_notes_hydrated: bool = False  # one-shot DB reload on resume
         # Thread-safe queue for user messages injected mid-task
         import queue as _queue_mod
         self._user_messages: _queue_mod.Queue[str] = _queue_mod.Queue()
@@ -436,6 +438,28 @@ class LoopEngine(AgentEngine):
         """Expose the tracker from the last task for downstream checks."""
         return self._last_file_tracker
 
+    def build_work_summary(self, final_answer: str, status: str) -> str | None:
+        """Distil the just-finished task into a hidden hand-off summary.
+
+        Reads the retained ``_last_state`` (per-step ActionRecords) and
+        ``_last_file_tracker`` (files + reasons) — the same state the loop
+        discards on return — and produces a compact record of what was
+        done and what went wrong. The pipeline stores this as a hidden
+        ``work_summary`` conversation turn so the next chat-agent turn has
+        continuity. Returns ``None`` when there is nothing worth recording
+        or the feature is disabled. Never raises — summary generation must
+        not break the task's finish path.
+        """
+        from infinidev.engine.loop.work_summary import build_work_summary
+        try:
+            return build_work_summary(
+                self._last_state, self._last_file_tracker,
+                final_answer=final_answer, status=status,
+            )
+        except Exception:
+            logger.warning("build_work_summary failed", exc_info=True)
+            return None
+
     def get_plan_steps(self) -> list[dict]:
         """Loop engine is step-scoped — no multi-step plan of its own."""
         return []
@@ -504,6 +528,22 @@ class LoopEngine(AgentEngine):
             summarizer_enabled=summarizer_enabled,
             task=task,
         )
+        # On a resumed session the engine is brand-new (lazily created in
+        # the TUI) but the session_id is the SAME as yesterday's. Re-load
+        # the persisted session notes once so the developer loop starts
+        # with the memory it built up before exit. Reusing the session_id
+        # is what makes this self-wiring — no plumbing from the UI needed.
+        if not self._session_notes_hydrated and not self.session_notes:
+            self._session_notes_hydrated = True
+            try:
+                from infinidev.tools.base.context import get_current_session_id
+                from infinidev.db.service import get_session_notes
+                _sid = get_current_session_id()
+                if _sid:
+                    self.session_notes = get_session_notes(_sid)[-10:]
+            except Exception:
+                pass
+
         if initial_plan is not None:
             _seed_state_from_plan(ctx.state, initial_plan)
         # Stash attachments on the engine instance for the first

@@ -45,7 +45,11 @@ class InfinidevApp:
     object via layout lambdas and keybinding handlers.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, resume_session: dict | None = None) -> None:
+        # Pre-resolved by run_tui when -c/--resume was passed:
+        # {"session_id": str, "turns": [(role, content), ...]}. Stored
+        # before the init helpers so _init_engine_state can adopt the id.
+        self._resume_request: dict = resume_session or {}
         self._init_ui_state()
         self._init_chat_subsystem()
         self._init_sidebar_state()
@@ -124,7 +128,9 @@ class InfinidevApp:
         self._cancel_watcher_active: bool = False
         self._gather_next_task: bool = False
         self._tree_resolved_lines: list[str] = []
-        self.session_id: str = str(uuid.uuid4())
+        # Reuse the resumed session_id so all the by-session machinery
+        # (chat history, findings, ContextRank, session notes) re-engages.
+        self.session_id: str = self._resume_request.get("session_id") or str(uuid.uuid4())
 
     def _init_analysis_state(self) -> None:
         self._analysis_waiting: bool = False
@@ -190,9 +196,32 @@ class InfinidevApp:
             mouse_support=True,
         )
         self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
+        self._repaint_resumed_history()
         self._start_animation_timer()
         self._index_ready = False
         self._start_background_index()
+
+    def _repaint_resumed_history(self) -> None:
+        """Repaint the prior conversation into the scrollback on resume.
+
+        Display-only — costs zero tokens. The model itself gets the full
+        history on its first turn via the replay queued in
+        ``begin_resumed_session`` (chat_agent.request_full_history_once).
+        """
+        turns = self._resume_request.get("turns") or []
+        if not turns:
+            return
+        self.add_message(
+            "System",
+            f"↻ Resumed session {self.session_id[:8]} — "
+            f"{len(turns)} prior turns restored.",
+            "system",
+        )
+        for role, content in turns:
+            if role == "user":
+                self.add_message("You", content, "user")
+            else:
+                self.add_message("Infinidev", content, "agent")
 
     # ── Run ──────────────────────────────────────────────────────────
 
@@ -811,6 +840,10 @@ class InfinidevApp:
     def show_project_search(self) -> None:
         pass  # Phase 8
 
+    def show_background_tasks(self) -> None:
+        """Open the background-tasks explorer (Ctrl+B / /tasks)."""
+        self.dialog_manager.open_background_tasks()
+
     def toggle_line_numbers(self) -> None:
         self.file_manager.toggle_line_numbers()
 
@@ -1202,16 +1235,54 @@ class InfinidevApp:
         self.invalidate()
 
 
-def run_tui() -> None:
+def _resolve_tui_resume(continue_session: bool, resume: bool) -> dict | None:
+    """Resolve -c/--resume BEFORE the full-screen app starts.
+
+    Always returns ``{"session_id", "turns"}`` — a fresh session has an
+    empty ``turns`` list. Registering the id here (fresh or resumed)
+    means even brand-new TUI sessions land in the registry so a later
+    ``-c`` can find them. The ``--resume`` picker prints to the normal
+    terminal and reads a line of input here — doing it before app.run()
+    avoids a Textual modal and keeps the picker dead simple.
+    """
+    from infinidev.cli import session_resume as sr
+
+    chosen: dict | None = None
+    if resume:
+        sessions = sr.recent_sessions()
+        if sessions:
+            print("Recent sessions:")
+            for i, s in enumerate(sessions, 1):
+                print(f"  {i}. {sr.session_label(s)}")
+            try:
+                raw = input("Resume which? (number, or Enter for fresh) ").strip()
+            except (EOFError, KeyboardInterrupt):
+                raw = ""
+            if raw.isdigit() and 1 <= int(raw) <= len(sessions):
+                chosen = sessions[int(raw) - 1]
+    elif continue_session:
+        chosen = sr.resolve_continue_session()
+
+    if not chosen:
+        sid = str(uuid.uuid4())
+        sr.begin_fresh_session(sid)
+        return {"session_id": sid, "turns": []}
+    sid = chosen["session_id"]
+    return {"session_id": sid, "turns": sr.begin_resumed_session(sid)}
+
+
+def run_tui(continue_session: bool = False, resume: bool = False) -> None:
     """Entry point to launch the Infinidev TUI."""
     import sys
+
+    resume_request = _resolve_tui_resume(continue_session, resume)
 
     # Redirect stderr to suppress subprocess output that would corrupt
     # the full-screen terminal. Log messages go to file handler instead.
     original_stderr = sys.stderr
     sys.stderr = open(os.devnull, "w")
     try:
-        app_state = InfinidevApp()
+        app_state = InfinidevApp(resume_session=resume_request)
         if app_state.status_bar_control:
             app_state.status_bar_control.set_project(os.path.basename(os.getcwd()))
             # Show the real model name immediately from settings

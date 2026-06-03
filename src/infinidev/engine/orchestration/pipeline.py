@@ -669,8 +669,37 @@ def run_task(
         hooks=hooks,
     )
 
+    # ── Hidden work summary ─────────────────────────────────────────────
+    # Record what the developer loop just did as a hidden conversation
+    # turn so the NEXT turn's chat agent has continuity instead of starting
+    # cold. Best-effort: a failure here must never sink a completed task.
+    _store_work_summary(used_engine, session_id, result)
+
     hooks.on_phase("idle")
     return result
+
+
+def _store_work_summary(engine: Any, session_id: str, result: str) -> None:
+    """Persist the hidden end-of-task work summary, if the engine offers one.
+
+    Only the LoopEngine exposes ``build_work_summary``; the legacy
+    PhaseEngine path is skipped via the ``hasattr`` guard. The summary is
+    stored under ``role="work_summary"`` — excluded from the UI repaint
+    (``get_all_turns``) but included in the model's history
+    (``get_recent_turns_full``), so it is hidden from the user yet seen by
+    the chat agent next turn.
+    """
+    if not session_id or not hasattr(engine, "build_work_summary"):
+        return
+    try:
+        status = getattr(engine, "_last_status", "") or "completed"
+        summary = engine.build_work_summary(result or "", status)
+        if not summary:
+            return
+        from infinidev.db.service import store_conversation_turn
+        store_conversation_turn(session_id, "work_summary", summary)
+    except Exception:
+        logger.warning("failed to store work summary", exc_info=True)
 
 
 def run_flow_task(

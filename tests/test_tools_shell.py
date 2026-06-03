@@ -169,3 +169,39 @@ class TestExecuteCommand:
         data = json.loads(result)
         ws = tool.workspace_path
         assert ws in data["stdout"]
+
+
+class TestManualBackgroundingDetection:
+    """The executor must bounce manual backgrounding to run_in_background."""
+
+    @pytest.mark.parametrize("cmd", [
+        "python server.py & echo PID=$!",
+        "npm run dev &",
+        "sleep 100 &",
+        "nohup ./run.sh &",
+        "setsid mytask",
+        "node app.js & disown",
+        "./server & echo started",
+        "python -m http.server 8000 &",
+    ])
+    def test_backgrounding_is_rejected(self, cmd, bound_tool, auto_approve_permissions):
+        tool = bound_tool(ExecuteCommandTool)
+        data = json.loads(tool._run(command=cmd))
+        assert "error" in data
+        assert "run_in_background" in data["error"]
+
+    @pytest.mark.parametrize("cmd", [
+        "ls -la",
+        "grep foo bar.txt && echo done",
+        "make build 2>&1 | tee log",
+        'echo "a & b"',
+        'curl -s "http://x/?a=1&b=2"',
+        "cat file > out 2>&1",
+        "echo done >&2",
+        "git log --oneline && git status",
+    ])
+    def test_legitimate_commands_not_flagged(self, cmd):
+        from infinidev.tools.shell.execute_command_tool import (
+            detect_manual_backgrounding,
+        )
+        assert detect_manual_backgrounding(cmd) is None

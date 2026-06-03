@@ -7,11 +7,14 @@ import pytest
 
 from infinidev.tools.shell.background_manager import (
     BackgroundTaskManager,
+    acknowledge_completion,
+    drain_completed_notifications,
     get_background_manager,
 )
 from infinidev.tools.shell.run_in_background import RunInBackgroundTool
 from infinidev.tools.shell.background_status import BackgroundStatusTool
 from infinidev.tools.shell.stop_background_task import StopBackgroundTaskTool
+from infinidev.tools.shell.wait_for_background_task import WaitForBackgroundTaskTool
 
 
 def _wait_for(predicate, timeout=5.0, interval=0.05):
@@ -57,6 +60,37 @@ class TestBackgroundManager:
         assert _wait_for(lambda: not task.is_running)
         assert task.exit_code == 3
         assert task.status == "exited"
+
+
+class TestBackgroundWait:
+    """The blocking wait() primitive on BackgroundTask."""
+
+    def test_wait_returns_exited_when_process_finishes(self, tmp_path):
+        mgr = BackgroundTaskManager()
+        task = mgr.start("sleep 0.2", "short sleep", str(tmp_path))
+        assert task.wait(timeout=5) == "exited"
+        assert not task.is_running
+
+    def test_wait_times_out_on_long_command(self, tmp_path):
+        mgr = BackgroundTaskManager()
+        task = mgr.start("sleep 30", "long sleep", str(tmp_path))
+        assert task.wait(timeout=0.3) == "timeout"
+        assert task.is_running  # still running — wait must NOT stop it
+        task.stop(force=True)
+
+    def test_wait_matches_until_text(self, tmp_path):
+        mgr = BackgroundTaskManager()
+        # Emits the marker, then stays alive so the match (not exit) ends the wait.
+        task = mgr.start("echo READY; sleep 30", "server", str(tmp_path))
+        assert task.wait(timeout=5, until_text="READY") == "matched"
+        assert task.is_running
+        task.stop(force=True)
+
+    def test_wait_until_text_falls_back_to_exit(self, tmp_path):
+        mgr = BackgroundTaskManager()
+        # Marker never appears; the wait should end on exit, not hang.
+        task = mgr.start("echo nope", "quick", str(tmp_path))
+        assert task.wait(timeout=5, until_text="NEVER") == "exited"
 
 
 class TestBackgroundTools:
@@ -122,3 +156,108 @@ class TestBackgroundTools:
 
     def test_run_tool_is_not_read_only(self):
         assert RunInBackgroundTool().is_read_only is False
+
+    def test_wait_tool_blocks_until_exit(
+        self, bound_tool, auto_approve_permissions, tmp_path
+    ):
+        run = bound_tool(RunInBackgroundTool)
+        rid = json.loads(
+            run._run(command="sleep 0.3", description="short sleep", cwd=str(tmp_path))
+        )["id"]
+        wait = bound_tool(WaitForBackgroundTaskTool)
+        data = json.loads(wait._run(task_id=rid, timeout=5))
+        assert data["wait_result"] == "exited"
+        assert data["timed_out"] is False
+        assert data["status"] == "exited"
+        assert data["exit_code"] == 0
+
+    def test_wait_tool_reports_timeout_without_stopping(
+        self, bound_tool, auto_approve_permissions, tmp_path
+    ):
+        run = bound_tool(RunInBackgroundTool)
+        rid = json.loads(
+            run._run(command="sleep 30", description="long sleep", cwd=str(tmp_path))
+        )["id"]
+        wait = bound_tool(WaitForBackgroundTaskTool)
+        data = json.loads(wait._run(task_id=rid, timeout=1))
+        assert data["timed_out"] is True
+        assert data["status"] == "running"  # NOT stopped
+        get_background_manager().stop(rid, force=True)
+
+    def test_wait_tool_unknown_id_errors(self, bound_tool):
+        wait = bound_tool(WaitForBackgroundTaskTool)
+        data = json.loads(wait._run(task_id="bg-nope"))
+        assert "error" in data
+
+    def test_wait_tool_is_read_only(self):
+        assert WaitForBackgroundTaskTool().is_read_only is True
+
+
+class TestCompletionNotifications:
+    """The pump-thread completion queue that surfaces finished tasks."""
+
+    def _drain_clear(self):
+        """Empty the global queue so each test starts from a clean slate."""
+        drain_completed_notifications()
+
+    def test_natural_completion_is_queued(
+        self, bound_tool, auto_approve_permissions, tmp_path
+    ):
+        self._drain_clear()
+        run = bound_tool(RunInBackgroundTool)
+        rid = json.loads(
+            run._run(command="echo done", description="quick echo", cwd=str(tmp_path))
+        )["id"]
+        task = get_background_manager().get(rid)
+        assert _wait_for(lambda: not task.is_running)
+        # The pump runs on a daemon thread; give it a beat to queue.
+        assert _wait_for(lambda: any(t.id == rid for t in drain_completed_notifications()))
+
+    def test_agent_stopped_task_is_not_queued(
+        self, bound_tool, auto_approve_permissions, tmp_path
+    ):
+        self._drain_clear()
+        run = bound_tool(RunInBackgroundTool)
+        rid = json.loads(
+            run._run(command="sleep 30", description="long sleep", cwd=str(tmp_path))
+        )["id"]
+        get_background_manager().stop(rid, force=True)
+        task = get_background_manager().get(rid)
+        assert _wait_for(lambda: not task.is_running)
+        # Agent stopped it itself — it must NOT show up as a surprise completion.
+        time.sleep(0.3)
+        assert all(t.id != rid for t in drain_completed_notifications())
+
+    def test_acknowledge_removes_from_queue(
+        self, bound_tool, auto_approve_permissions, tmp_path
+    ):
+        self._drain_clear()
+        run = bound_tool(RunInBackgroundTool)
+        rid = json.loads(
+            run._run(command="echo hi", description="quick echo", cwd=str(tmp_path))
+        )["id"]
+        task = get_background_manager().get(rid)
+        assert _wait_for(lambda: not task.is_running)
+        assert _wait_for(lambda: _is_queued(rid))
+        acknowledge_completion(rid)
+        assert all(t.id != rid for t in drain_completed_notifications())
+
+    def test_wait_tool_acknowledges_completion(
+        self, bound_tool, auto_approve_permissions, tmp_path
+    ):
+        self._drain_clear()
+        run = bound_tool(RunInBackgroundTool)
+        rid = json.loads(
+            run._run(command="sleep 0.2", description="short sleep", cwd=str(tmp_path))
+        )["id"]
+        wait = bound_tool(WaitForBackgroundTaskTool)
+        json.loads(wait._run(task_id=rid, timeout=5))
+        # Having explicitly waited, the agent already knows — no surprise nudge.
+        assert all(t.id != rid for t in drain_completed_notifications())
+
+
+def _is_queued(task_id: str) -> bool:
+    """Non-consuming check that ``task_id`` is in the completion queue."""
+    from infinidev.tools.shell import background_manager as bm
+    with bm._completions_lock:
+        return task_id in bm._pending_completions

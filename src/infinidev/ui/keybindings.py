@@ -122,6 +122,11 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Open project-wide search dialog."""
         app_state.show_project_search()
 
+    @kb.add("c-b")  # B for Background
+    def show_background_tasks(event):
+        """Open the background-tasks explorer."""
+        app_state.show_background_tasks()
+
     @kb.add("c-l", eager=True)
     @kb.add("f6")
     def toggle_line_numbers(event):
@@ -229,6 +234,7 @@ FOOTER_HINTS: list[tuple[str, str, frozenset[str]]] = [
     ("Ctrl+S", "Save",       frozenset({"file"})),
     ("Ctrl+F", "Find",       frozenset({"file"})),
     ("Ctrl+G", "Search",     frozenset({"always"})),
+    ("Ctrl+B", "Tasks",      frozenset({"always"})),
     ("F2",     "Chat",       frozenset({"always"})),
     ("Esc",    "Stop/close", frozenset({"always"})),
 ]

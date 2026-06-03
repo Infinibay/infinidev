@@ -311,7 +311,8 @@ def _install_classic_event_bridge() -> None:
 _install_classic_event_bridge()
 
 
-def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None:
+def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
+                       continue_session: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
 
     Thin adapter over :func:`engine.orchestration.run_task` /
@@ -323,11 +324,18 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
     from infinidev.engine.orchestration import (
         run_task, run_flow_task, NonInteractiveHooks,
     )
+    from infinidev.cli import session_resume as sr
 
     _bootstrap_single_prompt_runtime()
 
     agent = InfinidevAgent(agent_id="cli_agent")
-    session_id = str(uuid.uuid4())
+    _cont = sr.resolve_continue_session() if continue_session else None
+    if _cont:
+        session_id = _cont["session_id"]
+        sr.begin_resumed_session(session_id)
+    else:
+        session_id = str(uuid.uuid4())
+        sr.begin_fresh_session(session_id)
     hooks = NonInteractiveHooks()
     engine = LoopEngine()
 
@@ -377,7 +385,9 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False) -> None
 @click.option("--provider", default=None, help="Override LLM provider (ollama, openai, anthropic, gemini, etc.).")
 @click.option("--think", is_flag=True, help="Use phase engine (ANALYZE → PLAN → EXECUTE) for deeper reasoning.")
 @click.option("--profile", is_flag=True, help="Enable session profiling (saves to ~/.infinidev/profiles/).")
-def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool):
+@click.option("--continue", "-c", "continue_session", is_flag=True, help="Resume the most recent session in this directory.")
+@click.option("--resume", is_flag=True, help="Pick a recent session to resume from a list.")
+def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool, continue_session: bool, resume: bool):
     """Main entry point for Infinidev CLI."""
     from infinidev.cli.profiler import SessionProfiler
 
@@ -400,7 +410,7 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, pro
         _reset_capabilities()
 
     with SessionProfiler(enabled=profile) as profiler:
-        _run_main(no_tui, classic, prompt, think, profile)
+        _run_main(no_tui, classic, prompt, think, profile, continue_session, resume)
 
     if profile and profiler.report_path:
         click.echo(click.style(f"\nProfile saved to: {profiler.report_path}", fg="cyan"))
@@ -413,11 +423,47 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, pro
     _fast_exit_workaround()
 
 
-def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool):
+def _resolve_classic_session(continue_session: bool, resume: bool) -> tuple[str, list]:
+    """Resolve the session_id for classic mode, honoring -c/--resume.
+
+    Returns ``(session_id, prior_turns)`` where ``prior_turns`` is the
+    list of ``(role, content)`` to repaint (empty for a fresh session).
+    """
+    from infinidev.cli import session_resume as sr
+
+    chosen: dict | None = None
+    if resume:
+        sessions = sr.recent_sessions()
+        if not sessions:
+            click.echo(click.style("No prior sessions to resume — starting fresh.", fg="yellow"))
+        else:
+            click.echo(click.style("Recent sessions:", bold=True))
+            for i, s in enumerate(sessions, 1):
+                click.echo(f"  {i}. {sr.session_label(s)}")
+            raw = click.prompt("Resume which? (number, or Enter for fresh)", default="", show_default=False)
+            if raw.strip().isdigit() and 1 <= int(raw) <= len(sessions):
+                chosen = sessions[int(raw) - 1]
+    elif continue_session:
+        chosen = sr.resolve_continue_session()
+        if chosen is None:
+            click.echo(click.style("Nothing to continue — starting fresh.", fg="yellow"))
+
+    if chosen:
+        sid = chosen["session_id"]
+        return sid, sr.begin_resumed_session(sid)
+
+    sid = str(uuid.uuid4())
+    sr.begin_fresh_session(sid)
+    return sid, []
+
+
+def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool,
+              continue_session: bool = False, resume: bool = False):
     """Inner dispatch — runs inside the profiler context manager."""
     # Non-interactive --prompt mode
     if prompt:
-        _run_single_prompt(prompt, use_phase_engine=think)
+        _run_single_prompt(prompt, use_phase_engine=think,
+                            continue_session=continue_session)
         return
 
     if not (no_tui or classic):
@@ -428,7 +474,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         if profile:
             click.echo(click.style("Profiling enabled — profile will be saved on exit.", fg="yellow"), err=True)
         from infinidev.ui.app import run_tui
-        run_tui()
+        run_tui(continue_session=continue_session, resume=resume)
         return
 
     # Classic interactive mode — thin adapter around the unified pipeline.
@@ -506,8 +552,21 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     )
 
     agent = InfinidevAgent(agent_id="cli_agent")
-    session_id = str(uuid.uuid4())
+    session_id, _resumed_turns = _resolve_classic_session(continue_session, resume)
     engine = LoopEngine()
+    # Repaint prior conversation so you can see where you left off. This is
+    # display-only (zero tokens); the model gets the full history on its
+    # first turn via the resume replay queued in begin_resumed_session().
+    if _resumed_turns:
+        click.echo(click.style(
+            f"  ↻ Resumed session {session_id[:8]} · "
+            f"{len(_resumed_turns)} prior turns restored", fg="cyan"))
+        click.echo(hr())
+        for _role, _content in _resumed_turns:
+            _who = "You" if _role == "user" else "Infinidev"
+            _color = "green" if _role == "user" else "white"
+            click.echo(click.style(f"{_who}: ", fg=_color, bold=True) + _content)
+        click.echo(hr())
     reviewer = ReviewEngine()
     hooks = ClickHooks(session=session)
     _gather_next_task = False

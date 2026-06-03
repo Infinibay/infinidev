@@ -54,6 +54,67 @@ def _detect_prompt(recent: bytes, already_seen: set[str]) -> str | None:
     return None
 
 
+# Strips quoted spans so a literal '&' inside a string (e.g.
+# echo "a & b", grep '&&') never trips the backgrounding detector.
+_QUOTED_SPAN = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
+# Redirections that legitimately contain '&' and must NOT count as
+# job control: 2>&1, 1>&2, >&2, &>, &>>, >&file.
+_AMP_REDIRECT = re.compile(r'\d*>&\d*|&>>?')
+# A job-control '&' is conventionally whitespace-preceded and sits at a
+# command boundary (end, ';', '|', newline) — unlike a query-string
+# '&' in an unquoted URL (a=1&b=2), which has no leading space.
+_BG_AMP = re.compile(r'(?:^|\s)&(?:\s|;|\||$)')
+# Daemonizing wrappers that detach a process from this executor.
+_DAEMON_KW = re.compile(r'(?:^|[\s;&|()])(nohup|setsid|disown)(?:\s|$)')
+
+
+def detect_manual_backgrounding(command: str) -> str | None:
+    """Return a reason string if ``command`` tries to background a job
+    by hand, else None.
+
+    The model sometimes writes ``some_server & echo PID=$!`` instead of
+    using the ``run_in_background`` tool. That hangs this executor
+    (``subprocess.run`` blocks until the child's pipes close, which a
+    detached process never does) and leaks an untracked PID. We detect
+    it structurally and bounce it back to the proper tool — prompt rules
+    alone don't hold, but a refusal at the executor does.
+
+    Precision matters more than recall here: a false positive blocks a
+    legitimate command. So we scrub quoted spans, logical ``&&`` and
+    ``&``-bearing redirections before looking for a control ``&``.
+    """
+    scrubbed = _QUOTED_SPAN.sub("  ", command)
+    scrubbed = scrubbed.replace("&&", "  ")        # logical AND, not job control
+    scrubbed = _AMP_REDIRECT.sub("  ", scrubbed)   # 2>&1, &>, ...
+
+    m = _DAEMON_KW.search(scrubbed)
+    if m:
+        return f"'{m.group(1)}'"
+    if _BG_AMP.search(scrubbed):
+        return "a trailing '&' (job-control backgrounding)"
+    # '$!' is the PID of the last backgrounded job — capturing it is a
+    # near-certain tell, even if the '&' itself slipped past the checks
+    # above (e.g. split across a here-doc).
+    if "$!" in scrubbed:
+        return "a '$!' background-PID capture"
+    return None
+
+
+_BACKGROUNDING_GUIDANCE = (
+    "Command rejected: it backgrounds a process manually ({reason}). "
+    "Don't do that — a hand-backgrounded process hangs this tool (it "
+    "waits for the process's output pipes to close) and leaves an "
+    "untracked PID with no way to check or stop it.\n"
+    "Use the `run_in_background` tool instead: pass the command WITHOUT "
+    "the '&' plus a short `description`. It returns a task id immediately, "
+    "and the task is tracked in <background-tasks> every turn — check it "
+    "with `background_status`, wait on it with `wait_for_background_task`, "
+    "and stop it with `stop_background_task`.\n"
+    "If you only need the output right now, run it in the FOREGROUND "
+    "(no '&') and let execute_command return when it finishes."
+)
+
+
 def check_command_permission(
     command: str, *, description: str = "Execute shell command"
 ) -> str | None:
@@ -125,6 +186,13 @@ class ExecuteCommandTool(InfinibayBaseTool):
             command = str(command) if command else ""
         if not command or not command.strip():
             return self._error("Empty command")
+
+        # Bounce manual backgrounding back to the proper tool. Doing this
+        # before permission/exec means the model never gets a hung call —
+        # it gets an actionable redirect to run_in_background.
+        bg_reason = detect_manual_backgrounding(command)
+        if bg_reason:
+            return self._error(_BACKGROUNDING_GUIDANCE.format(reason=bg_reason))
 
         # Check permissions
         perm_error = self._check_permission(command)

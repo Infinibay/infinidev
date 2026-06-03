@@ -94,7 +94,7 @@ class TestContextFiltering:
 
     # Keys that should always be visible
     ALWAYS_KEYS = {
-        "Ctrl+C", "Ctrl+O", "Ctrl+E", "Alt+.", "Ctrl+G", "F2", "Esc",
+        "Ctrl+C", "Ctrl+O", "Ctrl+E", "Alt+.", "Ctrl+G", "Ctrl+B", "F2", "Esc",
     }
 
     # Keys only visible in file context

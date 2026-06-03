@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.shell.background_manager import (
     BackgroundTask,
+    acknowledge_completion,
     get_background_manager,
 )
 from infinidev.tools.shell.background_status_input import BackgroundStatusInput
@@ -71,4 +72,8 @@ class BackgroundStatusTool(InfinibayBaseTool):
         summary["stderr"] = _tail(summary["stderr"], tail_lines)
         if task.killed_reason:
             summary["killed_reason"] = task.killed_reason
+        # Inspecting a finished task surfaces its completion to the model, so
+        # don't also nag about it via <background-task-finished> next turn.
+        if not task.is_running:
+            acknowledge_completion(task.id)
         return self._success(summary)

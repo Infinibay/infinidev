@@ -197,6 +197,62 @@ Call `help record_finding` for full examples and guidance.
 - **NEVER run commands that require interactive stdin** (e.g. `passwd`, `ssh` without key, `read`, interactive installers). All commands must run non-interactively.
 """
 
+BEHAVIOR_GUIDELINES = """\
+## Behavior — How You Must Work
+
+These rules override convenience. They apply to every step, every tool call,
+and every summary you write. When honesty and getting-it-done-fast conflict,
+honesty wins.
+
+### Be honest
+- Report results exactly as they are. Never lie, exaggerate a success, or
+  downplay a failure to make the outcome look better than it is.
+- Always show the whole picture, not just the good parts. If something failed,
+  is incomplete, or you are not sure it works — say so plainly and say why.
+- Never claim a step is done, a test passes, or a bug is fixed unless you
+  actually ran it and saw the result. "It should work" is not "it works".
+
+### Do not cheat
+- Solve the REAL problem, not a shortcut that only looks solved.
+- Never fake a test: do not hard-code the expected output, delete or skip the
+  assertions, catch-and-ignore the error, or special-case the exact input the
+  test checks. A passing test must prove the code works for real inputs.
+- Do not find an "easy path" that produces the right-looking result while
+  leaving the actual task unsolved.
+- If you cannot make it work honestly, mark the step `blocked` and explain the
+  obstacle. Reporting an honest failure is correct; disguising it as success
+  is not.
+
+### Do the real work — do not be lazy
+- Implement the correct, complete solution — the right path, not the quickest
+  patch that happens to compile.
+- No `TODO` comments, no stub functions, no "left as an exercise", no
+  placeholder you intend to fill in "later". Finish it now.
+- The ONLY time you simplify or do a partial version is when the user explicitly
+  asked for a draft/minimal change, or the task genuinely calls for it.
+
+### Serve the user, professionally
+- The product and every decision belong to the user (see "Your Role" above).
+- If a request looks like it works AGAINST what the user actually wants — the
+  project's real goal — do not just silently obey. Tell the user what looks
+  off, explain why in one or two sentences, and ask whether to proceed anyway.
+  Then do whatever they decide.
+- The user may not know the codebase or the full flow (they may be "vibe
+  coding"). Match your explanation to what they appear to know: explain the
+  *why* in plain language and avoid jargon they are not already using.
+"""
+
+BEHAVIOR_GUIDELINES_SMALL = """\
+## Behavior (always follow)
+1. Be honest. Report results exactly as they are — never fake, exaggerate, or hide a failure.
+2. Never say a step is "done" or a test passes unless you actually ran it and saw it pass.
+3. No cheating: do not hard-code outputs, skip assertions, or special-case inputs to make a test pass.
+4. No laziness: write the real, complete code. No TODO, no stubs, no placeholders — unless the user asked for a draft.
+5. If you cannot do it honestly, mark the step blocked and explain why. An honest failure beats a fake success.
+6. If a request seems to work against the user's real goal, say so, explain why briefly, then ask before proceeding.
+7. The user may not know the code. Explain the "why" in simple words.
+"""
+
 CRITIC_PROTOCOL_ADDENDUM = """\
 ## Pair-Programming Partner
 
@@ -561,16 +617,20 @@ def build_system_prompt(
     if small_model:
         identity = CLI_AGENT_IDENTITY_SMALL
         protocol = LOOP_PROTOCOL_SMALL
+        behavior = BEHAVIOR_GUIDELINES_SMALL
     else:
         from infinidev.prompts.variants import get_variant
 
         identity = identity_override or get_variant("loop.identity") or CLI_AGENT_IDENTITY
         protocol = protocol_override or get_variant("loop.protocol") or LOOP_PROTOCOL
+        behavior = BEHAVIOR_GUIDELINES
 
-    # Stable prefix: identity + tech + protocol. Kept in this order so the
-    # whole prefix can be cached as a single block — the dynamic session
-    # context goes AFTER the cache breakpoint marker below.
-    parts: list[str] = [identity]
+    # Stable prefix: identity + behavior + tech + protocol. Kept in this order
+    # so the whole prefix can be cached as a single block — the dynamic session
+    # context goes AFTER the cache breakpoint marker below. Behavior sits right
+    # under the identity so the honesty/anti-laziness rules frame everything
+    # the agent does, regardless of which prompt variant supplied the identity.
+    parts: list[str] = [identity, behavior]
 
     # Tech-specific guidelines (skip for small models — too many tokens)
     if tech_hints and not small_model:
@@ -641,6 +701,7 @@ def build_iteration_prompt(
     _append_if(parts, _render_project_knowledge(project_knowledge))
     _append_if(parts, _render_context_rank(context_rank_result))
     _append_if(parts, _render_workspace())
+    _append_if(parts, _render_background_completions())
     _append_if(parts, _render_background_tasks())
 
     # Task: prefer the structured ``Task`` rendering when available
@@ -1107,17 +1168,46 @@ def _render_background_tasks() -> str:
         "read their output and stop_background_task to stop one.",
     ]
     for t in tasks:
-        runtime = t.runtime_seconds()
-        if t.status == "running":
-            state_str = f"running for {runtime:.0f}s"
-        elif t.status == "killed":
-            state_str = f"stopped after {runtime:.0f}s"
-        else:
-            code = t.exit_code if t.exit_code is not None else "?"
-            verdict = "ok" if t.exit_code == 0 else f"FAILED (exit {code})"
-            state_str = f"exited {verdict} after {runtime:.0f}s"
-        lines.append(f"  [{t.id}] {t.description} — {state_str}")
+        lines.append(f"  [{t.id}] {t.description} — {t.status_line()}")
     lines.append("</background-tasks>")
+    return "\n".join(lines)
+
+
+def _render_background_completions() -> str:
+    """Render a one-shot ``<background-task-finished>`` notice.
+
+    Drains the background manager's completion queue — populated by a task's
+    pump thread the moment it exits naturally. This is the signal that lets the
+    agent notice a build/test/migration that finished WHILE it was busy on
+    something else, without having to poll. Consuming: each finished task is
+    announced exactly once, then cleared. Tasks the agent stopped itself, or
+    already inspected via wait/background_status, never appear here.
+    """
+    try:
+        from infinidev.tools.shell.background_manager import (
+            drain_completed_notifications,
+        )
+    except Exception:
+        return ""
+
+    finished = drain_completed_notifications()
+    if not finished:
+        return ""
+
+    lines = [
+        "<background-task-finished>",
+        "A background command you started has finished since your last step "
+        "(it ran independently while you were working). If its result matters "
+        "to what you're doing, read its output with background_status.",
+    ]
+    for t in finished:
+        code = t.exit_code
+        verdict = "ok" if code == 0 else f"FAILED (exit {code})"
+        lines.append(
+            f"  [{t.id}] {t.description} — exited {verdict} "
+            f"after {t.runtime_seconds():.0f}s"
+        )
+    lines.append("</background-task-finished>")
     return "\n".join(lines)
 
 

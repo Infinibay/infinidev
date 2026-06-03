@@ -88,6 +88,12 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Stop a background task (force=True to SIGKILL immediately)",
         "stop_background_task(task_id='bg-1')",
     ),
+    "wait_for_background_task": (
+        "BLOCK until a background task finishes (or prints a readiness marker "
+        "via until_text), instead of polling background_status in a loop. "
+        "Bounded by a timeout; returns timed_out=True if it elapses.",
+        "wait_for_background_task(task_id='bg-1', until_text='Listening on')",
+    ),
     "iter_symbols": (
         "Walk all indexed symbols (no search term needed)",
         "iter_symbols(kind='method', parent='UserService')",
@@ -306,7 +312,7 @@ def build_tool_usage_section(available_tools: set[str]) -> str:
                      "add_content_before_line"]),
         ("Execution", ["execute_command", "code_interpreter",
                        "run_in_background", "background_status",
-                       "stop_background_task"]),
+                       "stop_background_task", "wait_for_background_task"]),
         ("Git", ["git_branch", "git_commit", "git_diff", "git_status"]),
         ("Web", ["web_search", "web_fetch", "code_search_web"]),
         ("Knowledge", ["record_finding", "search_findings", "read_findings",

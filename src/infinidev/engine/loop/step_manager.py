@@ -227,6 +227,10 @@ class StepManager:
     ) -> str:
         """Common finish logic: deactivate tracker, log, emit events, store stats."""
         ctx.file_tracker.deactivate()
+        # Retain the terminal status + state so the pipeline can build the
+        # hidden end-of-task work summary after execute() returns.
+        self._engine._last_state = ctx.state
+        self._engine._last_status = status
         if ctx.verbose:
             _log_finish(ctx.agent_name, status, iteration + 1, ctx.state.total_tool_calls, ctx.state.total_tokens)
             _log_cache_summary(ctx.state)

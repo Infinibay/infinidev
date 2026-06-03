@@ -16,6 +16,7 @@ from infinidev.tools.git import (
 from infinidev.tools.shell import (
     ExecuteCommandTool, CodeInterpreterTool,
     RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+    WaitForBackgroundTaskTool,
 )
 from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
 from infinidev.tools.knowledge import (
@@ -52,6 +53,7 @@ GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [
     ExecuteCommandTool, CodeInterpreterTool,
     RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+    WaitForBackgroundTaskTool,
 ]
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
 KNOWLEDGE_TOOLS = [
@@ -85,9 +87,10 @@ SMALL_MODEL_TOOLS = [
     ListDirectoryTool, CodeSearchTool, GlobTool,
     # Git (3)
     GitCommitTool, GitDiffTool, GitStatusTool,
-    # Shell (5)
+    # Shell (6)
     ExecuteCommandTool, CodeInterpreterTool,
     RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+    WaitForBackgroundTaskTool,
     # Knowledge (2)
     RecordFindingTool, SearchFindingsTool,
     # Code intelligence (8)

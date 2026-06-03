@@ -136,10 +136,15 @@ def handle_command(cmd_text: str):
         click.echo("  /brainstorm <problem> - Creative ideation with forced perspectives")
         click.echo("  /refactor [scope]  - Refactor code (modularize, clean, restructure)")
         click.echo("  /init              - Explore and document the current project")
+        click.echo("  /tasks [id]        - List background tasks (or show one task's output)")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
         return True
-    
+
+    elif cmd == "/tasks":
+        _render_background_tasks_classic(parts[1] if len(parts) > 1 else None)
+        return True
+
     elif cmd == "/settings":
         handle_settings_command(parts)
         return True
@@ -174,6 +179,57 @@ def handle_command(cmd_text: str):
 
     click.echo(f"Unknown command: {cmd}")
     return True
+
+
+def _render_background_tasks_classic(task_id: str | None = None) -> None:
+    """Print the background-tasks report for classic (non-TUI) mode.
+
+    Without an id: a compact list of every task and its status. With an id:
+    that task's status plus the tail of its captured stdout/stderr — the
+    text-mode equivalent of the TUI's Ctrl+B explorer.
+    """
+    from infinidev.tools.shell.background_manager import get_background_manager
+
+    manager = get_background_manager()
+
+    if task_id:
+        task = manager.get(task_id)
+        if task is None:
+            known = [t.id for t in manager.list()]
+            click.echo(click.style(
+                f"No background task '{task_id}'. Known: {known or 'none'}", fg="red"))
+            return
+        click.echo(click.style(f"[{task.id}] {task.description}", bold=True))
+        click.echo(f"  {task.status_line()}")
+        out, err = task.output()
+        if out.strip():
+            click.echo(click.style("  stdout:", dim=True))
+            for line in out.strip().splitlines()[-40:]:
+                click.echo(f"    {line}")
+        if err.strip():
+            click.echo(click.style("  stderr:", dim=True))
+            for line in err.strip().splitlines()[-40:]:
+                click.echo(f"    {line}")
+        if not out.strip() and not err.strip():
+            click.echo(click.style("  (no output captured)", dim=True))
+        return
+
+    tasks = manager.list()
+    if not tasks:
+        click.echo(click.style("No background tasks have been started.", dim=True))
+        return
+
+    running = sum(1 for t in tasks if t.status == "running")
+    click.echo(click.style(
+        f"Background tasks — {len(tasks)} total, {running} running", bold=True))
+    for t in tasks:
+        colour = "cyan" if t.status == "running" else (
+            "green" if (t.status == "exited" and t.exit_code == 0) else "yellow")
+        click.echo(
+            f"  {click.style(t.id, fg=colour)}  "
+            f"{t.description} — {t.status_line()}"
+        )
+    click.echo(click.style("  Use /tasks <id> to see a task's output.", dim=True))
 
 
 def handle_settings_command(parts: list[str]):

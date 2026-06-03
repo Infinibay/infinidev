@@ -57,6 +57,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
     app.add_message(
         "System",
         "Ctrl+E                Toggle file explorer\n"
+        "Ctrl+B                Explore running background tasks\n"
         "F2 / F3 / F4          Focus: Chat / Explorer / Sidebar\n"
         "Ctrl+W                Close file tab\n"
         "--------------------------------------------\n"
@@ -76,6 +77,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "/init                 Explore and document the current project\n"
         "/debug                Inspect agent: notes, history, plan, state\n"
         "/findings             Browse all findings\n"
+        "/tasks                Explore running background tasks (Ctrl+B)\n"
         "/knowledge            Browse project knowledge\n"
         "/documentation        Browse cached library docs\n"
         "/clear                Clear chat\n"
@@ -94,6 +96,11 @@ def _cmd_models(app: InfinidevApp, parts: list[str]) -> None:
 
 def _cmd_findings(app: InfinidevApp, parts: list[str]) -> None:
     app.dialog_manager.open_findings(filter_type=None)
+
+
+def _cmd_tasks(app: InfinidevApp, parts: list[str]) -> None:
+    """Open the background-tasks explorer (same as Ctrl+B)."""
+    app.dialog_manager.open_background_tasks()
 
 
 def _cmd_knowledge(app: InfinidevApp, parts: list[str]) -> None:
@@ -287,6 +294,7 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/debug": _cmd_debug,
     "/notes": _cmd_notes,
     "/findings": _cmd_findings,
+    "/tasks": _cmd_tasks,
     "/knowledge": _cmd_knowledge,
     "/documentation": _cmd_docs,
     "/docs": _cmd_docs,

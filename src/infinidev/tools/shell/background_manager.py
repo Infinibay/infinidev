@@ -100,9 +100,18 @@ class BackgroundTask:
             self.proc.wait()
         except Exception:
             pass
+        newly_finished = False
         with self._lock:
             if self.end_time is None:
                 self.end_time = time.monotonic()
+                newly_finished = True
+        # Signal a natural completion so the developer loop notices a task
+        # that finished WHILE it was working on something else. Skip tasks the
+        # agent stopped itself (killed_reason is set) — it already knows — and
+        # skip ones already surfaced via wait/status (acknowledged). The queue
+        # is drained into a <background-task-finished> prompt block each turn.
+        if newly_finished and self.killed_reason is None:
+            _queue_completion(self.id)
 
     # ── State accessors ──────────────────────────────────────────────
     @property
@@ -125,6 +134,20 @@ class BackgroundTask:
         end = self.end_time if self.end_time is not None else time.monotonic()
         return max(0.0, end - self.start_time)
 
+    def status_line(self) -> str:
+        """One-line human verdict — the single source of truth for the
+        'running for 12s' / 'exited ok' / 'FAILED' phrasing shared by the
+        <background-tasks> prompt block, the TUI explorer, and /tasks.
+        """
+        runtime = self.runtime_seconds()
+        if self.status == "running":
+            return f"running for {runtime:.0f}s"
+        if self.status == "killed":
+            return f"stopped after {runtime:.0f}s"
+        code = self.exit_code if self.exit_code is not None else "?"
+        verdict = "ok" if self.exit_code == 0 else f"FAILED (exit {code})"
+        return f"exited {verdict} after {runtime:.0f}s"
+
     def output(self) -> tuple[str, str]:
         """Return decoded (stdout, stderr) snapshots."""
         with self._lock:
@@ -133,6 +156,53 @@ class BackgroundTask:
         return out.decode(errors="replace"), err.decode(errors="replace")
 
     # ── Control ──────────────────────────────────────────────────────
+    def wait(
+        self,
+        timeout: float | None = None,
+        until_text: str | None = None,
+        poll_interval: float = 0.1,
+    ) -> str:
+        """Block until a completion condition is met or ``timeout`` elapses.
+
+        The wait ends on whichever comes first:
+          - the process exits, or
+          - ``until_text`` (if given) appears in captured stdout/stderr —
+            the readiness signal for commands that never exit (dev servers,
+            watchers), where waiting for exit would always time out.
+
+        Returns the reason the wait ended: ``"matched"`` (until_text seen),
+        ``"exited"`` (process is no longer running), or ``"timeout"``.
+        ``timeout=None`` waits indefinitely; callers should always pass a
+        bound so a wait can never block the CLI forever.
+
+        We poll ``poll()`` rather than call ``proc.wait()`` so we never
+        contend with the pump thread's reaping wait() on the same handle.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if until_text and self._buffers_contain(until_text):
+                return "matched"
+            if not self.is_running:
+                # Process gone, but the pump thread may still be draining the
+                # final slice of output. Give it a moment so an until_text
+                # printed just before exit isn't missed.
+                self._reader.join(timeout=0.5)
+                if until_text and self._buffers_contain(until_text):
+                    return "matched"
+                return "exited"
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return "timeout"
+                time.sleep(min(poll_interval, remaining))
+            else:
+                time.sleep(poll_interval)
+
+    def _buffers_contain(self, needle: str) -> bool:
+        """True if ``needle`` is present in either captured stream."""
+        out, err = self.output()
+        return needle in out or needle in err
+
     def stop(self, force: bool = False, reason: str | None = None) -> bool:
         """Stop the process. Returns True if it was running and is now down.
 
@@ -244,6 +314,48 @@ class BackgroundTaskManager:
                     task.stop(force=True, reason="Process exit cleanup")
                 except Exception:
                     pass
+
+
+# ── Completion notifications ─────────────────────────────────────────────
+# When a background task finishes naturally while the developer loop is busy
+# with something else, the loop has no way to know unless it polls. This
+# module-level queue (mirrors code_intel.file_change_notifications) records
+# the ids of tasks that just completed; build_iteration_prompt drains it once
+# per iteration and renders a <background-task-finished> block so the agent is
+# told about it on its next step. Guarded by its own lock — the pump threads
+# write to it; the prompt builder reads and clears it.
+_pending_completions: list[str] = []
+_completions_lock = threading.Lock()
+
+
+def _queue_completion(task_id: str) -> None:
+    """Record that ``task_id`` finished (called by the pump thread)."""
+    with _completions_lock:
+        if task_id not in _pending_completions:
+            _pending_completions.append(task_id)
+
+
+def acknowledge_completion(task_id: str) -> None:
+    """Drop a task from the pending queue — its completion was already shown.
+
+    Called by ``wait_for_background_task`` / ``background_status`` when they
+    surface a finished task to the model directly, so the next iteration's
+    <background-task-finished> block doesn't redundantly re-announce it.
+    """
+    with _completions_lock:
+        if task_id in _pending_completions:
+            _pending_completions.remove(task_id)
+
+
+def drain_completed_notifications() -> list["BackgroundTask"]:
+    """Pop and return the tasks that finished since the last drain."""
+    with _completions_lock:
+        ids = list(_pending_completions)
+        _pending_completions.clear()
+    if not ids:
+        return []
+    mgr = get_background_manager()
+    return [t for t in (mgr.get(i) for i in ids) if t is not None]
 
 
 _manager: BackgroundTaskManager | None = None

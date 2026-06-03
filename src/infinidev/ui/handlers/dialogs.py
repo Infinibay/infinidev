@@ -44,6 +44,10 @@ class DialogManager:
         self._debug_sections_window: Any = None
         self._debug_content_window: Any = None
 
+        # Background-tasks explorer state
+        self._bgtasks_ctrl: Any = None
+        self._bgtasks_window: Any = None
+
     # ── Settings dialog ─────────────────────────────────────────────
 
     def open_settings(self) -> None:
@@ -326,6 +330,90 @@ class DialogManager:
             content=ConditionalContainer(
                 content=frame,
                 filter=Condition(lambda: app.active_dialog == "notes_browser"),
+            ),
+            transparent=False,
+        )
+        if app._float_container:
+            app._float_container.floats.append(dialog_float)
+
+    # ── Background-tasks explorer ──────────────────────────────────
+
+    def open_background_tasks(self) -> None:
+        """Open the background-tasks explorer modal (lazy-inits on first call).
+
+        The control reads the background manager live on each render, so there
+        is no snapshot to refresh here — just reset the scroll and show it.
+        """
+        if self._bgtasks_ctrl is None:
+            self._init_background_tasks_dialog()
+
+        self._bgtasks_ctrl._scroll = 0
+        self._app.active_dialog = "background_tasks"
+        try:
+            self._app.app.layout.focus(self._bgtasks_window)
+        except Exception:
+            pass
+        self._app.invalidate()
+
+    def _init_background_tasks_dialog(self) -> None:
+        """Create the background-tasks dialog and register as a Float."""
+        from prompt_toolkit.layout.containers import (
+            Float, ConditionalContainer, ScrollOffsets,
+        )
+        from prompt_toolkit.filters import Condition
+        from prompt_toolkit.key_binding import KeyBindings
+        from infinidev.ui.dialogs.background_tasks_browser import (
+            BackgroundTasksControl,
+        )
+        from infinidev.ui.dialogs.base import dialog_frame
+        from infinidev.ui.theme import ACCENT
+        from infinidev.ui.controls.clickable_scrollbar import scrollable_window
+
+        app = self._app
+
+        ctrl = BackgroundTasksControl()
+        self._bgtasks_ctrl = ctrl
+
+        self._bgtasks_window, self._bgtasks_container = scrollable_window(
+            ctrl, display_arrows=True,
+            scroll_offsets=ScrollOffsets(top=1, bottom=1),
+        )
+
+        kb = KeyBindings()
+
+        @kb.add("up")
+        @kb.add("k")
+        def _up(event):
+            ctrl.scroll_up()
+
+        @kb.add("down")
+        @kb.add("j")
+        def _down(event):
+            ctrl.scroll_down()
+
+        @kb.add("r")
+        def _refresh(event):
+            # The view is already live; this just forces a redraw so a user
+            # watching a long task sees the latest output without scrolling.
+            app.invalidate()
+
+        @kb.add("escape")
+        @kb.add("q")
+        def _close(event):
+            app.active_dialog = None
+            app.focus_chat()
+            app.invalidate()
+
+        ctrl._nav_kb = kb
+        ctrl.get_key_bindings = lambda: kb
+
+        frame = dialog_frame("Background Tasks", self._bgtasks_container,
+                             width=84, height=26, border_color=ACCENT)
+
+        dialog_float = Float(
+            content=ConditionalContainer(
+                content=frame,
+                filter=Condition(lambda: app.active_dialog == "background_tasks"),
             ),
             transparent=False,
         )

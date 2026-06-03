@@ -76,6 +76,14 @@ class ToolProcessor:
                 note_text = snc_args.get("note", "").strip()
                 if note_text and len(engine.session_notes) < _MAX_SESSION_NOTES:
                     engine.session_notes.append(note_text)
+                    # Persist so a resumed session (`-c`) can re-load it.
+                    # Soft-fails: an in-memory note is still useful this run.
+                    try:
+                        from infinidev.tools.base.context import get_current_session_id
+                        from infinidev.db.service import persist_session_note
+                        persist_session_note(get_current_session_id(), note_text)
+                    except Exception:
+                        pass
             except (json.JSONDecodeError, AttributeError):
                 pass
 

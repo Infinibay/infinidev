@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     COMMAND_TIMEOUT: int = 120
     WEB_TIMEOUT: int = 30
     GIT_PUSH_TIMEOUT: int = 120
+    # wait_for_background_task: default block when the caller omits a timeout,
+    # and a hard ceiling so a single wait can never freeze the CLI indefinitely.
+    BACKGROUND_WAIT_TIMEOUT: int = 120
+    BACKGROUND_WAIT_MAX_TIMEOUT: int = 600
 
     # Sandbox (Disabled for local CLI by default)
     SANDBOX_ENABLED: bool = False
@@ -118,6 +122,11 @@ class Settings(BaseSettings):
     LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
     LOOP_GUIDANCE_ENABLED: bool = True  # Inject pre-baked how-to advice when small models get stuck
     LOOP_GUIDANCE_MAX_PER_TASK: int = 3  # Hard cap on guidance entries per task
+    # End-of-task work summary: a hidden conversation turn recording what
+    # the developer loop did (files + why, per-file changes, challenges) so
+    # the NEXT turn's chat agent has continuity instead of starting cold.
+    LOOP_WORK_SUMMARY_ENABLED: bool = True  # Generate the hidden end-of-task summary
+    LOOP_WORK_SUMMARY_USE_LLM: bool = True  # Synthesize via the model (vs. deterministic assembly only)
 
     # ── Spec elaboration ─────────────────────────────────────────────
     # Turns a vague requirement into a grounded spec BEFORE planning.
