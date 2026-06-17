@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog } from "@harbor/components/overlays/Dialog";
 import { Button } from "@harbor/components/buttons/Button";
 import { TextField } from "@harbor/components/inputs/TextField";
-import { Select } from "@harbor/components/inputs/Select";
+import { Z } from "@harbor/lib/z";
 import { useToast } from "@harbor/components/feedback/Toast";
 import { useEngine } from "@/state/store";
 import type { ProviderDto } from "@/api/engineEvent";
@@ -101,12 +101,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       }
     >
       <div className="space-y-3">
-        <Select
-          label="Provider"
-          value={provider}
-          onChange={setProvider}
-          options={providers.map((p) => ({ value: p.id, label: p.display_name }))}
-        />
+        <ProviderSelect providers={providers} value={provider} onChange={setProvider} />
         {prov?.api_key_required && (
           <TextField label="API key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
         )}
@@ -200,6 +195,77 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/** Provider chooser. A self-contained dropdown rendered *inside* the dialog's
+ *  stacking context (not portaled to <body>), so its options sit above the
+ *  sibling form fields without fighting the global layer scale — Harbor's
+ *  portaled Select would land at Z.POPOVER (1000), below Z.DIALOG (5000), and
+ *  be occluded by the modal. The options menu uses Z.RAISED from the layer
+ *  system rather than a hardcoded z-index. */
+function ProviderSelect({
+  providers,
+  value,
+  onChange,
+}: {
+  providers: ProviderDto[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = providers.find((p) => p.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="mb-1.5 block text-xs text-fg-muted">Provider</label>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-md border border-fg/15 bg-surface-2/60 px-3 py-2 text-left text-sm text-fg outline-none transition-colors hover:bg-surface-2 focus-visible:border-accent/50"
+      >
+        <span className={current ? "text-fg" : "text-fg-subtle"}>
+          {current?.display_name ?? "Select a provider…"}
+        </span>
+        <span className={`text-fg-subtle transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+      </button>
+      {open && (
+        <ul
+          role="listbox"
+          style={{ zIndex: Z.RAISED }}
+          className="absolute left-0 right-0 top-full mt-1 max-h-56 overflow-y-auto rounded-md border border-fg/15 bg-surface-2 shadow-harbor-lg"
+        >
+          {providers.map((p) => (
+            <li key={p.id} role="option" aria-selected={p.id === value}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(p.id);
+                  setOpen(false);
+                }}
+                className={`block w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-3/60 ${
+                  p.id === value ? "text-accent" : "text-fg-muted"
+                }`}
+              >
+                {p.display_name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

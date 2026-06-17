@@ -1677,7 +1677,7 @@ dependencies = [
 
 [[package]]
 name = "infinidev-codeintel"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "infinidev-tools",
@@ -1689,7 +1689,7 @@ dependencies = [
 
 [[package]]
 name = "infinidev-desktop"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "infinidev-engine",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "infinidev-engine"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -1719,7 +1719,7 @@ dependencies = [
 
 [[package]]
 name = "infinidev-knowledge"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "infinidev-tools",
@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "infinidev-llm"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "infinidev-tools"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "ignore",

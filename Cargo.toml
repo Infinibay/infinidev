@@ -15,7 +15,7 @@ exclude = ["desktop"]
 [workspace.package]
 edition = "2021"
 rust-version = "1.77"
-version = "0.9.0"
+version = "0.9.1"
 authors = ["Andres Borek"]
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Infinibay/infinidev"

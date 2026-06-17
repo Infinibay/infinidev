@@ -74,6 +74,37 @@ export function AppShell() {
   const [activeMain, setActiveMain] = useState<string>("chat");
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
 
+  // Resizable workbench: width in px, drag the divider to change it, persisted.
+  const clampAside = (w: number) =>
+    Math.min(Math.max(w, 320), Math.max(360, window.innerWidth - 360));
+  const [asideW, setAsideW] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("workbenchWidth"));
+    return saved >= 320 ? saved : 480;
+  });
+  const asideWRef = useRef(asideW);
+  asideWRef.current = asideW;
+
+  useEffect(() => {
+    localStorage.setItem("workbenchWidth", String(asideW));
+  }, [asideW]);
+
+  const startResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = asideWRef.current;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (ev: PointerEvent) => setAsideW(clampAside(startW + (startX - ev.clientX)));
+    const onUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
+
   const openFile = useCallback((path: string) => {
     setOpenFiles((f) => (f.includes(path) ? f : [...f, path]));
     setActiveMain(path);
@@ -238,7 +269,20 @@ export function AppShell() {
             onCommand={runCommand}
           />
         </main>
-        <aside className="w-[42%] min-w-[340px] max-w-[600px] shrink-0 border-l border-fg/10 bg-surface-1/80 shadow-[-12px_0_32px_-16px_rgba(0,0,0,0.55)] backdrop-blur-sm">
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panel"
+          onPointerDown={startResize}
+          className="group relative z-10 w-1 shrink-0 cursor-col-resize bg-fg/10 transition-colors hover:bg-accent/50"
+        >
+          {/* Wider invisible hit area so the 1px divider is easy to grab. */}
+          <span className="absolute inset-y-0 -left-1.5 -right-1.5" />
+        </div>
+        <aside
+          style={{ width: asideW }}
+          className="shrink-0 border-l border-fg/10 bg-surface-1/80 shadow-[-12px_0_32px_-16px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+        >
           <Workbench tab={tab} setTab={setTab} selectedFile={selectedFile} openFile={openFile} />
         </aside>
       </div>

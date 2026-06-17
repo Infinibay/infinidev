@@ -165,7 +165,9 @@ pub static PROVIDERS: &[Provider] = &[
         api_key_required: true,
         base_url_editable: false,
         wire: Wire::OpenAiCompat,
-        list_format: ListFormat::Static,
+        // OpenAI-compatible `/v1/models`; the static list is only a fallback if
+        // the live call fails (no key / offline).
+        list_format: ListFormat::OpenAi,
         is_native: false,
         static_models: &["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.1"],
     },
