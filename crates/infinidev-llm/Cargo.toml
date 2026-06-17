@@ -1,0 +1,21 @@
+[package]
+name = "infinidev-llm"
+description = "Multi-provider LLM client, model registry, capabilities and pricing for the Infinidev core."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

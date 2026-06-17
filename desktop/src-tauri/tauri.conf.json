@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Infinidev",
+  "version": "0.9.0",
+  "identifier": "com.infinibay.infinidev",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Infinidev",
+        "width": 1480,
+        "height": 920,
+        "minWidth": 980,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: ipc: http://ipc.localhost; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8765 ws://127.0.0.1:8765 http://localhost:8765 ws://localhost:8765; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "copyright": "© 2026 Infinibay. AGPL-3.0-or-later.",
+    "category": "DeveloperTool",
+    "shortDescription": "Local AI programming assistant",
+    "longDescription": "Infinidev desktop — a Tauri + React + Harbor GUI over the infinidev agent engine (local LLMs via Ollama)."
+  }
+}

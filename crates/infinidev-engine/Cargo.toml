@@ -1,0 +1,24 @@
+[package]
+name = "infinidev-engine"
+description = "Agentic tool-calling loop + event model for the Infinidev core."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+infinidev-llm = { path = "../infinidev-llm" }
+infinidev-tools = { path = "../infinidev-tools" }
+infinidev-knowledge = { path = "../infinidev-knowledge" }
+infinidev-codeintel = { path = "../infinidev-codeintel" }
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tempfile = "3"

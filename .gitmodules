@@ -1,0 +1,3 @@
+[submodule "desktop/external/infinibay_ui"]
+	path = desktop/external/infinibay_ui
+	url = https://github.com/Infinibay/harbor.git

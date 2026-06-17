@@ -1,0 +1,18 @@
+# Frontend
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+*.tsbuildinfo
+
+# Tauri
+src-tauri/target
+src-tauri/gen/schemas
+
+# Packaging (generated sidecar binary + PyInstaller scratch)
+src-tauri/binaries
+.pyinstaller-build
+
+# OS
+.DS_Store

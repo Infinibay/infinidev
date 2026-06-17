@@ -1,0 +1,23 @@
+[package]
+name = "infinidev-knowledge"
+description = "Persistent knowledge base (findings) for the Infinidev core, backed by SQLite."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+infinidev-tools = { path = "../infinidev-tools" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

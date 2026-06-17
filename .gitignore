@@ -56,3 +56,6 @@ unsloth_compiled_cache/
 
 # ken — local index, daemon socket, logs
 .ken/
+
+# Rust core (workspace target lives at the repo root)
+/target

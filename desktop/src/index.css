@@ -1,0 +1,77 @@
+@import "@harbor/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+
+  /* ── Palette overrides ──────────────────────────────────────────────────
+     Harbor's stock dark theme is a near-black, neutral-grey ramp (bg 10/10/15,
+     pure-white text) which reads as very dark and flat. We lift the whole
+     ladder into a layered slate-blue scheme: brighter bases, clearer step
+     separation (so panels read as distinct layers), softer tinted neutrals,
+     and a slightly brighter accent. Overrides the imported tokens.css. */
+  --harbor-bg: 20 22 31; /* base canvas (was 10 10 15) */
+  --harbor-bg-elev-1: 28 31 43; /* panels / right column */
+  --harbor-bg-elev-2: 38 42 57; /* menus, chips, raised controls */
+  --harbor-bg-elev-3: 50 55 73; /* dialogs */
+
+  --harbor-text: 235 238 246; /* soft off-white (was pure 255) */
+  --harbor-text-muted: 166 174 193;
+  --harbor-text-subtle: 121 130 151;
+
+  --harbor-border: 190 203 236; /* cool-tinted; consumed at low alpha */
+
+  --harbor-accent: 139 92 246; /* violet-500 — a touch brighter than 600 */
+  --harbor-accent-2: 56 189 248; /* sky-400 */
+  --harbor-accent-3: 244 114 182; /* pink-400 */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  /* Layered base: faint violet + sky glows over the canvas so large empty
+     areas read with subtle depth instead of one flat fill. */
+  background:
+    radial-gradient(1100px 620px at 88% -12%, rgb(var(--harbor-accent) / 0.12), transparent 62%),
+    radial-gradient(900px 520px at -6% 4%, rgb(var(--harbor-accent-2) / 0.07), transparent 58%),
+    rgb(var(--harbor-bg));
+  background-attachment: fixed;
+  color: rgb(var(--harbor-text));
+  font-family: var(--harbor-font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden; /* desktop app: panels scroll, not the body */
+}
+
+/* Thin scrollbars to match Harbor's showcase */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Monospaced code/diff surfaces */
+.mono {
+  font-family: var(--harbor-font-mono, "JetBrains Mono", ui-monospace, monospace);
+}
