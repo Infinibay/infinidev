@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.behavior.scorer import BehaviorScorer
 from infinidev.engine.hooks.hooks import hook_manager, HookEvent, HookContext
 
@@ -44,12 +45,10 @@ def register_behavior_hooks() -> None:
         # Re-registration only matters if the mode changed — clear either way.
         unregister_behavior_hooks()
 
-    try:
+    with best_effort("BEHAVIOR_CHECKERS_ENABLED settings read failed"):
         from infinidev.config.settings import settings
         if not getattr(settings, "BEHAVIOR_CHECKERS_ENABLED", False):
             return
-    except Exception:
-        pass
 
     mode = _current_mode()
     if mode == "per_message":
@@ -75,8 +74,6 @@ def register_behavior_hooks() -> None:
 def unregister_behavior_hooks() -> None:
     global _registered_events
     for event, fn in list(_registered_events):
-        try:
+        with best_effort("hook unregister failed"):
             hook_manager.unregister(event, fn)
-        except Exception:
-            pass
     _registered_events = []

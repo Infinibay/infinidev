@@ -180,8 +180,14 @@ def get_model_capabilities() -> ModelCapabilities:
             # branch didn't already determine vision support.
             if not _capabilities.supports_vision:
                 _capabilities.supports_vision = _detect_vision_support()
-        except Exception:
-            pass
+        except Exception as exc:
+            # One-shot startup probe: a real bug here (renamed settings field,
+            # NameError, ImportError) would silently degrade every model to
+            # defaults. Log it loudly instead of swallowing.
+            logger.warning(
+                "capability detection failed; using defaults: %s",
+                exc, exc_info=True,
+            )
     return _capabilities
 
 

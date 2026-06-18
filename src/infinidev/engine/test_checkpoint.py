@@ -11,6 +11,8 @@ import os
 import re
 import subprocess
 
+from infinidev.engine._best_effort import best_effort
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,12 +48,10 @@ class TestCheckpoint:
         # Makefile with test target
         makefile = os.path.join(wd, "Makefile")
         if os.path.exists(makefile):
-            try:
+            with best_effort("Makefile test-target detection failed"):
                 with open(makefile) as f:
                     if "test:" in f.read():
                         return "make test"
-            except Exception:
-                pass
 
         # Default: try pytest
         return "python -m pytest --tb=no -q"

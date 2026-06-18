@@ -9,6 +9,11 @@ from infinidev.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Warn-once guard for the response normalizer: it fires on every completion, so
+# repeated failures would spam the log. Warn loudly the first time it regresses
+# (a real bug), DEBUG thereafter.
+_normalizer_warned = False
+
 
 # ── Register models missing from LiteLLM's built-in database ─────────
 # LiteLLM rejects requests for unknown models with wrong context-window
@@ -91,13 +96,27 @@ def _install_global_response_normalizer() -> None:
                     if msg is not None:
                         _promote(msg)
             except Exception as exc:
-                logger.debug("response normalizer skipped: %s", exc)
+                # Load-bearing normalizer (8+ call sites depend on <think>
+                # promotion). Warn loudly the first time it regresses so a real
+                # bug surfaces; DEBUG afterward to avoid per-response spam. Must
+                # not break completion, so keep the catch.
+                global _normalizer_warned
+                if not _normalizer_warned:
+                    _normalizer_warned = True
+                    logger.warning(
+                        "response normalizer failed (first occurrence): %s",
+                        exc, exc_info=True,
+                    )
+                else:
+                    logger.debug("response normalizer skipped: %s", exc)
             return response
 
         litellm.completion = _wrapped
         litellm._infinidev_response_normalizer_installed = True
     except Exception as exc:
-        logger.debug("Could not install response normalizer: %s", exc)
+        logger.warning(
+            "Could not install response normalizer: %s", exc, exc_info=True,
+        )
 
 
 _install_global_response_normalizer()

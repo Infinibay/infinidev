@@ -34,8 +34,8 @@ from infinidev.engine.analysis.grounded_spec import (
     RejectedAlternative,
     ResolvedFact,
 )
-from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
-from infinidev.engine.loop.tools import build_tool_dispatch, execute_tool_call
+from infinidev.engine.schema_sanitizer import tool_to_openai_schema
+from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (

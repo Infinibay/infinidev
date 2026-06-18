@@ -7,6 +7,7 @@ import logging
 import re
 from typing import Any
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.llm_client import call_llm
 from infinidev.engine.engine_logging import emit_loop_event, log as _log, DIM, BOLD, RESET, YELLOW, RED
 from infinidev.engine.phases.plan_validator import validate_questions, format_rejection
@@ -139,7 +140,7 @@ def _generate_plan(agent: Any,
     from infinidev.engine.llm_client import call_llm
     from infinidev.config.llm import get_litellm_params, _is_small_model
     from infinidev.engine.loop.context import build_system_prompt
-    from infinidev.engine.loop.tools import STEP_COMPLETE_SCHEMA, ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, build_tool_schemas
+    from infinidev.engine.tool_dispatch import STEP_COMPLETE_SCHEMA, ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA, build_tool_schemas
     from infinidev.engine.formats.tool_call_parser import parse_step_complete_args
 
     answers_text = "\n".join(
@@ -259,7 +260,7 @@ def _generate_plan(agent: Any,
             name = tc.function.name
 
             if name == "add_step":
-                try:
+                with best_effort("add_step arg parse failed"):
                     args = _safe_json(tc.function.arguments) if isinstance(tc.function.arguments, str) else (tc.function.arguments or {})
                     if isinstance(args, dict):
                         title = args.get("title", args.get("explanation", ""))
@@ -272,8 +273,6 @@ def _generate_plan(agent: Any,
                                 "files": [],
                             })
                             steps_added_this_round += 1
-                except Exception:
-                    pass
                 messages.append({"role": "tool", "tool_call_id": tc_id,
                                  "content": f'{{"status": "added", "total_steps": {len(collected_steps)}}}'})
 

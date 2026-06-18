@@ -16,7 +16,7 @@ from typing import Any
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.engine_logging import emit_loop_event, extract_tool_error
 from infinidev.engine.loop.models import LoopState
-from infinidev.engine.loop.tools import execute_tool_call
+from infinidev.engine.tool_dispatch import execute_tool_call
 
 
 # ── Constants ─────────────────────────────────────────────────────────────

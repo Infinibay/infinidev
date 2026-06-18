@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, TYPE_CHECKING
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.engine_logging import (
     emit_loop_event as _emit_loop_event,
     emit_log as _emit_log,
@@ -138,7 +139,7 @@ class StepManager:
         cb = getattr(hooks, "on_step_start", None)
         if not callable(cb):
             return
-        try:
+        with best_effort("on_step_start hook dispatch failed"):
             steps = list(ctx.state.plan.steps)
             active = ctx.state.plan.active_step
             if active is None:
@@ -154,8 +155,6 @@ class StepManager:
             ]
             completed = [s.index for s in steps if s.status == "done"]
             cb(active.index, len(steps), all_steps, completed)
-        except Exception:
-            pass
 
     def summarize_and_record(
         self, ctx: ExecutionContext, step_result: StepResult,
@@ -210,11 +209,9 @@ class StepManager:
         # Pre-load files recommended by summarizer
         for fpath in record.files_to_preload:
             if fpath not in ctx.state.opened_files and os.path.isfile(fpath):
-                try:
+                with best_effort("preload file read failed"):
                     with open(fpath, "r", encoding="utf-8", errors="replace") as f:
                         ctx.state.cache_file(fpath, f.read())
-                except Exception:
-                    pass
 
         ctx.state.current_step_index = step_index
 
@@ -240,7 +237,7 @@ class StepManager:
             # off by default and the print path short-circuits when
             # it's off, so a normal user run stays clean and pays
             # zero overhead.
-            try:
+            with best_effort("static-analysis timer render failed"):
                 from infinidev.engine.static_analysis_timer import (
                     is_enabled as _sa_enabled,
                     render as _sa_render,
@@ -248,8 +245,6 @@ class StepManager:
                 if _sa_enabled():
                     from infinidev.engine.engine_logging import log as _log
                     _log(_sa_render())
-            except Exception:
-                pass
         _emit_loop_event("loop_finished", ctx.project_id, ctx.agent_id, {
             "agent_id": ctx.agent_id, "agent_name": ctx.agent_name,
             "status": status, "iterations": iteration + 1,
@@ -270,10 +265,8 @@ class StepManager:
         ))
         self._engine._store_stats(ctx.state)
         # ContextRank: snapshot session scores for cross-session ranking
-        try:
+        with best_effort("ContextRank session finish failed"):
             self._engine._cr_hooks.finish()
-        except Exception:
-            pass
         if result is None:
             return _synthesize_final(ctx.state)
         return result

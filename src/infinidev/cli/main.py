@@ -1,6 +1,6 @@
 """Main entry point for Infinidev CLI."""
 
-# Pre-load dotenv before crewai imports to avoid find_dotenv() stack frame assertion
+# Load .env early so settings/providers see env overrides at import time.
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -158,7 +158,7 @@ def _bootstrap_single_prompt_runtime() -> None:
     # for the first real call, no functional impact.
     try:
         from infinidev.tools import get_tools_for_role
-        from infinidev.engine.loop.tools import build_tool_schemas
+        from infinidev.engine.tool_dispatch import build_tool_schemas
         _warm_tools = get_tools_for_role("developer", small_model=True)
         build_tool_schemas(_warm_tools, small_model=True)
     except Exception:

@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from infinidev.config.settings import settings
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.council import moderator as MOD
 from infinidev.engine.council.brief import DesignBrief
 from infinidev.engine.council.channel import Channel
@@ -59,17 +60,13 @@ def run_council(
 
     def _status(level: str, msg: str) -> None:
         if hooks is not None:
-            try:
+            with best_effort("council on_status hook failed"):
                 hooks.on_status(level, msg)
-            except Exception:
-                pass
 
     def _say(speaker: str, msg: str) -> None:
         if hooks is not None and msg:
-            try:
+            with best_effort("council notify hook failed"):
                 hooks.notify(speaker, msg, "agent")
-            except Exception:
-                pass
 
     try:
         # ── Seed ─────────────────────────────────────────────────────────

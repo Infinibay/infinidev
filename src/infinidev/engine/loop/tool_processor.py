@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, TYPE_CHECKING
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.formats.tool_call_parser import safe_json_loads as _safe_json_loads
 
@@ -78,12 +79,10 @@ class ToolProcessor:
                     engine.session_notes.append(note_text)
                     # Persist so a resumed session (`-c`) can re-load it.
                     # Soft-fails: an in-memory note is still useful this run.
-                    try:
+                    with best_effort("session note persist failed"):
                         from infinidev.tools.base.context import get_current_session_id
                         from infinidev.db.service import persist_session_note
                         persist_session_note(get_current_session_id(), note_text)
-                    except Exception:
-                        pass
             except (json.JSONDecodeError, AttributeError):
                 pass
 

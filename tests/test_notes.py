@@ -4,7 +4,7 @@ import json
 
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.context import build_iteration_prompt
-from infinidev.engine.loop.tools import ADD_NOTE_SCHEMA, build_tool_schemas
+from infinidev.engine.tool_dispatch import ADD_NOTE_SCHEMA, build_tool_schemas
 
 
 class TestLoopStateNotes:

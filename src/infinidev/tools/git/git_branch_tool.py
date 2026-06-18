@@ -117,23 +117,22 @@ class GitBranchTool(InfinibayBaseTool):
                 pass  # Non-critical
 
         if action == "created":
-            try:
-                from infinidev.flows.event_listeners import FlowEvent, event_bus
+            from infinidev.engine._best_effort import best_effort
+            with best_effort("branch_created event emit failed"):
+                from infinidev.flows.event_listeners import event_bus
 
-                event_bus.emit(FlowEvent(
-                    event_type="branch_created",
-                    project_id=project_id,
-                    entity_type="task",
-                    entity_id=self.session_id,
-                    data={
+                event_bus.emit(
+                    "branch_created",
+                    project_id,
+                    agent_id,
+                    {
                         "branch_name": branch_name,
                         "base_branch": base_branch,
-                        "agent_id": agent_id,
+                        "entity_type": "task",
+                        "entity_id": self.session_id,
                         "session_id": self.session_id,
                     },
-                ))
-            except Exception:
-                pass  # Non-critical
+                )
 
         return self._success({
             "branch": branch_name,
@@ -222,22 +221,21 @@ class GitBranchTool(InfinibayBaseTool):
                 pass  # Non-critical
 
         if action == "created":
-            try:
-                from infinidev.flows.event_listeners import FlowEvent, event_bus
-                event_bus.emit(FlowEvent(
-                    event_type="branch_created",
-                    project_id=project_id,
-                    entity_type="task",
-                    entity_id=self.session_id,
-                    data={
+            from infinidev.engine._best_effort import best_effort
+            with best_effort("branch_created event emit failed"):
+                from infinidev.flows.event_listeners import event_bus
+                event_bus.emit(
+                    "branch_created",
+                    project_id,
+                    agent_id,
+                    {
                         "branch_name": branch_name,
                         "base_branch": base_branch,
-                        "agent_id": agent_id,
+                        "entity_type": "task",
+                        "entity_id": self.session_id,
                         "session_id": self.session_id,
                     },
-                ))
-            except Exception:
-                pass
+                )
 
         return self._success({
             "branch": branch_name,

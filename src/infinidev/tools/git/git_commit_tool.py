@@ -65,24 +65,20 @@ class GitCommitTool(InfinibayBaseTool):
                 except Exception:
                     pass
 
-                try:
-                    from infinidev.flows.event_listeners import FlowEvent, event_bus
+                from infinidev.engine._best_effort import best_effort
+                with best_effort("git_committed event emit failed"):
+                    from infinidev.flows.event_listeners import event_bus
                     event_bus.emit(
-                        FlowEvent(
-                            event_type="git_committed",
-                            project_id=self.project_id,
-                            entity_type="commit",
-                            entity_id=None,
-                            data={
-                                "commit_hash": commit_hash,
-                                "branch": branch_name,
-                                "message": message,
-                                "agent_id": self.agent_id,
-                            },
-                        )
+                        "git_committed",
+                        self.project_id or 0,
+                        self.agent_id or "",
+                        {
+                            "commit_hash": commit_hash,
+                            "branch": branch_name,
+                            "message": message,
+                            "entity_type": "commit",
+                        },
                     )
-                except Exception:
-                    pass  # Don't fail the commit if event emission fails
 
         except GitToolError as e:
             return self._error(str(e))
@@ -148,22 +144,20 @@ class GitCommitTool(InfinibayBaseTool):
             except Exception:
                 pass
 
-            try:
-                from infinidev.flows.event_listeners import FlowEvent, event_bus
-                event_bus.emit(FlowEvent(
-                    event_type="git_committed",
-                    project_id=self.project_id,
-                    entity_type="commit",
-                    entity_id=None,
-                    data={
+            from infinidev.engine._best_effort import best_effort
+            with best_effort("git_committed event emit failed"):
+                from infinidev.flows.event_listeners import event_bus
+                event_bus.emit(
+                    "git_committed",
+                    self.project_id or 0,
+                    self.agent_id or "",
+                    {
                         "commit_hash": commit_hash,
                         "branch": branch_name,
                         "message": message,
-                        "agent_id": self.agent_id,
+                        "entity_type": "commit",
                     },
-                ))
-            except Exception:
-                pass
+                )
 
         self._log_tool_usage(f"Committed (pod): {message[:80]}")
         return self._success({

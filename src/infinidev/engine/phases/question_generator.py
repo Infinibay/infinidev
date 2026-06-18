@@ -105,7 +105,7 @@ def _generate_questions(agent: Any,
     """
     from infinidev.config.llm import get_litellm_params, _is_small_model
     from infinidev.engine.loop.context import build_system_prompt
-    from infinidev.engine.loop.tools import (
+    from infinidev.engine.tool_dispatch import (
         STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
     )
     from infinidev.engine.formats.tool_call_parser import parse_step_complete_args
@@ -244,7 +244,7 @@ def _generate_followups(agent: Any,
     """Ask LLM if follow-up questions are needed based on investigation so far."""
     from infinidev.config.llm import get_litellm_params
     from infinidev.engine.loop.context import build_system_prompt
-    from infinidev.engine.loop.tools import (
+    from infinidev.engine.tool_dispatch import (
         STEP_COMPLETE_SCHEMA, GENERATE_QUESTION_SCHEMA,
     )
     from infinidev.prompts.phases.investigate import FOLLOWUP_PROMPT

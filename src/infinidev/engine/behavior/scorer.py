@@ -13,6 +13,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.behavior.registry import enabled_checkers
 
 
@@ -147,14 +148,12 @@ class BehaviorScorer:
             self._ticks.clear()
         # Clear per-checker rolling state as well. Imported lazily to
         # avoid a circular dependency at module load time.
-        try:
+        with best_effort("plan_drift checker state reset failed"):
             from infinidev.engine.behavior.checkers.plan_drift import (
                 _reset_state as _reset_plan_drift,
             )
 
             _reset_plan_drift()
-        except Exception:
-            pass
 
     def history(self, agent_id: str | None = None) -> list[BehaviorEvent]:
         """Return a snapshot of the verdict history (newest last)."""

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from infinidev.engine._best_effort import best_effort
+
 # (model, base_url) -> context_length. Memoized because the result
 # is intrinsic to the model and never changes within a process — but
 # the function used to fire an HTTP POST to ollama /api/show on every
@@ -38,7 +40,7 @@ def _get_model_max_context(llm_params: dict[str, Any]) -> int:
             break
 
     result = 0
-    try:
+    with best_effort("ollama /api/show context length fetch failed"):
         resp = httpx.post(
             f"{base_url}/api/show",
             json={"name": bare_model},
@@ -50,8 +52,6 @@ def _get_model_max_context(llm_params: dict[str, Any]) -> int:
                 if key.endswith(".context_length") and isinstance(val, int):
                     result = val
                     break
-    except Exception:
-        pass
 
     _MAX_CONTEXT_CACHE[cache_key] = result
     return result

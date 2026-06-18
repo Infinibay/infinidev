@@ -1,5 +1,6 @@
 """Tool: rename a symbol and update all references across the project."""
 
+import logging
 import os
 import tempfile
 from typing import Type
@@ -7,6 +8,8 @@ from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.code_intel.rename_symbol_input import RenameSymbolInput
+
+logger = logging.getLogger(__name__)
 
 
 def _atomic_write(path: str, content: str) -> None:
@@ -142,9 +145,12 @@ class RenameSymbolTool(InfinibayBaseTool):
             if perm_err:
                 return self._error(perm_err)
 
-        # Apply changes file by file
-        files_modified = []
-        total_replacements = 0
+        # Pre-stage every file's new content BEFORE writing any of them. A read
+        # failure must abort cleanly rather than leave a partial rename (some
+        # files renamed, others not) reported as success. Writes happen only
+        # after every read succeeds.
+        staged: list[tuple[str, str, int]] = []  # (path, new_content, n_repl)
+        read_errors: list[str] = []
 
         for fpath, line_changes in changes_by_file.items():
             if not os.path.isfile(fpath):
@@ -157,7 +163,9 @@ class RenameSymbolTool(InfinibayBaseTool):
             try:
                 with open(fpath, "r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
-            except Exception:
+            except (OSError, UnicodeError) as e:
+                logger.warning("rename_symbol: cannot read %s: %s", fpath, e)
+                read_errors.append(f"{fpath}: {e}")
                 continue
 
             # Deduplicate by line number
@@ -176,14 +184,38 @@ class RenameSymbolTool(InfinibayBaseTool):
                         replacements_in_file += 1
 
             if replacements_in_file > 0:
-                new_content = "".join(lines)
-                try:
-                    _atomic_write(fpath, new_content)
-                    ensure_indexed(project_id, fpath)
-                    files_modified.append(fpath)
-                    total_replacements += replacements_in_file
-                except Exception:
-                    continue
+                staged.append((fpath, "".join(lines), replacements_in_file))
+
+        # Fail closed if any file could not be read — nothing has been written
+        # yet, so the tree is still consistent.
+        if read_errors:
+            return self._error(
+                "Aborted rename before writing (tree unchanged) — could not "
+                "read: " + "; ".join(read_errors)
+            )
+
+        # Apply staged writes. If a write fails mid-way, stop and report exactly
+        # which files were already modified so the user can recover; a
+        # half-renamed tree must never be reported as success.
+        files_modified = []
+        total_replacements = 0
+        for fpath, new_content, replacements_in_file in staged:
+            try:
+                _atomic_write(fpath, new_content)
+                ensure_indexed(project_id, fpath)
+            except Exception as e:
+                logger.error(
+                    "rename_symbol: write failed for %s after %d file(s): %s",
+                    fpath, len(files_modified), e, exc_info=True,
+                )
+                return self._error(
+                    f"Rename FAILED while writing {fpath}: {e}. "
+                    f"Already modified: {files_modified or '(none)'}. The "
+                    f"project may be in a half-renamed state — review/revert "
+                    f"those files and re-run."
+                )
+            files_modified.append(fpath)
+            total_replacements += replacements_in_file
 
         self._log_tool_usage(
             f"rename_symbol: '{old_name}' → '{new_name}' "

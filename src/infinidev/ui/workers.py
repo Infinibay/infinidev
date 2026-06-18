@@ -121,6 +121,7 @@ def run_engine_task(
         app.invalidate()
 
     except Exception as e:
+        logger.error("run_engine_task failed: %s", e, exc_info=True)
         app._analysis_waiting = False
         app._chat_history_control.show_thinking = False
         app.add_message("Error", str(e), "system")
@@ -167,6 +168,7 @@ def _run_flow_task(app: InfinidevApp, flow_name: str,
             if not result or not result.strip():
                 result = empty_result_msg
         except Exception as e:
+            logger.error("flow %s failed: %s", flow_name, e, exc_info=True)
             result = f"{flow_name.title()} failed: {e}"
 
         app._chat_history_control.show_thinking = False
@@ -175,6 +177,7 @@ def _run_flow_task(app: InfinidevApp, flow_name: str,
         app._actions_text = "Idle"
         app.invalidate()
     except Exception as e:
+        logger.error("flow task failed: %s", e, exc_info=True)
         app._chat_history_control.show_thinking = False
         app.add_message("Error", str(e), "system")
     finally:
@@ -331,6 +334,7 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
         app.invalidate()
 
     except Exception as e:
+        logger.error("run_plan_task failed: %s", e, exc_info=True)
         app._plan_review_waiting = False
         app._chat_history_control.show_thinking = False
         app.add_message("Error", str(e), "system")

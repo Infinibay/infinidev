@@ -16,8 +16,8 @@ from typing import Any, Optional
 
 from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
-from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
-from infinidev.engine.loop.tools import build_tool_dispatch, execute_tool_call
+from infinidev.engine.schema_sanitizer import tool_to_openai_schema
+from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.prompts.analyst.planner_prompt import ANALYST_PLANNER_SYSTEM_PROMPT
 from infinidev.tools import get_tools_for_role

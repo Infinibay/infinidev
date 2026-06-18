@@ -282,16 +282,16 @@ class TestDynamicQuestionsParser:
 class TestToolAliases:
     def test_query_alias_for_pattern(self):
         """query should be auto-corrected to pattern in tool dispatch."""
-        from infinidev.engine.loop.tools import execute_tool_call
+        from infinidev.engine.tool_dispatch import execute_tool_call
         # We can't fully test without a real tool, but we can verify the alias map
         # exists in the code
-        import infinidev.engine.loop.tools as lt
+        import infinidev.engine.tool_dispatch as lt
         source = open(lt.__file__).read()
         assert '"query": "pattern"' in source
 
     def test_metadata_params_stripped(self):
         """description/reason should be silently stripped, not cause errors."""
-        import infinidev.engine.loop.tools as lt
+        import infinidev.engine.tool_dispatch as lt
         source = open(lt.__file__).read()
         assert "_METADATA_PARAMS" in source
         assert '"description"' in source

@@ -22,8 +22,8 @@ from typing import Any
 
 from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.config.settings import settings
-from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
-from infinidev.engine.loop.tools import build_tool_dispatch, execute_tool_call
+from infinidev.engine.schema_sanitizer import tool_to_openai_schema
+from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
     clear_agent_context,

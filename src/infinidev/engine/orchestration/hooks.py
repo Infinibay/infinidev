@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from infinidev.engine._best_effort import best_effort
+
 
 class NoOpHooks:
     """Silent default. Useful in tests and as a base for partial overrides.
@@ -168,10 +170,8 @@ class ClickHooks(NoOpHooks):
             self._stream_active = current
         # nl=False + manual flush so characters appear as they arrive.
         click.echo(chunk, nl=False)
-        try:
+        with best_effort("stdout flush failed during stream chunk"):
             sys.stdout.flush()
-        except Exception:
-            pass
 
     def notify_stream_end(
         self, speaker: str, kind: str = "agent",

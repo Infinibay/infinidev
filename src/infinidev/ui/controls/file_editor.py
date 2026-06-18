@@ -6,6 +6,7 @@ highlighting. Each open file gets its own Buffer instance.
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
 from typing import Callable
@@ -22,6 +23,9 @@ try:
 except ImportError:
     HAS_PYGMENTS = False
 
+logger = logging.getLogger(__name__)
+
+
 class FileEditor:
     """Manages a single open file's editing state."""
 
@@ -32,11 +36,17 @@ class FileEditor:
         self._on_dirty_change = on_dirty_change
 
         # Read file content
+        self._read_failed = False
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
-        except Exception:
+        except OSError as e:
+            # A failed read must NOT masquerade as an empty file: if the user
+            # then saves, save() would overwrite the real (non-empty) file with
+            # empty content. Flag it so save() refuses to write.
+            logger.warning("FileEditor: could not read %s: %s", file_path, e)
             content = ""
+            self._read_failed = True
 
         self._original_content = content
         self._dirty = False
@@ -79,6 +89,15 @@ class FileEditor:
 
     def save(self) -> bool:
         """Save the buffer content to disk. Returns True on success."""
+        if self._read_failed:
+            # The initial read failed, so the buffer does not reflect the real
+            # file. Refuse to overwrite it — an empty/partial buffer would
+            # destroy the on-disk content.
+            logger.warning(
+                "FileEditor: refusing to save %s — initial read failed",
+                self.file_path,
+            )
+            return False
         try:
             with open(self.file_path, "w", encoding="utf-8") as f:
                 f.write(self.buffer.text)
@@ -87,7 +106,8 @@ class FileEditor:
             if self._on_dirty_change:
                 self._on_dirty_change(self.tab_id, False)
             return True
-        except Exception:
+        except OSError as e:
+            logger.warning("FileEditor: save failed for %s: %s", self.file_path, e)
             return False
 
     def goto_line(self, line: int) -> None:

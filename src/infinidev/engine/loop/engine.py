@@ -32,7 +32,7 @@ from infinidev.engine.loop.models import (
     StepResult,
 )
 from infinidev.engine.file_change_tracker import FileChangeTracker
-from infinidev.engine.loop.tools import (
+from infinidev.engine.tool_dispatch import (
     ADD_NOTE_SCHEMA,
     ADD_STEP_SCHEMA,
     MODIFY_STEP_SCHEMA,
@@ -90,6 +90,8 @@ from infinidev.engine.loop.tool_processor import ToolProcessor
 from infinidev.engine.loop.loop_guard import LoopGuard
 from infinidev.engine.loop.behavior_tracker import BehaviorTracker
 from infinidev.engine.loop.step_manager import StepManager, _get_settings
+from infinidev.engine.loop.guardrail_runner import apply_guardrail
+from infinidev.engine.loop.user_message_injector import UserMessageInjector
 from infinidev.engine.trace_log import (
     trace_run_start as _trace_run_start,
     trace_iteration_prompt as _trace_iter_prompt,
@@ -155,9 +157,8 @@ class LoopEngine(AgentEngine):
         self._hooks: object | None = None
         self.session_notes: list[str] = []  # Persist across tasks within a session
         self._session_notes_hydrated: bool = False  # one-shot DB reload on resume
-        # Thread-safe queue for user messages injected mid-task
-        import queue as _queue_mod
-        self._user_messages: _queue_mod.Queue[str] = _queue_mod.Queue()
+        # User-message injection: thread-safe queue + inject/drain logic.
+        self._user_message_injector = UserMessageInjector()
         self._guidance = GuidanceHandler()
         from infinidev.engine.context_rank.hooks import ContextRankHooks
         self._cr_hooks = ContextRankHooks()
@@ -266,52 +267,16 @@ class LoopEngine(AgentEngine):
             pass
 
     def inject_message(self, message: str) -> None:
-        """Inject a user message into the running loop (thread-safe).
-
-        The message will be included in the next iteration's prompt as
-        a ``<user-message>`` block, giving the LLM live guidance without
-        interrupting the current step.
-        """
-        self._user_messages.put(message)
+        """Inject a user message into the running loop (thread-safe)."""
+        self._user_message_injector.inject(message)
 
     def _drain_user_messages(self) -> list[str]:
-        """Drain all pending user messages from the queue."""
-        messages = []
-        while not self._user_messages.empty():
-            try:
-                messages.append(self._user_messages.get_nowait())
-            except Exception:
-                break
-        return messages
+        return self._user_message_injector.drain()
 
     def _inject_mid_step_user_messages(
         self, ctx: "ExecutionContext", messages: list[dict[str, Any]],
     ) -> None:
-        """Drain any pending user messages and inject them as urgent
-        ``user``-role turns before the next LLM call.
-
-        No-op if the queue is empty. Used at the top of the inner loop
-        so the model always sees the freshest user input even when the
-        user speaks while an LLM call is in flight.
-        """
-        drained = self._drain_user_messages()
-        if not drained:
-            return
-        _emit_log(
-            "info",
-            f"⚡ mid-step user message drained ({len(drained)} msg(s)) "
-            f"— injecting before next LLM call",
-            project_id=ctx.project_id, agent_id=ctx.agent_id,
-        )
-        for m in drained:
-            messages.append({
-                "role": "user",
-                "content": (
-                    "URGENT — I just sent this while you were working. "
-                    "Acknowledge it with `send_message` as your VERY NEXT "
-                    f"tool call before continuing your current step:\n\n{m}"
-                ),
-            })
+        self._user_message_injector.inject_mid_step(ctx, messages)
 
     def _reject_step_complete_on_late_message(
         self,
@@ -319,40 +284,9 @@ class LoopEngine(AgentEngine):
         messages: list[dict[str, Any]],
         step_complete_id: str,
     ) -> bool:
-        """If the user spoke AFTER the model called ``step_complete`` but
-        BEFORE we processed the completion, reject the step and force
-        one more LLM call so the user can be acknowledged.
-
-        Writes a ``tool``-role message on the ``step_complete`` tool id
-        — providers treat that as "your previous close was overridden
-        by this feedback", which is exactly the framing we want.
-        Returns ``True`` if the rejection fired (caller should
-        ``continue`` the loop), ``False`` if the queue was empty.
-        """
-        drained = self._drain_user_messages()
-        if not drained:
-            return False
-
-        _emit_log(
-            "info",
-            f"⚡ late mid-step user message drained ({len(drained)} msg(s)) "
-            f"— overriding step_complete, forcing one more LLM call",
-            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        return self._user_message_injector.reject_step_complete_on_late_message(
+            ctx, messages, step_complete_id,
         )
-        rejection_body = (
-            "step_complete REJECTED — the user just spoke while "
-            "you were finishing your last action. You MUST "
-            "acknowledge them BEFORE completing this step. Call "
-            "`send_message` with a brief (1-2 sentence) reply "
-            "that addresses what they said, then call "
-            "step_complete again. The user's message(s) were:\n\n"
-            + "\n\n---\n\n".join(drained)
-        )
-
-        self._overwrite_step_complete_tool_result(
-            messages, step_complete_id, rejection_body,
-        )
-        return True
 
     @staticmethod
     def _overwrite_step_complete_tool_result(
@@ -360,30 +294,10 @@ class LoopEngine(AgentEngine):
         step_complete_id: str,
         new_body: str,
     ) -> None:
-        """Override the ``acknowledged`` stub on a step_complete tool id.
+        UserMessageInjector._overwrite_step_complete_tool_result(
+            messages, step_complete_id, new_body,
+        )
 
-        Anthropic requires exactly one tool_result per tool_use_id, so
-        we locate the existing tool message (the "acknowledged" stub
-        appended by ``_execute_regular_tools`` /
-        ``_build_pseudo_only_messages``) and rewrite its content in
-        place rather than appending a second one. On OpenAI both
-        approaches work; on Anthropic appending duplicates raises.
-        Falls back to a fresh append if no prior result is found —
-        that path keeps the loop well-formed even if the assumption
-        breaks.
-        """
-        for msg in reversed(messages):
-            if (
-                msg.get("role") == "tool"
-                and msg.get("tool_call_id") == step_complete_id
-            ):
-                msg["content"] = new_body
-                return
-        messages.append({
-            "role": "tool",
-            "tool_call_id": step_complete_id,
-            "content": new_body,
-        })
 
     def cancel(self) -> None:
         """Signal the engine to stop after the current tool call."""
@@ -1770,103 +1684,8 @@ class LoopEngine(AgentEngine):
         max_per_action: int = 0,
     ) -> str:
         """Validate result with guardrail; retry with feedback if it fails."""
-        if guardrail is None:
-            return result
-
-        for attempt in range(max_retries):
-            try:
-                validation = guardrail(result)
-                # CrewAI guardrail convention: returns (success, result_or_feedback)
-                if isinstance(validation, tuple):
-                    success, feedback = validation
-                    if success:
-                        return result
-                    # Retry with feedback
-                    logger.info(
-                        "Guardrail failed (attempt %d/%d): %s",
-                        attempt + 1, max_retries, str(feedback)[:200],
-                    )
-                    feedback_prompt = (
-                        f"Your previous output was rejected by validation.\n"
-                        f"Feedback: {feedback}\n\n"
-                        f"Please fix your output and try again.\n\n"
-                        f"Previous output:\n{result}"
-                    )
-                    messages: list[dict[str, Any]] = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": feedback_prompt},
-                    ]
-
-                    # Run inner loop for retry
-                    step_text = ""
-                    action_tool_calls = 0
-                    while action_tool_calls < max_per_action:
-                        response = _call_llm(
-                            llm_params, messages,
-                            tool_schemas if tool_schemas else None,
-                        )
-                        choice = response.choices[0]
-                        msg = choice.message
-                        tc_list = getattr(msg, "tool_calls", None)
-                        if tc_list:
-                            assistant_msg: dict[str, Any] = {
-                                "role": "assistant",
-                                "content": msg.content or "",
-                            }
-                            assistant_msg["tool_calls"] = [
-                                {
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments,
-                                    },
-                                }
-                                for tc in tc_list
-                            ]
-                            messages.append(assistant_msg)
-                            for tc in tc_list:
-                                if tc.function.name == "step_complete":
-                                    # Parse final answer from step_complete
-                                    sr = _parse_step_complete_args(tc.function.arguments)
-                                    step_text = sr.final_answer or sr.summary
-                                    messages.append({
-                                        "role": "tool",
-                                        "tool_call_id": tc.id,
-                                        "content": '{"status": "acknowledged"}',
-                                    })
-                                    break
-                                _pre_content_g = _capture_pre_content(
-                                    tc.function.name, tc.function.arguments, ctx.file_tracker,
-                                )
-                                tc_result = execute_tool_call(
-                                    tool_dispatch,
-                                    tc.function.name,
-                                    tc.function.arguments,
-                                )
-                                _maybe_emit_file_change(
-                                    tc.function.name, tc.function.arguments, tc_result,
-                                    _pre_content_g, ctx.file_tracker,
-                                    ctx.project_id, ctx.agent_id, self._hooks,
-                                )
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tc.id,
-                                    "content": tc_result,
-                                })
-                                action_tool_calls += 1
-                            if step_text:
-                                break
-                        else:
-                            step_text = msg.content or ""
-                            break
-
-                    result = step_text or result
-                else:
-                    # Simple bool guardrail
-                    if validation:
-                        return result
-            except Exception as exc:
-                logger.warning("Guardrail raised exception: %s", exc)
-
-        return result
+        return apply_guardrail(
+            ctx, result, guardrail, max_retries, llm_params, system_prompt,
+            desc, expected, state, tool_schemas, tool_dispatch, max_per_action,
+            hooks=self._hooks,
+        )

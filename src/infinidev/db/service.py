@@ -12,6 +12,17 @@ logger = logging.getLogger(__name__)
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ALLOWED_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "TIMESTAMP", "DATETIME", "NUMERIC"}
 
+# Canonical schema lives in schema.sql next to this module (the same file the
+# Rust crate mirrors via include_str!). Fresh DBs are provisioned from it
+# verbatim, so the DDL has a single source of truth.
+_SCHEMA_SQL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
+
+
+def _load_schema_sql() -> str:
+    with open(_SCHEMA_SQL_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 def execute_with_retry(func, db_path=None, max_retries=None, base_delay=None):
     """Execute a DB operation with retry logic.
 
@@ -47,588 +58,44 @@ def _migrate_add_column(conn: sqlite3.Connection, table: str, column: str, col_t
 def init_db():
     """Initialize the SQLite database with essential tables."""
     def _init(conn):
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS projects (
-                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-                name                  TEXT NOT NULL,
-                description           TEXT,
-                status                TEXT NOT NULL DEFAULT 'new',
-                created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS findings (
-                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id            INTEGER NOT NULL REFERENCES projects(id),
-                session_id            TEXT,
-                agent_id              TEXT,
-                agent_run_id          TEXT,
-                topic                 TEXT,
-                content               TEXT,
-                status                TEXT DEFAULT 'active',
-                finding_type          TEXT DEFAULT 'observation',
-                confidence            REAL DEFAULT 0.5,
-                sources_json          TEXT DEFAULT '[]',
-                tags_json             TEXT DEFAULT '[]',
-                artifact_id           INTEGER,
-                validation_method     TEXT,
-                reproducibility_score REAL,
-                embedding             BLOB,
-                created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # FTS5 virtual table for full-text search on findings
-        conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS findings_fts USING fts5(
-                topic, content, content=findings, content_rowid=id
-            )
-        """)
-        # Triggers to keep findings_fts in sync with findings
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS findings_ai AFTER INSERT ON findings BEGIN
-                INSERT INTO findings_fts(rowid, topic, content)
-                VALUES (new.id, new.topic, new.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS findings_ad AFTER DELETE ON findings BEGIN
-                INSERT INTO findings_fts(findings_fts, rowid, topic, content)
-                VALUES ('delete', old.id, old.topic, old.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS findings_au AFTER UPDATE ON findings BEGIN
-                INSERT INTO findings_fts(findings_fts, rowid, topic, content)
-                VALUES ('delete', old.id, old.topic, old.content);
-                INSERT INTO findings_fts(rowid, topic, content)
-                VALUES (new.id, new.topic, new.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS artifacts (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id    INTEGER NOT NULL REFERENCES projects(id),
-                session_id    TEXT,
-                type          TEXT DEFAULT 'artifact',
-                name          TEXT,
-                file_path     TEXT,
-                description   TEXT,
-                content       TEXT,
-                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # FTS5 virtual table for full-text search on artifacts
-        conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
-                name, description, content, content=artifacts, content_rowid=id
-            )
-        """)
-        # Triggers to keep artifacts_fts in sync with artifacts
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS artifacts_ai AFTER INSERT ON artifacts BEGIN
-                INSERT INTO artifacts_fts(rowid, name, description, content)
-                VALUES (new.id, new.name, new.description, new.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS artifacts_ad AFTER DELETE ON artifacts BEGIN
-                INSERT INTO artifacts_fts(artifacts_fts, rowid, name, description, content)
-                VALUES ('delete', old.id, old.name, old.description, old.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS artifacts_au AFTER UPDATE ON artifacts BEGIN
-                INSERT INTO artifacts_fts(artifacts_fts, rowid, name, description, content)
-                VALUES ('delete', old.id, old.name, old.description, old.content);
-                INSERT INTO artifacts_fts(rowid, name, description, content)
-                VALUES (new.id, new.name, new.description, new.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS web_cache (
-                url TEXT NOT NULL,
-                format TEXT NOT NULL DEFAULT 'markdown',
-                content TEXT,
-                fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(url, format)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS conversation_turns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT,
-                summary TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_conv_session
-            ON conversation_turns(session_id, created_at)
-        """)
-        # Session registry — one row per CLI/TUI session. Lets `-c`/`--resume`
-        # find the most-recent session for a workspace without scanning
-        # conversation_turns. `title` is the first user message (truncated),
-        # used as the human label in the resume picker.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id     TEXT PRIMARY KEY,
-                project_id     INTEGER,
-                workspace_path TEXT,
-                title          TEXT,
-                turn_count     INTEGER NOT NULL DEFAULT 0,
-                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-                last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_sessions_workspace
-            ON sessions(workspace_path, last_active_at)
-        """)
-        # Persisted session notes. The loop engine keeps `session_notes` in
-        # memory across tasks within a run; this table makes them survive
-        # process exit so a resumed session re-loads what it learned.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS session_notes (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                note_text  TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_session_notes_session
-            ON session_notes(session_id, created_at)
-        """)
-        # Library documentation storage with FTS5 search
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS library_docs (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                library_name   TEXT NOT NULL,
-                language       TEXT NOT NULL DEFAULT 'unknown',
-                version        TEXT NOT NULL DEFAULT 'latest',
-                section_title  TEXT NOT NULL,
-                section_order  INTEGER NOT NULL DEFAULT 0,
-                content        TEXT NOT NULL,
-                embedding      BLOB,
-                source_urls    TEXT DEFAULT '[]',
-                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(library_name, language, version, section_title)
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_library_docs_lookup
-                ON library_docs(library_name, language, version)
-        """)
-        conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS library_docs_fts USING fts5(
-                section_title, content, content=library_docs, content_rowid=id
-            )
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS library_docs_ai AFTER INSERT ON library_docs BEGIN
-                INSERT INTO library_docs_fts(rowid, section_title, content)
-                VALUES (new.id, new.section_title, new.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS library_docs_ad AFTER DELETE ON library_docs BEGIN
-                INSERT INTO library_docs_fts(library_docs_fts, rowid, section_title, content)
-                VALUES ('delete', old.id, old.section_title, old.content);
-            END
-        """)
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS library_docs_au AFTER UPDATE ON library_docs BEGIN
-                INSERT INTO library_docs_fts(library_docs_fts, rowid, section_title, content)
-                VALUES ('delete', old.id, old.section_title, old.content);
-                INSERT INTO library_docs_fts(rowid, section_title, content)
-                VALUES (new.id, new.section_title, new.content);
-            END
-        """)
+        # Fresh databases are fully provisioned from schema.sql (the single
+        # source of truth). On an existing DB every CREATE ... IF NOT EXISTS
+        # is a no-op.
+        conn.executescript(_load_schema_sql())
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS exploration_trees (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id       INTEGER NOT NULL REFERENCES projects(id),
-                session_id       TEXT,
-                agent_id         TEXT,
-                problem          TEXT NOT NULL,
-                tree_json        TEXT NOT NULL,
-                synthesis        TEXT,
-                status           TEXT DEFAULT 'running',
-                total_nodes      INTEGER DEFAULT 0,
-                total_tool_calls INTEGER DEFAULT 0,
-                total_tokens     INTEGER DEFAULT 0,
-                created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-                completed_at     DATETIME
-            )
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS artifact_changes (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id    INTEGER NOT NULL REFERENCES projects(id),
-                agent_run_id  TEXT,
-                file_path     TEXT NOT NULL,
-                action        TEXT NOT NULL DEFAULT 'modified',
-                before_hash   TEXT,
-                after_hash    TEXT,
-                size_bytes    INTEGER,
-                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS status_updates (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id    INTEGER NOT NULL REFERENCES projects(id),
-                agent_id      TEXT,
-                agent_run_id  TEXT,
-                message       TEXT,
-                progress      REAL,
-                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS branches (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id    INTEGER NOT NULL REFERENCES projects(id),
-                task_id       TEXT,
-                repo_name     TEXT,
-                branch_name   TEXT NOT NULL,
-                base_branch   TEXT,
-                status        TEXT DEFAULT 'active',
-                created_by    TEXT,
-                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Migrate existing databases: add columns that may be missing
+        # ── Column back-fills for pre-existing databases ──────────────────
+        # No-ops on a fresh DB (schema.sql already includes these columns),
+        # but required to bring an OLD DB up to date: CREATE TABLE IF NOT
+        # EXISTS will not add a column to a table that already exists.
         _migrate_add_column(conn, "findings", "session_id", "TEXT")
         _migrate_add_column(conn, "findings", "validation_method", "TEXT")
         _migrate_add_column(conn, "findings", "reproducibility_score", "REAL")
         _migrate_add_column(conn, "findings", "updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
-        # Anchored memory: each lesson/rule/landmine can be tied to a
-        # concrete code location so it fires automatically when the
-        # agent touches that anchor. See tool_executor._MEMORY_HANDLERS
-        # for the injection mechanism. All nullable — un-anchored
-        # memories still work as traditional project_knowledge.
+        # Anchored memory: each lesson/rule/landmine can be tied to a concrete
+        # code location so it fires automatically when the agent touches that
+        # anchor (see tool_executor._MEMORY_HANDLERS). All nullable.
         _migrate_add_column(conn, "findings", "anchor_file", "TEXT")
         _migrate_add_column(conn, "findings", "anchor_symbol", "TEXT")
         _migrate_add_column(conn, "findings", "anchor_tool", "TEXT")
         _migrate_add_column(conn, "findings", "anchor_error", "TEXT")
         _migrate_add_column(conn, "artifacts", "session_id", "TEXT")
         _migrate_add_column(conn, "artifacts", "type", "TEXT DEFAULT 'artifact'")
-
-        # ── Code Intelligence tables ──────────────────────────────────────
-
-        conn.execute("""\
-            CREATE TABLE IF NOT EXISTS ci_files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                language TEXT NOT NULL,
-                content_hash TEXT NOT NULL,
-                symbol_count INTEGER DEFAULT 0,
-                indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(project_id, file_path)
-            )""")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_files_path ON ci_files(project_id, file_path)")
-
-        conn.execute("""\
-            CREATE TABLE IF NOT EXISTS ci_symbols (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                name TEXT NOT NULL,
-                qualified_name TEXT DEFAULT '',
-                kind TEXT NOT NULL,
-                line_start INTEGER NOT NULL,
-                line_end INTEGER,
-                column_start INTEGER DEFAULT 0,
-                signature TEXT DEFAULT '',
-                type_annotation TEXT DEFAULT '',
-                docstring TEXT DEFAULT '',
-                parent_symbol TEXT DEFAULT '',
-                visibility TEXT DEFAULT 'public',
-                is_async BOOLEAN DEFAULT FALSE,
-                is_static BOOLEAN DEFAULT FALSE,
-                is_abstract BOOLEAN DEFAULT FALSE,
-                language TEXT NOT NULL
-            )""")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_name ON ci_symbols(name)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_kind ON ci_symbols(kind, name)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_file ON ci_symbols(project_id, file_path)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_qualified ON ci_symbols(qualified_name)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_symbols_parent ON ci_symbols(parent_symbol)")
-
-        conn.execute("""\
-            CREATE VIRTUAL TABLE IF NOT EXISTS ci_symbols_fts USING fts5(
-                name, qualified_name, signature, docstring,
-                content=ci_symbols, content_rowid=id
-            )""")
-
-        # FTS triggers for ci_symbols
-        conn.executescript("""\
-            CREATE TRIGGER IF NOT EXISTS ci_symbols_ai AFTER INSERT ON ci_symbols BEGIN
-                INSERT INTO ci_symbols_fts(rowid, name, qualified_name, signature, docstring)
-                VALUES (new.id, new.name, new.qualified_name, new.signature, new.docstring);
-            END;
-            CREATE TRIGGER IF NOT EXISTS ci_symbols_ad AFTER DELETE ON ci_symbols BEGIN
-                INSERT INTO ci_symbols_fts(ci_symbols_fts, rowid, name, qualified_name, signature, docstring)
-                VALUES ('delete', old.id, old.name, old.qualified_name, old.signature, old.docstring);
-            END;
-            CREATE TRIGGER IF NOT EXISTS ci_symbols_au AFTER UPDATE ON ci_symbols BEGIN
-                INSERT INTO ci_symbols_fts(ci_symbols_fts, rowid, name, qualified_name, signature, docstring)
-                VALUES ('delete', old.id, old.name, old.qualified_name, old.signature, old.docstring);
-                INSERT INTO ci_symbols_fts(rowid, name, qualified_name, signature, docstring)
-                VALUES (new.id, new.name, new.qualified_name, new.signature, new.docstring);
-            END;
-        """)
-
-        conn.execute("""\
-            CREATE TABLE IF NOT EXISTS ci_references (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                name TEXT NOT NULL,
-                line INTEGER NOT NULL,
-                column_num INTEGER DEFAULT 0,
-                context TEXT DEFAULT '',
-                ref_kind TEXT DEFAULT 'usage',
-                resolved_file TEXT DEFAULT '',
-                resolved_line INTEGER,
-                language TEXT NOT NULL
-            )""")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_refs_name ON ci_references(name)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_refs_file ON ci_references(project_id, file_path)")
-
-        conn.execute("""\
-            CREATE TABLE IF NOT EXISTS ci_imports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                source TEXT NOT NULL,
-                name TEXT NOT NULL,
-                alias TEXT DEFAULT '',
-                line INTEGER NOT NULL,
-                is_wildcard BOOLEAN DEFAULT FALSE,
-                resolved_file TEXT DEFAULT '',
-                language TEXT NOT NULL
-            )""")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_file ON ci_imports(project_id, file_path)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_name ON ci_imports(name)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_imports_source ON ci_imports(source)")
-
-        # Code intelligence: diagnostics from heuristic analysis
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS ci_diagnostics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                line INTEGER NOT NULL,
-                severity TEXT NOT NULL,
-                check_name TEXT NOT NULL,
-                message TEXT NOT NULL,
-                fix_suggestion TEXT DEFAULT '',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ci_diag_file ON ci_diagnostics(project_id, file_path)")
-
-        # Code intelligence: per-method body fingerprints for fuzzy
-        # similarity search across the project. Populated by the
-        # ``code_intel.method_index`` module immediately after
-        # ``store_file_symbols`` runs, so it stays in sync with the
-        # symbol index without a separate background pass.
-        #
-        # Why a separate table instead of columns on ci_symbols:
-        #   * Most ci_symbols rows are imports, fields, properties —
-        #     things with no body to fingerprint. Adding two TEXT
-        #     columns to ci_symbols would make every row pay for a
-        #     feature 90% of rows can't use.
-        #   * Similarity search has its own index requirements
-        #     (idx_method_bodies_hash for exact-dup, idx_method_bodies_qual
-        #     for "fetch THIS method"), unrelated to the symbol indexes.
-        #   * The table can be cleared and rebuilt independently of
-        #     ci_symbols if the normalization scheme changes.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS ci_method_bodies (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id    INTEGER NOT NULL,
-                file_path     TEXT NOT NULL,
-                qualified_name TEXT NOT NULL,
-                kind          TEXT NOT NULL,    -- 'function' | 'method'
-                line_start    INTEGER NOT NULL,
-                line_end      INTEGER NOT NULL,
-                body_size     INTEGER NOT NULL, -- in lines (after stripping comments)
-                body_hash     TEXT NOT NULL,    -- normalized sha256[:16] for exact-dup
-                body_norm     TEXT NOT NULL,    -- space-separated normalized tokens (for Jaccard)
-                language      TEXT NOT NULL,
-                indexed_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(project_id, file_path, qualified_name)
-            )
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_method_bodies_hash "
-            "ON ci_method_bodies(project_id, body_hash)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_method_bodies_qual "
-            "ON ci_method_bodies(project_id, qualified_name)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_method_bodies_file "
-            "ON ci_method_bodies(project_id, file_path)"
-        )
-
-        # ── ContextRank tables ─────────────────────────────────────────
-        # Vectorized context messages (user input, step titles/descriptions)
-        # that provoked tool calls. Embeddings enable cross-session
-        # similarity search to predict relevant resources for new tasks.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS cr_contexts (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id      TEXT NOT NULL,
-                session_id   TEXT NOT NULL,
-                context_type TEXT NOT NULL,
-                content      TEXT NOT NULL,
-                embedding    BLOB,
-                iteration    INTEGER,
-                step_index   INTEGER,
-                created_at   REAL NOT NULL
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_contexts_session ON cr_contexts(session_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_contexts_type ON cr_contexts(context_type)")
-
-        # Append-only interaction event log. Each row records one tool
-        # call's effect (file read/write, symbol access, finding create)
-        # linked to the context that provoked it.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS cr_interactions (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id      TEXT NOT NULL,
-                session_id   TEXT NOT NULL,
-                context_id   INTEGER REFERENCES cr_contexts(id),
-                iteration    INTEGER NOT NULL,
-                event_type   TEXT NOT NULL,
-                target       TEXT NOT NULL,
-                target_type  TEXT NOT NULL,
-                weight       REAL NOT NULL DEFAULT 1.0,
-                metadata     TEXT,
-                created_at   REAL NOT NULL
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_target ON cr_interactions(target, target_type)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_context ON cr_interactions(context_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_interactions_session ON cr_interactions(session_id)")
-
-        # Reasoning-pattern catalog for the assistant critic. Each row
-        # is one *signature* of a reasoning failure mode (e.g. one
-        # phrasing of "victory_lap"), embedded for cosine similarity at
-        # detection time. Multiple signatures share a pattern_name; the
-        # detector matches against the closest signature per pattern.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS critic_reasoning_patterns (
-                id                       INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_name             TEXT NOT NULL,
-                signature                TEXT NOT NULL,
-                embedding                BLOB NOT NULL,
-                threshold                REAL NOT NULL DEFAULT 0.75,
-                socratic_question        TEXT NOT NULL,
-                triggered_check          TEXT,
-                created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                confirmed_useful_count   INTEGER DEFAULT 0,
-                UNIQUE(pattern_name, signature)
-            )
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_patterns_name "
-            "ON critic_reasoning_patterns(pattern_name)"
-        )
-
-        # Pre-computed per-node scores snapshotted at session/task end.
-        # Avoids recalculating historical scores from raw interactions.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS cr_session_scores (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id      TEXT NOT NULL,
-                session_id   TEXT NOT NULL,
-                target       TEXT NOT NULL,
-                target_type  TEXT NOT NULL,
-                score        REAL NOT NULL,
-                access_count INTEGER NOT NULL DEFAULT 0,
-                created_at   REAL NOT NULL
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_target ON cr_session_scores(target, target_type)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cr_scores_session ON cr_session_scores(session_id)")
-
-        # ── Parser versioning migration ──────────────────────────
-        # ci_files.parser_version tracks which parser version
-        # produced the current symbols for this file.  The
-        # incremental indexer skips re-parsing only when BOTH the
-        # content hash and the parser version match — otherwise
-        # a parser bug fix's effect would never propagate to
-        # already-indexed files (the content hash never changes).
-        # See code_intel/parsers/__init__.py::PARSER_VERSIONS for
-        # the per-language version registry.
         _migrate_add_column(conn, "ci_files", "parser_version", "INTEGER DEFAULT 0")
-
-        # ── Phase 3 v3 migrations: fuzzy symbol embeddings ───────
-        # Canal 3 (mention detection) is redesigned in v3 to use
-        # dense embeddings instead of substring matching.  Each
-        # indexed symbol and each source file gets an embedding
-        # stored inline on its row, computed at index time by the
-        # code_intel.symbol_embeddings module.  The embedding_text
-        # column captures what was embedded (for debugging and for
-        # re-embedding if the prompt template changes).
         _migrate_add_column(conn, "ci_symbols", "embedding", "BLOB")
         _migrate_add_column(conn, "ci_symbols", "embedding_text", "TEXT")
         _migrate_add_column(conn, "ci_files", "embedding", "BLOB")
         _migrate_add_column(conn, "ci_files", "embedding_text", "TEXT")
-
-        # ── Phase 2 v3 migrations ────────────────────────────────
-        # Productivity-aware scoring needs richer logging than v2
-        # captured.  These additive migrations add tool-error tracking
-        # to the interaction log and per-target productivity/edit
-        # flags to the per-session score snapshot.
-        #
-        # cr_interactions.was_error: whether the tool call returned
-        # an error.  Populated from _tool_error in the loop engine.
-        # Error interactions are excluded from historical scoring so
-        # failed actions don't poison the signal.
         _migrate_add_column(conn, "cr_interactions", "was_error", "INTEGER DEFAULT 0")
-        # cr_session_scores.productivity: per-target multiplier
-        # computed at snapshot time.  1.5 for edited targets, 1.0
-        # for single-read targets, 0.6 for repeatedly-read-but-not-
-        # edited targets.  The predictive channel joins on this to
-        # weight historical interactions by their productivity.
         _migrate_add_column(conn, "cr_session_scores", "productivity", "REAL DEFAULT 1.0")
-        # cr_session_scores.was_edited: fast-lookup boolean for
-        # "did any write hit this target in this session?".  True
-        # when at least one cr_interactions row had weight >= 2.0.
         _migrate_add_column(conn, "cr_session_scores", "was_edited", "INTEGER DEFAULT 0")
 
-        # Indexes for Phase 2's new queries:
-        # - Age-filtered context fetch (WHERE created_at > ?)
-        # - Session+target composite for the productivity join
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_cr_contexts_created_at "
-            "ON cr_contexts(created_at DESC)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_cr_session_scores_session_target "
-            "ON cr_session_scores(session_id, target, target_type)"
-        )
-
-        # Create a default project if none exists
+        # Seed a default project if none exists.
         row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
         if not row:
-            conn.execute("INSERT INTO projects (name, description) VALUES ('Default Project', 'Autogenerated project for CLI')")
+            conn.execute(
+                "INSERT INTO projects (name, description) "
+                "VALUES ('Default Project', 'Autogenerated project for CLI')"
+            )
         conn.commit()
 
     execute_with_retry(_init)

@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.behavior.primitives.scoring import Confidence
 
 
@@ -39,12 +40,10 @@ def _coerce_args(raw: Any) -> tuple[dict[str, Any], str]:
             return raw, str(raw)
     if isinstance(raw, str):
         s = raw
-        try:
+        with best_effort("tool-call args JSON parse failed"):
             parsed = json.loads(s)
             if isinstance(parsed, dict):
                 return parsed, s
-        except Exception:
-            pass
         return {}, s
     return {}, str(raw)
 

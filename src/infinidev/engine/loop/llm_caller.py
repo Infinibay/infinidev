@@ -6,6 +6,7 @@ import json
 import time
 from typing import Any, TYPE_CHECKING
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.llm_client import (
     call_llm as _call_llm,
     is_malformed_tool_call as _is_malformed_tool_call,
@@ -185,14 +186,12 @@ def promote_embedded_think(message: Any) -> None:
         return
     cleaned = _THINK_BLOCK_RE.sub("", content).strip()
     promoted = "\n\n".join(b.strip() for b in blocks if b.strip())
-    try:
+    with best_effort("promote embedded think failed"):
         if existing:
             message.reasoning_content = f"{existing}\n\n{promoted}"
         else:
             message.reasoning_content = promoted
         message.content = cleaned
-    except Exception:
-        pass
 
 
 class LLMCaller:
@@ -446,10 +445,8 @@ class LLMCaller:
         # touch message.content (not reasoning_content) because
         # reasoning is already routed to the thinking panel, not chat.
         if parsed_src in ("content", "both") and getattr(message, "content", None):
-            try:
+            with best_effort("strip tool-call markup from content failed"):
                 message.content = _strip_tool_call_markup(message.content)
-            except Exception:
-                pass
 
         return [
             _ManualToolCall(

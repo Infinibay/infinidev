@@ -2,7 +2,7 @@
 
 Schema conversion and the pseudo-tool schema constants now live in
 ``loop/schema_sanitizer.py``. They are re-exported here so existing
-``from infinidev.engine.loop.tools import ...`` imports keep working
+``from infinidev.engine.tool_dispatch import ...`` imports keep working
 after the extraction.
 """
 
@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any
 
-from infinidev.engine.loop.schema_sanitizer import (
+from infinidev.engine.schema_sanitizer import (
     _clean_schema,
     _sanitize_schema_deep,
     _simplify_node,

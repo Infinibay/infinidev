@@ -87,7 +87,16 @@ def tool_to_openai_schema(tool: Any) -> dict[str, Any]:
             try:
                 parameters = tool.args_schema.schema()
             except Exception:
-                pass
+                # Both schema extractions failed → the tool would register with
+                # an EMPTY parameter schema, which CLAUDE.md calls the security
+                # boundary. Make it loud instead of silently shipping a zero-arg
+                # tool the model cannot call correctly.
+                logger.warning(
+                    "tool_to_openai_schema: could not extract args schema for "
+                    "tool %r; registering with EMPTY parameters",
+                    getattr(tool, "name", type(tool).__name__),
+                    exc_info=True,
+                )
         parameters = _clean_schema(parameters)
 
     # Ensure required fields

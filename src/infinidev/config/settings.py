@@ -1,10 +1,13 @@
 """Centralized configuration for Infinidev CLI."""
 
 import json
+import logging
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 # Base directory: .infinidev in the current working directory.
 # Using cwd ensures the DB is relative to wherever the engine runs.
@@ -378,8 +381,16 @@ class Settings(BaseSettings):
             try:
                 with open(SETTINGS_FILE, "r") as f:
                     file_settings = json.load(f)
-            except Exception as e:
-                print(f"Warning: Could not load settings from {SETTINGS_FILE}: {e}")
+            except (json.JSONDecodeError, OSError) as e:
+                # Narrow + log via the logger (not print, which is invisible in
+                # the TUI and absent from log files). Falling back to defaults
+                # silently runs on the wrong model / missing API key, so the
+                # failure must be observable.
+                logger.error(
+                    "Could not load settings from %s (%s); falling back to "
+                    "defaults — model/base_url/API keys may be wrong.",
+                    SETTINGS_FILE, e,
+                )
 
         # Env vars take precedence over file settings
         return cls(**file_settings)
@@ -391,8 +402,17 @@ class Settings(BaseSettings):
             try:
                 with open(SETTINGS_FILE, "r") as f:
                     current_data = json.load(f)
-            except Exception:
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                # Do NOT fall through to overwrite. Defaulting to {} here and
+                # then dumping would clobber every previously-saved setting
+                # (model, base_url, API keys) on a transient or corrupt read.
+                # Abort and leave the existing file untouched instead.
+                logger.error(
+                    "Refusing to save settings: cannot read existing %s (%s). "
+                    "Existing configuration left untouched.",
+                    SETTINGS_FILE, e,
+                )
+                return
 
         current_data.update(updates)
         with open(SETTINGS_FILE, "w") as f:

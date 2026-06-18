@@ -30,9 +30,10 @@ import uuid
 from typing import Any, Optional
 
 from infinidev.config.llm import get_litellm_params_for_behavior
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.llm_caller import ThinkStreamFilter, strip_think_blocks
-from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
-from infinidev.engine.loop.tools import build_tool_dispatch, execute_tool_call
+from infinidev.engine.schema_sanitizer import tool_to_openai_schema
+from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.prompts.chat_agent import build_chat_agent_system_prompt
@@ -177,10 +178,8 @@ def run_chat_agent(
         # and re-renders with whatever text was captured. Without this,
         # the TUI would carry a phantom message stuck in streaming=True.
         if hooks is not None:
-            try:
+            with best_effort("chat agent stream finalize failed"):
                 hooks.notify_stream_end("Infinidev", "agent")
-            except Exception:
-                pass
         return _fallback_respond(_detect_lang(user_input), exc=exc)
     finally:
         try:

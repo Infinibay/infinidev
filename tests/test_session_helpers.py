@@ -192,33 +192,33 @@ class TestResolveTool:
         }
 
     def test_direct_hit(self):
-        from infinidev.engine.loop.tools import _resolve_tool
+        from infinidev.engine.tool_dispatch import _resolve_tool
         tool, name = _resolve_tool(self._dispatch(), "read_file")
         assert tool == "READ_FILE_TOOL"
         assert name == "read_file"
 
     def test_alias_resolved(self):
         """Deprecated aliases map to their canonical names."""
-        from infinidev.engine.loop.tools import _resolve_tool
+        from infinidev.engine.tool_dispatch import _resolve_tool
         # write_file is a known alias for create_file.
         tool, name = _resolve_tool(self._dispatch(), "write_file")
         assert tool == "CREATE_FILE_TOOL"
         assert name == "create_file"
 
     def test_case_insensitive_match(self):
-        from infinidev.engine.loop.tools import _resolve_tool
+        from infinidev.engine.tool_dispatch import _resolve_tool
         tool, name = _resolve_tool(self._dispatch(), "READ_FILE")
         assert tool == "READ_FILE_TOOL"
 
     def test_hallucination_map_fallback(self):
         """Common small-model hallucinations route to the right tool."""
-        from infinidev.engine.loop.tools import _resolve_tool
+        from infinidev.engine.tool_dispatch import _resolve_tool
         tool, name = _resolve_tool(self._dispatch(), "run_command")
         assert tool == "EXEC_TOOL"
         assert name == "execute_command"
 
     def test_unknown_tool_returns_none(self):
-        from infinidev.engine.loop.tools import _resolve_tool
+        from infinidev.engine.tool_dispatch import _resolve_tool
         tool, name = _resolve_tool(self._dispatch(), "totally_made_up_tool")
         assert tool is None
         assert name == "totally_made_up_tool"

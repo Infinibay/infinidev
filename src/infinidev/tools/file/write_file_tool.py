@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 from typing import Literal, Type
 
@@ -19,6 +20,8 @@ from infinidev.tools.file._helpers import (
     deletion_warning_text,
 )
 from infinidev.tools.file.write_file_input import WriteFileInput
+
+logger = logging.getLogger(__name__)
 
 
 class WriteFileTool(InfinibayBaseTool):
@@ -53,18 +56,19 @@ class WriteFileTool(InfinibayBaseTool):
         # mode='w' — needed for the silent-deletion check below).
         before_hash = None
         old_text = ""
-        if os.path.exists(file_path):
+        existed = os.path.exists(file_path)
+        if existed:
             try:
                 with open(file_path, "rb") as f:
                     raw = f.read()
                 before_hash = hashlib.sha256(raw).hexdigest()[:16]
                 if mode == "w":
-                    try:
-                        old_text = raw.decode("utf-8", errors="replace")
-                    except Exception:
-                        old_text = ""
-            except Exception:
-                pass
+                    old_text = raw.decode("utf-8", errors="replace")
+            except (OSError, UnicodeError) as e:
+                # Read failed on a file we know exists: keep before_hash None
+                # (provenance lost) but log it. `existed` (below) still labels
+                # this a modification, not a creation, so the audit stays honest.
+                logger.debug("write_file: pre-write read failed for %s: %s", file_path, e)
 
         # Pre-write syntax check — only on full overwrite (mode='w'), since
         # append (mode='a') is typically used for logs/text accumulation
@@ -107,12 +111,26 @@ class WriteFileTool(InfinibayBaseTool):
             with open(file_path, "rb") as f:
                 after_hash = hashlib.sha256(f.read()).hexdigest()[:16]
             size_bytes = os.path.getsize(file_path)
-        except Exception:
-            after_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-            size_bytes = len(content.encode("utf-8"))
+        except (OSError, UnicodeError) as e:
+            logger.debug("write_file: post-write re-read failed for %s: %s", file_path, e)
+            if mode == "w":
+                # Full overwrite: the in-memory content IS the file content.
+                after_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+                size_bytes = len(content.encode("utf-8"))
+            else:
+                # Append: hashing only the appended fragment would store a hash
+                # that doesn't match the whole file. Re-stat for the real size
+                # and mark the hash unavailable rather than fabricating one.
+                after_hash = None
+                try:
+                    size_bytes = os.path.getsize(file_path)
+                except OSError:
+                    size_bytes = 0
 
-        # Record in artifact_changes for audit
-        action = "modified" if before_hash else "created"
+        # Record in artifact_changes for audit. Use prior existence, not
+        # before_hash: a failed pre-read leaves before_hash None on a file that
+        # nonetheless existed (a modification, not a creation).
+        action = "modified" if (before_hash or existed) else "created"
         record_artifact_change(self, file_path, action, before_hash, after_hash, size_bytes)
 
         result = {

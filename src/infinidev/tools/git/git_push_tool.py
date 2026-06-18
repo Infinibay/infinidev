@@ -57,24 +57,20 @@ class GitPushTool(InfinibayBaseTool):
         except GitToolError as e:
             return self._error(str(e))
 
-        try:
-            from infinidev.flows.event_listeners import FlowEvent, event_bus
+        from infinidev.engine._best_effort import best_effort
+        with best_effort("git_pushed event emit failed"):
+            from infinidev.flows.event_listeners import event_bus
             event_bus.emit(
-                FlowEvent(
-                    event_type="git_pushed",
-                    project_id=self.project_id,
-                    entity_type="branch",
-                    entity_id=None,
-                    data={
-                        "branch": branch,
-                        "remote": "origin",
-                        "forced": force,
-                        "agent_id": self.agent_id,
-                    },
-                )
+                "git_pushed",
+                self.project_id or 0,
+                self.agent_id or "",
+                {
+                    "branch": branch,
+                    "remote": "origin",
+                    "forced": force,
+                    "entity_type": "branch",
+                },
             )
-        except Exception:
-            pass  # Don't fail the push if event emission fails
 
         self._log_tool_usage(f"Pushed {branch} to origin")
         return self._success({
@@ -111,22 +107,20 @@ class GitPushTool(InfinibayBaseTool):
         except RuntimeError as e:
             return self._error(f"Pod execution failed: {e}")
 
-        try:
-            from infinidev.flows.event_listeners import FlowEvent, event_bus
-            event_bus.emit(FlowEvent(
-                event_type="git_pushed",
-                project_id=self.project_id,
-                entity_type="branch",
-                entity_id=None,
-                data={
+        from infinidev.engine._best_effort import best_effort
+        with best_effort("git_pushed event emit failed"):
+            from infinidev.flows.event_listeners import event_bus
+            event_bus.emit(
+                "git_pushed",
+                self.project_id or 0,
+                self.agent_id or "",
+                {
                     "branch": branch,
                     "remote": "origin",
                     "forced": force,
-                    "agent_id": self.agent_id,
+                    "entity_type": "branch",
                 },
-            ))
-        except Exception:
-            pass
+            )
 
         self._log_tool_usage(f"Pushed {branch} to origin (pod)")
         return self._success({"branch": branch, "remote": "origin", "forced": force})
@@ -168,24 +162,20 @@ class GitPushTool(InfinibayBaseTool):
         except asyncio.TimeoutError:
             return self._error(f"Push timed out after {settings.GIT_PUSH_TIMEOUT}s")
 
-        try:
-            from infinidev.flows.event_listeners import FlowEvent, event_bus
+        from infinidev.engine._best_effort import best_effort
+        with best_effort("git_pushed event emit failed"):
+            from infinidev.flows.event_listeners import event_bus
             event_bus.emit(
-                FlowEvent(
-                    event_type="git_pushed",
-                    project_id=self.project_id,
-                    entity_type="branch",
-                    entity_id=None,
-                    data={
-                        "branch": branch,
-                        "remote": "origin",
-                        "forced": force,
-                        "agent_id": self.agent_id,
-                    },
-                )
+                "git_pushed",
+                self.project_id or 0,
+                self.agent_id or "",
+                {
+                    "branch": branch,
+                    "remote": "origin",
+                    "forced": force,
+                    "entity_type": "branch",
+                },
             )
-        except Exception:
-            pass  # Don't fail the push if event emission fails
 
         self._log_tool_usage(f"Pushed {branch} to origin (async)")
         return self._success({"branch": branch, "remote": "origin", "forced": force})

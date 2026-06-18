@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from infinidev.engine._best_effort import best_effort
+
 
 class GuidanceHandler:
     """Gate + dispatch for the reactive guidance detector."""
@@ -34,7 +36,7 @@ class GuidanceHandler:
         the same step).  Any exception is swallowed — guidance is a
         best-effort nicety, never a blocker.
         """
-        try:
+        with best_effort("guidance queue check failed"):
             from infinidev.engine.loop.step_manager import _get_settings
             from infinidev.engine.engine_logging import log as _log, YELLOW, RESET
 
@@ -56,5 +58,3 @@ class GuidanceHandler:
             if queued and ctx.verbose:
                 suffix = " mid-step" if mid_step else ""
                 _log(f"  {YELLOW}↪ guidance queued{suffix}: {queued}{RESET}")
-        except Exception:
-            pass

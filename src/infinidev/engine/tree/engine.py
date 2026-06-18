@@ -38,7 +38,7 @@ from infinidev.engine.tree.models import (
     propagate,
     select_next_node,
 )
-from infinidev.engine.loop.tools import (
+from infinidev.engine.tool_dispatch import (
     build_tool_dispatch,
     build_tool_schemas,
     execute_tool_call,

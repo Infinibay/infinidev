@@ -24,6 +24,8 @@ import threading
 import time
 from typing import Any
 
+from infinidev.engine._best_effort import best_effort
+
 _LOCK = threading.Lock()
 _HANDLE = None
 _PATH: str | None = None
@@ -192,9 +194,7 @@ def trace_run_end(status: str, iterations: int, total_tools: int, final_result: 
     with _LOCK:
         global _HANDLE
         if _HANDLE is not None:
-            try:
+            with best_effort("trace_log handle flush/close failed"):
                 _HANDLE.flush()
                 _HANDLE.close()
-            except Exception:
-                pass
             _HANDLE = None

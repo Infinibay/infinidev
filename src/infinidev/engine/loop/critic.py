@@ -475,7 +475,7 @@ class AssistantCritic:
         try:
             from infinidev.tools import get_tools_for_role
             from infinidev.tools.base.context import bind_tools_to_agent
-            from infinidev.engine.loop.schema_sanitizer import tool_to_openai_schema
+            from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 
             tools = get_tools_for_role("assistant_critic")
             # Synthetic agent_id keeps the critic's reads isolated from

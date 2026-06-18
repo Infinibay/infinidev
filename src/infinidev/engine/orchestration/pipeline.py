@@ -28,6 +28,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from infinidev.engine._best_effort import best_effort
+
 logger = logging.getLogger(__name__)
 
 
@@ -308,10 +310,8 @@ def _run_council_phase(
             )
 
     # Surface a short summary to the user (non-blocking).
-    try:
+    with best_effort("council preview notify failed"):
         hooks.notify("Council", brief.render_user_preview(), "agent")
-    except Exception:
-        pass
 
     return _dc_replace(
         escalation, user_request=enriched_request, design_brief=brief,
@@ -349,13 +349,11 @@ def _run_execution_phase(
             from infinidev.engine.phases.phase_engine import PhaseEngine
             _depth_config = None
             if hasattr(agent, "_gather_brief") and agent._gather_brief:
-                try:
+                with best_effort("gather depth-config resolution failed"):
                     from infinidev.gather.models import DEPTH_CONFIGS
                     _depth_config = DEPTH_CONFIGS.get(
                         agent._gather_brief.classification.depth
                     )
-                except Exception:
-                    pass
             phase_eng = PhaseEngine()
             result = phase_eng.execute(
                 agent=agent,

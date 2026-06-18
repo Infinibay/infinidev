@@ -1,14 +1,17 @@
 """Tool: move a symbol (function/method/class) to another file or class."""
 
+import logging
 import os
 import re
-import tempfile
 import stat
+import tempfile
 from typing import Type
 from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.code_intel.move_symbol_input import MoveSymbolInput
+
+logger = logging.getLogger(__name__)
 
 
 def _atomic_write(path: str, content: str) -> None:
@@ -275,11 +278,24 @@ class MoveSymbolTool(InfinibayBaseTool):
             else:
                 _atomic_write(target_path, target_content)
         except Exception as exc:
-            # Rollback source
+            # Rollback the source (we already removed the symbol from it). If the
+            # rollback ALSO fails, the source is left in its post-removal state —
+            # the symbol was deleted but never landed in the target. Surface that
+            # loudly instead of swallowing it, so the user knows data may be lost.
             try:
                 _atomic_write(source_path, "".join(source_lines))
-            except Exception:
-                pass
+            except Exception as rb_exc:
+                logger.warning(
+                    "move_symbol: ROLLBACK of %s failed after target-write "
+                    "failure: %s", source_path, rb_exc, exc_info=True,
+                )
+                return self._error(
+                    f"Failed to write target {target_path}: {exc}. CRITICAL: "
+                    f"rollback of {source_path} also failed ({rb_exc}) — the "
+                    f"symbol may have been removed from {source_path} without "
+                    f"being added to the target. Restore {source_path} from "
+                    f"version control before continuing."
+                )
             return self._error(f"Failed to write target {target_path}: {exc}")
 
         # ── Step 6: Update imports across the project ────────────────────

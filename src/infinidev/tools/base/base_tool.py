@@ -1,15 +1,16 @@
 """Base tool class for all INFINIBAY tools."""
 
+import asyncio
 import inspect
 import json
 import logging
 import os
 import sqlite3
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from crewai.tools import BaseTool
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 if TYPE_CHECKING:
     from infinidev.engine.multimodal import ImageAttachment
@@ -56,6 +57,101 @@ def normalize_tool_result(value: Any) -> tuple[str, list["ImageAttachment"]]:
     if isinstance(value, str):
         return value, []
     return str(value), []
+
+
+class BaseTool(BaseModel, ABC):
+    """Minimal pydantic base for Infinibay tools (replaces ``crewai.tools.BaseTool``).
+
+    Infinibay only ever used four things from crewai's tool base: the
+    ``name`` / ``description`` / ``args_schema`` pydantic fields, the abstract
+    ``_run``, and a ``run()`` that validates kwargs against ``args_schema``
+    before dispatching to ``_run`` — plus the convenience of deriving
+    ``args_schema`` from the ``_run`` signature when a tool doesn't declare one.
+    All of that is reproduced here.
+
+    Deliberately NOT reproduced: crewai's ``model_post_init`` description
+    mutation (tools now expose their declared ``description`` verbatim — the
+    schema the LLM sees is cleaner), usage metering, env-var plumbing, and
+    checkpoint serialization. None were used by Infinibay. Production dispatch
+    goes through ``_run`` directly (see ``loop/tools.py``); ``run()`` exists for
+    parity and tests.
+    """
+
+    class _ArgsSchemaPlaceholder(BaseModel):
+        pass
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    name: str = Field(description="The unique name of the tool.")
+    description: str = Field(
+        description="Tells the model how/when/why to use the tool."
+    )
+    args_schema: type[BaseModel] = Field(
+        default=_ArgsSchemaPlaceholder,
+        validate_default=True,
+        description="Pydantic schema for the tool's arguments.",
+    )
+
+    @field_validator("args_schema", mode="before")
+    @classmethod
+    def _derive_args_schema(cls, v: Any) -> type[BaseModel]:
+        """Use the declared schema, or synthesize one from ``_run``'s signature.
+
+        Mirrors crewai so tools that don't set ``args_schema`` (mostly test
+        dummies) still get a schema built from their ``_run`` parameters.
+        """
+        if isinstance(v, type) and v is not cls._ArgsSchemaPlaceholder:
+            return v
+
+        fields: dict[str, Any] = {}
+        for pname, param in inspect.signature(cls._run).parameters.items():
+            if pname in ("self", "return"):
+                continue
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+            annotation = (
+                param.annotation
+                if param.annotation is not inspect.Parameter.empty
+                else Any
+            )
+            if param.default is inspect.Parameter.empty:
+                fields[pname] = (annotation, ...)
+            else:
+                fields[pname] = (annotation, param.default)
+        return create_model(f"{cls.__name__}Schema", **fields)
+
+    def _validate_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Validate/coerce kwargs against ``args_schema`` when it has fields."""
+        if self.args_schema is not None and self.args_schema.model_fields:
+            validated = self.args_schema.model_validate(kwargs)
+            return validated.model_dump()
+        return kwargs
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        if not args:
+            kwargs = self._validate_kwargs(kwargs)
+        result = self._run(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            result = asyncio.run(result)
+        return result
+
+    @abstractmethod
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        """Synchronous tool implementation; subclasses must override."""
+
+    async def _arun(self, *args: Any, **kwargs: Any) -> Any:
+        """Async implementation; override for async support."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement _arun."
+        )
+
+    async def arun(self, *args: Any, **kwargs: Any) -> Any:
+        if not args:
+            kwargs = self._validate_kwargs(kwargs)
+        return await self._arun(*args, **kwargs)
 
 
 class InfinibayBaseTool(BaseTool, ABC):

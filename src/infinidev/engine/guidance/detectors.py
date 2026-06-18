@@ -21,6 +21,7 @@ import json
 import re
 from typing import Any, TYPE_CHECKING
 
+from infinidev.engine._best_effort import best_effort
 from infinidev.engine.guidance.test_runners import (
     is_test_command,
     test_outcome_fingerprint,
@@ -180,10 +181,8 @@ def _has_regression_after_edit(state: "LoopState | None") -> bool:
         if not isinstance(fps, list) or len(fps) < 2:
             continue
         if _is_regression(fps[-2], fps[-1]):
-            try:
+            with best_effort("regression_signaled flag set failed"):
                 state.regression_signaled = True
-            except Exception:
-                pass
             return True
     return False
 
