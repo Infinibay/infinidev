@@ -76,13 +76,17 @@ def find_semantic_duplicate(
     ``{"id": int, "title": str, "similarity": float}`` when a duplicate is
     found, otherwise ``None``.
     """
-    if not existing_items or not new_title.strip():
+    # Strip once and use the stripped value for BOTH the guard/length check and
+    # the embedding, so incidental whitespace doesn't shift the vector away from
+    # an equivalent already-stored (stripped) title and let a dup slip through.
+    new_title = new_title.strip()
+    if not existing_items or not new_title:
         return None
 
     # Titles under 10 characters are too short for meaningful semantic
     # comparison — they lack enough signal to distinguish (e.g. "Task 1"
     # vs "Task 2" would false-positive).  Real titles are always longer.
-    if len(new_title.strip()) < 10:
+    if len(new_title) < 10:
         return None
 
     embed_fn = _get_embed_fn()

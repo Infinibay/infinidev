@@ -45,6 +45,11 @@ class RejectFindingTool(InfinibayBaseTool):
             result = execute_with_retry(_reject)
         except ValueError as e:
             return self._error(str(e))
+        except Exception as e:
+            # WAL contention can raise sqlite3.OperationalError after retries
+            # are exhausted; convert to clean error JSON instead of letting a
+            # raw traceback escape _run (matches delete/update_finding).
+            return self._error(f"Failed to reject finding: {e}")
 
         self._log_tool_usage(
             f"Rejected finding #{finding_id}: {result['topic'][:60]}"

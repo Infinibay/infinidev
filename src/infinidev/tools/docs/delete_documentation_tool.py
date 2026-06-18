@@ -29,6 +29,21 @@ class DeleteDocumentationTool(InfinibayBaseTool):
         section: Optional[str] = None,
     ) -> str:
         def _delete(conn: sqlite3.Connection):
+            # Resolve version='latest' to the newest stored version, mirroring
+            # find_documentation's _resolve_version — otherwise docs fetched
+            # under a concrete version (e.g. '3.0') are never deleted because
+            # the literal 'latest' row doesn't exist.
+            resolved = version
+            if version == "latest":
+                row = conn.execute(
+                    "SELECT version FROM library_docs "
+                    "WHERE library_name = ? AND language = ? "
+                    "ORDER BY updated_at DESC LIMIT 1",
+                    (library_name, language),
+                ).fetchone()
+                if row is None:
+                    return 0
+                resolved = row["version"]
             if section:
                 cursor = conn.execute(
                     """\
@@ -36,7 +51,7 @@ class DeleteDocumentationTool(InfinibayBaseTool):
                     WHERE library_name = ? AND language = ? AND version = ?
                       AND section_title LIKE ?
                     """,
-                    (library_name, language, version, f"%{section}%"),
+                    (library_name, language, resolved, f"%{section}%"),
                 )
             else:
                 cursor = conn.execute(
@@ -44,7 +59,7 @@ class DeleteDocumentationTool(InfinibayBaseTool):
                     DELETE FROM library_docs
                     WHERE library_name = ? AND language = ? AND version = ?
                     """,
-                    (library_name, language, version),
+                    (library_name, language, resolved),
                 )
             conn.commit()
             return cursor.rowcount

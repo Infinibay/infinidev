@@ -81,6 +81,25 @@ class RenameSymbolTool(InfinibayBaseTool):
         if old_name == new_name:
             return self._error(f"Symbol is already named '{new_name}'")
 
+        # The line-wide, word-boundary rewrite below is only safe when the bare
+        # name uniquely identifies ONE symbol project-wide. find_references
+        # matches by bare name and is NOT class-scoped, so if several symbols
+        # share old_name (e.g. a method name reused across classes) the rename
+        # would also rewrite the unrelated ones — plus any string/comment hit
+        # on each affected line. Refuse that case rather than corrupt code.
+        from infinidev.code_intel.query import find_definition
+        same_named = find_definition(project_id, old_name, limit=50)
+        distinct_defs = {(s.file_path, s.line_start) for s in same_named}
+        if len(distinct_defs) > 1:
+            where = sym.parent_symbol or sym.file_path
+            return self._error(
+                f"Rename of '{old_name}' (here: {where}) is unsafe: "
+                f"{len(distinct_defs)} symbols share that bare name across the "
+                f"project, and references are matched by bare name (not "
+                f"class-scoped), so renaming would also rewrite the unrelated "
+                f"ones. Rename it manually or use edit_symbol on the definition."
+            )
+
         # Find all references to this symbol across the project
         refs = find_references(project_id, old_name, limit=500)
 
@@ -110,6 +129,18 @@ class RenameSymbolTool(InfinibayBaseTool):
             changes_by_file.setdefault(imp.file_path, []).append(
                 (imp.line, old_name, new_name)
             )
+
+        # Permission pre-check: confirm every file we may write BEFORE applying
+        # any change, so a denial can't leave a half-renamed working tree.
+        from infinidev.tools.base.permissions import check_file_permission
+        for fpath in changes_by_file:
+            if not os.path.isfile(fpath):
+                continue
+            if self._validate_sandbox_path(fpath):
+                continue
+            perm_err = check_file_permission("edit_file", fpath)
+            if perm_err:
+                return self._error(perm_err)
 
         # Apply changes file by file
         files_modified = []

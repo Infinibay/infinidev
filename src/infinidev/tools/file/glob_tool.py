@@ -195,6 +195,10 @@ class GlobTool(InfinibayBaseTool):
                 # Content filter
                 if content_re is not None:
                     try:
+                        # Skip oversized files — match read_file's 5MB cap so a
+                        # glob content filter can't read a huge file into memory.
+                        if fpath.stat().st_size > settings.MAX_FILE_SIZE_BYTES:
+                            continue
                         text = fpath.read_text(encoding="utf-8", errors="replace")
                         if not content_re.search(text):
                             continue

@@ -55,8 +55,8 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("GATHER_ENABLED", "Enable gather phase (deep context)", "bool"),
     ],
     "Permissions": [
-        ("EXECUTE_COMMANDS_PERMISSION", "Shell command permission mode", "select:auto_approve,ask,allowed_list"),
-        ("FILE_OPERATIONS_PERMISSION", "File operations permission mode", "select:auto_approve,ask,allowed_paths"),
+        ("EXECUTE_COMMANDS_PERMISSION", "Shell command permission mode", "select:auto,auto_approve,ask,allowed_list"),
+        ("FILE_OPERATIONS_PERMISSION", "File operations permission mode", "select:auto,auto_approve,ask,allowed_paths"),
     ],
     "Sandbox": [
         ("SANDBOX_ENABLED", "Enable sandboxed execution", "bool"),

@@ -96,12 +96,15 @@ class SeedCouncilTool(InfinibayBaseTool):
     args_schema: Type[BaseModel] = SeedCouncilInput
 
     def _run(self, question: str, members: list, opening_threads: list) -> str:
+        # Schema-level terminator; the orchestrator reads tool_call args
+        # directly. Coerce nested pydantic models so this fallback _run never
+        # crashes on json.dumps if it is ever dispatched normally.
         return json.dumps({
             "kind": "seed_council",
             "question": question,
             "members": members,
             "opening_threads": opening_threads,
-        })
+        }, default=lambda o: o.model_dump() if hasattr(o, "model_dump") else str(o))
 
 
 # ── council_verdict ──────────────────────────────────────────────────────
@@ -228,7 +231,7 @@ class SynthesizeBriefTool(InfinibayBaseTool):
             "dissent": dissent or [],
             "user_decision_required": user_decision_required,
             "open_questions_for_user": open_questions_for_user or [],
-        })
+        }, default=lambda o: o.model_dump() if hasattr(o, "model_dump") else str(o))
 
 
 __all__ = [

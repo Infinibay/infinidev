@@ -63,7 +63,13 @@ class ProjectStructureTool(InfinibayBaseTool):
             """Get a short description of a directory from its files."""
             count = 0
             kinds: dict[str, int] = {}
-            for fname in os.listdir(dirpath):
+            try:
+                entries = os.listdir(dirpath)
+            except OSError:
+                # Unreadable dir / TOCTOU race (deleted, dangling symlink) —
+                # the sibling _walk guards its own listdir, this one didn't.
+                return ""
+            for fname in entries:
                 fpath = os.path.join(dirpath, fname)
                 if os.path.isfile(fpath):
                     lang = detect_language(fpath)

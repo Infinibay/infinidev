@@ -34,6 +34,7 @@ class WebSearchTool(InfinibayBaseTool):
         if cache_key in _search_cache:
             cached_time, cached_results = _search_cache[cache_key]
             if time.time() - cached_time < settings.WEB_CACHE_TTL_SECONDS:
+                _search_cache.move_to_end(cache_key)  # true LRU: touch on hit
                 return self._success({"results": cached_results, "cached": True})
 
         from infinidev.tools.web.backends import search_ddg
@@ -43,10 +44,15 @@ class WebSearchTool(InfinibayBaseTool):
         except Exception as e:
             return self._error(f"Search failed: {e}")
 
-        # Cache results (evict oldest if at capacity)
-        if len(_search_cache) >= _MAX_CACHE_SIZE:
-            _search_cache.popitem(last=False)
-        _search_cache[cache_key] = (time.time(), results)
+        # Only cache NON-EMPTY result sets. search_ddg returns [] on any
+        # transient failure (timeout / network / missing dep), so caching []
+        # would pin that failure for the full WEB_CACHE_TTL_SECONDS window and
+        # every identical search would be served the empty result from cache.
+        if results:
+            if len(_search_cache) >= _MAX_CACHE_SIZE:
+                _search_cache.popitem(last=False)
+            _search_cache[cache_key] = (time.time(), results)
+            _search_cache.move_to_end(cache_key)
 
         return self._success({"results": results, "count": len(results)})
 

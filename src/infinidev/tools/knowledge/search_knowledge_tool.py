@@ -12,6 +12,7 @@ from infinidev.tools.knowledge.search_knowledge_input import SearchKnowledgeInpu
 
 class SearchKnowledgeTool(InfinibayBaseTool):
     name: str = "search_knowledge"
+    is_read_only: bool = True
     description: str = (
         "Unified search across knowledge sources (findings, reports). "
         "Uses full-text search for fast, relevant results. "

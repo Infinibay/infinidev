@@ -1,7 +1,10 @@
 """Web fetch tool for extracting readable content from URLs."""
 
+import ipaddress
+import socket
 import sqlite3
 from typing import Literal, Type
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +14,36 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.web.rate_limiter import web_rate_limiter
 from infinidev.tools.web.robots_checker import robots_checker
 from infinidev.tools.web.web_fetch_input import WebFetchInput
+
+
+def _validate_fetch_url(url: str) -> str | None:
+    """Return an error string if *url* is unsafe to fetch (SSRF guard), else None.
+
+    The LLM controls the url and this tool is exposed to the read-only tiers,
+    so a prompt-injected page could otherwise point it at localhost, RFC-1918
+    intranet hosts, link-local, or the cloud metadata endpoint
+    (169.254.169.254). Restrict to http/https and reject any host that resolves
+    to a private/loopback/link-local/reserved address.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "Only http/https URLs are supported"
+    host = parsed.hostname
+    if not host:
+        return "URL has no host"
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or None)
+    except socket.gaierror:
+        return "Could not resolve host"
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return "Could not parse resolved address"
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return "Refusing to fetch private/internal address"
+    return None
 
 
 class WebFetchTool(InfinibayBaseTool):
@@ -62,6 +95,12 @@ class WebFetchTool(InfinibayBaseTool):
             pass  # Cache write failure is non-fatal
 
     def _run(self, url: str, format: str = "markdown", bypass_cache: bool = False) -> str:
+        # SSRF guard FIRST — before cache/robots/rate-limit, since the robots
+        # check itself reaches the target host.
+        err = _validate_fetch_url(url)
+        if err is not None:
+            return self._error(err)
+
         # Check cache first
         if not bypass_cache:
             cached = self._check_cache(url, format)
@@ -87,14 +126,29 @@ class WebFetchTool(InfinibayBaseTool):
         # Rate limit
         web_rate_limiter.acquire()
 
-        # Fetch URL
+        # Fetch URL. Follow redirects MANUALLY (httpx auto-follow disabled) so
+        # each hop's target is re-validated by the SSRF guard — otherwise a
+        # permitted public host could 30x-redirect us into the internal
+        # network. Common http→https / canonicalization redirects still work.
         try:
             with httpx.Client(
                 timeout=settings.WEB_TIMEOUT,
-                follow_redirects=True,
+                follow_redirects=False,
                 headers={"User-Agent": "Mozilla/5.0 (compatible; InfinidevBot/1.0)"},
             ) as client:
-                response = client.get(url)
+                current = url
+                response = None
+                for _ in range(5):  # cap redirect hops
+                    response = client.get(current)
+                    location = response.headers.get("location")
+                    if response.is_redirect and location:
+                        nxt = str(response.url.join(location))
+                        verr = _validate_fetch_url(nxt)
+                        if verr is not None:
+                            return self._error(f"Refusing redirect to unsafe URL: {verr}")
+                        current = nxt
+                        continue
+                    break
                 response.raise_for_status()
                 html = response.text
         except Exception as e:

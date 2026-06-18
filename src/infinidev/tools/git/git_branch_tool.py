@@ -39,25 +39,30 @@ class GitBranchTool(InfinibayBaseTool):
         cwd = self._git_cwd
         try:
             if create:
-                # Verify origin remote exists before fetching
+                # Use origin/<base> when a remote is available; otherwise fall
+                # back to the local ref. A missing 'origin' is NOT an error —
+                # local-only repos must still be able to create the task branch
+                # (this mirrors the pod path, which already falls back).
                 check = run_git(["git", "remote", "get-url", "origin"], cwd=cwd, timeout=10)
                 if check.returncode != 0:
-                    return self._error(
-                        "No remote 'origin' configured. Cannot fetch from remote. "
-                        "Will use local branch as base instead."
-                    )
-                # Fetch latest; fall back to local ref if fetch fails
-                fetch = run_git(["git", "fetch", "origin", base_branch], cwd=cwd, timeout=30)
-                if fetch.returncode == 0:
-                    checkout_ref = f"origin/{base_branch}"
-                else:
                     logger.warning(
-                        "git fetch origin %s failed (exit %d): %s — "
-                        "falling back to local '%s'",
-                        base_branch, fetch.returncode,
-                        fetch.stderr.strip(), base_branch,
+                        "No remote 'origin' configured; using local '%s' as base",
+                        base_branch,
                     )
                     checkout_ref = base_branch
+                else:
+                    # Fetch latest; fall back to local ref if fetch fails
+                    fetch = run_git(["git", "fetch", "origin", base_branch], cwd=cwd, timeout=30)
+                    if fetch.returncode == 0:
+                        checkout_ref = f"origin/{base_branch}"
+                    else:
+                        logger.warning(
+                            "git fetch origin %s failed (exit %d): %s — "
+                            "falling back to local '%s'",
+                            base_branch, fetch.returncode,
+                            fetch.stderr.strip(), base_branch,
+                        )
+                        checkout_ref = base_branch
                 result = run_git(
                     ["git", "checkout", "-b", branch_name, checkout_ref], cwd=cwd,
                 )

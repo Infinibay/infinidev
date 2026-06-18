@@ -23,5 +23,10 @@ class SendMessageTool(InfinibayBaseTool):
         # The actual delivery is handled by the loop engine which intercepts
         # this tool call and emits a loop_user_message event.  The tool
         # itself just returns an acknowledgment so the LLM knows it worked.
+        # The delivery hook only emits when `message` is truthy, so ack'ing an
+        # empty/whitespace-only message would falsely tell the LLM it reached
+        # the user when nothing was shown.
+        if not (message or "").strip():
+            return self._error("send_message requires a non-empty message.")
         return json.dumps({"status": "delivered"})
 

@@ -18,6 +18,7 @@ from infinidev.tools.docs.find_documentation_input import FindDocumentationInput
 
 class FindDocumentationTool(InfinibayBaseTool):
     name: str = "find_documentation"
+    is_read_only: bool = True
     description: str = (
         "Find and read locally cached library documentation. "
         "Can list sections, read a specific section, or search within docs. "
@@ -172,10 +173,20 @@ class FindDocumentationTool(InfinibayBaseTool):
             })
 
         query_vec = np.frombuffer(query_emb, dtype=np.float32)
+        query_norm = float(np.linalg.norm(query_vec))
         scored = []
         for row in rows:
-            doc_vec = embedding_from_blob(row["embedding"])
-            sim = float(np.dot(query_vec, doc_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(doc_vec) + 1e-9))
+            try:
+                doc_vec = embedding_from_blob(row["embedding"])
+            except ValueError:
+                # Truncated / corrupt BLOB (size not a multiple of 4 bytes).
+                continue
+            if doc_vec.shape != query_vec.shape:
+                # Dimension mismatch from an older / different embedding runtime
+                # (CLAUDE.md warns a model swap corrupts stored BLOBs). Skip the
+                # bad row rather than letting np.dot raise out of _run.
+                continue
+            sim = float(np.dot(query_vec, doc_vec) / (query_norm * float(np.linalg.norm(doc_vec)) + 1e-9))
             scored.append((sim, row["section_title"], row["content"][:300]))
 
         scored.sort(reverse=True)

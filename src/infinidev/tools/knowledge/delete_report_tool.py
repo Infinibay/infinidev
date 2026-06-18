@@ -20,16 +20,28 @@ class DeleteReportTool(InfinibayBaseTool):
     args_schema: Type[BaseModel] = DeleteReportInput
 
     def _run(self, artifact_id: int, delete_file: bool = True) -> str:
+        # Scope to the current project AND type='report' so this destructive
+        # op can never delete another project's artifact or a non-report row
+        # (artifact ids are a single global sequence). A None project_id
+        # matches nothing, so the tool fails closed rather than deleting
+        # unscoped.
+        project_id = self.project_id
+
         def _delete(conn: sqlite3.Connection) -> dict:
             row = conn.execute(
-                "SELECT id, file_path, description FROM artifacts WHERE id = ?",
-                (artifact_id,),
+                "SELECT id, file_path, description FROM artifacts "
+                "WHERE id = ? AND type = 'report' AND project_id = ?",
+                (artifact_id, project_id),
             ).fetchone()
 
             if not row:
-                raise ValueError(f"Artifact {artifact_id} not found")
+                raise ValueError(f"Report {artifact_id} not found")
 
-            conn.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
+            conn.execute(
+                "DELETE FROM artifacts "
+                "WHERE id = ? AND type = 'report' AND project_id = ?",
+                (artifact_id, project_id),
+            )
             conn.commit()
             return {
                 "file_path": row["file_path"],

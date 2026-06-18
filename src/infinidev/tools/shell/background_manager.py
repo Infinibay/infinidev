@@ -21,6 +21,7 @@ import itertools
 import logging
 import os
 import select
+import signal
 import subprocess
 import threading
 import time
@@ -96,6 +97,15 @@ class BackgroundTask:
                     # Keep only the trailing window per stream.
                     if len(buf) > _MAX_BUFFER_BYTES:
                         del buf[:-_MAX_BUFFER_BYTES]
+        # Close any pipes still open — the EOF branch closes per-stream, but
+        # the select-error `break` above exits with handles still in `fds`,
+        # which would otherwise leak the pipe fds for the process's lifetime.
+        for f in (self.proc.stdout, self.proc.stderr):
+            if f is not None:
+                try:
+                    f.close()
+                except Exception:
+                    pass
         try:
             self.proc.wait()
         except Exception:
@@ -203,8 +213,30 @@ class BackgroundTask:
         out, err = self.output()
         return needle in out or needle in err
 
+    def _signal_group(self, sig: int) -> None:
+        """Send ``sig`` to the child's whole process group.
+
+        ``start_new_session=True`` (see ``BackgroundTaskManager.start``) makes
+        ``proc.pid`` the leader of a new process group, so the real workload —
+        which runs as a grandchild of ``/bin/sh -c`` (node, docker, pytest
+        workers, …) — shares that group. Signalling only ``self.proc`` would
+        kill the shell and leak the grandchildren; signalling the group reaches
+        them all. Falls back to the direct child if the group is already gone.
+        POSIX-only, consistent with the select/os.read-based pump.
+        """
+        try:
+            os.killpg(os.getpgid(self.proc.pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                if sig == signal.SIGKILL:
+                    self.proc.kill()
+                else:
+                    self.proc.terminate()
+            except Exception:
+                pass
+
     def stop(self, force: bool = False, reason: str | None = None) -> bool:
-        """Stop the process. Returns True if it was running and is now down.
+        """Stop the process group. Returns True if it was running.
 
         ``force`` skips the graceful SIGTERM and sends SIGKILL immediately.
         Otherwise we terminate, wait briefly, and escalate to kill only if
@@ -212,19 +244,22 @@ class BackgroundTask:
         """
         if not self.is_running:
             return False
-        self.killed_reason = reason or (
+        intended_reason = reason or (
             "Force-killed by agent" if force else "Stopped by agent"
         )
+        # Set eagerly so the pump thread's completion de-dup sees this as an
+        # agent-initiated stop and doesn't queue a spurious "finished" notice.
+        self.killed_reason = intended_reason
         try:
             if force:
-                self.proc.kill()
+                self._signal_group(signal.SIGKILL)
             else:
-                self.proc.terminate()
+                self._signal_group(signal.SIGTERM)
                 try:
                     self.proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
-                    self.proc.kill()
-            # Reap so poll()/status reflect the kill immediately rather than
+                    self._signal_group(signal.SIGKILL)
+            # Reap so poll()/status reflect the outcome immediately rather than
             # racing the pump thread. wait() is thread-safe — both this call
             # and the pump's reap return the same code.
             try:
@@ -233,6 +268,13 @@ class BackgroundTask:
                 pass
         except Exception as exc:
             logger.debug("Error stopping background task %s: %s", self.id, exc)
+        # If the child actually exited on its own (won the TOCTOU race against
+        # our signal), subprocess reports a non-negative return code; a
+        # signalled death is -signum. Don't mislabel a natural completion
+        # (including a graceful exit-0 on SIGTERM) as an agent kill.
+        rc = self.proc.poll()
+        if rc is not None and rc >= 0:
+            self.killed_reason = None
         return True
 
     def summary(self) -> dict:

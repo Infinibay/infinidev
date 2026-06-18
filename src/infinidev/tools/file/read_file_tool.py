@@ -209,7 +209,12 @@ class ReadFileTool(InfinibayBaseTool):
         # Accept start_line/end_line as aliases for offset/limit
         if start_line is not None and offset is None:
             offset = start_line
-        if end_line is not None and offset is not None and limit is None:
+        if end_line is not None and limit is None:
+            # A lone end_line (no start_line/offset) means "read lines
+            # 1..end_line"; without defaulting offset the upper bound was
+            # silently dropped and the whole file was read.
+            if offset is None:
+                offset = 1
             limit = max(1, end_line - (offset or 1) + 1)
         file_path = self._resolve_path(os.path.expanduser(file_path))
 
@@ -257,6 +262,18 @@ class ReadFileTool(InfinibayBaseTool):
             start = max((offset or 1) - 1, 0)  # convert 1-based to 0-based
             end = start + limit if limit is not None else total_lines
             selected = all_lines[start:end]
+            if not selected:
+                # Out-of-bounds range: surface an informative advisory rather
+                # than a bare empty string the agent can misread as "file is
+                # empty" or a tool failure.
+                if limit == 0:
+                    return self._warning(
+                        f"Empty result: limit=0 requested. File has {total_lines} lines."
+                    )
+                return self._warning(
+                    f"No lines in requested range: start line {start + 1} is past "
+                    f"end of file ({total_lines} lines)."
+                )
             # Format with line numbers for easy reference
             numbered = []
             for i, line in enumerate(selected, start=start + 1):

@@ -18,7 +18,12 @@ class AnalyzeCodeTool(InfinibayBaseTool):
         from infinidev.code_intel.analyzer import analyze_code, ALL_CHECKS
         from infinidev.code_intel.smart_index import ensure_indexed
 
-        project_id = self.project_id or 1
+        project_id = self.project_id
+        if not project_id:
+            # Match the sibling code-intel tools (project_stats / iter_symbols /
+            # find_similar_methods / search_by_docstring): error out cleanly
+            # rather than silently analyzing whatever is indexed under id 1.
+            return self._error("No project context — cannot analyze code.")
         workspace = self.workspace_path or ""
 
         # Parse checks

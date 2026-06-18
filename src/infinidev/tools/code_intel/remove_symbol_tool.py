@@ -60,6 +60,11 @@ class RemoveSymbolTool(InfinibayBaseTool):
         if sandbox_err:
             return self._error(sandbox_err)
 
+        from infinidev.tools.base.permissions import check_file_permission
+        perm_err = check_file_permission("edit_file", target_path)
+        if perm_err:
+            return self._error(perm_err)
+
         # Read file
         try:
             with open(target_path, "r", encoding="utf-8", errors="replace") as f:
@@ -79,19 +84,23 @@ class RemoveSymbolTool(InfinibayBaseTool):
         # Remove lines
         result_lines = lines[:start] + lines[end:]
 
-        # Clean up excessive blank lines (max 2 consecutive)
-        cleaned = []
-        blank_count = 0
-        for line in result_lines:
-            if line.strip() == "":
-                blank_count += 1
-                if blank_count <= 2:
-                    cleaned.append(line)
-            else:
-                blank_count = 0
-                cleaned.append(line)
+        # Collapse blank lines only at the deletion seam (max 2 consecutive),
+        # leaving the rest of the file byte-identical. The old whole-file pass
+        # silently reformatted unrelated blank runs elsewhere in the file.
+        seam_start = start
+        while seam_start > 0 and result_lines[seam_start - 1].strip() == "":
+            seam_start -= 1
+        seam_end = start
+        while seam_end < len(result_lines) and result_lines[seam_end].strip() == "":
+            seam_end += 1
+        if seam_end - seam_start > 2:
+            result_lines = (
+                result_lines[:seam_start]
+                + result_lines[seam_start:seam_start + 2]
+                + result_lines[seam_end:]
+            )
 
-        new_content = "".join(cleaned)
+        new_content = "".join(result_lines)
 
         # Atomic write
         try:
