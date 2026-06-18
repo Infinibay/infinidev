@@ -11,20 +11,16 @@ will help you reproduce, locate, and understand the root cause.
 ## EXAMPLES OF GOOD QUESTIONS
 
 For "Users get a 500 error when uploading files larger than 10MB":
-[
-  {{"question": "What error message or stack trace appears in logs when the 500 occurs?", "intent": "reproduce"}},
-  {{"question": "Which function handles file uploads, and what file is it in?", "intent": "find_code"}},
-  {{"question": "Is there a file size limit configured, and where is it set?", "intent": "find_config"}},
-  {{"question": "Are there existing tests for file upload that cover large files?", "intent": "check_tests"}},
-  {{"question": "What is the current test baseline (how many pass/fail)?", "intent": "baseline"}}
-]
+1. What error message or stack trace appears in logs when the 500 occurs?
+2. Which function handles file uploads, and what file is it in?
+3. Is there a file size limit configured, and where is it set?
+4. Are there existing tests for file upload that cover large files?
+5. What is the current test baseline (how many pass/fail)?
 
 For "Sort order is wrong in the task list — shows oldest first instead of newest":
-[
-  {{"question": "Which function builds the task list query, and what ORDER BY does it use?", "intent": "find_code"}},
-  {{"question": "Are there tests that verify sort order? Do they pass or fail?", "intent": "check_tests"}},
-  {{"question": "Is the sort order configurable or hardcoded?", "intent": "find_config"}}
-]
+1. Which function builds the task list query, and what ORDER BY does it use?
+2. Are there tests that verify sort order? Do they pass or fail?
+3. Is the sort order configurable or hardcoded?
 
 ## EXAMPLES OF BAD QUESTIONS (DO NOT GENERATE THESE)
 
@@ -48,31 +44,25 @@ Generate questions that will reveal the API, patterns, dependencies, and current
 ## EXAMPLES OF GOOD QUESTIONS
 
 For "Add a /users/stats endpoint that returns activity metrics":
-[
-  {{"question": "What patterns do existing endpoints follow? (decorators, auth, response format)", "intent": "find_patterns"}},
-  {{"question": "What data models exist for users and their activity?", "intent": "find_code"}},
-  {{"question": "Are there tests for the new endpoint already written? What do they expect?", "intent": "check_tests"}},
-  {{"question": "What is the current test baseline?", "intent": "baseline"}},
-  {{"question": "Are there similar stats/aggregation endpoints I can use as reference?", "intent": "find_patterns"}}
-]
+1. What patterns do existing endpoints follow? (decorators, auth, response format)
+2. What data models exist for users and their activity?
+3. Are there tests for the new endpoint already written? What do they expect?
+4. What is the current test baseline?
+5. Are there similar stats/aggregation endpoints I can use as reference?
 
 For "Implement a caching layer for database queries":
-[
-  {{"question": "How are database queries currently made? (ORM, raw SQL, query builder)", "intent": "find_code"}},
-  {{"question": "What existing caching infrastructure exists? (Redis, in-memory, none)", "intent": "find_code"}},
-  {{"question": "Which queries are most frequently called and would benefit from caching?", "intent": "find_code"}},
-  {{"question": "Are there tests that verify query results? Will caching change behavior?", "intent": "check_tests"}},
-  {{"question": "What is the project structure and where should new modules go?", "intent": "find_patterns"}}
-]
+1. How are database queries currently made? (ORM, raw SQL, query builder)
+2. What existing caching infrastructure exists? (Redis, in-memory, none)
+3. Which queries are most frequently called and would benefit from caching?
+4. Are there tests that verify query results? Will caching change behavior?
+5. What is the project structure and where should new modules go?
 
 For "Build a module from scratch based on a test specification":
-[
-  {{"question": "What is the full public API expected? (classes, methods, signatures, return types)", "intent": "understand_spec"}},
-  {{"question": "How many tests are there and what categories do they cover?", "intent": "check_tests"}},
-  {{"question": "What are the dependencies between features? (what must be built first)", "intent": "understand_spec"}},
-  {{"question": "Are there existing files or patterns in the project to follow?", "intent": "find_patterns"}},
-  {{"question": "What is the current test baseline?", "intent": "baseline"}}
-]
+1. What is the full public API expected? (classes, methods, signatures, return types)
+2. How many tests are there and what categories do they cover?
+3. What are the dependencies between features? (what must be built first)
+4. Are there existing files or patterns in the project to follow?
+5. What is the current test baseline?
 
 ## EXAMPLES OF BAD QUESTIONS (DO NOT GENERATE THESE)
 
@@ -97,19 +87,15 @@ Generate questions that map dependencies and establish a safety baseline.
 ## EXAMPLES OF GOOD QUESTIONS
 
 For "Split the monolithic process() function into smaller helpers":
-[
-  {{"question": "What does process() do and what are its logical sections?", "intent": "find_code"}},
-  {{"question": "Who calls process()? (all importers and callers across the project)", "intent": "find_dependents"}},
-  {{"question": "What is the current test baseline? All tests must keep passing", "intent": "baseline"}},
-  {{"question": "Are there internal variables shared across the sections that complicate extraction?", "intent": "find_code"}}
-]
+1. What does process() do and what are its logical sections?
+2. Who calls process()? (all importers and callers across the project)
+3. What is the current test baseline? All tests must keep passing.
+4. Are there internal variables shared across the sections that complicate extraction?
 
 For "Move UserService from services/ to a new domain/ directory":
-[
-  {{"question": "What files import UserService? (all references across the project)", "intent": "find_dependents"}},
-  {{"question": "Does UserService depend on other services that would also need to move?", "intent": "find_code"}},
-  {{"question": "What is the current test baseline?", "intent": "baseline"}}
-]
+1. What files import UserService? (all references across the project)
+2. Does UserService depend on other services that would also need to move?
+3. What is the current test baseline?
 
 ## EXAMPLES OF BAD QUESTIONS (DO NOT GENERATE THESE)
 
@@ -130,17 +116,13 @@ Generate questions to understand the current state before making changes.
 ## EXAMPLES OF GOOD QUESTIONS
 
 For "Change the API timeout from 30s to 60s":
-[
-  {{"question": "Where is the timeout configured? (file, line, env var)", "intent": "find_config"}},
-  {{"question": "Are there other timeout settings that might need to change too?", "intent": "find_config"}}
-]
+1. Where is the timeout configured? (file, line, env var)
+2. Are there other timeout settings that might need to change too?
 
 For "Figure out why the deploy is failing":
-[
-  {{"question": "What does the deploy error log say?", "intent": "reproduce"}},
-  {{"question": "What changed recently that could cause the failure?", "intent": "find_code"}},
-  {{"question": "What is the deploy process? (scripts, CI config, commands)", "intent": "find_code"}}
-]
+1. What does the deploy error log say?
+2. What changed recently that could cause the failure?
+3. What is the deploy process? (scripts, CI config, commands)
 
 ## EXAMPLES OF BAD QUESTIONS
 

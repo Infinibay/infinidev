@@ -53,6 +53,32 @@ def _resolve_tokens() -> int:
     return _PRESET_TOKENS.get(preset, _PRESET_TOKENS["medium"])
 
 
+# Thinking tokens are typically 2-5x the response tokens, so the output cap
+# (thinking + response) gets headroom over the raw thinking budget.
+_THINKING_HEADROOM_MULT = 3
+
+
+def _local_ctx() -> int:
+    """Effective local context window used to clamp output budgets."""
+    return getattr(settings, "OLLAMA_NUM_CTX", 0) or 16384
+
+
+def _budget_with_headroom(tokens: int, ctx: int) -> int:
+    """Output-token cap (thinking + response) that cannot crowd out the prompt.
+
+    Without clamping, a 'high' preset (16384 thinking tokens * 3) asks for
+    49152 output tokens — more than an entire 16k local window, so the
+    backend silently clamps to num_ctx and leaves no room for the prompt.
+    When ``ctx`` is a known local window we cap the budget at ~75% of it so
+    the prompt still fits; ``ctx=0`` (unknown / large hosted window) means
+    no clamp.
+    """
+    raw = tokens * _THINKING_HEADROOM_MULT
+    if ctx and ctx > 0:
+        return min(raw, max(1024, int(ctx * 0.75)))
+    return raw
+
+
 def _is_openai_reasoning_model(model: str) -> bool:
     """Return True if the model is an OpenAI o-series reasoning model."""
     # o1, o1-mini, o1-pro, o3, o3-mini, o3-pro, o4-mini, etc.
@@ -134,10 +160,9 @@ def apply_thinking_budget(
             # Make sure /no_think is NOT present, allow thinking
             _remove_prompt_tag(kwargs, "/no_think")
             if preset != "ultra" and tokens > 0:
-                # Set a generous max_tokens that includes thinking + response
-                # Thinking tokens are typically 2-5x the response tokens,
-                # so we give extra headroom
-                kwargs["max_tokens"] = tokens * 3
+                # Output cap (thinking + response), clamped to the local
+                # context window so a 'high' preset can't crowd out the prompt.
+                kwargs["max_tokens"] = _budget_with_headroom(tokens, _local_ctx())
         return
 
     # ── DeepSeek (native provider) ───────────────────────────────
@@ -155,14 +180,14 @@ def apply_thinking_budget(
                 kwargs["max_tokens"] = tokens * 2
         elif preset != "ultra" and tokens > 0:
             _remove_prompt_tag(kwargs, "/no_think")
-            kwargs["max_tokens"] = tokens * 3
+            kwargs["max_tokens"] = _budget_with_headroom(tokens, _local_ctx())
         else:
             _remove_prompt_tag(kwargs, "/no_think")
         return
 
     # ── Fallback for unknown providers ───────────────────────────
     if preset != "ultra" and tokens > 0:
-        kwargs["max_tokens"] = tokens * 3
+        kwargs["max_tokens"] = _budget_with_headroom(tokens, _local_ctx())
 
 
 # ── Prompt tag helpers ──────────────────────────────────────────────

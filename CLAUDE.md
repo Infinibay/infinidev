@@ -49,7 +49,7 @@ LoopEngine.execute(initial_plan=plan)  ← loop/engine.py
 Review (runs if files changed)         ← analysis/review_engine.py
 ```
 
-The `ChatAgent` owns a short (~5 iteration) read-only LLM loop with
+The `ChatAgent` owns a short (~20 iteration) read-only LLM loop with
 the `respond`/`escalate` terminator tools. The `AnalystPlanner` owns a
 budgeted loop with the `emit_plan` terminator. Neither uses the
 LoopEngine — they call litellm directly; the LoopEngine is reserved
@@ -70,7 +70,7 @@ The LLM signals step completion via a `step_complete` tool call with `status` (c
 
 ### Prompt Construction
 
-Every iteration builds an XML-structured prompt: `<task>`, `<plan-overview>` (stable prose, set once by the planner), `<plan>` (step list), `<previous-actions>`, `<current-action>` (active step's full `detail`), `<next-actions>`, `<expected-output>`. The protocol rules are in `prompts/shared.py` as `LOOP_PROTOCOL`. Per-step `detail` renders ONLY for the active step to keep context compact.
+Every iteration builds an XML-structured prompt: `<task>`, `<plan-overview>` (stable prose, set once by the planner), `<plan>` (step list), `<previous-actions>`, `<current-action>` (active step's full `detail`), `<next-actions>`, `<expected-output>`. The protocol rules are in `engine/loop/prompt/text.py` as `LOOP_PROTOCOL`. Per-step `detail` renders ONLY for the active step to keep context compact.
 
 ### Tools (`tools/`)
 

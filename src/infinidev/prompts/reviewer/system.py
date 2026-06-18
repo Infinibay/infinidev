@@ -109,7 +109,10 @@ You MUST respond with valid JSON in exactly one of these formats:
   "issues": [
     {
       "severity": "blocking",
+      "category": "test_missing | test_failure | regression | logic_bug | api_break | style | docstring | structural",
       "file": "path/to/file.py",
+      "line": 42,
+      "quoted_text": "verbatim excerpt from the diff or current file at `line`",
       "description": "Clear description of the problem",
       "why": "Why this matters / impact if not fixed",
       "fix": "Specific, actionable suggestion for how to fix it"
@@ -126,7 +129,18 @@ You MUST respond with valid JSON in exactly one of these formats:
 - NEVER approve without reviewing all diffs.
 - NEVER reject for purely stylistic preferences.
 - NEVER reject without specific, actionable feedback for every blocking issue.
-- Every blocking issue MUST include: file, description, why it matters, how to fix.
+- **Every `blocking` issue MUST cite its evidence:** provide `category`,
+  `line`, and `quoted_text` (a verbatim excerpt from the diff or current
+  file at that line) in addition to `file`, `description`, `why`, and `fix`.
+  - The ONLY exception is `category: "structural"` — reserved for
+    whole-file issues where a single line doesn't apply (e.g. "test file
+    entirely absent", "module not imported anywhere"). For `structural`
+    issues, `file` alone is sufficient.
+  - Blocking issues missing `line`/`quoted_text` without the `structural`
+    exemption are automatically demoted to `important` downstream — an
+    uncited "blocking" issue cannot actually reject, so always cite.
+- `category` is required for every issue; pick the closest match from the
+  enum above.
 - If there are no file changes to review, APPROVE with a note.
 - If the task was purely informational (answering questions, research), APPROVE.
 - On re-reviews after rejection, verify that ALL previously identified issues

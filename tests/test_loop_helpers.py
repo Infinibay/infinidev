@@ -152,6 +152,72 @@ class TestParseTextToolCalls:
         assert _parse_text_tool_calls("Hello, how can I help you?") is None
 
 
+# ── Mis-nested sibling-param rescue (shared _normalize_single_call) ───────────
+
+
+# (delimiters, raw single-call body) for each model family. The body is a tool
+# call whose ``expected_output`` is emitted as a SIBLING of ``arguments``
+# instead of inside it — small models do this regularly. After normalization
+# the param MUST be folded into arguments so the tool receives it.
+_SIBLING_BODY = (
+    '{"name": "add_step", "arguments": {"title": "x"}, "expected_output": "y"}'
+)
+
+_FAMILY_CASES = [
+    ("qwen", f"<tool_call>{_SIBLING_BODY}</tool_call>"),
+    ("qwen_pipe", f"<|tool_call|>{_SIBLING_BODY}<|/tool_call|>"),
+    ("mistral", f"[TOOL_CALLS] [{_SIBLING_BODY}]"),
+    ("llama", f"<|python_tag|>{_SIBLING_BODY}<|eot_id|>"),
+    ("function_call", f"<function_call>{_SIBLING_BODY}</function_call>"),
+    ("tool_tag", f"<tool>{_SIBLING_BODY}</tool>"),
+    ("manual_json", _SIBLING_BODY),
+]
+
+
+class TestMisNestedSiblingParamRescue:
+    """Every family adapter must fold a mis-nested sibling param into arguments.
+
+    Regression for the bug where each adapter carried its own un-rescued copy
+    of ``_normalize_single_call`` and silently dropped sibling params.
+    """
+
+    @pytest.mark.parametrize("family,text", _FAMILY_CASES, ids=[c[0] for c in _FAMILY_CASES])
+    def test_sibling_param_folded_into_arguments(self, family, text):
+        calls = _parse_text_tool_calls(text)
+        assert calls is not None, f"{family}: parsed nothing"
+        assert calls[0]["name"] == "add_step"
+        args = calls[0]["arguments"]
+        assert args.get("title") == "x"
+        # The mis-nested sibling must end up INSIDE arguments.
+        assert args.get("expected_output") == "y", f"{family}: sibling param dropped"
+
+    def test_mistral_array_value_not_truncated(self):
+        """Mistral must capture the full balanced [...] even when an argument
+        value is itself a JSON array (a non-greedy regex truncated at the
+        first ``]``, corrupting the JSON and dropping the call)."""
+        text = (
+            '[TOOL_CALLS] '
+            '[{"name": "add_step", "arguments": {"items": [1, 2, 3], "title": "x"}}]'
+        )
+        calls = _parse_text_tool_calls(text)
+        assert calls is not None
+        assert calls[0]["name"] == "add_step"
+        assert calls[0]["arguments"]["items"] == [1, 2, 3]
+        assert calls[0]["arguments"]["title"] == "x"
+
+    def test_llama_splits_sequential_calls_and_drops_prose(self):
+        """Llama must bound each <|python_tag|> payload and split multiple
+        calls instead of greedily swallowing to EOF."""
+        text = (
+            '<|python_tag|>{"name": "a", "arguments": {"k": 1}}<|eom_id|>'
+            "trailing prose that is not a tool call"
+            '<|python_tag|>{"name": "b", "arguments": {}}<|eot_id|>'
+        )
+        calls = _parse_text_tool_calls(text)
+        assert calls is not None
+        assert [c["name"] for c in calls] == ["a", "b"]
+
+
 # ── _extract_tool_detail ─────────────────────────────────────────────────────
 
 

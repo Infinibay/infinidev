@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from infinidev.config.settings import settings
+from infinidev.engine.formats.tool_call_parser import safe_json_loads as _safe_json_loads
 from infinidev.engine.loop.models import LoopState, StepResult
 
 logger = logging.getLogger(__name__)

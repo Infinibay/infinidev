@@ -410,6 +410,18 @@ def _assemble(
         [deliverable] + in_scope + [f.question for f in facts]
     )[:500]
 
+    # Surface theory gaps that are NOT already answered by a resolved fact.
+    # (Previously this used `and not facts`, which dropped ALL theory
+    # open-questions the moment a single — possibly unrelated — fact was
+    # resolved. Over-surfacing is safe; silently dropping unresolved
+    # questions violates the surface-don't-invent contract.)
+    resolved_questions = {f.question for f in facts}
+    open_questions = [
+        g.get("question", "")
+        for g in analysis.get("gaps", [])
+        if g.get("kind") == "theory" and g.get("question", "") not in resolved_questions
+    ]
+
     return GroundedSpec(
         deliverable=deliverable,
         in_scope=in_scope,
@@ -420,7 +432,7 @@ def _assemble(
         design_direction=design_direction,
         alternatives_rejected=rejected,
         risks=risks,
-        open_questions=[g.get("question", "") for g in analysis.get("gaps", []) if g.get("kind") == "theory" and not facts],
+        open_questions=open_questions,
         signature_text=signature,
     )
 

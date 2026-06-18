@@ -140,6 +140,12 @@ def _run_llm_loop(
 
         if not tool_calls:
             content = (getattr(message, "content", None) or "").strip()
+            # Small / non-FC models often emit the plan as prose JSON instead
+            # of a native emit_plan call. Recover it before dropping to the
+            # bootstrap fallback (the 7B default is exactly this tier).
+            recovered = _plan_from_text(content)
+            if recovered is not None:
+                return recovered
             logger.warning(
                 "Planner returned text without tool call: %s", content[:200]
             )
@@ -246,9 +252,14 @@ def _render_handoff(escalation: EscalationPacket) -> str:
     return "\n".join(lines)
 
 
-def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
-    raw = getattr(tc.function, "arguments", None) or "{}"
-    args = raw if isinstance(raw, dict) else _safe_json(raw)
+def _build_plan_from_args(args: dict) -> Plan | None:
+    """Build a validated Plan from emit_plan-style args.
+
+    Returns None (rather than a fallback) when the overview or steps are
+    empty/malformed, so callers can choose how to recover. Shared by the
+    native tool-call path and the prose-JSON recovery path so the two
+    cannot drift.
+    """
     overview = (args.get("overview") or "").strip()
     raw_steps = args.get("steps") or []
     if not isinstance(raw_steps, list):
@@ -266,12 +277,42 @@ def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
             expected_output=(s.get("expected_output") or "").strip(),
         ))
     if not overview or not steps:
-        logger.warning(
-            "Planner emitted incomplete plan (overview=%r, steps=%d), "
-            "falling back", overview[:60], len(steps),
-        )
-        return _fallback_plan(escalation, "emit_plan produced empty fields")
+        return None
     return Plan(overview=overview, steps=steps)
+
+
+def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
+    raw = getattr(tc.function, "arguments", None) or "{}"
+    args = raw if isinstance(raw, dict) else _safe_json(raw)
+    if not isinstance(args, dict):
+        args = {}
+    plan = _build_plan_from_args(args)
+    if plan is None:
+        logger.warning("Planner emitted incomplete plan, falling back")
+        return _fallback_plan(escalation, "emit_plan produced empty fields")
+    return plan
+
+
+def _plan_from_text(content: str) -> Plan | None:
+    """Recover a plan from a prose JSON response (no native tool call).
+
+    Small / non-FC models frequently emit ``{"overview": ..., "steps": [...]}``
+    as text instead of calling emit_plan. Returns a validated Plan when the
+    content yields complete fields, else None so the caller falls back.
+    """
+    if not content or "{" not in content:
+        return None
+    start = content.find("{")
+    end = content.rfind("}")
+    if end <= start:
+        return None
+    args = _safe_json(content[start:end + 1])
+    if not isinstance(args, dict):
+        return None
+    plan = _build_plan_from_args(args)
+    if plan is not None:
+        logger.info("Planner recovered a plan from prose JSON (no tool call)")
+    return plan
 
 
 def _fallback_plan(escalation: EscalationPacket, reason: str) -> Plan:

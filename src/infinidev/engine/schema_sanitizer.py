@@ -428,8 +428,8 @@ def _sanitize_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 _SMALL_MODEL_DESCRIPTIONS: dict[str, str] = {
     # Hand-tuned compact descriptions for small models. Used in place
-    # of the rich docstring (which would otherwise get truncated to
-    # 120 chars and lose its key signal). Each entry must keep the
+    # of the rich docstring (which would otherwise get truncated at a
+    # ~160-char sentence boundary and may lose its key signal). Each entry must keep the
     # *callable* name and the most important capability hint within
     # the budget; everything else moves to `help`.
     "code_interpreter": (
@@ -444,7 +444,7 @@ def _simplify_schema_for_small(schema: dict[str, Any]) -> dict[str, Any]:
 
     - Replaces description with a hand-tuned short version when
       available in ``_SMALL_MODEL_DESCRIPTIONS``; otherwise truncates
-      to ≤120 chars.
+      at a ~160-char sentence/clause boundary (never mid-word).
     - Removes 'explore' from step_complete status enum
     - Strips optional parameter descriptions to save tokens
     """
@@ -452,15 +452,21 @@ def _simplify_schema_for_small(schema: dict[str, Any]) -> dict[str, Any]:
     schema = copy.deepcopy(schema)
     func = schema.get("function", {})
 
-    # Description: prefer hand-tuned short version, else truncate
+    # Description: prefer hand-tuned short version, else truncate at a
+    # sentence/clause boundary (never mid-word) so small models still get a
+    # coherent hint — a hard char cut amputated step_complete's guidance.
     name = func.get("name", "")
     short_desc = _SMALL_MODEL_DESCRIPTIONS.get(name)
     if short_desc:
         func["description"] = short_desc
     else:
         desc = func.get("description", "")
-        if len(desc) > 120:
-            func["description"] = desc[:117] + "..."
+        if len(desc) > 160:
+            cut = desc[:160]
+            boundary = max(cut.rfind(". "), cut.rfind("; "), cut.rfind(", "))
+            if boundary >= 80:
+                cut = cut[: boundary + 1]
+            func["description"] = cut.rstrip() + " …"
 
     # Remove 'explore' status from step_complete (confuses small models)
     if func.get("name") == "step_complete":

@@ -365,7 +365,7 @@ Do NOT keep trying different fixes — each attempt makes things worse.
 After finishing each step, you MUST call the `step_complete` tool with these parameters:
 
 - **summary** (required): 1-2 sentence summary of what you did and key facts discovered.
-- **status** (required): One of `continue`, `done`, or `blocked`.
+- **status** (required): One of `continue`, `done`, `blocked`, or `explore`.
 - **final_answer** (optional): When status=done, provide the final result here.
 
 ### Managing the Plan — `add_step`, `modify_step`, `remove_step`
