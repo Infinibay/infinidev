@@ -25,6 +25,11 @@ class WriteReportTool(InfinibayBaseTool):
         project_id = self.project_id
         session_id = self.session_id
 
+        # project_id None would otherwise produce a "project_None" path AND a
+        # NOT NULL violation that the swallowing try/except below hides.
+        if project_id is None:
+            return self._error("No project context; cannot write report")
+
         # Generate filename from title
         safe_title = "".join(
             c if c.isalnum() or c in ("-", "_") else "_"
@@ -83,8 +88,15 @@ class WriteReportTool(InfinibayBaseTool):
 
         try:
             artifact_id = execute_with_retry(_record)
-        except Exception:
-            artifact_id = None
+        except Exception as e:
+            # Don't report success with artifact_id=None: the file exists but
+            # the report would be invisible to read_report (DB-first) and
+            # search_knowledge (FTS over artifacts). Surface the failure.
+            return self._error(
+                f"Report file written to {host_file_path} but DB indexing "
+                f"failed (it will not be searchable or readable via "
+                f"read_report): {e}"
+            )
 
         self._log_tool_usage(f"Wrote report: {title}")
         return self._success({

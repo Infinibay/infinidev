@@ -57,10 +57,18 @@ class ReplaceLinesTool(InfinibayBaseTool):
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
 
-        # Read existing content
+        # Read existing content. Read STRICTLY (no errors="replace") and
+        # refuse non-UTF-8 files: we rewrite the whole file below, so a
+        # U+FFFD substitution would permanently corrupt bytes the edit never
+        # touched. newline="" additionally preserves CRLF on round-trip.
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, "r", encoding="utf-8", newline="") as f:
                 lines = f.readlines()
+        except UnicodeDecodeError:
+            return self._error(
+                f"File is not valid UTF-8; refusing to edit to avoid "
+                f"corrupting binary/non-UTF-8 content: {path}"
+            )
         except PermissionError:
             return self._error(f"Permission denied: {path}")
         except Exception as e:
@@ -84,11 +92,17 @@ class ReplaceLinesTool(InfinibayBaseTool):
         old_content = "".join(lines)
         before_hash = hashlib.sha256(old_content.encode("utf-8")).hexdigest()[:16]
 
-        # Build new content lines (ensure each line ends with \n)
+        # Build new content lines (ensure each line ends with \n).
+        # Split on "\n" only (matches f.readlines() semantics); splitlines()
+        # also breaks on U+2028/U+2029/\v/\f/etc., which would inflate the
+        # reported line count and leave those pieces unterminated.
         if content == "":
             new_lines = []
         else:
-            new_lines = content.splitlines(keepends=True)
+            parts = content.split("\n")
+            new_lines = [s + "\n" for s in parts[:-1]]
+            if parts[-1]:
+                new_lines.append(parts[-1])
             # Ensure last line has newline
             if new_lines and not new_lines[-1].endswith("\n"):
                 new_lines[-1] += "\n"

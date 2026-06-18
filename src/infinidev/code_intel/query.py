@@ -79,6 +79,14 @@ def find_definition(
     short names.
     """
     def _query(conn: sqlite3.Connection):
+        # Soft preference: when a file_hint is given, surface symbols defined
+        # in that file first. It's an ORDER BY term (bound BEFORE the trailing
+        # LIMIT), not a WHERE filter, so a stale/mismatched hint never drops
+        # otherwise-valid matches.
+        hint_order = (
+            "CASE WHEN file_path = ? THEN 0 ELSE 1 END,\n                    "
+            if file_hint else ""
+        )
         # Pass 1: input contains a dot → treat as qualified name.
         if "." in name:
             sql_qual = f"""
@@ -86,13 +94,15 @@ def find_definition(
                 WHERE project_id = ? AND qualified_name = ?
                 {f"AND kind = ?" if kind else ""}
                 ORDER BY
-                    CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
+                    {hint_order}CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
                     file_path
                 LIMIT ?
             """
             params_qual: list[Any] = [project_id, name]
             if kind:
                 params_qual.append(kind)
+            if file_hint:
+                params_qual.append(file_hint)
             params_qual.append(limit)
             rows = conn.execute(sql_qual, params_qual).fetchall()
             if rows:
@@ -112,13 +122,15 @@ def find_definition(
                   AND name = ?
                 {f"AND kind = ?" if kind else ""}
                 ORDER BY
-                    CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
+                    {hint_order}CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
                     file_path
                 LIMIT ?
             """
             params_parent: list[Any] = [project_id, parent_part, leaf]
             if kind:
                 params_parent.append(kind)
+            if file_hint:
+                params_parent.append(file_hint)
             params_parent.append(limit)
             rows = conn.execute(sql_parent, params_parent).fetchall()
             if rows:
@@ -130,13 +142,15 @@ def find_definition(
                 WHERE project_id = ? AND name = ?
                 {f"AND kind = ?" if kind else ""}
                 ORDER BY
-                    CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
+                    {hint_order}CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
                     file_path
                 LIMIT ?
             """
             params_leaf: list[Any] = [project_id, leaf]
             if kind:
                 params_leaf.append(kind)
+            if file_hint:
+                params_leaf.append(file_hint)
             params_leaf.append(limit)
             rows = conn.execute(sql_leaf, params_leaf).fetchall()
             return [_row_to_symbol(r) for r in rows]
@@ -151,10 +165,12 @@ def find_definition(
             SELECT * FROM ci_symbols
             WHERE {' AND '.join(conditions)}
             ORDER BY
-                CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
+                {hint_order}CASE WHEN kind IN ('function', 'method', 'class') THEN 0 ELSE 1 END,
                 file_path
             LIMIT ?
         """
+        if file_hint:
+            params.append(file_hint)
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         return [_row_to_symbol(r) for r in rows]

@@ -22,8 +22,13 @@ class GetSymbolCodeTool(InfinibayBaseTool):
         workspace = self.workspace_path
 
         # Auto-index specific file if provided
+        file_hint = None
         if file_path:
             resolved = self._resolve_path(file_path)
+            # Pass the resolved path as the hint so it can match the stored
+            # ci_symbols.file_path (a soft ORDER-BY preference in
+            # find_definition; harmless no-op if it doesn't match).
+            file_hint = resolved
             if os.path.isfile(resolved):
                 try:
                     from infinidev.code_intel.smart_index import ensure_indexed
@@ -31,7 +36,7 @@ class GetSymbolCodeTool(InfinibayBaseTool):
                 except Exception:
                     pass
 
-        results = find_definition(project_id, name, kind=kind or None, file_hint=file_path or None)
+        results = find_definition(project_id, name, kind=kind or None, file_hint=file_hint)
         if not results and workspace:
             index_directory(project_id, workspace)
             results = find_definition(project_id, name, kind=kind or None)

@@ -307,6 +307,11 @@ def record_artifact_change(
 
     project_id = tool.project_id
     agent_run_id = tool.agent_run_id
+    if project_id is None:
+        # artifact_changes.project_id is NOT NULL; without a project context
+        # the INSERT would raise an IntegrityError that the swallowing
+        # try/except below hides. Skip explicitly instead.
+        return
 
     def _record(conn: sqlite3.Connection) -> None:
         conn.execute(

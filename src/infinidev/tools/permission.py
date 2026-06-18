@@ -31,6 +31,18 @@ def set_permission_handler(handler: Callable[[str, str, str], bool] | None) -> N
         _permission_handler = handler
 
 
+def is_permission_handler_registered() -> bool:
+    """Whether an interactive UI handler is available to approve prompts.
+
+    Used by ``auto`` mode to fail CLOSED in non-interactive contexts (headless
+    ``--prompt``, server): without a handler ``request_permission`` would
+    auto-approve, so a risky-but-escalated operation would run silently. The
+    ``auto`` branches deny instead when this returns False.
+    """
+    with _handler_lock:
+        return _permission_handler is not None
+
+
 def request_permission(tool_name: str, description: str, details: str = "") -> bool:
     """Request user permission to execute an action.
 

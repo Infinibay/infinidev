@@ -75,5 +75,11 @@ class EmitPlanTool(InfinibayBaseTool):
     def _run(self, overview: str, steps: list) -> str:
         # Like RespondTool/EscalateTool, this is a schema-level
         # terminator — the planner orchestrator reads the tool_call
-        # args directly. This _run is the safe fallback.
-        return json.dumps({"kind": "plan", "overview": overview, "steps": steps})
+        # args directly. This _run is the safe fallback. Under normal
+        # dispatch `steps` arrives as PlanStepArg pydantic models, which
+        # json.dumps can't serialize — coerce via model_dump so the
+        # fallback never crashes.
+        return json.dumps(
+            {"kind": "plan", "overview": overview, "steps": steps},
+            default=lambda o: o.model_dump() if hasattr(o, "model_dump") else str(o),
+        )

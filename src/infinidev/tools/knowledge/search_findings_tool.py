@@ -98,7 +98,7 @@ class SearchFindingsTool(InfinibayBaseTool):
             # Fallback: embed topic + content for candidates without stored embeddings
             if without_emb:
                 texts = [
-                    f"{c['topic']} {c.get('content', '')[:500]}" if include_content or c.get("content")
+                    f"{c['topic']} {(c.get('content') or '')[:500]}" if include_content or c.get("content")
                     else c["topic"]
                     for _, c in without_emb
                 ]

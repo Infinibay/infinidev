@@ -66,10 +66,19 @@ class MultiEditFileTool(InfinibayBaseTool):
                 f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
             )
 
-        # Read existing content
+        # Read existing content. Read STRICTLY and refuse non-UTF-8 files —
+        # the whole file is rewritten below, so errors="replace" would
+        # silently corrupt untouched bytes into U+FFFD. (No newline="" here:
+        # edits match against model-supplied LF strings, so universal-newline
+        # decoding must stay on for CRLF files.)
         try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
+        except UnicodeDecodeError:
+            return self._error(
+                f"File is not valid UTF-8; refusing to edit to avoid "
+                f"corrupting binary/non-UTF-8 content: {file_path}"
+            )
         except PermissionError:
             return self._error(f"Permission denied: {file_path}")
         except Exception as e:

@@ -1,6 +1,7 @@
 """Tool: move a symbol (function/method/class) to another file or class."""
 
 import os
+import re
 import tempfile
 import stat
 from typing import Type
@@ -134,9 +135,23 @@ class MoveSymbolTool(InfinibayBaseTool):
         if sandbox_err:
             return self._error(sandbox_err)
 
-        # Same file check
-        if os.path.abspath(source_path) == os.path.abspath(target_path) and not target_class:
-            return self._error("Source and target are the same file. Specify target_class to move within the file.")
+        # Same file check. In-file moves are NOT supported: the target file is
+        # re-read fresh from disk (still containing the symbol) before the
+        # source removal is written, so a same-path move duplicates the symbol
+        # and the second write clobbers the removal. Reject outright.
+        if os.path.abspath(source_path) == os.path.abspath(target_path):
+            return self._error(
+                "Moving a symbol within the same file is not supported. "
+                "Use remove_symbol + add_symbol (or edit_symbol) instead."
+            )
+
+        # Permission check both endpoints BEFORE any write (a move rewrites the
+        # source and the target). Fail closed before mutating either file.
+        from infinidev.tools.base.permissions import check_file_permission
+        for _p in (source_path, target_path):
+            perm_err = check_file_permission("edit_file", _p)
+            if perm_err:
+                return self._error(perm_err)
 
         # ── Step 1: Extract source code ──────────────────────────────────
         try:
@@ -334,7 +349,15 @@ class MoveSymbolTool(InfinibayBaseTool):
             idx = imp.line - 1
             if 0 <= idx < len(lines):
                 original = lines[idx]
-                new_line = original.replace(old_module, new_module)
+                # Anchor to dotted-path boundaries on both sides so a strict
+                # prefix/suffix of a longer module (e.g. "pkg.file" inside
+                # "pkg.file_utils" or "pkg.file.sub") is not rewritten, and a
+                # non-matching line is a no-op rather than a substring smash.
+                new_line = re.sub(
+                    r"(?<![\w.])" + re.escape(old_module) + r"(?![\w.])",
+                    new_module,
+                    original,
+                )
                 if new_line != original:
                     lines[idx] = new_line
                     try:

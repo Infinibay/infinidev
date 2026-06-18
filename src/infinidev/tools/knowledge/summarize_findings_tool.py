@@ -12,6 +12,7 @@ from infinidev.tools.knowledge.summarize_findings_input import SummarizeFindings
 
 class SummarizeFindingsTool(InfinibayBaseTool):
     name: str = "summarize_findings"
+    is_read_only: bool = True
     description: str = (
         "Get a compact overview of findings: counts by type, confidence "
         "stats, topic list with status, and status breakdown. Useful "
@@ -89,6 +90,11 @@ class SummarizeFindingsTool(InfinibayBaseTool):
             }
 
         result = execute_with_retry(_query)
+        # The "no session_id or project_id" path returns an error dict; surface
+        # it as a real error (and skip the misleading "Summarized 0" log) so the
+        # loop's {"error": ...}-shaped detection recognizes the failure.
+        if isinstance(result, dict) and result.get("error"):
+            return self._error(result["error"])
         scope = f"session {session_id}" if session_id is not None and session_id != "0" else "project"
         self._log_tool_usage(
             f"Summarized {result['total_count']} findings for {scope}"

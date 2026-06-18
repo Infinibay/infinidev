@@ -130,10 +130,49 @@ def check_command_permission(
     if mode == "auto_approve":
         return None
 
+    if mode == "auto":
+        # Auto-approve provably read-only commands; escalate everything else
+        # to the same prompt as ``ask``. The classifier is allow-listed, so an
+        # unknown/obfuscated/mutating command always reaches the user.
+        from infinidev.tools.base.command_risk import classify_command
+        safe, reason = classify_command(command)
+        if safe:
+            return None
+        from infinidev.tools.permission import (
+            is_permission_handler_registered,
+            request_permission,
+        )
+        if not is_permission_handler_registered():
+            # Non-interactive (headless/server): no human to approve. Fail closed
+            # rather than silently running a non-read-only command.
+            return (
+                f"Command requires confirmation (auto: {reason}) but no approval "
+                "UI is available. Set EXECUTE_COMMANDS_PERMISSION=auto_approve to "
+                f"allow non-interactively: {command}"
+            )
+        approved = request_permission(
+            tool_name="execute_command",
+            description=f"{description} (auto: {reason})",
+            details=command,
+        )
+        if not approved:
+            return f"Command denied by user: {command}"
+        return None
+
     if mode == "allowed_list":
         allowed = settings.ALLOWED_COMMANDS_LIST
         if not allowed:
             return "Command denied: no commands in allowed list"
+        # The command runs under shell=True, so a single allowed leading token
+        # would otherwise authorize an arbitrary pipeline (`cd && rm -rf ~`,
+        # `$(...)`, `| sh`). Refuse shell chaining / metacharacters in this
+        # mode before the base-token check; only a single simple command is
+        # validatable from its first token.
+        if re.search(r"[;&|`$><\n]|\$\(|&&|\|\|", command):
+            return (
+                "Command denied: chaining/shell operators are not allowed in "
+                "allowed_list mode"
+            )
         # Check if the command's base executable is in the allowed list
         try:
             base_cmd = shlex.split(command)[0]
@@ -172,7 +211,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
     def _run(
         self,
         command: str,
-        timeout: int = 60,
+        timeout: int = 300,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         rationale: str = "",

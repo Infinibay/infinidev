@@ -50,12 +50,13 @@ class GitCommitTool(InfinibayBaseTool):
 
             # Update branch record in DB
             if branch_name and commit_hash:
+                project_id = self.project_id
                 def _update_branch(conn: sqlite3.Connection):
                     conn.execute(
                         """UPDATE branches
                            SET last_commit_hash = ?, last_commit_at = CURRENT_TIMESTAMP
-                           WHERE branch_name = ? AND status = 'active'""",
-                        (commit_hash, branch_name),
+                           WHERE project_id = ? AND branch_name = ? AND status = 'active'""",
+                        (commit_hash, project_id, branch_name),
                     )
                     conn.commit()
 
@@ -132,12 +133,13 @@ class GitCommitTool(InfinibayBaseTool):
 
         # Update DB and emit events (same as host mode)
         if branch_name and commit_hash:
+            project_id = self.project_id
             def _update_branch(conn: sqlite3.Connection):
                 conn.execute(
                     """UPDATE branches
                        SET last_commit_hash = ?, last_commit_at = CURRENT_TIMESTAMP
-                       WHERE branch_name = ? AND status = 'active'""",
-                    (commit_hash, branch_name),
+                       WHERE project_id = ? AND branch_name = ? AND status = 'active'""",
+                    (commit_hash, project_id, branch_name),
                 )
                 conn.commit()
 

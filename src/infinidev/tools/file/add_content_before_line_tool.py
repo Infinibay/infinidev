@@ -33,9 +33,17 @@ def _insert_at(tool: InfinibayBaseTool, path: str, content: str, insert_idx: int
             f"File too large: {file_size} bytes (max {settings.MAX_FILE_SIZE_BYTES} bytes)"
         )
 
+    # Read strictly and refuse non-UTF-8 files: the whole file is rewritten
+    # below, so errors="replace" would corrupt untouched bytes. newline=""
+    # preserves CRLF on round-trip.
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, "r", encoding="utf-8", newline="") as f:
             lines = f.readlines()
+    except UnicodeDecodeError:
+        return tool._error(
+            f"File is not valid UTF-8; refusing to edit to avoid "
+            f"corrupting binary/non-UTF-8 content: {path}"
+        )
     except PermissionError:
         return tool._error(f"Permission denied: {path}")
     except Exception as e:
@@ -50,10 +58,17 @@ def _insert_at(tool: InfinibayBaseTool, path: str, content: str, insert_idx: int
     old_content = "".join(lines)
     before_hash = hashlib.sha256(old_content.encode("utf-8")).hexdigest()[:16]
 
-    # Build new lines
-    new_lines = content.splitlines(keepends=True)
-    if new_lines and not new_lines[-1].endswith("\n"):
-        new_lines[-1] += "\n"
+    # Build new lines — split on "\n" only (matches f.readlines()); avoids
+    # splitlines() breaking on U+2028/U+2029/\v/\f and miscounting lines.
+    if content == "":
+        new_lines = []
+    else:
+        parts = content.split("\n")
+        new_lines = [s + "\n" for s in parts[:-1]]
+        if parts[-1]:
+            new_lines.append(parts[-1])
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines[-1] += "\n"
 
     result_lines = lines[:insert_idx] + new_lines + lines[insert_idx:]
     new_content = "".join(result_lines)

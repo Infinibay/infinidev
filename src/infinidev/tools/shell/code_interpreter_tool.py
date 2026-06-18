@@ -33,6 +33,34 @@ class CodeInterpreterTool(InfinibayBaseTool):
         if mode == "auto_approve":
             return None
 
+        if mode == "auto":
+            # Auto-approve pure analysis/read code; escalate code that writes
+            # files, spawns processes, reaches the network, or executes
+            # arbitrary code to the same prompt as ``ask``.
+            from infinidev.tools.base.command_risk import classify_python
+            safe, reason = classify_python(code)
+            if safe:
+                return None
+            from infinidev.tools.permission import (
+                is_permission_handler_registered,
+                request_permission,
+            )
+            if not is_permission_handler_registered():
+                return (
+                    f"Code requires confirmation (auto: {reason}) but no approval "
+                    "UI is available. Set EXECUTE_COMMANDS_PERMISSION=auto_approve "
+                    "to allow non-interactively."
+                )
+            preview = code[:200] + ("..." if len(code) > 200 else "")
+            approved = request_permission(
+                tool_name="code_interpreter",
+                description=f"Execute Python code (auto: {reason}): {preview}",
+                details=code,
+            )
+            if not approved:
+                return "Code execution denied by user"
+            return None
+
         if mode == "allowed_list":
             # Code interpreter is never in an allowed_list — deny
             return "Code interpreter denied: not in allowed commands list"
@@ -138,7 +166,6 @@ class CodeInterpreterTool(InfinibayBaseTool):
                 mode="w",
                 suffix=".py",
                 prefix="infinidev_code_",
-                dir="/tmp",
                 delete=False,
             ) as tmp:
                 tmp.write(_BOOTSTRAP_HEADER)
@@ -233,6 +260,10 @@ class CodeInterpreterTool(InfinibayBaseTool):
                 text=True,
                 timeout=timeout,
                 env=env,
+                # Run in the project workspace (when it's a real dir) so the
+                # script's relative file I/O resolves against the project,
+                # matching execute_command. None falls back to the process cwd.
+                cwd=self._git_cwd,
             )
         except subprocess.TimeoutExpired:
             return {

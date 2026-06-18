@@ -32,6 +32,11 @@ class AddSymbolTool(InfinibayBaseTool):
         if sandbox_err:
             return self._error(sandbox_err)
 
+        from infinidev.tools.base.permissions import check_file_permission
+        perm_err = check_file_permission("edit_file", resolved_path)
+        if perm_err:
+            return self._error(perm_err)
+
         if not os.path.isfile(resolved_path):
             return self._error(f"File not found: {resolved_path}")
 
@@ -42,6 +47,11 @@ class AddSymbolTool(InfinibayBaseTool):
             with open(resolved_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
                 lines = content.split("\n")
+                # Drop the trailing-newline sentinel ('' after a final \n) so
+                # insert_line points at true EOF and we don't emit spurious
+                # blank lines when appending at end of file.
+                if lines and lines[-1] == "":
+                    lines.pop()
         except Exception as exc:
             return self._error(f"Cannot read {resolved_path}: {exc}")
 
@@ -92,10 +102,10 @@ class AddSymbolTool(InfinibayBaseTool):
                         adjusted.append("")
                 code_lines = adjusted
 
-        # Insert the code
-        insert_text = "\n" + "\n".join(code_lines) + "\n"
-        new_lines = lines[:insert_line] + [insert_text] + lines[insert_line:]
-        new_content = "\n".join(new_lines)
+        # Insert the code: one blank-line separator before it as list
+        # elements (not hand-padded "\n"), and exactly one trailing newline.
+        new_lines = lines[:insert_line] + [""] + code_lines + lines[insert_line:]
+        new_content = "\n".join(new_lines) + "\n"
 
         # Atomic write
         try:

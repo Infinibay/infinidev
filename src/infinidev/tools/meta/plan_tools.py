@@ -80,11 +80,25 @@ class AddStepTool(InfinibayBaseTool):
             existing_max = max((s.index for s in plan.steps), default=0)
             index = existing_max + 1
 
+        # Detect a real insertion by object identity: apply_operations silently
+        # drops the add when the slot is held by a user-approved or a done step,
+        # so a title check can't tell "added" from "rejected".
+        before_ids = {id(s) for s in plan.steps}
         op = StepOperation(
             op="add", index=index, title=title,
             explanation=explanation, expected_output=expected_output,
         )
         plan.apply_operations([op])
+        added = next(
+            (s for s in plan.steps if s.index == index and id(s) not in before_ids),
+            None,
+        )
+        if added is None:
+            return self._error(
+                f"Could not add step at index {index} — that slot is occupied by a "
+                "user-approved or completed step and is protected. Omit index (or "
+                "pass 0) to append at the end of the plan instead."
+            )
         result: dict = {"status": "added", "index": index, "total_steps": len(plan.steps)}
         from infinidev.engine.static_analysis_timer import measure
         with measure("plan_validate"):
@@ -120,6 +134,16 @@ class ModifyStepTool(InfinibayBaseTool):
         plan = ctx.loop_state.plan
         from infinidev.engine.loop.step_operation import StepOperation
 
+        # Pre-validate so the success report matches reality — apply_operations
+        # silently no-ops a modify on a missing/user-approved/finished step.
+        target = next((s for s in plan.steps if s.index == index), None)
+        if target is None:
+            return self._error(f"No step with index {index} in the plan")
+        if target.user_approved:
+            return self._error(f"Step {index} is user-approved and cannot be modified")
+        if target.status in ("done", "skipped"):
+            return self._error(f"Step {index} is {target.status} and cannot be modified")
+
         op = StepOperation(
             op="modify", index=index, title=title,
             explanation=explanation, expected_output=expected_output,
@@ -143,6 +167,23 @@ class RemoveStepTool(InfinibayBaseTool):
 
         plan = ctx.loop_state.plan
         from infinidev.engine.loop.step_operation import StepOperation
+
+        # Pre-validate so "removed" can't be reported when apply_operations
+        # actually no-ops (missing/user-approved/already-finished index, or the
+        # bulk-removal guard refusing to drop the only pending step).
+        target = next((s for s in plan.steps if s.index == index), None)
+        if target is None:
+            return self._error(f"No step with index {index} in the plan")
+        if target.user_approved:
+            return self._error(f"Step {index} is user-approved and cannot be removed")
+        if target.status not in ("pending", "active"):
+            return self._error(f"Step {index} is {target.status}; nothing to remove")
+        pending = [s for s in plan.steps if s.status in ("pending", "active")]
+        if len(pending) <= 1:
+            return self._error(
+                "Refusing to remove the only remaining pending step — add a "
+                "replacement step first or mark it done via step_complete"
+            )
 
         op = StepOperation(op="remove", index=index)
         plan.apply_operations([op])

@@ -76,9 +76,13 @@ class Settings(BaseSettings):
     ALLOWED_COMMANDS: list[str] = []      # Not used if SANDBOX_ENABLED=False
 
     # Permissions
-    EXECUTE_COMMANDS_PERMISSION: str = "ask"  # "auto_approve", "ask", "allowed_list"
+    # "auto" (default): auto-approve provably read-only commands / in-workspace
+    # edits, and prompt for anything risky. Other modes: "auto_approve" (allow
+    # everything), "ask" (prompt for everything), "allowed_list"/"allowed_paths"
+    # (allow only an explicit list).
+    EXECUTE_COMMANDS_PERMISSION: str = "auto"  # "auto", "auto_approve", "ask", "allowed_list"
     ALLOWED_COMMANDS_LIST: list[str] = []  # List of allowed commands when permission is "allowed_list"
-    FILE_OPERATIONS_PERMISSION: str = "ask"  # "ask", "auto_approve", "allowed_paths"
+    FILE_OPERATIONS_PERMISSION: str = "auto"  # "auto", "ask", "auto_approve", "allowed_paths"
     ALLOWED_FILE_PATHS: list[str] = []  # List of allowed paths when permission is "allowed_paths"
 
     # File limits

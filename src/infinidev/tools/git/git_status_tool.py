@@ -40,6 +40,11 @@ class GitStatusTool(InfinibayBaseTool):
             index_status = line[0]
             worktree_status = line[1]
             file_path = line[3:]
+            # Renames/copies are reported as "old -> new"; keep the
+            # destination path so downstream consumers get a real path
+            # rather than the garbled arrow string.
+            if index_status in ("R", "C") and " -> " in file_path:
+                file_path = file_path.split(" -> ", 1)[1]
 
             if index_status in ("A", "M", "D", "R", "C"):
                 staged.append({"status": index_status, "file": file_path})
@@ -85,6 +90,11 @@ class GitStatusTool(InfinibayBaseTool):
             index_status = line[0]
             worktree_status = line[1]
             file_path = line[3:]
+            # Renames/copies are reported as "old -> new"; keep the
+            # destination path so downstream consumers get a real path
+            # rather than the garbled arrow string.
+            if index_status in ("R", "C") and " -> " in file_path:
+                file_path = file_path.split(" -> ", 1)[1]
 
             if index_status in ("A", "M", "D", "R", "C"):
                 staged.append({"status": index_status, "file": file_path})

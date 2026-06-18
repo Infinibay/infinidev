@@ -67,6 +67,11 @@ class EditSymbolTool(InfinibayBaseTool):
         if sandbox_err:
             return self._error(sandbox_err)
 
+        from infinidev.tools.base.permissions import check_file_permission
+        perm_err = check_file_permission("edit_file", target_path)
+        if perm_err:
+            return self._error(perm_err)
+
         # Read current file
         try:
             with open(target_path, "r", encoding="utf-8", errors="replace") as f:

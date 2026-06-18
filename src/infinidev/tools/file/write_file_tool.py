@@ -81,11 +81,20 @@ class WriteFileTool(InfinibayBaseTool):
         if parent:
             os.makedirs(parent, exist_ok=True)
 
-        # Atomic write: write to temp file then rename
+        # Atomic write: write to temp file then rename.
         try:
             if mode == "w":
                 atomic_write(file_path, content)
             else:
+                # Append is intentionally non-atomic (correct, O(1) semantics
+                # for logs/accumulation). Re-stat right before writing to
+                # minimize the stale-size TOCTOU window from the check above.
+                cur_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                if cur_size + content_size > settings.MAX_FILE_SIZE_BYTES:
+                    return self._error(
+                        f"Content too large: {cur_size + content_size} bytes "
+                        f"(max {settings.MAX_FILE_SIZE_BYTES} bytes)"
+                    )
                 with open(file_path, "a", encoding="utf-8") as f:
                     f.write(content)
         except PermissionError:

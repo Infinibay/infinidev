@@ -123,7 +123,7 @@ class UpdateFindingTool(InfinibayBaseTool):
         # and whether this update is adding/changing them.
         def _fetch_existing_anchors(_conn: sqlite3.Connection) -> dict | None:
             row = _conn.execute(
-                "SELECT anchor_file, anchor_symbol, anchor_tool, anchor_error "
+                "SELECT finding_type, anchor_file, anchor_symbol, anchor_tool, anchor_error "
                 "FROM findings WHERE id = ?",
                 (finding_id,),
             ).fetchone()
@@ -140,7 +140,15 @@ class UpdateFindingTool(InfinibayBaseTool):
                 "anchor_tool": anchor_tool,
                 "anchor_error": anchor_error,
             }
-            err = _validate_anchors(existing, new_anchors, finding_type)
+            # Validate against the EFFECTIVE type: the value supplied in this
+            # call, or the existing row's type when unchanged. Otherwise
+            # clearing the last anchor without re-passing finding_type bypasses
+            # the "anchored type needs ≥1 anchor" rule, leaving a dead memory.
+            effective_type = (
+                finding_type if finding_type is not None
+                else existing.get("finding_type")
+            )
+            err = _validate_anchors(existing, new_anchors, effective_type)
             if err:
                 raise ValueError(err)
 

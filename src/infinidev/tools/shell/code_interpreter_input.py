@@ -24,7 +24,10 @@ class CodeInterpreterInput(BaseModel):
         default=120,
         ge=1,
         le=600,
-        description="Max execution time in seconds",
+        description=(
+            "Max execution time in seconds (the effective value is clamped to "
+            "the operator-configured CODE_INTERPRETER_TIMEOUT, default 120)"
+        ),
     )
 
 

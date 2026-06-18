@@ -13,15 +13,16 @@ class RobotsChecker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cache: dict[str, tuple[float, urllib.robotparser.RobotFileParser]] = {}
+        self._cache: dict[tuple[str, str], tuple[float, urllib.robotparser.RobotFileParser]] = {}
         self._ttl: int = settings.WEB_ROBOTS_CACHE_TTL
 
     def _get_parser(
         self, domain: str, scheme: str
     ) -> urllib.robotparser.RobotFileParser | None:
+        key = (scheme, domain)
         with self._lock:
-            if domain in self._cache:
-                cached_time, parser = self._cache[domain]
+            if key in self._cache:
+                cached_time, parser = self._cache[key]
                 if time.time() - cached_time < self._ttl:
                     return parser
 
@@ -34,7 +35,7 @@ class RobotsChecker:
             return None
 
         with self._lock:
-            self._cache[domain] = (time.time(), parser)
+            self._cache[key] = (time.time(), parser)
         return parser
 
     def is_allowed(self, url: str, user_agent: str) -> bool:
@@ -43,8 +44,12 @@ class RobotsChecker:
         Permissive policy: if robots.txt cannot be fetched, access is allowed.
         """
         parsed = urllib.parse.urlparse(url)
-        domain = parsed.netloc
         scheme = parsed.scheme or "https"
+        # Use hostname (drops any user:pass@ userinfo so credentials never leak
+        # into the robots.txt request) plus the port, and key the cache on
+        # (scheme, domain) so http/https for the same host don't collide.
+        host = parsed.hostname or ""
+        domain = host if parsed.port is None else f"{host}:{parsed.port}"
         parser = self._get_parser(domain, scheme)
         if parser is None:
             return True

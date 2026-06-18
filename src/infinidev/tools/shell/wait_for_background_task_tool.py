@@ -97,7 +97,11 @@ class WaitForBackgroundTaskTool(InfinibayBaseTool):
             summary["killed_reason"] = task.killed_reason
         # We've just shown the model this task's finished state, so suppress
         # the redundant <background-task-finished> nudge next iteration.
-        if reason == "exited":
+        # Acknowledge whenever the task is actually finished at result time,
+        # not only when the reason is "exited": a "matched" result can come
+        # from a task that printed its marker and then exited, which the pump
+        # thread has already queued as a completion.
+        if reason == "exited" or not task.is_running:
             acknowledge_completion(task.id)
 
         if reason == "timeout":

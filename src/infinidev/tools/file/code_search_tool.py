@@ -80,8 +80,9 @@ class CodeSearchTool(InfinibayBaseTool):
                     ext = ext if ext.startswith(".") else f".{ext}"
                     cmd.append(f"*{ext}")
         else:
-            # Fallback to plain grep
-            cmd = ["grep", "-rn", "-E"]
+            # Fallback to plain grep. Keep -r and -n as separate tokens so the
+            # max_depth file-list branch below can strip the recursion flag.
+            cmd = ["grep", "-r", "-n", "-E"]
             if not case_sensitive:
                 cmd.append("-i")
             if context_lines > 0:
@@ -170,6 +171,7 @@ class CodeSearchTool(InfinibayBaseTool):
 
         # Parse matches (skip context separator lines "--")
         matches = []
+        hit_cap = False
         for line in lines:
             if line == "--":
                 continue
@@ -201,11 +203,14 @@ class CodeSearchTool(InfinibayBaseTool):
             })
 
             if len(matches) >= max_results:
+                hit_cap = True
                 break
 
-        truncated = len(lines) > len(matches) or (
-            len(matches) == max_results and len(lines) > max_results
-        )
+        # Only flag truncation when the match cap was actually reached.
+        # The old heuristic compared len(lines) to len(matches), but `lines`
+        # also contains context lines (context_lines>0) and "--" group
+        # separators, so it reported truncated=True for complete results.
+        truncated = hit_cap
 
         self._log_tool_usage(
             f"Searched '{pattern}' in {file_path} — {len(matches)} matches"
