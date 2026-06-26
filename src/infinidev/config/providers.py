@@ -195,6 +195,23 @@ PROVIDERS: dict[str, ProviderConfig] = {
             "qwq-plus",
         ],
     ),
+    "gmi": ProviderConfig(
+        id="gmi",
+        display_name="GMI Cloud",
+        # OpenAI-compatible serverless inference. Fixed cloud URL, Bearer
+        # auth, GET /v1/models for discovery. custom_openai/ routes the
+        # request through LiteLLM's OpenAI format against default_base_url
+        # (is_native=False → get_litellm_params passes api_base).
+        prefix="custom_openai/",
+        default_base_url="https://api.gmi-serving.com/v1",
+        model_list_format="openai",
+        # Offline fallback only. The live catalog is fetched from
+        # GET /v1/models with the user's key (model_list_format="openai");
+        # DeepSeek-R1 is the one id the API reference documents explicitly.
+        static_models=[
+            "deepseek-ai/DeepSeek-R1",
+        ],
+    ),
 }
 
 

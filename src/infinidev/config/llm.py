@@ -424,7 +424,7 @@ def get_litellm_params() -> dict[str, Any]:
     # cleanly to the structured field. For an agent loop the think
     # pass is redundant anyway — plan/summarize stages already own
     # structured reasoning.
-    _openai_compat = {"llama_cpp", "vllm", "openai_compatible"}
+    _openai_compat = {"llama_cpp", "vllm", "openai_compatible", "gmi"}
     if (
         settings.LLM_PROVIDER in _openai_compat
         and "qwen3" in model.lower()

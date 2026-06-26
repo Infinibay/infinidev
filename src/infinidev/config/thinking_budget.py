@@ -172,8 +172,8 @@ def apply_thinking_budget(
             kwargs["max_tokens"] = tokens * 3  # thinking + response headroom
         return
 
-    # ── llama.cpp / vLLM / OpenAI-compatible / OpenRouter ────────
-    if provider_id in ("llama_cpp", "vllm", "openai_compatible", "openrouter"):
+    # ── llama.cpp / vLLM / OpenAI-compatible / OpenRouter / GMI ──
+    if provider_id in ("llama_cpp", "vllm", "openai_compatible", "openrouter", "gmi"):
         if preset == "low":
             _inject_prompt_tag(kwargs, "/no_think")
             if tokens > 0:

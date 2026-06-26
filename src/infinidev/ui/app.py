@@ -1275,6 +1275,15 @@ def run_tui(continue_session: bool = False, resume: bool = False) -> None:
     """Entry point to launch the Infinidev TUI."""
     import sys
 
+    # Provision the schema BEFORE anything touches the DB. The very first
+    # thing _resolve_tui_resume does is register_session() — an INSERT into
+    # `sessions` — and on a fresh project dir the DB file has no tables yet
+    # (init_db otherwise runs lazily in _ensure_engine, far too late). The
+    # classic/--prompt paths already bootstrap via init_db(); the TUI path
+    # needs the same guarantee or it crashes with "no such table: sessions".
+    from infinidev.db.service import init_db
+    init_db()
+
     resume_request = _resolve_tui_resume(continue_session, resume)
 
     # Redirect stderr to suppress subprocess output that would corrupt

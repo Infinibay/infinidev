@@ -58,7 +58,7 @@ def apply_prompt_caching(
         _apply_openrouter_caching(kwargs)
     elif provider_id == "kimi":
         _apply_kimi_caching(kwargs)
-    # openai, deepseek, zai, gemini: automatic prefix caching, no-op
+    # openai, deepseek, zai, gemini, gmi: automatic prefix caching, no-op
     # ollama, llama_cpp, vllm, openai_compatible: local/no cache API, no-op
 
     # Anything not handled above — strip the marker so it never reaches

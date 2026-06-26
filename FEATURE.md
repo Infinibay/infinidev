@@ -1075,6 +1075,7 @@ Eight providers are supported out of the box:
 | `groq` | `groq/` | Groq cloud. |
 | `together` | `together_ai/` | Together AI. |
 | `mistral` | `mistral/` | Mistral cloud. |
+| `gmi` | `custom_openai/` | [GMI Cloud](https://docs.gmicloud.ai) serverless inference (DeepSeek, Qwen, Kimi, GLM, ...) — OpenAI-compatible. |
 
 Switching providers is one command:
 

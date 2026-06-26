@@ -153,6 +153,17 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
         needs_schema_sanitization=True,  # Qwen rejects anyOf and complex schemas
         probed=True,
     ),
+    "gmi": ModelCapabilities(
+        # GMI Cloud serves a mixed catalog (DeepSeek, Qwen, Kimi, GLM,
+        # Llama, ...) behind one OpenAI-compatible endpoint, so — like
+        # OpenRouter — be conservative on the per-model-variable features
+        # instead of probing (which would cost a live call + a valid key
+        # at startup). FC itself is supported across the catalog.
+        supports_function_calling=True,
+        supports_tool_choice_required=False,  # varies by model
+        supports_json_mode=False,             # varies by model
+        probed=True,
+    ),
 }
 
 
