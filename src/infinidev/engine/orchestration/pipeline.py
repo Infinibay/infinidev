@@ -67,8 +67,8 @@ class OrchestrationHooks(Protocol):
         """Status line for ad-hoc updates. *level* is informational
         (``"info"``, ``"warn"``, ``"error"``, ``"verification_pass"``,
         ``"verification_fail"``, ``"objectives_pass"``, ``"objectives_fail"``,
-        ``"objectives_unverified"``, ``"approved"``, ``"rejected"``,
-        ``"max_reviews"``). UIs may colourise based on level."""
+        ``"objectives_unverified"``, ``"objectives_summary"``, ``"approved"``,
+        ``"rejected"``, ``"max_reviews"``). UIs may colourise based on level."""
 
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
         """A speaker is producing a chat-style message. *kind* is one of
@@ -435,6 +435,8 @@ def _run_review_phase(
                 f"Note: {msg}",
                 "system",
             )
+        elif level == "objectives_summary":
+            hooks.notify("System", msg, "system")
         elif level == "rejected":
             hooks.notify(
                 "System",

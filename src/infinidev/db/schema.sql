@@ -245,6 +245,26 @@ CREATE TABLE IF NOT EXISTS branches (
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Durable ledger of objective-verification verdicts (PASS / FAIL /
+-- UNVERIFIABLE), one row per objective per task-end re-verification.
+-- Turns the otherwise-ephemeral in-memory verification result into a
+-- queryable record: "which objectives ended unmet", resume-aware re-checks.
+CREATE TABLE IF NOT EXISTS objective_verdicts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id    INTEGER NOT NULL REFERENCES projects(id),
+    session_id    TEXT,
+    agent_run_id  TEXT,
+    step_index    INTEGER,
+    title         TEXT,
+    kind          TEXT NOT NULL,
+    spec          TEXT,
+    verdict       TEXT NOT NULL,   -- PASS | FAIL | UNVERIFIABLE
+    detail        TEXT,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_objective_verdicts_session
+    ON objective_verdicts(session_id, created_at);
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Code intelligence cache
 -- ─────────────────────────────────────────────────────────────────────────────

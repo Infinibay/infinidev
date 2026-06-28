@@ -1114,6 +1114,31 @@ def run_review_rework_loop(
                 diff_summary=engine.get_changed_files_summary(),
             )
 
+        def _finalize(results) -> None:
+            """Persist each objective's FINAL verdict to the durable ledger
+            and emit a one-line objective summary for the user."""
+            n_pass = n_fail = n_unver = 0
+            for idx, title, check, vres in results:
+                if vres.unverifiable:
+                    verdict = "UNVERIFIABLE"; n_unver += 1
+                elif vres.passed:
+                    verdict = "PASS"; n_pass += 1
+                else:
+                    verdict = "FAIL"; n_fail += 1
+                try:
+                    from infinidev.db.service import record_objective_verdict
+                    record_objective_verdict(
+                        session_id=session_id, step_index=idx, title=title,
+                        kind=check.kind, spec=check.spec, verdict=verdict,
+                        detail=(vres.summary or "")[:1000],
+                    )
+                except Exception:
+                    logger.debug("record_objective_verdict failed", exc_info=True)
+            _notify(
+                "objectives_summary",
+                f"Objectives: {n_pass} passed, {n_fail} failed, {n_unver} unverified",
+            )
+
         rounds = 0
         while True:
             results = [(idx, title, check, _verify_one(check)) for idx, title, check in checks]
@@ -1128,11 +1153,13 @@ def run_review_rework_loop(
             if not failed:
                 _notify("objectives_pass",
                         f"{len(checks) - len(unverified)} objective check(s) verified")
+                _finalize(results)
                 return current_result
 
             _notify("objectives_fail", f"{len(failed)}/{len(checks)} objective check(s) failing")
             if rounds >= max_rounds:
                 _notify("max_reviews", "objective checks still failing after rework")
+                _finalize(results)
                 return current_result
 
             fix_description = (

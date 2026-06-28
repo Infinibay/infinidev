@@ -223,6 +223,62 @@ def persist_session_note(session_id: str, note_text: str) -> None:
     execute_with_retry(_insert)
 
 
+def record_objective_verdict(
+    *,
+    session_id: str | None,
+    step_index: int | None,
+    title: str,
+    kind: str,
+    spec: str,
+    verdict: str,
+    detail: str = "",
+    project_id: int = 1,
+    agent_run_id: str | None = None,
+) -> None:
+    """Persist one objective-verification verdict to the durable ledger.
+
+    Best-effort: the table is additive (schema.sql, created on next init),
+    and a write failure must never break the review phase — callers wrap
+    this so a missing/locked DB just means no ledger row.
+    """
+    def _insert(conn):
+        conn.execute(
+            "INSERT INTO objective_verdicts "
+            "(project_id, session_id, agent_run_id, step_index, title, kind, spec, verdict, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, session_id, agent_run_id, step_index, title, kind, spec, verdict, detail),
+        )
+        conn.commit()
+    execute_with_retry(_insert)
+
+
+def get_objective_verdicts(
+    session_id: str, *, agent_run_id: str | None = None, limit: int = 100
+) -> list[dict]:
+    """Return recent objective verdicts (newest first) for a session.
+
+    The queryable read side of the ledger: powers "which objectives ended
+    unmet" inspection and future resume-aware re-verification.
+    """
+    def _query(conn):
+        if agent_run_id:
+            rows = conn.execute(
+                "SELECT step_index, title, kind, spec, verdict, detail, created_at "
+                "FROM objective_verdicts WHERE session_id = ? AND agent_run_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (session_id, agent_run_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT step_index, title, kind, spec, verdict, detail, created_at "
+                "FROM objective_verdicts WHERE session_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    return execute_with_retry(_query) or []
+
+
 def get_session_notes(session_id: str, limit: int = 50) -> list[str]:
     """Return persisted session notes (oldest first) for a session."""
     def _query(conn):
