@@ -48,6 +48,21 @@ small.
       ``expected_output`` — verifiable success criterion. "Unit test \
 test_validate_token_rejects_expired passes." / "No references to \
 legacy_verify() remain (find_references returns empty)."
+      ``verify_kind`` / ``verify_spec`` / ``verify_observable`` — the \
+MACHINE-checkable form of that criterion. Whenever a step's success can \
+be decided by a command, a test, a file's contents, or a symbol's \
+existence, FILL THESE: the engine RUNS the check on step completion and \
+rejects the step (with the failure output) until it passes, so the \
+developer cannot self-declare a green check. Choose verify_kind = \
+``test_id`` (a pytest node id like tests/test_auth.py::test_expired), \
+``command`` (a shell command that must exit 0), ``file_contains`` \
+(verify_spec = file path, verify_observable = required substring), or \
+``symbol_exists`` (verify_spec = a name that must appear in the code). \
+For a SOFT criterion no command can decide (readability, clearer errors, \
+"duplication removed"), use ``llm_judge`` with verify_spec = a precise \
+acceptance statement an independent reviewer checks against the diff at \
+task end. Leave verify_kind ``none`` only as a last resort. Prefer \
+test_id when a test can express the criterion.
 
 Steps should be small and concrete. Prefer 3-6 steps for non-trivial \
 work; 1-2 for simple edits. Each step should produce something \

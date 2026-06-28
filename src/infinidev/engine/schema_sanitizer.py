@@ -19,8 +19,53 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _inline_defs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline ``$defs``/``$ref`` so nested models survive ``$defs`` stripping.
+
+    Pydantic v2 emits nested BaseModel fields (e.g. ``steps: list[PlanStepArg]``
+    in emit_plan) as a ``$ref`` into a top-level ``$defs`` table. The schema
+    cleaners drop ``$defs`` for providers that choke on it — which would leave
+    a DANGLING ``$ref`` and silently erase every nested field from the schema
+    the LLM sees. Resolving the refs first keeps the nested fields intact.
+
+    No-op for the common case (no ``$defs`` → flat tool schema). A depth guard
+    bounds any self-referential model rather than recursing forever.
+    """
+    defs = schema.get("$defs") or schema.get("definitions")
+    if not defs:
+        return schema
+
+    import copy
+    defs = copy.deepcopy(defs)
+
+    def resolve(node: Any, depth: int) -> Any:
+        if depth > 8:
+            return node
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and "/" in ref:
+                name = ref.split("/")[-1]
+                target = defs.get(name)
+                if isinstance(target, dict):
+                    merged = copy.deepcopy(target)
+                    # Preserve sibling keys (e.g. a per-field description that
+                    # sits next to the $ref) over the target's own.
+                    for k, v in node.items():
+                        if k != "$ref":
+                            merged[k] = v
+                    return resolve(merged, depth + 1)
+            return {k: resolve(v, depth + 1) for k, v in node.items()}
+        if isinstance(node, list):
+            return [resolve(x, depth + 1) for x in node]
+        return node
+
+    top = {k: v for k, v in schema.items() if k not in ("$defs", "definitions")}
+    return resolve(top, 0)
+
+
 def _clean_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Remove Pydantic v2 artifacts that confuse LLM providers."""
+    schema = _inline_defs(schema)
     schema.pop("title", None)
     schema.pop("$defs", None)
     schema.pop("definitions", None)

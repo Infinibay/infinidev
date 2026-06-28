@@ -26,6 +26,12 @@ class VerificationResult:
     summary: str = ""
     commands_run: list[dict[str, str]] = field(default_factory=list)
     # Each entry: {"command": "...", "exit_code": int, "output": "..."}
+    # True when an objective could NOT be verified either way (e.g. an
+    # adversarial llm_judge returned UNVERIFIABLE, or the verifier call
+    # failed). Such an objective is surfaced to the user as "done but
+    # unverified" rather than silently counted as success OR forced into
+    # endless rework. ``passed`` is left True for these so they don't block.
+    unverifiable: bool = False
 
     @property
     def verdict(self) -> str:

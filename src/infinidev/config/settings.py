@@ -126,6 +126,15 @@ class Settings(BaseSettings):
     LOOP_SUMMARIZER_MAX_INPUT_TOKENS: int = 4000  # Max tokens from step messages to feed summarizer
     LOOP_SUMMARIZER_TIMEOUT: int = 30  # Seconds; falls back to raw summary on timeout
     LOOP_REQUIRE_NOTE_BEFORE_COMPLETE: bool = True  # Gate step_complete on add_note for small models
+    # Deterministic per-step objective verification: when a planner-authored
+    # step carries an executable ``verify`` check, run it on step_complete and
+    # block closure (with the failure output) until it passes.
+    LOOP_OBJECTIVE_VERIFY_ENABLED: bool = True
+    # Max correction turns forced per step before the engine stops blocking
+    # (to avoid starving the global budget on one stuck objective). On
+    # exhaustion the step is allowed to close but the unmet objective is
+    # logged and noted so it surfaces rather than silently passing.
+    LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS: int = 3
     LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
     LOOP_GUIDANCE_ENABLED: bool = True  # Inject pre-baked how-to advice when small models get stuck
     LOOP_GUIDANCE_MAX_PER_TASK: int = 3  # Hard cap on guidance entries per task
@@ -195,6 +204,17 @@ class Settings(BaseSettings):
     # Phases
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True
+    # Post-loop objective re-verification: at task end, re-run every
+    # planner-authored step verification together (a backstop for the
+    # cross-objective regression the per-step gate cannot see) and feed any
+    # failures back to the developer. Bounded by MAX_ROUNDS re-execution cycles.
+    REVIEW_OBJECTIVE_REVERIFY_ENABLED: bool = True
+    REVIEW_OBJECTIVE_REVERIFY_MAX_ROUNDS: int = 2
+    # Adversarial LLM verifier for soft objectives (verify_kind='llm_judge'):
+    # an independent, skeptical judge with a cited-evidence verdict that is
+    # substring-grounded against the diff. Runs only at task end (one LLM call
+    # per soft objective per round). Uses the assistant model when configured.
+    REVIEW_ADVERSARIAL_VERIFY_ENABLED: bool = True
 
     # Council (multi-agent deliberation, opt-in design/research phase).
     # The feature is available by default but only FIRES when the chat

@@ -162,9 +162,14 @@ def parse_step_complete_args(arguments: str | dict[str, Any]) -> "StepResult":
     if raw_answer is not None and not isinstance(raw_answer, str):
         raw_answer = json.dumps(raw_answer)
 
+    evidence = args.get("evidence_summary", "")
+    if not isinstance(evidence, str):
+        evidence = str(evidence)
+
     return StepResult(
         summary=args.get("summary", "Step completed (no summary provided)"),
         status=args.get("status", "continue"),
         next_steps=[],
         final_answer=raw_answer,
+        evidence_summary=evidence,
     )

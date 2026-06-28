@@ -10,22 +10,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from infinidev.engine.analysis.step_verification import StepVerification
+
 
 @dataclass(frozen=True)
 class PlanStepSpec:
     """One step in a planner-emitted plan.
 
     The fields map directly to loop.plan_step.PlanStep: ``title`` goes
-    to PlanStep.title, ``detail`` to PlanStep.detail, and
-    ``expected_output`` to PlanStep.expected_output. Keeping this as a
-    separate frozen dataclass (rather than reusing PlanStep) makes the
-    handoff boundary explicit: the planner does not produce mutable
-    LoopState objects.
+    to PlanStep.title, ``detail`` to PlanStep.detail, ``expected_output``
+    to PlanStep.expected_output, and ``verify`` to PlanStep.verify.
+    Keeping this as a separate frozen dataclass (rather than reusing
+    PlanStep) makes the handoff boundary explicit: the planner does not
+    produce mutable LoopState objects.
+
+    ``verify`` is the planner-authored, machine-checkable success
+    condition. Authoring it here — read-only, before any code exists —
+    keeps the success bar adversarial (the developer cannot back-rationalise
+    a check against its own diff) and frozen (planner steps are
+    user_approved, so the developer cannot relax it mid-run).
     """
 
     title: str
     detail: str = ""
     expected_output: str = ""
+    verify: StepVerification | None = None
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ planner tier (registered under PLANNER_TOOLS in tools/__init__.py).
 """
 
 import json
-from typing import Type
+from typing import Literal, Type
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,50 @@ class PlanStepArg(BaseModel):
             "Verifiable success criterion — what is true after the "
             "step completes. Example: 'tests/test_auth.py passes' or "
             "'validate_token returns None for expired tokens'."
+        ),
+    )
+    # A MACHINE-checkable version of the success criterion. When you can name
+    # a concrete check, fill these — the engine RUNS it on step completion and
+    # rejects the step (with the failure output) until it passes, so the
+    # developer cannot self-declare a green check. Leave verify_kind 'none'
+    # only when no command/file/test can decide the step (e.g. a pure
+    # readability refactor).
+    verify_kind: Literal[
+        "none", "command", "test_id", "file_contains", "symbol_exists", "llm_judge"
+    ] = Field(
+        "none",
+        description=(
+            "How the step's success is checked. Prefer a DETERMINISTIC kind: "
+            "'command' (a shell command that must exit 0), "
+            "'test_id' (a pytest node id like tests/test_x.py::test_y), "
+            "'file_contains' (a file must contain a substring), "
+            "'symbol_exists' (a name/snippet must appear somewhere in the "
+            "codebase). For a SOFT objective that no command can decide "
+            "(readability, clearer error messages, duplication removed), use "
+            "'llm_judge' — an independent reviewer judges verify_spec against "
+            "the diff at task end. Use 'none' only when even that is "
+            "impossible."
+        ),
+    )
+    verify_spec: str = Field(
+        "",
+        description=(
+            "The thing to run/inspect/judge, per verify_kind: the command, the "
+            "pytest node id, the file path (file_contains), the name/snippet "
+            "(symbol_exists), or — for llm_judge — a precise acceptance "
+            "statement a reviewer can check against the code (e.g. 'the three "
+            "duplicated parse blocks in reader.py are replaced by one helper'). "
+            "Required when verify_kind is not 'none'."
+        ),
+    )
+    verify_observable: str = Field(
+        "",
+        description=(
+            "The proof that means PASS. For file_contains: the REQUIRED "
+            "substring (mandatory). For command/test_id: an optional stdout "
+            "fragment that must also appear (empty = exit code 0 alone "
+            "decides). For llm_judge: an optional hint of where to look "
+            "(file/area). Ignored for the other kinds."
         ),
     )
 

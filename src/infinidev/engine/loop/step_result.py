@@ -17,6 +17,11 @@ class StepResult(BaseModel):
     next_steps: list[StepOperation] = Field(default_factory=list)
     status: Literal["continue", "done", "blocked", "explore"] = "continue"
     final_answer: str | None = None
+    # The model's free-text claim of how it verified the step (from the
+    # step_complete schema). Captured for logging/diagnostics and as a hint
+    # of WHICH check it ran — it is never the source of truth for pass/fail
+    # (that is the executed StepVerification). Previously parsed-and-discarded.
+    evidence_summary: str = ""
 
     # Post-processing metadata (set by _run_inner_loop, consumed by step_manager)
     action_tool_calls: int = 0

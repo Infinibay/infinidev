@@ -125,6 +125,7 @@ def _seed_state_from_plan(state, plan) -> None:
             title=spec.title,
             detail=spec.detail,
             expected_output=spec.expected_output,
+            verify=getattr(spec, "verify", None),
             user_approved=True,
             status="active" if idx == 0 else "pending",
         )
@@ -157,6 +158,10 @@ class LoopEngine(AgentEngine):
         self._hooks: object | None = None
         self.session_notes: list[str] = []  # Persist across tasks within a session
         self._session_notes_hydrated: bool = False  # one-shot DB reload on resume
+        # Per-run, per-step count of forced objective-verification correction
+        # turns. Reset at the start of each execute(); bounds the
+        # block-and-correct loop so one stuck objective can't starve the budget.
+        self._verify_attempts: dict[int, int] = {}
         # User-message injection: thread-safe queue + inject/drain logic.
         self._user_message_injector = UserMessageInjector()
         self._guidance = GuidanceHandler()
@@ -298,6 +303,126 @@ class LoopEngine(AgentEngine):
             messages, step_complete_id, new_body,
         )
 
+    def _objective_gate_blocks(
+        self,
+        ctx: "ExecutionContext",
+        step_complete_call: Any,
+        messages: list[dict[str, Any]],
+    ) -> bool:
+        """Run the active step's deterministic verification on step_complete.
+
+        Returns True to BLOCK closure (the caller must ``continue`` the inner
+        loop for a correction turn), False to allow the step to close.
+
+        No-op (False) when: the feature is disabled, the active step has no
+        executable ``verify`` check, or the model declared ``status='blocked'``
+        (a legitimate give-up, not something to force-verify). On FAIL it
+        overwrites the step_complete tool result with the failure output and
+        returns True, bounded by ``LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS`` so one
+        stuck objective cannot loop forever.
+        """
+        settings_ = _get_settings()
+        if not getattr(settings_, "LOOP_OBJECTIVE_VERIFY_ENABLED", True):
+            return False
+
+        active = ctx.state.plan.active_step if ctx.state.plan else None
+        check = getattr(active, "verify", None) if active is not None else None
+        # Only DETERMINISTIC checks gate per step (cheap, synchronous). An
+        # ``llm_judge`` check is deferred to the post-loop adversarial verifier
+        # so we never pay an LLM call on every step_complete.
+        if check is None or not check.is_deterministic:
+            return False
+
+        # Don't force verification when the model is giving up on the step.
+        if self._step_complete_status(step_complete_call) == "blocked":
+            return False
+
+        from infinidev.engine.analysis.objective_verifier import ObjectiveVerifier
+
+        # Resolve the workspace the same way the post-loop review does, so the
+        # check runs against the project regardless of the process cwd. An
+        # explicit ctx.workspace_path (tests) wins; else fall back to the
+        # tool-context workspace, then ObjectiveVerifier's os.getcwd() default.
+        workspace = getattr(ctx, "workspace_path", None)
+        if not workspace:
+            with best_effort("objective-gate workspace resolve failed"):
+                from infinidev.tools.base.context import get_current_workspace_path
+                workspace = get_current_workspace_path()
+        try:
+            result = ObjectiveVerifier(workspace).verify(check)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("objective verification raised for step %s: %s",
+                           getattr(active, "index", "?"), exc)
+            return False  # fail open — never let the gate crash the loop
+
+        if result.passed:
+            _emit_log(
+                "info",
+                f"✓ step {active.index} objective verified ({check.kind}: {check.spec[:80]})",
+                project_id=ctx.project_id, agent_id=ctx.agent_id,
+            )
+            return False
+
+        # FAIL → bounded block-and-correct.
+        attempts = self._verify_attempts.get(active.index, 0) + 1
+        self._verify_attempts[active.index] = attempts
+        cap = getattr(settings_, "LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS", 3)
+
+        if attempts > cap:
+            # Stop blocking to protect the global budget, but surface the
+            # unmet objective loudly instead of letting it pass silently.
+            note = (
+                f"⚠ Step {active.index} objective NOT verified after {cap} "
+                f"attempts — {check.kind}: {check.spec}"
+            )
+            _emit_log("error", note, project_id=ctx.project_id, agent_id=ctx.agent_id)
+            with best_effort("objective-unmet note append failed"):
+                ctx.state.notes.append(note)
+            return False
+
+        body = (
+            f"step_complete BLOCKED — the step's verification check did not pass. "
+            f"You do not decide this verdict; an automated check does.\n\n"
+            f"Verification ({check.kind}): {check.spec}\n"
+            f"{result.format_for_developer() or result.summary}\n\n"
+            f"Fix the issue so this check passes, then call step_complete again "
+            f"(attempt {attempts}/{cap})."
+        )
+        self._overwrite_step_complete_tool_result(messages, step_complete_call.id, body)
+        with best_effort("objective-gate loop event failed"):
+            _emit_loop_event(
+                "loop_objective_verify",
+                ctx.project_id, ctx.agent_id,
+                {
+                    "step_index": active.index,
+                    "kind": check.kind,
+                    "spec": check.spec,
+                    "passed": False,
+                    "attempt": attempts,
+                    "blocked": True,
+                },
+            )
+        _emit_log(
+            "info",
+            f"⚠ step_complete blocked — step {active.index} verification failed "
+            f"({check.kind}: {check.spec[:80]}), attempt {attempts}/{cap}",
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        )
+        return True
+
+    @staticmethod
+    def _step_complete_status(step_complete_call: Any) -> str:
+        """Best-effort read of the status arg from a step_complete tool call."""
+        try:
+            import json as _json
+            raw = step_complete_call.function.arguments
+            args = _json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw or {})
+            if isinstance(args, dict):
+                return str(args.get("status", "continue"))
+        except Exception:
+            pass
+        return "continue"
+
 
     def cancel(self) -> None:
         """Signal the engine to stop after the current tool call."""
@@ -375,8 +500,45 @@ class LoopEngine(AgentEngine):
             return None
 
     def get_plan_steps(self) -> list[dict]:
-        """Loop engine is step-scoped — no multi-step plan of its own."""
-        return []
+        """Return the final plan steps for the post-loop reviewer.
+
+        Under the chat-agent-first pipeline the engine IS seeded with a
+        multi-step, user-approved plan (``_seed_state_from_plan``), so the
+        reviewer's plan-fidelity check has something real to check against —
+        previously this returned ``[]`` and that check was dead.
+        """
+        state = self._last_state
+        if state is None or not getattr(state, "plan", None):
+            return []
+        return [
+            {
+                "step": s.index,
+                "title": s.title,
+                "explanation": s.detail or s.explanation,
+                "status": s.status,
+            }
+            for s in state.plan.steps
+        ]
+
+    def get_objective_checks(self) -> list[tuple[int, str, Any]]:
+        """Return ``(step_index, title, StepVerification)`` for each step that
+        carries an executable verification.
+
+        Consumed by the post-loop review-rework loop to RE-verify every
+        objective together at task end — catching the cross-objective
+        regression the per-step gate cannot see (step 3's edit silently
+        breaking step 1's already-green check). Read from the final state, so
+        it reflects the plan as executed.
+        """
+        state = self._last_state
+        if state is None or not getattr(state, "plan", None):
+            return []
+        checks: list[tuple[int, str, Any]] = []
+        for s in state.plan.steps:
+            verify = getattr(s, "verify", None)
+            if verify is not None and verify.is_executable:
+                checks.append((s.index, s.title, verify))
+        return checks
 
     def get_file_contents(self) -> dict[str, str]:
         """Return path → current content for each changed file."""
@@ -469,6 +631,7 @@ class LoopEngine(AgentEngine):
         self._supports_vision_cached = None
         llm_caller, tool_proc, guard, step_mgr = self._init_execution(ctx, task_prompt)
         consecutive_all_done = 0
+        self._verify_attempts = {}
 
         for iteration in range(ctx.start_iteration, ctx.max_iterations):
             if self._cancel_event.is_set():
@@ -1223,6 +1386,14 @@ class LoopEngine(AgentEngine):
                                     )
                                 except Exception:
                                     pass
+
+                    # Deterministic objective gate: if the active step carries
+                    # an executable verification, run it before honoring
+                    # step_complete. On FAIL we reuse the critic's proven
+                    # block-and-correct mechanism (overwrite the tool result +
+                    # continue) so the model gets a correction turn.
+                    if self._objective_gate_blocks(ctx, classified.step_complete, messages):
+                        continue  # Re-enter the loop, don't break.
 
                     step_result = _parse_step_complete_args(classified.step_complete.function.arguments)
                     break

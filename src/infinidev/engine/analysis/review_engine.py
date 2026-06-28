@@ -954,6 +954,37 @@ class ReviewEngine:
         return "\n".join(lines)
 
 
+def _collect_objective_checks(engine: Any) -> list[tuple[int, str, Any]]:
+    """Snapshot the engine's executable objective checks (best effort).
+
+    Captured BEFORE any rework re-execution, because re-running the developer
+    rebuilds the plan and would drop the planner-authored verify specs.
+    """
+    getter = getattr(engine, "get_objective_checks", None)
+    if not callable(getter):
+        return []
+    try:
+        return list(getter() or [])
+    except Exception:
+        logger.debug("get_objective_checks failed", exc_info=True)
+        return []
+
+
+def _format_objective_failures(failed: list[tuple[int, str, Any, Any]]) -> str:
+    """Render failed objective checks as developer-facing rework feedback."""
+    parts: list[str] = []
+    for idx, title, check, vres in failed:
+        parts.append(f"### Step {idx}: {title}")
+        parts.append(f"- check ({check.kind}): {check.spec}")
+        if getattr(check, "observable", ""):
+            parts.append(f"- must show: {check.observable}")
+        detail = vres.format_for_developer() or vres.summary
+        if detail:
+            parts.append(detail)
+        parts.append("")
+    return "\n".join(parts)
+
+
 def run_review_rework_loop(
     *,
     engine: Any,
@@ -1039,11 +1070,99 @@ def run_review_rework_loop(
         finally:
             agent.deactivate()
 
+    def _run_objective_reverification_and_fix(
+        current_result: str, checks: list[tuple[int, str, Any]],
+    ) -> str:
+        """Re-run every captured objective check together; fix regressions.
+
+        The per-step gate already verified each check the moment its step
+        closed, but a later step's edit can silently break an earlier
+        check. This re-verifies them all at task end and, on any failure,
+        re-executes the developer with the failing checks — bounded by
+        ``REVIEW_OBJECTIVE_REVERIFY_MAX_ROUNDS`` so it cannot thrash.
+        """
+        from infinidev.config.settings import settings as _settings
+
+        if not checks or not getattr(_settings, "REVIEW_OBJECTIVE_REVERIFY_ENABLED", True):
+            return current_result
+
+        workspace = getattr(engine, '_workspace', None)
+        if not workspace:
+            from infinidev.tools.base.context import get_current_workspace_path
+            workspace = get_current_workspace_path()
+        if not workspace:
+            return current_result
+
+        from infinidev.engine.analysis.objective_verifier import ObjectiveVerifier
+        verifier = ObjectiveVerifier(workspace=workspace)
+        adversarial_on = getattr(_settings, "REVIEW_ADVERSARIAL_VERIFY_ENABLED", True)
+        max_rounds = getattr(_settings, "REVIEW_OBJECTIVE_REVERIFY_MAX_ROUNDS", 2)
+
+        def _verify_one(check):
+            """Dispatch a check: deterministic → ObjectiveVerifier, soft
+            (llm_judge) → the independent adversarial verifier."""
+            if check.is_deterministic:
+                return verifier.verify(check)
+            if not adversarial_on:
+                from infinidev.engine.analysis.verification_result import VerificationResult
+                return VerificationResult(passed=True, unverifiable=True,
+                                          summary="llm_judge skipped (disabled)")
+            from infinidev.engine.analysis.adversarial_verifier import AdversarialVerifier
+            return AdversarialVerifier(workspace=workspace).verify(
+                check, changed_files=(engine.get_file_contents() or {}),
+                diff_summary=engine.get_changed_files_summary(),
+            )
+
+        rounds = 0
+        while True:
+            results = [(idx, title, check, _verify_one(check)) for idx, title, check in checks]
+            failed = [r for r in results if not r[3].passed]
+            unverified = [r for r in results if r[3].unverifiable]
+            if unverified:
+                _notify(
+                    "objectives_unverified",
+                    f"{len(unverified)} objective(s) could not be verified — "
+                    f"surfaced for human confirmation",
+                )
+            if not failed:
+                _notify("objectives_pass",
+                        f"{len(checks) - len(unverified)} objective check(s) verified")
+                return current_result
+
+            _notify("objectives_fail", f"{len(failed)}/{len(checks)} objective check(s) failing")
+            if rounds >= max_rounds:
+                _notify("max_reviews", "objective checks still failing after rework")
+                return current_result
+
+            fix_description = (
+                f"{task_prompt[0]}\n\n"
+                f"## IMPORTANT: objective verification FAILED\n"
+                f"One or more of the plan's success checks no longer pass — a "
+                f"check that passed earlier was likely broken by a later change "
+                f"(regression). Fix the code so EVERY check below passes.\n\n"
+                f"{_format_objective_failures(failed)}"
+            )
+            fix_prompt = (fix_description, task_prompt[1])
+            agent.activate_context(session_id=session_id)
+            try:
+                new_result = engine.execute(agent=agent, task_prompt=fix_prompt, verbose=True)
+                if new_result and new_result.strip():
+                    current_result = new_result
+            finally:
+                agent.deactivate()
+            rounds += 1
+
     reviewer.reset()
     result = initial_result
 
+    # Snapshot objective checks before any re-execution rebuilds the plan.
+    objective_checks = _collect_objective_checks(engine)
+
     # Run verification before review (catch real breakage first)
     result = _run_verification_and_fix(result)
+
+    # Re-verify objectives together (cross-objective regression backstop).
+    result = _run_objective_reverification_and_fix(result, objective_checks)
 
     previous_feedback = ""
     plan_steps = getattr(engine, "get_plan_steps", lambda: [])()

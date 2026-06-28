@@ -339,9 +339,39 @@ def build_iteration_prompt(
     # The global `expected_output` (if set, e.g. by a flow that wraps the task)
     # is rendered only as a fallback when the active step has no criterion.
     active_step = state.plan.active_step if state.plan else None
+    active_verify = getattr(active_step, "verify", None) if active_step else None
     step_criterion = (active_step.expected_output.strip()
                       if active_step and active_step.expected_output else "")
-    if step_criterion:
+    if active_verify is not None and active_verify.is_deterministic:
+        observable_line = (
+            f"  must show: {active_verify.observable}\n"
+            if active_verify.observable else ""
+        )
+        parts.append(
+            "<verification-method>\n"
+            "An EXTERNAL, automated check runs the moment you call step_complete. "
+            "You do NOT decide the verdict — this check does. Your job is to make "
+            "it pass for real, not to declare it passed.\n\n"
+            f"  kind:  {active_verify.kind}\n"
+            f"  check: {active_verify.spec}\n"
+            f"{observable_line}"
+            "\nDo the step's work, then confirm this check passes (run it yourself "
+            "to be sure). If it fails when you call step_complete, the closure is "
+            "rejected with the failure output and you get another turn to fix it.\n"
+            "</verification-method>"
+        )
+    elif active_verify is not None and active_verify.is_executable:
+        # Soft (llm_judge) objective: judged independently at task end, not now.
+        parts.append(
+            "<verification-method>\n"
+            "An INDEPENDENT reviewer will judge this objective against the code "
+            "at task end, looking for verbatim evidence it was met — assume it "
+            "will try to prove you FAILED. Make it genuinely true, don't just "
+            "claim it.\n\n"
+            f"  objective: {active_verify.spec}\n"
+            "</verification-method>"
+        )
+    elif step_criterion:
         parts.append(
             "<expected-output>\n"
             "This is the success criterion you set for the current step. "

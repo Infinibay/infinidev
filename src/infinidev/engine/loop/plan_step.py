@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from infinidev.engine.analysis.step_verification import StepVerification
+
 
 class PlanStep(BaseModel):
     """A single step in the agent's execution plan."""
@@ -26,6 +28,12 @@ class PlanStep(BaseModel):
     # displayed to the user in chat). LoopPlan.apply_operations refuses to
     # remove or modify approved steps when the LLM tries mid-execution.
     user_approved: bool = False
+    # Machine-checkable success condition authored by the planner. When
+    # present and executable, the engine runs it on step_complete and
+    # blocks closure until it passes (see ObjectiveVerifier + the gate in
+    # LoopEngine._objective_gate_blocks). None / kind 'none' falls back to
+    # the self-attested ``expected_output``.
+    verify: StepVerification | None = None
     status: Literal["pending", "active", "done", "skipped"] = "pending"
 
 

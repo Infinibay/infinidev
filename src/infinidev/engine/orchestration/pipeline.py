@@ -66,7 +66,8 @@ class OrchestrationHooks(Protocol):
     def on_status(self, level: str, msg: str) -> None:
         """Status line for ad-hoc updates. *level* is informational
         (``"info"``, ``"warn"``, ``"error"``, ``"verification_pass"``,
-        ``"verification_fail"``, ``"approved"``, ``"rejected"``,
+        ``"verification_fail"``, ``"objectives_pass"``, ``"objectives_fail"``,
+        ``"objectives_unverified"``, ``"approved"``, ``"rejected"``,
         ``"max_reviews"``). UIs may colourise based on level."""
 
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
@@ -419,6 +420,18 @@ def _run_review_phase(
             hooks.notify(
                 "System",
                 "Re-running developer to fix test failures...",
+                "system",
+            )
+        elif level == "objectives_fail":
+            hooks.notify(
+                "System",
+                "Objective check regressed — re-running developer to fix it...",
+                "system",
+            )
+        elif level == "objectives_unverified":
+            hooks.notify(
+                "System",
+                f"Note: {msg}",
                 "system",
             )
         elif level == "rejected":
