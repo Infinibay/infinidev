@@ -223,18 +223,37 @@ class VerificationEngine:
             }
 
     def _file_to_module(self, filepath: str) -> str | None:
-        """Convert a file path to a Python module name for import checking."""
-        # Strip .py extension
+        """Convert a file path to a Python module name for import checking.
+
+        Absolute paths are made relative to the workspace FIRST — otherwise
+        ``/tmp/x/calc.py`` becomes the garbage module ``.tmp.x.calc`` and the
+        ``python -c 'import ...'`` check fails spuriously (which triggered an
+        unnecessary developer re-run). Files outside the workspace, and
+        ``__init__``/``conftest``/``test_`` files, are skipped.
+        """
         if not filepath.endswith(".py"):
             return None
-        path = filepath[:-3]
-        # Strip leading src/ if present
-        if path.startswith("src/"):
-            path = path[4:]
-        # Convert path separators to dots
-        module = path.replace(os.sep, ".").replace("/", ".")
+        path = filepath
+        # Normalise absolute paths to workspace-relative so the dotted module
+        # is a real module, not a leading-dot path fragment.
+        if os.path.isabs(path):
+            try:
+                path = os.path.relpath(path, self._workspace)
+            except ValueError:
+                return None  # e.g. a different drive on Windows
+        # Outside the workspace (``../...``) → not importable from here.
+        if path == ".." or path.startswith(".." + os.sep):
+            return None
         # Skip __init__, test files, conftest
         basename = os.path.basename(filepath)
         if basename in ("__init__.py", "conftest.py") or basename.startswith("test_"):
             return None
-        return module
+        # Strip .py extension
+        path = path[:-3]
+        # Strip leading src/ if present
+        if path.startswith("src" + os.sep) or path.startswith("src/"):
+            path = path[4:]
+        # Convert path separators to dots; strip any residual leading/trailing
+        # dots defensively so we never emit ``.foo`` or ``foo.``.
+        module = path.replace(os.sep, ".").replace("/", ".").strip(".")
+        return module or None
