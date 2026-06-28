@@ -41,9 +41,10 @@ Call ``seed_council`` EXACTLY once with:
       - ``persona``: HOW it thinks (its stable stance/bias).
       - ``objective``: WHAT it must achieve in THIS debate (a concrete
         target, not "help solve it").
-    Make the personas genuinely DIVERSE and partly in TENSION with each
-    other — an MVP-advocate and a robustness-advocate check each other;
-    a skeptic refutes; a researcher grounds claims in facts. The tension
+    Call ``seed_council`` once. Per-field guidance (member_id/persona/objective/seed_tools)
+    is in the tool schema; your job here is the JUDGEMENT it can't encode: pick 3-5 personas
+    that genuinely pull against each other (an MVP-advocate vs a robustness-advocate, a
+    skeptic, a fact-grounding researcher) so the council out-reasons any single agent. The tension
     is the whole point: several agents pushing from different angles beat
     one agent that over-estimates itself.
   * ``opening_threads`` — 1-3 threads that frame the debate.
@@ -99,10 +100,9 @@ you don't. Your value is your distinct perspective.
 You will see the current state of the shared channel (threads of
 messages from all members). React to it:
   * Build on or REFUTE specific messages — reference them by id.
-  * Bring evidence: you have READ-ONLY tools (read_file, code_search,
-    get_symbol_code, find_references, web_search, etc.). Use them to
-    ground claims before asserting them, then cite what you found in
-    ``refs``.
+  * Bring evidence: you have read-only exploration tools (file reads, code/symbol
+    search, reference lookups, web search — see your available tools). Use them to
+    ground claims before asserting them, then cite what you found in ``refs``.
   * Be concrete and brief. One good point beats three vague ones.
 
 End your turn by calling EXACTLY ONE of:
@@ -162,7 +162,11 @@ def render_judge_user_message(digest: str, round_num: int, max_rounds: int) -> s
 def build_moderator_synth_prompt() -> str:
     return f"""\
 You are the MODERATOR closing a council debate. Synthesise everything on
-the channel into a single design brief.
+the channel into a single design brief. This brief is the spec the planner and
+developer build from — make every section concrete enough that they never have
+to re-derive the design; no vague 'TBD'/placeholder entries. But it is a DESIGN
+brief, not an implementation plan: capture the decision, the rationale and the
+risks — do not pre-write the code or enumerate edit steps.
 
 {_LANG_RULE}
 Call ``synthesize_brief`` EXACTLY once. Fold in the STRONGEST points from
@@ -180,8 +184,10 @@ every member — not just the majority. Specifically:
     genuine PRODUCT/DESIGN fork that you must NOT decide alone (e.g.
     "optimise for latency or cost?", "which UX?"). Resolve purely
     technical questions yourself. Unresolved dissent over a user-facing
-    tradeoff is the signal that this should be true; then put the concrete
-    questions in ``open_questions_for_user``.
+    tradeoff is the signal that this should be true, and you MUST list the concrete
+    questions in ``open_questions_for_user`` — setting user_decision_required without
+    supplying those questions has NO effect (it is ignored), so the brief would proceed
+    as if no decision were needed.
 
 Communicate solely via tool calls. Your turn ends on ``synthesize_brief``.
 """

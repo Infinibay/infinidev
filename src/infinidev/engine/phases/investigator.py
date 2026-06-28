@@ -15,10 +15,13 @@ logger = logging.getLogger(__name__)
 # Tools allowed during INVESTIGATE phase (read-only)
 _READ_ONLY_TOOLS = {
     "read_file", "list_directory", "glob", "code_search",
-    "project_structure", "find_definition", "find_references",
+    "project_structure", "find_references",
     "list_symbols", "search_symbols", "get_symbol_code",
     "read_findings", "search_findings",
-    "web_search", "web_fetch", "execute_command",
+    "web_search", "web_fetch",
+    # execute_command is allowed for running tests / inspection ONLY —
+    # it must never be used to edit, move, or delete files during INVESTIGATE.
+    "execute_command",
 }
 
 _MAX_FOLLOWUP_DEPTH = 2

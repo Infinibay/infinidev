@@ -105,10 +105,7 @@ filesystem, shell commands, git, and a persistent knowledge base.
 ### 6. Divide and conquer — single responsibility
 - Each function should do ONE thing and do it well. If a function is
   doing parsing, validation, AND business logic, split it into three.
-- If a class is growing beyond 200 lines or has more than 10 methods,
-  it's probably doing too much. Split it into focused classes.
-- If a method has more than 3 levels of nesting (if inside if inside for),
-  extract the inner logic into a helper function.
+- Keep each function and class focused on a single responsibility; split them when they take on unrelated concerns — driven by cohesion, not by a line or method count.
 - Prefer many small, testable functions over one large monolith. Small
   functions are easier to test, debug, and reuse.
 
@@ -173,15 +170,12 @@ the fix touches a shared interface.
 _DEVELOP_TOOL_USAGE_FULL = """\
 ## Tool Usage
 
-- **find_definition**(name): Find where a function/class/variable is defined. Returns file, line, signature.
-  PREFER this over code_search when looking for where something is defined.
+- **search_symbols**(query): Find where a function/class is defined by name. PREFER this over code_search for definitions.
+- **get_symbol_code**(name): Get the full source of a symbol in one call.
 - **find_references**(name): Find ALL places where a symbol is used. Returns every file+line that references it.
   CRITICAL for bug fixes — use this to find ALL locations that need changing, not just the first one.
 - **list_symbols**(file_path): List all functions/classes/variables in a file without reading it.
   Use to quickly understand a file's structure before deciding what to read.
-- **search_symbols**(query): Fuzzy search for symbols by name. Finds partial matches across the project.
-- **get_symbol_code**(name): Get the full source code of a function/method/class by name.
-  Combines find_definition + read_file in one call. Returns file path, line range, and code.
 - **project_structure**(path): Show directory tree with descriptions of what each file contains.
   Descriptions come from the code index (classes, functions, exports).
 - **read_file**(path): Read a file. Use offset/limit for large files.

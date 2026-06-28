@@ -20,8 +20,8 @@ def get_prompt() -> str:
 ### Security
 - Use `subprocess` with `shell=False` and a list of arguments — never `shell=True` with user input.
 - Use the `secrets` module (not `random`) for tokens, keys, and nonces.
-- Parameterise all database queries — never format user input into SQL strings.
 - Never `pickle.load` untrusted data — use JSON or a safe serialisation format.
+- Use `yaml.safe_load`, never `yaml.load`, on untrusted YAML.
 
 ### Standard Library / Core Tooling
 - `pathlib.Path` over `os.path` for file system operations.

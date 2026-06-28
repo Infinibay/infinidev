@@ -25,24 +25,15 @@ to go beyond the obvious.
 
 ## Rules
 
-- Every idea MUST be different from the banned obvious approaches
 - Hypotheses and speculation are allowed — mark them clearly
 - Use tools to validate feasibility, but don't let feasibility kill creativity early
 - State "hypothesis" is acceptable when evidence is incomplete but direction is promising
-- Maximum 3 parallel hypotheses per branch to avoid analysis paralysis
+- Go for genuinely distinct ideas over many near-duplicates — breadth of approach beats volume
 - When crossing ideas, the hybrid must be MORE than the sum of its parts
 
 ## Output Format
 
-For each idea branch:
-```
-### IDEA: [Title]
-**Perspective**: [Which creative lens generated this]
-**Approach**: [How it works]
-**Novelty**: [Why this isn't obvious]
-**Feasibility signals**: [Evidence from tools]
-**Verification needed**: [What to check next]
-```
+You express ideas by calling the provided tools (e.g. propose_idea, cross_ideas) — not as free-form text.
 """
 
 BRAINSTORM_BACKSTORY = (

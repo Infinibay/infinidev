@@ -5,8 +5,7 @@ Provides three prompt styles:
 - ``generalized`` — condensed prose paragraphs capturing the same essence
 - ``coding`` — behavioral rules expressed as pseudocode
 
-The ``auto`` setting (default) selects ``generalized`` for small models
-and ``full`` for large models.
+The ``auto`` setting (default) selects ``generalized`` for all models.
 """
 
 from __future__ import annotations

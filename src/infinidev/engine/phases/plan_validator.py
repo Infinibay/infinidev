@@ -78,9 +78,7 @@ def validate_plan(
 
         # Vague description check
         vague_patterns = [
-            "implement the", "fix the bugs", "write the code",
-            "set up", "implement everything", "finish",
-            "do the rest", "complete the",
+            "implement everything", "do the rest", "fix the bugs", "write the code",
         ]
         if desc and any(p in desc.lower() for p in vague_patterns):
             if len(desc) < 60:  # Short + vague = bad

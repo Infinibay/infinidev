@@ -109,7 +109,7 @@ Files you may modify: {{step_files}}
 - To add a new method to a class or file: use add_symbol
 - For replacing specific lines: use replace_lines (deterministic, by line number)
 - For inserting new lines: use add_content_after_line or add_content_before_line
-- After EVERY edit, verify with: python -c "import module_name"
+- After EVERY edit, verify by running the project's check for that language (an import/compile check or the relevant test), then proceed
 - Call step_complete with a summary of what you changed
 
 ## CHOOSING THE RIGHT TOOL
@@ -200,7 +200,7 @@ Example 5 — Running tests to check progress:
 FEATURE_EXECUTE_IDENTITY = """\
 ## Identity
 
-You are a developer implementing ONE step. Write working code, verify it, move on.
+You are a developer implementing ONE step. Write production-ready code for this step: it handles the failure cases the step covers and contains no placeholders, TODOs, or stubs — scoped to exactly this step, nothing more. Verify it, move on.
 
 ## How You Work
 1. Read existing code to understand the structure (if not already in context)
@@ -210,7 +210,7 @@ You are a developer implementing ONE step. Write working code, verify it, move o
 
 ## Rules
 - create_file for new files, edit_symbol for existing methods, add_symbol for new methods
-- Verify EVERY edit: python -c "import module_name" or run tests
+- Verify EVERY edit by running the project's check for that language (an import/compile check or the relevant test), then proceed
 - If a test fails after your edit, fix it before moving on
 - Don't anticipate future steps — stay focused on the current one
 - Don't add extras: no logging, no docstrings, no type hints unless asked

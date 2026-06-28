@@ -236,8 +236,8 @@ def build_iteration_prompt(
         else:
             parts.append(
                 "<plan>\nNo plan yet. Your FIRST action must be to call add_step(title=\"...\") "
-                "2-3 times to create your initial steps, then call "
-                "step_complete(summary=\"Plan created\", status=\"continue\").\n</plan>"
+                "to lay out the steps the task needs, then call "
+                "step_complete(status=\"continue\") to begin executing them.\n</plan>"
             )
 
     # Previous action summaries (rich format if available)
@@ -289,9 +289,12 @@ def build_iteration_prompt(
         # All planned steps are done — prompt to continue or finish
         parts.append(
             "<current-action>\n"
-            "All planned steps are complete. Review what was accomplished against the task requirements.\n"
-            "Either add new steps via add_step() if more work is needed,\n"
-            "or call step_complete(status=\"done\", final_answer=\"...\") if the task is fully complete.\n"
+            "All planned steps are complete. Now review what was accomplished against the task "
+            "requirements the way a senior reviewer would who assumes you cut corners: are the "
+            "task's acceptance criteria literally met, with no TODOs, stubs, or placeholders left "
+            "— and without padding the work with extras nobody asked for?\n"
+            "If anything is missing, add_step for it. Only when you'd put your name on the result, "
+            "call step_complete(status=\"done\", final_answer=\"...\").\n"
             "</current-action>"
         )
 
@@ -322,11 +325,14 @@ def build_iteration_prompt(
                 "message and what you'll do about it. Examples:\n"
                 "  send_message(message=\"Got it — I'll finish this edit and "
                 "then look into your question.\")\n"
-                "  send_message(message=\"Recibido. Pauso lo que estaba "
-                "haciendo y voy a esto primero.\")\n\n"
+                "Reply in the user's language.\n\n"
                 "ONLY AFTER sending the acknowledgement, continue your work. "
-                "If the user is changing the task or asking you to stop, also "
-                "call `modify_step` / `step_complete` with the new direction. "
+                "If the user is changing the task or asking you to stop, surface "
+                "it in your send_message acknowledgement, then either add_step for "
+                "the new direction or call step_complete(status=\"done\") and explain "
+                "the change in your final_answer. Do NOT modify_step or remove the "
+                "existing steps — the user-approved plan is protected and those ops "
+                "are silently rejected. "
                 "Do NOT silently fold this message into your thinking — the "
                 "user is waiting to hear from you.\n"
                 "</urgent-user-message>"
@@ -389,9 +395,9 @@ def build_iteration_prompt(
             "<expected-output>\n"
             "Overall task expectation (set by the caller, not by you):\n\n"
             f"  {expected_output}\n\n"
-            "When you create steps with add_step, give each one its own "
-            "expected_output — a short, verifiable criterion you can check "
-            "before completing that step. Run step_complete only after you have "
+            "If you add steps with add_step (only when no plan was provided), give "
+            "each one its own expected_output — a short, verifiable criterion you "
+            "can check before completing that step. Run step_complete only after you have "
             "actually verified the step's outcome.\n"
             "</expected-output>"
         )
@@ -410,16 +416,15 @@ def build_iteration_prompt(
 
         if pct_used >= 85:
             budget_lines.append(
-                "⚠ CRITICAL: Context window almost full. You MUST wrap up immediately. "
-                "Call step_complete with status=\"done\" and a final_answer summarizing "
-                "what was accomplished and what remains unfinished."
+                "⚠ CRITICAL: context window almost full — wrap up NOW per the protocol's "
+                "context-budget rule: step_complete(status=\"done\"), summarising what was "
+                "accomplished and what remains in final_answer."
             )
         elif pct_used >= 70:
             budget_lines.append(
-                "⚠ WARNING: Context window running low. Finish the current step, then "
-                "call step_complete with status=\"done\". In your final_answer, include "
-                "a summary of what was done and list any remaining work as follow-up steps "
-                "the user can request in a new conversation."
+                "⚠ WARNING: context window running low — finish this step, then "
+                "step_complete(status=\"done\") per the protocol's context-budget rule, "
+                "with remaining work listed as follow-ups in final_answer."
             )
 
         parts.append(

@@ -26,8 +26,8 @@ Types:
 
 - Read the ticket carefully.
 - Call step_complete with status="done" immediately.
-- In final_answer, output ONLY this JSON: {"ticket_type": "bug|feature|refactor|sysadmin|other", "reasoning": "1 sentence why", "keywords": ["key", "terms"]}
-- Do NOT use any tools. Just classify and respond.
+- In final_answer, output ONLY this JSON: {"ticket_type": "bug|feature|refactor|sysadmin|other", "reasoning": "1 sentence why", "keywords": ["key", "terms"], "depth": "minimal|light|standard|deep", "depth_reasoning": "1 sentence"}
+- Do NOT use any investigation tools (no reads, no searches) — your only call is step_complete.
 
 ## IMPORTANT: Also classify analysis DEPTH
 

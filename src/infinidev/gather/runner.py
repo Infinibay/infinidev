@@ -145,33 +145,6 @@ Call step_complete with status="done". In final_answer, output a JSON array of q
 If no additional questions are needed, output an empty array: []
 """
 
-_DYNAMIC_QUESTIONS_TOOL_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "generate_questions",
-        "description": "Generate additional investigation questions. Pass an empty array if no more questions are needed.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "questions": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "string", "description": "Short identifier"},
-                            "question": {"type": "string", "description": "The question text"},
-                            "context_prompt": {"type": "string", "description": "Expanded investigation prompt"},
-                        },
-                        "required": ["id", "question"],
-                    },
-                    "description": "List of questions to investigate. Empty array if none needed.",
-                },
-            },
-            "required": ["questions"],
-        },
-    },
-}
-
 
 def _emit_gather_status(text: str) -> None:
     """Emit a gather progress event to the EventBus."""

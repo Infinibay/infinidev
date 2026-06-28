@@ -117,7 +117,7 @@ OBLIQUE_STRATEGIES: list[str] = [
     "Honor thy mistake as a hidden intention",
     "What would happen if you did nothing?",
     "Remove ambiguities and convert to specifics",
-    "Ask your body",
+    "Trust the first instinct you dismissed",
     "Try the opposite extreme",
     "What context would make this idea brilliant?",
     "Make it 10x bigger. Now make it 10x smaller.",
@@ -515,7 +515,9 @@ def build_brainstorm_explore_prompt(
         "- State 'hypothesis' is acceptable if direction is promising but "
         "evidence is incomplete\n"
         "- Record feasibility signals as facts\n"
-        "- If the idea sparks a BETTER idea, include it as new_sub_problems\n\n"
+        "- If exploring this idea sparks a distinctly better idea, capture it "
+        "via new_sub_problems (the engine treats these as child idea-branches "
+        "to explore next)\n\n"
         "When done, call `resolve_node` with your findings.\n"
         "</instructions>"
     )
@@ -607,7 +609,11 @@ def build_converge_prompt(
         "- surprise_finding: the most unexpected insight that emerged\n\n"
         "Scoring guide:\n"
         "- Novelty 1 = basically an obvious approach, 5 = truly unexpected\n"
-        "- Feasibility 1 = no evidence, 5 = strong tool-based evidence\n"
+        "- Feasibility 1 = no evidence, 5 = strong tool-based evidence. "
+        "Score feasibility as if a skeptical senior engineer will challenge "
+        "each claim — a 4-5 must point to specific tool evidence (a file, a "
+        "command result), not optimism. When evidence is thin, score low and "
+        "say what experiment would settle it.\n"
         "- Completeness 1 = vague concept, 5 = ready to implement\n"
         "</instructions>"
     )

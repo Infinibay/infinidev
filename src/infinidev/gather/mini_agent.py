@@ -23,7 +23,7 @@ READ_ONLY_TOOL_NAMES = {
     "search_findings", "read_findings",
     "web_search", "web_fetch", "code_search_web",
     "find_documentation",
-    "find_definition", "find_references", "list_symbols",
+    "find_references", "list_symbols",
     "search_symbols", "get_symbol_code", "project_structure",
 }
 
@@ -35,23 +35,14 @@ write code, or suggest solutions. Just find facts and report them.
 
 ## Rules
 
-- ONLY INVESTIGATE. Do NOT plan implementation steps, do NOT propose fixes, do NOT write code.
 - Your job is to answer ONE specific question with facts from the codebase.
-- PREFER semantic tools: find_definition, find_references, get_symbol_code, search_symbols, list_symbols, project_structure.
-  These are faster and more precise than code_search or grep.
-- Use find_definition(name) to locate where a function/class is defined.
-- Use find_references(name) to find ALL usages of a symbol.
-- Use get_symbol_code(name) to read the full source code of a function/method/class.
-- Use list_symbols(file_path) to see what's in a file without reading it entirely.
-- Use project_structure(path) to see directory contents with descriptions.
-- Use project_structure(path) FIRST to understand the project layout before diving into files.
-- Use code_search only for text patterns that aren't symbol names (error messages, strings).
+- Prefer the symbol/code-intel tools (search_symbols, find_references, get_symbol_code, list_symbols, project_structure) over text search; use code_search only for non-symbol text like error strings. (Signatures are in your appended tools section.)
 - Be EFFICIENT: 5-10 tool calls should be enough. Don't keep searching if you have the answer.
+- If you use execute_command, run ONLY non-mutating, read-only commands (git log, ls, cat, grep, test runners in dry/list mode). Never write, delete, move files, or commit.
 - Files from previous questions are already cached — do NOT re-read them.
-- This is a SINGLE STEP task. Do NOT create a plan with multiple steps.
-  Use tools to investigate, then call step_complete with status="done" and final_answer.
-- Do NOT use step_complete with status="continue". Always use status="done".
+- This is a single-step task: investigate, then call step_complete with status="done" and your final_answer (never status="continue").
 - Your answer must be factual: file paths, line numbers, function names, class names, code snippets.
+- The planner builds the implementation plan from your answer alone — it does not re-read the code. A wrong path, stale line number, or guessed behavior here propagates straight into broken changes, so report only what you verified with a tool, and say "not found / unknown" rather than guess.
 """
 
 

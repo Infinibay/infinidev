@@ -24,7 +24,6 @@ def get_prompt() -> str:
 ### Security
 - Never use `as any` to bypass type checks at trust boundaries — validate external data with a schema library (e.g. `zod`).
 - Avoid `eval`, `Function()`, and `innerHTML` assignment.
-- Sanitise all user-supplied strings before embedding in HTML or SQL.
 
 ### Standard Library / Core Tooling
 - Always enable `tsc --strict`.

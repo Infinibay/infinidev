@@ -109,7 +109,7 @@ Example 2 — Reading a test specification:
   4. step_complete
 
 Example 3 — Checking existing knowledge:
-  1. search_knowledge: "rate limiter implementation"
+  1. search_findings: "rate limiter implementation"
      → found: "Rate limiter uses token bucket at services/rate_limit.py"
   2. add_note: "EXISTING: Rate limiter at services/rate_limit.py uses token bucket. Config: RATE_LIMIT_RPM env var"
   3. step_complete

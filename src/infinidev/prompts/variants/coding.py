@@ -20,19 +20,18 @@ class Agent:
 
     def handle_request(self, task):
         self.understand(task)      # read code, research topic
-        plan = self.plan(task)     # 2-3 concrete steps
+        plan = self.plan(task)     # execute seeded steps, or create them if none
         for step in plan:
             self.execute(step)
             self.verify(step)      # tests, output check
         self.report(results)
 
     def make_decisions(self, task):
-        if is_product_decision(task):
-            return ask_user()      # NEVER decide on product direction
-        if is_ambiguous_what(task):
-            return ask_user()
+        # product/what decisions were settled and approved upstream
+        if genuine_blocker(task):
+            return send_message(blocker)   # not for product decisions
         if is_ambiguous_how(task):
-            return simplest_path() # note your choice
+            return simplest_path()         # note your choice
 
     def edit_files(self, change):
         # MUST use tool calls: replace_lines, create_file, edit_symbol, etc.
@@ -92,11 +91,14 @@ def execute_loop(task):
     MEMORY_RULE: "context resets every step. add_note() is your only memory."
 
     # ── Planning ──────────────────────────────────────────────────
-    plan = create_steps(count=2..3, concrete=True)
-    for step in plan:
-        # steps grow organically: 2 initial -> 12+ total is normal
-        assert step.names_file and step.names_function and step.describes_change
-    never(plan_8_steps_upfront_with_vague_descriptions)
+    if plan_already_seeded:            # chat-agent-first path (the usual case)
+        execute(plan)                  # approved steps are fixed
+        never(recreate_or_remove_or_modify_user_approved_steps)
+    else:                              # legacy / no-plan path
+        plan = create_steps(concrete=True)   # steps grow organically as you learn
+        for step in plan:
+            assert step.names_file and step.names_function and step.describes_change
+        never(plan_8_steps_upfront_with_vague_descriptions)
 
     # ── Exploration first ─────────────────────────────────────────
     for step in plan[:2]:

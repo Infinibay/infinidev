@@ -57,6 +57,11 @@ prose. Do not suggest fixes. Do not classify issues.
 
 ## Extraction Rules
 
+**Line numbers:** all `line` and `line_range` values use NEW-file
+(post-change) line numbers for added/modified content. For a line that
+exists only on the deleted side, prefix the number with `-` (e.g.
+`"line": -55`) so consumers know it refers to removed code.
+
 1. **Be literal.** If a symbol was removed, list it in `symbols_removed`.
    Do not speculate about why.
 2. **`notable_lines` is reserved for factually suspicious snippets** that

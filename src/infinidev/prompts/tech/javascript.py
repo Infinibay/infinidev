@@ -25,7 +25,6 @@ def get_prompt() -> str:
 - Use `textContent` not `innerHTML` for DOM text insertions.
 - Use `crypto.randomUUID()` not `Math.random()` for identifiers.
 - Avoid `eval` and `new Function` — they enable code injection.
-- Sanitise all user input before rendering or embedding in queries.
 
 ### Standard Library / Core Tooling
 - Modern globals available without imports: `URL`, `URLSearchParams`, `fetch`, `crypto`, `structuredClone`, `AbortController`.

@@ -19,7 +19,7 @@ _CATEGORY_LABELS: dict[str, str] = {
     "knowledge": "Knowledge base (record/update findings, reports)",
     "docs": "Documentation management",
     "web": "Web access (search, fetch)",
-    "meta": "Planning & meta tools",
+    "meta": "Tool help & meta",
     "chat": "Direct user messaging",
 }
 
