@@ -38,6 +38,13 @@ why, which files are involved, how success is verified. This text \
 shows up in every iteration of the developer's loop as <plan-overview>, \
 so keep it compact (≈150-300 tokens) and non-redundant with per-step \
 detail.
+  * ``acceptance_criteria``: 1-5 task-level "done" conditions for the \
+WHOLE task — each a short, FALSIFIABLE statement checkable by running a \
+command, reading a file, or inspecting behaviour ("expired JWTs are \
+rejected by validate_token", "no references to legacy_verify() remain"). \
+These are the accept gate the post-loop reviewer judges against, distinct \
+from each step's own verify check. Avoid vague quality words ("looks \
+good", "is clean") — they are dropped.
   * ``steps``: ordered list. For each step:
       ``title`` — short action-oriented phrase ("Patch validate_token's \
 exp check").

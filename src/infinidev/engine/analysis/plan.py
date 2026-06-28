@@ -54,3 +54,8 @@ class Plan:
 
     overview: str
     steps: list[PlanStepSpec] = field(default_factory=list)
+    # Task-level, falsifiable "done" conditions for the WHOLE task (distinct
+    # from per-step ``verify`` checks). Authored by the planner, they become
+    # the real Task.acceptance_criteria (replacing the synthesised
+    # placeholder) and are fed to the post-loop reviewer as the accept gate.
+    acceptance_criteria: list[str] = field(default_factory=list)

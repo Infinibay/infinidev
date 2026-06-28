@@ -391,6 +391,7 @@ def _run_review_phase(
     result: str,
     reviewer: Any,
     hooks: OrchestrationHooks,
+    acceptance_criteria: list[str] | None = None,
 ) -> str:
     """Review: run the review-rework loop if enabled and applicable.
 
@@ -451,6 +452,7 @@ def _run_review_phase(
             reviewer=reviewer,
             recent_messages=get_recent_summaries(session_id, limit=5),
             on_status=_on_review_status,
+            acceptance_criteria=acceptance_criteria,
         )
     except Exception as exc:
         logger.error("Review phase failed: %s", exc, exc_info=True)
@@ -633,16 +635,20 @@ def run_task(
 
     # Wrap the user free-text into a structured ``Task`` artefact so
     # the developer prompt and the assistant critic both see the same
-    # XML-rendered spec. Today this is auto-synthesised from the user
-    # request; in a follow-up the chat agent / planner can produce a
-    # richer Task with explicit acceptance criteria, out_of_scope, etc.
-    # If construction fails (e.g. user_request too short), we fall
-    # back to ``None`` and the legacy plain ``<task>`` block is used —
-    # the pipeline never breaks because of an enrichment failure.
+    # XML-rendered spec. When the planner authored real, falsifiable
+    # acceptance criteria, they become the Task's contract (replacing the
+    # synthesised placeholder) and is_synthesised() flips to False so the
+    # critic/reviewer treat them as ground truth. If construction fails
+    # (e.g. user_request too short), we fall back to ``None`` and the legacy
+    # plain ``<task>`` block is used — the pipeline never breaks because of
+    # an enrichment failure.
     structured_task: Any | None = None
     try:
         from infinidev.engine.orchestration.task_schema import task_from_free_text
-        structured_task = task_from_free_text(escalation.user_request)
+        structured_task = task_from_free_text(
+            escalation.user_request,
+            acceptance_criteria=list(getattr(plan, "acceptance_criteria", []) or []),
+        )
     except Exception:
         logger.debug("structured Task synthesis failed; using legacy <task>", exc_info=True)
 
@@ -670,6 +676,14 @@ def run_task(
     )
 
     # ── Review ──────────────────────────────────────────────────────────
+    # Feed the reviewer the planner's real acceptance criteria (not the
+    # synthesised placeholder) so it judges against the actual contract.
+    review_criteria: list[str] | None = None
+    if structured_task is not None:
+        from infinidev.engine.orchestration.task_schema import is_synthesised
+        if not is_synthesised(structured_task):
+            review_criteria = list(structured_task.acceptance_criteria)
+
     result = _run_review_phase(
         engine=used_engine,
         agent=agent,
@@ -678,6 +692,7 @@ def run_task(
         result=result,
         reviewer=reviewer,
         hooks=hooks,
+        acceptance_criteria=review_criteria,
     )
 
     # ── Hidden work summary ─────────────────────────────────────────────

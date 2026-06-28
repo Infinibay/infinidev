@@ -995,6 +995,7 @@ def run_review_rework_loop(
     reviewer: ReviewEngine,
     recent_messages: list[str] | None = None,
     on_status: Any | None = None,
+    acceptance_criteria: list[str] | None = None,
 ) -> tuple[str, ReviewResult | None]:
     """Run verification + review-rework cycle.
 
@@ -1164,6 +1165,17 @@ def run_review_rework_loop(
     # Re-verify objectives together (cross-objective regression backstop).
     result = _run_objective_reverification_and_fix(result, objective_checks)
 
+    # Enrich the description the reviewer judges against with the planner's
+    # real acceptance criteria — the actual accept gate, previously never
+    # passed to the reviewer (it only saw the raw task string).
+    review_task_description = task_prompt[0]
+    _criteria = [c.strip() for c in (acceptance_criteria or []) if c and c.strip()]
+    if _criteria:
+        review_task_description += (
+            "\n\n## Acceptance criteria (ALL must be satisfied for approval)\n"
+            + "\n".join(f"- {c}" for c in _criteria)
+        )
+
     previous_feedback = ""
     plan_steps = getattr(engine, "get_plan_steps", lambda: [])()
 
@@ -1182,7 +1194,7 @@ def run_review_rework_loop(
             with ThreadPoolExecutor(max_workers=2) as ex:
                 ext_future = ex.submit(
                     reviewer._run_extraction_pass,
-                    task_description=task_prompt[0],
+                    task_description=review_task_description,
                     developer_result=result,
                     file_changes_summary=file_changes_summary,
                     file_contents=file_contents,
@@ -1206,7 +1218,7 @@ def run_review_rework_loop(
             )
 
         review = reviewer.review(
-            task_description=task_prompt[0],
+            task_description=review_task_description,
             developer_result=result,
             file_changes_summary=file_changes_summary,
             file_reasons=engine.get_file_change_reasons(),

@@ -280,7 +280,16 @@ def _build_plan_from_args(args: dict) -> Plan | None:
         ))
     if not overview or not steps:
         return None
-    return Plan(overview=overview, steps=steps)
+
+    # Task-level acceptance criteria: keep only falsifiable ones (drop vague
+    # quality phrases at the authoring boundary instead of trusting them).
+    from infinidev.engine.orchestration.task_schema import is_falsifiable
+    raw_criteria = args.get("acceptance_criteria") or []
+    if not isinstance(raw_criteria, list):
+        raw_criteria = []
+    criteria = [c.strip() for c in raw_criteria if isinstance(c, str) and is_falsifiable(c)]
+
+    return Plan(overview=overview, steps=steps, acceptance_criteria=criteria)
 
 
 def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:

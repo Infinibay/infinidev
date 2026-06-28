@@ -58,6 +58,21 @@ _NON_FALSIFIABLE_HINTS: tuple[str, ...] = (
 )
 
 
+def is_falsifiable(criterion: str) -> bool:
+    """True when a criterion is concrete enough to be checked.
+
+    A criterion is falsifiable when it is long enough to say something and
+    does not lean on a vague quality word. Used to FILTER planner-authored
+    acceptance criteria at the authoring boundary (a contained, non-breaking
+    alternative to making Task._validate_criteria raise globally).
+    """
+    s = (criterion or "").strip()
+    if len(s) < 5:
+        return False
+    low = s.lower()
+    return not any(hint in low for hint in _NON_FALSIFIABLE_HINTS)
+
+
 class Task(BaseModel):
     """The structured task spec.
 
@@ -199,17 +214,20 @@ def task_from_free_text(
     *,
     title: str | None = None,
     kind: str = "feature",
+    acceptance_criteria: list[str] | None = None,
 ) -> Task:
-    """Build a minimal :class:`Task` from raw user text.
+    """Build a :class:`Task` from raw user text.
 
-    Used by the pipeline as a backward-compat fallback when the chat
-    agent / planner haven't produced a structured task yet. The
-    description is the verbatim user_request; the title is either
-    explicit or derived as the first sentence (truncated to 120 chars).
+    Used by the pipeline. The description is the verbatim user_request;
+    the title is either explicit or derived as the first sentence
+    (truncated to 120 chars).
 
-    The critic is told (via prompt) that fields like ``acceptance_criteria``
-    were synthesised, not authored — so it can probe them rather than
-    treat them as ground truth.
+    ``acceptance_criteria``: when the planner authored real, falsifiable
+    criteria, pass them here and they become the task's contract (so
+    :func:`is_synthesised` returns False and the critic/reviewer treat them
+    as ground truth). When omitted/empty, a single synthesised placeholder
+    is used and the critic is told (via prompt) that it was synthesised,
+    not authored — so it can probe it rather than trust it.
     """
     text = user_request.strip()
     if len(text) < 20:
@@ -230,17 +248,20 @@ def task_from_free_text(
             # Fallback: pad short titles to satisfy min_length=5.
             title = (title + " task")[:120]
 
-    # Single synthesised acceptance criterion: "the user request is
-    # satisfied". Honest about the lack of a real spec — the critic
-    # can flag this as low-quality and ask for a refinement.
+    # Real planner-authored criteria win; otherwise fall back to a single
+    # synthesised placeholder. Honest about the lack of a real spec — the
+    # critic can flag the placeholder as low-quality and ask for refinement.
+    criteria = [c.strip() for c in (acceptance_criteria or []) if c and c.strip()]
+    if not criteria:
+        criteria = [
+            "The user's request as written in <description> is "
+            "satisfied to the user's confirmation."
+        ]
     return Task(
         title=title,
         description=text,
         kind=kind,
-        acceptance_criteria=[
-            "The user's request as written in <description> is "
-            "satisfied to the user's confirmation."
-        ],
+        acceptance_criteria=criteria,
     )
 
 

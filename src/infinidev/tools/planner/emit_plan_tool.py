@@ -102,6 +102,19 @@ class EmitPlanInput(BaseModel):
             "remove or modify these."
         ),
     )
+    acceptance_criteria: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Task-level 'done' conditions for the WHOLE task — each a "
+            "short, FALSIFIABLE statement whose truth can be checked by "
+            "running a command, reading a file, or inspecting behaviour "
+            "(e.g. 'expired JWTs are rejected by validate_token', 'no "
+            "references to legacy_verify() remain'). These are the accept "
+            "gate the post-loop reviewer checks against — distinct from "
+            "each step's own verify check. Avoid vague quality words "
+            "('looks good', 'is clean'); they are dropped. 1-5 items."
+        ),
+    )
 
 
 class EmitPlanTool(InfinibayBaseTool):
@@ -116,7 +129,7 @@ class EmitPlanTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = EmitPlanInput
 
-    def _run(self, overview: str, steps: list) -> str:
+    def _run(self, overview: str, steps: list, acceptance_criteria: list | None = None) -> str:
         # Like RespondTool/EscalateTool, this is a schema-level
         # terminator — the planner orchestrator reads the tool_call
         # args directly. This _run is the safe fallback. Under normal
@@ -124,6 +137,11 @@ class EmitPlanTool(InfinibayBaseTool):
         # json.dumps can't serialize — coerce via model_dump so the
         # fallback never crashes.
         return json.dumps(
-            {"kind": "plan", "overview": overview, "steps": steps},
+            {
+                "kind": "plan",
+                "overview": overview,
+                "steps": steps,
+                "acceptance_criteria": acceptance_criteria or [],
+            },
             default=lambda o: o.model_dump() if hasattr(o, "model_dump") else str(o),
         )
