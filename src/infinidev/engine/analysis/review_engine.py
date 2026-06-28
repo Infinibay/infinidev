@@ -1099,6 +1099,20 @@ def run_review_rework_loop(
         adversarial_on = getattr(_settings, "REVIEW_ADVERSARIAL_VERIFY_ENABLED", True)
         max_rounds = getattr(_settings, "REVIEW_OBJECTIVE_REVERIFY_MAX_ROUNDS", 2)
 
+        # Resume-aware regression detection: load this session's PRIOR verdicts
+        # (newest-first) keyed by spec, BEFORE this run writes any. An
+        # objective that the ledger shows previously PASSED but FAILs now is a
+        # regression — a stronger signal than a fresh failure.
+        prior_verdict: dict[str, str] = {}
+        try:
+            from infinidev.db.service import get_objective_verdicts
+            for row in get_objective_verdicts(session_id):
+                spec = row.get("spec")
+                if spec and spec not in prior_verdict:  # first row = most recent
+                    prior_verdict[spec] = row.get("verdict")
+        except Exception:
+            logger.debug("loading prior objective verdicts failed", exc_info=True)
+
         def _verify_one(check):
             """Dispatch a check: deterministic → ObjectiveVerifier, soft
             (llm_judge) → the independent adversarial verifier."""
@@ -1115,9 +1129,10 @@ def run_review_rework_loop(
             )
 
         def _finalize(results) -> None:
-            """Persist each objective's FINAL verdict to the durable ledger
-            and emit a one-line objective summary for the user."""
-            n_pass = n_fail = n_unver = 0
+            """Persist each objective's FINAL verdict to the durable ledger,
+            flag regressions against prior verdicts, and emit the summary."""
+            n_pass = n_fail = n_unver = n_regressed = 0
+            regressed_titles: list[str] = []
             for idx, title, check, vres in results:
                 if vres.unverifiable:
                     verdict = "UNVERIFIABLE"; n_unver += 1
@@ -1125,18 +1140,32 @@ def run_review_rework_loop(
                     verdict = "PASS"; n_pass += 1
                 else:
                     verdict = "FAIL"; n_fail += 1
+                regressed = (verdict == "FAIL" and prior_verdict.get(check.spec) == "PASS")
+                if regressed:
+                    n_regressed += 1
+                    regressed_titles.append(title)
+                detail = (vres.summary or "")[:1000]
+                if regressed:
+                    detail = f"REGRESSION (previously PASS) — {detail}"
                 try:
                     from infinidev.db.service import record_objective_verdict
                     record_objective_verdict(
                         session_id=session_id, step_index=idx, title=title,
                         kind=check.kind, spec=check.spec, verdict=verdict,
-                        detail=(vres.summary or "")[:1000],
+                        detail=detail,
                     )
                 except Exception:
                     logger.debug("record_objective_verdict failed", exc_info=True)
+            if n_regressed:
+                _notify(
+                    "objectives_regressed",
+                    f"{n_regressed} objective(s) REGRESSED (passed before, fail now): "
+                    + ", ".join(regressed_titles[:5]),
+                )
+            extra = f" ({n_regressed} regressed)" if n_regressed else ""
             _notify(
                 "objectives_summary",
-                f"Objectives: {n_pass} passed, {n_fail} failed, {n_unver} unverified",
+                f"Objectives: {n_pass} passed, {n_fail} failed{extra}, {n_unver} unverified",
             )
 
         rounds = 0
