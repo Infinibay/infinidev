@@ -374,7 +374,11 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
         hooks=hooks,
         use_phase_engine=use_phase_engine,
     )
-    click.echo(result or "Done.")
+    # Don't echo the reply again if it was already streamed/notified to
+    # the terminal by the respond branch (the develop path leaves the
+    # flag False, so its result still prints).
+    if not getattr(hooks, "reply_already_shown", False):
+        click.echo(result or "Done.")
 
 
 @click.command()
@@ -706,7 +710,11 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
                 (result or "")[:200],
             )
 
-            if result:
+            # Skip the echo when the respond reply was already streamed/
+            # notified to the terminal (otherwise it prints twice). The
+            # develop path doesn't surface its result via hooks, so the
+            # flag stays False and the final result still prints.
+            if result and not getattr(hooks, "reply_already_shown", False):
                 click.echo(click.style("\nFinal Result:", bold=True))
                 _render_final(result)
 

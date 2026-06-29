@@ -785,6 +785,9 @@ class ToolCallWidget:
                     cb(ok)
                 except Exception:
                     pass
+            # The cache key won't change when the badge expires, so
+            # schedule a repaint to revert it to the idle icon (B3).
+            _mw._schedule_badge_revert()
         clickable[0] = _copy_msg
 
         # ── 3. Render each section, prepending the accent bar ─────────

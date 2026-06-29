@@ -82,8 +82,11 @@ class ContextProgressBar(Widget):
         self._update_style()
 
     def _update_style(self) -> None:
-        """Update style based on usage percentage."""
-        self._fill_class = "critical" if self._usage < 0.3 else "warning" if self._usage < 0.7 else "good"
+        """Update style based on usage percentage.
+
+        High usage paints critical/warning; low usage paints good.
+        """
+        self._fill_class = "critical" if self._usage > 0.8 else "warning" if self._usage > 0.5 else "good"
 
     @property
     def usage(self) -> float:
@@ -112,7 +115,7 @@ class ContextProgressBar(Widget):
         """Render the context progress bar."""
         percentage = self._usage * 100
         bar_width = 25
-        filled = int(bar_width * (1.0 - self._usage))  # Fill based on remaining
+        filled = int(bar_width * self._usage)  # Fill based on used fraction
         empty = bar_width - filled
 
         bar = Text()

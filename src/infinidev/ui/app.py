@@ -102,7 +102,13 @@ class InfinidevApp:
         self._context_status: dict[str, Any] = {}
         self._context_flow: str = ""
         self._plan_text: str = ""
+        # _thinking_text is the truncated sidebar VIEW; _thinking_full is
+        # the untruncated accumulator for the current LLM call that gets
+        # flushed verbatim into the chat as a permanent "Thinking" message
+        # on stream-done. Keeping them separate stops the sidebar's "..."
+        # truncation from leaking into (and cutting off) the chat record.
         self._thinking_text: str = ""
+        self._thinking_full: str = ""
         self._steps_text: str = ""
         self._actions_text: str = ""
         self._streaming_tool_name: str | None = None
@@ -736,7 +742,14 @@ class InfinidevApp:
         extra, errors = load_attachments_from_paths(detected_paths)
         for err in errors:
             self.add_message("System", f"Image skipped — {err}", "system")
+        # Snapshot the tray summary BEFORE draining so we can detect and
+        # clear a stale "/attach" summary still parked in _actions_text —
+        # left there it suppresses the active-turn spinner (the spinner
+        # branches are gated on `not self._actions_text`).
+        tray_summary = self.attachment_tray.summary() if len(self.attachment_tray) else ""
         tray_items = self.attachment_tray.take_all()
+        if tray_summary and self._actions_text == tray_summary:
+            self._actions_text = ""
         all_attachments = tray_items + url_attachments + extra
         if all_attachments:
             # Mention vision gating when the configured model can't see them.

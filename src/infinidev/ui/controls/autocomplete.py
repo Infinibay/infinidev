@@ -96,21 +96,36 @@ class AutocompleteState:
         if not self.visible or not self.matches:
             return FormattedText([])
 
+        # Slide a window of up to 8 entries that follows selected_index so
+        # the highlighted item is always on-screen even when the match list
+        # is longer than the window.
+        window_size = 8
+        total = len(self.matches)
+        start = 0
+        if total > window_size and self.selected_index >= window_size:
+            start = min(self.selected_index - window_size + 1, total - window_size)
+        window = self.matches[start:start + window_size]
+
         fragments: list = []
-        for i, (cmd, desc) in enumerate(self.matches[:8]):  # max 8 visible
-            def _click(mouse_event, idx=i, c=cmd):
+        for offset, (cmd, desc) in enumerate(window):
+            idx = start + offset
+
+            def _click(mouse_event, idx=idx, c=cmd):
                 if mouse_event.event_type == MouseEventType.MOUSE_UP:
                     self.selected_index = idx
                     if self._on_select:
                         self._on_select(c)
                         self.dismiss()
 
-            if i == self.selected_index:
+            if offset > 0:
+                # Newline separates entries; none trailing the last one.
+                fragments.append(("", "\n"))
+
+            if idx == self.selected_index:
                 fragments.append((f"bg:{PRIMARY} #ffffff bold", f" {cmd} ", _click))
                 fragments.append((f"bg:{PRIMARY} #cccccc", f" {desc} ", _click))
             else:
                 fragments.append((f"bg:{SURFACE_LIGHT} {ACCENT}", f" {cmd} ", _click))
                 fragments.append((f"bg:{SURFACE_LIGHT} {TEXT_MUTED}", f" {desc} ", _click))
-            fragments.append(("", "\n"))
 
         return FormattedText(fragments)

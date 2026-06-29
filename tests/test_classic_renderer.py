@@ -163,6 +163,35 @@ def test_loop_end_clears_run_started(renderer, fresh_bus, status):
     assert status.run_started_at is None
 
 
+def test_loop_start_resets_stale_token_counters(renderer, fresh_bus, status):
+    # Leftover figures from the previous turn must not bleed into the next.
+    status.last_prompt_tokens = 111
+    status.last_completion_tokens = 222
+    status.total_tokens = 999
+    status.cache_read = 5
+    status.cache_create = 7
+    status.tool_calls_total = 3
+    status.iteration = 9
+    fresh_bus.emit("loop_start", 1, "agent-a", {"prompt": "new turn"})
+    assert status.last_prompt_tokens == 0
+    assert status.last_completion_tokens == 0
+    assert status.total_tokens == 0
+    assert status.cache_read == 0
+    assert status.cache_create == 0
+    assert status.tool_calls_total == 0
+    assert status.iteration == 0
+
+
+def test_flush_think_does_not_truncate_long_tail(renderer, fresh_bus, capsys):
+    long_thought = "x" * 500  # > 320, no newline → kept as the buffered tail
+    fresh_bus.emit("loop_thinking_chunk", 1, "agent-a", {"text": long_thought})
+    capsys.readouterr()  # nothing flushed yet (no newline)
+    # A non-thinking event flushes the buffered tail — in full, not cut at 320.
+    fresh_bus.emit("loop_user_message", 1, "agent-a", {"message": "go"})
+    out = capsys.readouterr().out
+    assert long_thought in out
+
+
 # ── Renderer never raises on malformed events ────────────────────────────
 
 

@@ -32,6 +32,16 @@ class NoOpHooks:
     treat ``None`` as "skip this question, use defaults".
     """
 
+    # Set by :meth:`mark_reply_shown` when the respond reply has already
+    # been surfaced (streamed or notified). Callers that also receive the
+    # reply as ``run_task``'s return value check this to avoid rendering
+    # it a second time. ``run_task`` resets it at the start of each turn.
+    reply_already_shown: bool = False
+
+    def mark_reply_shown(self) -> None:
+        """Record that the respond reply was already shown to the user."""
+        self.reply_already_shown = True
+
     def on_phase(self, phase: str) -> None:
         return None
 

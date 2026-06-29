@@ -26,10 +26,14 @@ class ChatAgentResult:
       * ``kind="escalate"`` → ``escalation`` is not None
 
     ``streamed`` is True when the chat agent ran in streaming mode and
-    already emitted the ``reply`` text incrementally via
-    ``hooks.notify_stream_chunk``. The pipeline uses this to decide
-    whether to call ``hooks.notify`` for the reply (double-render
-    otherwise). Only meaningful for ``kind="respond"``.
+    already emitted plain text incrementally via
+    ``hooks.notify_stream_chunk``. On the ``respond`` path the pipeline
+    uses it to decide whether to call ``hooks.notify`` for the reply
+    (double-render otherwise). It is *also* consulted on the
+    ``escalate`` path: when True, the pipeline calls
+    ``hooks.notify_stream_end`` to finalize a streaming bubble that was
+    opened by plain-text content emitted before the ``escalate`` tool
+    fired (otherwise that bubble stays stuck in raw-markdown mode).
     """
 
     kind: Literal["respond", "escalate"]

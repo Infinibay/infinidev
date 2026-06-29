@@ -3,7 +3,7 @@
 Converts a subset of markdown into styled (style, text) tuples for
 use in prompt_toolkit's FormattedText. Supports:
 - **bold**, *italic*, `inline code`
-- # Headings (H1-H3)
+- # Headings (H1-H6)
 - ```code blocks```
 - - bullet lists
 - > blockquotes
@@ -28,14 +28,20 @@ _BLOCKQUOTE = f"{TEXT_MUTED} italic"
 _BULLET = f"{SUCCESS} bold"
 
 # Pre-compiled patterns (avoid re.compile() on every line render)
-_HEADING_RE = re.compile(r'^(#{1,3})\s+(.+)')
+_HEADING_RE = re.compile(r'^(#{1,6})\s+(.+)')
 _BULLET_RE = re.compile(r'^(\s*)([-*])\s+(.+)')
 _NUMLIST_RE = re.compile(r'^(\s*)(\d+)[.)]\s+(.+)')
+# Inner alternative ``\S(?:.*?\S)?|\S`` requires the first and last
+# character inside the markers to be non-space, so arithmetic like
+# "5 * 4" or "a * b * c" is NOT mistaken for italic. The trailing
+# ``[*`]`` catch-all guarantees a stray asterisk/backtick is emitted as
+# literal text instead of being silently dropped by finditer.
 _INLINE_RE = re.compile(
-    r'(\*\*(.+?)\*\*)'    # **bold**
-    r'|(\*(.+?)\*)'       # *italic*
-    r'|(`(.+?)`)'         # `code`
-    r'|([^*`]+)'          # plain text
+    r'(\*\*(\S(?:.*?\S)?|\S)\*\*)'    # **bold** (non-space boundaries)
+    r'|(\*(\S(?:.*?\S)?|\S)\*)'       # *italic* (non-space boundaries)
+    r'|(`([^`]+?)`)'                   # `code` (may be space-padded)
+    r'|([^*`]+)'                       # plain text
+    r'|([*`])'                         # stray * / ` → literal
 )
 
 
@@ -103,12 +109,20 @@ def _parse_inline(text: str, base_style: str, bg_part: str) -> list[tuple[str, s
             style = f"{base_style} italic"
             fragments.append((style, m.group(4)))
         elif m.group(6) is not None:
-            # `code`
+            # `code` — CommonMark strips one symmetric padding space
+            # (e.g. `` ` x ` `` renders as "x") so a space-padded span
+            # still reads as code rather than literal backticks.
+            code = m.group(6)
+            if len(code) >= 2 and code[0] == " " and code[-1] == " " and code.strip():
+                code = code[1:-1]
             style = f"{_CODE_INLINE} {bg_part}" if bg_part else _CODE_INLINE
-            fragments.append((style, m.group(6)))
+            fragments.append((style, code))
         elif m.group(7) is not None:
             # plain text
             fragments.append((base_style, m.group(7)))
+        elif m.group(8) is not None:
+            # stray * or ` with no matching partner — emit as literal
+            fragments.append((base_style, m.group(8)))
 
     if not fragments:
         fragments.append((base_style, text))

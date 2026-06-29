@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+from prompt_toolkit.utils import get_cwidth
+
 from infinidev.ui.theme import (
     STYLE_USER_MSG, STYLE_AGENT_MSG, STYLE_SYSTEM_MSG, STYLE_THINK_MSG,
     STYLE_PENDING_MSG, STYLE_QUEUED_MSG,
@@ -100,6 +102,116 @@ def _side_by_side_enabled() -> bool:
         return False
 
 
+def _cell_len(s: str) -> int:
+    """Terminal-column width of a string (wide chars count as 2).
+
+    Layout math must count *columns*, not code points — CJK/emoji
+    occupy two cells, so ``len`` over/under-pads the right edge (B7).
+    """
+    return sum(get_cwidth(c) for c in s)
+
+
+def _take_cells(s: str, budget: int) -> str:
+    """Longest prefix of ``s`` that fits within ``budget`` columns.
+
+    Used to wrap single-style bodies (code blocks, plain text) at the
+    column budget instead of by code-point count, so CJK/emoji don't
+    overshoot the right border (B7). Always takes at least one
+    character when ``budget > 0`` so the caller's wrap loop makes
+    progress even on a lone wide char.
+    """
+    out: list[str] = []
+    acc = 0
+    for ch in s:
+        cw = get_cwidth(ch)
+        if out and acc + cw > budget:
+            break
+        acc += cw
+        out.append(ch)
+    return "".join(out)
+
+
+def _wrap_fragments(
+    frags: list[tuple[str, str]], max_width: int
+) -> list[list[tuple[str, str]]]:
+    """Wrap already-styled fragments to ``max_width`` terminal columns.
+
+    Splits fragments at column boundaries while carrying each
+    fragment's style onto the continuation lines, so markdown styling
+    (bold/italic/inline-code) survives on long lines instead of falling
+    back to the raw ``**``/`` ` `` markers (B1). Wide chars are measured
+    via ``get_cwidth``.
+    """
+    rows: list[list[tuple[str, str]]] = []
+    cur: list[tuple[str, str]] = []
+    cur_w = 0
+    for style, text in frags:
+        if not text:
+            continue
+        i, n = 0, len(text)
+        while i < n:
+            start = i
+            seg_w = 0
+            while i < n:
+                cw = get_cwidth(text[i])
+                # Always place at least one char per row so a lone wide
+                # char wider than max_width can't spin forever.
+                if cur_w + seg_w + cw > max_width and (cur or i > start):
+                    break
+                seg_w += cw
+                i += 1
+            if i > start:
+                cur.append((style, text[start:i]))
+                cur_w += seg_w
+            if i < n:
+                rows.append(cur)
+                cur, cur_w = [], 0
+    if cur or not rows:
+        rows.append(cur)
+    return rows
+
+
+def _schedule_badge_revert() -> None:
+    """Force a repaint after the copy badge expires so it reverts.
+
+    The chat cache is keyed on (msg_count, width) — neither changes when
+    the ✓/✗ feedback badge should flip back to the idle icon, so without
+    an explicit cache-bust + invalidate the badge stays frozen until an
+    unrelated event (B3). Best-effort: silently no-ops when no app is
+    running (tests) or it lacks a chat control.
+    """
+    try:
+        from prompt_toolkit.application.current import get_app_or_none
+        app = get_app_or_none()  # None (not a DummyApplication) when no app
+    except Exception:
+        app = None
+    schedule = getattr(app, "create_background_task", None)
+    if app is None or schedule is None:
+        return
+
+    async def _revert() -> None:
+        import asyncio
+        try:
+            await asyncio.sleep(_COPY_FEEDBACK_DURATION)
+        except Exception:
+            return
+        ctrl = getattr(app, "_chat_history_control", None)
+        if ctrl is not None:
+            try:
+                ctrl.invalidate_cache()
+            except Exception:
+                pass
+        try:
+            app.invalidate()
+        except Exception:
+            pass
+
+    try:
+        schedule(_revert())
+    except Exception:
+        pass
+
+
 def _render_bordered_body(
     text: str, width: int,
     border_char: str, border_style: str, body_style: str, fill_style: str,
@@ -121,7 +233,7 @@ def _render_bordered_body(
                 in_code_block = not in_code_block
                 from infinidev.ui.controls.markdown_render import render_markdown_line
                 frags = render_markdown_line(raw_line, body_style, bg_part)
-                used = 2 + sum(len(t) for _, t in frags)
+                used = 2 + sum(_cell_len(t) for _, t in frags)
                 lines.append(
                     [(border_style, f"{border_char} ")]
                     + frags
@@ -131,16 +243,16 @@ def _render_bordered_body(
 
             if in_code_block:
                 code_style = f"{_CODE_BLOCK_STYLE} {bg_part}" if bg_part else _CODE_BLOCK_STYLE
-                while len(raw_line) > content_width:
-                    chunk = raw_line[:content_width]
-                    used = 2 + len(chunk)
+                while _cell_len(raw_line) > content_width:
+                    chunk = _take_cells(raw_line, content_width)
+                    used = 2 + _cell_len(chunk)
                     lines.append([
                         (border_style, f"{border_char} "),
                         (code_style, chunk),
                         (fill_style, " " * max(0, width - used)),
                     ])
-                    raw_line = raw_line[content_width:]
-                used = 2 + len(raw_line)
+                    raw_line = raw_line[len(chunk):]
+                used = 2 + _cell_len(raw_line)
                 lines.append([
                     (border_style, f"{border_char} "),
                     (code_style, raw_line),
@@ -150,23 +262,19 @@ def _render_bordered_body(
 
             from infinidev.ui.controls.markdown_render import render_markdown_line
             frags = render_markdown_line(raw_line, body_style, bg_part)
-            used = 2 + sum(len(t) for _, t in frags)
+            used = 2 + sum(_cell_len(t) for _, t in frags)
             if used > width:
-                while len(raw_line) > content_width:
-                    chunk = raw_line[:content_width]
-                    u = 2 + len(chunk)
-                    lines.append([
-                        (border_style, f"{border_char} "),
-                        (body_style, chunk),
-                        (fill_style, " " * max(0, width - u)),
-                    ])
-                    raw_line = raw_line[content_width:]
-                used = 2 + len(raw_line)
-                lines.append([
-                    (border_style, f"{border_char} "),
-                    (body_style, raw_line),
-                    (fill_style, " " * max(0, width - used)),
-                ])
+                # Long line: wrap the already-PARSED styled fragments so
+                # bold/italic/inline-code styling survives on the
+                # continuation lines. Re-wrapping the raw string here
+                # would re-show literal ``**`` / `` ` `` markers (B1).
+                for row in _wrap_fragments(frags, content_width):
+                    row_used = 2 + sum(_cell_len(t) for _, t in row)
+                    lines.append(
+                        [(border_style, f"{border_char} ")]
+                        + row
+                        + [(fill_style, " " * max(0, width - row_used))]
+                    )
             else:
                 lines.append(
                     [(border_style, f"{border_char} ")]
@@ -174,16 +282,16 @@ def _render_bordered_body(
                     + [(fill_style, " " * max(0, width - used))]
                 )
         else:
-            while len(raw_line) > content_width:
-                chunk = raw_line[:content_width]
-                used = 2 + len(chunk)
+            while _cell_len(raw_line) > content_width:
+                chunk = _take_cells(raw_line, content_width)
+                used = 2 + _cell_len(chunk)
                 lines.append([
                     (border_style, f"{border_char} "),
                     (body_style, chunk),
                     (fill_style, " " * max(0, width - used)),
                 ])
-                raw_line = raw_line[content_width:]
-            used = 2 + len(raw_line)
+                raw_line = raw_line[len(chunk):]
+            used = 2 + _cell_len(raw_line)
             lines.append([
                 (border_style, f"{border_char} "),
                 (body_style, raw_line),
@@ -222,6 +330,13 @@ class BorderedWidget:
         sender = msg.get("sender", "")
         text = msg.get("text", "")
 
+        # Empty/whitespace body → render nothing. Otherwise an empty
+        # message flashes a stray bordered "sender:" box (header + blank
+        # body + separator) before streaming fills it in (B5). Once text
+        # arrives the message re-renders normally.
+        if not (text and text.strip()):
+            return RenderResult(lines=[], clickable_offsets={})
+
         # Extract bg
         bg_part = ""
         for part in self._body_style.split():
@@ -259,7 +374,7 @@ class BorderedWidget:
         else:
             copy_label, copy_style = COPY_ICON, COPY_ICON_STYLE
 
-        header_used = 2 + len(header_text) + len(copy_label)
+        header_used = 2 + _cell_len(header_text) + _cell_len(copy_label)
         gap = max(0, width - header_used)
         lines.append([
             (border_style, f"{self._border_char} "),
@@ -276,6 +391,9 @@ class BorderedWidget:
             _copy_highlight[id(m)] = (_time.monotonic(), ok)
             if _copy_feedback:
                 _copy_feedback(ok)
+            # The chat cache key won't change when the badge expires, so
+            # schedule a repaint to revert it to the idle icon (B3).
+            _schedule_badge_revert()
         clickable[0] = _copy_msg
 
         # Body
@@ -334,7 +452,10 @@ class DiffWidget:
 
         lines: list[list[tuple[str, str]]] = []
 
-        pad = " " * max(0, width - len(header_text) - 4)
+        # 3 leading chars (" ", arrow, " ") precede header_text, so pad
+        # with width-3 to fill the full bar — matching the group-header
+        # path below. ``-4`` left a 1-column unpainted notch (B4).
+        pad = " " * max(0, width - len(header_text) - 3)
         lines.append([(f"{DIFF_TITLE_FG} {title_bg} bold", f" {arrow} {header_text}{pad}")])
 
         if not collapsed and diff_text:
@@ -449,9 +570,20 @@ _EXEC_EXPANDED_STDERR = 20
 
 
 def _truncate(s: str, width: int) -> str:
-    if len(s) <= width:
+    # Truncate to `width` terminal columns (not code points) so wide
+    # chars (CJK/emoji) don't over/under-shoot the column budget (B7).
+    if _cell_len(s) <= width:
         return s
-    return s[: max(1, width - 1)] + "…"
+    budget = max(1, width - 1)  # reserve one column for the ellipsis
+    acc = 0
+    out: list[str] = []
+    for ch in s:
+        cw = get_cwidth(ch)
+        if acc + cw > budget:
+            break
+        acc += cw
+        out.append(ch)
+    return "".join(out) + "…"
 
 
 class ExecCommandWidget:

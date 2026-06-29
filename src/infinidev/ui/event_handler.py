@@ -41,6 +41,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
     if event_type == "loop_step_update":
         # Clear all transient state on step transition
         app._thinking_text = ""
+        app._thinking_full = ""
         app._streaming_tool_name = None
         app._streaming_token_count = 0
         app._actions_text = ""  # Reset so "waiting for LLM..." animation shows
@@ -166,17 +167,19 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
 
         if phase == "done":
             # Stream finished (or failed) — clear streaming UI state.
-            # Also flush the accumulated native thinking buffer into the
-            # chat as a `think` message so extended-thinking models leave
-            # a permanent trail (the sidebar gets cleared on the next
-            # step transition; without this flush the reasoning is lost).
-            buf = (getattr(app, "_thinking_text", "") or "").strip()
-            if buf:
-                # Strip the leading "..." truncation marker the sidebar
-                # adds when the buffer overflows.
-                clean = buf.lstrip(".").lstrip()
-                if clean:
-                    app.add_message("Thinking", clean, "think")
+            # Flush the FULL accumulated native thinking buffer into the
+            # chat as a permanent `think` message so extended-thinking
+            # models leave a complete, untruncated trail. Reset BOTH the
+            # full accumulator and the sidebar view afterwards: there are
+            # several LLM calls per step, each ending in a "done" event, so
+            # without the reset every subsequent "done" would re-emit the
+            # same buffer (duplicate) and the sidebar's truncated view
+            # would leak into the chat (cut off).
+            full = (getattr(app, "_thinking_full", "") or "").strip()
+            if full:
+                app.add_message("Thinking", full, "think")
+            app._thinking_full = ""
+            app._thinking_text = ""
             app._streaming_tool_name = None
             app._streaming_token_count = 0
         elif phase == "tool_detected" and tool_name:
@@ -187,13 +190,17 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             app._streaming_token_count = token_count
 
     elif event_type == "loop_thinking_chunk":
-        # Streaming thinking — append to the THINKING sidebar panel
+        # Streaming thinking — accumulate the FULL reasoning (for the
+        # eventual permanent chat flush on stream-done) and render a
+        # truncated VIEW of it in the THINKING sidebar panel.
         chunk = data.get("text", "")
         if chunk:
-            app._thinking_text += chunk
-            # Keep only last ~500 chars to prevent sidebar overflow
-            if len(app._thinking_text) > 500:
-                app._thinking_text = "..." + app._thinking_text[-450:]
+            app._thinking_full += chunk
+            # Sidebar view: keep only last ~500 chars to prevent overflow.
+            if len(app._thinking_full) > 500:
+                app._thinking_text = "..." + app._thinking_full[-450:]
+            else:
+                app._thinking_text = app._thinking_full
             # Throttle redraws to ~10 FPS to avoid excessive invalidation
             import time
             now = time.monotonic()
@@ -209,6 +216,9 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             sender = "Analyst" if agent_id == "analyst" else "Thinking"
             app.add_message(sender, reasoning, "think")
             # Show in THINKING panel (truncated). Cleared on step transition.
+            # Deliberately do NOT touch _thinking_full — this reasoning has
+            # already been written to chat above, so the next stream-done
+            # flush must not re-emit it as a duplicate.
             if len(reasoning) > 500:
                 app._thinking_text = "..." + reasoning[-450:]
             else:

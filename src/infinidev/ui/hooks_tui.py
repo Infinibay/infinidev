@@ -35,6 +35,12 @@ class TUIHooks:
 
     def __init__(self, app: InfinidevApp) -> None:
         self._app = app
+        # Set True once the pipeline has already displayed the final chat
+        # reply (the respond path streams/notifies it itself). The worker
+        # checks this to avoid re-appending `result` and double-rendering
+        # the reply. The develop/escalate path leaves it False so the
+        # worker shows the developer's result.
+        self.reply_already_shown = False
 
     # ── Phase / status ───────────────────────────────────────────────────
 
@@ -97,7 +103,10 @@ class TUIHooks:
             "collapsed": True,
         })
         self._app._chat_history_control.invalidate_cache()
-        self._app._chat_history_control.show_thinking = True
+        # notify_error is terminal — do NOT re-enable show_thinking here,
+        # or a completed/errored turn would show a spurious "thinking..."
+        # spinner underneath the error. The worker also resets it to False
+        # at the end of the turn.
         try:
             self._app.invalidate()
         except Exception:
@@ -128,6 +137,17 @@ class TUIHooks:
         LLM finishes producing it.
         """
         self._app.finalize_streaming_message(speaker, kind)
+
+    def mark_reply_shown(self) -> None:
+        """Record that the chat reply has already been displayed.
+
+        Called by the pipeline's ``respond`` branch right after it has
+        streamed / notified the reply, so the worker knows not to append
+        ``result`` a second time. Classic CLI hooks don't implement this
+        (the pipeline calls it defensively) — their reply is printed from
+        run_task's return value by the caller.
+        """
+        self.reply_already_shown = True
 
     # ── User interaction ─────────────────────────────────────────────────
 

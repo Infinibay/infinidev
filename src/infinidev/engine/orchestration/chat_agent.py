@@ -318,7 +318,7 @@ def _run_llm_loop(
             if name == "respond":
                 return _build_respond(tc, user_input, streamed=streamed)
             if name == "escalate":
-                return _build_escalate(tc, user_input)
+                return _build_escalate(tc, user_input, streamed=streamed)
 
         # No terminator — execute read-only tools and continue.
         for tc in tool_calls:
@@ -372,17 +372,25 @@ def _build_respond(
     args = _parse_args(tc)
     message = (args.get("message") or "").strip()
     if not message:
-        return _fallback_respond(_detect_lang(user_input), reason="empty_respond")
+        return _fallback_respond(
+            _detect_lang(user_input), reason="empty_respond", streamed=streamed,
+        )
     return ChatAgentResult(kind="respond", reply=message, streamed=streamed)
 
 
-def _build_escalate(tc: Any, user_input: str) -> ChatAgentResult:
+def _build_escalate(
+    tc: Any, user_input: str, *, streamed: bool = False,
+) -> ChatAgentResult:
     args = _parse_args(tc)
     understanding = (args.get("understanding") or "").strip()
     if not understanding:
         # Defensive: escalate with empty understanding is a useless
         # handoff. Fall back to respond so the user isn't stranded.
-        return _fallback_respond(_detect_lang(user_input), reason="empty_escalate")
+        # Carry `streamed` so the pipeline still finalizes any orphaned
+        # streaming bubble opened before the (empty) escalate fired.
+        return _fallback_respond(
+            _detect_lang(user_input), reason="empty_escalate", streamed=streamed,
+        )
     opened = args.get("opened_files") or []
     if not isinstance(opened, list):
         opened = []
@@ -399,7 +407,10 @@ def _build_escalate(tc: Any, user_input: str) -> ChatAgentResult:
         council_requested=bool(args.get("council_requested")),
         council_focus=focus,  # type: ignore[arg-type]
     )
-    return ChatAgentResult(kind="escalate", escalation=packet)
+    # `streamed` carries through whether any plain-text content was emitted
+    # to the UI before the escalate tool fired — the pipeline uses it to
+    # finalize the orphaned streaming bubble.
+    return ChatAgentResult(kind="escalate", escalation=packet, streamed=streamed)
 
 
 def _build_max_iter_escalation(
@@ -627,6 +638,7 @@ def _detect_lang(text: str) -> str:
 
 def _fallback_respond(
     lang: str, *, reason: str = "exception", exc: Exception | None = None,
+    streamed: bool = False,
 ) -> ChatAgentResult:
     """Build a respond result from a localized fallback message.
 
@@ -634,6 +646,11 @@ def _fallback_respond(
     result so the UI can render it inside a collapsed widget — the
     short message still dominates the chat, but the user can expand
     it to see the real error without digging through log files.
+
+    ``streamed`` propagates from the caller when plain text was already
+    streamed to the UI before falling back (e.g. an empty-understanding
+    escalate), so the pipeline can finalize the orphaned streaming
+    bubble instead of leaving it stuck in raw-markdown mode.
     """
     if exc is not None:
         logger.warning("chat_agent fallback (reason=%s): %s", reason, exc)
@@ -646,7 +663,9 @@ def _fallback_respond(
         tb_text = "".join(
             traceback.format_exception(type(exc), exc, exc.__traceback__)
         )
-    return ChatAgentResult(kind="respond", reply=message, error_traceback=tb_text)
+    return ChatAgentResult(
+        kind="respond", reply=message, error_traceback=tb_text, streamed=streamed,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────

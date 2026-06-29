@@ -27,7 +27,9 @@ def _format_count(value: int | None) -> str:
     """Format a token count in a compact way, '?' when unknown."""
     if value is None:
         return "?"
-    if value >= 1_000_000:
+    # 999_500..999_999 rounds up to 1000k under the ``k`` branch, so roll it
+    # over to ``1.0M`` instead of showing a four-digit ``1000k``.
+    if value >= 999_500:
         return f"{value / 1_000_000:.1f}M"
     if value >= 1_000:
         return f"{value / 1_000:.0f}k"
@@ -47,7 +49,7 @@ def build_usage_bar_fragments(
     *available* is ``None`` (unknown context window), the bar is
     muted and the available side is shown as ``*``.
     """
-    pct_val = min(pct, 1.0)
+    pct_val = max(0.0, min(pct, 1.0))
     used_str = _format_count(used)
     label_col = f"{label:<5}"
 

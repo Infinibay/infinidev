@@ -393,3 +393,298 @@ class TestPipelineDoesNotDoubleRender:
             speaker == "Infinidev" and msg == "atomic reply"
             for speaker, msg, _ in hooks.messages
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# A2 / A3: respond-reply de-dup and escalate stream finalization
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _FakeChatControl:
+    def __init__(self) -> None:
+        self.show_thinking = False
+
+    def invalidate_cache(self) -> None:
+        pass
+
+
+class _FakeApp:
+    """Mirrors the InfinidevApp message methods TUIHooks drives."""
+
+    def __init__(self) -> None:
+        self.chat_messages: list[dict[str, Any]] = []
+        self._chat_history_control = _FakeChatControl()
+        self._actions_text = ""
+        self._context_flow = ""
+
+    def add_message(self, sender: str, text: str, msg_type: str = "agent") -> None:
+        self.chat_messages.append(
+            {"sender": sender, "text": text, "type": msg_type}
+        )
+
+    def append_to_last_message(
+        self, sender: str, chunk: str, msg_type: str = "agent",
+    ) -> None:
+        last = self.chat_messages[-1] if self.chat_messages else None
+        if (
+            last is not None
+            and last.get("sender") == sender
+            and last.get("type") == msg_type
+            and last.get("streaming") is True
+        ):
+            last["text"] = str(last.get("text") or "") + chunk
+        else:
+            self.chat_messages.append({
+                "sender": sender, "text": chunk,
+                "type": msg_type, "streaming": True,
+            })
+
+    def finalize_streaming_message(
+        self, sender: str, msg_type: str = "agent",
+    ) -> None:
+        last = self.chat_messages[-1] if self.chat_messages else None
+        if (
+            last is not None
+            and last.get("sender") == sender
+            and last.get("type") == msg_type
+            and last.get("streaming") is True
+        ):
+            last["streaming"] = False
+
+    def invalidate(self) -> None:
+        pass
+
+
+class _FakeAgent:
+    agent_id = "x"
+    backstory = ""
+    _system_prompt_identity = ""
+
+    def activate_context(self, session_id): pass
+    def deactivate(self): pass
+
+
+class _FakeEngine:
+    def execute(self, **kw): return "done"
+    def has_file_changes(self): return False
+
+
+class TestRespondReplyLandsInChatOnce:
+    """A2: the respond reply must appear in the chat exactly once even
+    though both the pipeline (via TUIHooks.notify) and the worker would
+    otherwise display it (the worker re-appends run_task's return value).
+    The pipeline marks it shown so the worker skips the second append."""
+
+    def test_respond_reply_lands_in_chat_exactly_once(self, monkeypatch):
+        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
+        from infinidev.engine.orchestration.pipeline import run_task
+        from infinidev.ui.hooks_tui import TUIHooks
+
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(
+                kind="respond", reply="hola!", streamed=False,
+            ),
+        )
+
+        app = _FakeApp()
+        hooks = TUIHooks(app)
+
+        result = run_task(
+            agent=_FakeAgent(),
+            user_input="hola",
+            session_id="s",
+            engine=_FakeEngine(),
+            reviewer=object(),
+            hooks=hooks,
+        )
+
+        # The pipeline displayed the reply and flagged it as shown.
+        assert hooks.reply_already_shown is True
+
+        # Replicate the worker's post-pipeline append guard.
+        if result and not getattr(hooks, "reply_already_shown", False):
+            app.add_message("Infinidev", result, "agent")
+
+        # The reply text appears exactly once across the whole chat.
+        occurrences = [m for m in app.chat_messages if m["text"] == "hola!"]
+        assert len(occurrences) == 1
+
+    def test_develop_path_leaves_flag_unset_so_worker_shows_result(self, monkeypatch):
+        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
+        from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+        from infinidev.engine.orchestration.pipeline import run_task
+        from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+        from infinidev.ui.hooks_tui import TUIHooks
+
+        escalation = EscalationPacket(
+            user_request="fix bug", understanding="fix the thing",
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(kind="escalate", escalation=escalation),
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.analysis.planner.run_planner",
+            lambda *a, **kw: Plan(overview="ov", steps=[PlanStepSpec(title="s")]),
+        )
+
+        app = _FakeApp()
+        hooks = TUIHooks(app)
+        result = run_task(
+            agent=_FakeAgent(),
+            user_input="fix",
+            session_id="s",
+            engine=_FakeEngine(),
+            reviewer=object(),
+            hooks=hooks,
+        )
+        # Develop path never marks the reply shown — the worker must
+        # display the developer's result.
+        assert hooks.reply_already_shown is False
+        if result and not getattr(hooks, "reply_already_shown", False):
+            app.add_message("Infinidev", result, "agent")
+        assert any(m["text"] == "done" for m in app.chat_messages)
+
+
+class TestClassicReplyShownOnce:
+    """A2 (classic CLI): the respond reply must reach the terminal once.
+    ClickHooks/NonInteractiveHooks print it via ``notify``; ``main.py``
+    then prints ``run_task``'s return value. The ``reply_already_shown``
+    flag lets ``main.py`` skip that second print."""
+
+    def test_noninteractive_respond_marks_shown_and_prints_once(
+        self, monkeypatch, capsys,
+    ):
+        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
+        from infinidev.engine.orchestration.pipeline import run_task
+        from infinidev.engine.orchestration.hooks import NonInteractiveHooks
+
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(
+                kind="respond", reply="hola!", streamed=False,
+            ),
+        )
+
+        hooks = NonInteractiveHooks()
+        result = run_task(
+            agent=_FakeAgent(), user_input="hola", session_id="s",
+            engine=_FakeEngine(), reviewer=object(), hooks=hooks,
+        )
+
+        # The pipeline printed the reply via notify and flagged it shown.
+        assert hooks.reply_already_shown is True
+
+        # Replicate main.py's guard: skip the echo when already shown.
+        import click
+        if not getattr(hooks, "reply_already_shown", False):
+            click.echo(result or "Done.")
+
+        assert capsys.readouterr().out.count("hola!") == 1
+
+    def test_run_task_resets_flag_each_turn(self, monkeypatch):
+        # A reused hooks object (the classic REPL keeps one ClickHooks)
+        # must not carry "already shown" from a prior respond turn into a
+        # later develop turn — run_task resets it at entry.
+        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
+        from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+        from infinidev.engine.orchestration.pipeline import run_task
+        from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+        from infinidev.ui.hooks_tui import TUIHooks
+
+        escalation = EscalationPacket(
+            user_request="fix", understanding="fix it",
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(kind="escalate", escalation=escalation),
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.analysis.planner.run_planner",
+            lambda *a, **kw: Plan(overview="ov", steps=[PlanStepSpec(title="s")]),
+        )
+
+        app = _FakeApp()
+        hooks = TUIHooks(app)
+        hooks.reply_already_shown = True  # stale from a prior turn
+        run_task(
+            agent=_FakeAgent(), user_input="fix", session_id="s",
+            engine=_FakeEngine(), reviewer=object(), hooks=hooks,
+        )
+        assert hooks.reply_already_shown is False
+
+
+class TestEscalateFinalizesOrphanedStream:
+    """A3: when the chat agent streamed plain text and then escalated,
+    the partial streaming bubble must be finalized before the preview /
+    plan messages are appended, or it stays in raw-markdown mode forever
+    (finalize only ever flips the LAST message)."""
+
+    def test_streamed_escalate_calls_stream_end_before_preview(self, monkeypatch):
+        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
+        from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+        from infinidev.engine.orchestration.pipeline import run_task
+        from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+
+        escalation = EscalationPacket(
+            user_request="fix bug",
+            understanding="fix the thing",
+            user_visible_preview="Voy a arreglarlo.",
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(
+                kind="escalate", escalation=escalation, streamed=True,
+            ),
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.analysis.planner.run_planner",
+            lambda *a, **kw: Plan(overview="ov", steps=[PlanStepSpec(title="s")]),
+        )
+
+        hooks = _RecordingHooks()
+        run_task(
+            agent=_FakeAgent(),
+            user_input="fix",
+            session_id="s",
+            engine=_FakeEngine(),
+            reviewer=object(),
+            hooks=hooks,
+        )
+        # The orphaned streaming bubble was finalized.
+        assert ("Infinidev", "agent") in hooks.stream_ends
+        # And the preview was still shown afterwards.
+        assert any(msg == "Voy a arreglarlo." for _, msg, _ in hooks.messages)
+
+    def test_unstreamed_escalate_does_not_call_stream_end(self, monkeypatch):
+        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
+        from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+        from infinidev.engine.orchestration.pipeline import run_task
+        from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+
+        escalation = EscalationPacket(
+            user_request="fix bug", understanding="fix the thing",
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(
+                kind="escalate", escalation=escalation, streamed=False,
+            ),
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.analysis.planner.run_planner",
+            lambda *a, **kw: Plan(overview="ov", steps=[PlanStepSpec(title="s")]),
+        )
+
+        hooks = _RecordingHooks()
+        run_task(
+            agent=_FakeAgent(),
+            user_input="fix",
+            session_id="s",
+            engine=_FakeEngine(),
+            reviewer=object(),
+            hooks=hooks,
+        )
+        # Nothing was streamed — no orphaned bubble to finalize.
+        assert hooks.stream_ends == []

@@ -46,6 +46,14 @@ class ChatHistoryControl(UIControl):
         self._group_states: dict[int, bool] = {}
         # Rebuild throttle
         self._last_rebuild: float = 0.0
+        # Last *rendered* line list (message lines only — excludes the
+        # thinking indicator). Survives invalidate_cache() so the throttle
+        # can reuse it during streaming bursts and so the scroll-anchor
+        # delta has a stable, thinking-independent reference.
+        self._last_lines: list[list[tuple[str, str]]] | None = None
+        # One-shot guard: a trailing rebuild has been scheduled for after
+        # the current throttle window (see _schedule_trailing_rebuild).
+        self._trailing_scheduled: bool = False
     def invalidate_cache(self) -> None:
         """Mark cache as stale.
 
@@ -73,7 +81,12 @@ class ChatHistoryControl(UIControl):
             callback = self._clickable_lines.get(line_idx)
             if callback is not None:
                 callback()
-                self._line_cache = None  # rebuild on next frame
+                # Rebuild on next frame — and bypass the streaming
+                # throttle so a collapse/expand toggle clicked during a
+                # burst renders immediately instead of reusing stale
+                # _last_lines for up to _REBUILD_MIN_INTERVAL (C3 regression).
+                self._line_cache = None
+                self._last_rebuild = 0.0
                 return None
         return NotImplemented
 
@@ -221,17 +234,39 @@ class ChatHistoryControl(UIControl):
         if cache_valid:
             lines = self._line_cache
         else:
-            # Throttle: skip rebuild if we just did one and msg count
-            # hasn't changed (pure repaint).  Always rebuild when new
-            # messages arrive so they appear immediately.
+            # Throttle: skip the full rebuild if we did one very recently
+            # and the message geometry is unchanged (same count + width) —
+            # this is the streaming-burst case, where the last message's
+            # text grows every frame. Always rebuild when a *new* message
+            # arrives so it appears immediately.
+            #
+            # The reuse source is _last_lines, NOT _line_cache: the normal
+            # streaming path calls invalidate_cache() each frame, which
+            # nulls _line_cache, so gating on it left this throttle dead
+            # and ran a full rebuild every frame. _last_lines survives
+            # invalidation, so the throttle now actually engages.
             now = time.monotonic()
-            if (self._line_cache is not None
-                    and self._cache_len == msg_count
-                    and now - self._last_rebuild < _REBUILD_MIN_INTERVAL):
-                lines = self._line_cache
+            throttled = (
+                self._last_lines is not None
+                and self._cache_len == msg_count
+                and self._cache_width == width
+                and now - self._last_rebuild < _REBUILD_MIN_INTERVAL
+            )
+            if throttled:
+                lines = self._last_lines
+                # Reused lines are stale (mid-stream text). Guarantee a
+                # real rebuild once the throttle window closes so the
+                # final state always renders — text never stays frozen.
+                self._schedule_trailing_rebuild()
             else:
                 lines = self._do_rebuild(msg_count, width)
                 self._last_rebuild = now
+                # A real rebuild just produced fresh lines, so any pending
+                # trailing-rebuild guard is moot. Clear it defensively so a
+                # scheduled timer that never fired (app torn down mid-window)
+                # can't wedge the flag True and permanently disable future
+                # trailing rebuilds.
+                self._trailing_scheduled = False
         # Append thinking indicator if active
         if self._show_thinking:
             total = len(lines) + 2
@@ -260,7 +295,13 @@ class ChatHistoryControl(UIControl):
         # rebuild we'll bump _scroll_offset by the delta when the user
         # is scrolled up, so the visible content stays anchored at the
         # same position instead of drifting down with new entries.
-        prev_line_count = self._line_count
+        #
+        # Use the previous *rebuild's* line count (message lines only) —
+        # NOT self._line_count, which includes the 2 thinking-indicator
+        # lines _build_lines appends. new_line_count below is message-only
+        # too, so both sides of the delta stay consistent; otherwise the
+        # anchor drifts ~2 lines per rebuild while "thinking" is active.
+        prev_line_count = len(self._last_lines) if self._last_lines is not None else 0
 
         lines: list[list[tuple[str, str]]] = []
         self._clickable_lines = {}
@@ -274,7 +315,12 @@ class ChatHistoryControl(UIControl):
                 continue
 
             if group.is_group:
-                collapsed = self._group_states.get(group.start_index, True)
+                # Default EXPANDED (False): consecutive agent/system/user
+                # replies must all stay visible — collapsing by default hid
+                # earlier messages behind a "Responses (N)" header and read
+                # as "content vanished". The manual collapse toggle still
+                # works; clicking the header flips this state.
+                collapsed = self._group_states.get(group.start_index, False)
 
                 header_result = widget.render_group_header(
                     len(group.messages), collapsed, width,
@@ -283,7 +329,7 @@ class ChatHistoryControl(UIControl):
                 lines.extend(header_result.lines)
 
                 def _toggle_group(idx=group.start_index):
-                    self._group_states[idx] = not self._group_states.get(idx, True)
+                    self._group_states[idx] = not self._group_states.get(idx, False)
                 self._clickable_lines[header_start] = _toggle_group
 
                 if collapsed:
@@ -323,9 +369,49 @@ class ChatHistoryControl(UIControl):
                 )
 
         self._line_cache = lines
+        self._last_lines = lines
         self._cache_len = msg_count
         self._cache_width = width
         return lines
+
+    def _schedule_trailing_rebuild(self) -> None:
+        """Ensure a real rebuild lands once the throttle window closes.
+
+        When ``_build_lines`` reuses stale ``_last_lines`` during a burst,
+        the most recent change (e.g. the final streamed chunk, or the
+        markdown re-render on stream end) would never appear if no further
+        redraw is triggered. Schedule a one-shot invalidate just past the
+        throttle interval: ``create_content`` runs again with the interval
+        elapsed, so the throttle no longer applies and a fresh rebuild
+        renders the final state.
+
+        Idempotent within a window via ``_trailing_scheduled``. Wrapped in
+        try/except so it is a no-op when no application is running (tests),
+        where ``get_app()`` returns a loop-less DummyApplication.
+        """
+        if self._trailing_scheduled:
+            return
+        try:
+            from prompt_toolkit.application import get_app
+            app = get_app()
+            loop = app.loop
+        except Exception:
+            return
+        if loop is None:
+            return
+
+        def _fire() -> None:
+            self._trailing_scheduled = False
+            try:
+                app.invalidate()
+            except Exception:
+                pass
+
+        try:
+            loop.call_later(_REBUILD_MIN_INTERVAL, _fire)
+            self._trailing_scheduled = True
+        except Exception:
+            self._trailing_scheduled = False
 
     def _render_fallback(self, msg: dict, width: int) -> list[list[tuple[str, str]]]:
         """Minimal fallback for unknown message types."""

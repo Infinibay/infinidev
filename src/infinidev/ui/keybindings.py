@@ -224,8 +224,13 @@ def create_global_keybindings(app_state) -> KeyBindings:
 # If context_set contains "always" it is shown unconditionally.
 # Otherwise it is shown when ANY of its contexts match the current app state.
 
+# Ordered by importance: the footer drops trailing hints first when the
+# terminal is too narrow to show them all (best-effort, never clipped
+# mid-word), so the highest-value keys — quit and the stop/cancel
+# affordance — come first and survive truncation.
 FOOTER_HINTS: list[tuple[str, str, frozenset[str]]] = [
     ("Ctrl+C", "Clear/Quit", frozenset({"always"})),
+    ("Esc",    "Stop/close", frozenset({"always"})),
     ("Ctrl+O", "Open file",  frozenset({"always"})),
     ("Ctrl+E", "Explorer",   frozenset({"always"})),
     ("Alt+.",  "Sidebar",    frozenset({"always"})),
@@ -236,7 +241,6 @@ FOOTER_HINTS: list[tuple[str, str, frozenset[str]]] = [
     ("Ctrl+G", "Search",     frozenset({"always"})),
     ("Ctrl+B", "Tasks",      frozenset({"always"})),
     ("F2",     "Chat",       frozenset({"always"})),
-    ("Esc",    "Stop/close", frozenset({"always"})),
 ]
 
 

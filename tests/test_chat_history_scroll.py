@@ -112,3 +112,111 @@ def test_end_key_reengages_tail_follow(chat):
 
     assert c._follow_tail is True
     assert c._scroll_offset == 0
+
+
+def _flat_text(c: ChatHistoryControl) -> str:
+    """Concatenate all rendered (cached) line text for content assertions."""
+    return "".join(t for line in (c._line_cache or []) for _, t in line)
+
+
+# ── C1: consecutive agent/system replies must stay visible by default ──
+
+def test_consecutive_agent_messages_both_visible_by_default(chat):
+    c, msgs = chat
+    msgs.append({"type": "agent", "sender": "A", "text": "first reply"})
+    msgs.append({"type": "agent", "sender": "A", "text": "second reply"})
+    _force_render(c)
+
+    # No manual toggle yet → default must be EXPANDED, so BOTH replies
+    # render. Previously the group defaulted to collapsed and only the
+    # last one showed under a "Responses (2)" header.
+    assert c._group_states == {}
+    flat = _flat_text(c)
+    assert "first reply" in flat
+    assert "second reply" in flat
+
+
+def test_group_header_toggle_collapses_then_expands(chat):
+    c, msgs = chat
+    msgs.append({"type": "agent", "sender": "A", "text": "first reply"})
+    msgs.append({"type": "agent", "sender": "A", "text": "second reply"})
+    _force_render(c)
+
+    # The group header is the first clickable line (offset 0).
+    toggle = c._clickable_lines[0]
+
+    # First click: collapse → earlier reply hidden, last one kept.
+    toggle()
+    assert c._group_states[0] is True
+    _force_render(c)
+    flat = _flat_text(c)
+    assert "first reply" not in flat
+    assert "second reply" in flat
+
+    # Second click: expand again → both visible.
+    c._clickable_lines[0]()
+    assert c._group_states[0] is False
+    _force_render(c)
+    flat = _flat_text(c)
+    assert "first reply" in flat
+    assert "second reply" in flat
+
+
+# ── C2: anchor stays put while "thinking" indicator is active ──────────
+
+def test_anchor_stable_when_scrolled_up_with_thinking_active(chat):
+    c, msgs = chat
+    for i in range(20):
+        msgs.append({"type": "agent", "sender": "A", "text": f"msg {i}"})
+    c.show_thinking = True
+    _force_render(c)
+
+    initial_line_count = c._line_count  # includes the +2 thinking lines
+    c._follow_tail = False
+    c._scroll_offset = 8
+    initial_cursor_y = initial_line_count - 1 - 8
+
+    # New messages arrive while thinking is still active.
+    for i in range(3):
+        msgs.append({"type": "agent", "sender": "A", "text": f"new {i}"})
+    c.invalidate_cache()
+    _force_render(c)
+
+    new_cursor_y = c._line_count - 1 - c._scroll_offset
+    # The anchor must not drift by the 2 thinking-indicator lines.
+    assert new_cursor_y == initial_cursor_y
+
+
+# ── C3: rebuild throttle must engage during streaming bursts ───────────
+
+def test_streaming_throttle_reuses_lines_when_cache_nulled(chat):
+    c, msgs = chat
+    for i in range(5):
+        msgs.append({"type": "agent", "sender": "A", "text": f"msg {i}"})
+
+    # First real render establishes _last_lines and a recent _last_rebuild.
+    c._line_cache = None
+    c._last_rebuild = 0.0
+    c.create_content(width=80, height=24)
+
+    # Count full rebuilds during a simulated streaming burst.
+    calls = {"n": 0}
+    orig = c._do_rebuild
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    c._do_rebuild = counting
+
+    # Streaming grows the last message's text and nulls the cache every
+    # frame (exactly what append_to_last_message does), all inside the
+    # throttle window. The throttle must NOT depend on _line_cache being
+    # non-None — otherwise it never engages here.
+    for _ in range(10):
+        msgs[-1]["text"] += "x"
+        c.invalidate_cache()
+        c.create_content(width=80, height=24)
+
+    # Throttle engaged → far fewer than 10 rebuilds.
+    assert calls["n"] <= 1

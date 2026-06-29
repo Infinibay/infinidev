@@ -180,6 +180,13 @@ class ClassicRenderer:
         self.status.run_started_at = time.monotonic()
         self.status.tool_calls_total = 0
         self.status.iteration = 0
+        # Reset token counters too so the toolbar doesn't carry the previous
+        # turn's figures into the start of a new one.
+        self.status.last_prompt_tokens = 0
+        self.status.last_completion_tokens = 0
+        self.status.total_tokens = 0
+        self.status.cache_read = 0
+        self.status.cache_create = 0
         prompt = _truncate(data.get("prompt"), 200)
         if prompt:
             self._println(_dim(f"▸ {prompt}"))
@@ -247,7 +254,9 @@ class ClassicRenderer:
         if buf:
             text = "".join(buf).strip()
             if text:
-                self._println(_dim("💭 " + _truncate(text, 320)))
+                # Stream the buffered tail in full, like the per-line path —
+                # truncating here silently cut reasoning segments >320 chars.
+                self._println(_dim("💭 " + text))
 
     def _on_loop_user_message(self, agent_id: str, data: dict) -> None:
         msg = _truncate(data.get("message"), 320)

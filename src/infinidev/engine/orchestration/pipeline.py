@@ -100,6 +100,17 @@ class OrchestrationHooks(Protocol):
         the final newline they add on ``notify`` or session end is
         enough."""
 
+    def mark_reply_shown(self) -> None:
+        """Signal that the chat reply has already been displayed.
+
+        The pipeline calls this in the ``respond`` branch after it has
+        streamed / notified the reply, so UI adapters that ALSO render
+        ``run_task``'s return value (the TUI worker) can skip the
+        duplicate. Default no-op — classic CLI adapters print the return
+        value themselves, so they're unaffected. The pipeline invokes it
+        defensively (``getattr``), so adapters that don't define it are
+        fine too."""
+
     # ── User interaction ─────────────────────────────────────────────────
     def ask_user(self, prompt: str, kind: str = "text") -> str | None:
         """Block until the user replies. Return the user's text answer
@@ -522,6 +533,13 @@ def run_task(
         get_current_workspace_path,
     )
 
+    # Reset the per-turn "reply already shown" flag — hooks can be reused
+    # across turns (the classic REPL keeps a single ClickHooks). The
+    # respond branch sets it via mark_reply_shown() so callers don't
+    # re-render the reply from this function's return value.
+    if hasattr(hooks, "reply_already_shown"):
+        hooks.reply_already_shown = False
+
     # Plumb the orchestration hooks into the engine so the inner loop
     # can forward on_file_change / on_step_start as the worker
     # advances — including during the rework loop, which calls
@@ -578,12 +596,27 @@ def run_task(
             hooks.notify_stream_end("Infinidev", "agent")
         else:
             hooks.notify("Infinidev", chat_result.reply, "agent")
+        # The reply has now been shown (streamed, notified, or surfaced as
+        # an error). Tell UI adapters so they don't re-render it from
+        # run_task's return value. Defensive: classic CLI hooks don't
+        # define this — they print the return value from the caller.
+        _mark_shown = getattr(hooks, "mark_reply_shown", None)
+        if callable(_mark_shown):
+            _mark_shown()
         hooks.on_phase("idle")
         return chat_result.reply
 
     # ── Planner (escalate path) ─────────────────────────────────────────
     escalation = chat_result.escalation
     assert escalation is not None  # enforced by ChatAgentResult invariants
+    # If the chat agent streamed plain text before deciding to escalate,
+    # the partial streaming bubble is still flagged streaming=True. Finalize
+    # it now — otherwise the upcoming preview/plan messages get appended
+    # after it and finalize can never match it again (it only flips the
+    # LAST message), leaving the bubble stuck in raw-markdown mode forever.
+    # No-op when nothing was streamed (finalize_streaming_message guards).
+    if chat_result.streamed:
+        hooks.notify_stream_end("Infinidev", "agent")
     if escalation.user_visible_preview:
         hooks.notify("Infinidev", escalation.user_visible_preview, "agent")
 

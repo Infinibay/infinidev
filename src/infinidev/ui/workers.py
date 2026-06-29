@@ -110,7 +110,13 @@ def run_engine_task(
             app.agent.deactivate()
 
         app._chat_history_control.show_thinking = False
-        if result:
+        # On the respond path the pipeline already displayed the reply
+        # (streamed / notified), so re-appending `result` here would
+        # double-render it. `reply_already_shown` is set by the pipeline
+        # in that case; the develop/escalate path leaves it False so the
+        # developer's result is shown. `result` is still the canonical
+        # value persisted to the conversation either way.
+        if result and not getattr(hooks, "reply_already_shown", False):
             app.add_message("Infinidev", result, "agent")
         store_conversation_turn(
             app.session_id, "assistant",
@@ -128,6 +134,16 @@ def run_engine_task(
     finally:
         app._engine_running = False
         app._context_flow = ""
+        # Zero the transient streaming state at the turn boundary. The
+        # respond path emits none of the loop_* events that normally reset
+        # these (loop_step_update / loop_tool_call / loop_stream_status),
+        # so without this a stale "receiving... N tokens" / leftover tool
+        # name (and the armed repaint loop) would bleed into idle or the
+        # next turn.
+        app._streaming_token_count = 0
+        app._streaming_tool_name = None
+        app._thinking_text = ""
+        app._thinking_full = ""
         app.invalidate()
         _drain_pending(app)
 
