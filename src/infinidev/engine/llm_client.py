@@ -187,6 +187,15 @@ _TOOL_NAME_PATTERNS = [
     re.compile(r'"function"\s*:\s*"([a-z_][a-z0-9_]*)"', re.IGNORECASE),
 ]
 
+# OpenAI-compatible providers that need `stream_options.include_usage` to
+# report token usage in streamed responses. Native-usage providers (anthropic,
+# gemini, ollama) are intentionally excluded.
+_STREAM_USAGE_PROVIDERS = frozenset({
+    "openai", "openai_compatible", "vllm", "llama_cpp", "gmi", "qwen",
+    "openrouter", "zai", "zai_coding", "kimi", "minimax", "mistral", "deepseek",
+})
+
+
 # Known tool names to validate detected names against
 _KNOWN_TOOLS = frozenset({
     "read_file", "partial_read", "create_file", "replace_lines",
@@ -281,6 +290,16 @@ def call_llm(
     # support streaming with function calling — litellm's stream_chunk_builder
     # correctly assembles tool_call deltas from the stream.
     use_streaming = on_thinking_chunk is not None
+
+    # Ask OpenAI-compatible backends to report real token usage in the stream.
+    # Without `stream_options.include_usage`, vLLM / llama.cpp / GMI / OpenRouter
+    # / etc. omit the usage block from streamed responses, and litellm falls
+    # back to a tiktoken *estimate* (wrong tokenizer for local models) — which
+    # is exactly what made the context bar's "used" count drift. Anthropic,
+    # Gemini and Ollama report usage natively, so we skip the flag there to
+    # avoid passing a param their (non-OpenAI) endpoints may reject.
+    if use_streaming and settings.LLM_PROVIDER in _STREAM_USAGE_PROVIDERS:
+        kwargs["stream_options"] = {"include_usage": True}
 
     last_exc: Exception | None = None
     for attempt in range(1, LLM_RETRIES + 1):

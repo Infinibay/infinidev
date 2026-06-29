@@ -10,9 +10,24 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
-
 logger = logging.getLogger(__name__)
+
+
+def _estimate_tokens(text: str, model: str) -> int:
+    """Estimate tokens for *text* using the model's tokenizer when known.
+
+    litellm.token_counter picks the right tokenizer for known models and
+    falls back to a sensible default otherwise — far better than the old
+    chars/4 heuristic.  If anything goes wrong (unknown model, import error),
+    fall back to ~4 chars per token so the bar still moves.
+    """
+    if not text:
+        return 0
+    try:
+        import litellm
+        return int(litellm.token_counter(model=model or "gpt-3.5-turbo", text=text))
+    except Exception:
+        return len(text) // 4
 
 
 class ContextWindowCalculator:
@@ -30,142 +45,74 @@ class ContextWindowCalculator:
         self.max_context: int | None = max_context
         self._last_prompt_tokens: int = 0
         self._task_prompt_tokens: int = 0
-
-    # Known context windows for cloud models (tokens)
-    _KNOWN_CONTEXT: dict[str, int] = {
-        # OpenAI
-        "gpt-5.4": 1_000_000, "gpt-5.4-mini": 400_000, "gpt-5.4-nano": 400_000,
-        "o3": 200_000, "o3-pro": 200_000, "o3-mini": 200_000, "o4-mini": 200_000,
-        # Anthropic
-        "claude-opus-4-6": 1_000_000, "claude-sonnet-4-6": 1_000_000,
-        "claude-haiku-4-5-20251001": 200_000,
-        "claude-sonnet-4-5-20250929": 200_000, "claude-opus-4-5-20251101": 200_000,
-        "claude-sonnet-4-0": 200_000, "claude-opus-4-0": 200_000,
-        # Gemini
-        "gemini-3.1-pro-preview": 1_048_576, "gemini-3-flash-preview": 1_048_576,
-        "gemini-3.1-flash-lite-preview": 1_048_576,
-        "gemini-2.5-pro": 1_048_576, "gemini-2.5-flash": 1_048_576,
-        "gemini-2.5-flash-lite": 1_048_576,
-        # Z.AI
-        "glm-5": 200_000, "glm-5-turbo": 200_000,
-        "glm-4.7": 200_000, "glm-4.6": 200_000,
-        "glm-4.5": 128_000, "glm-4.5-flash": 128_000, "glm-4.5-air": 128_000,
-        # Kimi
-        "kimi-k2.5": 256_000,
-        "kimi-k2-thinking": 256_000, "kimi-k2-thinking-turbo": 256_000,
-        "kimi-k2-0905-preview": 256_000, "kimi-k2-turbo-preview": 256_000,
-        # Minimax
-        "MiniMax-M2.7": 204_800, "MiniMax-M2.7-highspeed": 204_800,
-        "MiniMax-M2.5": 204_800, "MiniMax-M2.1": 204_800,
-    }
+        self._warned_over_budget: bool = False
 
     async def update_model_context(self) -> None:
-        """Fetch model context window. Supports Ollama API and known cloud models.
+        """Resolve the model's *effective* context window.
 
-        Sets ``self.max_context`` to the real value when found, or ``None``
-        when the context window cannot be determined (unknown cloud model,
-        Ollama API unreachable, etc).  The TUI renders ``None`` as ``?``
-        instead of a misleading hardcoded number.
+        Delegates to :func:`get_model_context_window`, the single source of
+        truth shared with the LoopEngine.  For Ollama that is the real ceiling
+        (``num_ctx``, capped by the trained length) — NOT the trained length,
+        which the server ignores and truncates past.  Sets ``self.max_context``
+        to ``None`` when unknown; the TUI renders ``None`` as ``?``.
         """
+        import asyncio
+
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
+        from infinidev.engine.loop.model_context import get_model_context_window
 
         llm_params = get_litellm_params()
         model = llm_params.get("model", settings.LLM_MODEL)
-        base_url = llm_params.get("base_url", settings.LLM_BASE_URL)
-
-        # Strip provider prefixes to get bare model name
-        bare_model = model
-        if "/" in bare_model:
-            bare_model = bare_model.split("/", 1)[1]
-
-        # Reset to unknown before attempting lookup — we'll set it below
-        # only when we have authoritative data.
-        self.model_name = bare_model
-        self.max_context = None
-
-        # Check known cloud models first
-        if bare_model in self._KNOWN_CONTEXT:
-            self.max_context = self._KNOWN_CONTEXT[bare_model]
-            logger.info(f"Model {bare_model} context length (known): {self.max_context}")
-            return
-
-        # Try litellm's model cost map for context window
-        try:
-            from litellm import model_cost
-            if model in model_cost:
-                ctx = model_cost[model].get("max_input_tokens", 0)
-                if ctx:
-                    self.max_context = ctx
-                    logger.info(f"Model {bare_model} context length (litellm): {self.max_context}")
-                    return
-            # Also try the bare model name
-            if bare_model in model_cost:
-                ctx = model_cost[bare_model].get("max_input_tokens", 0)
-                if ctx:
-                    self.max_context = ctx
-                    logger.info(f"Model {bare_model} context length (litellm bare): {self.max_context}")
-                    return
-        except Exception:
-            pass
-
-        # Fallback: try Ollama API (only works for Ollama provider)
         provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
-        if provider_id == "ollama" and base_url:
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    resp = await client.post(
-                        f"{base_url}/api/show",
-                        json={"name": bare_model},
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
 
-                        model_info = data.get("model_info", {})
-                        for key, val in model_info.items():
-                            if key.endswith(".context_length") and isinstance(val, int):
-                                self.max_context = val
-                                break
+        # Strip provider prefixes to get bare model name for display.
+        self.model_name = model.split("/", 1)[1] if "/" in model else model
 
-                        if self.max_context is not None:
-                            logger.info(f"Model {bare_model} context length (ollama): {self.max_context}")
-                            return
+        # The resolver may do a blocking HTTP call to Ollama on first lookup
+        # (memoized thereafter); keep it off the event loop thread.
+        self.max_context = await asyncio.to_thread(
+            get_model_context_window, llm_params, provider_id,
+        )
 
-                    # Fallback: try /api/tags
-                    resp = await client.get(f"{base_url}/api/tags")
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        for m in data.get("models", []):
-                            m_name = m.get("name", "")
-                            if bare_model in m_name or m_name in bare_model:
-                                self.model_name = m_name
-                                ctx = m.get("details", {}).get("context_length", 0)
-                                if ctx:
-                                    self.max_context = ctx
-                                    logger.info(f"Model {m_name} context length (tags): {self.max_context}")
-                                    return
-                                break
-            except Exception as e:
-                logger.warning(f"Could not fetch Ollama model info: {e}")
-
-        # No authoritative data — leave max_context as None.
-        # The TUI will render this as "?" to signal unknown.
-        logger.info(f"Model {bare_model}: context window unknown, will display as '?'")
+        if self.max_context:
+            logger.info(
+                f"Model {self.model_name} effective context window: {self.max_context}"
+            )
+        else:
+            logger.info(
+                f"Model {self.model_name}: context window unknown, will display as '?'"
+            )
 
     def update_chat(self, user_input: str, session_summaries: list[str] | None = None) -> None:
         """Estimate chat context tokens from user input + session history.
 
-        Uses ~4 chars per token as a rough estimate (standard heuristic).
+        Uses the model's tokenizer via litellm when available, falling back to
+        ~4 chars per token.
         """
         text = user_input
         if session_summaries:
             text += "\n".join(session_summaries)
-        self._last_prompt_tokens = max(1, len(text) // 4)
+        self._last_prompt_tokens = _estimate_tokens(text, self.model_name)
 
     def update_task(self, task_prompt_tokens: int = 0) -> None:
-        """Update task context with prompt_tokens from the last LLM call."""
+        """Update task context with the exact prompt_tokens from the last LLM call."""
         if task_prompt_tokens:
             self._task_prompt_tokens = task_prompt_tokens
+            # The prompt overflowed the real window: the backend is silently
+            # truncating context this turn.  Warn once so it isn't invisible.
+            if (
+                self.max_context
+                and task_prompt_tokens > self.max_context
+                and not self._warned_over_budget
+            ):
+                self._warned_over_budget = True
+                logger.warning(
+                    "Prompt (%d tokens) exceeds the model's effective context "
+                    "window (%d) — the backend is truncating context. Raise "
+                    "INFINIDEV_OLLAMA_NUM_CTX or shorten the task.",
+                    task_prompt_tokens, self.max_context,
+                )
 
     def get_context_status(self) -> dict[str, Any]:
         """Get current context window status for the UI.
