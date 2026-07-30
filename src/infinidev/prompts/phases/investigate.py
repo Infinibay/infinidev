@@ -34,7 +34,7 @@ Bad 2 — Vague note:
 
 Bad 3 — Editing files:
   1. read_file: "src/handler.py"
-  2. replace_lines: "src/handler.py" ← WRONG
+  2. edit_file: "src/handler.py" ← WRONG
   WHY BAD: Investigation is read-only. Do NOT modify files.
 
 Bad 4 — Reading everything without purpose:
@@ -53,7 +53,7 @@ BUG_INVESTIGATE = _INVESTIGATE_RULES + """
 
 Example 1 — Starting from a failing test:
   1. execute_command: "pytest tests/test_auth.py -v --tb=short 2>&1 | tail -20"
-     → 2 tests fail: test_expired_token (expects 401, gets 200), test_refresh (expects token, gets None)
+     Output: 2 tests fail: test_expired_token (expects 401, gets 200), test_refresh (expects token, gets None)
   2. add_note: "FAILING: test_expired_token expects 401 but gets 200. test_refresh expects new token but gets None"
   3. read_file: "src/auth.py" (lines 40-90)
   4. add_note: "auth.py:52 verify_token() — compares signature but never checks 'exp' field. auth.py:85 refresh_token() returns None instead of creating new token"
@@ -61,17 +61,17 @@ Example 1 — Starting from a failing test:
 
 Example 2 — Starting from an error message:
   1. execute_command: "python -c 'from mylib import calc; print(calc.discount(100, 20))'"
-     → outputs: -1800 (expected: 80)
+     Output: outputs: -1800 (expected: 80)
   2. add_note: "REPRO: discount(100, 20) returns -1800 instead of 80"
   3. read_file: "mylib/calc.py"
   4. add_note: "calc.py:15 discount() uses price * (1 - percent) but percent=20, not 0.20. Needs percent/100"
   5. step_complete
 
 Example 3 — Tracing from stack trace:
-  1. search_findings: "TypeError models.py" → no prior findings
+  1. search_findings: "TypeError models.py"  no prior findings
   2. read_file: "src/models.py" (lines 120-130)
   3. add_note: "models.py:123 get_display_name() calls name.lower() but name can be NULL (nullable column). Need None check"
-  4. glob: "tests/**/test_model*" → found tests/test_models.py
+  4. glob: "tests/**/test_model*"  found tests/test_models.py
   5. read_file: "tests/test_models.py" (lines 1-30)
   6. add_note: "No test for None name case in test_models.py. Will need to add one"
   7. step_complete
@@ -97,7 +97,7 @@ FEATURE_INVESTIGATE = _INVESTIGATE_RULES + """
 ## EXAMPLES OF GOOD FEATURE INVESTIGATION
 
 Example 1 — Understanding existing patterns:
-  1. glob: "app/routes/*.py" → find existing route files
+  1. glob: "app/routes/*.py"   to find existing route files
   2. read_file: "app/routes/users.py" (lines 1-40)
   3. add_note: "PATTERN: routes use @app.get/post, return Pydantic models, auth via Depends(get_current_user). Response format: {data: ..., meta: ...}"
   4. step_complete
@@ -110,7 +110,7 @@ Example 2 — Reading a test specification:
 
 Example 3 — Checking existing knowledge:
   1. search_findings: "rate limiter implementation"
-     → found: "Rate limiter uses token bucket at services/rate_limit.py"
+     Output: found: "Rate limiter uses token bucket at services/rate_limit.py"
   2. add_note: "EXISTING: Rate limiter at services/rate_limit.py uses token bucket. Config: RATE_LIMIT_RPM env var"
   3. step_complete
 
@@ -118,7 +118,7 @@ Example 4 — Mapping dependencies:
   1. code_search: "from.*payment.*import|import.*payment"
   2. add_note: "DEPS: payment module imported by routes/checkout.py, routes/webhook.py, services/order.py. Must not break these"
   3. execute_command: "python -m pytest tests/ --tb=no -q 2>&1 | tail -3"
-     → "42 passed in 1.8s"
+     Output: "42 passed in 1.8s"
   4. add_note: "BASELINE: 42/42 tests passing"
   5. step_complete
 """
@@ -144,7 +144,8 @@ REFACTOR_INVESTIGATE = _INVESTIGATE_RULES + """
 ## EXAMPLES OF GOOD REFACTOR INVESTIGATION
 
 Example 1 — Mapping callers before extraction:
-  1. execute_command: "pytest tests/ --tb=no -q" → "48 passed in 2.1s"
+  1. execute_command: "pytest tests/ --tb=no -q"
+     Output: "48 passed in 2.1s"
   2. add_note: "BASELINE: 48 tests all passing. Must stay at 48 after refactor"
   3. code_search: "from.*processor.*import|import.*processor"
   4. add_note: "CALLERS: main.py:12 imports process(), test_processor.py imports process(). Public API is just process()"

@@ -32,6 +32,20 @@ __all__ = [
 # benign HTML comment if ever leaked.
 CACHE_BREAKPOINT_MARKER = "<!--__INFINIDEV_CACHE_BREAK__-->"
 
+
+def _verbatim_step_budget() -> int:
+    """How many recent step summaries stay verbatim in the prompt.
+
+    Read lazily (not at import) so a settings change mid-session takes
+    effect on the next prompt build, like every other loop limit.
+    """
+    from infinidev.config.settings import settings
+
+    try:
+        return max(0, int(getattr(settings, "WORKING_MEMORY_VERBATIM_STEPS", 4)))
+    except (TypeError, ValueError):
+        return 4
+
 # Static prompt text lives in loop/prompt/text.py; re-exported here so that
 # existing `from ...loop.context import CLI_AGENT_IDENTITY, ...` keeps working.
 from infinidev.engine.loop.prompt.text import (  # noqa: F401
@@ -54,6 +68,7 @@ def build_system_prompt(
     identity_override: str | None = None,
     protocol_override: str | None = None,
     small_model: bool = False,
+    workspace_path: str | None = None,
 ) -> str:
     """Combine CLI identity, tech guidelines, session context, and loop protocol.
 
@@ -63,6 +78,10 @@ def build_system_prompt(
         protocol_override: If provided, replaces LOOP_PROTOCOL. Use for agents
             that don't need plan/step management (e.g. analyst).
         small_model: If True, use shortened prompts optimized for <25B models.
+        workspace_path: Project root. When it holds an ``AGENTS.md`` (or a
+            ``CLAUDE.md``), its contents join the cacheable prefix — it is
+            stable for the whole session, and it is the project speaking, so
+            it belongs above the per-iteration context, not inside it.
     """
     if small_model:
         identity = CLI_AGENT_IDENTITY_SMALL
@@ -94,6 +113,17 @@ def build_system_prompt(
             parts.append("## Technology Guidelines\n\n" + "\n\n".join(tech_sections))
 
     parts.append(protocol)
+
+    # The project's own instructions go last in the stable prefix: they are
+    # meant to override the general guidance above, and the end of the
+    # prefix is where that reads unambiguously. Still inside the cache
+    # breakpoint — the file does not change mid-session.
+    with best_effort("project instructions load failed"):
+        from infinidev.prompts.project_instructions import render_project_instructions
+
+        block = render_project_instructions(workspace_path)
+        if block:
+            parts.append(block)
 
     # When the pair-programming critic is enabled, teach the principal
     # that those `--- critic note ---` blocks at the end of tool
@@ -200,7 +230,7 @@ def build_iteration_prompt(
                 "command, an external editor, or one of your own "
                 "edits) left them with tree-sitter parse errors. "
                 "Read each file, understand what went wrong, and "
-                "fix it with replace_lines or create_file before "
+                "fix it with edit_file or create_file before "
                 "doing anything else — downstream tools that read "
                 "these files will see garbage."
             )
@@ -244,8 +274,19 @@ def build_iteration_prompt(
     if state.history:
         # Small models: only show last 2 records to save context
         history_slice = state.history[-2:] if small_model else state.history
+        # Retention policy: the newest N summaries stay verbatim, older ones
+        # collapse to a single line. Nothing is lost — the full text (and the
+        # raw tool output behind it) lives in working memory and comes back
+        # through recall_context. See engine/working_memory.py.
+        verbatim = _verbatim_step_budget()
+        collapsed_count = 0
+        if verbatim and len(history_slice) > verbatim:
+            collapsed_count = len(history_slice) - verbatim
         summaries = []
-        for record in history_slice:
+        for position, record in enumerate(history_slice):
+            if position < collapsed_count:
+                summaries.append(f"- Step {record.step_index}: {record.summary}")
+                continue
             lines = [f"### Step {record.step_index}: {record.summary}"]
             if record.changes_made:
                 lines.append(f"  Changes: {record.changes_made}")
@@ -254,7 +295,16 @@ def build_iteration_prompt(
             if record.pending_items:
                 lines.append(f"  Pending: {record.pending_items}")
             summaries.append("\n".join(lines))
-        parts.append(f"<previous-actions>\n{chr(10).join(summaries)}\n</previous-actions>")
+        header = ""
+        if collapsed_count:
+            header = (
+                f"({collapsed_count} earlier step(s) shown as one line each — "
+                f"call recall_context(query=...) to retrieve their detail or "
+                f"any tool output from them.)\n"
+            )
+        parts.append(
+            f"<previous-actions>\n{header}{chr(10).join(summaries)}\n</previous-actions>"
+        )
 
         # Consolidated anti-patterns from all steps — skip for small models
         if not small_model:

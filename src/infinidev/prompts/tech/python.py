@@ -25,14 +25,14 @@ def get_prompt() -> str:
 
 ### Standard Library / Core Tooling
 - `pathlib.Path` over `os.path` for file system operations.
-- `dataclasses` or `attrs` for data containers — prefer `@dataclass(frozen=True)` for value objects.
+- `dataclasses` or `attrs` for data containers. A value object is `@dataclass(frozen=True)`.
 - `logging` (not `print`) for diagnostics.
 - `contextlib`, `itertools`, `functools` for clean utility code.
 - Type-annotate all public APIs using the `typing` module.
 
 ### Useful Patterns
 - Use `__slots__` on performance-critical classes to reduce memory and speed up attribute access.
-- Prefer generators and `yield` over building full lists when the consumer iterates once.
+- IF the consumer iterates once, THEN `yield` instead of building the full list.
 - Use `@dataclass(frozen=True)` for immutable value objects.
 - Use `Enum` or `StrEnum` for fixed sets of string constants.
 

@@ -5,6 +5,21 @@ import logging
 from typing import Any
 from infinidev.tools.base.context import bind_tools_to_agent, set_context
 
+
+def _mcp_generation() -> int:
+    """How many MCP tools discovery has produced so far.
+
+    Used as a cheap change signal: it starts at 0 while the servers are still
+    warming and settles once they answer, so a rebuilt toolset is triggered
+    exactly once per session rather than polled.
+    """
+    try:
+        from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
+
+        return len(discover_mcp_tool_classes())
+    except Exception:
+        return 0
+
 logger = logging.getLogger(__name__)
 
 class InfinidevAgent:
@@ -37,22 +52,41 @@ class InfinidevAgent:
         self._session_summaries: list[str] | None = None
         self._session_id: str | None = None
 
+        self._role = role
+        self._extra_tools = extra_tools
+        self._mcp_generation = -1
+        self._tools: list = []
+        self._resolve_tools()
+
+    def _resolve_tools(self) -> None:
+        """Build the toolset and remember which MCP generation it reflects."""
         # Import tools dynamically to avoid circular imports
         from infinidev.tools import get_tools_for_role
-        tools = get_tools_for_role(role)
-        if extra_tools:
-            instantiated_extras = [
-                t() if isinstance(t, type) else t
-                for t in extra_tools
+
+        tools = get_tools_for_role(self._role)
+        if self._extra_tools:
+            tools = tools + [
+                t() if isinstance(t, type) else t for t in self._extra_tools
             ]
-            tools = tools + instantiated_extras
 
         # Stamp tools with agent context
-        bind_tools_to_agent(tools, agent_id)
+        bind_tools_to_agent(tools, self.agent_id)
         self._tools = tools
+        self._mcp_generation = _mcp_generation()
 
     @property
     def tools(self) -> list:
+        """The agent's toolset, refreshed if MCP discovery has since filled.
+
+        MCP servers are warmed on a background thread, so an agent built in
+        the first moments of a session resolves its tools before any server
+        has answered ``tools/list`` — and used to keep that empty result for
+        its entire life, silently running without the project index. Checking
+        a generation counter costs a dict lookup and lets the toolset heal on
+        the next turn instead of the next process.
+        """
+        if _mcp_generation() != self._mcp_generation:
+            self._resolve_tools()
         return self._tools
 
     def activate_context(self, *, session_id: str | None = None) -> None:

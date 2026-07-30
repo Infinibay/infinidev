@@ -70,13 +70,44 @@ def test_empty_agent_message_renders_nothing():
     assert w.render({"sender": "Infinidev", "text": "  \n  "}, 80).lines == []
 
 
-def test_nonempty_agent_message_still_renders_box():
+def test_agent_reply_renders_as_plain_indented_prose():
+    """No name tag, no mark, no background — the reply is the content."""
     w = BorderedWidget("agent", "Responses")
     rr = w.render({"sender": "Infinidev", "text": "hello"}, 80)
     flat = "".join(t for line in rr.lines for _, t in line)
     assert rr.lines
     assert "hello" in flat
-    assert "Infinidev:" in flat
+    assert "Infinidev:" not in flat
+    assert rr.lines[0][0][1].strip() == "", "no gutter glyph on assistant text"
+    # Copy stays reachable even without a header line to hang it on.
+    assert 0 in rr.clickable_offsets
+    assert "⧉" in flat
+
+
+def test_user_message_is_marked_once_not_on_every_line():
+    w = BorderedWidget("user", "Messages")
+    rr = w.render({"sender": "You", "text": "line one\nline two"}, 80)
+    marks = [line[0][1] for line in rr.lines if line and line[0][1].strip()]
+    assert marks == ["> "], "one prompt mark, on the first line only"
+
+
+def test_copy_glyph_is_not_drawn_on_every_message_type():
+    """It used to render " [⧉] " on every message; that was the loudest
+    thing on screen after the text itself."""
+    user = BorderedWidget("user", "Messages").render(
+        {"sender": "You", "text": "hello"}, 80
+    )
+    flat = "".join(t for line in user.lines for _, t in line)
+    assert "⧉" not in flat
+    assert 0 in user.clickable_offsets, "the click target must survive"
+
+
+def test_named_speaker_keeps_its_header():
+    """A sender whose identity matters (Reviewer, critic verdicts) is named."""
+    w = BorderedWidget("agent", "Responses")
+    rr = w.render({"sender": "Reviewer", "text": "needs a test"}, 80)
+    flat = "".join(t for line in rr.lines for _, t in line)
+    assert "Reviewer:" in flat
 
 
 # ── B4: diff title bar fills the full width ──────────────────────────────
@@ -117,7 +148,7 @@ def test_copy_handler_schedules_revert_and_records_highlight(monkeypatch):
     assert calls["n"] == 1
     # The very next render reflects the recorded highlight.
     flat = "".join(t for line in w.render(msg, 80).lines for _, t in line)
-    assert "Copied" in flat
+    assert "copied" in flat
 
 
 # ── B7: cell-width-aware truncation ──────────────────────────────────────

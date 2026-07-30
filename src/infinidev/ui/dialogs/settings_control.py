@@ -7,6 +7,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEventType
 
+from infinidev.config.secrets import is_secret, mask_if_secret
 from infinidev.ui.theme import (
     PRIMARY, TEXT, TEXT_MUTED, ACCENT, SUCCESS,
     SURFACE_LIGHT,
@@ -130,7 +131,7 @@ class SettingsControl(UIControl):
                     (f"{TEXT}", f"{'Enabled' if bool_val else 'Disabled'}"),
                 ])
             elif stype.startswith("select:") or stype.startswith("select_dynamic:"):
-                current_val = str(value)
+                current_val = mask_if_secret(key, value)
                 # Show as plain text (no ▾) for free-text model fields
                 if key == "LLM_MODEL" and self._state._is_free_text_model():
                     lines.append([
@@ -145,8 +146,12 @@ class SettingsControl(UIControl):
                         (f"{TEXT_MUTED}", "  ▾"),
                     ])
             else:
-                val_str = str(value)
-                lines.append([(f"{TEXT}", f"   = {val_str}")])
+                # Credentials render as a shape, never as the value. The
+                # real thing appears only in the edit buffer above, which
+                # the user has to deliberately open.
+                val_str = mask_if_secret(key, value)
+                style = TEXT_MUTED if is_secret(key) else TEXT
+                lines.append([(f"{style}", f"   = {val_str}")])
 
             # Line 3: description
             lines.append([(f"{TEXT_MUTED}", f"   {desc}")])

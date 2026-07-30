@@ -142,17 +142,19 @@ def create_chat_input(
 
     @kb.add("pageup")
     def page_up(event):
-        """Scroll chat history up."""
+        """Scroll chat history up (deterministic page jump)."""
         if chat_history_control:
-            for _ in range(15):
-                chat_history_control.move_cursor_up()
+            # A single deterministic jump — NOT 15 wheel impulses. The
+            # wheel handlers (move_cursor_up/down) now feed the momentum
+            # model, so looping them here would inject 15 impulses and
+            # fling the viewport. page_up() moves a fixed page instantly.
+            chat_history_control.page_up()
 
     @kb.add("pagedown")
     def page_down(event):
-        """Scroll chat history down."""
+        """Scroll chat history down (deterministic page jump)."""
         if chat_history_control:
-            for _ in range(15):
-                chat_history_control.move_cursor_down()
+            chat_history_control.page_down()
 
     control = BufferControl(
         buffer=buf,

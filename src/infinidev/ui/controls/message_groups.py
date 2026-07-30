@@ -22,13 +22,27 @@ class MessageGroup:
         return len(self.messages) > 1
 
 
-# Types that must NEVER be folded into multi-message groups. The user
-# wants every tool call, every diff, every exec block, every think and
-# every error visible permanently — no accordion. Each message of these
-# types is rendered as its own singleton group.
+# Types that must NEVER be folded into multi-message groups. Diffs, exec
+# blocks, thinking and errors each stay as their own singleton group.
+#
+# NOTE: ``tool_call`` used to live here (every tool rendered as its own
+# fully-expanded block). It was intentionally removed so consecutive tool
+# calls coalesce into ONE compact, collapsible group ("Ejecutadas N tools ▸",
+# claude-code / codex style). The tool-group rendering lives in
+# ``ChatHistoryControl._do_rebuild`` + ``tool_call_widget.build_tool_group``.
+#
+# ``user`` and ``agent`` are here too: collapsing the conversation itself
+# under a "▼ Responses (2)" header treats the thing the user came to read
+# as noise to be folded away. Grouping is for repetitive machine output,
+# not for turns.
 NEVER_GROUP_TYPES: frozenset[str] = frozenset({
-    "tool_call", "exec", "diff", "error", "think",
+    "exec", "diff", "error", "think", "user", "agent",
 })
+
+# Types that group but render with a dedicated compact-collapsible path
+# (NOT the generic "header + last message" group rendering). The chat
+# renderer special-cases these.
+COMPACT_GROUP_TYPES: frozenset[str] = frozenset({"tool_call"})
 
 
 def identify_groups(messages: list[dict[str, Any]]) -> list[MessageGroup]:

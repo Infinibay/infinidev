@@ -1,0 +1,250 @@
+"""Working memory: what leaves the prompt must remain retrievable."""
+
+from __future__ import annotations
+
+import pytest
+
+from infinidev.engine.working_memory import (
+    WorkingMemory,
+    get_working_memory,
+    reset_working_memory,
+)
+
+
+@pytest.fixture
+def memory(tmp_path, monkeypatch):
+    """A WorkingMemory backed by a throwaway database."""
+    from infinidev.code_intel import _db as ci_db
+    from infinidev.config import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod.settings, "DB_PATH", str(tmp_path / "wm.db"))
+    ci_db._conn_cache.__dict__.clear()
+    reset_working_memory()
+    yield WorkingMemory("session-1", embed=False)
+    reset_working_memory()
+
+
+def _step_messages() -> list[dict]:
+    return [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"file_path": "src/auth/jwt.py"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": (
+                "def verify_token(token: str) -> Claims:\n"
+                "    # RS256, 60 second clock skew tolerance\n"
+                "    return jwt.decode(token, PUBLIC_KEY, algorithms=['RS256'])\n"
+            ),
+        },
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_2",
+                    "function": {
+                        "name": "execute_command",
+                        "arguments": '{"command": "pytest tests/test_auth.py"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_2",
+            "content": (
+                "FAILED tests/test_auth.py::test_expiry - AssertionError: "
+                "expected 401 but the endpoint returned 500 for an expired token"
+            ),
+        },
+    ]
+
+
+# ── archiving ─────────────────────────────────────────────────────────────
+
+
+def test_step_output_is_archived_with_its_call(memory):
+    stored = memory.archive_step(1, _step_messages(), summary="")
+    assert stored == 2
+    records = memory.search("verify token", limit=5)
+    titles = [record.title for record in records]
+    assert any("read_file" in title and "jwt.py" in title for title in titles)
+
+
+def test_trivial_tool_output_is_not_archived(memory):
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "c", "function": {"name": "x", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "c", "content": "OK"},
+    ]
+    assert memory.archive_step(1, messages, summary="") == 0
+
+
+def test_identical_output_is_stored_once(memory):
+    memory.archive_step(1, _step_messages(), summary="")
+    assert memory.archive_step(2, _step_messages(), summary="") == 0
+
+
+def test_step_summary_is_archived_when_substantial(memory):
+    summary = (
+        "Read the JWT verifier and ran the auth suite; the expiry test fails "
+        "because the endpoint returns 500 instead of 401."
+    )
+    memory.archive_step(1, [], summary=summary)
+    records = memory.search("expiry test failure", limit=3)
+    assert any(record.kind == "step_summary" for record in records)
+
+
+# ── recall ────────────────────────────────────────────────────────────────
+
+
+def test_recall_finds_the_evicted_error_message(memory):
+    memory.archive_step(1, _step_messages(), summary="")
+    records = memory.search("expired token returned 500", limit=3)
+    assert records, "the archived failure must be retrievable"
+    assert "expected 401" in records[0].content
+
+
+def test_recall_is_scoped_to_the_session_by_default(memory, tmp_path):
+    memory.archive_step(1, _step_messages(), summary="")
+    other = WorkingMemory("session-2", embed=False)
+    assert other.search("expired token") == []
+    assert other.search("expired token", all_sessions=True)
+
+
+def test_recall_matches_by_meaning_not_shared_words(tmp_path, monkeypatch):
+    """The whole point of the archive: recall without knowing the wording.
+
+    Also guards the persistence contract — ``execute_with_retry`` does not
+    commit, so a missing ``conn.commit()`` leaves rows invisible to the
+    embedding worker's connection and silently degrades this to keyword
+    scoring, which cannot match these queries at all.
+    """
+    from infinidev.code_intel import _db as ci_db
+    from infinidev.config import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod.settings, "DB_PATH", str(tmp_path / "sem.db"))
+    ci_db._conn_cache.__dict__.clear()
+    reset_working_memory()
+
+    memory = WorkingMemory("semantic-session")  # embeddings ON
+    memory.archive_step(1, _step_messages(), summary="")
+
+    records = memory.search("why is the endpoint answering with a server error")
+    assert records, "semantic recall must find the failure without shared words"
+    assert "expected 401" in records[0].content
+    # Keyword scoring cannot produce this: the query shares no token with
+    # the archived text, so any score at all proves the vector path ran.
+    assert records[0].score > 0
+
+
+def test_recall_returns_nothing_for_unrelated_queries(memory):
+    memory.archive_step(1, _step_messages(), summary="")
+    assert memory.search("kubernetes ingress annotations") == []
+
+
+def test_render_truncates_but_reports_the_remainder(memory):
+    memory.remember("big", "x" * 5000)
+    record = memory.search("big", limit=1)[0]
+    rendered = record.render(max_chars=100)
+    assert "more chars" in rendered
+    assert len(rendered) < 400
+
+
+# ── lifecycle ─────────────────────────────────────────────────────────────
+
+
+def test_stats_report_what_was_offloaded(memory):
+    memory.archive_step(1, _step_messages(), summary="")
+    stats = memory.stats()
+    assert stats["entries"] == 2
+    assert stats["archived_this_run"] == 2
+    assert stats["approx_tokens_offloaded"] > 0
+
+
+def test_clear_removes_only_this_session(memory):
+    memory.archive_step(1, _step_messages(), summary="")
+    other = WorkingMemory("session-2", embed=False)
+    other.remember("kept", "this entry belongs to another session entirely")
+    assert memory.clear() == 2
+    assert memory.search("verify token") == []
+    assert other.search("another session")
+
+
+def test_registry_returns_one_instance_per_session(memory):
+    first = get_working_memory("abc")
+    assert get_working_memory("abc") is first
+    assert get_working_memory("def") is not first
+
+
+def test_archiving_never_raises_when_storage_fails(monkeypatch, memory):
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(
+        "infinidev.engine.working_memory.execute_with_retry", boom, raising=True
+    )
+    assert memory.archive_step(1, _step_messages(), summary="") == 0
+    assert memory.search("anything") == []
+
+
+# ── prompt retention policy ───────────────────────────────────────────────
+
+
+def test_old_summaries_collapse_and_point_at_recall(monkeypatch):
+    from infinidev.config import settings as settings_mod
+    from infinidev.engine.loop.context import build_iteration_prompt
+    from infinidev.engine.loop.models import ActionRecord, LoopState
+
+    monkeypatch.setattr(settings_mod.settings, "WORKING_MEMORY_VERBATIM_STEPS", 2)
+    state = LoopState()
+    for index in range(1, 6):
+        state.history.append(
+            ActionRecord(
+                step_index=index,
+                summary=f"did thing {index}",
+                changes_made=f"touched file{index}.py",
+            )
+        )
+    prompt = build_iteration_prompt(
+        description="t", expected_output="e", state=state, small_model=False
+    )
+    assert "3 earlier step(s) shown as one line each" in prompt
+    assert "recall_context" in prompt
+    # Collapsed entries lose their detail lines; recent ones keep them.
+    assert "touched file1.py" not in prompt
+    assert "touched file5.py" in prompt
+
+
+def test_verbatim_budget_zero_keeps_every_summary(monkeypatch):
+    from infinidev.config import settings as settings_mod
+    from infinidev.engine.loop.context import build_iteration_prompt
+    from infinidev.engine.loop.models import ActionRecord, LoopState
+
+    monkeypatch.setattr(settings_mod.settings, "WORKING_MEMORY_VERBATIM_STEPS", 0)
+    state = LoopState()
+    for index in range(1, 6):
+        state.history.append(
+            ActionRecord(
+                step_index=index,
+                summary=f"did thing {index}",
+                changes_made=f"touched file{index}.py",
+            )
+        )
+    prompt = build_iteration_prompt(
+        description="t", expected_output="e", state=state, small_model=False
+    )
+    assert "touched file1.py" in prompt
+    assert "shown as one line each" not in prompt

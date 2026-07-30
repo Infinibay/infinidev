@@ -148,24 +148,20 @@ _TOOL_EVENT_MAP: dict[str, tuple[str, str, float]] = {
     "code_search":      ("file_read",    "file", 0.5),
     "glob":             ("file_read",    "file", 0.5),
     # File writes
-    "replace_lines":    ("file_write",   "file", 2.0),
+    "edit_file":        ("file_write",   "file", 2.0),
     "create_file":      ("file_write",   "file", 2.0),
-    "multi_edit_file":  ("file_write",   "file", 2.0),
-    "add_content_above": ("file_write",  "file", 2.0),
-    "add_content_below": ("file_write",  "file", 2.0),
     # Symbol reads
     "get_symbol_code":  ("symbol_read",  "symbol", 1.0),
     "list_symbols":     ("symbol_read",  "symbol", 0.5),
     "search_symbols":   ("symbol_read",  "symbol", 0.5),
     "find_references":  ("symbol_read",  "symbol", 1.0),
     # Symbol writes
-    "edit_symbol":      ("symbol_write", "symbol", 2.5),
-    "add_symbol":       ("symbol_write", "symbol", 2.5),
-    "remove_symbol":    ("symbol_write", "symbol", 2.5),
+    "rename_symbol":    ("symbol_write", "symbol", 2.5),
+    "move_symbol":      ("symbol_write", "symbol", 2.5),
     # Findings
     "record_finding":   ("finding_create", "finding", 1.5),
     "search_findings":  ("finding_read",   "finding", 0.8),
-    "read_findings":    ("finding_read",   "finding", 0.8),
+    "search_knowledge": ("finding_read",   "finding", 0.8),
     # Shell
     "execute_command":  ("command_exec", "file", 0.3),
 }

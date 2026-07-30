@@ -22,25 +22,19 @@ from infinidev.engine.tool_dispatch import execute_tool_call
 # ── Constants ─────────────────────────────────────────────────────────────
 
 # Tools that modify files — tracked for diff generation.
-# ``edit_file`` and ``apply_patch`` are included as the raw names the
-# model may emit before the hallucination alias rewrites them to
-# ``replace_lines``; keeping them here ensures batching and diff
-# capture see the write intent even on the unresolved name.
+# ``apply_patch``/``write_file`` are the raw names a model may emit before
+# the hallucination alias rewrites them to ``edit_file``/``create_file``;
+# keeping them here means batching and diff capture see the write intent
+# even on the unresolved name.
 FILE_CHANGE_TOOLS = {
-    "edit_file", "write_file", "multi_edit_file", "apply_patch",
-    "create_file", "replace_lines",
-    "add_content_after_line", "add_content_before_line",
-    "edit_symbol", "add_symbol", "remove_symbol",
-    "rename_symbol", "move_symbol",
+    "edit_file", "create_file", "rename_symbol", "move_symbol",
+    "write_file", "multi_edit_file", "apply_patch",
 }
 
 # Tools with side effects — act as barriers in parallel execution.
 WRITE_TOOLS = {
-    "edit_file", "write_file", "multi_edit_file", "apply_patch",
-    "create_file", "replace_lines",
-    "add_content_after_line", "add_content_before_line",
-    "edit_symbol", "add_symbol", "remove_symbol",
-    "rename_symbol", "move_symbol",
+    "edit_file", "create_file", "rename_symbol", "move_symbol",
+    "write_file", "multi_edit_file", "apply_patch",
     "git_commit", "git_branch", "git_push",
     "execute_command",  # Commands can have side effects
     "code_interpreter",  # Executes arbitrary code — must be sequential
@@ -190,23 +184,6 @@ def _cache_edit(state, path, args, result, ws):
     reindex_if_enabled(path)
 
 
-def _cache_line_edit(state, path, args, result, ws):
-    import os as _os
-    file_path_arg = args.get("file_path") or path
-    if file_path_arg:
-        if not _os.path.isabs(file_path_arg):
-            file_path_arg = _os.path.normpath(_os.path.join(ws, file_path_arg))
-        _reread_and_cache(state, file_path_arg)
-        reindex_if_enabled(file_path_arg)
-
-
-def _cache_symbol_edit(state, path, args, result, ws):
-    affected_path = _extract_path_from_result(result)
-    if affected_path:
-        _reread_and_cache(state, affected_path)
-        reindex_if_enabled(affected_path)
-
-
 def _cache_rename_symbol(state, path, args, result, ws):
     try:
         res = json.loads(result) if isinstance(result, str) else result
@@ -259,8 +236,8 @@ def _cache_get_symbol_code(state, path, args, result, ws):
     (``[symbol] qualified_name``) lets the prompt builder include it
     in the next ``<opened-files>`` block — same TTL/eviction rules as
     file content, same edit-invalidation guarantees (because any
-    edit_symbol/replace_lines on the underlying file evicts ALL
-    cached entries for that file via _cache_symbol_edit).
+    edit to the underlying file evicts ALL cached entries for that
+    file via _cache_edit).
     """
     name = args.get("name") or args.get("symbol") or args.get("qualified_name", "")
     if not name:
@@ -280,12 +257,6 @@ _CACHE_HANDLERS = {
     "create_file": _cache_write,
     "edit_file": _cache_edit,
     "multi_edit_file": _cache_edit,
-    "replace_lines": _cache_line_edit,
-    "add_content_after_line": _cache_line_edit,
-    "add_content_before_line": _cache_line_edit,
-    "edit_symbol": _cache_symbol_edit,
-    "add_symbol": _cache_symbol_edit,
-    "remove_symbol": _cache_symbol_edit,
     "rename_symbol": _cache_rename_symbol,
     "move_symbol": _cache_move_symbol,
     "list_directory": _cache_list_dir,
@@ -354,14 +325,10 @@ _MEMORY_HANDLERS: dict = {
     "partial_read": _anchor_from_file_arg,
     "create_file": _anchor_from_file_arg,
     "edit_file": _anchor_from_file_arg,
-    "replace_lines": _anchor_from_file_arg,
-    "add_content_after_line": _anchor_from_file_arg,
-    "add_content_before_line": _anchor_from_file_arg,
     "list_directory": _anchor_from_file_arg,
     "get_symbol_code": _anchor_from_symbol_arg,
-    "edit_symbol": _anchor_from_symbol_arg,
-    "add_symbol": _anchor_from_symbol_arg,
-    "remove_symbol": _anchor_from_symbol_arg,
+    "rename_symbol": _anchor_from_symbol_arg,
+    "move_symbol": _anchor_from_symbol_arg,
     "search_symbols": _anchor_from_symbol_arg,
     "execute_command": _anchor_from_command_arg,
 }

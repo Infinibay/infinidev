@@ -77,6 +77,33 @@ if _log_file_path:
 if _log_stderr:
     _handlers.append(logging.StreamHandler(sys.stderr))
 
+
+class _RedactSecrets(logging.Filter):
+    """Strip configured credentials out of every log record.
+
+    Debug logs are the other place an API key escapes: provider SDKs log
+    the request URL, and ``INFINIDEV_LOG_FILE`` is exactly what a user
+    attaches to a bug report. Filtering at the handler catches library
+    logs too, not just ours.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            from infinidev.config.secrets import redact
+
+            message = record.getMessage()
+            cleaned = redact(message)
+            if cleaned != message:
+                record.msg = cleaned
+                record.args = ()
+        except Exception:
+            pass  # logging must never break the session
+        return True
+
+
+for _handler in _handlers:
+    _handler.addFilter(_RedactSecrets())
+
 _root = logging.getLogger()
 # Wipe any handlers an imported library may have attached during its
 # own module-level side effects, then install ours (or a NullHandler).

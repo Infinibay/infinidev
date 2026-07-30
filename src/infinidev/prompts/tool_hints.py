@@ -22,17 +22,10 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Create a NEW file (fails if file exists)",
         "create_file(file_path='src/new.py', content='...')",
     ),
-    "replace_lines": (
-        "Replace a line range in an existing file (read first to get line numbers)",
-        "replace_lines(file_path='src/main.py', content='new code', start_line=10, end_line=15)",
-    ),
-    "add_content_after_line": (
-        "Insert content after a specific line",
-        "add_content_after_line(file_path='src/main.py', line_number=10, content='new line')",
-    ),
-    "add_content_before_line": (
-        "Insert content before a specific line",
-        "add_content_before_line(file_path='src/main.py', line_number=10, content='new line')",
+    "edit_file": (
+        "Change an existing file by replacing exact text (must be unique; "
+        "empty new_string deletes)",
+        "edit_file(file_path='src/main.py', old_string='timeout=30', new_string='timeout=120')",
     ),
     "list_directory": (
         "List directory contents",
@@ -72,7 +65,7 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Run Python code in a sandbox. Great for analyzing, parsing, "
         "or querying the codebase (count methods, measure spans, aggregate "
         "symbols). 13 code-intel helpers pre-imported — use `help` tool for details.",
-        "code_interpreter(code='rows = iter_symbols(kind=\"method\", parent=\"Foo\")\\nprint(len(rows))')",
+        'code_interpreter(code=\'rows = iter_symbols(kind="method", parent="Foo")\\nprint(len(rows))\')',
     ),
     "run_in_background": (
         "Start a long-running command in the background (dev server, watcher) "
@@ -124,13 +117,11 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Search saved findings",
         "search_findings(query='auth')",
     ),
-    "read_findings": (
-        "Read all findings",
-        "read_findings()",
-    ),
     "search_knowledge": (
-        "Full-text search across all saved knowledge (findings + reports)",
-        "search_knowledge(query='auth AND token')",
+        "Full-text search across saved knowledge (findings + reports); "
+        "omit the query to browse findings by filter",
+        "search_knowledge(query='auth & token*') | "
+        "search_knowledge(finding_type='project_context')",
     ),
     "update_finding": (
         "Edit the content/topic of an existing finding by id",
@@ -178,10 +169,6 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "delete_documentation(library_name='fastapi')",
     ),
     # Code intelligence
-    "find_definition": (
-        "Find where a function/class is defined",
-        "find_definition(name='verify_token')",
-    ),
     "find_references": (
         "Find ALL places where a symbol is used",
         "find_references(name='verify_token')",
@@ -201,18 +188,6 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "project_structure": (
         "Show directory tree with file descriptions",
         "project_structure(file_path='src/')",
-    ),
-    "edit_symbol": (
-        "Replace a method/function body by symbol name",
-        "edit_symbol(symbol='AuthService.verify_token', new_code='def verify_token(self, token): ...')",
-    ),
-    "add_symbol": (
-        "Add a new method to a class or file",
-        "add_symbol(file_path='src/auth.py', code='def new_method(self): ...', class_name='AuthService')",
-    ),
-    "remove_symbol": (
-        "Remove a method/function by name",
-        "remove_symbol(symbol='AuthService._old_helper')",
     ),
     "analyze_code": (
         "Detect broken imports, undefined symbols, unused code",
@@ -266,6 +241,14 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Get detailed help and examples for any tool",
         "help(context='edit')",
     ),
+    "recall_context": (
+        "Retrieve tool output from earlier steps that left your context",
+        "recall_context(query='the failing assertion from the auth test')",
+    ),
+    "view_image": (
+        "Load an image so the next turn can see it (vision models only)",
+        "view_image(file_path='docs/architecture.png')",
+    ),
     # Engine pseudo-tools (always available)
     "step_complete": (
         "End current step (REQUIRED after each step)",
@@ -286,92 +269,283 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
 }
 
 
+# ── MCP-provided tools ───────────────────────────────────────────────────
+#
+# These arrive from an MCP server at runtime and already carry the server's
+# own description, so they need no entry here to be usable. The hints below
+# exist for a different reason: a tool the model has to *discover* in a
+# ninety-entry schema is a tool it does not reach for. Naming the handful
+# worth using unprompted — and saying when — is what turns a registered
+# tool into a used one.
+#
+# They live in their own dict because whether the matching tool exists
+# depends on which servers are configured, so the staleness guard in
+# ``tests/test_tool_docs_complete.py`` must not treat them as dead entries
+# on a machine with no Ken installed.
+# Hints for tools a *server* owns, so they are coupled to that server's
+# version in a way local hints are not: ken renaming its surface silently
+# retires every entry here, and the catalog's staleness guard cannot see it
+# (it exempts MCP names, because a missing server is a deployment fact, not
+# rot). The bridge already renders each server's own description as a
+# fallback — these exist only to add the one thing a description cannot: a
+# call that shows the argument shape.
+MCP_TOOL_HINTS: dict[str, tuple[str, str]] = {
+    "ken_find": (
+        "Find things by describing them — scope picks what is searched: "
+        "files, symbols, text, tests, wiring, intent",
+        "ken_find(query='where provider retries are backed off', scope='files')",
+    ),
+    "ken_read": (
+        "Read an indexed file's structure, and its source when you ask for it",
+        "ken_read(path='src/infinidev/engine/loop/engine.py', include=['symbols'])",
+    ),
+    "ken_related": (
+        "What else is connected to a file or symbol, by a named relation: "
+        "blast_radius, callers, callees, cochange, clones, imports, neighbors",
+        "ken_related(target='src/infinidev/engine/loop/engine.py', relation='blast_radius')",
+    ),
+    "ken_rank": (
+        "What matters right now — ken's own ordering, not a search. Scopes: "
+        "session, changes, project, architecture",
+        "ken_rank(scope='session', verbose=1)",
+    ),
+    "ken_recall": (
+        "Recall findings saved in earlier sessions for this project",
+        "ken_recall(query='auth token lifetime', limit=5)",
+    ),
+    "ken_remember": (
+        "Save a durable finding so future sessions start warm",
+        "ken_remember(topic='jwt-clock-skew', content='Tokens allow 60s skew (src/auth/jwt.py:88)')",
+    ),
+}
+
+TOOL_DESCRIPTIONS.update(MCP_TOOL_HINTS)
+
+
+# Terminators and engine pseudo-tools. They are explained by the loop
+# protocol section, not by the tool catalog, so the catalog's catch-all must
+# leave them alone.
+_PROTOCOL_TOOLS = {
+    "step_complete",
+    "add_note",
+    "add_session_note",
+    "think",
+    "respond",
+    "escalate",
+    "emit_plan",
+    "emit_verdict",
+    "channel_post",
+    "conclude",
+    "seed_council",
+    "council_verdict",
+    "synthesize_brief",
+}
+
+
 # ── Editing tool groups ──────────────────────────────────────────────────
 # Used to generate conditional editing rules
 
-_EDIT_TOOLS_SURGICAL = {"replace_lines", "edit_symbol"}
-_EDIT_TOOLS_INSERT = {"add_content_after_line", "add_content_before_line"}
-_EDIT_TOOLS_SYMBOL = {"edit_symbol", "add_symbol", "remove_symbol"}
+# One tool changes file contents; the symbol pair are project-wide refactors.
+_EDIT_TOOLS_SURGICAL = {"edit_file"}
+_EDIT_TOOLS_SYMBOL = {"rename_symbol", "move_symbol"}
 
 
-def build_tool_usage_section(available_tools: set[str]) -> str:
+def _mcp_descriptions() -> dict[str, str]:
+    """Name → description for every MCP tool currently exposed.
+
+    Read from the bridge's cache rather than passed down the call chain:
+    the identity prompt is built from a set of *names*, several layers away
+    from the tool instances, and threading them through every flow just to
+    caption a list would be a lot of plumbing for one paragraph.
+    """
+    try:
+        from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
+
+        return {
+            cls.model_fields["name"].default:
+                (cls.model_fields["description"].default or "").strip()
+            for cls in discover_mcp_tool_classes()
+        }
+    except Exception:  # pragma: no cover - prompts must never fail on this
+        return {}
+
+
+def build_tool_usage_section(
+    available_tools: set[str], tools: list | None = None
+) -> str:
     """Generate a '## Tool Usage' prompt section listing only available tools.
 
     Groups tools by category and includes usage hints.
+
+    ``tools`` is optional and carries the instances themselves. It matters
+    for MCP-provided tools, whose descriptions live on the server rather
+    than in this file: without it they would be listed as bare names, which
+    tells the model a tool exists but nothing about when to use it. When it
+    is not supplied the descriptions are read from the MCP bridge's own
+    cache, so callers that only have names still get usable output.
     """
+    own_descriptions = _mcp_descriptions()
+    own_descriptions.update({
+        t.name: (getattr(t, "description", "") or "").strip()
+        for t in (tools or [])
+        if getattr(t, "name", None)
+    })
     categories = [
-        ("Reading", ["read_file", "list_directory", "glob",
-                     "code_search", "get_symbol_code", "list_symbols",
-                     "search_symbols", "find_definition", "find_references",
-                     "find_similar_methods", "search_by_docstring",
-                     "iter_symbols", "project_stats",
-                     "project_structure", "analyze_code"]),
-        ("Writing", ["create_file", "replace_lines", "edit_symbol",
-                     "add_symbol", "remove_symbol", "rename_symbol",
-                     "move_symbol", "add_content_after_line",
-                     "add_content_before_line"]),
-        ("Execution", ["execute_command", "code_interpreter",
-                       "run_in_background", "background_status",
-                       "stop_background_task", "wait_for_background_task"]),
+        (
+            "Reading",
+            [
+                "read_file",
+                "list_directory",
+                "glob",
+                "code_search",
+                "get_symbol_code",
+                "list_symbols",
+                "search_symbols",
+                "find_references",
+                "find_similar_methods",
+                "search_by_docstring",
+                "iter_symbols",
+                "project_stats",
+                "project_structure",
+                "analyze_code",
+                "view_image",
+            ],
+        ),
+        (
+            "Writing",
+            [
+                "create_file",
+                "edit_file",
+                "rename_symbol",
+                "move_symbol",
+            ],
+        ),
+        (
+            "Execution",
+            [
+                "execute_command",
+                "code_interpreter",
+                "run_in_background",
+                "background_status",
+                "stop_background_task",
+                "wait_for_background_task",
+            ],
+        ),
         ("Git", ["git_branch", "git_commit", "git_diff", "git_status"]),
         ("Web", ["web_search", "web_fetch", "code_search_web"]),
-        ("Knowledge", ["record_finding", "search_findings", "read_findings",
-                       "search_knowledge", "update_finding", "validate_finding",
-                       "reject_finding", "delete_finding", "summarize_findings",
-                       "write_report", "read_report", "delete_report"]),
-        ("Library docs", ["find_documentation", "update_documentation",
-                          "delete_documentation"]),
-        ("Planning", ["add_step", "modify_step", "remove_step",
-                      "declare_test_command", "tail_test_output"]),
+        (
+            "Knowledge",
+            [
+                "record_finding",
+                "search_findings",
+                "search_knowledge",
+                "update_finding",
+                "validate_finding",
+                "reject_finding",
+                "delete_finding",
+                "summarize_findings",
+                "write_report",
+                "read_report",
+                "delete_report",
+            ],
+        ),
+        (
+            "Library docs",
+            ["find_documentation", "update_documentation", "delete_documentation"],
+        ),
+        (
+            "Planning",
+            [
+                "add_step",
+                "modify_step",
+                "remove_step",
+                "declare_test_command",
+                "tail_test_output",
+            ],
+        ),
         ("Communication", ["send_message"]),
-        ("Meta", ["help"]),
+        ("Meta", ["help", "recall_context"]),
     ]
 
     lines = ["## Tool Usage", ""]
+    listed: set[str] = set()
     for category, tool_names in categories:
         present = [t for t in tool_names if t in available_tools]
         if not present:
             continue
+        listed.update(present)
         lines.append(f"### {category}")
         for name in present:
             desc, example = TOOL_DESCRIPTIONS.get(name, (name, ""))
             lines.append(f"- **{name}**: {desc}")
         lines.append("")
 
+    # Tools that arrived from an MCP server are discovered at runtime, so no
+    # static category can name them. Listing them last is the difference
+    # between a tool the model knows it has and one that only exists in the
+    # JSON schema — and a tool the model does not know about is one it never
+    # calls.
+    #
+    # Protocol tools are excluded: `step_complete`, `respond`, `escalate` and
+    # friends are terminators explained by the loop protocol, and repeating
+    # them here under a heading about the project index would be actively
+    # misleading.
+    remaining = sorted(available_tools - listed - _PROTOCOL_TOOLS)
+    if remaining:
+        lines.append("### Project index (MCP)")
+        lines.append(
+            "Backed by a semantic index of this repository, kept up to date "
+            "outside the session. Reach for these when you are looking for "
+            "something by *meaning* rather than by name, or when a previous "
+            "session may already have answered the question."
+        )
+        for name in remaining:
+            desc = TOOL_DESCRIPTIONS.get(name, ("", ""))[0]
+            desc = desc or own_descriptions.get(name, "")
+            lines.append(f"- **{name}**{f': {desc}' if desc else ''}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
 def build_editing_rules(available_tools: set[str]) -> str:
-    """Generate editing rules based on which edit tools are available."""
+    """Editing guidance, keyed to what is actually bound.
+
+    Written as decision rules with observable triggers rather than advice.
+    "Prefer surgical edits" asks the model to rate its own behaviour; "if the
+    match is not unique, add surrounding lines" is something it can check.
+    """
     rules = []
-
-    has_replace = "replace_lines" in available_tools
-    has_edit_sym = "edit_symbol" in available_tools
-    has_add_sym = "add_symbol" in available_tools
-    has_remove_sym = "remove_symbol" in available_tools
-    has_create = "create_file" in available_tools
-    has_insert = "add_content_after_line" in available_tools
-    has_help = "help" in available_tools
-
-    if has_help:
-        rules.append("- Call help(\"edit\") if unsure how the editing tools work.")
-
-    if has_edit_sym:
-        rules.append("- To replace a method/function: use edit_symbol (preferred — by symbol name)")
-    if has_replace:
-        rules.append("- To replace specific lines: use replace_lines (by line number — read file first)")
-    if has_add_sym:
-        rules.append("- To add a new method to a class: use add_symbol")
-    if has_remove_sym:
-        rules.append("- To delete a method: use remove_symbol")
-    if has_insert:
-        rules.append("- To insert lines: use add_content_after_line or add_content_before_line")
-    if has_create:
-        rules.append("- To create a new file: use create_file (fails if file exists)")
-
+    if "help" in available_tools:
+        rules.append('- Unsure how the editing tools work? Call help("edit").')
+    if "edit_file" in available_tools:
+        rules.extend([
+            "- Change an existing file with edit_file(file_path, old_string, "
+            "new_string). old_string must match byte for byte, indentation "
+            "included.",
+            "- Read the file in this step before editing it. The text you paste "
+            "has to be the text on disk right now.",
+            "- If the edit is refused for appearing more than once, add the "
+            "lines above and below until the match is unique — do not guess.",
+            "- Deleting is new_string=\"\".",
+        ])
+    if "create_file" in available_tools:
+        rules.append(
+            "- create_file is for files that do not exist yet; it fails if one does."
+        )
+    if "rename_symbol" in available_tools:
+        rules.append(
+            "- Renaming something used elsewhere: rename_symbol, not edit_file. "
+            "It rewrites every reference and import; editing files one at a "
+            "time leaves the others pointing at a name that is gone."
+        )
+    if "move_symbol" in available_tools:
+        rules.append(
+            "- Moving code between files: move_symbol, for the same reason — it "
+            "fixes the imports on both sides."
+        )
     if not rules:
         return ""
-
     return "## Editing Rules\n" + "\n".join(rules)
 
 
@@ -380,67 +554,41 @@ def build_editing_examples(
     *,
     task_type: str = "feature",
 ) -> str:
-    """Generate editing examples using only available tools."""
+    """One worked example per distinct operation, and no more.
+
+    There used to be four, three of which showed the same shape with a
+    different tool. Extra demonstrations of a pattern the model already has
+    measurably cost accuracy on structured tasks — they compete for attention
+    with the instruction they are meant to support.
+    """
     examples = []
 
-    has_replace = "replace_lines" in available_tools
-    has_edit_sym = "edit_symbol" in available_tools
-    has_add_sym = "add_symbol" in available_tools
-    has_create = "create_file" in available_tools
-
-    if has_replace:
+    if "edit_file" in available_tools:
         examples.append(
-            "Example — Replace specific lines:\n"
-            "  1. read_file: path=\"src/auth.py\" → see line numbers\n"
-            "  2. replace_lines: file_path=\"src/auth.py\",\n"
-            "     content=\"    if payload.get('exp', 0) < time.time():\\n\",\n"
-            "     start_line=15, end_line=15\n"
-            "  3. execute_command: \"python -m pytest tests/test_auth.py -x -q\"\n"
-            "     → PASSED\n"
-            "  4. step_complete: summary=\"Fixed expiry check. Test passes.\""
+            "Example — change an existing file:\n"
+            '  1. read_file: file_path="src/auth.py"   shows the current text\n'
+            "  2. edit_file:\n"
+            '     file_path="src/auth.py",\n'
+            "     old_string=\"    if payload.get('exp', 0) < now:\",\n"
+            "     new_string=\"    if payload.get('exp', 0) < time.time():\"\n"
+            '  3. execute_command: "python -m pytest tests/test_auth.py -x -q"\n'
+            "     Output: PASSED\n"
+            '  4. step_complete: summary="Fixed expiry check. Test passes."'
         )
 
-    if has_edit_sym:
+    if "create_file" in available_tools:
         examples.append(
-            "Example — Replace a method by name:\n"
-            "  1. edit_symbol:\n"
-            "     symbol=\"AuthService.verify_token\",\n"
-            "     new_code=\"    def verify_token(self, token):\\n"
-            "        payload = self._decode(token)\\n"
-            "        if not payload or payload.get('exp', 0) < time.time():\\n"
-            "            return None\\n"
-            "        return payload\"\n"
-            "  2. execute_command: \"python -m pytest tests/test_auth.py -v\"\n"
-            "     → 3 passed\n"
-            "  3. step_complete: summary=\"Rewrote verify_token() with expiry check\""
-        )
-
-    if has_add_sym:
-        examples.append(
-            "Example — Add a new method to a class:\n"
-            "  1. add_symbol:\n"
-            "     file_path=\"validator.py\",\n"
-            "     code=\"def add_rule(self, rule_func):\\n    self.rules.append(rule_func)\",\n"
-            "     class_name=\"Validator\"\n"
+            "Example — a file that does not exist yet:\n"
+            '  1. create_file: file_path="validator.py", content="class Validator:\\n'
+            '    def __init__(self):\\n        self.rules = []\\n"\n'
             "  2. execute_command: \"python -c 'from validator import Validator; "
-            "v = Validator(); v.add_rule(lambda x: True); print(len(v.rules))'\"\n"
-            "     → 1\n"
-            "  3. step_complete: summary=\"Added add_rule() to Validator\""
-        )
-
-    if has_create:
-        examples.append(
-            "Example — Create a new file:\n"
-            "  1. create_file: path=\"validator.py\", content=\"class Validator:\\n"
-            "    def __init__(self):\\n        self.rules = []\\n\"\n"
-            "  2. execute_command: \"python -c 'from validator import Validator; print(type(Validator()))'\"\n"
-            "     → <class 'validator.Validator'>\n"
-            "  3. step_complete: summary=\"Created Validator skeleton\""
+            "print(type(Validator()))'\"\n"
+            "     Output: <class 'validator.Validator'>\n"
+            '  3. step_complete: summary="Created Validator skeleton"'
         )
 
     if not examples:
         return ""
-
     return "## Examples of Good Execution\n\n" + "\n\n".join(examples)
 
 
@@ -450,32 +598,32 @@ def build_anti_patterns(available_tools: set[str]) -> str:
 
     # Universal anti-patterns
     patterns.append(
-        "1. Rewrite entire file to change one function:\n"
-        "   → Use surgical edits (replace_lines, edit_symbol) instead."
+        "1. Rewrite a whole file to change one function:\n"
+        "   INSTEAD: edit_file the one block that changes."
     )
     patterns.append(
         "2. Edit without reading first:\n"
-        "   → You need exact line numbers and function names. Read the file first."
+        "   INSTEAD: read the file this step; old_string must match it exactly."
     )
     patterns.append(
         "3. Fix things not in this step:\n"
-        "   → ONE step = ONE change. Other fixes go in their own step."
+        "   INSTEAD: ONE step means ONE change. Other fixes go in their own step."
     )
     patterns.append(
         "4. Skip verification:\n"
-        "   → ALWAYS run a test or import check after every edit."
+        "   INSTEAD: ALWAYS run a test or an import check after every edit."
     )
     patterns.append(
         "5. Keep trying after 3 consecutive failures:\n"
-        "   → STOP. Call step_complete(status=\"blocked\"). The design needs rethinking."
+        '   INSTEAD: STOP. Call step_complete(status="blocked"). The design needs rethinking.'
     )
     patterns.append(
         "6. Add code that wasn't asked for:\n"
-        "   → No extra logging, docstrings, type hints, or error handling unless requested."
+        "   INSTEAD: add no logging, docstrings, type hints, or error handling unless asked."
     )
     patterns.append(
         "7. Read the same file twice in one step:\n"
-        "   → The content is already in your context after the first read."
+        "   INSTEAD: use what you already read. It is still in your context."
     )
 
     return "## NEVER Do These\n\n" + "\n\n".join(patterns)
@@ -500,7 +648,7 @@ def build_execute_prompt(
         "",
         "## RULES",
         "- ONLY modify the file(s) and function(s) described in this step",
-        "- Do NOT refactor, clean up, or \"improve\" adjacent code",
+        '- Do NOT refactor, clean up, or "improve" adjacent code',
         "- Do NOT add error handling for cases that can't happen",
         "- Do NOT add abstractions for one-time operations",
         "- Verify your edit: run the relevant test",

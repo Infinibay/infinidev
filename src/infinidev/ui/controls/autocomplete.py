@@ -34,6 +34,8 @@ COMMANDS = [
     ("/docs", "Browse cached library documentation (alias)"),
     ("/reindex", "Re-index the workspace (incremental)"),
     ("/reindex --full", "Drop the index and rebuild from scratch"),
+    ("/mcp", "Show MCP server health (Ken semantic index, and others)"),
+    ("/mcp restart", "Restart an MCP server: /mcp restart ken"),
     ("/clear", "Clear chat history"),
     ("/help", "Show this help"),
     ("/exit", "Exit the CLI"),

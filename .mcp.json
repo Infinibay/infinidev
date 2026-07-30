@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ken": {
+      "command": "ken",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

@@ -36,6 +36,10 @@ from infinidev.engine.analysis.grounded_spec import (
 )
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
+from infinidev.engine.oversized_result import (
+    DuplicateCallGuard,
+    handle_oversized_result,
+)
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
@@ -486,6 +490,10 @@ def _exploration_call(
     tools = list(read_schemas) + [terminator]
     exploration_calls = 0
 
+    # One guard per run: a repeat inside the same turn is the
+    # livelock, a repeat in a later turn is a legitimate re-read.
+    dup_guard = DuplicateCallGuard()
+
     for _ in range(max_exploration_calls + 2):
         call_kwargs = dict(base_kwargs)
         call_kwargs["messages"] = messages
@@ -512,9 +520,17 @@ def _exploration_call(
 
         for tc in tool_calls:
             exploration_calls += 1
-            result = execute_tool_call(dispatch, tc.function.name, tc.function.arguments)
-            if len(result) > _MAX_RESULT_CHARS:
-                result = result[:_MAX_RESULT_CHARS] + "\n...[truncated]"
+            result = dup_guard.refusal_for(
+                tc.function.name, tc.function.arguments,
+            ) or execute_tool_call(
+                dispatch, tc.function.name, tc.function.arguments,
+            )
+            result = handle_oversized_result(
+                result,
+                max_chars=_MAX_RESULT_CHARS,
+                tool_name=tc.function.name,
+                tool_args=tc.function.arguments,
+            )
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
         if exploration_calls >= max_exploration_calls:

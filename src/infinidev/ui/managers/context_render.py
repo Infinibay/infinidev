@@ -12,6 +12,7 @@ from prompt_toolkit.formatted_text import FormattedText
 
 from infinidev.ui.theme import (
     TEXT,
+    TEXT_DIM,
     TEXT_MUTED,
     ACCENT,
     PROGRESS_GOOD,
@@ -51,12 +52,14 @@ def build_usage_bar_fragments(
     """
     pct_val = max(0.0, min(pct, 1.0))
     used_str = _format_count(used)
-    label_col = f"{label:<5}"
+    # Leading space aligns every sidebar row on the same left edge as the
+    # section titles; without it the bars start flush against the border.
+    label_col = f" {label:<5}"
 
     if available is None:
         return [
-            (f"{TEXT} bold", label_col),
-            (f"{TEXT_MUTED}", BAR_EMPTY * BAR_WIDTH),
+            (f"{TEXT_MUTED}", label_col),
+            (f"{TEXT_DIM}", BAR_EMPTY * BAR_WIDTH),
             (f"{TEXT_MUTED}", f" {used_str}/*"),
         ]
 
@@ -72,9 +75,9 @@ def build_usage_bar_fragments(
     avail_str = _format_count(available)
 
     return [
-        (f"{TEXT} bold", label_col),
+        (f"{TEXT_MUTED}", label_col),
         (f"{color}", BAR_FILLED * filled),
-        (f"{TEXT_MUTED}", BAR_EMPTY * empty),
+        (f"{TEXT_DIM}", BAR_EMPTY * empty),
         (f"{TEXT_MUTED}", f" {used_str}/{avail_str}"),
     ]
 
@@ -89,11 +92,11 @@ def build_context_fragments(
     flow_part = f"  {context_flow}" if context_flow else ""
 
     fragments: list[tuple[str, str]] = []
-    fragments.append((f"{TEXT} bold", f"{model}"))
+    fragments.append((f"{TEXT}", f" {model}"))
     if max_ctx is None:
-        fragments.append((f"{TEXT_MUTED}", " (* ctx)"))
+        fragments.append((f"{TEXT_DIM}", " · ? ctx"))
     else:
-        fragments.append((f"{TEXT_MUTED}", f" ({_format_count(max_ctx)} ctx)"))
+        fragments.append((f"{TEXT_DIM}", f" · {_format_count(max_ctx)} ctx"))
     if flow_part:
         fragments.append((f"{ACCENT} bold", flow_part))
     fragments.append(("", "\n"))

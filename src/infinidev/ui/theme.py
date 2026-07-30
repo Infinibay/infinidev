@@ -10,37 +10,45 @@ prompt_toolkit styles use the format: "fg_hex bg:bg_hex bold italic underline"
 from __future__ import annotations
 
 # ── Message styles ──────────────────────────────────────────────────────
+#
+# Transcript-first design: messages carry NO background fill. Coloured
+# blocks fight the terminal's own theme, break text selection in most
+# emulators, and make a long conversation read as a stack of boxes rather
+# than a conversation. Identity comes from a 1-cell gutter mark plus the
+# text colour — the same approach every modern coding CLI converged on.
+#
+# Setting a *_BG to "" makes the renderer inherit the terminal background.
 
-MSG_USER_FG = "#a8ffc8"
-MSG_USER_BG = "#0a1a0a"
-MSG_USER_BORDER = "#2df97f"
+MSG_USER_FG = "#e8e8e8"
+MSG_USER_BG = ""
+MSG_USER_BORDER = "#5ad48a"
 
-MSG_AGENT_FG = "#d0e4ff"
-MSG_AGENT_BG = "#0a101a"
-MSG_AGENT_BORDER = "#4da6ff"
+MSG_AGENT_FG = "#d6dbe4"
+MSG_AGENT_BG = ""
+MSG_AGENT_BORDER = "#6c8fc7"
 
-MSG_SYSTEM_FG = "#ffcc4d"
-MSG_SYSTEM_BG = "#1a1500"
-MSG_SYSTEM_BORDER = "#ffaa00"
+MSG_SYSTEM_FG = "#c9a227"
+MSG_SYSTEM_BG = ""
+MSG_SYSTEM_BORDER = "#c9a227"
 
-MSG_THINK_FG = "#c0b8e0"
-MSG_THINK_BG = "#12101a"
-MSG_THINK_BORDER = "#8a70c8"
+MSG_THINK_FG = "#8a8fa3"
+MSG_THINK_BG = ""
+MSG_THINK_BORDER = "#6b6f80"
 
-MSG_PENDING_FG = "#7aad7a"
-MSG_PENDING_BG = "#0a1a0a"
-MSG_PENDING_BORDER = "#2a8a4f"
+MSG_PENDING_FG = "#7f9f8a"
+MSG_PENDING_BG = ""
+MSG_PENDING_BORDER = "#4c7a5f"
 
-MSG_QUEUED_FG = "#888888"
-MSG_QUEUED_BG = "#161616"
-MSG_QUEUED_BORDER = "#ffaa00"
+MSG_QUEUED_FG = "#7a7a7a"
+MSG_QUEUED_BG = ""
+MSG_QUEUED_BORDER = "#c9a227"
 
 # ── Sender name colors ──────────────────────────────────────────────────
 
 SENDER_COLORS = {
-    "user": "#6fbf6f",
-    "agent": "#7a9fd4",
-    "system": "#888888",
+    "user": "#5ad48a",
+    "agent": "#6c8fc7",
+    "system": "#7a7a7a",
 }
 
 NAME_COLORS = {
@@ -59,72 +67,88 @@ NAME_COLORS = {
 
 # ── Diff colors ─────────────────────────────────────────────────────────
 
-DIFF_REMOVED = "#ff5577"
-DIFF_ADDED = "#00ee77"
-DIFF_HUNK = "#55aaff"
-DIFF_HEADER = "#888888"
-DIFF_TITLE_FG = "#ff8800"
-DIFF_TITLE_BG = "#1a1200"
+DIFF_REMOVED = "#d96b6b"
+DIFF_ADDED = "#5ad48a"
+DIFF_HUNK = "#6c8fc7"
+DIFF_HEADER = "#7a8090"
+DIFF_TITLE_FG = "#c9a227"
+DIFF_TITLE_BG = "#1c1a12"
 
 # ── Progress / status bars ──────────────────────────────────────────────
 
-PROGRESS_GOOD = "#44ff44"
-PROGRESS_WARNING = "#ffaa00"
-PROGRESS_CRITICAL = "#ff4444"
+PROGRESS_GOOD = "#5ad48a"
+PROGRESS_WARNING = "#c9a227"
+PROGRESS_CRITICAL = "#d96b6b"
 
 # ── Chrome (layout surfaces, borders, text) ─────────────────────────────
+#
+# Chrome sits close to the terminal background instead of competing with
+# it. SURFACE stays empty ("") wherever the transcript is: the chat area
+# must feel like the terminal, not like a widget painted on top of it.
 
-SURFACE = "#1e1e1e"
-SURFACE_DARK = "#161616"
-SURFACE_DARKER = "#111111"
-SURFACE_LIGHT = "#262626"
+SURFACE = "#16181d"       # modal dialogs — the one place a solid fill helps
+SURFACE_DARK = "#14161a"  # status line
+SURFACE_DARKER = "#0f1114"
+SURFACE_LIGHT = "#191c21"  # composer / panels
 
-PRIMARY = "#4da6ff"
-PRIMARY_DARK = "#3a7fbf"
-PRIMARY_DARKER = "#2a5f8f"
+PRIMARY = "#6c8fc7"
+PRIMARY_DARK = "#4d6b99"
+PRIMARY_DARKER = "#3a5273"
 
-ACCENT = "#ffaa00"
+ACCENT = "#c9a227"
 
-TEXT = "#cccccc"
-TEXT_MUTED = "#888888"
-TEXT_DIM = "#555555"
+TEXT = "#d6dbe4"
+TEXT_MUTED = "#7a8090"
+TEXT_DIM = "#4a5060"
 
-WARNING = "#ffaa00"
-ERROR = "#ff4444"
-SUCCESS = "#2df97f"
+WARNING = "#c9a227"
+ERROR = "#d96b6b"
+SUCCESS = "#5ad48a"
 
 # ── Scrollbar ───────────────────────────────────────────────────────────
 
-SCROLLBAR_BG = "#161616"
-SCROLLBAR_FG = "#4da6ff"
+SCROLLBAR_BG = "#14161a"
+SCROLLBAR_FG = "#4d6b99"
 
 # ── Thinking indicator ──────────────────────────────────────────────────
 
-THINKING_FG = "#7b9fdf"
+THINKING_FG = "#7a8090"
 
 # ── Explorer ────────────────────────────────────────────────────────────
 
-EXPLORER_TITLE_FG = "#ffffff"
-EXPLORER_TITLE_BG = "#4da6ff"
-EXPLORER_TREE_GUIDE = "#2a5f8f"
-EXPLORER_HIDDEN = "#888888"
+EXPLORER_TITLE_FG = "#d6dbe4"
+EXPLORER_TITLE_BG = "#191c21"
+EXPLORER_TREE_GUIDE = "#3a5273"
+EXPLORER_HIDDEN = "#4a5060"
 
 # ── Image viewer ────────────────────────────────────────────────────────
 
-IMAGE_VIEWER_BG = "#111111"
+IMAGE_VIEWER_BG = "#0f1114"
 
 # ── Shell mode input ────────────────────────────────────────────────
 
-SHELL_INPUT_BG = "#1a0a0a"
-SHELL_INPUT_FG = "#e0e0e0"
-SHELL_BORDER_COLOR = "#ff4444"
-SHELL_LABEL_FG = "#ff4444"
+SHELL_INPUT_BG = "#1c1315"
+SHELL_INPUT_FG = "#e8dcdc"
+SHELL_BORDER_COLOR = "#d96b6b"
+SHELL_LABEL_FG = "#d96b6b"
+
+# ── Composer (the input box at the bottom of the transcript) ────────────
+
+COMPOSER_BORDER = "#3a4050"
+COMPOSER_BORDER_FOCUS = "#6c8fc7"
+COMPOSER_PROMPT = "#6c8fc7"
+COMPOSER_PLACEHOLDER = "#4a5060"
 
 # ── Dimensions ──────────────────────────────────────────────────────────
 
-EXPLORER_WIDTH = 30
-SIDEBAR_WIDTH_PERCENT = 30
-CHAT_INPUT_HEIGHT = 4
+# Panel widths in columns. Both used to be ~30% of the terminal, which on
+# a 200-column screen meant a 60-column file tree — far more than a file
+# tree needs, taken straight out of the transcript. Fixed widths sized to
+# their content read better and stay predictable when the window resizes.
+EXPLORER_WIDTH = 26
+SIDEBAR_WIDTH = 30
+SIDEBAR_WIDTH_PERCENT = 30  # legacy alias, kept for external callers
+CHAT_INPUT_HEIGHT = 3
 STATUS_BAR_HEIGHT = 1
 SIDEBAR_PANEL_MAX_LINES = 8
 CONTEXT_PANEL_HEIGHT = 5

@@ -59,6 +59,11 @@ _TOOL_ALIASES: dict[str, str] = {
     # we recommend in the new system prompt; the alias keeps the old
     # name working so existing prompts don't break.
     "explain_tool": "help",
+    # read_findings and search_knowledge were the same algorithm (FTS over
+    # findings) behind two names. search_knowledge took over, including the
+    # no-query browse mode and the session/type filters, so the old name is
+    # a pure rename — every read_findings parameter exists there unchanged.
+    "read_findings": "search_knowledge",
 }
 
 
@@ -67,8 +72,8 @@ _TOOL_ALIASES: dict[str, str] = {
 # ``execute_tool_call`` doesn't rebuild this dict on every invocation.
 _HALLUCINATION_MAP: dict[str, str] = {
     "write_file": "create_file",
-    "edit_file": "replace_lines",
-    "apply_patch": "replace_lines",
+    "apply_patch": "edit_file",
+    "str_replace": "edit_file",
     "read": "read_file",
     "search": "code_search",
     "run": "execute_command",
@@ -77,8 +82,46 @@ _HALLUCINATION_MAP: dict[str, str] = {
     "find": "glob",
     "grep": "code_search",
     "cat": "read_file",
-    "vim": "replace_lines",
-    "search_knowledge": "search_findings",
+    "vim": "edit_file",
+}
+
+
+# Retired tools: the name is gone and its arguments do not survive a rename,
+# so there is nothing to alias it to. Saying "unknown tool" would send the
+# model hunting; naming the replacement and the shape it wants turns a dead
+# end into one wasted call.
+_RETIRED_TOOLS: dict[str, str] = {
+    "replace_lines": (
+        "replace_lines was retired. Use edit_file(file_path, old_string, "
+        "new_string) — paste the exact text to replace instead of line "
+        "numbers, which shift as soon as an earlier edit lands."
+    ),
+    "add_content_after_line": (
+        "add_content_after_line was retired. Use edit_file(file_path, "
+        "old_string, new_string) with the line you are inserting after as "
+        "old_string, and that same line plus your new content as new_string."
+    ),
+    "add_content_before_line": (
+        "add_content_before_line was retired. Use edit_file(file_path, "
+        "old_string, new_string) with the line you are inserting before as "
+        "old_string, and your new content plus that line as new_string."
+    ),
+    "edit_symbol": (
+        "edit_symbol was retired. Read the symbol (get_symbol_code) and "
+        "replace its body with edit_file(file_path, old_string, new_string)."
+    ),
+    "add_symbol": (
+        "add_symbol was retired. Use edit_file(file_path, old_string, "
+        "new_string) anchored on the line you want to insert after."
+    ),
+    "remove_symbol": (
+        "remove_symbol was retired. Use edit_file(file_path, old_string, "
+        "new_string='') with the symbol's source as old_string."
+    ),
+    "multi_edit_file": (
+        "multi_edit_file was retired. Call edit_file once per change; each "
+        "one validates its own match."
+    ),
 }
 
 
@@ -121,6 +164,55 @@ def _resolve_tool(
     return None, name
 
 
+# How many alternatives an unknown-tool error offers. Enough to contain the
+# right one, few enough that the model reads them all.
+_SUGGESTION_LIMIT = 8
+# Below this score a candidate is not a near-miss, it is padding. Without a
+# floor the list fills to the limit with whatever ranked next, which puts
+# unrelated tools beside the right answer and dilutes it.
+_SUGGESTION_FLOOR = 0.5
+# …but never answer with nothing: a wrong guess the model can reject still
+# beats an error that offers no way forward.
+_MIN_SUGGESTIONS = 3
+
+
+def _unknown_tool_message(dispatch: dict[str, Any], name: str) -> str:
+    """Name the tools the model probably meant.
+
+    This used to answer with ``sorted(dispatch)[:15]`` — the alphabetically
+    first fifteen of ninety-odd, which for this toolset is everything from
+    ``add_content_after_line`` to ``delete_report`` and never once the tool
+    that was actually wanted. Ranking by similarity to what the model typed
+    turns a dead end into a correction it can make on the next call.
+    """
+    from difflib import SequenceMatcher
+
+    # A retired tool is not a typo — the model is remembering a real tool that
+    # used to exist. Guessing at neighbours would be noise; say what replaced it.
+    if (retired := _RETIRED_TOOLS.get(name)):
+        return retired
+
+    typed = name.lower()
+
+    def closeness(candidate: str) -> float:
+        low = candidate.lower()
+        # A shared prefix or suffix ("ken_search_file" → "ken_search_files")
+        # is a far stronger signal than raw edit distance, which would rank
+        # every ken_* tool identically.
+        bonus = 0.3 if low.startswith(typed[:6]) or typed.startswith(low[:6]) else 0.0
+        return SequenceMatcher(None, typed, low).ratio() + bonus
+
+    scored = sorted(
+        ((closeness(candidate), candidate) for candidate in dispatch), reverse=True,
+    )
+    close = [n for score, n in scored[:_SUGGESTION_LIMIT] if score >= _SUGGESTION_FLOOR]
+    ranked = close or [n for _, n in scored[:_MIN_SUGGESTIONS]]
+    return (
+        f"Unknown tool: {name}. Did you mean one of: {', '.join(ranked)}? "
+        f"Call help() to list every tool you have."
+    )
+
+
 def execute_tool_call(
     dispatch: dict[str, Any],
     name: str,
@@ -141,10 +233,7 @@ def execute_tool_call(
     tool, name = _resolve_tool(dispatch, name)
 
     if tool is None:
-        available = sorted(dispatch.keys())[:15]
-        return json.dumps({
-            "error": f"Unknown tool: {name}. Available tools: {', '.join(available)}",
-        })
+        return json.dumps({"error": _unknown_tool_message(dispatch, name)})
 
     # Parse arguments
     if isinstance(arguments, str):

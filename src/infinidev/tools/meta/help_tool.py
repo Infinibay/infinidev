@@ -33,8 +33,59 @@ class HelpTool(InfinibayBaseTool):
         if len(matches) > 1:
             return f"Multiple matches for '{context}': {', '.join(matches)}. Be more specific."
 
+        # Nothing hand-written. Tools discovered at runtime from an MCP
+        # server are never in HELP_CONTENT — a static file cannot document
+        # what a server has not advertised yet — so render their own schema
+        # instead of answering "no help found" about a tool the model can
+        # plainly see in its toolbox.
+        live = _render_live_tool(context)
+        if live:
+            return live
+
         available = sorted(k for k in HELP_CONTENT if k is not None)
         return (
             f"No help found for '{context}'.\n"
             f"Available topics: {', '.join(available)}"
         )
+
+
+def _render_live_tool(name: str | None) -> str | None:
+    """Build help for a registered tool from its description and schema."""
+    if not name:
+        return None
+    tool = _find_registered_tool(name)
+    if tool is None:
+        return None
+
+    lines = [f"# {tool.name}", "", (tool.description or "").strip()]
+    server = getattr(tool, "mcp_server", None)
+    if server:
+        lines.append(f"\nProvided by the {server!r} MCP server.")
+
+    schema = getattr(tool, "args_schema", None)
+    fields = getattr(schema, "model_fields", None) or {}
+    if fields:
+        lines.append("\n## Parameters")
+        for field_name, field in fields.items():
+            required = "required" if field.is_required() else "optional"
+            described = (field.description or "").strip()
+            lines.append(
+                f"- **{field_name}** ({required})"
+                + (f" — {described}" if described else "")
+            )
+    else:
+        lines.append("\nTakes no arguments.")
+    return "\n".join(lines)
+
+
+def _find_registered_tool(name: str):
+    """Locate a live tool instance by name, without building the full toolset."""
+    try:
+        from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
+
+        for cls in discover_mcp_tool_classes():
+            if cls.model_fields["name"].default == name:
+                return cls()
+    except Exception:
+        pass
+    return None

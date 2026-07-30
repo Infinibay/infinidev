@@ -57,6 +57,12 @@ class TUIHooks:
             "idle":     "Idle",
         }
         self._app._actions_text = labels.get(phase, phase or "Idle")
+        # The sidebar is closed by default now, so the phase has to reach
+        # the transcript's working indicator too — otherwise a long
+        # planning pass looks identical to a hung process.
+        control = getattr(self._app, "_chat_history_control", None)
+        if control is not None:
+            control.work_label = "" if phase == "idle" else labels.get(phase, phase)
         if phase == "idle":
             self._app._context_flow = ""
         elif phase == "execute":
@@ -223,8 +229,17 @@ class TUIHooks:
         self._app.invalidate()
 
     def on_file_change(self, path: str) -> None:
-        # Diff tracking is owned by InfinidevApp._file_diffs and updated
-        # by the engine hooks (engine/hooks/ui_hooks.py). Nothing to do
-        # here yet — included so the Protocol contract is satisfied and
-        # so future "highlight changed file" UX has a place to land.
-        return None
+        """Record the file in this task's touched-files list.
+
+        Full diff tracking is owned by InfinidevApp._file_diffs. This is
+        the running tally the sidebar shows: while a task is executing,
+        "which files is it editing right now" is the single most useful
+        thing a side panel can display, and the hook was a no-op.
+        """
+        if not path:
+            return
+        touched = getattr(self._app, "_touched_files", None)
+        if touched is None:
+            return
+        touched[path] = touched.get(path, 0) + 1
+        self._app.invalidate()

@@ -198,14 +198,14 @@ _STREAM_USAGE_PROVIDERS = frozenset({
 
 # Known tool names to validate detected names against
 _KNOWN_TOOLS = frozenset({
-    "read_file", "partial_read", "create_file", "replace_lines",
+    "read_file", "partial_read", "create_file", "edit_file",
     "list_directory", "code_search", "glob",
     "get_symbol_code", "list_symbols", "search_symbols",
-    "find_references", "edit_symbol", "add_symbol", "remove_symbol",
+    "find_references", "rename_symbol", "move_symbol",
     "project_structure",
     "git_branch", "git_commit", "git_diff", "git_status",
     "execute_command", "code_interpreter",
-    "record_finding", "read_findings", "search_findings",
+    "record_finding", "search_knowledge", "search_findings",
     "step_complete", "help",
 })
 

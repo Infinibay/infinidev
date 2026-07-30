@@ -137,9 +137,15 @@ def test_consecutive_agent_messages_both_visible_by_default(chat):
 
 
 def test_group_header_toggle_collapses_then_expands(chat):
+    """Grouping still works — for machine output, which is what it is for.
+
+    Conversation turns (user/agent) are exempt now: folding replies under
+    a "▼ Responses (2)" header hid the thing the user came to read. System
+    notices are the case grouping was built for.
+    """
     c, msgs = chat
-    msgs.append({"type": "agent", "sender": "A", "text": "first reply"})
-    msgs.append({"type": "agent", "sender": "A", "text": "second reply"})
+    msgs.append({"type": "system", "sender": "System", "text": "first reply"})
+    msgs.append({"type": "system", "sender": "System", "text": "second reply"})
     _force_render(c)
 
     # The group header is the first clickable line (offset 0).

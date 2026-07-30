@@ -1,29 +1,59 @@
 from infinidev.tools.file import (
-    ReadFileTool, WriteFileTool, MultiEditFileTool,
-    ListDirectoryTool, CodeSearchTool, GlobTool,
-    CreateFileTool, ReplaceLinesTool,
-    AddContentAfterLineTool, AddContentBeforeLineTool,
+    ReadFileTool,
+    WriteFileTool,
+    MultiEditFileTool,
+    EditFileTool,
+    ListDirectoryTool,
+    CodeSearchTool,
+    GlobTool,
+    CreateFileTool,
+    ReplaceLinesTool,
+    AddContentAfterLineTool,
+    AddContentBeforeLineTool,
     ViewImageTool,
 )
+from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
 from infinidev.tools.meta import HelpTool
-from infinidev.tools.meta.plan_tools import AddStepTool, ModifyStepTool, RemoveStepTool
+from infinidev.tools.meta.recall_context_tool import RecallContextTool
+from infinidev.tools.meta.plan_tools import (
+    AddStepTool,
+    ModifyStepTool,
+    RemoveStepTool,
+    PlanAddTool,
+    PlanListTool,
+    PlanRemoveTool,
+    PlanUpdateTool,
+)
 from infinidev.tools.meta.declare_test_command_tool import DeclareTestCommandTool
 from infinidev.tools.meta.tail_test_output_tool import TailTestOutputTool
 from infinidev.tools.git import (
-    GitBranchTool, GitCommitTool,
-    GitDiffTool, GitStatusTool,
+    GitBranchTool,
+    GitCommitTool,
+    GitDiffTool,
+    GitStatusTool,
 )
 from infinidev.tools.shell import (
-    ExecuteCommandTool, CodeInterpreterTool,
-    RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+    ExecuteCommandTool,
+    CodeInterpreterTool,
+    RunInBackgroundTool,
+    BackgroundStatusTool,
+    StopBackgroundTaskTool,
     WaitForBackgroundTaskTool,
 )
 from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
 from infinidev.tools.knowledge import (
-    RecordFindingTool, ReadFindingsTool, SearchFindingsTool,
-    ValidateFindingTool, RejectFindingTool, UpdateFindingTool, DeleteFindingTool,
-    WriteReportTool, ReadReportTool, DeleteReportTool,
-    SearchKnowledgeTool, SummarizeFindingsTool,
+    RecordFindingTool,
+    ReadFindingsTool,
+    SearchFindingsTool,
+    ValidateFindingTool,
+    RejectFindingTool,
+    UpdateFindingTool,
+    DeleteFindingTool,
+    WriteReportTool,
+    ReadReportTool,
+    DeleteReportTool,
+    SearchKnowledgeTool,
+    SummarizeFindingsTool,
 )
 from infinidev.tools.chat import SendMessageTool
 from infinidev.tools.chat_agent import RespondTool, EscalateTool
@@ -32,35 +62,98 @@ from infinidev.tools.council import (
     COUNCIL_MEMBER_TOOLS as _COUNCIL_MEMBER_TOOLS,
     COUNCIL_MODERATOR_TOOLS as _COUNCIL_MODERATOR_TOOLS,
 )
-from infinidev.tools.docs import DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool
+from infinidev.tools.docs import (
+    DeleteDocumentationTool,
+    FindDocumentationTool,
+    UpdateDocumentationTool,
+)
 from infinidev.tools.code_intel import (
-    FindDefinitionTool, FindReferencesTool, ListSymbolsTool, SearchSymbolsTool,
-    GetSymbolCodeTool, ProjectStructureTool,
-    EditSymbolTool, AddSymbolTool, RemoveSymbolTool,
-    EditMethodTool, AddMethodTool, RemoveMethodTool,  # backward-compat aliases
-    AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool,
-    FindSimilarMethodsTool, SearchByDocstringTool,
-    IterSymbolsTool, ProjectStatsTool,
+    FindDefinitionTool,
+    FindReferencesTool,
+    ListSymbolsTool,
+    SearchSymbolsTool,
+    GetSymbolCodeTool,
+    ProjectStructureTool,
+    EditSymbolTool,
+    AddSymbolTool,
+    RemoveSymbolTool,
+    EditMethodTool,
+    AddMethodTool,
+    RemoveMethodTool,  # backward-compat aliases
+    AnalyzeCodeTool,
+    RenameSymbolTool,
+    MoveSymbolTool,
+    FindSimilarMethodsTool,
+    SearchByDocstringTool,
+    IterSymbolsTool,
+    ProjectStatsTool,
 )
 
-FILE_TOOLS = [ReadFileTool, CreateFileTool, ReplaceLinesTool, AddContentAfterLineTool, AddContentBeforeLineTool, ListDirectoryTool, CodeSearchTool, GlobTool, ViewImageTool]
+FILE_TOOLS = [
+    ReadFileTool,
+    CreateFileTool,
+    EditFileTool,
+    # ReplaceLinesTool / AddContentAfterLineTool / AddContentBeforeLineTool are
+    # unbound: all three are `edit_file` with a different way of pointing at
+    # the text. Line numbers shift as soon as an earlier edit in the same step
+    # lands, so an off-by-one writes into the wrong place and reports success;
+    # an exact-text match refuses instead. MultiEditFileTool stays unbound for
+    # the same reason it always was — one way to edit a file.
+    ListDirectoryTool,
+    CodeSearchTool,
+    GlobTool,
+    ViewImageTool,
+]
 # Tools that only make sense when the model can see images.
 # Filtered out in get_tools_for_role when supports_vision is False so they
 # never reach the schema the LLM sees.
 VISION_ONLY_TOOLS = {ViewImageTool}
-META_TOOLS = [HelpTool, AddStepTool, ModifyStepTool, RemoveStepTool, DeclareTestCommandTool, TailTestOutputTool]
+META_TOOLS = [
+    HelpTool,
+    RecallContextTool,
+    AddStepTool,
+    ModifyStepTool,
+    RemoveStepTool,
+    # PlanAddTool / PlanListTool / PlanUpdateTool / PlanRemoveTool are
+    # deliberately not bound. They back a second, durable plan under
+    # `.infinidev/plans` — but nothing in the engine, the prompt or the
+    # review ever reads it back, so writing to it is a no-op the model
+    # pays ~425 tokens of schema to be tempted by. Worse, two ways to
+    # "manage a plan" is exactly the ambiguity that makes tool selection
+    # unreliable: `add_step` is the one that steers the run.
+    # `plan_store` and `plan_tools` stay in the tree — rebinding them is
+    # this list, once something consumes the store.
+    DeclareTestCommandTool,
+    TailTestOutputTool,
+]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [
-    ExecuteCommandTool, CodeInterpreterTool,
-    RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+    ExecuteCommandTool,
+    CodeInterpreterTool,
+    RunInBackgroundTool,
+    BackgroundStatusTool,
+    StopBackgroundTaskTool,
     WaitForBackgroundTaskTool,
 ]
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
 KNOWLEDGE_TOOLS = [
-    RecordFindingTool, ReadFindingsTool, SearchFindingsTool,
-    ValidateFindingTool, RejectFindingTool, UpdateFindingTool, DeleteFindingTool,
-    WriteReportTool, ReadReportTool, DeleteReportTool,
-    SearchKnowledgeTool, SummarizeFindingsTool,
+    RecordFindingTool,
+    # ReadFindingsTool is unbound: it and `search_knowledge` were both
+    # full-text search over findings, and two tools for one algorithm is the
+    # ambiguity that makes tool selection unreliable. `search_knowledge`
+    # absorbed its browse mode and its session/type filters; the name still
+    # resolves through `_TOOL_ALIASES`. `search_findings` stays — semantic
+    # search is a different algorithm, not a different spelling.
+    SearchFindingsTool,
+    ValidateFindingTool,
+    RejectFindingTool,
+    UpdateFindingTool,
+    DeleteFindingTool,
+    WriteReportTool,
+    ReadReportTool,
+    DeleteReportTool,
+    SearchKnowledgeTool,
+    SummarizeFindingsTool,
 ]
 CHAT_TOOLS = [SendMessageTool]
 # Exclusive to the chat agent tier — NOT bound to the developer.
@@ -77,30 +170,64 @@ PLANNER_TOOLS = [EmitPlanTool]
 COUNCIL_MEMBER_TOOLS = _COUNCIL_MEMBER_TOOLS
 COUNCIL_MODERATOR_TOOLS = _COUNCIL_MODERATOR_TOOLS
 DOCS_TOOLS = [DeleteDocumentationTool, FindDocumentationTool, UpdateDocumentationTool]
-CODE_INTEL_TOOLS = [FindReferencesTool, ListSymbolsTool, SearchSymbolsTool, GetSymbolCodeTool, ProjectStructureTool, EditSymbolTool, AddSymbolTool, RemoveSymbolTool, AnalyzeCodeTool, RenameSymbolTool, MoveSymbolTool, FindSimilarMethodsTool, SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool]
+CODE_INTEL_TOOLS = [
+    FindReferencesTool,
+    ListSymbolsTool,
+    SearchSymbolsTool,
+    GetSymbolCodeTool,
+    ProjectStructureTool,
+    # EditSymbolTool / AddSymbolTool / RemoveSymbolTool are unbound: replacing,
+    # inserting or deleting a symbol body is `edit_file` addressed by name.
+    # RenameSymbolTool and MoveSymbolTool stay — those rewrite every reference
+    # and import across the index, which is an algorithm the model cannot
+    # reproduce by editing files one at a time.
+    AnalyzeCodeTool,
+    RenameSymbolTool,
+    MoveSymbolTool,
+    FindSimilarMethodsTool,
+    SearchByDocstringTool,
+    IterSymbolsTool,
+    ProjectStatsTool,
+]
 
 # Curated subset for small models (<25B) — tools with simple schemas
 SMALL_MODEL_TOOLS = [
     # File I/O (8)
-    ReadFileTool, CreateFileTool, ReplaceLinesTool,
-    AddContentAfterLineTool, AddContentBeforeLineTool,
-    ListDirectoryTool, CodeSearchTool, GlobTool,
+    ReadFileTool,
+    CreateFileTool,
+    EditFileTool,
+    ListDirectoryTool,
+    CodeSearchTool,
+    GlobTool,
     # Git (3)
-    GitCommitTool, GitDiffTool, GitStatusTool,
+    GitCommitTool,
+    GitDiffTool,
+    GitStatusTool,
     # Shell (6)
-    ExecuteCommandTool, CodeInterpreterTool,
-    RunInBackgroundTool, BackgroundStatusTool, StopBackgroundTaskTool,
+    ExecuteCommandTool,
+    CodeInterpreterTool,
+    RunInBackgroundTool,
+    BackgroundStatusTool,
+    StopBackgroundTaskTool,
     WaitForBackgroundTaskTool,
     # Knowledge (2)
-    RecordFindingTool, SearchFindingsTool,
+    RecordFindingTool,
+    SearchFindingsTool,
     # Code intelligence (8)
-    SearchSymbolsTool, GetSymbolCodeTool, EditSymbolTool,
-    FindReferencesTool, FindSimilarMethodsTool, SearchByDocstringTool,
-    IterSymbolsTool, ProjectStatsTool,
+    SearchSymbolsTool,
+    GetSymbolCodeTool,
+    FindReferencesTool,
+    FindSimilarMethodsTool,
+    SearchByDocstringTool,
+    IterSymbolsTool,
+    ProjectStatsTool,
     # Plan management (3)
-    AddStepTool, ModifyStepTool, RemoveStepTool,
+    AddStepTool,
+    ModifyStepTool,
+    RemoveStepTool,
     # Project introspection (2)
-    DeclareTestCommandTool, TailTestOutputTool,
+    DeclareTestCommandTool,
+    TailTestOutputTool,
 ]
 
 
@@ -131,6 +258,7 @@ def get_tools_for_role(
         # tool-list lookup and breaks tests that patch litellm.completion.
         try:
             from infinidev.config.model_capabilities import _detect_vision_support
+
             supports_vision = _detect_vision_support()
         except Exception:
             supports_vision = False
@@ -140,14 +268,36 @@ def get_tools_for_role(
             return classes
         return [c for c in classes if c not in VISION_ONLY_TOOLS]
 
+    # Tools published by the configured MCP servers, under the names those
+    # servers gave them (``ken_rank``, ``ken_recall``, …). Discovery is
+    # cached and non-blocking, so a cold session simply gets none of them
+    # this turn and all of them the next; a local tool always wins a name
+    # collision, since a remote server must not be able to shadow read_file.
+    mcp_tool_classes = discover_mcp_tool_classes()
+
     # CHAT_AGENT_TOOLS (respond, escalate) are NOT in the developer
     # toolset — they're exclusive to the chat agent tier. The developer
     # uses step_complete for termination; the chat agent uses respond
     # and escalate.
-    all_tool_classes = _vision_filter(
-        FILE_TOOLS + GIT_TOOLS + SHELL_TOOLS + WEB_TOOLS + KNOWLEDGE_TOOLS
-        + CHAT_TOOLS + DOCS_TOOLS + CODE_INTEL_TOOLS + META_TOOLS
+    local_tool_classes = _vision_filter(
+        FILE_TOOLS
+        + GIT_TOOLS
+        + SHELL_TOOLS
+        + WEB_TOOLS
+        + KNOWLEDGE_TOOLS
+        + CHAT_TOOLS
+        + DOCS_TOOLS
+        + CODE_INTEL_TOOLS
+        + META_TOOLS
     )
+    def _declared_name(cls) -> str | None:
+        field = cls.model_fields.get("name")
+        return getattr(field, "default", None) if field is not None else None
+
+    local_names = {_declared_name(c) for c in local_tool_classes}
+    all_tool_classes = local_tool_classes + [
+        c for c in mcp_tool_classes if _declared_name(c) not in local_names
+    ]
     if role == "chat_agent":
         # Instantiate each tool and keep only the read-only ones. Pydantic
         # moves class-level field defaults into model_fields so getattr on
@@ -187,5 +337,13 @@ def get_tools_for_role(
         read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
         return read_only + [cls() for cls in COUNCIL_MODERATOR_TOOLS]
     if small_model:
-        return [cls() for cls in _vision_filter(SMALL_MODEL_TOOLS)]
+        # A small model's problem is choosing, not capability: the curated
+        # list exists because a 90-tool schema wrecks its selection. MCP
+        # tools join it only once MCP_TOOL_FILTER names which ones matter,
+        # so "expose everything" never silently lands on a 7B model.
+        from infinidev.config.settings import settings
+
+        narrowed = str(getattr(settings, "MCP_TOOL_FILTER", "*") or "*").strip()
+        extra = mcp_tool_classes if narrowed and narrowed != "*" else []
+        return [cls() for cls in _vision_filter(SMALL_MODEL_TOOLS) + extra]
     return [cls() for cls in all_tool_classes]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 
@@ -97,10 +98,25 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Toggle the file explorer panel."""
         app_state.toggle_explorer()
 
-    @kb.add("escape", ".")  # Alt+. — toggle right sidebar
+    # Right sidebar: Alt+. or F4. Ctrl/Alt + punctuation is the least
+    # portable class of shortcut there is, so the function key is the one
+    # that is guaranteed to work — a panel nobody can open is a panel that
+    # does not exist. `/sidebar` covers terminals that eat both.
+    @kb.add("escape", ".")  # Alt+.
     def toggle_sidebar(event):
         """Toggle the right sidebar panel."""
         app_state.toggle_sidebar()
+
+    @kb.add("?", filter=Condition(lambda: not app_state._chat_buffer.text))
+    def show_help(event):
+        """Show the keyboard/command reference.
+
+        Only fires on an empty prompt, so typing "?" in a message still
+        types a question mark.
+        """
+        from infinidev.ui.handlers.commands import handle_command
+
+        handle_command(app_state, "/help")
 
     @kb.add("c-w")
     def close_tab(event):
@@ -151,7 +167,10 @@ def create_global_keybindings(app_state) -> KeyBindings:
 
     @kb.add("f4")
     def focus_sidebar(event):
-        """Move focus to the sidebar."""
+        """Open the sidebar if it is closed, then focus it."""
+        if not app_state.sidebar_visible:
+            app_state.toggle_sidebar()
+            return
         app_state.focus_sidebar()
 
 
@@ -189,7 +208,6 @@ def create_global_keybindings(app_state) -> KeyBindings:
             return
         app_state.handle_escape()
 
-    from prompt_toolkit.filters import Condition
     _stdin_active = Condition(
         lambda: getattr(app_state, "active_dialog", None) == "stdin_prompt"
     )

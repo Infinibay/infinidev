@@ -39,7 +39,13 @@ logger = logging.getLogger(__name__)
 
 
 Phase = Literal[
-    "chat", "council", "analysis", "gather", "execute", "review", "idle",
+    "chat",
+    "council",
+    "analysis",
+    "gather",
+    "execute",
+    "review",
+    "idle",
 ]
 
 
@@ -77,7 +83,10 @@ class OrchestrationHooks(Protocol):
         ``"error"`` (failure)."""
 
     def notify_stream_chunk(
-        self, speaker: str, chunk: str, kind: str = "agent",
+        self,
+        speaker: str,
+        chunk: str,
+        kind: str = "agent",
     ) -> None:
         """Append a streaming text chunk. The FIRST chunk for a new
         ``(speaker, kind)`` pair creates a message; subsequent chunks
@@ -88,7 +97,9 @@ class OrchestrationHooks(Protocol):
         adapters may concatenate and defer until a sentinel arrives."""
 
     def notify_stream_end(
-        self, speaker: str, kind: str = "agent",
+        self,
+        speaker: str,
+        kind: str = "agent",
     ) -> None:
         """Mark the in-progress streaming message as complete.
 
@@ -136,6 +147,29 @@ class OrchestrationHooks(Protocol):
         here. Default impls may ignore this."""
 
 
+def _runtime_event_bridge(hooks: OrchestrationHooks):
+    """Surface runtime task state on the status line.
+
+    Only events that tell the user something they cannot already see get
+    through. "Task queued" / "Task started" / "Step completed" fired on
+    every transition and said nothing the transcript wasn't already
+    showing — a status line that repeats the obvious trains people to stop
+    reading it.
+    """
+
+    def emit(event: dict[str, Any]) -> None:
+        kind = event.get("event")
+        if kind == "task_started":
+            task = event.get("task")
+            title = getattr(task, "title", "") if task is not None else ""
+            if title:
+                hooks.on_status("info", title)
+        elif kind == "runtime_cancelled":
+            hooks.on_status("warn", "Cancelled")
+
+    return emit
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase implementations — pure functions, take hooks as parameter
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,6 +202,7 @@ def _run_gather_phase(
 
     try:
         from infinidev.gather import run_gather
+
         agent.activate_context(session_id=session_id)
         hooks.on_status("info", "Gathering context...")
         chat_history = [
@@ -207,7 +242,10 @@ def _run_elaboration_phase(
         return escalation
 
     try:
-        from infinidev.engine.analysis.spec_elaborator import elaborate, should_elaborate
+        from infinidev.engine.analysis.spec_elaborator import (
+            elaborate,
+            should_elaborate,
+        )
 
         if not should_elaborate(escalation):
             return escalation
@@ -327,7 +365,9 @@ def _run_council_phase(
         hooks.notify("Council", brief.render_user_preview(), "agent")
 
     return _dc_replace(
-        escalation, user_request=enriched_request, design_brief=brief,
+        escalation,
+        user_request=enriched_request,
+        design_brief=brief,
     )
 
 
@@ -360,10 +400,12 @@ def _run_execution_phase(
     try:
         if use_phase_engine:
             from infinidev.engine.phases.phase_engine import PhaseEngine
+
             _depth_config = None
             if hasattr(agent, "_gather_brief") and agent._gather_brief:
                 with best_effort("gather depth-config resolution failed"):
                     from infinidev.gather.models import DEPTH_CONFIGS
+
                     _depth_config = DEPTH_CONFIGS.get(
                         agent._gather_brief.classification.depth
                     )
@@ -416,10 +458,7 @@ def _run_review_phase(
     from infinidev.config.settings import settings as _settings
     from infinidev.db.service import get_recent_summaries
 
-    if not (
-        _settings.REVIEW_ENABLED
-        and engine.has_file_changes()
-    ):
+    if not (_settings.REVIEW_ENABLED and engine.has_file_changes()):
         return result
 
     hooks.on_phase("review")
@@ -480,6 +519,25 @@ def _run_review_phase(
 # ─────────────────────────────────────────────────────────────────────────────
 # Public entry points
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def _report_user_turn_to_ken(user_input: str, session_id: str) -> None:
+    """Give Ken the user's actual words, once per turn.
+
+    This is the *only* place infinidev writes a ``user_prompt`` row, and it
+    has to stay that way. ``similar_past_sessions`` reads the last fifty
+    such rows across **every** agent sharing this index — there is no agent
+    filter — so one row per plan step would flush the window within a couple
+    of tasks and cost the user's other sessions their predictive channel.
+    """
+    try:
+        from infinidev.engine.ken_session import get_ken_session
+
+        session = get_ken_session(session_id=session_id)
+        if session is not None:
+            session.prompt(user_input)
+    except Exception:
+        logger.debug("ken prompt report failed", exc_info=True)
 
 
 def run_task(
@@ -551,6 +609,14 @@ def run_task(
     except AttributeError:
         pass
 
+    from infinidev.engine.task_runtime import TaskRuntime
+
+    runtime = TaskRuntime(task_id=session_id, on_event=_runtime_event_bridge(hooks))
+    runtime.append_chat("user", user_input)
+    _report_user_turn_to_ken(user_input, session_id)
+    root_task = runtime.add_task("Working on your request")
+    runtime.start_next_task()
+
     # ── Chat agent ──────────────────────────────────────────────────────
     hooks.on_phase("chat")
     agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)
@@ -562,8 +628,16 @@ def run_task(
     # None through, which breaks every code-intel tool with
     # "No project context". Falling back per-field keeps partial contexts
     # usable too (e.g. agent has project_id but not workspace_path).
-    agent_project_id = ctx.project_id if ctx and ctx.project_id is not None else get_current_project_id()
-    agent_workspace = ctx.workspace_path if ctx and ctx.workspace_path is not None else get_current_workspace_path()
+    agent_project_id = (
+        ctx.project_id
+        if ctx and ctx.project_id is not None
+        else get_current_project_id()
+    )
+    agent_workspace = (
+        ctx.workspace_path
+        if ctx and ctx.workspace_path is not None
+        else get_current_workspace_path()
+    )
     # Last-resort fallback to the agent's own project_id attribute so
     # tools don't crash when nothing else has been set — matches what
     # activate_context would have written.
@@ -586,7 +660,9 @@ def run_task(
             # Streaming is also cleanly terminated by the caller in
             # chat_agent.run_chat_agent's except block.
             hooks.notify_error(
-                "Infinidev", chat_result.reply, chat_result.error_traceback,
+                "Infinidev",
+                chat_result.reply,
+                chat_result.error_traceback,
             )
         elif chat_result.streamed:
             # Streaming already showed the text to the user chunk-by-chunk.
@@ -604,6 +680,8 @@ def run_task(
         if callable(_mark_shown):
             _mark_shown()
         hooks.on_phase("idle")
+        runtime.complete_current_task(chat_result.reply)
+        runtime.append_chat("assistant", chat_result.reply)
         return chat_result.reply
 
     # ── Planner (escalate path) ─────────────────────────────────────────
@@ -657,6 +735,7 @@ def run_task(
     # Configure agent identity for the develop flow before gather/execute.
     from infinidev.engine.flows import get_flow_config
     from infinidev.prompts.flows import get_flow_identity
+
     flow_config = get_flow_config("develop")
     if hasattr(agent, "_system_prompt_identity"):
         agent._system_prompt_identity = get_flow_identity("develop")
@@ -683,12 +762,15 @@ def run_task(
     structured_task: Any | None = None
     try:
         from infinidev.engine.orchestration.task_schema import task_from_free_text
+
         structured_task = task_from_free_text(
             escalation.user_request,
             acceptance_criteria=list(getattr(plan, "acceptance_criteria", []) or []),
         )
     except Exception:
-        logger.debug("structured Task synthesis failed; using legacy <task>", exc_info=True)
+        logger.debug(
+            "structured Task synthesis failed; using legacy <task>", exc_info=True
+        )
 
     # ── Gather ──────────────────────────────────────────────────────────
     task_prompt = _run_gather_phase(
@@ -709,7 +791,9 @@ def run_task(
         session_id=session_id,
         use_phase_engine=use_phase_engine,
         hooks=hooks,
-        initial_attachments=list(escalation.attachments) if escalation.attachments else None,
+        initial_attachments=list(escalation.attachments)
+        if escalation.attachments
+        else None,
         task=structured_task,
     )
 
@@ -719,6 +803,7 @@ def run_task(
     review_criteria: list[str] | None = None
     if structured_task is not None:
         from infinidev.engine.orchestration.task_schema import is_synthesised
+
         if not is_synthesised(structured_task):
             review_criteria = list(structured_task.acceptance_criteria)
 
@@ -740,6 +825,9 @@ def run_task(
     _store_work_summary(used_engine, session_id, result)
 
     hooks.on_phase("idle")
+    runtime.record_step(result, step_id=root_task.id)
+    runtime.complete_current_task(result)
+    runtime.append_chat("assistant", result)
     return result
 
 
@@ -761,7 +849,17 @@ def _store_work_summary(engine: Any, session_id: str, result: str) -> None:
         if not summary:
             return
         from infinidev.db.service import store_conversation_turn
+
         store_conversation_turn(session_id, "work_summary", summary)
+        # Also file it in working memory so a later turn can *search* it
+        # ("what did we change in the auth module last time?") rather than
+        # only receiving it as fixed prelude context.
+        with best_effort("work summary archive failed"):
+            from infinidev.engine.working_memory import get_working_memory
+
+            get_working_memory(session_id).remember(
+                "Task summary", summary, kind="task_summary"
+            )
     except Exception:
         logger.warning("failed to store work summary", exc_info=True)
 
@@ -797,6 +895,7 @@ def run_flow_task(
     try:
         if use_tree_engine:
             from infinidev.engine.tree import TreeEngine
+
             engine_to_use: Any = TreeEngine()
             result = engine_to_use.execute(
                 agent=agent,

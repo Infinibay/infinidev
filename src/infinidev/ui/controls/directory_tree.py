@@ -88,6 +88,7 @@ SPECIAL_FILE_ICONS: dict[str, str] = {
     ".gitattributes": "\U0001f500 ", ".dockerignore": "\U0001f433 ",
     ".eslintrc.js": "\U0001f9f9 ", ".eslintrc.json": "\U0001f9f9 ",
     ".prettierrc": "\U0001f9f9 ", ".editorconfig": "\u2699\ufe0f ",
+    "AGENTS.md": "\U0001f916 ",
     "CLAUDE.md": "\U0001f916 ",
 }
 

@@ -58,7 +58,7 @@ Produce one of two verdicts:
 - Based on `summary` and `notable_lines` in the extraction: are there
   logic bugs, off-by-one errors, null dereferences, unhandled edge
   cases?
-- Do error paths exist where they should?
+- Does every failure mode have an error path?
 
 ### 3. Security
 - Hardcoded secrets in `notable_lines`?
@@ -76,9 +76,9 @@ Produce one of two verdicts:
 - Over-engineered solutions for hardcoded needs.
 
 ### 6. Tests
-- If the task was a bug fix or feature, `plan_coverage` should show
+- IF the task was a bug fix or a feature, THEN `plan_coverage` shows
   at least one `evidence_files` entry pointing at a test file, or the
-  extraction should show new symbols under a `tests/` path.
+  extraction shows new symbols under a `tests/` path.
 - If no tests exist for non-trivial new logic, flag as Important.
 
 ## Severity Classification
@@ -86,7 +86,7 @@ Produce one of two verdicts:
 | Severity | Criteria | Action |
 |----------|----------|--------|
 | **Blocking** | Bugs, security issues, missing plan steps, report discrepancies, automated-check errors | Must fix — REJECT |
-| **Important** | Missing tests, maintainability concerns, incomplete error handling | Should fix — mention but can approve |
+| **Important** | Missing tests, maintainability concerns, incomplete error handling | Name it in the review, approve anyway |
 | **Suggestion** | Style, minor refactoring, docstrings | Never sole reason to reject |
 
 ## Response Format
@@ -146,7 +146,7 @@ Respond with ONLY valid JSON in one of these shapes.
 - **`category` is required for every issue.** Pick the closest match
   from the enum above.
 - Trust automated checks: `orphaned_references > 0` or
-  `tests/import-check: FAILED` → you MUST REJECT and convert each
+  `tests/import-check: FAILED`, you MUST REJECT and convert each
   finding into an issue. Copy the finding's `file` and `line` directly
   and quote the offending symbol name as `quoted_text`.
 - Cross-check extractor claims against automated checks:

@@ -19,6 +19,10 @@ from infinidev.engine.analysis.plan import Plan, PlanStepSpec
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
+from infinidev.engine.oversized_result import (
+    DuplicateCallGuard,
+    handle_oversized_result,
+)
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.prompts.analyst.planner_prompt import ANALYST_PLANNER_SYSTEM_PROMPT
 from infinidev.tools import get_tools_for_role
@@ -127,6 +131,10 @@ def _run_llm_loop(
     exploration_calls = 0
     budget_nudged = False
 
+    # One guard per run: a repeat inside the same turn is the
+    # livelock, a repeat in a later turn is a legitimate re-read.
+    dup_guard = DuplicateCallGuard()
+
     for iteration in range(max_iterations):
         call_kwargs = dict(base_kwargs)
         call_kwargs["messages"] = messages
@@ -168,11 +176,16 @@ def _run_llm_loop(
         # Non-terminator calls — count toward exploration budget.
         for tc in tool_calls:
             exploration_calls += 1
-            result = execute_tool_call(
+            result = dup_guard.refusal_for(
+                tc.function.name, tc.function.arguments,
+            ) or execute_tool_call(
                 dispatch, tc.function.name, tc.function.arguments,
             )
-            trimmed = result if len(result) <= _MAX_RESULT_CHARS else (
-                result[:_MAX_RESULT_CHARS] + "\n...[truncated]"
+            trimmed = handle_oversized_result(
+                result,
+                max_chars=_MAX_RESULT_CHARS,
+                tool_name=tc.function.name,
+                tool_args=tc.function.arguments,
             )
             messages.append({
                 "role": "tool",

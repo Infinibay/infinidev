@@ -99,10 +99,17 @@ def build_chat_agent_system_prompt() -> str:
     # initialized (relevant during interpreter startup / tests).
     from infinidev.tools import get_tools_for_role
 
+    from infinidev.prompts.project_instructions import render_project_instructions
+
     chat_tools = get_tools_for_role("chat_agent")
     dev_tools = get_tools_for_role("developer")
 
-    return CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE.format(
+    prompt = CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE.format(
         chat_agent_toolbox=_render_chat_toolbox(chat_tools),
         developer_toolset=_render_developer_toolset(dev_tools, chat_tools),
     )
+    # The chat agent answers questions *about* this project and decides what
+    # to escalate, so the project's own instructions apply to it at least as
+    # much as to the developer.
+    project = render_project_instructions(None)
+    return f"{prompt}\n\n{project}" if project else prompt

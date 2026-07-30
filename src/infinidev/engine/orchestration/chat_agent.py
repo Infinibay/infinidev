@@ -34,6 +34,10 @@ from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.llm_caller import ThinkStreamFilter, strip_think_blocks
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
+from infinidev.engine.oversized_result import (
+    DuplicateCallGuard,
+    handle_oversized_result,
+)
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.prompts.chat_agent import build_chat_agent_system_prompt
@@ -212,6 +216,10 @@ def _run_llm_loop(
     budget_nudged = False
     cr_injected = False  # True once we've spliced ContextRank into `messages`
 
+    # One guard per run: a repeat inside the same turn is the
+    # livelock, a repeat in a later turn is a legitimate re-read.
+    dup_guard = DuplicateCallGuard()
+
     for iteration in range(max_iterations):
         # ── Lazy ContextRank injection ─────────────────────────────────
         # Skip the first iteration entirely — trivial chats ("hola",
@@ -322,7 +330,9 @@ def _run_llm_loop(
 
         # No terminator — execute read-only tools and continue.
         for tc in tool_calls:
-            result = execute_tool_call(
+            result = dup_guard.refusal_for(
+                tc.function.name, tc.function.arguments,
+            ) or execute_tool_call(
                 dispatch, tc.function.name, tc.function.arguments,
             )
             if cr_hooks is not None:
@@ -335,8 +345,11 @@ def _run_llm_loop(
                     )
                 except Exception:
                     logger.debug("ContextRank tool call log failed", exc_info=True)
-            trimmed = result if len(result) <= _MAX_RESULT_CHARS else (
-                result[:_MAX_RESULT_CHARS] + "\n...[truncated]"
+            trimmed = handle_oversized_result(
+                result,
+                max_chars=_MAX_RESULT_CHARS,
+                tool_name=tc.function.name,
+                tool_args=tc.function.arguments,
             )
             messages.append({
                 "role": "tool",

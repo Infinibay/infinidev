@@ -25,12 +25,9 @@ Alphabet (one letter per tool, ~15 letters cover everything):
                   search_symbols, find_similar_methods, search_by_docstring,
                   iter_symbols, project_stats, project_structure, analyze_code
 ``D``             list_directory
-``E``             replace_lines, edit_symbol, edit_method,
-                  add_content_after_line, add_content_before_line,
-                  rename_symbol, move_symbol
+``E``             edit_file, rename_symbol, move_symbol
 ``C``             create_file, write_file
-``M``             add_symbol, add_method, remove_symbol, remove_method
-``A``             multi_edit_file (file-level edit)
+``A``             multi_edit_file (file-level edit, currently unbound)
 ``+``             add_step
 ``~``             modify_step, remove_step
 ``.``             step_complete
@@ -92,22 +89,13 @@ _TOOL_LETTER_MAP: dict[str, str] = {
     "analyze_code": "L",
     # Directory
     "list_directory": "D",
-    # Edit (line-level)
-    "replace_lines": "E",
-    "add_content_after_line": "E",
-    "add_content_before_line": "E",
-    "edit_symbol": "E",
-    "edit_method": "E",
+    # Edit
+    "edit_file": "E",
     "rename_symbol": "E",
     "move_symbol": "E",
     # Create new file
     "create_file": "C",
     "write_file": "C",
-    # Add/remove symbol
-    "add_symbol": "M",
-    "add_method": "M",
-    "remove_symbol": "M",
-    "remove_method": "M",
     # File-level edit
     "multi_edit_file": "A",
     # Plan management

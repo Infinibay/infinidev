@@ -55,7 +55,7 @@ Use these EXACT topic prefixes so findings are searchable and consistent:
 ### Rules for content quality
 
 - **Be specific.** File paths, line numbers, function signatures, actual values.
-- **Be complete.** Each finding should be self-contained — useful without
+- **Be complete.** Each finding stands on its own — useful without
   needing to read other findings.
 - **Set confidence to 1.0** — you are reading the actual code, not guessing.
 - **Tag findings** with relevant keywords for searchability.

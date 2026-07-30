@@ -241,8 +241,8 @@ class TestAssistantCriticReview:
 
 
 class TestEngineDefaultDisabled:
-    def test_engine_init_critic_is_none_by_default(self):
-        """With the feature flag off, engine state must show no critic.
+    def test_no_critic_is_built_when_the_feature_is_off(self):
+        """With the feature flag off, the liaison must never build a critic.
 
         This is the contract that lets the parallel-execution branch be
         a pure no-op for the 99% of users who haven't opted in. The
@@ -257,7 +257,26 @@ class TestEngineDefaultDisabled:
         _settings.ASSISTANT_LLM_ENABLED = False
         try:
             eng = LoopEngine()
-            assert eng._critic is None
-            assert eng._pending_critic_messages == []
+            ctx = SimpleNamespace(tool_dispatch={}, project_id=1, agent_id="a")
+            assert eng._critic.get(ctx) is None
+            assert eng._critic.pending_messages == []
+        finally:
+            _settings.ASSISTANT_LLM_ENABLED = prior
+
+    def test_review_alongside_runs_the_tools_with_no_critic(self):
+        """The no-critic path must still execute tools, not skip them."""
+        from infinidev.engine.loop.engine import LoopEngine
+        from infinidev.config.settings import settings as _settings
+
+        prior = _settings.ASSISTANT_LLM_ENABLED
+        _settings.ASSISTANT_LLM_ENABLED = False
+        try:
+            eng = LoopEngine()
+            ctx = SimpleNamespace(tool_dispatch={}, project_id=1, agent_id="a")
+            messages: list[dict] = []
+            assert eng._critic.review_alongside(
+                ctx, messages, [], None, lambda: 7,
+            ) == 7
+            assert messages == []
         finally:
             _settings.ASSISTANT_LLM_ENABLED = prior

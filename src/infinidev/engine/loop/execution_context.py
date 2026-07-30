@@ -79,3 +79,15 @@ class ExecutionContext:
     @property
     def agent_id(self) -> str:
         return self.agent.agent_id
+
+    @property
+    def session_id(self) -> str:
+        """Session this run belongs to — the key working memory is filed under.
+
+        Falls back to ``agent_id`` so a run started outside a chat session
+        (tests, one-shot CLI invocations) still gets a stable archive key
+        instead of colliding with every other sessionless run.
+        """
+        from infinidev.tools.base.context import get_current_session_id
+
+        return get_current_session_id() or self.agent_id

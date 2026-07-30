@@ -1,4 +1,4 @@
-"""File-edit inspection: parse create_file/replace_lines/symbol ops."""
+"""File-edit inspection: turn edit_file/create_file calls into line deltas."""
 
 from __future__ import annotations
 
@@ -21,10 +21,7 @@ class FileOp:
 
 _EDIT_TOOLS = {
     "create_file",
-    "replace_lines",
-    "edit_symbol",
-    "add_symbol",
-    "remove_symbol",
+    "edit_file",
 }
 
 
@@ -46,31 +43,23 @@ def parse_file_ops(calls: Iterable[NormalizedCall]) -> list[FileOp]:
             or ""
         )
         content = (
-            args.get("content")
-            or args.get("new_content")
-            or args.get("replacement")
-            or args.get("code")
-            or ""
-        )
+            args.get("new_string")
+            if c.name == "edit_file"
+            else args.get("content") or args.get("new_content") or args.get("code")
+        ) or ""
         if not isinstance(content, str):
             content = str(content)
-        if c.name == "create_file":
+        if c.name == "edit_file":
+            # Both sides of the swap are literal text, so the delta is exact
+            # here rather than the estimate the line-range tools needed.
+            old = args.get("old_string") or ""
+            if not isinstance(old, str):
+                old = str(old)
+            added = content.count("\n") + (1 if content else 0)
+            removed = old.count("\n") + (1 if old else 0)
+        else:  # create_file
             added = content.count("\n") + (1 if content else 0)
             removed = 0
-        elif c.name == "remove_symbol":
-            added = 0
-            removed = max(1, content.count("\n") + 1)
-        elif c.name == "replace_lines":
-            added = content.count("\n") + (1 if content else 0)
-            start = args.get("start_line") or args.get("start")
-            end = args.get("end_line") or args.get("end")
-            try:
-                removed = max(0, int(end) - int(start) + 1)
-            except (TypeError, ValueError):
-                removed = added
-        else:  # edit_symbol / add_symbol
-            added = content.count("\n") + (1 if content else 0)
-            removed = added  # approximate
         ops.append(
             FileOp(
                 tool=c.name,

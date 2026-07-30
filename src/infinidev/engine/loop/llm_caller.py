@@ -63,21 +63,41 @@ def _strip_tool_call_markup(text: str) -> str:
     return text.rstrip()
 
 
+_THINK_TAGS = r"think|thinking|thoughts"
 _THINK_BLOCK_RE = _re.compile(
-    r"<(?:think|thinking|thoughts)>(.*?)</(?:think|thinking|thoughts)>",
+    rf"<(?:{_THINK_TAGS})>(.*?)</(?:{_THINK_TAGS})>",
     _re.DOTALL | _re.IGNORECASE,
 )
+_THINK_OPEN_RE = _re.compile(rf"<(?:{_THINK_TAGS})>", _re.IGNORECASE)
+_THINK_CLOSE_RE = _re.compile(rf"</(?:{_THINK_TAGS})>", _re.IGNORECASE)
 
 
 def strip_think_blocks(text: str) -> str:
-    """Remove any <think>...</think> blocks from free-form text.
+    """Remove reasoning blocks — balanced or not — from free-form text.
 
-    Useful for the streaming path where content is assembled from
-    deltas and no message-like object is available to mutate.
+    Balanced pairs are the easy case. The one that reached the transcript
+    is the unbalanced one: a provider asked to split reasoning out (MiniMax
+    with ``reasoning_split``, and others) moves the block into
+    ``reasoning_content`` but leaves its terminator in ``content``, so the
+    user sees a lone ``</thinking>`` and no thinking. An orphan close means
+    everything before it was reasoning; an orphan open means everything
+    after it is.
     """
     if not text:
         return text
-    return _THINK_BLOCK_RE.sub("", text).strip()
+    text = _THINK_BLOCK_RE.sub("", text)
+
+    match = None
+    for match in _THINK_CLOSE_RE.finditer(text):
+        pass  # keep the last one — reasoning ends at the final terminator
+    if match is not None:
+        text = text[match.end():]
+
+    open_match = _THINK_OPEN_RE.search(text)
+    if open_match is not None:
+        text = text[:open_match.start()]
+
+    return text.strip()
 
 
 class ThinkStreamFilter:
@@ -100,15 +120,43 @@ class ThinkStreamFilter:
     held-back tail.
     """
 
+    # Every spelling in the wild, not just the short one. ``_THINK_BLOCK_RE``
+    # has covered all three since it was written; this filter knew only
+    # ``<think>``, so a model emitting ``<thinking>`` streamed its reasoning
+    # straight into the transcript — and a provider that split the block
+    # imperfectly left the orphan closing tag visible on its own.
+    OPENS = ("<think>", "<thinking>", "<thoughts>")
+    CLOSES = ("</think>", "</thinking>", "</thoughts>")
+    _MAX_HOLD = max(len(t) for t in OPENS + CLOSES)
+
+    # Kept for callers (and tests) that referenced the single-tag form.
     OPEN = "<think>"
     CLOSE = "</think>"
-    _MAX_HOLD = max(len(OPEN), len(CLOSE))
 
     __slots__ = ("_inside", "_pending")
 
     def __init__(self) -> None:
         self._inside = False
         self._pending = ""
+
+    @staticmethod
+    def _first_of(haystack: str, needles: tuple[str, ...]) -> tuple[int, str]:
+        """Earliest occurrence of any needle, as ``(index, needle)``.
+
+        Case-insensitive, because ``_THINK_BLOCK_RE`` is — a model emitting
+        ``<THINKING>`` must not leak on the streaming path while the
+        non-streaming path cleans it. Ties go to the longest match so
+        ``<thinking>`` is never read as ``<think>`` plus a stray ``ing>``.
+        """
+        lowered = haystack.lower()
+        best_idx, best = -1, ""
+        for needle in needles:
+            idx = lowered.find(needle)
+            if idx < 0:
+                continue
+            if best_idx < 0 or idx < best_idx or (idx == best_idx and len(needle) > len(best)):
+                best_idx, best = idx, needle
+        return best_idx, best
 
     def feed(self, delta: str) -> str:
         if not delta:
@@ -117,32 +165,43 @@ class ThinkStreamFilter:
         emit_parts: list[str] = []
         while self._pending:
             if self._inside:
-                idx = self._pending.find(self.CLOSE)
+                idx, tag = self._first_of(self._pending, self.CLOSES)
                 if idx < 0:
                     # Still inside, nothing to emit yet. Keep only the
-                    # last few chars in case CLOSE spans chunks.
+                    # last few chars in case a close spans chunks.
                     if len(self._pending) > self._MAX_HOLD:
                         self._pending = self._pending[-self._MAX_HOLD:]
                     break
                 # Close found — discard up to and including it.
-                self._pending = self._pending[idx + len(self.CLOSE):]
+                self._pending = self._pending[idx + len(tag):]
                 self._inside = False
                 continue
 
-            idx = self._pending.find(self.OPEN)
+            idx, tag = self._first_of(self._pending, self.OPENS)
             if idx >= 0:
                 if idx > 0:
                     emit_parts.append(self._pending[:idx])
-                self._pending = self._pending[idx + len(self.OPEN):]
+                self._pending = self._pending[idx + len(tag):]
                 self._inside = True
                 continue
 
-            # No OPEN seen yet, but a partial OPEN could still be
-            # forming at the tail. Hold back that much.
+            # An orphan close with no open before it: the provider split
+            # the reasoning out and left its terminator behind. Drop it
+            # rather than letting a lone </thinking> reach the transcript.
+            idx, tag = self._first_of(self._pending, self.CLOSES)
+            if idx >= 0:
+                emit_parts.append(self._pending[:idx])
+                self._pending = self._pending[idx + len(tag):]
+                continue
+
+            # No tag seen yet, but a partial one could still be forming at
+            # the tail. Hold back the longest prefix that might grow into one.
             hold = 0
-            for i in range(1, min(len(self.OPEN), len(self._pending) + 1)):
-                if self._pending.endswith(self.OPEN[:i]):
-                    hold = i
+            tail = self._pending.lower()
+            for candidate in self.OPENS + self.CLOSES:
+                for i in range(1, min(len(candidate), len(tail) + 1)):
+                    if tail.endswith(candidate[:i]):
+                        hold = max(hold, i)
             if hold == 0:
                 emit_parts.append(self._pending)
                 self._pending = ""

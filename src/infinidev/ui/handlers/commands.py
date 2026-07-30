@@ -56,32 +56,37 @@ def _cmd_clear(app: InfinidevApp, parts: list[str]) -> None:
 def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
     app.add_message(
         "System",
-        "Ctrl+E                Toggle file explorer\n"
-        "Ctrl+B                Explore running background tasks\n"
-        "F2 / F3 / F4          Focus: Chat / Explorer / Sidebar\n"
-        "Ctrl+W                Close file tab\n"
-        "--------------------------------------------\n"
-        "!ls                   Execute shell command\n"
-        "!grep foo *.py        Run shell with piping\n"
-        "/models               Show current model\n"
-        "/models list          List available Ollama models\n"
-        "/models set <name>    Change model\n"
-        "/models manage        Pick a model interactively\n"
-        "/settings             Show current settings\n"
-        "/settings <key>       Show specific setting\n"
-        "/settings <key> <val> Change setting\n"
-        "/settings reset       Reset to defaults\n"
-        "/plan <task>          Generate plan, review, then execute\n"
-        "/refactor [scope]     Refactor code (modularize, clean, restructure)\n"
-        "/explore <problem>    Decompose and explore a complex problem\n"
-        "/init                 Explore and document the current project\n"
-        "/debug                Inspect agent: notes, history, plan, state\n"
-        "/findings             Browse all findings\n"
-        "/tasks                Explore running background tasks (Ctrl+B)\n"
-        "/knowledge            Browse project knowledge\n"
-        "/documentation        Browse cached library docs\n"
-        "/clear                Clear chat\n"
-        "/exit, /quit          Exit",
+        "PANELS\n"
+        "  Alt+.  ·  F4  ·  /sidebar    Session panel (steps, files, context)\n"
+        "  Ctrl+E        ·  /files      File tree\n"
+        "  Ctrl+B        ·  /tasks      Background tasks\n"
+        "\n"
+        "KEYS\n"
+        "  ?                            This help (on an empty prompt)\n"
+        "  Esc                          Stop the running task / close a panel\n"
+        "  Ctrl+C                       Clear input, twice to quit\n"
+        "  \\ + Enter                    New line without sending\n"
+        "  PgUp / PgDn                  Scroll the transcript\n"
+        "  Ctrl+O                       Open a file    ·  Ctrl+W close tab\n"
+        "  Ctrl+G                       Search the project\n"
+        "\n"
+        "SHELL\n"
+        "  !ls -la                      Run a shell command directly\n"
+        "\n"
+        "COMMANDS\n"
+        "  /models [list|set|manage]    Show or change the model\n"
+        "  /settings [key] [value]      Show or change settings\n"
+        "  /mcp [restart <name>]        Index server health (Ken and others)\n"
+        "  /plan <task>                 Plan, review, then execute\n"
+        "  /refactor [scope]            Modularize, clean, restructure\n"
+        "  /explore <problem>           Decompose a complex problem\n"
+        "  /init                        Explore and document this project\n"
+        "  /debug                       Agent internals: notes, plan, state\n"
+        "  /findings   /knowledge       Browse what the agent learned\n"
+        "  /documentation               Browse cached library docs\n"
+        "  /reindex [--full]            Rebuild the local symbol index\n"
+        "  /clear                       Clear the transcript\n"
+        "  /exit                        Quit",
         "system",
     )
 
@@ -282,9 +287,81 @@ def _cmd_refactor(app: InfinidevApp, parts: list[str]) -> None:
     run_in_background(app, run_engine_task, app, prompt, exclusive=True)
 
 
+def _cmd_sidebar(app: InfinidevApp, parts: list[str]) -> None:
+    """Toggle the right panel — the fallback when Alt+. / F4 are eaten."""
+    app.toggle_sidebar()
+
+
+def _cmd_explorer(app: InfinidevApp, parts: list[str]) -> None:
+    """Toggle the file tree."""
+    app.toggle_explorer()
+
+
+def _cmd_mcp(app: InfinidevApp, parts: list[str]) -> None:
+    """Show MCP server health, or start/stop/restart one.
+
+    Usage: ``/mcp`` · ``/mcp restart ken`` · ``/mcp stop ken``
+    """
+    from infinidev.engine.mcp_client import get_default_mcp_manager
+
+    manager = get_default_mcp_manager()
+    action = parts[1].lower() if len(parts) > 1 else "status"
+
+    if action in {"start", "stop", "restart"}:
+        if len(parts) < 3:
+            app.add_message("System", f"Usage: /mcp {action} <server>", "system")
+            return
+        name = parts[2]
+        ok = getattr(manager, action)(name)
+        verb = f"{action}ed" if action != "stop" else "stopped"
+        app.add_message(
+            "System",
+            f"MCP server {name!r} {verb}." if ok else f"MCP server {name!r} not found.",
+            "system",
+        )
+        return
+
+    status = manager.status()
+    if not status:
+        app.add_message(
+            "System",
+            "No MCP servers configured. Add one to .mcp.json — Ken is the "
+            "default when the file is absent.",
+            "system",
+        )
+        return
+
+    lines = ["MCP servers:"]
+    for name, info in status.items():
+        if info["running"] and info["initialized"]:
+            state = f"● running · {info['tools_loaded']} tools"
+        elif not info["available"]:
+            state = f"✗ unavailable — {info['reason'] or 'unknown'}"
+        elif info["failure_count"]:
+            # Installed but it did not come up. Reporting "idle" here would
+            # send the user hunting for a problem the manager already knows
+            # about, so lead with the actual reason.
+            state = f"✗ failed — {info['reason'] or 'unknown error'}"
+        else:
+            state = "○ idle (starts on first use)"
+        lines.append(f"  {name}: {state}")
+        lines.append(f"      {info['command']}")
+        if info["failure_count"]:
+            lines.append(f"      {info['failure_count']} recent failure(s)")
+        for stderr_line in info["stderr"]:
+            lines.append(f"      ! {stderr_line}")
+    lines.append("")
+    lines.append("/mcp restart <server> · /mcp stop <server>")
+    app.add_message("System", "\n".join(lines), "system")
+
+
 # ── Command dispatch table ──────────────────────────────────────────────
 
 _COMMAND_TABLE: dict[str, Any] = {
+    "/mcp": _cmd_mcp,
+    "/sidebar": _cmd_sidebar,
+    "/panel": _cmd_sidebar,
+    "/files": _cmd_explorer,
     "/exit": _cmd_exit,
     "/quit": _cmd_exit,
     "/clear": _cmd_clear,
@@ -313,6 +390,7 @@ _COMMAND_TABLE: dict[str, Any] = {
 
 def handle_settings(app: InfinidevApp, parts: list[str]) -> None:
     """Handle /settings subcommands."""
+    from infinidev.config.secrets import mask_if_secret
     from infinidev.config.settings import settings, reload_all
 
     if len(parts) == 1 or (len(parts) == 2 and parts[1].lower() == "browse"):
@@ -341,7 +419,9 @@ def handle_settings(app: InfinidevApp, parts: list[str]) -> None:
         key = parts[1].upper()
         val = getattr(settings, key, None)
         if val is not None:
-            app.add_message("System", f"{key}: {val}", "system")
+            # Credentials are echoed as a shape: the transcript is scrollback,
+            # and scrollback outlives the session.
+            app.add_message("System", f"{key}: {mask_if_secret(key, val)}", "system")
         else:
             app.add_message("System", f"Unknown setting: {key}", "system")
 
@@ -351,7 +431,9 @@ def handle_settings(app: InfinidevApp, parts: list[str]) -> None:
         try:
             settings.save_user_settings({key: value})
             reload_all()
-            app.add_message("System", f"{key} = {value}", "system")
+            app.add_message(
+                "System", f"{key} = {mask_if_secret(key, value)}", "system"
+            )
             app._update_status_bar()
         except Exception as e:
             app.add_message("System", f"Error setting {key}: {e}", "system")

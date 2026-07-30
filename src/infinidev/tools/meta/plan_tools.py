@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Type
 
@@ -17,10 +18,10 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 # model can choose to refine via modify_step. Deliberately permissive — this
 # is a nudge, not a gate.
 _CONCRETE_HINTS = (
-    re.compile(r"\.[a-zA-Z]{1,4}\b"),         # has a file extension
-    re.compile(r"[/\\][\w./-]+"),              # has a path separator
-    re.compile(r"\b\w+\([^)]*\)"),             # has a function call
-    re.compile(r":\d+\b"),                     # has a :line reference
+    re.compile(r"\.[a-zA-Z]{1,4}\b"),  # has a file extension
+    re.compile(r"[/\\][\w./-]+"),  # has a path separator
+    re.compile(r"\b\w+\([^)]*\)"),  # has a function call
+    re.compile(r":\d+\b"),  # has a :line reference
 )
 
 
@@ -30,7 +31,10 @@ def _looks_concrete(title: str) -> bool:
 
 class AddStepInput(BaseModel):
     title: str = Field(description="Short step title naming FILE, FUNCTION, and CHANGE")
-    explanation: str = Field(default="", description="Detailed explanation: tools to use, approach, edge cases (optional)")
+    explanation: str = Field(
+        default="",
+        description="Detailed explanation: tools to use, approach, edge cases (optional)",
+    )
     expected_output: str = Field(
         default="",
         description=(
@@ -41,13 +45,17 @@ class AddStepInput(BaseModel):
             "'I can name the entry point file and the persistence layer'."
         ),
     )
-    index: int = Field(default=0, description="Step number. 0 or omit to append at end of plan.")
+    index: int = Field(
+        default=0, description="Step number. 0 or omit to append at end of plan."
+    )
 
 
 class ModifyStepInput(BaseModel):
     index: int = Field(description="Step number to modify")
     title: str = Field(default="", description="New title (empty = keep current)")
-    explanation: str = Field(default="", description="New explanation (empty = keep current)")
+    explanation: str = Field(
+        default="", description="New explanation (empty = keep current)"
+    )
     expected_output: str = Field(
         default="",
         description="New success criterion for this step (empty = keep current)",
@@ -56,6 +64,125 @@ class ModifyStepInput(BaseModel):
 
 class RemoveStepInput(BaseModel):
     index: int = Field(description="Step number to remove")
+
+
+# ── Mini-plan tools (durable, MCP-friendly) ─────────────────────────────────
+
+
+class PlanAddInput(BaseModel):
+    name: str = Field(
+        default="rewrite", description="Plan name (file under .infinidev/plans)."
+    )
+    title: str = Field(description="Plan item title.")
+    depends_on: list[str] = Field(
+        default_factory=list, description="Item ids this item depends on."
+    )
+    idempotency_key: str = Field(
+        default="", description="Stable key; reused calls are no-ops."
+    )
+
+
+class PlanUpdateInput(BaseModel):
+    name: str = Field(default="rewrite", description="Plan name.")
+    item_id: str = Field(description="Item id to update.")
+    status: str | None = Field(
+        default=None,
+        description="pending | active | blocked | completed | failed | cancelled.",
+    )
+    notes: str | None = Field(
+        default=None, description="Free-form notes to record on the item."
+    )
+
+
+class PlanRemoveInput(BaseModel):
+    name: str = Field(default="rewrite", description="Plan name.")
+    item_id: str = Field(description="Item id to remove.")
+
+
+class PlanListInput(BaseModel):
+    name: str = Field(default="rewrite", description="Plan name.")
+
+
+class PlanAddTool(InfinibayBaseTool):
+    name: str = "plan_add"
+    description: str = "Add an item to a durable mini-plan (idempotent by key)."
+    args_schema: Type[BaseModel] = PlanAddInput
+    is_read_only: bool = False
+
+    def _run(
+        self,
+        name: str = "rewrite",
+        title: str = "",
+        depends_on: list[str] | None = None,
+        idempotency_key: str = "",
+    ) -> str:
+        from infinidev.engine.plan_store import add_plan_item
+
+        item = add_plan_item(
+            name,
+            title,
+            depends_on=depends_on or [],
+            idempotency_key=idempotency_key,
+        )
+        return json.dumps({"status": "ok", "item": item.to_dict()})
+
+
+class PlanUpdateTool(InfinibayBaseTool):
+    name: str = "plan_update"
+    description: str = "Update an item's status or notes by id."
+    args_schema: Type[BaseModel] = PlanUpdateInput
+    is_read_only: bool = False
+
+    def _run(
+        self,
+        name: str = "rewrite",
+        item_id: str = "",
+        status: str | None = None,
+        notes: str | None = None,
+    ) -> str:
+        from infinidev.engine.plan_store import update_plan_item
+
+        item = update_plan_item(name, item_id, status=status, notes=notes)
+        if item is None:
+            return json.dumps({"status": "missing", "item_id": item_id})
+        return json.dumps({"status": "ok", "item": item.to_dict()})
+
+
+class PlanRemoveTool(InfinibayBaseTool):
+    name: str = "plan_remove"
+    description: str = "Remove an item from a mini-plan by id."
+    args_schema: Type[BaseModel] = PlanRemoveInput
+    is_read_only: bool = False
+
+    def _run(self, name: str = "rewrite", item_id: str = "") -> str:
+        from infinidev.engine.plan_store import remove_plan_item
+
+        removed = remove_plan_item(name, item_id)
+        return json.dumps(
+            {"status": "ok" if removed else "missing", "item_id": item_id}
+        )
+
+
+class PlanListTool(InfinibayBaseTool):
+    name: str = "plan_list"
+    description: str = "List the items of a mini-plan, including pending and completed."
+    args_schema: Type[BaseModel] = PlanListInput
+    is_read_only: bool = True
+
+    def _run(self, name: str = "rewrite") -> str:
+        from infinidev.engine.plan_store import load_plan, next_pending_items
+
+        plan = load_plan(name)
+        return json.dumps(
+            {
+                "name": plan.name,
+                "items": [item.to_dict() for item in plan.items],
+                "runnable": [item.id for item in next_pending_items(plan)],
+            }
+        )
+
+
+# ── Legacy step tools — preserved for the existing pipeline ──────────────────
 
 
 class AddStepTool(InfinibayBaseTool):
@@ -67,8 +194,15 @@ class AddStepTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = AddStepInput
 
-    def _run(self, title: str, explanation: str = "", expected_output: str = "", index: int = 0) -> str:
+    def _run(
+        self,
+        title: str,
+        explanation: str = "",
+        expected_output: str = "",
+        index: int = 0,
+    ) -> str:
         from infinidev.tools.base.context import get_context_for_agent
+
         ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
             return self._error("No active plan context")
@@ -85,8 +219,11 @@ class AddStepTool(InfinibayBaseTool):
         # so a title check can't tell "added" from "rejected".
         before_ids = {id(s) for s in plan.steps}
         op = StepOperation(
-            op="add", index=index, title=title,
-            explanation=explanation, expected_output=expected_output,
+            op="add",
+            index=index,
+            title=title,
+            explanation=explanation,
+            expected_output=expected_output,
         )
         plan.apply_operations([op])
         added = next(
@@ -99,8 +236,13 @@ class AddStepTool(InfinibayBaseTool):
                 "user-approved or completed step and is protected. Omit index (or "
                 "pass 0) to append at the end of the plan instead."
             )
-        result: dict = {"status": "added", "index": index, "total_steps": len(plan.steps)}
+        result: dict = {
+            "status": "added",
+            "index": index,
+            "total_steps": len(plan.steps),
+        }
         from infinidev.engine.static_analysis_timer import measure
+
         with measure("plan_validate"):
             _vague = not _looks_concrete(title)
         if _vague:
@@ -125,8 +267,15 @@ class ModifyStepTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = ModifyStepInput
 
-    def _run(self, index: int, title: str = "", explanation: str = "", expected_output: str = "") -> str:
+    def _run(
+        self,
+        index: int,
+        title: str = "",
+        explanation: str = "",
+        expected_output: str = "",
+    ) -> str:
         from infinidev.tools.base.context import get_context_for_agent
+
         ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
             return self._error("No active plan context")
@@ -142,11 +291,16 @@ class ModifyStepTool(InfinibayBaseTool):
         if target.user_approved:
             return self._error(f"Step {index} is user-approved and cannot be modified")
         if target.status in ("done", "skipped"):
-            return self._error(f"Step {index} is {target.status} and cannot be modified")
+            return self._error(
+                f"Step {index} is {target.status} and cannot be modified"
+            )
 
         op = StepOperation(
-            op="modify", index=index, title=title,
-            explanation=explanation, expected_output=expected_output,
+            op="modify",
+            index=index,
+            title=title,
+            explanation=explanation,
+            expected_output=expected_output,
         )
         plan.apply_operations([op])
         return self._success({"status": "modified", "index": index})
@@ -161,6 +315,7 @@ class RemoveStepTool(InfinibayBaseTool):
 
     def _run(self, index: int) -> str:
         from infinidev.tools.base.context import get_context_for_agent
+
         ctx = get_context_for_agent(self.agent_id)
         if not ctx or not hasattr(ctx, "loop_state") or ctx.loop_state is None:
             return self._error("No active plan context")

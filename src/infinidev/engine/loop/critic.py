@@ -126,7 +126,7 @@ _SYSTEM_PROMPT = (
     "cap — once exhausted, you must emit_verdict on your next "
     "turn. Use reads only when verifying a specific claim would "
     "change your verdict.\n"
-    "- Never call write tools (replace_lines, execute_command, "
+    "- Never call write tools (edit_file, execute_command, "
     "etc.) — they aren't exposed to you. Describe what the "
     "principal should do, don't do it yourself.\n"
     "- Don't echo the prefix the engine adds (\"[ASSISTANT - "

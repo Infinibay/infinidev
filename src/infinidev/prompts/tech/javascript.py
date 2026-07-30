@@ -34,7 +34,7 @@ def get_prompt() -> str:
 ### Useful Patterns
 - Use `Array.from()` over spread for iterables that aren't arrays.
 - Use `Object.freeze()` for config constants that must not be mutated.
-- Prefer optional chaining `?.` and nullish coalescing `??` over `||` for default values.
+- Reach for optional chaining `?.` and nullish coalescing `??`, never `||`, for default values.
 - Use `Object.hasOwn(obj, key)` over `obj.hasOwnProperty(key)`.
 
 ### Anti-Patterns to Avoid

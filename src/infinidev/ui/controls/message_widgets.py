@@ -19,17 +19,24 @@ from infinidev.ui.theme import (
     MSG_USER_BORDER, MSG_AGENT_BORDER, MSG_SYSTEM_BORDER, MSG_THINK_BORDER,
     MSG_PENDING_BORDER,
     DIFF_TITLE_FG, DIFF_TITLE_BG,
-    TEXT, TEXT_MUTED, ACCENT,
+    TEXT, TEXT_MUTED, TEXT_DIM, ACCENT, SUCCESS, ERROR,
     NAME_COLORS,
 )
 
-# Copy button labels shown on message headers
-COPY_ICON = " [⧉] "
-COPY_ICON_STYLE = f"{TEXT_MUTED}"
-COPY_OK_ICON = " [✓ Copied] "
-COPY_OK_STYLE = "#00ff00 bold"
-COPY_FAIL_ICON = " [✗ Failed] "
-COPY_FAIL_STYLE = "#ff4444 bold"
+# Copy affordance.
+#
+# It used to render as " [⧉] " on every single message. Repeated down a
+# whole conversation the brackets read as content, not as a control, and
+# they were the loudest thing on screen after the text itself. Now it is
+# one dim glyph, drawn only where a copy is actually plausible (see
+# ``_wants_copy_icon``); the click target is unchanged — the message's
+# first line stays clickable everywhere.
+COPY_ICON = "⧉"
+COPY_ICON_STYLE = f"{TEXT_DIM}"
+COPY_OK_ICON = "✓ copied"
+COPY_OK_STYLE = f"{SUCCESS}"
+COPY_FAIL_ICON = "✗ failed"
+COPY_FAIL_STYLE = f"{ERROR}"
 _COPY_FEEDBACK_DURATION = 2.0  # seconds the icon stays visible
 
 # Module-level callback set by the app — receives (ok: bool) after a copy
@@ -212,14 +219,48 @@ def _schedule_badge_revert() -> None:
         pass
 
 
+def _drop_leading_space(row: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Remove the single space a wrap carries onto the next line.
+
+    Wrapping at a column boundary keeps the space that preceded the break,
+    so a continuation renders one column further right than the line above
+    it — a small misalignment the eye reads as a broken paragraph. Only
+    applied to prose; code blocks wrap through a different path where
+    leading whitespace is meaningful.
+    """
+    for index, (style, text) in enumerate(row):
+        if not text:
+            continue
+        if text.startswith(" "):
+            return [*row[:index], (style, text[1:]), *row[index + 1 :]]
+        return row
+    return row
+
+
 def _render_bordered_body(
     text: str, width: int,
     border_char: str, border_style: str, body_style: str, fill_style: str,
     use_markdown: bool = False,
+    continuation_char: str | None = None,
 ) -> list[list[tuple[str, str]]]:
-    """Render message body lines with border, wrapping, and optional markdown."""
+    """Render message body lines with a gutter, wrapping, and optional markdown.
+
+    ``border_char`` marks the first rendered line; ``continuation_char``
+    (default: the same char) marks the rest. Passing a blank continuation
+    turns the gutter into a single mark at the top of the message — the
+    shape modern coding CLIs use for assistant replies, where a bar down
+    the whole answer just adds visual noise.
+    """
     content_width = max(width - 3, 20)
     lines: list[list[tuple[str, str]]] = []
+    first_char = border_char
+    rest_char = border_char if continuation_char is None else continuation_char
+
+    def _gutter() -> tuple[str, str]:
+        """Gutter fragment for the next line (first line differs)."""
+        char = first_char if not lines else rest_char
+        return (border_style, f"{char} ")
+
     bg_part = ""
     for part in fill_style.split():
         if part.startswith("bg:"):
@@ -235,7 +276,7 @@ def _render_bordered_body(
                 frags = render_markdown_line(raw_line, body_style, bg_part)
                 used = 2 + sum(_cell_len(t) for _, t in frags)
                 lines.append(
-                    [(border_style, f"{border_char} ")]
+                    [_gutter()]
                     + frags
                     + [(fill_style, " " * max(0, width - used))]
                 )
@@ -247,14 +288,14 @@ def _render_bordered_body(
                     chunk = _take_cells(raw_line, content_width)
                     used = 2 + _cell_len(chunk)
                     lines.append([
-                        (border_style, f"{border_char} "),
+                        _gutter(),
                         (code_style, chunk),
                         (fill_style, " " * max(0, width - used)),
                     ])
                     raw_line = raw_line[len(chunk):]
                 used = 2 + _cell_len(raw_line)
                 lines.append([
-                    (border_style, f"{border_char} "),
+                    _gutter(),
                     (code_style, raw_line),
                     (fill_style, " " * max(0, width - used)),
                 ])
@@ -268,32 +309,38 @@ def _render_bordered_body(
                 # bold/italic/inline-code styling survives on the
                 # continuation lines. Re-wrapping the raw string here
                 # would re-show literal ``**`` / `` ` `` markers (B1).
-                for row in _wrap_fragments(frags, content_width):
+                for index, row in enumerate(_wrap_fragments(frags, content_width)):
+                    if index:
+                        row = _drop_leading_space(row)
                     row_used = 2 + sum(_cell_len(t) for _, t in row)
                     lines.append(
-                        [(border_style, f"{border_char} ")]
+                        [_gutter()]
                         + row
                         + [(fill_style, " " * max(0, width - row_used))]
                     )
             else:
                 lines.append(
-                    [(border_style, f"{border_char} ")]
+                    [_gutter()]
                     + frags
                     + [(fill_style, " " * max(0, width - used))]
                 )
         else:
+            wrapped = False
             while _cell_len(raw_line) > content_width:
                 chunk = _take_cells(raw_line, content_width)
                 used = 2 + _cell_len(chunk)
                 lines.append([
-                    (border_style, f"{border_char} "),
+                    _gutter(),
                     (body_style, chunk),
                     (fill_style, " " * max(0, width - used)),
                 ])
                 raw_line = raw_line[len(chunk):]
+                wrapped = True
+            if wrapped and raw_line.startswith(" "):
+                raw_line = raw_line[1:]
             used = 2 + _cell_len(raw_line)
             lines.append([
-                (border_style, f"{border_char} "),
+                _gutter(),
                 (body_style, raw_line),
                 (fill_style, " " * max(0, width - used)),
             ])
@@ -304,13 +351,61 @@ def _render_bordered_body(
 # ── BorderedWidget ─────────────────────────────────────────────────────
 
 # Style tables (same data as the old _MSG_STYLES etc.)
-_BORDERED_CONFIG: dict[str, dict[str, str]] = {
-    "user":    {"body": STYLE_USER_MSG,    "header": STYLE_USER_HEADER,   "border_char": "\u258c", "border_color": MSG_USER_BORDER},
-    "agent":   {"body": STYLE_AGENT_MSG,   "header": STYLE_AGENT_HEADER,  "border_char": "\u258c", "border_color": MSG_AGENT_BORDER},
-    "system":  {"body": STYLE_SYSTEM_MSG,  "header": STYLE_SYSTEM_HEADER, "border_char": "\u258c", "border_color": MSG_SYSTEM_BORDER},
-    "think":   {"body": STYLE_THINK_MSG,   "header": STYLE_THINK_HEADER,  "border_char": "\u258c", "border_color": MSG_THINK_BORDER},
-    "pending": {"body": STYLE_PENDING_MSG, "header": STYLE_PENDING_MSG,   "border_char": "\u250a", "border_color": MSG_PENDING_BORDER},
-    "queued":  {"body": STYLE_QUEUED_MSG,  "header": STYLE_QUEUED_MSG,    "border_char": "\u258c", "border_color": ACCENT},
+# Per-type gutter and header policy.
+#
+# ``border_char``   \u2192 mark on the message's FIRST line
+# ``cont_char``     \u2192 mark on every following line
+# ``show_header``   \u2192 render a "Sender:" line at all
+#
+# The user's own words keep a full-height bar (\u258c) so a long prompt is
+# visibly one block; the assistant gets a single dot and then plain,
+# unmarked prose. Named senders (Reviewer, Verifier, critic verdicts\u2026)
+# still get a header, because there the *who* is the information.
+_BORDERED_CONFIG: dict[str, dict[str, Any]] = {
+    # The user's turn is the only one that gets a mark, and only on its
+    # first line: it is the anchor the eye scrolls back to.
+    "user": {
+        "body": STYLE_USER_MSG, "header": STYLE_USER_HEADER,
+        "border_char": ">", "cont_char": " ",
+        "border_color": MSG_USER_BORDER, "show_header": False,
+    },
+    # The assistant's reply is the content. No mark, no name, no colour \u2014
+    # just indented prose, so nothing competes with what it says.
+    "agent": {
+        "body": STYLE_AGENT_MSG, "header": STYLE_AGENT_HEADER,
+        "border_char": " ", "cont_char": " ",
+        "border_color": MSG_AGENT_BORDER, "show_header": False,
+    },
+    "system": {
+        "body": STYLE_SYSTEM_MSG, "header": STYLE_SYSTEM_HEADER,
+        "border_char": "\u00b7", "cont_char": " ",
+        "border_color": MSG_SYSTEM_BORDER, "show_header": False,
+    },
+    "think": {
+        "body": STYLE_THINK_MSG, "header": STYLE_THINK_HEADER,
+        "border_char": "\u00b7", "cont_char": " ",
+        "border_color": MSG_THINK_BORDER, "show_header": False,
+    },
+    "pending": {
+        "body": STYLE_PENDING_MSG, "header": STYLE_PENDING_MSG,
+        "border_char": "\u00b7", "cont_char": " ",
+        "border_color": MSG_PENDING_BORDER, "show_header": False,
+    },
+    "queued": {
+        "body": STYLE_QUEUED_MSG, "header": STYLE_QUEUED_MSG,
+        "border_char": "\u00b7", "cont_char": " ",
+        "border_color": ACCENT, "show_header": False,
+    },
+}
+
+
+# Senders that add nothing over the gutter mark for their own message
+# type — naming them is pure repetition.
+_GENERIC_SENDERS: dict[str, frozenset[str]] = {
+    "user": frozenset({"You", "User"}),
+    "agent": frozenset({"Infinidev", "Assistant", "Agent"}),
+    "system": frozenset({"System"}),
+    "think": frozenset({"Thinking", "Think"}),
 }
 
 
@@ -324,7 +419,35 @@ class BorderedWidget:
         self._body_style = cfg["body"]
         self._header_style_default = cfg["header"]
         self._border_char = cfg["border_char"]
+        self._cont_char = cfg.get("cont_char", cfg["border_char"])
         self._border_color = cfg["border_color"]
+        self._show_header = cfg.get("show_header", True)
+
+    def _wants_copy_icon(self, msg: dict[str, Any], recently_copied: bool) -> bool:
+        """Whether to draw the copy glyph on this message.
+
+        Drawn on assistant replies (the text people actually copy) and on
+        whatever was just copied, so the ✓ feedback has somewhere to land.
+        Everywhere else the click target exists without the decoration.
+        """
+        if recently_copied:
+            return True
+        if self.msg_type != "agent":
+            return False
+        return bool((msg.get("text") or "").strip())
+
+    def _wants_header(self, sender: str) -> bool:
+        """Headers only where the sender carries information.
+
+        A named speaker (Reviewer, Verifier, "Assistant · REJECT") is worth
+        a line; "Infinidev:" above every reply, or "System:" above a line
+        that already reads as a system notice, is not.
+        """
+        if self._show_header:
+            return True
+        if sender in _GENERIC_SENDERS.get(self.msg_type, frozenset()):
+            return False
+        return sender in NAME_COLORS
 
     def render(self, msg: dict[str, Any], width: int) -> RenderResult:
         sender = msg.get("sender", "")
@@ -359,14 +482,11 @@ class BorderedWidget:
         lines: list[list[tuple[str, str]]] = []
         clickable: dict[int, Callable[[], None]] = {}
 
-        # Header line (with copy button on the right)
-        suffix = " (pending):" if self.msg_type == "pending" else ":"
-        header_text = f"{sender}{suffix}"
-
         # Check if this message was recently copied → show feedback icon
         now = _time.monotonic()
         hl = _copy_highlight.get(id(msg))
-        if hl and (now - hl[0]) < _COPY_FEEDBACK_DURATION:
+        recently_copied = bool(hl and (now - hl[0]) < _COPY_FEEDBACK_DURATION)
+        if recently_copied:
             if hl[1]:
                 copy_label, copy_style = COPY_OK_ICON, COPY_OK_STYLE
             else:
@@ -374,16 +494,23 @@ class BorderedWidget:
         else:
             copy_label, copy_style = COPY_ICON, COPY_ICON_STYLE
 
-        header_used = 2 + _cell_len(header_text) + _cell_len(copy_label)
-        gap = max(0, width - header_used)
-        lines.append([
-            (border_style, f"{self._border_char} "),
-            (header_style, header_text),
-            (fill_style, " " * gap),
-            (copy_style, copy_label),
-        ])
+        # Header line (with copy button on the right) — only when the
+        # sender is worth naming. Headerless messages still expose copy:
+        # the body's first line stays clickable (offset 0 either way).
+        if self._wants_header(sender):
+            suffix = " (pending):" if self.msg_type == "pending" else ":"
+            header_text = f"{sender}{suffix}"
+            header_used = 2 + _cell_len(header_text) + _cell_len(copy_label) + 1
+            gap = max(0, width - header_used)
+            lines.append([
+                (border_style, f"{self._border_char} "),
+                (header_style, header_text),
+                (fill_style, " " * gap),
+                (copy_style, copy_label),
+                (fill_style, " "),
+            ])
 
-        # Register header line (offset 0) as clickable → copy message text
+        # Register the first line (offset 0) as clickable → copy message text
         def _copy_msg(m=msg):
             from infinidev.ui.clipboard import copy_to_clipboard
             ok = copy_to_clipboard(m.get("text", ""))
@@ -407,10 +534,31 @@ class BorderedWidget:
             and _markdown_enabled()
             and not msg.get("streaming", False)
         )
-        lines.extend(_render_bordered_body(
-            text, width, self._border_char, border_style, self._body_style,
-            fill_style, use_markdown,
-        ))
+        # When a header was drawn it already carries the leading mark, so
+        # the body continues with the continuation char throughout.
+        had_header = bool(lines)
+        body_first = self._cont_char if had_header else self._border_char
+        body = _render_bordered_body(
+            text, width, body_first, border_style, self._body_style,
+            fill_style, use_markdown, continuation_char=self._cont_char,
+        )
+        if not had_header and body and self._wants_copy_icon(msg, recently_copied):
+            # No header to hang the copy affordance on — right-align it on
+            # the message's first line. The body already pads its lines out
+            # to `width`, so trim that trailing filler first or there is
+            # never room left.
+            first = list(body[0])
+            while first and not first[-1][1].strip():
+                first.pop()
+            used = sum(_cell_len(t) for _, t in first)
+            gap = width - used - _cell_len(copy_label) - 1
+            if gap > 1:
+                body[0] = first + [
+                    (fill_style, " " * gap),
+                    (copy_style, copy_label),
+                    (fill_style, " "),
+                ]
+        lines.extend(body)
 
         # Blank separator
         lines.append([("", "")])
@@ -539,8 +687,46 @@ class ErrorWidget:
         return RenderResult(lines=lines)
 
 
+# ── BannerWidget ───────────────────────────────────────────────────────
+
+class BannerWidget:
+    """The opening block: who you're talking to, where, and with what.
+
+    Replaces a plain "Welcome to Infinidev!" system line. The first screen
+    is the one moment a tool gets to orient someone — model, workspace and
+    branch answer "am I pointed at the right thing?" before the first
+    prompt, which is exactly when that question is cheap to fix.
+    """
+
+    msg_type = "banner"
+    group_label = "Banner"
+
+    def render(self, msg: dict[str, Any], width: int) -> RenderResult:
+        lines: list[list[tuple[str, str]]] = [
+            [("", "")],
+            [
+                (f"{ACCENT} bold", " ✻ "),
+                (f"{TEXT} bold", msg.get("title", "infinidev")),
+                (f"{TEXT_DIM}", f"  {msg.get('version', '')}"),
+            ],
+        ]
+        context = msg.get("context", "")
+        if context:
+            lines.append([(f"{TEXT_MUTED}", f"   {context}")])
+        hint = msg.get("hint", "")
+        if hint:
+            lines.append([("", "")])
+            lines.append([(f"{TEXT_DIM}", f"   {hint}")])
+        lines.append([("", "")])
+        return RenderResult(lines=lines)
+
+    def render_group_header(self, count: int, collapsed: bool, width: int) -> RenderResult:
+        return RenderResult(lines=[])
+
+
 # ── Register built-in widgets ──────────────────────────────────────────
 
+register(BannerWidget())
 register(BorderedWidget("user", "Messages"))
 register(BorderedWidget("agent", "Responses"))
 register(BorderedWidget("system", "System"))

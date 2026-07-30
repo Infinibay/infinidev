@@ -12,7 +12,7 @@ def get_prompt() -> str:
 - `kebab-case` for file names (e.g. `user-service.ts`).
 
 ### Error Handling
-- Prefer typed `Result<T, E>` patterns or discriminated unions over `try/catch` for expected failures.
+- An expected failure is a typed `Result<T, E>` or a discriminated union, never a `try/catch`.
 - Reserve `try/catch` for truly exceptional I/O errors.
 - Always narrow `unknown` in catch blocks before accessing properties:
   ```ts
@@ -29,11 +29,11 @@ def get_prompt() -> str:
 - Always enable `tsc --strict`.
 - Use `ts-node` or `tsx` for running scripts directly.
 - Install `@types/*` packages for third-party libraries that lack built-in types.
-- Prefer Node stdlib modules: `path`, `fs/promises`, `crypto`, `url`.
+- Reach for the Node stdlib first: `path`, `fs/promises`, `crypto`, `url`.
 
 ### Useful Patterns
 - Use the `satisfies` operator for type-safe object literals without widening.
-- Prefer `readonly` arrays and `Readonly<T>` for immutable data.
+- Immutable data is a `readonly` array or a `Readonly<T>`.
 - Use `as const` assertions for literal types and exhaustive switch checks.
 - Use discriminated unions with a `type` or `kind` field for variant modelling.
 
@@ -42,5 +42,5 @@ def get_prompt() -> str:
 - Ignoring `Promise` rejections — always attach `.catch()` or use `try/await`.
 - `!` non-null assertions without a comment explaining why the value is guaranteed to exist.
 - `namespace` merging in new code — use ES modules instead.
-- `enum` with computed values — prefer `as const` objects for string enums.\
+- `enum` with computed values — a string enum is an `as const` object.\
 """

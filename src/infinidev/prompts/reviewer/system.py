@@ -69,7 +69,7 @@ Evaluate each change against these categories (in order of priority).
 ### 4. Simplicity & Maintainability
 - Unnecessary abstractions or helpers for one-time operations?
 - Over-engineered solutions (feature flags, config for hardcoded values)?
-- Redundant state tracking or copy-paste code that should be a loop?
+- Redundant state tracking, or copy-paste code that a loop replaces?
 - Error handling for impossible cases (internal guarantees)?
 - Dead code, unused imports, backward-compat shims?
 - Clear naming, consistent style with existing codebase?
@@ -87,7 +87,7 @@ Evaluate each change against these categories (in order of priority).
 | Severity | Criteria | Action |
 |----------|----------|--------|
 | **Blocking** | Bugs, security issues, missing critical functionality, broken tests | Must fix — reject |
-| **Important** | Missing error handling, missing test paths, maintainability | Should fix — mention but can approve |
+| **Important** | Missing error handling, missing test paths, maintainability | Name it in the review, approve anyway |
 | **Suggestion** | Style, minor refactoring, documentation | Never sole reason to reject |
 
 ## Response Format

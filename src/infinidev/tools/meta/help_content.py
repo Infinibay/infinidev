@@ -14,7 +14,7 @@ _CATEGORY_INDEX = {
     "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "rename_symbol", "move_symbol"],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
     "shell": ["execute_command", "code_interpreter"],
-    "knowledge": ["record_finding", "read_findings", "search_findings", "search_knowledge"],
+    "knowledge": ["record_finding", "search_findings", "search_knowledge"],
     "web": ["web_search", "web_fetch"],
 }
 
@@ -151,14 +151,12 @@ KNOWLEDGE TOOLS — Findings and reports
     full guide, including which finding_type to pick and when an
     anchor is required.
 
-  read_findings(query?, finding_type?, limit?)
-    Read stored findings. Filter by query or type.
-
   search_findings(query, limit?)
-    Semantic search over findings.
+    Semantic search over findings — the fuzzy path.
 
-  search_knowledge(query, sources?, limit?)
-    Search across findings + docs.""",
+  search_knowledge(query?, sources?, session_id?, finding_type?, limit?)
+    Full-text search over findings + reports. Omit the query to browse
+    findings by filter instead.""",
 
     # ── Category: web ─────────────────────────────────────────────────────
     "web": """\
@@ -1046,25 +1044,10 @@ EXAMPLES:
       anchor_error="SIGSEGV",
   )""",
 
-    "read_findings": """\
-read_findings(query?, finding_type?, limit?)
-
-Read stored findings from the knowledge base.
-
-PARAMS:
-  query (str, optional)         — Filter findings by text match
-  finding_type (str, optional)  — Filter by type: "observation", "conclusion", "project_context"
-  limit (int, optional)         — Max results. Default: 50.
-
-EXAMPLES:
-  read_findings()
-  read_findings(query="auth")
-  read_findings(finding_type="project_context", limit=10)""",
-
     "search_findings": """\
 search_findings(query, limit?)
 
-Semantic search over findings using embeddings. Better than read_findings for fuzzy queries.
+Semantic search over findings using embeddings. Better than search_knowledge for fuzzy queries.
 
 PARAMS:
   query (str, required)   — Search query (semantic matching, not exact text)
@@ -1075,18 +1058,30 @@ EXAMPLES:
   search_findings(query="database connection pooling", limit=5)""",
 
     "search_knowledge": """\
-search_knowledge(query, sources?, limit?)
+search_knowledge(query?, sources?, session_id?, finding_type?, min_confidence?, limit?)
 
-Unified search across findings, reports, and cached documentation.
+Search or browse saved knowledge. With a query this is full-text search and
+results come back as highlighted snippets. Without one it lists findings by
+filter, with their full content — a snippet only means something relative to
+a query. Absorbed the old `read_findings`, which still resolves to this name.
 
 PARAMS:
-  query (str, required)           — Search query
-  sources (list[str], optional)   — Which sources to search. Default: ["findings", "reports"].
-  limit (int, optional)           — Max results. Default: 20.
+  query (str, optional)           — FTS query. Operators: | OR, & AND,
+                                    'pre*' prefix, "exact phrase".
+                                    Omit to browse instead of search.
+  sources (list[str], optional)   — ["findings", "reports"]. Reports need a
+                                    query, so browsing covers findings only.
+  session_id (str, optional)      — Defaults to the current session.
+                                    Pass "0" for every session.
+  finding_type (str, optional)    — Keep only findings of this type.
+  min_confidence (float, optional)— Findings only. Default: 0.0.
+  limit (int, optional)           — Max results per source. Default: 20.
 
 EXAMPLES:
   search_knowledge(query="rate limiting")
-  search_knowledge(query="FastAPI auth", sources=["findings", "reports"])""",
+  search_knowledge(query="auth & token*", sources=["findings"])
+  search_knowledge(finding_type="project_context")
+  search_knowledge(session_id="0", min_confidence=0.8)""",
 
     "web_search": """\
 web_search(query, num_results?)

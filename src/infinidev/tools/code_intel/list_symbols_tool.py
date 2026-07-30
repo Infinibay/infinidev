@@ -28,6 +28,22 @@ class ListSymbolsTool(InfinibayBaseTool):
             results = list_symbols(project_id, file_path, kind=kind or None)
 
         if not results:
+            # tree-sitter may not cover this language; Ken indexes more.
+            from infinidev.engine.ken_client import get_ken_client
+
+            ken_symbols = get_ken_client().file_symbols(file_path)
+            if kind:
+                ken_symbols = [s for s in ken_symbols if s.kind == kind]
+            if ken_symbols:
+                body = "\n".join(
+                    f"L{s.line:4d}  {s.kind:10} {s.qualname}"
+                    + (f"  # {s.docstring}" if s.docstring else "")
+                    for s in ken_symbols
+                )
+                return (
+                    f"Symbols in {file_path} ({len(ken_symbols)} total, via Ken):\n"
+                    + body
+                )
             return self._error(f"No symbols found in '{file_path}'")
 
         lines = []

@@ -65,7 +65,8 @@ class InfinidevApp:
 
     def _init_ui_state(self) -> None:
         self.explorer_visible: bool = False
-        self.sidebar_visible: bool = True
+        # Transcript-first: both side panels start closed (Ctrl+B / Alt+.).
+        self.sidebar_visible: bool = False
         self.active_tab: str = "chat"
         self.active_dialog: str | None = None
 
@@ -122,6 +123,9 @@ class InfinidevApp:
         self._open_files = self.file_manager.open_files
         self._tab_names = self.file_manager.tab_names
         self._dirty_files = self.file_manager.dirty_files
+        # Files the running task has written to → the sidebar's FILES
+        # section. Reset per task by _handle_submit.
+        self._touched_files: dict[str, int] = {}
         self._editors = self.file_manager.editors
         self._editor_windows = self.file_manager.editor_windows
         self._search_bar = self.file_manager.search_bar
@@ -163,15 +167,22 @@ class InfinidevApp:
         self._float_container = None
         self.status_bar_control = None
         self.footer_control = None
-        from infinidev.ui.controls.clickable_scrollbar import scrollable_window
-        self._chat_history_window, chat_scroll_container = scrollable_window(
-            self._chat_history_control,
-            display_arrows=True,
+        # No scrollbar on the chat body. The chat is a full-bleed surface
+        # scrolled with a momentum wheel (see ChatHistoryControl); we build
+        # the Window directly instead of via scrollable_window() so no
+        # 1-column scrollbar track is reserved and the body uses full width.
+        self._chat_history_window = Window(
+            content=self._chat_history_control,
             wrap_lines=False,
             style=f"bg:{SURFACE}",
+            # Make the momentum scroll authoritative: derive vertical_scroll
+            # from the control's scroll state instead of the phantom cursor,
+            # so a glide actually moves the viewport 1:1 (see
+            # ChatHistoryControl.get_vertical_scroll).
+            get_vertical_scroll=self._chat_history_control.get_vertical_scroll,
         )
         self._chat_content_window = HSplit([
-            chat_scroll_container,
+            self._chat_history_window,
             ConditionalContainer(
                 content=Window(
                     content=FormattedTextControl(lambda: self._autocomplete.get_fragments()),
@@ -201,11 +212,46 @@ class InfinidevApp:
             full_screen=True,
             mouse_support=True,
         )
-        self.add_message("System", "Welcome to Infinidev! Type your instruction or /help.", "system")
+        self._add_banner()
         self._repaint_resumed_history()
         self._start_animation_timer()
         self._index_ready = False
         self._start_background_index()
+
+    def _add_banner(self) -> None:
+        """Open the transcript with the session's identity, not a greeting."""
+        import os
+        from pathlib import Path
+
+        try:
+            from importlib.metadata import version as _pkg_version
+
+            release = f"v{_pkg_version('infinidev')}"
+        except Exception:
+            release = ""
+
+        try:
+            from infinidev.config.settings import settings
+
+            model = settings.LLM_MODEL or "no model set — /models to pick one"
+        except Exception:
+            model = ""
+
+        cwd = Path(os.getcwd())
+        home = Path.home()
+        shown = f"~/{cwd.relative_to(home)}" if cwd.is_relative_to(home) else str(cwd)
+        context = f"{shown}  ·  {model}" if model else shown
+
+        self.chat_messages.append({
+            "type": "banner",
+            "sender": "System",
+            "text": "",
+            "title": "infinidev",
+            "version": release,
+            "context": context,
+            "hint": "/ for commands   ·   ? for shortcuts   ·   ! to run a shell command",
+        })
+        self._chat_history_control.invalidate_cache()
 
     def _repaint_resumed_history(self) -> None:
         """Repaint the prior conversation into the scrollback on resume.
@@ -245,71 +291,58 @@ class InfinidevApp:
     # ── Background workspace indexing ───────────────────────────────
 
     def _start_background_index(self) -> None:
-        """Kick off workspace indexing in a background thread.
+        """Bring the workspace index up — Ken's, not our own.
 
-        Shows progress in the chat history so the user knows what's happening.
-        The index runs once at startup; subsequent file changes are handled
-        by the file watcher.
+        Ken owns the project index now: it embeds files and symbols, tracks
+        which ones mattered for previous prompts, and keeps that across
+        sessions. Running our own full tree-sitter sweep at startup on top
+        of that indexed the same tree twice, cost several seconds of CPU
+        before the user could type, and printed two chat messages about it.
+
+        The local tree-sitter index has not gone away — the symbol *writer*
+        tools (edit_symbol, add_symbol, get_symbol_code) need line-accurate
+        positions Ken does not provide, and every tool that needs it indexes
+        the file it is about to touch on demand. `/reindex` still forces a
+        full sweep for anyone who wants one.
+        """
+        self._index_ready = True
+        self._warm_up_mcp()
+
+    def _warm_up_mcp(self) -> None:
+        """Bring the index server up before the first tool call.
+
+        Ken loads an embedding model at startup, so a cold server costs the
+        first search several seconds. Warming up in the background moves
+        that cost to the time the user spends typing their first message.
+
+        The outcome lands on the status line, never in the transcript: a
+        missing index is a normal state with a local fallback behind it,
+        not an event worth a chat message.
         """
         import threading
 
-        def _index_worker():
-            from infinidev.config.settings import settings
-            if not settings.CODE_INTEL_ENABLED:
-                self._index_ready = True
-                return
-
-            if self.status_bar_control:
-                self.status_bar_control.set_status("indexing...")
-                self.invalidate()
-
-            self.add_message(
-                "System",
-                "Indexing workspace — code intelligence will be ready shortly...",
-                "system",
-            )
+        def _warm():
             try:
-                from infinidev.cli.initial_index import run_initial_index
+                from infinidev.config.settings import settings
 
-                def _on_index_progress(msg: str):
-                    if self.status_bar_control:
-                        self.status_bar_control.set_status(msg)
-                        try:
-                            self.invalidate()
-                        except Exception:
-                            pass
+                if not getattr(settings, "MCP_ENABLED", True):
+                    return
+                from infinidev.engine.ken_client import get_ken_client
+                from infinidev.engine.mcp_client import get_default_mcp_manager
 
-                stats = run_initial_index(project_id=1, on_progress=_on_index_progress)
+                manager = get_default_mcp_manager()
+                for name in manager.all_names():
+                    manager._warmup_one(manager.get(name))
 
-                files = stats.get("files_indexed", 0)
-                symbols = stats.get("symbols_total", 0)
-                elapsed = stats.get("elapsed_ms", 0)
-
-                if files > 0:
-                    self.add_message(
-                        "System",
-                        f"Index ready: {files} files, {symbols} symbols ({elapsed}ms)",
-                        "system",
-                    )
-                else:
-                    self.add_message("System", "Index up to date.", "system")
-
-                if self.status_bar_control:
-                    self.status_bar_control.set_status("ready")
+                client = get_ken_client()
+                ready = bool(client.available and client.rank(""))
+                if self.status_bar_control is not None and not ready:
+                    self.status_bar_control.set_status("no project index · /mcp")
                     self.invalidate()
+            except Exception:
+                logger.debug("MCP warmup skipped", exc_info=True)
 
-            except Exception as exc:
-                logger.warning("Background indexing failed: %s", exc)
-                self.add_message(
-                    "System",
-                    f"Indexing failed: {exc} — code intelligence may be limited.",
-                    "system",
-                )
-            finally:
-                self._index_ready = True
-
-        t = threading.Thread(target=_index_worker, daemon=True, name="infinidev-index")
-        t.start()
+        threading.Thread(target=_warm, daemon=True, name="infinidev-mcp-warmup").start()
 
     def _start_animation_timer(self) -> None:
         """Periodic invalidation for sidebar animations while engine runs.
@@ -334,11 +367,36 @@ class InfinidevApp:
 
     # ── Message management ───────────────────────────────────────────
 
+    def _seal_open_stream(self) -> None:
+        """Clear a ``streaming`` flag that can no longer be true.
+
+        Only the last message can be mid-stream: once anything else is
+        appended, nothing can extend the earlier one. The flag suppresses
+        markdown — a message stuck with it shows ``**bold**`` and raw
+        backticks forever — and ``finalize_streaming_message`` used to be
+        the only thing that cleared it, so a tool result or a system notice
+        landing between the last chunk and the stream-end call left the
+        reply permanently unformatted.
+        """
+        last = self.chat_messages[-1] if self.chat_messages else None
+        if last is not None and last.get("streaming") is True:
+            last["streaming"] = False
+
     def add_message(self, sender: str, text: str, msg_type: str = "agent") -> None:
-        """Append a message to the chat history and trigger redraw."""
+        """Append a message to the chat history and trigger redraw.
+
+        Every message passes through the credential redactor. Individual
+        call sites already mask what they know is a secret; this catches
+        what they don't — provider SDKs embed the API key in the request
+        URL, so an "Invalid API key" exception stringifies into the
+        transcript with the key inside it.
+        """
+        from infinidev.config.secrets import redact
+
+        self._seal_open_stream()
         self.chat_messages.append({
             "sender": sender,
-            "text": str(text) if text else "",
+            "text": redact(str(text)) if text else "",
             "type": msg_type,
         })
         self._chat_history_control.invalidate_cache()
@@ -371,6 +429,8 @@ class InfinidevApp:
             existing = str(last.get("text") or "")
             last["text"] = existing + str(chunk)
         else:
+            # A different speaker taking over ends the previous stream.
+            self._seal_open_stream()
             self.chat_messages.append({
                 "sender": sender,
                 "text": str(chunk) if chunk else "",
@@ -394,15 +454,21 @@ class InfinidevApp:
         if a ``notify()`` interrupted the stream or nothing was
         streamed at all).
         """
-        last = self.chat_messages[-1] if self.chat_messages else None
-        if (
-            last is None
-            or last.get("sender") != sender
-            or last.get("type") != msg_type
-            or last.get("streaming") is not True
-        ):
+        # Scan back for the stream rather than demanding it be last. A tool
+        # result or a system notice arriving between the final chunk and
+        # this call used to make the guard bail, and the reply then rendered
+        # its markdown source — literal ``**`` and backticks — for the rest
+        # of the session.
+        target = None
+        for msg in reversed(self.chat_messages):
+            if msg.get("streaming") is not True:
+                continue
+            if msg.get("sender") == sender and msg.get("type") == msg_type:
+                target = msg
+            break
+        if target is None:
             return
-        last["streaming"] = False
+        target["streaming"] = False
         self._chat_history_control.invalidate_cache()
         try:
             self.invalidate()
@@ -591,6 +657,9 @@ class InfinidevApp:
                            user_text, getattr(self, "_engine_running", None))
         self._autocomplete.dismiss()
         _sublogger.warning("[SUBMIT] autocomplete dismissed")
+        # Each turn gets its own touched-files tally, so the sidebar shows
+        # what *this* request changed rather than the whole session.
+        self._touched_files = {}
         self.add_message("You", user_text, "user")
         _sublogger.warning("[SUBMIT] message added")
 
@@ -661,6 +730,7 @@ class InfinidevApp:
             else:
                 self._engine_running = True
                 self._chat_history_control.show_thinking = True
+                self._chat_history_control.busy = True
                 self.invalidate()
                 self._ensure_engine()
                 from infinidev.ui.workers import run_in_background, run_engine_task
@@ -1104,15 +1174,36 @@ class InfinidevApp:
         return self._sidebar_cache["plan"]
 
     def _build_plan_fragments(self) -> FormattedText:
+        # Empty means empty: the section hides itself rather than printing
+        # "Idle" into a panel the user opened to see what is happening.
         if not self._thinking_text and not self._plan_text:
-            return FormattedText([(f"{TEXT_MUTED}", " Idle")])
+            return FormattedText([])
         fragments = []
         if self._thinking_text:
-            fragments.append((f"#c0b8e0 bg:{SURFACE_LIGHT}", f" {self._thinking_text}"))
+            fragments.append((f"{TEXT}", f" {self._thinking_text}"))
         if self._plan_text:
             if fragments:
-                fragments.append((STYLE_SIDEBAR_CONTENT, "\n"))
-            fragments.append((f"{TEXT_DIM} bg:{SURFACE_LIGHT}", f" {self._plan_text}"))
+                fragments.append(("", "\n"))
+            fragments.append((f"{TEXT_DIM}", f" {self._plan_text}"))
+        return FormattedText(fragments)
+
+    def get_files_fragments(self) -> FormattedText:
+        """Files this task has written to, most-edited first."""
+        touched = getattr(self, "_touched_files", None) or {}
+        if not touched:
+            return FormattedText([])
+        import os
+
+        ordered = sorted(touched.items(), key=lambda kv: (-kv[1], kv[0]))
+        fragments: list[tuple[str, str]] = []
+        for path, count in ordered[:8]:
+            name = os.path.basename(path) or path
+            suffix = f" ×{count}" if count > 1 else ""
+            fragments.append((f"{SUCCESS}", " ± "))
+            fragments.append((f"{TEXT}", name))
+            fragments.append((f"{TEXT_DIM}", f"{suffix}\n"))
+        if len(ordered) > 8:
+            fragments.append((f"{TEXT_DIM}", f"   +{len(ordered) - 8} more\n"))
         return FormattedText(fragments)
 
     def get_steps_fragments(self) -> FormattedText:
@@ -1127,24 +1218,24 @@ class InfinidevApp:
 
     def _build_steps_fragments(self) -> FormattedText:
         if not self._steps_text:
-            return FormattedText([(f"{TEXT_MUTED}", " Waiting...")])
+            return FormattedText([])
         fragments = []
         for line in self._steps_text.split("\n"):
             line = line.strip()
             if not line:
                 continue
             if line.startswith("v "):  # done
-                fragments.append((f"{SUCCESS} bg:{SURFACE_LIGHT}", " \u2714 "))
-                fragments.append((f"{TEXT_MUTED} bg:{SURFACE_LIGHT}", f"{line[2:]}\n"))
+                fragments.append((f"{SUCCESS}", " \u2713 "))
+                fragments.append((f"{TEXT_DIM}", f"{line[2:]}\n"))
             elif line.startswith("> "):  # active
-                fragments.append((f"{ACCENT} bold bg:{SURFACE_LIGHT}", " \u25b6 "))
-                fragments.append((f"#ffffff bold bg:{SURFACE_LIGHT}", f"{line[2:]}\n"))
+                fragments.append((f"{ACCENT} bold", " \u25b8 "))
+                fragments.append((f"{TEXT} bold", f"{line[2:]}\n"))
             elif line.startswith("o "):  # pending
-                fragments.append((f"{TEXT_DIM} bg:{SURFACE_LIGHT}", " \u25cb "))
-                fragments.append((f"{TEXT_DIM} bg:{SURFACE_LIGHT}", f"{line[2:]}\n"))
+                fragments.append((f"{TEXT_DIM}", " \u00b7 "))
+                fragments.append((f"{TEXT_DIM}", f"{line[2:]}\n"))
             else:
-                fragments.append((STYLE_SIDEBAR_CONTENT, f" {line}\n"))
-        return FormattedText(fragments) if fragments else FormattedText([(f"{TEXT_MUTED}", " Waiting...")])
+                fragments.append((f"{TEXT}", f" {line}\n"))
+        return FormattedText(fragments)
 
     def get_actions_fragments(self) -> FormattedText:
         # Actions are animated — always recompute, but use pre-allocated
@@ -1171,9 +1262,9 @@ class InfinidevApp:
                 (f"{TEXT_MUTED}", f" {frame} waiting for LLM..."),
             ])
 
-        if not self._actions_text:
-            return FormattedText([(f"{TEXT_MUTED}", " Idle")])
-        return FormattedText([(STYLE_SIDEBAR_CONTENT, self._actions_text)])
+        if not self._actions_text or self._actions_text == "Idle":
+            return FormattedText([])
+        return FormattedText([(f"{TEXT}", f" {self._actions_text}")])
 
     def get_logs_fragments(self) -> FormattedText:
         cur_len = len(self._log_entries)
@@ -1190,7 +1281,7 @@ class InfinidevApp:
         now = time.monotonic()
         active = [(ts, text) for ts, text in self._log_entries if now - ts < 30.0]
         if not active:
-            return FormattedText([(f"{TEXT_MUTED}", " No logs")])
+            return FormattedText([])
         lines = [text for _, text in active[-5:]]
         return FormattedText([(STYLE_SIDEBAR_CONTENT, "\n".join(lines))])
 

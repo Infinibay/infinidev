@@ -56,3 +56,6 @@ unsloth_compiled_cache/
 
 # ken — local index, daemon socket, logs
 .ken/
+
+# SWE-bench evaluation output, regenerated per run
+.infinidev_eval.json

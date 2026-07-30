@@ -25,6 +25,7 @@ def _estimate_tokens(text: str, model: str) -> int:
         return 0
     try:
         import litellm
+
         return int(litellm.token_counter(model=model or "gpt-3.5-turbo", text=text))
     except Exception:
         return len(text) // 4
@@ -72,7 +73,9 @@ class ContextWindowCalculator:
         # The resolver may do a blocking HTTP call to Ollama on first lookup
         # (memoized thereafter); keep it off the event loop thread.
         self.max_context = await asyncio.to_thread(
-            get_model_context_window, llm_params, provider_id,
+            get_model_context_window,
+            llm_params,
+            provider_id,
         )
 
         if self.max_context:
@@ -84,7 +87,9 @@ class ContextWindowCalculator:
                 f"Model {self.model_name}: context window unknown, will display as '?'"
             )
 
-    def update_chat(self, user_input: str, session_summaries: list[str] | None = None) -> None:
+    def update_chat(
+        self, user_input: str, session_summaries: list[str] | None = None
+    ) -> None:
         """Estimate chat context tokens from user input + session history.
 
         Uses the model's tokenizer via litellm when available, falling back to
@@ -111,7 +116,8 @@ class ContextWindowCalculator:
                     "Prompt (%d tokens) exceeds the model's effective context "
                     "window (%d) — the backend is truncating context. Raise "
                     "INFINIDEV_OLLAMA_NUM_CTX or shorten the task.",
-                    task_prompt_tokens, self.max_context,
+                    task_prompt_tokens,
+                    self.max_context,
                 )
 
     def get_context_status(self) -> dict[str, Any]:
@@ -207,13 +213,19 @@ class ContextWindowCalculator:
 
 # Global calculator instance
 def _get_initial_model_name() -> str:
-    from infinidev.config.llm import get_litellm_params
     from infinidev.config.settings import settings
+
+    if not settings.LLM_MODEL:
+        return "ollama_chat/qwen2.5-coder:7b"
+    from infinidev.config.llm import get_litellm_params
+
     llm_params = get_litellm_params()
     return llm_params.get("model", settings.LLM_MODEL)
 
 
-calculator = ContextWindowCalculator(model_name=_get_initial_model_name(), max_context=None)
+calculator = ContextWindowCalculator(
+    model_name=_get_initial_model_name(), max_context=None
+)
 
 
 async def get_context_status() -> dict[str, Any]:

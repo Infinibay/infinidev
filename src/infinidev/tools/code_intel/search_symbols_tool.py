@@ -26,6 +26,13 @@ class SearchSymbolsTool(InfinibayBaseTool):
             results = search_symbols(project_id, query, kind=kind or None)
 
         if not results:
+            # The local index matches on *name*. When that finds nothing the
+            # query is often a description ("where do we validate tokens"),
+            # which Ken's embedding index can answer — so fall through to it
+            # instead of reporting "not found".
+            semantic = self._semantic_fallback(query, kind)
+            if semantic:
+                return semantic
             return self._error(f"No symbols matching '{query}'")
 
         lines = []
@@ -35,4 +42,20 @@ class SearchSymbolsTool(InfinibayBaseTool):
             lines.append(f"{s.kind.value:10} {sig} — {s.file_path}:{s.line_start}{parent}")
 
         return f"Found {len(results)} symbol(s) matching '{query}':\n" + "\n".join(lines)
+
+    @staticmethod
+    def _semantic_fallback(query: str, kind: str = "") -> str:
+        """Ask Ken for semantically similar symbols. Empty string when absent."""
+        from infinidev.engine.ken_client import get_ken_client
+
+        hits = get_ken_client().search_symbols(query, limit=15)
+        if kind:
+            hits = [hit for hit in hits if hit.kind == kind]
+        if not hits:
+            return ""
+        lines = [hit.render() for hit in hits]
+        return (
+            f"No exact name match for '{query}'. "
+            f"{len(hits)} semantically related symbol(s):\n" + "\n".join(lines)
+        )
 

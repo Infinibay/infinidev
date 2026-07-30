@@ -21,7 +21,7 @@ and synthesize findings into actionable recommendations.
 - Pivot questions change the tree structure; informational ones don't
 - When something seems impossible, decompose the assumptions behind "impossible"
 - Maximum 4 children per node, maximum 4 levels of depth
-- Prefer OR logic when exploring alternatives to an unsolvable path
+- IF a path turns out unsolvable, THEN branch with OR logic to its alternatives
 - VERIFY with tools before speculating
 - Constraints and blockers always propagate upward
 - Discarded branches still carry useful information — note why they were discarded

@@ -18,7 +18,7 @@ from infinidev.engine.engine_logging import (
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.loop.models import ActionRecord, StepResult
 from infinidev.engine.loop.behavior_rules import _EDIT_TOOLS, _READ_TOOLS
-from infinidev.engine.loop.step_summarizer import _synthesize_final
+from infinidev.engine.loop.step_summarizer import _summarize_step, _synthesize_final
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
@@ -196,6 +196,12 @@ class StepManager:
         if ctx.is_small:
             record = _auto_enhance_record(record, messages)
 
+        # Archive everything that is about to leave the model's context.
+        # The prompt is rebuilt from summaries only, so without this the
+        # raw tool output would be unrecoverable; with it, the model can
+        # pull any of it back via recall_context.
+        self._archive_evicted_context(ctx, step_index, messages, record.summary)
+
         # Merge behavior tracker data if available
         bt = step_result.behavior_tracker
         if bt:
@@ -217,6 +223,30 @@ class StepManager:
 
         # Keep _last_state up-to-date for live introspection (e.g. /debug panel)
         self._engine._last_state = ctx.state
+
+    @staticmethod
+    def _archive_evicted_context(
+        ctx: ExecutionContext, step_index: int,
+        messages: list[dict[str, Any]], summary: str,
+    ) -> None:
+        """Persist the step's raw exchanges into searchable working memory.
+
+        Best-effort by design: the archive is an aid, and a storage hiccup
+        must never fail a step that already did its work.
+        """
+        if not _get_settings().WORKING_MEMORY_ENABLED:
+            return
+        with best_effort("working-memory archive failed"):
+            from infinidev.engine.working_memory import get_working_memory
+
+            stored = get_working_memory(ctx.session_id).archive_step(
+                step_index, messages, summary
+            )
+            if stored:
+                _log(
+                    f"   {_DIM}🗄  Archived {stored} excerpt(s) "
+                    f"— recall with recall_context{_RESET}"
+                )
 
     def finish(
         self, ctx: ExecutionContext, status: str,

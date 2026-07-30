@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from infinidev.tools.knowledge.finding_types import FINDING_TYPES, FINDING_TYPE_HELP
+from infinidev.tools.knowledge.finding_types import FINDING_TYPE_HELP, FindingType
 
 
 class UpdateFindingInput(BaseModel):
@@ -14,11 +14,8 @@ class UpdateFindingInput(BaseModel):
     confidence: float | None = Field(
         default=None, ge=0.0, le=1.0, description="New confidence level"
     )
-    finding_type: str | None = Field(
-        default=None,
-        description=(
-            f"New finding type: {', '.join(FINDING_TYPES)}. {FINDING_TYPE_HELP}"
-        ),
+    finding_type: FindingType | None = Field(
+        default=None, description=f"Leave unset to keep. {FINDING_TYPE_HELP}"
     )
     tags: list[str] | None = Field(default=None, description="Replace tags")
     sources: list[str] | None = Field(default=None, description="Replace sources")

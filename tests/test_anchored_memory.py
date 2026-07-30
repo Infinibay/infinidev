@@ -321,10 +321,8 @@ class TestMemoryHandlers:
         """Every tool that mutates or reads files should have a handler."""
         expected = {
             "read_file", "partial_read", "create_file", "edit_file",
-            "replace_lines", "add_content_after_line",
-            "add_content_before_line", "list_directory",
-            "get_symbol_code", "edit_symbol", "add_symbol",
-            "remove_symbol", "search_symbols", "execute_command",
+            "list_directory", "get_symbol_code", "rename_symbol",
+            "move_symbol", "search_symbols", "execute_command",
         }
         actual = set(_MEMORY_HANDLERS.keys())
         missing = expected - actual

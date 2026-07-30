@@ -14,9 +14,7 @@ from typing import Literal
 # ── Tool name sets ──────────────────────────────────────────────────────
 
 _EDIT_TOOLS = frozenset({
-    "replace_lines", "create_file",
-    "add_content_after_line", "add_content_before_line",
-    "edit_symbol", "add_symbol", "remove_symbol",
+    "edit_file", "create_file", "rename_symbol", "move_symbol",
 })
 
 _READ_TOOLS = frozenset({

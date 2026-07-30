@@ -53,10 +53,12 @@ def get_db_path() -> Path:
     """
     return _get_base_dir() / DB_FILE_NAME
 
+
 # Backward-compatibility alias: module-level Path so tests can patch it.
 # Runtime code should prefer get_settings_file() / get_db_path() / get_base_dir()
 # which always track the real cwd.
 SETTINGS_FILE = get_settings_file()
+
 
 class Settings(BaseSettings):
     # Database
@@ -76,7 +78,7 @@ class Settings(BaseSettings):
     # Sandbox (Disabled for local CLI by default)
     SANDBOX_ENABLED: bool = False
     ALLOWED_BASE_DIRS: list[str] = ["/"]  # Allow all for local CLI
-    ALLOWED_COMMANDS: list[str] = []      # Not used if SANDBOX_ENABLED=False
+    ALLOWED_COMMANDS: list[str] = []  # Not used if SANDBOX_ENABLED=False
 
     # Permissions
     # "auto" (default): auto-approve provably read-only commands / in-workspace
@@ -84,9 +86,9 @@ class Settings(BaseSettings):
     # everything), "ask" (prompt for everything), "allowed_list"/"allowed_paths"
     # (allow only an explicit list).
     EXECUTE_COMMANDS_PERMISSION: str = "auto"  # "auto", "auto_approve", "ask", "allowed_list"
-    ALLOWED_COMMANDS_LIST: list[str] = []  # List of allowed commands when permission is "allowed_list"
+    ALLOWED_COMMANDS_LIST: list[str] = []  # Allowed commands when permission is "allowed_list"
     FILE_OPERATIONS_PERMISSION: str = "auto"  # "auto", "ask", "auto_approve", "allowed_paths"
-    ALLOWED_FILE_PATHS: list[str] = []  # List of allowed paths when permission is "allowed_paths"
+    ALLOWED_FILE_PATHS: list[str] = []  # Allowed paths when permission is "allowed_paths"
 
     # File limits
     MAX_FILE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5MB
@@ -197,8 +199,8 @@ class Settings(BaseSettings):
     TREE_INNER_LOOP_MAX: int = 8
 
     # Brainstorm-specific limits (wide & shallow exploration)
-    TREE_BRAINSTORM_MAX_DEPTH: int = 2          # ideas + 1 level max
-    TREE_BRAINSTORM_INNER_LOOP_MAX: int = 4     # quick validation per idea
+    TREE_BRAINSTORM_MAX_DEPTH: int = 2  # ideas + 1 level max
+    TREE_BRAINSTORM_INNER_LOOP_MAX: int = 4  # quick validation per idea
     TREE_BRAINSTORM_TOOL_CALLS_PER_NODE: int = 3  # few lookups, not exhaustive
 
     # Phases
@@ -226,8 +228,8 @@ class Settings(BaseSettings):
     # Point this at a cloud provider for real parallelism, since local
     # Ollama serialises concurrent members at the GPU.
     COUNCIL_MODEL: str = ""
-    COUNCIL_MAX_MEMBERS: int = 5          # hard upper bound on roster size
-    COUNCIL_MAX_ROUNDS: int = 3           # runaway guard; moderator may stop earlier
+    COUNCIL_MAX_MEMBERS: int = 5  # hard upper bound on roster size
+    COUNCIL_MAX_ROUNDS: int = 3  # runaway guard; moderator may stop earlier
     # Iterations per member per round (each = one LLM call). This is a
     # runaway guard, NOT a quality gate: a member should be able to
     # investigate deeply — chain many web_search/web_fetch calls, read
@@ -242,7 +244,7 @@ class Settings(BaseSettings):
     # from real codebase/web exploration. The convergence-judge turn is
     # separately capped low (it just needs to read the digest and vote).
     COUNCIL_MODERATOR_MAX_ITERS: int = 60
-    COUNCIL_MAX_CONCURRENCY: int = 4      # members run in parallel up to this many
+    COUNCIL_MAX_CONCURRENCY: int = 4  # members run in parallel up to this many
     # Off by default: the chat agent may PROPOSE a council on complexity,
     # but auto-triggering without a user signal risks the model's own
     # over-estimation. Reserved for a future opt-in.
@@ -272,10 +274,13 @@ class Settings(BaseSettings):
     # UI
     MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling
     DIFF_DISPLAY_MODE: str = "unified"  # "unified" (git diff) | "side_by_side"
-    UI_SIDEBAR_VISIBLE: bool = True  # Right sidebar panel visibility (toggled with Alt+.)
+    # Transcript-first by default: the sidebar's panels (context, thinking,
+    # steps, actions, logs) are all still there, one Alt+. away, but they
+    # no longer take a third of the terminal before the user asks for them.
+    UI_SIDEBAR_VISIBLE: bool = False
     # Behavior Checkers (modular punish/promote scoring after each model message)
     BEHAVIOR_CHECKERS_ENABLED: bool = False  # Master toggle
-    BEHAVIOR_HISTORY_WINDOW: int = 4         # Recent messages fed to each checker
+    BEHAVIOR_HISTORY_WINDOW: int = 4  # Recent messages fed to each checker
     # "stochastic" (default, zero LLM calls) | "llm" (legacy batched judge)
     # | "hybrid" (stochastic first, escalate low-confidence to LLM)
     BEHAVIOR_JUDGE_MODE: str = "stochastic"
@@ -325,6 +330,43 @@ class Settings(BaseSettings):
     ASSISTANT_LLM_API_KEY: str = ""
     ASSISTANT_LLM_TIMEOUT: int = 600
     ASSISTANT_LLM_INCLUDE_STEP_COMPLETE: bool = True
+
+    # Runtime task scheduler and unified conversation memory
+    RUNTIME_ENABLED: bool = True
+    RUNTIME_MEMORY_KEEP: int = 12
+    RUNTIME_PERSIST_EVENTS: bool = True
+    # Working memory: raw tool output evicted from the prompt at each step
+    # close is archived and indexed so the model can pull it back with
+    # ``recall_context`` instead of re-running the read. See
+    # engine/working_memory.py.
+    WORKING_MEMORY_ENABLED: bool = True
+    # How many full step summaries stay in the prompt. Older ones collapse
+    # to one line each and remain retrievable via recall_context.
+    # 0 = never collapse (old behaviour: every summary stays verbatim).
+    WORKING_MEMORY_VERBATIM_STEPS: int = 4
+
+    # MCP — generic Model Context Protocol client. Ken is the default server
+    # but any number of MCP servers can be registered via .mcp.json.
+    MCP_ENABLED: bool = True
+    MCP_AUTOLOAD_CONFIG: bool = True
+    MCP_REQUEST_TIMEOUT: int = 30
+    # Handshake budget: a cold Ken loads its embedding model before it can
+    # answer `initialize`, which is far slower than a steady-state call.
+    MCP_STARTUP_TIMEOUT: int = 60
+    # Which discovered MCP tools reach the model, as a comma-separated glob
+    # list ("*" = every tool the servers advertise). Every tool a server
+    # publishes is exposed by default under its own name; narrowing this is
+    # for small models, where a hundred-tool schema hurts selection more
+    # than the extra capability helps. Example: "ken_search_*,ken_rank,ken_recall".
+    MCP_TOOL_FILTER: str = "*"
+    # Report the session to Ken's daemon (start/prompt/tool/turn/end), so its
+    # ranker gets the event stream its reactive, predictive and
+    # explicit-mention channels are computed from. Without it Ken answers
+    # with only the name/text channels — measured: reactive 0, explicit 0,
+    # findings 0 — because a query string cannot say what this session has
+    # been doing. Off by default: it changes what the model sees, so it
+    # wants measuring before it becomes the default.
+    KEN_SESSION_ENABLED: bool = False
 
     # ContextRank (cross-session context prioritization)
     CONTEXT_RANK_ENABLED: bool = False
@@ -409,7 +451,8 @@ class Settings(BaseSettings):
                 logger.error(
                     "Could not load settings from %s (%s); falling back to "
                     "defaults — model/base_url/API keys may be wrong.",
-                    SETTINGS_FILE, e,
+                    SETTINGS_FILE,
+                    e,
                 )
 
         # Env vars take precedence over file settings
@@ -430,7 +473,8 @@ class Settings(BaseSettings):
                 logger.error(
                     "Refusing to save settings: cannot read existing %s (%s). "
                     "Existing configuration left untouched.",
-                    SETTINGS_FILE, e,
+                    SETTINGS_FILE,
+                    e,
                 )
                 return
 
@@ -444,5 +488,6 @@ def reload_all():
     new_s = Settings.load_user_settings()
     for key, value in new_s.model_dump().items():
         setattr(settings, key, value)
+
 
 settings = Settings.load_user_settings()

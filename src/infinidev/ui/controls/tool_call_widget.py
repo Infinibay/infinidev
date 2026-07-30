@@ -84,6 +84,7 @@ _TC_OUT_FG     = "#a8b8c8"          # stdout-like output (soft blue-gray)
 _TC_ERR_FG     = "#d48a8a"          # stderr-like / partial errors
 _TC_FAIL_FG    = "#ff5577 bold"     # hard error
 _TC_OK_FG      = "#5fd07f"          # success marker (✓)
+_TC_WARN_FG    = "#e0b050"          # refused, not failed (⊘)
 
 
 # ── Section types ────────────────────────────────────────────────────────
@@ -321,16 +322,46 @@ def _render_json_list(items: list, *, max_items: int = 30) -> SectionList:
     return out
 
 
+def _oversized_sections(result: str) -> SectionList | None:
+    """Explain a size refusal, or ``None`` when the read went through.
+
+    The user is looking at a row that neither succeeded nor failed, so the
+    numbers that caused it are the whole story.
+    """
+    from infinidev.engine.oversized_result import is_oversized_refusal
+
+    if not is_oversized_refusal(result):
+        return None
+    try:
+        meta = json.loads(result.split("\n", 1)[0])
+    except (ValueError, TypeError):
+        return None
+    return [
+        _kv("path", str(meta.get("file_path", "?"))),
+        _status(
+            f"not read — {meta.get('characters', 0):,} chars over "
+            f"{meta.get('lines', 0)} lines, limit "
+            f"{meta.get('limit_characters', 0):,}",
+            ok=False,
+        ),
+        _label("the agent got the file's outline and can re-read a range"),
+    ]
+
+
 def _fmt_read_file(args, result, error, width) -> SectionList:
     # Args-only: file content would clutter the chat. The agent
     # consumes the body internally; the user just needs to see *what*
     # was read.
+    if (sections := _oversized_sections(result)) is not None:
+        return sections
     path = args.get("path") or args.get("file_path") or "?"
     return [_kv("path", path)]
 
 
 def _fmt_partial_read(args, result, error, width) -> SectionList:
     # Args-only: the bytes are food for the agent.
+    if (sections := _oversized_sections(result)) is not None:
+        return sections
     path = args.get("path") or args.get("file_path") or "?"
     start = args.get("start_line") or args.get("line_start") or args.get("start")
     end = args.get("end_line") or args.get("line_end") or args.get("end")
@@ -600,10 +631,21 @@ def _fmt_search_findings(args, result, error, width) -> SectionList:
     return s
 
 
-def _fmt_read_findings(args, result, error, width) -> SectionList:
-    # Args-only: bulk read used for agent context, not user-facing.
-    q = args.get("query") or ""
-    return [_kv("query", q)] if q else []
+def _fmt_search_knowledge(args, result, error, width) -> SectionList:
+    # One tool, two modes. A search's matches are the point, so the result
+    # is shown; a browse is the bulk read that used to be `read_findings`,
+    # pulled in for the agent's own context — the user wants the filter it
+    # ran under, not the dump.
+    query = args.get("query") or ""
+    if query:
+        return _fmt_search_findings(args, result, error, width)
+
+    filters = [
+        _kv(k, str(args[k]))
+        for k in ("finding_type", "session_id", "min_confidence")
+        if args.get(k) not in (None, "")
+    ]
+    return filters or [_kv("browse", "all findings")]
 
 
 def _fmt_web(args, result, error, width) -> SectionList:
@@ -640,8 +682,8 @@ _TOOL_FORMATTERS: dict[str, Callable[[dict, str, str, int], SectionList]] = {
     "git_push": _fmt_git_simple,
     "record_finding": _fmt_record_finding,
     "search_findings": _fmt_search_findings,
-    "read_findings": _fmt_read_findings,
-    "search_knowledge": _fmt_search_findings,
+    "read_findings": _fmt_search_knowledge,  # retired alias
+    "search_knowledge": _fmt_search_knowledge,
     "web_search": _fmt_web,
     "web_fetch": _fmt_web,
 }
@@ -859,11 +901,181 @@ class ToolCallWidget:
         return RenderResult(lines=lines, clickable_offsets=clickable)
 
     def render_group_header(self, count: int, collapsed: bool, width: int) -> RenderResult:
-        # Tool calls are NOT grouped (see message_groups.NEVER_GROUP_TYPES).
-        # Fallback flat header for safety.
+        # Tool groups render through build_tool_group(), not this header path.
+        # Kept only as a Protocol-completeness fallback.
         label = f"{self.group_label} ({count})"
         pad = " " * max(0, width - len(label) - 1)
         return RenderResult(lines=[[(_TC_HEADER_FG, f" {label}{pad}")]])
 
 
 register(ToolCallWidget())
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Compact tool GROUP rendering (claude-code / codex style)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Consecutive tool calls coalesce into ONE collapsible group instead of N
+# full-payload blocks. Three levels of progressive disclosure:
+#
+#   Level 1 (default, collapsed):   ✓ Ran 5 tools ▸
+#   Level 2 (group expanded):       ✓ Ran 5 tools ▾
+#                                       ✓ read_file  src/main.py    ▸
+#                                       ✓ code_search  "TODO"       ▸
+#                                       ✗ write_file  /etc/passwd   ▸
+#   Level 3 (a tool expanded):      the full ToolCallWidget.render() block,
+#                                   embedded + indented under its one-liner.
+#
+# While the agent is still working AND this is the last group, the summary
+# reads "Running N tools…" (live). When idle it reads "Ran N tools".
+
+# Copy strings live here as constants so the UI language is a one-line swap.
+_TG_VERB_LIVE = "Running"      # agent still executing tools  (es: "Ejecutando")
+_TG_VERB_DONE = "Ran"          # tools finished               (es: "Ejecutadas")
+_TG_FAILED_NOTE = "failed"     # "· N failed"                 (es: "con error")
+
+_TG_LIVE_ICON = "●"
+_TG_OK_ICON = "✓"
+_TG_ERR_ICON = "✗"
+# A size refusal is neither a success nor a failure: the tool never ran.
+_TG_SKIP_ICON = "⊘"
+_TG_ARROW_COLLAPSED = "▸"
+_TG_ARROW_EXPANDED = "▾"
+
+_TG_SUMMARY_FG = TEXT              # summary label (primary)
+_TG_ONELINE_FG = _TC_BODY_FG       # per-tool one-liner label
+_TG_DIM_FG = TEXT_MUTED            # arrows / separators
+
+
+def _tool_status(msg: dict[str, Any]) -> str:
+    """``"ok"``, ``"err"`` or ``"skipped"`` for one tool message.
+
+    ``"skipped"`` is the file-too-large refusal: nothing was read, nothing
+    failed. Rendering it as an error would send the user hunting for a bug
+    that is not there.
+    """
+    from infinidev.engine.oversized_result import is_oversized_refusal
+
+    if is_oversized_refusal(msg.get("result") or ""):
+        return "skipped"
+    return "ok" if _tool_ok(msg) else "err"
+
+
+def _tool_ok(msg: dict[str, Any]) -> bool:
+    """True if a tool succeeded; False on error or non-zero shell exit."""
+    if msg.get("error"):
+        return False
+    env = _try_parse_exec(msg.get("result") or "")
+    if env is not None:
+        if env.get("killed_reason"):
+            return False
+        ec = env.get("exit_code")
+        if ec is not None and ec != 0:
+            return False
+    return True
+
+
+def _tool_oneliner_label(msg: dict[str, Any]) -> str:
+    """Compact one-line label for a tool row.
+
+    Prefers the precomputed ``text`` (e.g. "read_file src/foo.py"); falls
+    back to tool_name + the first meaningful argument.
+    """
+    txt = (msg.get("text") or "").strip()
+    if txt:
+        return txt
+    name = msg.get("tool_name") or "?"
+    args = msg.get("args") if isinstance(msg.get("args"), dict) else {}
+    for k in ("path", "file_path", "query", "command", "cmd",
+              "pattern", "name", "symbol_name", "message"):
+        v = args.get(k) if isinstance(args, dict) else None
+        if v:
+            return f"{name}  {_truncate(str(v), 120)}"
+    return name
+
+
+def build_tool_group(
+    messages: list[dict[str, Any]],
+    *,
+    collapsed: bool,
+    expanded_set: set,
+    width: int,
+    live: bool,
+    on_toggle_group: Callable[[], None],
+    on_toggle_tool: Callable[[int], None],
+) -> RenderResult:
+    """Render a run of tool calls as a compact, collapsible group.
+
+    Returns a RenderResult whose ``clickable_offsets`` are wired to the two
+    provided callbacks: offset 0 toggles the whole group; each one-liner
+    toggles that tool's full detail. Detail blocks reuse ToolCallWidget and
+    keep their own copy button (offsets rebased into this result).
+    """
+    n = len(messages)
+    statuses = [_tool_status(m) for m in messages]
+    n_err = sum(1 for st in statuses if st == "err")
+    n_skip = sum(1 for st in statuses if st == "skipped")
+
+    if live:
+        icon, icon_style, verb, tail = _TG_LIVE_ICON, _TC_BAR_FG + " bold", _TG_VERB_LIVE, "…"
+    elif n_err:
+        icon, icon_style, verb, tail = _TG_ERR_ICON, _TC_FAIL_FG, _TG_VERB_DONE, ""
+    elif n_skip:
+        icon, icon_style, verb, tail = _TG_SKIP_ICON, _TC_WARN_FG, _TG_VERB_DONE, ""
+    else:
+        icon, icon_style, verb, tail = _TG_OK_ICON, _TC_OK_FG, _TG_VERB_DONE, ""
+
+    unit = "tool" if n == 1 else "tools"
+    err_note = f"   ·  {n_err} {_TG_FAILED_NOTE}" if n_err else ""
+    if n_skip:
+        err_note += f"   ·  {n_skip} too large"
+    arrow = _TG_ARROW_COLLAPSED if collapsed else _TG_ARROW_EXPANDED
+    label = f"{verb} {n} {unit}{tail}{err_note}"
+
+    lines: list[list[tuple[str, str]]] = []
+    clickable: dict[int, Callable[[], None]] = {}
+
+    # ── Summary line (offset 0) — click toggles the whole group ──────────
+    lines.append([
+        ("", "  "),
+        (icon_style, icon + " "),
+        (_TG_SUMMARY_FG, label),
+        ("", "  "),
+        (_TG_DIM_FG, arrow),
+    ])
+    clickable[0] = on_toggle_group
+
+    # ── Expanded: one-liner per tool (+ optional full detail) ────────────
+    if not collapsed:
+        for i, msg in enumerate(messages):
+            status = statuses[i]
+            row_icon, row_style = {
+                "ok": (_TG_OK_ICON, _TC_OK_FG),
+                "err": (_TG_ERR_ICON, _TC_FAIL_FG),
+                "skipped": (_TG_SKIP_ICON, _TC_WARN_FG),
+            }[status]
+            is_exp = i in expanded_set
+            twirl = _TG_ARROW_EXPANDED if is_exp else _TG_ARROW_COLLAPSED
+            label_i = _truncate(_tool_oneliner_label(msg), max(12, width - 12))
+
+            off = len(lines)
+            lines.append([
+                ("", "     "),
+                (row_style, row_icon + " "),
+                (_TG_ONELINE_FG, label_i),
+                ("", "  "),
+                (_TG_DIM_FG, twirl),
+            ])
+            clickable[off] = (lambda idx=i: on_toggle_tool(idx))
+
+            if is_exp:
+                detail = ToolCallWidget().render(msg, max(24, width - 5))
+                base = len(lines)
+                for dl in detail.lines:
+                    lines.append([("", "     "), *dl])
+                for d_off, cb in detail.clickable_offsets.items():
+                    clickable[base + d_off] = cb
+
+    # trailing chat separator
+    lines.append([("", "")])
+    return RenderResult(lines=lines, clickable_offsets=clickable)

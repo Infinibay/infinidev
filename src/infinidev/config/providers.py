@@ -18,13 +18,13 @@ class ProviderConfig:
 
     id: str
     display_name: str
-    prefix: str                              # LiteLLM model prefix
+    prefix: str  # LiteLLM model prefix
     default_base_url: str
     api_key_required: bool = True
     base_url_editable: bool = False
-    model_list_format: str = "static"        # ollama, openai, anthropic, gemini, static
+    model_list_format: str = "static"  # ollama, openai, anthropic, gemini, static
     static_models: list[str] = field(default_factory=list)
-    is_native: bool = False                  # LiteLLM handles endpoint natively
+    is_native: bool = False  # LiteLLM handles endpoint natively
 
 
 # ── Provider Registry ────────────────────────────────────────────────
@@ -47,8 +47,13 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=True,
         static_models=[
-            "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
-            "o3", "o3-pro", "o3-mini", "o4-mini",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "o3",
+            "o3-pro",
+            "o3-mini",
+            "o4-mini",
         ],
     ),
     "anthropic": ProviderConfig(
@@ -59,10 +64,13 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="anthropic",
         is_native=True,
         static_models=[
-            "claude-opus-4-6", "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
             "claude-haiku-4-5-20251001",
-            "claude-sonnet-4-5-20250929", "claude-opus-4-5-20251101",
-            "claude-sonnet-4-0", "claude-opus-4-0",
+            "claude-sonnet-4-5-20250929",
+            "claude-opus-4-5-20251101",
+            "claude-sonnet-4-0",
+            "claude-opus-4-0",
         ],
     ),
     "gemini": ProviderConfig(
@@ -73,9 +81,12 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="gemini",
         is_native=True,
         static_models=[
-            "gemini-3.1-pro-preview", "gemini-3-flash-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3-flash-preview",
             "gemini-3.1-flash-lite-preview",
-            "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
         ],
     ),
     "zai": ProviderConfig(
@@ -86,9 +97,14 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=True,
         static_models=[
-            "glm-5", "glm-5-turbo",
-            "glm-4.7", "glm-4.6", "glm-4.5",
-            "glm-4.5-flash", "glm-4.5-air",
+            "glm-5.2",
+            "glm-5",
+            "glm-5-turbo",
+            "glm-4.7",
+            "glm-4.6",
+            "glm-4.5",
+            "glm-4.5-flash",
+            "glm-4.5-air",
         ],
     ),
     "zai_coding": ProviderConfig(
@@ -99,9 +115,14 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=False,
         static_models=[
-            "glm-5", "glm-5-turbo",
-            "glm-4.7", "glm-4.6", "glm-4.5",
-            "glm-4.5-flash", "glm-4.5-air",
+            "glm-5.2",
+            "glm-5",
+            "glm-5-turbo",
+            "glm-4.7",
+            "glm-4.6",
+            "glm-4.5",
+            "glm-4.5-flash",
+            "glm-4.5-air",
         ],
     ),
     "kimi": ProviderConfig(
@@ -111,20 +132,26 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="https://api.moonshot.ai/v1",
         model_list_format="openai",
         static_models=[
+            "kimi-k3",
             "kimi-k2.5",
-            "kimi-k2-thinking", "kimi-k2-thinking-turbo",
-            "kimi-k2-0905-preview", "kimi-k2-turbo-preview",
+            "kimi-k2-thinking",
+            "kimi-k2-thinking-turbo",
+            "kimi-k2-0905-preview",
+            "kimi-k2-turbo-preview",
         ],
     ),
     "minimax": ProviderConfig(
         id="minimax",
-        display_name="Minimax",
+        display_name="MiniMax",
         prefix="minimax/",
         default_base_url="https://api.minimax.io/v1",
         model_list_format="static",
         static_models=[
-            "MiniMax-M2.7", "MiniMax-M2.7-highspeed",
-            "MiniMax-M2.5", "MiniMax-M2.1",
+            "MiniMax-M3",
+            "MiniMax-M2.7",
+            "MiniMax-M2.7-highspeed",
+            "MiniMax-M2.5",
+            "MiniMax-M2.1",
         ],
     ),
     "mistral": ProviderConfig(
@@ -135,10 +162,16 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=True,
         static_models=[
-            "mistral-large-latest", "mistral-medium-latest", "mistral-small-latest",
-            "ministral-3b-latest", "ministral-8b-latest",
-            "magistral-medium-latest", "magistral-small-latest",
-            "codestral-latest", "devstral-medium-latest", "devstral-small-latest",
+            "mistral-large-latest",
+            "mistral-medium-latest",
+            "mistral-small-latest",
+            "ministral-3b-latest",
+            "ministral-8b-latest",
+            "magistral-medium-latest",
+            "magistral-small-latest",
+            "codestral-latest",
+            "devstral-medium-latest",
+            "devstral-small-latest",
             "pixtral-large-latest",
         ],
     ),
@@ -187,11 +220,20 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         static_models=[
             "qwen3.6-plus",
-            "qwen3.5-plus", "qwen3.5-flash",
-            "qwen3.5-397b-a17b", "qwen3.5-122b-a10b",
-            "qwen3-max", "qwen3-coder-plus", "qwen3-coder-flash",
-            "qwen3-235b-a22b", "qwen3-32b", "qwen3-30b-a3b",
-            "qwen-max", "qwen-plus", "qwen-turbo", "qwen-flash",
+            "qwen3.5-plus",
+            "qwen3.5-flash",
+            "qwen3.5-397b-a17b",
+            "qwen3.5-122b-a10b",
+            "qwen3-max",
+            "qwen3-coder-plus",
+            "qwen3-coder-flash",
+            "qwen3-235b-a22b",
+            "qwen3-32b",
+            "qwen3-30b-a3b",
+            "qwen-max",
+            "qwen-plus",
+            "qwen-turbo",
+            "qwen-flash",
             "qwq-plus",
         ],
     ),
@@ -227,6 +269,7 @@ def list_provider_ids() -> list[str]:
 
 # ── Model Discovery ──────────────────────────────────────────────────
 
+
 def fetch_models(
     provider_id: str,
     api_key: str = "",
@@ -245,7 +288,9 @@ def fetch_models(
     if not provider.base_url_editable and provider.default_base_url:
         url = provider.default_base_url.rstrip("/")
     else:
-        url = base_url.rstrip("/") if base_url else provider.default_base_url.rstrip("/")
+        url = (
+            base_url.rstrip("/") if base_url else provider.default_base_url.rstrip("/")
+        )
 
     if not url:
         return [f"{provider.prefix}{m}" for m in provider.static_models]
@@ -316,7 +361,7 @@ def _fetch_gemini(base_url: str, api_key: str, prefix: str) -> list[str]:
         name = m.get("name", "")
         # Gemini returns "models/gemini-pro" — strip prefix
         if name.startswith("models/"):
-            name = name[len("models/"):]
+            name = name[len("models/") :]
         if name:
             result.append(f"{prefix}{name}")
     return result

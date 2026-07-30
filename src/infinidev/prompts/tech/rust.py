@@ -35,7 +35,7 @@ def get_prompt() -> str:
 - Use the builder pattern for constructing complex structs.
 - Leverage `From` / `Into` traits for clean type conversions.
 - Add `#[derive(Debug, Clone, PartialEq)]` liberally on data types.
-- Use `#[must_use]` on functions whose return value should not be ignored.
+- Mark a function `#[must_use]` when ignoring its return value is a bug.
 
 ### Anti-Patterns to Avoid
 - `.clone()` to silence the borrow checker — understand ownership and borrowing instead.

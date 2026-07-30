@@ -396,7 +396,7 @@ def _render_similarity_guidance(
     )
     lines.append(
         "2. If they do the same thing, call the existing one from your new "
-        "code and delete your duplicate. Use edit_symbol or replace_lines."
+        "code and delete your duplicate. Use edit_file."
     )
     lines.append(
         "3. If they're different enough to justify, leave a comment "

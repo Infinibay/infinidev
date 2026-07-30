@@ -224,19 +224,23 @@ def test_widget_handles_non_dict_args(widget):
 # ── Grouping rules ──────────────────────────────────────────────────────
 
 
-def test_tool_call_messages_are_never_grouped():
-    assert "tool_call" in NEVER_GROUP_TYPES
+def test_tool_call_messages_are_grouped_compactly():
+    # Tools were intentionally moved OUT of NEVER_GROUP_TYPES: consecutive
+    # tool calls now coalesce into ONE compact, collapsible group
+    # (claude-code / codex style), instead of N fully-expanded blocks.
+    from infinidev.ui.controls.message_groups import COMPACT_GROUP_TYPES
+    assert "tool_call" not in NEVER_GROUP_TYPES
+    assert "tool_call" in COMPACT_GROUP_TYPES
     msgs = [
-        {"type": "tool_call", "tool_name": "read_file", "args": {}, "result": "", "error": ""},
-        {"type": "tool_call", "tool_name": "code_search", "args": {}, "result": "", "error": ""},
-        {"type": "tool_call", "tool_name": "glob", "args": {}, "result": "", "error": ""},
+        {"type": "tool_call", "tool_name": "read_file", "text": "read_file a.py", "args": {}, "result": "", "error": ""},
+        {"type": "tool_call", "tool_name": "code_search", "text": "code_search x", "args": {}, "result": "", "error": ""},
+        {"type": "tool_call", "tool_name": "glob", "text": "glob *.py", "args": {}, "result": "", "error": ""},
     ]
     groups = identify_groups(msgs)
-    # Three tool calls → three singleton groups, NOT one group of 3.
-    assert len(groups) == 3
-    for g in groups:
-        assert len(g.messages) == 1
-        assert g.is_group is False
+    # Three consecutive tool calls → ONE group of 3 (not three singletons).
+    assert len(groups) == 1
+    assert groups[0].is_group is True
+    assert len(groups[0].messages) == 3
 
 
 def test_diff_exec_error_think_are_singleton_groups():
@@ -409,13 +413,18 @@ def test_serialize_for_copy_preserves_args_and_result():
     assert "abc123" in text
 
 
-def test_user_agent_messages_are_still_grouped():
+def test_conversation_turns_are_never_folded_into_groups():
+    """Grouping is for repetitive machine output, not for the conversation.
+
+    Consecutive assistant replies used to collapse under a "▼ Responses (3)"
+    header — the one thing the user opened the tool to read, hidden behind
+    a disclosure triangle.
+    """
     msgs = [
         {"type": "agent", "text": "hi"},
         {"type": "agent", "text": "again"},
-        {"type": "agent", "text": "third"},
+        {"type": "user", "text": "ok"},
     ]
     groups = identify_groups(msgs)
-    assert len(groups) == 1
-    assert groups[0].is_group is True
-    assert len(groups[0].messages) == 3
+    assert len(groups) == 3
+    assert all(group.is_group is False for group in groups)

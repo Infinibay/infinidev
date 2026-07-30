@@ -20,6 +20,7 @@ _normalizer_warned = False
 # limits.  We register them once at import time so every call_llm() and
 # capability probe works correctly.
 
+
 def _register_custom_models() -> None:
     """Add model entries that LiteLLM doesn't ship yet."""
     try:
@@ -42,6 +43,7 @@ def _register_custom_models() -> None:
         }
 
         custom = {
+            "minimax/MiniMax-M3": {**_M27_BASE},
             "minimax/MiniMax-M2.7": {**_M27_BASE},
             "minimax/MiniMax-M2.7-highspeed": {**_M27_BASE},
         }
@@ -77,6 +79,7 @@ def _install_global_response_normalizer() -> None:
     """
     try:
         import litellm
+
         if getattr(litellm, "_infinidev_response_normalizer_installed", False):
             return
 
@@ -90,6 +93,7 @@ def _install_global_response_normalizer() -> None:
                 from infinidev.engine.loop.llm_caller import (
                     promote_embedded_think as _promote,
                 )
+
                 choices = getattr(response, "choices", None) or []
                 for choice in choices:
                     msg = getattr(choice, "message", None)
@@ -105,7 +109,8 @@ def _install_global_response_normalizer() -> None:
                     _normalizer_warned = True
                     logger.warning(
                         "response normalizer failed (first occurrence): %s",
-                        exc, exc_info=True,
+                        exc,
+                        exc_info=True,
                     )
                 else:
                     logger.debug("response normalizer skipped: %s", exc)
@@ -115,11 +120,14 @@ def _install_global_response_normalizer() -> None:
         litellm._infinidev_response_normalizer_installed = True
     except Exception as exc:
         logger.warning(
-            "Could not install response normalizer: %s", exc, exc_info=True,
+            "Could not install response normalizer: %s",
+            exc,
+            exc_info=True,
         )
 
 
 _install_global_response_normalizer()
+
 
 def _extract_provider(model: str) -> str:
     """Extract provider prefix from a LiteLLM model string."""
@@ -129,15 +137,18 @@ def _extract_provider(model: str) -> str:
         return "openai"
     return ""
 
+
 def _is_native_provider(model: str) -> bool:
     """Return True if LiteLLM handles this provider's endpoint natively."""
     from infinidev.config.providers import get_provider
+
     provider_id = settings.LLM_PROVIDER
     provider = get_provider(provider_id)
     if provider.is_native:
         return True
     # Fallback: check model prefix for backward compatibility
     return _extract_provider(model) in {"deepseek", "anthropic", "gemini", "openai"}
+
 
 def _get_model_size_b(model: str | None = None) -> int:
     """Extract model size in billions from model name.
@@ -155,15 +166,29 @@ def _get_model_size_b(model: str | None = None) -> int:
 _SMALL_MODEL_NAME_HINTS = (
     # Explicit local / open-weight families that fit on consumer GPUs.
     # Listed lowercase; matched as substrings of the model id.
-    "glm-4.7-flash", "glm-4-flash", "glm-flash",
-    "gemma2", "gemma3", "gemma4",
-    "qwen2.5-coder", "qwen3", "qwen3.5",
-    "mistral-small", "mistral-7b", "mixtral-8x7b",
-    "nemotron-3-super", "nemotron-cascade",
+    "glm-4.7-flash",
+    "glm-4-flash",
+    "glm-flash",
+    "gemma2",
+    "gemma3",
+    "gemma4",
+    "qwen2.5-coder",
+    "qwen3",
+    "qwen3.5",
+    "mistral-small",
+    "mistral-7b",
+    "mixtral-8x7b",
+    "nemotron-3-super",
+    "nemotron-cascade",
     "lfm2",
     "gpt-oss:20b",
     # Generic "small" markers
-    ":flash", "-flash", "-mini", "-tiny", "-small", "haiku",
+    ":flash",
+    "-flash",
+    "-mini",
+    "-tiny",
+    "-small",
+    "haiku",
 )
 
 
@@ -197,14 +222,22 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
     """
     model = (settings.REVIEW_EXTRACTOR_LLM_MODEL or "").strip() or settings.LLM_MODEL
     if not model:
-        raise RuntimeError("No review-extractor model and no main LLM_MODEL configured.")
+        raise RuntimeError(
+            "No review-extractor model and no main LLM_MODEL configured."
+        )
 
     if model.startswith("ollama/"):
-        model = "ollama_chat/" + model[len("ollama/"):]
+        model = "ollama_chat/" + model[len("ollama/") :]
 
-    provider_id = (settings.REVIEW_EXTRACTOR_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
-    api_key = (settings.REVIEW_EXTRACTOR_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
-    base_url = (settings.REVIEW_EXTRACTOR_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
+    provider_id = (
+        settings.REVIEW_EXTRACTOR_LLM_PROVIDER or ""
+    ).strip() or settings.LLM_PROVIDER
+    api_key = (
+        settings.REVIEW_EXTRACTOR_LLM_API_KEY or ""
+    ).strip() or settings.LLM_API_KEY
+    base_url = (
+        settings.REVIEW_EXTRACTOR_LLM_BASE_URL or ""
+    ).strip() or settings.LLM_BASE_URL
 
     params: dict[str, Any] = {"model": model}
     if api_key:
@@ -212,11 +245,15 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
 
     try:
         from infinidev.config.providers import get_provider
+
         provider = get_provider(provider_id)
         is_native = bool(getattr(provider, "is_native", False))
     except Exception:
         is_native = _extract_provider(model) in {
-            "deepseek", "anthropic", "gemini", "openai",
+            "deepseek",
+            "anthropic",
+            "gemini",
+            "openai",
         }
     if base_url and not is_native:
         params["api_base"] = base_url
@@ -228,6 +265,7 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
 
     from importlib.metadata import version as _pkg_version
+
     try:
         _version = _pkg_version("infinidev")
     except Exception:
@@ -255,9 +293,11 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
         raise RuntimeError("No behavior model and no main LLM_MODEL configured.")
 
     if model.startswith("ollama/"):
-        model = "ollama_chat/" + model[len("ollama/"):]
+        model = "ollama_chat/" + model[len("ollama/") :]
 
-    provider_id = (settings.BEHAVIOR_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
+    provider_id = (
+        settings.BEHAVIOR_LLM_PROVIDER or ""
+    ).strip() or settings.LLM_PROVIDER
     api_key = (settings.BEHAVIOR_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
     base_url = (settings.BEHAVIOR_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
 
@@ -269,11 +309,15 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
     # providers, otherwise litellm routes to the wrong endpoint.
     try:
         from infinidev.config.providers import get_provider
+
         provider = get_provider(provider_id)
         is_native = bool(getattr(provider, "is_native", False))
     except Exception:
         is_native = _extract_provider(model) in {
-            "deepseek", "anthropic", "gemini", "openai",
+            "deepseek",
+            "anthropic",
+            "gemini",
+            "openai",
         }
     if base_url and not is_native:
         params["api_base"] = base_url
@@ -286,6 +330,7 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
 
     from importlib.metadata import version as _pkg_version
+
     try:
         _version = _pkg_version("infinidev")
     except Exception:
@@ -313,9 +358,11 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
         raise RuntimeError("No assistant model and no main LLM_MODEL configured.")
 
     if model.startswith("ollama/"):
-        model = "ollama_chat/" + model[len("ollama/"):]
+        model = "ollama_chat/" + model[len("ollama/") :]
 
-    provider_id = (settings.ASSISTANT_LLM_PROVIDER or "").strip() or settings.LLM_PROVIDER
+    provider_id = (
+        settings.ASSISTANT_LLM_PROVIDER or ""
+    ).strip() or settings.LLM_PROVIDER
     api_key = (settings.ASSISTANT_LLM_API_KEY or "").strip() or settings.LLM_API_KEY
     base_url = (settings.ASSISTANT_LLM_BASE_URL or "").strip() or settings.LLM_BASE_URL
 
@@ -325,11 +372,15 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
 
     try:
         from infinidev.config.providers import get_provider
+
         provider = get_provider(provider_id)
         is_native = bool(getattr(provider, "is_native", False))
     except Exception:
         is_native = _extract_provider(model) in {
-            "deepseek", "anthropic", "gemini", "openai",
+            "deepseek",
+            "anthropic",
+            "gemini",
+            "openai",
         }
     if base_url and not is_native:
         params["api_base"] = base_url
@@ -341,6 +392,7 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
 
     from importlib.metadata import version as _pkg_version
+
     try:
         _version = _pkg_version("infinidev")
     except Exception:
@@ -363,8 +415,10 @@ def get_litellm_params() -> dict[str, Any]:
     # Auto-correct ollama/ → ollama_chat/ so the /api/chat endpoint is used
     # (ollama/ hits /api/generate which has no function-calling support).
     if model.startswith("ollama/"):
-        model = "ollama_chat/" + model[len("ollama/"):]
-        logger.info("Auto-corrected model prefix: ollama/ → ollama_chat/ (required for tool calling)")
+        model = "ollama_chat/" + model[len("ollama/") :]
+        logger.info(
+            "Auto-corrected model prefix: ollama/ → ollama_chat/ (required for tool calling)"
+        )
 
     params: dict[str, Any] = {"model": model}
 
@@ -402,6 +456,7 @@ def get_litellm_params() -> dict[str, Any]:
     # Providers track client identity for analytics, rate-limit fairness,
     # and partnership eligibility.
     from importlib.metadata import version as _pkg_version
+
     try:
         _version = _pkg_version("infinidev")
     except Exception:
@@ -425,10 +480,7 @@ def get_litellm_params() -> dict[str, Any]:
     # pass is redundant anyway — plan/summarize stages already own
     # structured reasoning.
     _openai_compat = {"llama_cpp", "vllm", "openai_compatible", "gmi"}
-    if (
-        settings.LLM_PROVIDER in _openai_compat
-        and "qwen3" in model.lower()
-    ):
+    if settings.LLM_PROVIDER in _openai_compat and "qwen3" in model.lower():
         extra = params.setdefault("extra_body", {})
         kwargs_map = extra.setdefault("chat_template_kwargs", {})
         kwargs_map.setdefault("enable_thinking", False)

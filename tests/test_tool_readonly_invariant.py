@@ -123,7 +123,9 @@ class TestChatAgentRole:
             "find_similar_methods", "search_by_docstring",
             "iter_symbols", "project_stats",
             "git_diff", "git_status",
-            "read_findings", "search_findings",
+            # search_knowledge absorbed read_findings; search_findings is the
+            # semantic path and stays separate.
+            "search_knowledge", "search_findings",
         }
         missing = must_include - names
         assert not missing, f"chat_agent missing read-only tools: {missing}"

@@ -76,15 +76,14 @@ def build_tools_prompt_section(
 def _build_tools_prompt_small(tool_schemas: list[dict[str, Any]]) -> str:
     """Compact tool prompt for small models — grouped by category, minimal details."""
     _GROUPS = {
-        "READING": {"read_file", "partial_read", "list_directory", "glob", "code_search",
+        "READING": {"read_file", "list_directory", "glob", "code_search",
                     "project_structure", "list_symbols", "search_symbols", "get_symbol_code",
-                    "find_definition", "find_references"},
-        "EDITING": {"replace_lines", "create_file", "edit_symbol", "add_symbol",
-                    "remove_symbol", "add_content_after_line", "add_content_before_line"},
+                    "find_references"},
+        "EDITING": {"edit_file", "create_file", "rename_symbol", "move_symbol"},
         "SHELL": {"execute_command"},
         "GIT": {"git_branch", "git_commit", "git_diff", "git_status"},
         "WEB": {"web_search", "web_fetch"},
-        "KNOWLEDGE": {"record_finding", "search_findings", "read_findings"},
+        "KNOWLEDGE": {"record_finding", "search_findings", "search_knowledge"},
         "STEP MANAGEMENT": {"step_complete", "add_note", "add_session_note", "add_step",
                             "modify_step", "remove_step"},
     }
@@ -115,7 +114,7 @@ def _build_tools_prompt_small(tool_schemas: list[dict[str, Any]]) -> str:
 
     lines.append("")
 
-    _KEY_TOOLS = ["read_file", "replace_lines", "create_file", "execute_command",
+    _KEY_TOOLS = ["read_file", "edit_file", "create_file", "execute_command",
                   "step_complete", "add_note", "add_step", "glob", "code_search"]
     for name in _KEY_TOOLS:
         if name not in available:

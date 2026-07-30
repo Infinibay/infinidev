@@ -61,10 +61,56 @@ The developer stage is a **plan-execute-summarize** cycle, not a ReAct loop:
 
 1. **Plan** — either seeded upfront from `initial_plan` (chat-agent-first path, steps marked `user_approved=True`) or bootstrapped by the LLM via `add_step` calls (legacy PhaseEngine path).
 2. **Execute** — One step at a time, up to 4 tool calls per step.
-3. **Summarize** — LLM produces a ~50-token summary; raw tool output is discarded.
+3. **Summarize** — LLM produces a ~50-token summary; raw tool output is *archived, not discarded* (see Working memory).
 4. **Repeat** — Prompt is rebuilt from scratch each iteration using only compact summaries.
 
+### Working memory (`engine/working_memory.py`)
+
+Eviction from the model's context is recoverable rather than destructive.
+When a step closes, `StepManager._archive_evicted_context` writes every
+tool call + result of that step into the `working_memory` SQLite table and
+queues an embedding on a background worker. The model gets it back with
+the `recall_context` tool (cosine search, keyword fallback), so it can
+retrieve an error message or a file listing from six steps ago instead of
+re-running the command.
+
+Retention in the prompt is explicit: the newest `WORKING_MEMORY_VERBATIM_STEPS`
+summaries render in full, older ones collapse to one line, and the block
+tells the model that the detail is one `recall_context` call away. The
+*chat transcript* is never touched by any of this — it is the model's
+memory that gets compacted, not the user's conversation.
+
+Two gotchas worth knowing: `execute_with_retry` does **not** commit, so
+every writer commits inside its own callback (otherwise the embedding
+worker's connection cannot see the rows), and each record carries the
+`db_path` it was written to because the embed worker is process-wide.
+
 The LLM signals step completion via a `step_complete` tool call with `status` (continue/done/blocked), `summary`, and optional plan modifications (add/modify/remove steps). `user_approved` steps are protected — `apply_operations` rejects remove/modify on them so the LLM cannot rewrite an analyst-produced plan mid-execution.
+
+**`engine.py` holds the shape of a run; the work lives in collaborators.**
+Each is a module in `loop/`, and knowing which one owns a concern is
+usually enough to find the code:
+
+| module | owns |
+|---|---|
+| `context_builder.py` | what a run needs (once) and what each iteration says (per step) |
+| `llm_caller.py` | one model call: retries, streaming, manual-mode parsing |
+| `tool_processor.py` | classifying calls into real tools vs pseudo-tools |
+| `tool_runner.py` | executing them and writing results into `messages` |
+| `critic_liaison.py` | the pair-programming critic: advisory, except one veto |
+| `step_complete_gate.py` | the four reasons a step may not close |
+| `loop_guard.py` | repetition, error circuits, text-only stalls |
+| `step_manager.py` | advancing the plan, summarising, finishing |
+| `run_report.py` | what the finished run tells the reviewer |
+
+`step_complete` is the model's *claim* that a step is done, and
+`StepCompleteGate` is the chain that can override it — notes, a user
+message that arrived mid-generation, the critic, then the step's own
+deterministic verification. Ordered cheapest-first, so a step that fails
+the note check never pays for an LLM call. Every gate refuses the same way:
+by overwriting the `step_complete` tool result, which the model reads as
+"your close was overridden" — far more reliable than a user-role message,
+because following a tool result is its natural mode after a tool call.
 
 **Dual tool-calling modes:** The engine auto-detects whether the LLM supports native function calling (FC mode) or falls back to parsing tool calls from text JSON (manual mode). Detection happens at startup via `config/model_capabilities.py`.
 
@@ -82,7 +128,8 @@ Categories:
 - **git**: `git_branch`, `git_commit`, `git_diff`, `git_status`
 - **shell**: `execute_command`, `code_interpreter`
 - **knowledge**: `record_finding`, `read_findings`, `search_findings` (with semantic dedup)
-- **meta**: `help` (dynamic tool documentation)
+- **meta**: `help` (dynamic tool documentation), `recall_context` (working-memory retrieval)
+- **mcp** (`tools/mcp_bridge.py`): every tool a configured MCP server publishes, under the server's own name — `ken_rank`, `ken_recall`, `ken_callgraph`, … Discovered at runtime from `tools/list`, never hand-written.
 - **chat_agent** (tier-exclusive): `respond`, `escalate` — terminators for the chat agent's loop; never bound to the developer.
 - **planner** (tier-exclusive): `emit_plan` — the planner's single-shot terminator that produces the `Plan` artifact.
 
@@ -92,9 +139,89 @@ Key tool design: `read_file` auto-indexes files via tree-sitter for code intelli
 
 Tool schemas are validated at runtime — hallucinated parameters are rejected before execution. Old tool names (`edit_method`, `add_method`, `remove_method`, `write_file`, `find_definition`) are aliased to new names in `engine/loop_tools.py`.
 
+### MCP and Ken (`engine/mcp_client.py`, `engine/ken_client.py`)
+
+Infinidev is an MCP **host**. Servers are declared in `.mcp.json`
+(workspace) or `~/.infinidev/mcp.json`; with no config at all, `ken mcp`
+is registered as the default server. `McpServerClient` speaks real
+stdio JSON-RPC: `initialize` + `notifications/initialized` handshake,
+responses matched by `id` (servers interleave notifications), one reader
+thread per stream so a full pipe can never deadlock the child, real
+per-request deadlines, and exponential backoff (cap 8 s) on crashes.
+
+**Server tools reach the model under the server's own names.**
+`tools/mcp_bridge.py` reads `tools/list` and generates one
+`InfinibayBaseTool` subclass per remote tool, keeping its name, its
+description and its JSON Schema. Nothing in the tool layer knows what Ken
+is — point the host at another MCP server and its tools appear too. Three
+things the raw listing needs first:
+
+- **Descriptions are compressed to the first paragraph.** Python-SDK
+  servers publish the whole docstring; Ken's 30 tools cost ~6 100 tokens
+  of schema that way, ~2 500 after. The parameter walk-through in those
+  docstrings duplicates the schema sitting beside it.
+- **Writers are separated from readers.** The spec's
+  `annotations.readOnlyHint` wins when a server sends one (Ken sends
+  none); otherwise the name is matched against a mutating-verb pattern and
+  a match means "assume it writes". This is what keeps `ken_remember` out
+  of the read-only tiers, which is a security boundary, not a hint.
+- **A local tool always wins a name collision** — a remote server must not
+  be able to shadow `read_file`.
+
+`MCP_TOOL_FILTER` (comma-separated globs, default `*`) narrows what
+reaches the schema; small models get MCP tools only once it is set,
+because a 90-tool schema hurts their selection more than the extra
+capability helps.
+
+`KenClient` (`engine/ken_client.py`) is a separate, *internal* path: it
+backs the deterministic tools, not the model's toolbox. **Ken augments,
+never gates** — every method falls back to a local implementation when the
+server is missing or the workspace has no `.ken` index, so `code_search`
+and `glob` stay deterministic (git grep / pathlib).
+
+`/mcp` shows per-server health (running / idle / failed + stderr tail) and
+takes `start`/`stop`/`restart`.
+
+**Ken owns the project index.** The TUI no longer runs a full tree-sitter
+sweep at startup — that indexed the same tree Ken already indexes, cost
+seconds before the user could type, and narrated itself in the transcript.
+The local index has not gone away: the symbol *writer* tools
+(`edit_symbol`, `add_symbol`, `get_symbol_code`) need line-accurate
+positions Ken does not provide, and every tool that needs it indexes the
+file it is about to touch on demand. `/reindex` still forces a full sweep.
+
 ### Agent (`agents/base.py`)
 
 `InfinidevAgent` holds role metadata, binds tools based on role, and manages execution context. The CLI creates one agent with role="developer" per user instruction.
+
+### TUI (`ui/`)
+
+prompt_toolkit, not Textual. The layout is **transcript-first**
+(`ui/layout.py`): the conversation owns the full terminal width, the
+composer (`ui/controls/composer.py`) sits under it in a rounded frame with
+an inline ghost placeholder, and one status line (`ui/controls/status_line.py`)
+closes the screen with model · branch · context-left on the left and key
+hints on the right. The explorer (Ctrl+B) and the sidebar with its five
+panels (Alt+.) still exist in full — they are toggles, closed by default.
+
+Message rendering (`ui/controls/message_widgets.py`) is deliberately
+undecorated: one `>` opening the user's turn, *nothing* on an assistant
+reply beyond a two-space indent, `·` for system notices, and no
+per-message background so the terminal theme shows through. Headers are
+drawn only for named speakers (Reviewer, critic verdicts) — see
+`_BORDERED_CONFIG` and `_GENERIC_SENDERS`. Conversation turns are never
+grouped (`NEVER_GROUP_TYPES`); consecutive *tool calls* fold into one
+collapsible `✓ Ran N tools ▸` group (`build_tool_group`).
+
+Modals share one hand-rolled frame (`ui/dialogs/base.py`): rounded
+corners, title inlined into the top border, key hints in the bottom
+border, one column of interior padding. `prompt_toolkit.widgets.Frame`
+cannot do any of those three, which is why it is not used.
+
+Two tests guard this: `tests/test_tui_render.py` draws the app into an
+in-memory `Screen` (fast, no terminal), and `tests/test_tui_smoke.py`
+boots the real `Application` and feeds it keystrokes — use the second
+when touching key bindings or startup.
 
 ### Config (`config/`)
 

@@ -34,27 +34,50 @@ _OLLAMA_CTX_CACHE: dict[tuple[str, str], int | None] = {}
 # these self-heal on the next litellm upgrade instead of silently going stale.
 _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     # OpenAI
-    "gpt-5.4": 1_000_000, "gpt-5.4-mini": 400_000, "gpt-5.4-nano": 400_000,
-    "o3": 200_000, "o3-pro": 200_000, "o3-mini": 200_000, "o4-mini": 200_000,
+    "gpt-5.4": 1_000_000,
+    "gpt-5.4-mini": 400_000,
+    "gpt-5.4-nano": 400_000,
+    "o3": 200_000,
+    "o3-pro": 200_000,
+    "o3-mini": 200_000,
+    "o4-mini": 200_000,
     # Anthropic
-    "claude-opus-4-8": 1_000_000, "claude-opus-4-6": 1_000_000,
-    "claude-sonnet-4-6": 1_000_000, "claude-haiku-4-5-20251001": 200_000,
-    "claude-sonnet-4-5-20250929": 200_000, "claude-opus-4-5-20251101": 200_000,
-    "claude-sonnet-4-0": 200_000, "claude-opus-4-0": 200_000,
+    "claude-opus-4-8": 1_000_000,
+    "claude-opus-4-6": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,
+    "claude-haiku-4-5-20251001": 200_000,
+    "claude-sonnet-4-5-20250929": 200_000,
+    "claude-opus-4-5-20251101": 200_000,
+    "claude-sonnet-4-0": 200_000,
+    "claude-opus-4-0": 200_000,
     # Gemini
-    "gemini-3.1-pro-preview": 1_048_576, "gemini-3-flash-preview": 1_048_576,
+    "gemini-3.1-pro-preview": 1_048_576,
+    "gemini-3-flash-preview": 1_048_576,
     "gemini-3.1-flash-lite-preview": 1_048_576,
-    "gemini-2.5-pro": 1_048_576, "gemini-2.5-flash": 1_048_576,
+    "gemini-2.5-pro": 1_048_576,
+    "gemini-2.5-flash": 1_048_576,
     "gemini-2.5-flash-lite": 1_048_576,
     # Z.AI
-    "glm-5": 200_000, "glm-5-turbo": 200_000, "glm-4.7": 200_000, "glm-4.6": 200_000,
-    "glm-4.5": 128_000, "glm-4.5-flash": 128_000, "glm-4.5-air": 128_000,
+    "glm-5.2": 200_000,
+    "glm-5": 200_000,
+    "glm-5-turbo": 200_000,
+    "glm-4.7": 200_000,
+    "glm-4.6": 200_000,
+    "glm-4.5": 128_000,
+    "glm-4.5-flash": 128_000,
+    "glm-4.5-air": 128_000,
     # Kimi
-    "kimi-k2.5": 256_000, "kimi-k2-thinking": 256_000, "kimi-k2-thinking-turbo": 256_000,
-    "kimi-k2-0905-preview": 256_000, "kimi-k2-turbo-preview": 256_000,
+    "kimi-k3": 256_000,
+    "kimi-k2.5": 256_000,
+    "kimi-k2-thinking": 256_000,
+    "kimi-k2-0905-preview": 256_000,
+    "kimi-k2-turbo-preview": 256_000,
     # Minimax
-    "MiniMax-M2.7": 204_800, "MiniMax-M2.7-highspeed": 204_800,
-    "MiniMax-M2.5": 204_800, "MiniMax-M2.1": 204_800,
+    "MiniMax-M3": 204_800,
+    "MiniMax-M2.7": 204_800,
+    "MiniMax-M2.7-highspeed": 204_800,
+    "MiniMax-M2.5": 204_800,
+    "MiniMax-M2.1": 204_800,
 }
 
 
@@ -62,7 +85,7 @@ def _bare_model(model: str) -> str:
     """Strip the provider prefix from a LiteLLM model id."""
     for prefix in ("ollama_chat/", "ollama/"):
         if model.startswith(prefix):
-            return model[len(prefix):]
+            return model[len(prefix) :]
     return model.split("/", 1)[1] if "/" in model else model
 
 
@@ -102,6 +125,7 @@ def _cloud_context_window(model: str) -> int | None:
     bare = _bare_model(model)
     try:
         import litellm
+
         for name in (model, bare):
             info = litellm.model_cost.get(name)
             if info:
@@ -117,7 +141,8 @@ def _cloud_context_window(model: str) -> int | None:
 
 
 def get_model_context_window(
-    llm_params: dict[str, Any], provider_id: str | None = None,
+    llm_params: dict[str, Any],
+    provider_id: str | None = None,
 ) -> int | None:
     """The real usable context window the backend enforces, or None if unknown.
 

@@ -27,7 +27,7 @@ be reversible or explicitly approved by the user before execution.
 - Check memory: `free -h` (before starting services)
 - Check what is already installed/running that relates to the task
 - Read existing config files before modifying them
-- Use search_findings and read_findings to check if this system was
+- Use search_findings and search_knowledge to check if this system was
   configured in a previous session
 
 ### 2. Plan and confirm with the user
@@ -41,7 +41,7 @@ be reversible or explicitly approved by the user before execution.
 - Use the package manager — never curl-pipe-bash install scripts without
   the user's explicit approval.
 - Run one change at a time. Verify each change before moving to the next.
-- Prefer `systemctl reload` over `systemctl restart` when possible.
+- Reload a service with `systemctl reload`. Restart it only when a reload cannot apply the change.
 - Use `--dry-run` or equivalent flags when available to preview changes.
 
 ### 4. Verify changes worked
@@ -65,11 +65,12 @@ be reversible or explicitly approved by the user before execution.
 - **read_file**: Read config files, logs, and system files BEFORE modifying.
 - **create_file**: Create new config files. ALWAYS back up the original first
   if one exists. Never overwrite without a backup.
-- **replace_lines**: Modify existing config files with targeted changes. Prefer
-  this over create_file for existing files — smaller changes are safer.
+- **edit_file**: Modify an existing config file by replacing exact text. Use
+  this, never create_file, on a file that exists — replacing the one line that
+  changes cannot clobber the rest of the config.
 - **record_finding**: Record system state, installed versions, config paths,
   and decisions for future sessions. Always include the hostname/context.
-- **search_findings** / **read_findings**: Check if previous sessions left
+- **search_findings** / **search_knowledge**: Check if previous sessions left
   notes about this system's configuration.
 - **web_search** / **web_fetch**: Look up documentation for specific config
   syntax, error messages, or compatibility information.

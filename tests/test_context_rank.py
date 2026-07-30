@@ -83,7 +83,7 @@ class TestInteractionLogger:
 
         log_tool_call(
             "sess-1", "task-1", None, 0,
-            "replace_lines", {"path": "src/auth.py", "start": 1, "end": 5},
+            "edit_file", {"path": "src/auth.py", "old_string": "a"},
         )
         flush()
 
@@ -119,7 +119,7 @@ class TestInteractionLogger:
         assert result == ("file_read", "a.py", "file", 1.0)
 
         # Symbol write
-        result = classify_tool_call("edit_symbol", {"qualified_name": "Foo.bar"})
+        result = classify_tool_call("rename_symbol", {"qualified_name": "Foo.bar"})
         assert result == ("symbol_write", "Foo.bar", "symbol", 2.5)
 
         # Finding
@@ -301,7 +301,7 @@ class TestContextRankHooks:
             hooks = ContextRankHooks()
             hooks.start("sess-1", "task-1", "test")
             # Arguments as JSON string (how they come from the LLM)
-            hooks.on_tool_call("replace_lines", '{"path": "x.py", "start": 1}', 0)
+            hooks.on_tool_call("edit_file", '{"path": "x.py", "old_string": "a"}', 0)
 
             from infinidev.engine.context_rank.logger import flush
             flush()

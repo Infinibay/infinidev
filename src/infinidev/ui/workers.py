@@ -133,6 +133,7 @@ def run_engine_task(
         app.add_message("Error", str(e), "system")
     finally:
         app._engine_running = False
+        app._chat_history_control.busy = False
         app._context_flow = ""
         # Zero the transient streaming state at the turn boundary. The
         # respond path emits none of the loop_* events that normally reset
@@ -198,6 +199,7 @@ def _run_flow_task(app: InfinidevApp, flow_name: str,
         app.add_message("Error", str(e), "system")
     finally:
         app._engine_running = False
+        app._chat_history_control.busy = False
         app._context_flow = ""
         app.invalidate()
         _drain_pending(app)
@@ -356,6 +358,7 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
         app.add_message("Error", str(e), "system")
     finally:
         app._engine_running = False
+        app._chat_history_control.busy = False
         app._context_flow = ""
         app.invalidate()
         _drain_pending(app)

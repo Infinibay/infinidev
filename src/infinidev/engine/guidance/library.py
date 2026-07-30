@@ -43,7 +43,7 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "written or modified a single file yet. Planning more is "
             "procrastination. Pick the file your active step names, "
             "call read_file or list_symbols on it, then make the actual "
-            "change with replace_lines, create_file, or edit_symbol. "
+            "change with edit_file or create_file. "
             "Tests, refactors, and features all require BYTES landing "
             "on disk — a perfect plan with zero edits ships nothing. "
             "If you genuinely don't know what file to touch yet, your "
@@ -59,8 +59,8 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "  ... 0 edits to any file ...\n\n"
             "GOOD pattern:\n"
             "  read_file('app/services/Foo.ts')   # see the actual code\n"
-            "  replace_lines(file_path='app/services/Foo.ts',\n"
-            "                start_line=42, end_line=58, content='...')"
+            "  edit_file(file_path='app/services/Foo.ts',\n"
+            "            old_string='...', new_string='...')"
         ),
     ),
     "stuck_on_planning": GuidanceEntry(
@@ -69,8 +69,8 @@ _LIBRARY: dict[str, GuidanceEntry] = {
         body=(
             "Each step you create with add_step must name a FILE PATH, a "
             "FUNCTION (with parens), and the SPECIFIC change. Vague titles "
-            "like 'implement the feature' get flagged as warnings and the "
-            "model that wrote them tends to drift. Set expected_output "
+            "like 'implement the feature' get flagged as warnings, and a "
+            "vague step is where a run drifts. Set expected_output "
             "to a short, verifiable check the step must pass."
         ),
         example=(
@@ -92,15 +92,15 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "that keeps gathering more context.\n\n"
             "What to do RIGHT NOW:\n"
             "  1. Re-read your own notes / discovered_context. You "
-            "     probably already know enough.\n"
-            "  2. Pick the SMALLEST plausible change you could make.\n"
-            "  3. Make it with replace_lines / edit_symbol / "
-            "     create_file. Even a wrong first attempt is more "
+            "already know enough.\n"
+            "  2. Pick the SMALLEST change that addresses the step.\n"
+            "  3. Make it with edit_file / create_file. Even a "
+            "     wrong first attempt is more "
             "     useful than another read — the test failure that "
             "     follows will tell you what's actually wrong.\n"
             "  4. Run the relevant test (or static check) and let "
             "     the result drive the next iteration.\n\n"
-            "Things you should NOT do:\n"
+            "NEVER do these:\n"
             "  - read_file on a file you've already opened in this task\n"
             "  - get_symbol_code on a symbol whose source is in <opened-files>\n"
             "  - search_symbols / find_references for terms you've already searched\n"
@@ -112,46 +112,42 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "read_file, code_search, get_symbol_code, list_symbols, "
             "read_file\n\n"
             "...your next call MUST be one of:\n"
-            "  replace_lines / edit_symbol / create_file / add_symbol\n"
+            "  edit_file / create_file\n"
             "or step_complete with status='blocked' if you genuinely cannot proceed."
         ),
     ),
     "python_env_mismatch": GuidanceEntry(
         key="python_env_mismatch",
-        title="ImportError from python/pytest? It is almost certainly a virtualenv mismatch",
+        title="ImportError from python/pytest means a virtualenv mismatch",
         body=(
             "When `python -c \"import X\"` or `pytest ...` raises "
             "ImportError / ModuleNotFoundError immediately after a "
             "successful `pip install`, the install and the import are "
-            "almost certainly hitting different Python environments. "
+            "hitting different Python environments. "
             "Reinstalling deps will NOT help — the package IS installed, "
             "just in the wrong venv. STOP installing things and check "
             "the environment first.\n\n"
             "Run `which python && python --version && python -c "
             "\"import sys; print(sys.executable, sys.path[:3])\"` to see "
             "exactly which interpreter is running. If it points at the "
-            "agent's host venv (e.g. /home/.../infinidev/.venv), the "
-            "project's local venv probably exists at "
-            "`<repo>/.venv/bin/python` or `<repo>/venv/bin/python` — "
-            "use that absolute path instead. Many projects also expect "
-            "`tox -e py` or `python -m pytest` from inside their own "
-            "venv — read setup.cfg / pyproject.toml / tox.ini before "
-            "guessing.\n\n"
-            "If no project venv exists, the model can usually proceed "
-            "without running tests at all: read the relevant code, "
-            "make the fix, and rely on a static read of the failing "
-            "test file to verify the change matches expectations. Do "
-            "NOT spend the step budget debugging the host environment."
+            "agent's host venv, look for the project's own venv at "
+            "`<repo>/.venv/bin/python` or `<repo>/venv/bin/python` and use "
+            "that absolute path. Read setup.cfg, pyproject.toml or tox.ini "
+            "for how this project runs its tests before guessing.\n\n"
+            "IF no project venv exists, THEN work without running tests: "
+            "read the code, make the fix, and read the failing test file "
+            "to confirm your change matches what it asserts. NEVER spend "
+            "the step budget debugging the host environment."
         ),
         example=(
             "1. execute_command('which python && python -c \"import sys; "
             "print(sys.executable)\"')\n"
-            "   → /home/andres/infinidev/.venv/bin/python\n"
+            "   Output: /home/andres/infinidev/.venv/bin/python\n"
             "2. execute_command('ls -d ./.venv ./venv 2>/dev/null')\n"
-            "   → ./venv\n"
+            "   Output: ./venv\n"
             "3. execute_command('./venv/bin/python -c \"import flask; "
             "print(flask.__version__)\"')\n"
-            "   → 2.0.1   (correct env)\n"
+            "   Output: 2.0.1   (correct env)\n"
             "4. From here on, prefix all python invocations with "
             "./venv/bin/python instead of bare `python`."
         ),
@@ -160,20 +156,24 @@ _LIBRARY: dict[str, GuidanceEntry] = {
         key="stuck_on_edit",
         title="How to edit existing files in this project",
         body=(
-            "Use replace_lines for surgical edits — it takes a file_path "
-            "plus start_line, end_line, and the replacement content. "
-            "Read the file first to find the exact line numbers; do not "
-            "guess. The pre-write syntax check will reject the edit if "
-            "the result has invalid Python — fix the indentation and "
-            "retry, do not work around it. For brand-new files use "
-            "create_file. For renaming a function, use edit_symbol."
+            "Use edit_file: it takes the exact text to replace "
+            "(old_string) and what to put there (new_string). Read the "
+            "file in this step and copy old_string from what you read — "
+            "it must match byte for byte, indentation included, and it "
+            "must appear exactly once. If the edit is refused for being "
+            "ambiguous, add the lines above and below until the match is "
+            "unique; if it is refused for not matching, read the file "
+            "again rather than guessing at the text. The pre-write "
+            "syntax check rejects an edit that leaves invalid Python — "
+            "fix the indentation and retry, do not work around it. For "
+            "brand-new files use create_file."
         ),
         example=(
-            "1. read_file('src/auth.py')   # see verify_token at line 42-58\n"
-            "2. replace_lines(\n"
+            "1. read_file('src/auth.py')   # see verify_token\n"
+            "2. edit_file(\n"
             "     file_path='src/auth.py',\n"
-            "     start_line=52, end_line=52,\n"
-            "     content='    return payload[\"exp\"] is not None\\n',\n"
+            "     old_string='    return payload[\"exp\"]',\n"
+            "     new_string='    return payload[\"exp\"] is not None',\n"
             "   )\n"
             "3. execute_command('pytest tests/test_auth.py -v')"
         ),
@@ -198,12 +198,12 @@ _LIBRARY: dict[str, GuidanceEntry] = {
         example=(
             "1. execute_command('pytest tests/test_x.py::test_foo -v')\n"
             "2. tail_test_output(mode='structured')\n"
-            "   → {failures: [{test_name: '...test_foo', file: 'handler.py',\n"
+            "   Output: {failures: [{test_name: '...test_foo', file: 'handler.py',\n"
             "                  line: 52, error_type: 'AssertionError',\n"
             "                  message: 'expected 200, got 404'}]}\n"
             "3. add_note('test_foo: handler.py:52 returns 404 not 200 — route missing')\n"
             "4. read_file('src/handler.py')\n"
-            "5. replace_lines(file_path='src/handler.py', start_line=52, ...)\n"
+            "5. edit_file(file_path='src/handler.py', old_string=..., new_string=...)\n"
             "6. execute_command('pytest tests/test_x.py::test_foo -v')"
         ),
     ),
@@ -229,13 +229,13 @@ _LIBRARY: dict[str, GuidanceEntry] = {
         example=(
             "1. execute_command('pytest tests/test_foo.py::test_one -v')\n"
             "2. tail_test_output(mode='structured')\n"
-            "   → failures=[{file: 'minidb.py', line: 92,\n"
+            "   Output: failures=[{file: 'minidb.py', line: 92,\n"
             "                error_type: 'TypeError',\n"
             "                message: '_parse_values: quote_char is None'}]\n"
             "3. add_note('TypeError at minidb.py:92 inside _parse_values')\n"
             "4. read_file('minidb.py')   # focus on _parse_values around line 92\n"
             "5. modify_step(index=N, expected_output='_parse_values handles empty values')\n"
-            "6. replace_lines('minidb.py', start_line=88, end_line=95, content=...)"
+            "6. edit_file('minidb.py', old_string=..., new_string=...)"
         ),
     ),
     "reread_loop": GuidanceEntry(
@@ -254,7 +254,7 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "Right:\n"
             "  read_file('src/auth.py')\n"
             "  add_note('verify_token at auth.py:42, missing exp check')\n"
-            "  replace_lines(file_path='src/auth.py', start_line=52, ...)"
+            "  edit_file(file_path='src/auth.py', old_string=..., new_string=...)"
         ),
     ),
     "unknown_tool": GuidanceEntry(
@@ -264,7 +264,7 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "The error 'Unknown tool: X' means X is not in the registered "
             "toolset for this run. Do NOT keep retrying it. Call the help "
             "tool to see what is available, or pick from these common "
-            "ones: read_file, replace_lines, edit_file, create_file, "
+            "ones: read_file, edit_file, create_file, "
             "code_search, glob, list_directory, execute_command, "
             "add_note, add_step, modify_step, step_complete."
         ),
@@ -321,7 +321,7 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "the structure first."
         ),
         example=(
-            "code_search(query='auth', path='src/') -> 5 hits\n"
+            "code_search(query='auth', path='src/') returns 5 hits\n"
             "read_file('src/auth/handlers.py')   # actually read the top hit\n"
             "add_note('auth flow lives in src/auth/handlers.py:42 verify()')"
         ),
@@ -375,21 +375,21 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "  2. Run tail_test_output(mode='structured') to see WHICH "
             "test newly fails and on what file:line.\n"
             "  3. If the new failure points to a line you just touched, "
-            "revert that hunk (replace_lines back to the previous content) "
+            "revert that hunk (edit_file it back to the previous content) "
             "and re-think the change more carefully.\n"
             "  4. If the new failure is in a DIFFERENT file, the edit "
             "had a side effect — read the new failing file and trace why."
         ),
         example=(
-            "before edit: pytest test_minidb.py → 1 failed, 1 passed\n"
-            "after  edit: pytest test_minidb.py → 2 failed, 0 passed   ← regression\n"
+            "before edit: pytest test_minidb.py gave 1 failed, 1 passed\n"
+            "after  edit: pytest test_minidb.py gave 2 failed, 0 passed   REGRESSION\n"
             "\n"
             "1. tail_test_output(mode='structured')\n"
-            "   → newly failing: TestCreateTable.test_create_simple at minidb.py:84\n"
+            "   Newly failing: TestCreateTable.test_create_simple at minidb.py:84\n"
             "2. read_file('minidb.py')   # focus around line 84\n"
             "3. The line you just changed is the problem — revert it.\n"
-            "4. replace_lines('minidb.py', start_line=82, end_line=86,\n"
-            "                 content=<the previous working version>)\n"
+            "4. edit_file('minidb.py', old_string=<what you just wrote>,\n"
+            "              new_string=<the previous working version>)\n"
             "5. execute_command('pytest test_minidb.py')   # confirm 1/2 again\n"
             "6. THEN reattempt the original fix more carefully."
         ),
@@ -410,11 +410,11 @@ _LIBRARY: dict[str, GuidanceEntry] = {
         example=(
             "1. execute_command('pytest tests/test_x.py -v')\n"
             "2. tail_test_output(mode='structured')\n"
-            "   → {failure_count: 1, failures: [{file: 'src/x.py',\n"
+            "   Output: {failure_count: 1, failures: [{file: 'src/x.py',\n"
             "        line: 42, error_type: 'KeyError', message: \"'id'\"}]}\n"
             "3. add_note('test fails: KeyError id at src/x.py:42')\n"
             "4. read_file('src/x.py')   # focus around line 42\n"
-            "5. replace_lines(file_path='src/x.py', start_line=40, ...)\n"
+            "5. edit_file(file_path='src/x.py', old_string=..., new_string=...)\n"
             "6. execute_command('pytest tests/test_x.py -v')   # re-verify"
         ),
     ),
@@ -424,12 +424,12 @@ _LIBRARY: dict[str, GuidanceEntry] = {
         body=(
             "Several steps in your plan have nearly identical titles "
             "(e.g. 'Read test files to understand behavior' and 'Read "
-            "test_minidb.py to understand required cases'). This usually "
+            "test_minidb.py to understand required cases'). That "
             "means you re-planned the same work without removing the "
             "previous steps. The plan does not get smarter by accumulating "
             "drafts — it gets noisy and the model loses track of where it "
             "is. Use remove_step on the duplicates and modify_step to "
-            "differentiate the ones that remain. Each step should describe "
+            "differentiate the ones that remain. Each step describes "
             "a UNIQUE action with its own file:line and expected_output."
         ),
         example=(

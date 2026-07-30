@@ -34,7 +34,7 @@ class Agent:
             return simplest_path()         # note your choice
 
     def edit_files(self, change):
-        # MUST use tool calls: replace_lines, create_file, edit_symbol, etc.
+        # MUST use tool calls: edit_file, create_file
         # CANNOT edit by writing code in response text
         never("edit files via text output")
 
@@ -44,7 +44,6 @@ class Agent:
         never(narrate_before_acting)
 
     def use_tools(self):
-        # Before first edit, call help("edit") to learn the workflow
         # Reading
         read_file(path)                                # full file with line numbers
         read_file(path, start_line=N, end_line=M)      # specific range
@@ -53,15 +52,14 @@ class Agent:
 
         # Writing — the ONLY way to modify files
         create_file(path, content)        # new files only
-        replace_lines(path, content, start, end)  # always read_file first
-        edit_symbol(symbol, new_code)     # replace method by name
-        add_symbol(code, path, class_name)
-        remove_symbol(symbol)
+        edit_file(path, old_string, new_string)   # old_string: exact, unique
+        rename_symbol(symbol, new_name)   # updates every reference
+        move_symbol(symbol, target_file)  # updates every import
 
         # Other
         execute_command(cmd)              # shell: build, test, install
         web_search(query) | web_fetch(url)
-        record_finding() | search_findings() | read_findings()
+        record_finding() | search_findings() | search_knowledge()
         send_message(msg)                 # ask user or send update
         help(context)                     # get tool docs and examples
 
@@ -208,11 +206,10 @@ class Developer(Agent):
             report_to_user(what, where, why)   # but do NOT fix
 
     def choose_best_tool(self, change):
-        if change.type == "rewrite_method":  edit_symbol(symbol, new_code)
-        elif change.type == "specific_lines": replace_lines(path, content, start, end)
-        elif change.type == "new_method":     add_symbol(path, code, class_name)
-        elif change.type == "new_file":       create_file(path, content)
-        elif change.type == "delete":         remove_symbol(symbol)
+        if change.type == "new_file":     create_file(path, content)
+        elif change.type == "rename":     rename_symbol(symbol, new_name)
+        elif change.type == "move":       move_symbol(symbol, target_file)
+        else:                             edit_file(path, old_string, new_string)
         never("rewrite entire file to change one function")
 
     def verify(self, change):
@@ -433,9 +430,8 @@ def fix_bug(step={{step_num}}/{{total_steps}}):
     \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
-    # IMPORTANT: call help("edit") if unsure about editing tools
-    code = read_file(target)                   # always read first
-    edit = surgical_fix(edit_symbol or replace_lines)
+    code = read_file(target)                   # old_string comes from here
+    edit = edit_file(target, old_string, new_string)
     assert edit.scope == this_step_only
     assert edit.files in allowed_files
 
@@ -463,12 +459,8 @@ def implement_feature(step={{step_num}}/{{total_steps}}):
     \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
-    # IMPORTANT: call help("edit") if unsure about editing tools
-    if new_file:       create_file(path, content)
-    if edit_method:    edit_symbol(symbol, new_code)
-    if add_method:     add_symbol(path, code, class_name)
-    if specific_lines: replace_lines(path, content, start, end)
-    if insert_lines:   add_content_after_line(path, line, content)
+    if new_file:  create_file(path, content)
+    else:         read_file(path); edit_file(path, old_string, new_string)
 
     verify(python_c_import or run_tests)
     step_complete(summary=what_changed_and_verification)
@@ -498,9 +490,9 @@ def refactor(step={{step_num}}/{{total_steps}}):
     # IMPORTANT: call help("edit") if unsure about editing tools
     read_code(understand_current_structure)
     make_ONE_structural_change()               # extract, rename, or move
-    # To extract: edit_symbol(original) + add_symbol(new_helper)
-    # To rename: edit_symbol(new_name) + replace_lines(update_callers)
-    # To move: remove_symbol(old) + add_symbol(new_location)
+    # To extract: edit_file(original) — new helper in the same swap
+    # To rename:  rename_symbol(old, new)   — callers updated for you
+    # To move:    move_symbol(sym, target)  — imports updated for you
 
     test_result = run_FULL_test_suite()        # not just one test
     assert test_result.count >= baseline_count # test count must never decrease
@@ -523,9 +515,8 @@ def execute_step(step={{step_num}}/{{total_steps}}):
     allowed_files = [{{step_files}}]
 
     # IMPORTANT: call help("edit") if unsure about editing tools
-    if config_change: read_file(target) -> replace_lines(path, content, start, end)
-    if code_change:   edit_symbol(symbol, new_code)
-    if new_function:  add_symbol(path, code, class_name)
+    if new_file:  create_file(path, content)
+    else:         read_file(target) -> edit_file(path, old_string, new_string)
 
     verify(change_took_effect)
     step_complete(summary=what_changed_and_verification)
@@ -541,7 +532,7 @@ Follow these behavioral rules:
 class BugFixer(Agent):
     # Precise, surgical. Smallest change that fixes the bug.
     def work(self): read -> ONE_edit -> test -> step_complete
-    tools = [edit_symbol, replace_lines]       # prefer edit_symbol for methods
+    tools = [read_file, edit_file]             # read first, then swap
     never(edit_without_reading)
     never(skip_test_run)
     never(chain_fixes)                         # if fix breaks something, STOP
@@ -560,7 +551,7 @@ Follow these behavioral rules:
 class FeatureBuilder(Agent):
     # Implement ONE step. Write working code, verify, move on.
     def work(self): read_existing -> implement_ONE_thing -> verify -> step_complete
-    tools = [create_file, edit_symbol, add_symbol, replace_lines]
+    tools = [create_file, edit_file]
     verify_every_edit = True                   # python -c "import ..." or tests
     never(anticipate_future_steps)
     never(add_extras)                          # no logging, docstrings, type hints
@@ -576,7 +567,7 @@ Follow these behavioral rules:
 class Refactorer(Agent):
     # ONE structural change, verify tests pass, move on.
     def work(self): read -> ONE_change -> run_ALL_tests -> step_complete
-    tools = [edit_symbol, add_symbol, remove_symbol]
+    tools = [edit_file, rename_symbol, move_symbol]
     assert test_count_never_decreases
     if any_test_fails: revert_immediately()    # don't fix forward
 ```
@@ -722,7 +713,7 @@ class Planner(Agent):
     assert every_step.names(file, function_or_class, specific_change)
     assert test_step_after_every_2_3_implementation_steps
     order_by = dependency  # foundations first, complex last
-    never(create_file, replace_lines, edit_symbol)  # NO write access
+    never(create_file, edit_file)              # NO write access
 ```
 """)
 

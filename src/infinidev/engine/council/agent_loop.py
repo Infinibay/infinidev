@@ -24,6 +24,10 @@ from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.config.settings import settings
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
+from infinidev.engine.oversized_result import (
+    DuplicateCallGuard,
+    handle_oversized_result,
+)
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
     clear_agent_context,
@@ -94,6 +98,10 @@ def run_terminating_loop(
         base_kwargs = _council_base_kwargs()
         budget_nudged = False
 
+        # One guard per run: a repeat inside the same turn is the
+        # livelock, a repeat in a later turn is a legitimate re-read.
+        dup_guard = DuplicateCallGuard()
+
         for iteration in range(max_iterations):
             if (
                 not budget_nudged
@@ -146,11 +154,16 @@ def run_terminating_loop(
             # Otherwise dispatch read-only exploration tools and continue.
             for tc in tool_calls:
                 explored.append(tc.function.name)
-                result = execute_tool_call(
+                result = dup_guard.refusal_for(
+                    tc.function.name, tc.function.arguments,
+                ) or execute_tool_call(
                     dispatch, tc.function.name, tc.function.arguments,
                 )
-                trimmed = result if len(result) <= _MAX_RESULT_CHARS else (
-                    result[:_MAX_RESULT_CHARS] + "\n...[truncated]"
+                trimmed = handle_oversized_result(
+                    result,
+                    max_chars=_MAX_RESULT_CHARS,
+                    tool_name=tc.function.name,
+                    tool_args=tc.function.arguments,
                 )
                 messages.append({
                     "role": "tool",

@@ -22,6 +22,7 @@ import re
 from typing import Any, TYPE_CHECKING
 
 from infinidev.engine._best_effort import best_effort
+from infinidev.engine.tool_executor import FILE_CHANGE_TOOLS
 from infinidev.engine.guidance.test_runners import (
     is_test_command,
     test_outcome_fingerprint,
@@ -276,7 +277,7 @@ def _has_same_test_output_loop(messages: list[dict]) -> bool:
 
 
 def _has_repeated_edit_errors(messages: list[dict]) -> bool:
-    """True iff 3+ edit calls (replace_lines/edit_file) returned errors."""
+    """True iff 3+ file-writing calls returned errors."""
     calls = _tool_calls_in_messages(messages)
     results = _tool_results(messages)
     if not results:
@@ -286,7 +287,7 @@ def _has_repeated_edit_errors(messages: list[dict]) -> bool:
     for name, _ in calls:
         if result_idx >= len(results):
             break
-        if name in ("replace_lines", "edit_file", "multi_edit_file", "create_file"):
+        if name in FILE_CHANGE_TOOLS:
             r = results[result_idx]
             if r.startswith('{"error"'):
                 edit_errors += 1

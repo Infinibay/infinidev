@@ -127,7 +127,8 @@ class LoopGuard:
                 "content": (
                     f"WARNING: Your last {_MAX} tool calls all failed. "
                     "You are stuck in a failing pattern. Change your approach:\n"
-                    "- If edit_symbol or replace_lines keeps failing, try a different edit tool.\n"
+                    "- If edit_file keeps failing, read the file again — old_string must match "
+                    "the current bytes exactly, and it must be unique.\n"
                     "- If read_file keeps failing on a path, use glob or list_directory to find the correct path.\n"
                     "- If nothing works, call step_complete(status='blocked') to move on."
                 ),
