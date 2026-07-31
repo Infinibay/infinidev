@@ -24,14 +24,20 @@ class TestContextWindowCalculator:
         assert calc.chat_remaining == 8192
         assert calc.task_remaining == 8192
 
-    def test_update_chat(self):
-        """Test updating chat context from user input + summaries."""
+    def test_update_chat_takes_the_real_prompt_size(self):
+        """The chat meter records usage.prompt_tokens, never an estimate."""
         calc = ContextWindowCalculator(max_context=8192)
-        calc.update_chat("Hello, can you help me?", ["Previous summary 1", "Previous summary 2"])
+        calc.update_chat(4400)
 
-        # ~4 chars per token estimate
-        assert calc.chat_window["current_tokens"] > 0
-        assert calc.chat_remaining < 8192
+        assert calc.chat_window["current_tokens"] == 4400
+        assert calc.chat_remaining == 3792
+
+    def test_update_chat_ignores_a_missing_measurement(self):
+        """A provider that sent no usage must not zero a real reading."""
+        calc = ContextWindowCalculator(max_context=8192)
+        calc.update_chat(4400)
+        calc.update_chat(0)
+        assert calc.chat_window["current_tokens"] == 4400
 
     def test_update_task(self):
         """Test updating task context with prompt tokens."""
@@ -43,15 +49,25 @@ class TestContextWindowCalculator:
         assert status["tasks"]["remaining_tokens"] == 5192
 
     def test_chat_and_task_independent(self):
-        """Test that chat and task contexts are tracked independently."""
+        """The two lanes hold different prompts and move independently."""
         calc = ContextWindowCalculator(max_context=4096)
-        calc.update_chat("Hello world")
+        calc.update_chat(900)
         calc.update_task(task_prompt_tokens=2000)
 
         status = calc.get_context_status()
-        # Chat is estimated from text, task is exact
-        assert status["chat"]["current_tokens"] > 0
+        assert status["chat"]["current_tokens"] == 900
         assert status["tasks"]["current_tokens"] == 2000
+
+    def test_start_task_resets_only_the_task_lane(self):
+        """A new task rebuilds the developer prompt; the chat lane persists."""
+        calc = ContextWindowCalculator(max_context=4096)
+        calc.update_chat(900)
+        calc.update_task(task_prompt_tokens=2000)
+        calc.start_task()
+
+        status = calc.get_context_status()
+        assert status["tasks"]["current_tokens"] == 0
+        assert status["chat"]["current_tokens"] == 900
 
     def test_full_context_window(self):
         """Test when prompt fills entire context window."""
@@ -97,7 +113,7 @@ class TestContextWindowCalculator:
     def test_context_status_format(self):
         """Test context status dictionary format."""
         calc = ContextWindowCalculator(max_context=4096)
-        calc.update_chat("test input")
+        calc.update_chat(500)
         calc.update_task(task_prompt_tokens=1000)
         status = calc.get_context_status()
 
@@ -110,16 +126,23 @@ class TestContextWindowCalculator:
         assert status["tasks"]["current_tokens"] == 1000
 
     def test_update_chat_replaces_previous(self):
-        """Test that each update_chat replaces the previous count."""
+        """Each call rebuilds the prompt, so the newest reading wins."""
         calc = ContextWindowCalculator(max_context=4096)
-        calc.update_chat("short")
-        first = calc.chat_window["current_tokens"]
-        calc.update_chat("a much longer message with more content")
-        second = calc.chat_window["current_tokens"]
-        assert second > first
+        calc.update_chat(300)
+        calc.update_chat(2800)
+        assert calc.chat_window["current_tokens"] == 2800
 
-    def test_update_chat_empty(self):
-        """Test update_chat with empty input."""
-        calc = ContextWindowCalculator(max_context=4096)
-        calc.update_chat("")
-        assert calc.chat_window["current_tokens"] >= 0
+    def test_resolve_model_context_works_inside_a_running_loop(self):
+        """Regression: asyncio.run here raised, and the raise was swallowed.
+
+        Startup runs inside prompt_toolkit's loop, so every model displayed
+        ``?`` for its context window no matter what the catalog said.
+        """
+        import asyncio
+
+        async def main():
+            calc = ContextWindowCalculator()
+            calc.resolve_model_context()
+            return calc.max_context
+
+        assert asyncio.run(main()) is not None

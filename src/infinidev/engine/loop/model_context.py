@@ -41,43 +41,63 @@ _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     "o3-pro": 200_000,
     "o3-mini": 200_000,
     "o4-mini": 200_000,
-    # Anthropic
+    # Anthropic — aliases, matching the catalog in config/providers.py. A
+    # dated id here would only ever match a dated id there, and the catalog
+    # no longer offers any.
+    "claude-opus-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    "claude-fable-5": 1_000_000,
     "claude-opus-4-8": 1_000_000,
+    "claude-opus-4-7": 1_000_000,
     "claude-opus-4-6": 1_000_000,
     "claude-sonnet-4-6": 1_000_000,
-    "claude-haiku-4-5-20251001": 200_000,
-    "claude-sonnet-4-5-20250929": 200_000,
-    "claude-opus-4-5-20251101": 200_000,
-    "claude-sonnet-4-0": 200_000,
-    "claude-opus-4-0": 200_000,
+    "claude-haiku-4-5": 200_000,
+    "claude-opus-4-5": 200_000,
+    "claude-sonnet-4-5": 200_000,
     # Gemini
+    "gemini-3.6-flash": 1_048_576,
+    "gemini-3.5-flash": 1_048_576,
+    "gemini-3.5-flash-lite": 1_048_576,
     "gemini-3.1-pro-preview": 1_048_576,
+    "gemini-3.1-flash-lite": 1_048_576,
+    "gemini-3-pro-preview": 1_048_576,
     "gemini-3-flash-preview": 1_048_576,
-    "gemini-3.1-flash-lite-preview": 1_048_576,
     "gemini-2.5-pro": 1_048_576,
     "gemini-2.5-flash": 1_048_576,
     "gemini-2.5-flash-lite": 1_048_576,
     # Z.AI
     "glm-5.2": 200_000,
+    "glm-5.1": 200_000,
     "glm-5": 200_000,
     "glm-5-turbo": 200_000,
     "glm-4.7": 200_000,
+    "glm-4.7-flash": 128_000,
     "glm-4.6": 200_000,
     "glm-4.5": 128_000,
     "glm-4.5-flash": 128_000,
     "glm-4.5-air": 128_000,
-    # Kimi
-    "kimi-k3": 256_000,
-    "kimi-k2.5": 256_000,
-    "kimi-k2-thinking": 256_000,
-    "kimi-k2-0905-preview": 256_000,
-    "kimi-k2-turbo-preview": 256_000,
+    # Qwen — litellm indexes DashScope models under prefixes that never match
+    # the `custom_openai/` one this provider uses, so the whole catalog
+    # resolves to "unknown" without entries here. Only the tier Alibaba
+    # documents as 1M is listed; the rest stay unknown rather than guessed,
+    # because an over-stated window makes the loop pack context until the
+    # backend truncates it silently — strictly worse than showing "?".
+    "qwen3.6-plus": 1_000_000,
+    "qwen3.6-flash": 1_000_000,
+    "qwen3.6-max-preview": 1_000_000,
+    # Kimi — K3 is a 1M-context model; the 256k figure here was the K2 line's.
+    "kimi-k3": 1_048_576,
+    "kimi-k2.7-code": 256_000,
+    "kimi-k2.6": 256_000,
     # Minimax
     "MiniMax-M3": 204_800,
     "MiniMax-M2.7": 204_800,
     "MiniMax-M2.7-highspeed": 204_800,
     "MiniMax-M2.5": 204_800,
+    "MiniMax-M2.5-highspeed": 204_800,
     "MiniMax-M2.1": 204_800,
+    "MiniMax-M2.1-highspeed": 204_800,
+    "MiniMax-M2": 204_800,
 }
 
 
@@ -86,7 +106,14 @@ def _bare_model(model: str) -> str:
     for prefix in ("ollama_chat/", "ollama/"):
         if model.startswith(prefix):
             return model[len(prefix) :]
-    return model.split("/", 1)[1] if "/" in model else model
+    bare = model.split("/", 1)[1] if "/" in model else model
+    # `openai/responses/gpt-5.5` carries a protocol segment as well as a
+    # provider one. Both catalogs key on the bare slug, so a single split
+    # leaves `responses/gpt-5.5` — a name nothing matches, which reads as
+    # "context window unknown" rather than as the bug it is.
+    if bare.startswith("responses/"):
+        bare = bare[len("responses/") :]
+    return bare
 
 
 def _is_ollama(model: str, provider_id: str | None) -> bool:
@@ -155,6 +182,17 @@ def get_model_context_window(
     model = llm_params.get("model") or settings.LLM_MODEL or ""
     if provider_id is None:
         provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
+
+    # The subscription serves the same model names as the metered API with
+    # different limits — litellm's map says gpt-5.5 takes 1 050 000 input
+    # tokens, the Codex backend gives it 272 000. Reading the cost map here
+    # would hand the loop ~800 000 tokens of headroom that do not exist.
+    from infinidev.config.llm import CHATGPT_SUBSCRIPTION_PROVIDER
+
+    if provider_id == CHATGPT_SUBSCRIPTION_PROVIDER:
+        from infinidev.config.codex_catalog import context_window
+
+        return context_window(_bare_model(model))
 
     if _is_ollama(model, provider_id):
         base_url = (

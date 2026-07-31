@@ -28,9 +28,9 @@ class SearchByDocstringInput(BaseModel):
         description=(
             "Words describing what the code DOES, e.g. 'parse timestamp', "
             "'validate email format', 'retry on failure with backoff'. "
-            "Multiple words are OR'd together — every match counts. Use "
-            "natural phrases the original author might have written in a "
-            "docstring or comment, not exact identifier names."
+            "Multiple words are OR'd together — every match counts. Write "
+            "the natural phrase an author puts in a docstring or a comment, "
+            "not an exact identifier name."
         ),
         min_length=1,
     )

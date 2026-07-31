@@ -202,6 +202,12 @@ class StepManager:
         # pull any of it back via recall_context.
         self._archive_evicted_context(ctx, step_index, messages, record.summary)
 
+        # The user's end-of-step hook, if any. Runs after the summariser so
+        # it can be handed the summary the step actually produced, and its
+        # output lands on the record rather than in it — see
+        # ActionRecord.hook_notes for why that distinction matters.
+        record.hook_notes = self._step_end_summary_hook(ctx, step_index, record.summary)
+
         # Merge behavior tracker data if available
         bt = step_result.behavior_tracker
         if bt:
@@ -223,6 +229,36 @@ class StepManager:
 
         # Keep _last_state up-to-date for live introspection (e.g. /debug panel)
         self._engine._last_state = ctx.state
+
+    @staticmethod
+    def _step_end_summary_hook(
+        ctx: ExecutionContext, step_index: int, summary: str,
+    ) -> str:
+        """Run the user's ``step_end_summary`` hook for the step just closed.
+
+        Returns the empty string for every uneventful case — no hook, no
+        output, a failure — so the caller can assign the result
+        unconditionally.
+
+        The step index is passed in rather than read from the plan: by the
+        time this runs the plan has already advanced, so ``active_step`` is
+        the *next* step and would mislabel every payload by one.
+        """
+        from infinidev.engine.user_hooks import (
+            UserHookEvent, run_hooks, step_payload,
+        )
+
+        output = None
+        with best_effort("step_end_summary hook failed"):
+            payload = step_payload(ctx)
+            payload["step_index"] = step_index
+            payload["summary"] = summary
+            output = run_hooks(
+                UserHookEvent.STEP_END_SUMMARY,
+                payload,
+                workspace_path=getattr(ctx, "workspace_path", None),
+            )
+        return output.text.strip() if output else ""
 
     @staticmethod
     def _archive_evicted_context(

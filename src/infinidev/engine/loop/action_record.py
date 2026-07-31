@@ -18,6 +18,12 @@ class ActionRecord(BaseModel):
     discovered_context: str = ""
     pending_items: str = ""
     anti_patterns: str = ""
+    # Output of the user's ``step_end_summary`` hook, if one is configured.
+    # Held on the record rather than folded into ``summary`` precisely so
+    # the summariser cannot rewrite or drop it: the record is what the next
+    # iteration's prompt is rebuilt from, so this is the one field a user
+    # can put text into and know it will still be there ten steps later.
+    hook_notes: str = ""
     behavior_score: int = 0
     behavior_good: list[str] = Field(default_factory=list)
     behavior_bad: list[str] = Field(default_factory=list)

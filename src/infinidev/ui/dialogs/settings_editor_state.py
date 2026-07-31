@@ -21,6 +21,7 @@ from infinidev.ui.theme import (
     PRIMARY, TEXT, TEXT_MUTED, ACCENT, SUCCESS, ERROR,
     SURFACE, SURFACE_LIGHT, SURFACE_DARK,
 )
+from infinidev.config.providers import list_provider_ids
 from infinidev.ui.dialogs.base import dialog_frame
 
 DIALOG_NAME = "settings_editor"
@@ -28,9 +29,19 @@ DIALOG_NAME = "settings_editor"
 # ── Settings metadata: (key, description, type) ─────────────────────────
 # type: "bool", "int", "float", "str", "select:opt1,opt2,opt3"
 
+# Derived from the provider registry instead of typed out. The three
+# hand-maintained copies of this list had already drifted — `zai_coding` and
+# `gmi` reached this one and not the others — which is the failure mode where
+# a provider is selectable in one dialog and missing in the next. Registering
+# a provider is now the only step needed to make it choosable.
+_PROVIDER_IDS = ",".join(list_provider_ids())
+_PROVIDER_SELECT = f"select:{_PROVIDER_IDS}"
+# Leading empty option: "reuse the main LLM_* settings".
+_OPTIONAL_PROVIDER_SELECT = f"select:,{_PROVIDER_IDS}"
+
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
-        ("LLM_PROVIDER", "LLM provider", "select:ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,gmi,openai_compatible"),
+        ("LLM_PROVIDER", "LLM provider", _PROVIDER_SELECT),
         ("LLM_MODEL", "LLM model", "select_dynamic:provider_models"),
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
@@ -39,7 +50,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "Assistant LLM": [
         ("ASSISTANT_LLM_ENABLED", "Enable pair-programming critic (runs in parallel)", "bool"),
         ("ASSISTANT_LLM_PROVIDER", "Assistant provider (empty = reuse main)",
-         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,gmi,openai_compatible"),
+         _OPTIONAL_PROVIDER_SELECT),
         ("ASSISTANT_LLM_MODEL", "Assistant model", "select_dynamic:assistant_models"),
         ("ASSISTANT_LLM_BASE_URL", "Assistant API base URL (auto-filled)", "str"),
         ("ASSISTANT_LLM_API_KEY", "Assistant API key (auto-filled)", "str"),
@@ -134,7 +145,7 @@ def _build_behavior_section() -> list[tuple[str, str, str]]:
          "int"),
         # Independent LLM endpoint for the judge — empty = reuse main LLM_*
         ("BEHAVIOR_LLM_PROVIDER", "Behavior judge provider (empty = reuse main)",
-         "select:,ollama,llama_cpp,vllm,openai,anthropic,gemini,zai,zai_coding,kimi,minimax,openrouter,qwen,gmi,openai_compatible"),
+         _OPTIONAL_PROVIDER_SELECT),
         ("BEHAVIOR_LLM_MODEL", "Behavior judge model", "select_dynamic:behavior_models"),
         ("BEHAVIOR_LLM_BASE_URL", "Behavior judge API base URL (auto-filled)", "str"),
         ("BEHAVIOR_LLM_API_KEY", "Behavior judge API key (auto-filled)", "str"),

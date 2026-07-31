@@ -46,7 +46,16 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="https://api.openai.com/v1",
         model_list_format="openai",
         is_native=True,
+        # GPT-5.6 split the generation from the capability tier: the number is
+        # the generation, Sol/Terra/Luna are the tiers (flagship / balanced /
+        # fastest). `gpt-5.6` remains valid alongside the three.
         static_models=[
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.6",
+            "gpt-5.5-pro",
+            "gpt-5.5",
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.4-nano",
@@ -56,6 +65,38 @@ PROVIDERS: dict[str, ProviderConfig] = {
             "o4-mini",
         ],
     ),
+    "openai_subscription": ProviderConfig(
+        id="openai_subscription",
+        display_name="ChatGPT Subscription (Codex)",
+        # Two prefixes doing two jobs. ``openai/`` selects LiteLLM's OpenAI
+        # transport; ``responses/`` flips that transport onto the Responses
+        # API, which is the only request shape the Codex backend accepts —
+        # it has no /chat/completions. LiteLLM bridges the two, so the engine
+        # keeps calling completion() and never learns the difference.
+        prefix="openai/responses/",
+        default_base_url="https://chatgpt.com/backend-api/codex",
+        # The credential is an OAuth access token minted by `codex login`,
+        # resolved per-request in config/llm.py. There is no key to type, and
+        # prompting for one would be asking for the wrong thing entirely.
+        api_key_required=False,
+        model_list_format="codex",
+        # Live list comes from the Codex CLI's own catalog; this is only the
+        # offline floor (see config/codex_catalog.py). Every entry is a real
+        # slug: the 5.6 generation ships as three named variants and the
+        # backend rejects the bare family name.
+        static_models=[
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+        ],
+        # False on purpose: the request must go to chatgpt.com, so api_base
+        # has to be passed. is_native=True would let LiteLLM route it to
+        # api.openai.com, where the OAuth token is not a valid key.
+        is_native=False,
+    ),
     "anthropic": ProviderConfig(
         id="anthropic",
         display_name="Claude (Anthropic)",
@@ -63,14 +104,22 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="https://api.anthropic.com",
         model_list_format="anthropic",
         is_native=True,
+        # Aliases, never dated snapshots. An alias keeps pointing at the
+        # current snapshot; a dated id freezes and eventually 404s once that
+        # snapshot retires. The generation-5 models have no dated variant at
+        # all. Retired and deprecated models are left out — offering a model
+        # the API will refuse is worse than a short list.
         static_models=[
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-opus-4-7",
             "claude-opus-4-6",
             "claude-sonnet-4-6",
-            "claude-haiku-4-5-20251001",
-            "claude-sonnet-4-5-20250929",
-            "claude-opus-4-5-20251101",
-            "claude-sonnet-4-0",
-            "claude-opus-4-0",
+            "claude-haiku-4-5",
+            "claude-opus-4-5",
+            "claude-sonnet-4-5",
         ],
     ),
     "gemini": ProviderConfig(
@@ -80,10 +129,17 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="https://generativelanguage.googleapis.com",
         model_list_format="gemini",
         is_native=True,
+        # Google promotes a model from `-preview` to a stable id rather than
+        # renaming it, so a `-preview` suffix that has a stable counterpart is
+        # a stale entry, not a different model.
         static_models=[
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
             "gemini-3.1-pro-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3-pro-preview",
             "gemini-3-flash-preview",
-            "gemini-3.1-flash-lite-preview",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
@@ -98,9 +154,11 @@ PROVIDERS: dict[str, ProviderConfig] = {
         is_native=True,
         static_models=[
             "glm-5.2",
+            "glm-5.1",
             "glm-5",
             "glm-5-turbo",
             "glm-4.7",
+            "glm-4.7-flash",
             "glm-4.6",
             "glm-4.5",
             "glm-4.5-flash",
@@ -116,9 +174,11 @@ PROVIDERS: dict[str, ProviderConfig] = {
         is_native=False,
         static_models=[
             "glm-5.2",
+            "glm-5.1",
             "glm-5",
             "glm-5-turbo",
             "glm-4.7",
+            "glm-4.7-flash",
             "glm-4.6",
             "glm-4.5",
             "glm-4.5-flash",
@@ -131,13 +191,14 @@ PROVIDERS: dict[str, ProviderConfig] = {
         prefix="moonshot/",
         default_base_url="https://api.moonshot.ai/v1",
         model_list_format="openai",
+        # The K2 line is on its way out: after the K3 launch, `kimi-k2.5` and
+        # the `moonshot-v1` series stopped being available to new accounts,
+        # with a full platform sunset on 2026-08-31. Listing a model that
+        # rejects the user's key is a worse failure than not listing it.
         static_models=[
             "kimi-k3",
-            "kimi-k2.5",
-            "kimi-k2-thinking",
-            "kimi-k2-thinking-turbo",
-            "kimi-k2-0905-preview",
-            "kimi-k2-turbo-preview",
+            "kimi-k2.7-code",
+            "kimi-k2.6",
         ],
     ),
     "minimax": ProviderConfig(
@@ -146,12 +207,19 @@ PROVIDERS: dict[str, ProviderConfig] = {
         prefix="minimax/",
         default_base_url="https://api.minimax.io/v1",
         model_list_format="static",
+        # model_list_format="static" — MiniMax publishes no /models endpoint,
+        # so this list is the *only* source of truth for the picker, not an
+        # offline floor like every other provider here. A model missing from
+        # it does not exist as far as Infinidev is concerned.
         static_models=[
             "MiniMax-M3",
             "MiniMax-M2.7",
             "MiniMax-M2.7-highspeed",
             "MiniMax-M2.5",
+            "MiniMax-M2.5-highspeed",
             "MiniMax-M2.1",
+            "MiniMax-M2.1-highspeed",
+            "MiniMax-M2",
         ],
     ),
     "mistral": ProviderConfig(
@@ -219,7 +287,11 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         model_list_format="openai",
         static_models=[
+            "qwen3.7-max",
+            "qwen3.7-plus",
+            "qwen3.6-max-preview",
             "qwen3.6-plus",
+            "qwen3.6-flash",
             "qwen3.5-plus",
             "qwen3.5-flash",
             "qwen3.5-397b-a17b",
@@ -304,6 +376,8 @@ def fetch_models(
             return _fetch_anthropic(url, api_key, provider.prefix)
         elif provider.model_list_format == "gemini":
             return _fetch_gemini(url, api_key, provider.prefix)
+        elif provider.model_list_format == "codex":
+            return _fetch_codex(provider.prefix)
         else:
             return [f"{provider.prefix}{m}" for m in provider.static_models]
     except Exception as exc:
@@ -333,6 +407,18 @@ def _fetch_openai(base_url: str, api_key: str, prefix: str) -> list[str]:
     resp.raise_for_status()
     data = resp.json().get("data", [])
     return [f"{prefix}{m['id']}" for m in data]
+
+
+def _fetch_codex(prefix: str) -> list[str]:
+    """Models the ChatGPT subscription serves, from the Codex CLI's catalog.
+
+    Local read, no HTTP: the backend publishes no documented model-list
+    endpoint, and the CLI already keeps a fresh copy on disk. That also
+    means this never fails or blocks the settings dialog on a network call.
+    """
+    from infinidev.config.codex_catalog import list_models
+
+    return [f"{prefix}{slug}" for slug in list_models()]
 
 
 def _fetch_anthropic(base_url: str, api_key: str, prefix: str) -> list[str]:

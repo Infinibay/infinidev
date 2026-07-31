@@ -34,6 +34,7 @@ from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.llm_caller import ThinkStreamFilter, strip_think_blocks
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
+from infinidev.engine.token_usage import report_prompt_tokens
 from infinidev.engine.oversized_result import (
     DuplicateCallGuard,
     handle_oversized_result,
@@ -289,6 +290,10 @@ def _run_llm_loop(
         call_kwargs.setdefault("max_tokens", 2000)
 
         response = litellm.completion(**call_kwargs)
+        report_prompt_tokens(
+            hooks, response, lane="chat",
+            messages=messages, model=call_kwargs.get("model", ""),
+        )
 
         if stream_mode:
             content, tool_calls, streamed = _consume_stream(response, hooks)

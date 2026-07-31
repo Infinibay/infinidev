@@ -20,9 +20,9 @@ class RespondInput(BaseModel):
     language: str | None = Field(
         None,
         description=(
-            "Optional language hint ('es' or 'en'). The chat agent "
-            "usually infers this from the user's message; set explicitly "
-            "only if the conversation mixes languages."
+            "Optional language hint ('es' or 'en'). Leave it unset and the "
+            "language is read from the user's message. Set it explicitly "
+            "when the conversation mixes languages."
         ),
     )
 

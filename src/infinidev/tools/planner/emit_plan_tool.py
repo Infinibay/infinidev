@@ -47,16 +47,16 @@ class PlanStepArg(BaseModel):
     ] = Field(
         "none",
         description=(
-            "How the step's success is checked. Prefer a DETERMINISTIC kind: "
-            "'command' (a shell command that must exit 0), "
-            "'test_id' (a pytest node id like tests/test_x.py::test_y), "
-            "'file_contains' (a file must contain a substring), "
-            "'symbol_exists' (a name/snippet must appear somewhere in the "
-            "codebase). For a SOFT objective that no command can decide "
-            "(readability, clearer error messages, duplication removed), use "
-            "'llm_judge' — an independent reviewer judges verify_spec against "
-            "the diff at task end. Use 'none' only when even that is "
-            "impossible."
+            "How the step's success is checked. Choose in this order, and "
+            "take the first that fits. A pytest node id you have seen in "
+            "this repository, then 'test_id'. A shell command that exits 0 "
+            "exactly when the step succeeded, then 'command'. A substring a "
+            "named file must contain, then 'file_contains'. A string whose "
+            "presence proves this step ran, then 'symbol_exists'. A sentence "
+            "an independent reviewer checks against the diff at task end, "
+            "then 'llm_judge'. Use 'none' when you cannot write that "
+            "sentence. NEVER name a node id you have not seen: the engine "
+            "runs it, and one that does not exist fails on every attempt."
         ),
     )
     verify_spec: str = Field(
@@ -75,9 +75,9 @@ class PlanStepArg(BaseModel):
         description=(
             "The proof that means PASS. For file_contains: the REQUIRED "
             "substring (mandatory). For command/test_id: an optional stdout "
-            "fragment that must also appear (empty = exit code 0 alone "
+            "fragment that must also appear (empty means the exit code alone "
             "decides). For llm_judge: an optional hint of where to look "
-            "(file/area). Ignored for the other kinds."
+            "(file or area). Ignored for symbol_exists and none."
         ),
     )
 
@@ -102,8 +102,11 @@ class EmitPlanInput(BaseModel):
             "remove or modify these."
         ),
     )
+    # Required, not optional-with-a-default: these become the accept gate the
+    # post-loop reviewer judges against, and an omission silently leaves
+    # review_criteria None — a task that ends with nothing to check it against.
     acceptance_criteria: list[str] = Field(
-        default_factory=list,
+        ...,
         description=(
             "Task-level 'done' conditions for the WHOLE task — each a "
             "short, FALSIFIABLE statement whose truth can be checked by "
@@ -122,10 +125,13 @@ class EmitPlanTool(InfinibayBaseTool):
     name: str = "emit_plan"
     description: str = (
         "Emit the final execution plan and end the planning turn. "
-        "Call this EXACTLY once, after you have enough information to "
-        "break the work into concrete steps. Do not emit an empty plan "
-        "or a single-step plan for non-trivial work. The developer "
-        "will execute your steps in order without re-asking the user."
+        "Call this EXACTLY once: the turn ends on the first call and a "
+        "second is never read. Emit once every step you are about to write "
+        "names a file you have observed, or once your exploration budget is "
+        "spent, whichever comes first. A plan with zero steps is rejected. "
+        "A one-step plan is right when one file changes and one check "
+        "settles it. The developer executes your steps in order and cannot "
+        "edit or delete them."
     )
     args_schema: Type[BaseModel] = EmitPlanInput
 

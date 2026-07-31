@@ -103,6 +103,15 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
         supports_json_mode=True,
         probed=True,
     ),
+    "openai_subscription": ModelCapabilities(
+        # Same GPT-5.x models as the metered API, reached over the Responses
+        # API. A preset rather than a probe because probing would burn a
+        # subscription request at every startup to re-learn a constant.
+        supports_function_calling=True,
+        supports_tool_choice_required=True,
+        supports_json_mode=True,
+        probed=True,
+    ),
     "anthropic": ModelCapabilities(
         supports_function_calling=True,
         supports_tool_choice_required=True,

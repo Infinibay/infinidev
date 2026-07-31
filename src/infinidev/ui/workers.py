@@ -81,9 +81,11 @@ def run_engine_task(
         summaries = get_recent_summaries(app.session_id, limit=10)
         app.agent._session_summaries = summaries
 
-        # Refresh the context-token meter before the LLM starts so the
-        # status bar shows the right value during analysis.
-        app.context_calculator.update_chat(user_input, summaries)
+        # A new task rebuilds the developer's prompt from scratch, so its
+        # meter resets here. The chat meter keeps the last real measurement
+        # until this turn's first response reports a new one — an estimate of
+        # the user's message alone measured the one part that never matters.
+        app.context_calculator.start_task()
         app._context_status = app.context_calculator.get_context_status()
         app.invalidate()
 

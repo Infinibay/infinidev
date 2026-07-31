@@ -68,9 +68,9 @@ class EscalateInput(BaseModel):
     council_focus: str = Field(
         "design",
         description=(
-            "What the council should deliberate: 'design' (how to build "
-            "it), 'research' (find facts/options first), or 'both'. Only "
-            "meaningful when council_requested is True."
+            "What the council deliberates: 'design' (how to build it), "
+            "'research' (find facts and options first), or 'both'. Read "
+            "only when council_requested is True; ignored otherwise."
         ),
     )
 

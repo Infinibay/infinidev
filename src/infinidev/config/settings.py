@@ -95,7 +95,10 @@ class Settings(BaseSettings):
     MAX_DIR_LISTING: int = 1000
 
     # LLM (via LiteLLM)
-    LLM_PROVIDER: str = "ollama"  # Provider ID: ollama, llama_cpp, vllm, openai, anthropic, gemini, zai, zai_coding, kimi, minimax, openrouter, qwen, gmi, openai_compatible
+    # Provider ID — the authoritative list is PROVIDERS in config/providers.py.
+    # `openai_subscription` bills against a ChatGPT plan via `codex login`
+    # instead of an API key; it ignores LLM_API_KEY and LLM_BASE_URL.
+    LLM_PROVIDER: str = "ollama"
     LLM_MODEL: str = "ollama_chat/qwen2.5-coder:7b"
     LLM_BASE_URL: str = "http://localhost:11434"
     LLM_API_KEY: str = "ollama"
@@ -344,6 +347,17 @@ class Settings(BaseSettings):
     # to one line each and remain retrievable via recall_context.
     # 0 = never collapse (old behaviour: every summary stays verbatim).
     WORKING_MEMORY_VERBATIM_STEPS: int = 4
+
+    # User hooks: shell commands bound to the six lifecycle events and
+    # declared in .infinidev/hooks.json. Nothing ships enabled — with no
+    # config file the whole subsystem is inert — so this switch exists to
+    # turn off hooks a user already wrote, not to opt into the feature.
+    # See engine/user_hooks/.
+    HOOKS_ENABLED: bool = True
+    # Fallback deadline per hook, overridable per hook in the config. A
+    # hook runs between two steps with the loop waiting on it, so an
+    # unbounded one would look like a hang with no explanation.
+    HOOKS_TIMEOUT: int = 60
 
     # MCP — generic Model Context Protocol client. Ken is the default server
     # but any number of MCP servers can be registered via .mcp.json.

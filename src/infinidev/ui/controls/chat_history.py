@@ -699,6 +699,9 @@ class ChatHistoryControl(UIControl):
             if group.msg_type == "tool_call":
                 self._render_tool_group(group, gi == n_groups - 1, width, lines)
                 continue
+            if group.msg_type == "critic":
+                self._render_critic_group(group, width, lines)
+                continue
 
             widget = get_widget(group.msg_type)
             if widget is None:
@@ -798,6 +801,44 @@ class ChatHistoryControl(UIControl):
             live=live,
             on_toggle_group=_toggle_group,
             on_toggle_tool=_toggle_tool,
+        )
+        start = len(lines)
+        lines.extend(rr.lines)
+        for offset, cb in rr.clickable_offsets.items():
+            self._clickable_lines[start + offset] = cb
+
+    def _render_critic_group(self, group, width: int,
+                             lines: list[list[tuple[str, str]]]) -> None:
+        """Render a run of critic verdicts as one compact, collapsible group.
+
+        Shares ``_tool_group_states`` / ``_tool_expanded`` with the tool
+        groups: both are keyed by ``group.start_index`` into the same
+        message list, so the keys cannot collide, and one collapse-state
+        store means one place to clear when the transcript resets.
+        """
+        from infinidev.ui.controls.critic_widget import build_critic_group
+
+        idx = group.start_index
+        collapsed = self._tool_group_states.get(idx, True)   # default collapsed
+        expanded_set = self._tool_expanded.get(idx, set())
+
+        def _toggle_group(_idx=idx):
+            self._tool_group_states[_idx] = not self._tool_group_states.get(_idx, True)
+
+        def _toggle_item(local_i: int, _idx=idx):
+            s = self._tool_expanded.setdefault(_idx, set())
+            if local_i in s:
+                s.discard(local_i)
+            else:
+                s.add(local_i)
+
+        rr = build_critic_group(
+            group.messages,
+            collapsed=collapsed,
+            expanded_set=expanded_set,
+            width=width,
+            on_toggle_group=_toggle_group,
+            on_toggle_item=_toggle_item,
         )
         start = len(lines)
         lines.extend(rr.lines)

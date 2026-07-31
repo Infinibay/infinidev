@@ -190,6 +190,67 @@ The local index has not gone away: the symbol *writer* tools
 positions Ken does not provide, and every tool that needs it indexes the
 file it is about to touch on demand. `/reindex` still forces a full sweep.
 
+### User hooks (`engine/user_hooks/`)
+
+Shell commands the user binds to six lifecycle points in
+`.infinidev/hooks.json` (workspace) or `~/.infinidev/hooks.json` (global).
+Not to be confused with `engine/hooks/`, which is the *in-process* hook
+manager the engine registers Python callbacks on — that one can rewrite a
+tool call, this one can only contribute text. Nothing ships enabled: with
+no config file the subsystem is inert.
+
+A hook declares `command` (stdout is the output) **or** `prompt` (fixed
+text, no subprocess). Config merges **per event**: the first file to
+declare an event owns it outright, so `"task_start": []` in a project is
+how you switch a global hook off there.
+
+```json
+{"hooks": {
+  "step_end_instruction": [{"prompt": "Review the diff and fix what is wrong."}],
+  "task_end_summary":     [{"command": "git diff --stat", "timeout": 30}]
+}}
+```
+
+**The start / end / end triad is the design.** A task and a step each get
+one start hook and *two* end hooks, and the pair differs in one thing —
+which side of the summarisation boundary the output lands on:
+
+| event | fires | output |
+|---|---|---|
+| `task_start` | turn opens | into the chat agent's input *and* the developer's task prompt |
+| `step_start` | each iteration | appended to the step's user message |
+| `step_end_instruction` | model calls `step_complete` | overwrites the tool result, step stays open — **dies with the step** |
+| `step_end_summary` | step really closes | `ActionRecord.hook_notes` — **survives every later prompt** |
+| `task_end_instruction` | after Review | re-enters `run_task` for one more pass — **not written to history** |
+| `task_end_summary` | turn really closes | stored as a hidden `work_summary` turn — **the next turn reads it** |
+
+Four things that are load-bearing rather than incidental:
+
+- **The instruction hooks fire once.** Per step index, per turn. The
+  model's second `step_complete` is indistinguishable from its first, so
+  a hook that re-fired would hold the step forever. A hook that printed
+  *nothing* still burns its one shot, or a sometimes-silent hook could
+  fire twice inside one step.
+- **`step_end_instruction` is the last gate, after the engine's own four**
+  (see `loop/step_complete_gate.py`). The user's command is never asked to
+  comment on a step that failed its own verification, and it does not
+  re-run for each correction turn a failing check costs.
+- **`task_end_instruction` re-enters `run_task`, not the loop.** The
+  follow-up is classified, planned, executed and reviewed like any turn —
+  a hook asking for a deep review gets the whole pipeline. `_hook_reentry`
+  suppresses `task_start` and the instruction hook on that pass, which is
+  what bounds it to exactly one.
+- **Hooks are fail-open and deadlined.** Non-zero exit, timeout, missing
+  binary, malformed JSON: all cost the hook's output and a log line,
+  never the run. Output is capped at 8 000 chars — it goes straight into
+  the prompt.
+
+Payload reaches the command twice: full JSON on stdin, scalars as
+`INFINIDEV_HOOK_*` env vars (`INFINIDEV_HOOK_STEP_INDEX`,
+`INFINIDEV_HOOK_FILES_CHANGED`, …) for the one-liners people actually
+write. cwd is the workspace. `HOOKS_ENABLED` / `HOOKS_TIMEOUT` in
+settings; config reloads on mtime change, no restart.
+
 ### Agent (`agents/base.py`)
 
 `InfinidevAgent` holds role metadata, binds tools based on role, and manages execution context. The CLI creates one agent with role="developer" per user instruction.
@@ -213,6 +274,20 @@ drawn only for named speakers (Reviewer, critic verdicts) — see
 grouped (`NEVER_GROUP_TYPES`); consecutive *tool calls* fold into one
 collapsible `✓ Ran N tools ▸` group (`build_tool_group`).
 
+The pair-programming critic gets the same treatment
+(`controls/critic_widget.py`, message type `critic`): `◇ Critic · N notes ▸`,
+collapsed by default, expanding to one line per verdict and then to the
+full body. It talks on most steps, so rendered as full system messages it
+buried the assistant's reply — and its severity colours used to be amber,
+which won every contest for the eye. Two things differ from the tool
+group: **one** verdict also collapses (a single critic paragraph is just
+as interruptive as three), and the summary line counts rejects
+separately, since a reject changed what the model did and a
+recommendation usually did not. Severity/model/source travel as fields on
+the message dict (`add_message(**fields)`), not baked into the body —
+the renderer counts rejects without parsing prose, and a body prefixed
+with `(model)` would poison the preview line.
+
 Modals share one hand-rolled frame (`ui/dialogs/base.py`): rounded
 corners, title inlined into the top border, key hints in the bottom
 border, one column of interior padding. `prompt_toolkit.widgets.Frame`
@@ -228,6 +303,51 @@ when touching key bindings or startup.
 - `settings.py` — All settings use `INFINIBAY_` env var prefix. Key: `LLM_MODEL` (LiteLLM format like `ollama/qwen2.5-coder:7b`), `LLM_BASE_URL`, `SANDBOX_ENABLED`, loop limits.
 - `llm.py` — `get_litellm_params()` builds the dict for `litellm.completion()`.
 - `model_capabilities.py` — Runtime probing of FC support, JSON mode, schema sanitization needs.
+- `openai_oauth.py`, `codex_catalog.py` — the ChatGPT-subscription provider (below).
+
+### ChatGPT subscription (`openai_subscription`)
+
+`LLM_PROVIDER=openai_subscription` bills against the user's ChatGPT plan
+instead of a metered API key. Three things make that work, and each one is
+somewhere a naive implementation goes wrong:
+
+**The protocol is the Responses API, not chat completions.** The Codex
+backend serves no `/chat/completions`. The provider's prefix is therefore
+`openai/responses/` — `openai/` picks LiteLLM's OpenAI transport and
+`responses/` flips it onto `POST {api_base}/responses`, with LiteLLM's
+`completion_extras/litellm_responses_transformation` bridge translating
+messages, tools and streaming in both directions. **The engine is untouched:
+it still calls `litellm.completion()`.** `_normalize_subscription_model`
+repairs a bare `gpt-5.5` or a copied `openai/gpt-5.5`, because the resulting
+404 explains nothing.
+
+**The credential is an OAuth token owned by another tool.** There is no
+second login: `codex login` writes `~/.codex/auth.json` (honouring
+`CODEX_HOME`) and `openai_oauth.py` reads, refreshes and *writes back* that
+same file. Writing back is mandatory, not tidiness — OpenAI rotates refresh
+tokens, so a refresh kept in memory would leave a dead one on disk and
+silently log the user out of the Codex CLI. Refreshes are atomic
+(`os.replace` onto a file created 0600), taken under an advisory `flock`
+shared with any other writer, and re-read inside the lock so a concurrent
+`codex` run that already refreshed is used instead of burning a second
+token. `_apply_chatgpt_subscription` in `llm.py` resolves the token on every
+request and is the single place that overrides `api_key`/`api_base` for all
+four `get_litellm_params*` builders.
+
+**The limits are not the API's limits.** litellm's cost map says `gpt-5.5`
+takes 1 050 000 input tokens; on the subscription it takes 272 000.
+`codex_catalog.py` reads the catalog the Codex CLI caches at
+`~/.codex/models_cache.json` — never writes it — for the model list, the
+per-model context window (scaled by `effective_context_window_percent`, the
+share left for input) and the reasoning levels each model accepts, so
+`THINKING_BUDGET=ultra` can reach `xhigh` where it exists instead of being
+flattened to `high`. Trusting the cost map would hand the loop ~800 000
+tokens of headroom that do not exist.
+
+Two smaller traps, both covered by tests: `is_native` must stay False or the
+`openai/` prefix routes the request to api.openai.com where the OAuth token
+is not a valid key; and the loop's pinned `temperature=0.2` has to be
+dropped, since GPT-5.x reasoning models reject it.
 
 ### DB (`db/service.py`)
 

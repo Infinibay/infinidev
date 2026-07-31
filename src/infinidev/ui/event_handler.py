@@ -225,27 +225,30 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
                 app._thinking_text = reasoning
 
     elif event_type == "loop_assistant_message":
-        # Pair-programming critic spoke up. Sender is one of three
-        # stable strings ("Assistant · REJECT" / "RECOMMEND" / "INFO")
-        # so theme.NAME_COLORS can paint each severity a different
-        # color. Model name and source (tools vs step_complete) move
-        # into a thin context line above the body — keeps the
-        # sender stable for color matching while preserving metadata.
+        # Pair-programming critic spoke up. Rendered as its own message
+        # type so consecutive verdicts fold into one collapsible line
+        # (see controls/critic_widget.py) instead of pushing the
+        # assistant's reply off screen — the critic talks on most steps.
+        #
+        # Severity, model and source travel as fields rather than being
+        # baked into the sender string and the body text: the compact
+        # renderer needs them separately (it counts rejects, and shows the
+        # model only once a verdict is expanded), and a body that starts
+        # with "(model)" would put that noise into the preview line.
         action = data.get("action", "information")
         message = (data.get("message") or "").strip()
         if message:
-            model = data.get("model") or "assistant"
-            source = data.get("source") or "tools"
-            tag_map = {
+            tag = {
                 "reject": "REJECT",
                 "recommendation": "RECOMMEND",
                 "information": "INFO",
-            }
-            tag = tag_map.get(action, "INFO")
-            sender = f"Assistant · {tag}"
-            src_suffix = "" if source == "tools" else f" · re: {source}"
-            body = f"({model}{src_suffix})\n{message}"
-            app.add_message(sender, body, "system")
+            }.get(action, "INFO")
+            app.add_message(
+                f"Assistant · {tag}", message, "critic",
+                critic_action=action,
+                critic_model=data.get("model") or "assistant",
+                critic_source=data.get("source") or "tools",
+            )
 
     elif event_type == "loop_behavior_update":
         # Intentionally silent — verdicts are inspected via /debug → Behavior.

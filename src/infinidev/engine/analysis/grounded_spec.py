@@ -96,7 +96,9 @@ class GroundedSpec:
             lines.append("  Resolved facts (grounded in evidence):")
             for f in self.resolved_facts:
                 ev = f" [{f.evidence}]" if f.evidence.strip() else " [no evidence]"
-                lines.append(f"    - {f.question} → {f.answer}{ev}")
+                # Spelled out: this block renders into the planner's user
+                # message, whose own prompt bans arrow glyphs.
+                lines.append(f"    - {f.question} — answer: {f.answer}{ev}")
         if self.assumptions:
             lines.append("  ASSUMPTIONS (unverified — flag if any is wrong):")
             lines += [f"    - {a.statement}" for a in self.assumptions]

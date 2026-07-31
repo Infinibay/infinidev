@@ -69,6 +69,14 @@ class OrchestrationHooks(Protocol):
         ``"review"``, ``"idle"``.
         UIs use this to update an "Actions" indicator."""
 
+    def notify_token_usage(self, prompt_tokens: int, lane: str = "chat") -> None:
+        """Report the real prompt size of one LLM call.
+
+        *prompt_tokens* comes off ``response.usage`` — the only number that
+        knows what the model actually received. *lane* is ``"chat"`` for the
+        conversational loops and ``"task"`` for the developer's, which the UI
+        meters separately because they hold different prompts."""
+
     def on_status(self, level: str, msg: str) -> None:
         """Status line for ad-hoc updates. *level* is informational
         (``"info"``, ``"warn"``, ``"error"``, ``"verification_pass"``,
@@ -551,6 +559,7 @@ def run_task(
     use_phase_engine: bool = False,
     force_gather: bool = False,
     attachments: list[Any] | None = None,
+    _hook_reentry: bool = False,
 ) -> str:
     """Run a complete task through the chat-agent-first pipeline.
 
@@ -574,6 +583,15 @@ def run_task(
     Callers must still construct ``agent``, ``engine``, ``reviewer``,
     and ``hooks``. The project_id and workspace_path for the chat agent
     are resolved from the agent's bound context.
+
+    A turn is also the unit the user's ``task_start`` / ``task_end_*``
+    hooks are scoped to (see ``engine/user_hooks/``). ``_hook_reentry`` is
+    set on the one extra pass a ``task_end_instruction`` hook can ask for:
+    it suppresses ``task_start`` and the end-of-task instruction hook, so
+    the re-entered turn cannot request a third, and keeps the hook's text
+    out of the stored chat history — that instruction is scaffolding for
+    this turn, not something the next turn should read back as if the user
+    had typed it.
 
     NOTE: ``run_chat_agent`` and ``run_planner`` are imported lazily to
     avoid a circular import: ``engine.orchestration.__init__`` eagerly
@@ -612,10 +630,53 @@ def run_task(
     from infinidev.engine.task_runtime import TaskRuntime
 
     runtime = TaskRuntime(task_id=session_id, on_event=_runtime_event_bridge(hooks))
-    runtime.append_chat("user", user_input)
-    _report_user_turn_to_ken(user_input, session_id)
-    root_task = runtime.add_task("Working on your request")
+    if not _hook_reentry:
+        # A re-entered turn is the same user turn continuing, so it neither
+        # appends a second user message to the transcript nor reports a
+        # second prompt to Ken — the text is a hook's, not the user's.
+        runtime.append_chat("user", user_input)
+        _report_user_turn_to_ken(user_input, session_id)
+    root_task = runtime.add_task(
+        "Follow-up requested by hook" if _hook_reentry else "Working on your request"
+    )
     runtime.start_next_task()
+
+    # ── task_start hook ─────────────────────────────────────────────────
+    # Its output rides along to both consumers of the turn: the chat agent
+    # (which may answer without escalating) and, further down, the
+    # developer's task prompt. Injected into the copies handed to those
+    # two, never into ``user_input`` itself, which is already recorded.
+    turn_context = _run_task_start_hook(
+        user_input=user_input,
+        session_id=session_id,
+        skip=_hook_reentry,
+    )
+    chat_input = f"{user_input}\n\n{turn_context}" if turn_context else user_input
+
+    def _reenter(instruction: str) -> str:
+        """Run the turn again with a hook's instruction as the input.
+
+        Going back through ``run_task`` rather than re-driving the engine
+        directly is what makes the follow-up a real turn: it is classified,
+        planned, executed and reviewed like any other. A hook that asks for
+        a deep review gets the whole pipeline, not a bare loop iteration.
+        Attachments are not carried over — they belonged to the user's
+        message, and re-sending them would pay for the same images twice.
+        """
+        from infinidev.engine.user_hooks import task_instruction
+
+        return run_task(
+            agent=agent,
+            user_input=task_instruction(instruction),
+            session_id=session_id,
+            engine=engine,
+            reviewer=reviewer,
+            hooks=hooks,
+            use_phase_engine=use_phase_engine,
+            force_gather=force_gather,
+            attachments=None,
+            _hook_reentry=True,
+        )
 
     # ── Chat agent ──────────────────────────────────────────────────────
     hooks.on_phase("chat")
@@ -644,7 +705,7 @@ def run_task(
     if agent_project_id is None:
         agent_project_id = getattr(agent, "project_id", None)
     chat_result = run_chat_agent(
-        user_input,
+        chat_input,
         session_id=session_id,
         project_id=agent_project_id,
         workspace_path=agent_workspace,
@@ -679,6 +740,28 @@ def run_task(
         _mark_shown = getattr(hooks, "mark_reply_shown", None)
         if callable(_mark_shown):
             _mark_shown()
+        # End-of-task hooks fire here too: the turn is over, even though it
+        # never reached the developer. ``files_changed=False`` is what lets
+        # a hook written for the develop path opt out of the chat path
+        # without the pipeline second-guessing which hooks belong where.
+        from infinidev.engine.user_hooks import UserHookEvent
+
+        followup = _task_end_hook(
+            UserHookEvent.TASK_END_INSTRUCTION,
+            user_input=user_input, session_id=session_id,
+            result=chat_result.reply, files_changed=False,
+            status="responded", skip=_hook_reentry,
+        )
+        if followup:
+            runtime.complete_current_task(chat_result.reply)
+            runtime.append_chat("assistant", chat_result.reply)
+            return _reenter(followup)
+        _store_task_hook_note(session_id, _task_end_hook(
+            UserHookEvent.TASK_END_SUMMARY,
+            user_input=user_input, session_id=session_id,
+            result=chat_result.reply, files_changed=False,
+            status="responded",
+        ))
         hooks.on_phase("idle")
         runtime.complete_current_task(chat_result.reply)
         runtime.append_chat("assistant", chat_result.reply)
@@ -729,6 +812,7 @@ def run_task(
         session_id=session_id,
         project_id=(ctx.project_id if ctx else get_current_project_id()),
         workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
+        hooks=hooks,
     )
     hooks.notify("Planner", plan.overview, "agent")
 
@@ -745,8 +829,13 @@ def run_task(
     # Build the developer's task prompt from the planner output. The
     # overview is the description; the flow config supplies the
     # canonical expected_output.
+    # The task_start hook's output rides on the description, not on the
+    # expected_output — the latter is the flow's contract and the reviewer
+    # judges against it, so user text there would change what "done" means.
     task_prompt: tuple[str, str] = (
-        escalation.user_request,
+        f"{escalation.user_request}\n\n{turn_context}"
+        if turn_context
+        else escalation.user_request,
         flow_config.expected_output,
     )
 
@@ -818,17 +907,145 @@ def run_task(
         acceptance_criteria=review_criteria,
     )
 
+    # ── task_end_instruction hook ───────────────────────────────────────
+    # Last chance to add work, after the reviewer has had its say. If the
+    # hook prints anything the turn is re-entered with it and *that* pass
+    # owns the ending — its own end-of-task summary, its own stored work
+    # summary — so neither closing step happens twice.
+    from infinidev.engine.user_hooks import UserHookEvent
+
+    _turn_status = getattr(used_engine, "_last_status", "") or "completed"
+    followup = _task_end_hook(
+        UserHookEvent.TASK_END_INSTRUCTION,
+        user_input=user_input, session_id=session_id, result=result,
+        files_changed=_turn_changed_files(used_engine), status=_turn_status,
+        skip=_hook_reentry,
+    )
+    if followup:
+        runtime.record_step(result, step_id=root_task.id)
+        runtime.complete_current_task(result)
+        return _reenter(followup)
+
     # ── Hidden work summary ─────────────────────────────────────────────
     # Record what the developer loop just did as a hidden conversation
     # turn so the NEXT turn's chat agent has continuity instead of starting
     # cold. Best-effort: a failure here must never sink a completed task.
     _store_work_summary(used_engine, session_id, result)
+    _store_task_hook_note(session_id, _task_end_hook(
+        UserHookEvent.TASK_END_SUMMARY,
+        user_input=user_input, session_id=session_id, result=result,
+        files_changed=_turn_changed_files(used_engine), status=_turn_status,
+    ))
 
     hooks.on_phase("idle")
     runtime.record_step(result, step_id=root_task.id)
     runtime.complete_current_task(result)
     runtime.append_chat("assistant", result)
     return result
+
+
+def _turn_changed_files(engine: Any) -> bool:
+    """Whether the turn touched anything on disk, for the hook payload.
+
+    ``has_file_changes`` is a LoopEngine method; the legacy PhaseEngine
+    path has no tracker, and a hook asking "did anything change?" is better
+    told "no" than handed an AttributeError from the finish path.
+    """
+    probe = getattr(engine, "has_file_changes", None)
+    if not callable(probe):
+        return False
+    try:
+        return bool(probe())
+    except Exception:
+        return False
+
+
+def _run_task_start_hook(
+    *, user_input: str, session_id: str, skip: bool,
+) -> str:
+    """Output of the user's ``task_start`` hook, wrapped for the prompt.
+
+    Empty string whenever there is nothing to add — no hook, no output, a
+    failure, or a re-entered turn. Callers concatenate unconditionally.
+    """
+    if skip:
+        return ""
+    from infinidev.engine.user_hooks import (
+        UserHookEvent, context_block, run_hooks, task_payload,
+    )
+    from infinidev.tools.base.context import (
+        get_current_project_id, get_current_workspace_path,
+    )
+
+    workspace = get_current_workspace_path() or ""
+    output = None
+    with best_effort("task_start hook failed"):
+        output = run_hooks(
+            UserHookEvent.TASK_START,
+            task_payload(
+                session_id=session_id,
+                user_input=user_input,
+                workspace_path=workspace,
+                project_id=get_current_project_id(),
+            ),
+            workspace_path=workspace or None,
+        )
+    if not output:
+        return ""
+    return context_block(UserHookEvent.TASK_START, output.text)
+
+
+def _task_end_hook(
+    event: Any, *, user_input: str, session_id: str, result: str,
+    files_changed: bool, status: str, skip: bool = False,
+) -> str:
+    """Run one of the two end-of-task hooks and return its text.
+
+    Shared by both: they take the same payload and differ only in what the
+    caller does with the answer — one becomes another pass of work, the
+    other becomes a note that outlives the turn.
+    """
+    if skip:
+        return ""
+    from infinidev.engine.user_hooks import run_hooks, task_payload
+    from infinidev.tools.base.context import (
+        get_current_project_id, get_current_workspace_path,
+    )
+
+    workspace = get_current_workspace_path() or ""
+    output = None
+    with best_effort("%s hook failed", getattr(event, "value", event)):
+        output = run_hooks(
+            event,
+            task_payload(
+                session_id=session_id,
+                user_input=user_input,
+                workspace_path=workspace,
+                project_id=get_current_project_id(),
+                result=result,
+                files_changed=files_changed,
+                status=status,
+            ),
+            workspace_path=workspace or None,
+        )
+    return output.text.strip() if output else ""
+
+
+def _store_task_hook_note(session_id: str, note: str) -> None:
+    """Persist a ``task_end_summary`` hook's output past the end of the turn.
+
+    Filed under the same hidden ``work_summary`` role the developer's own
+    end-of-task summary uses, which is what makes it survive: that role is
+    excluded from the UI repaint but included in the history the next
+    turn's chat agent reads. A hook that prints "deploy is frozen until
+    Friday" is still saying it on the next turn.
+    """
+    if not session_id or not note:
+        return
+    with best_effort("task_end_summary note store failed"):
+        from infinidev.db.service import store_conversation_turn
+
+        store_conversation_turn(session_id, "work_summary", note)
 
 
 def _store_work_summary(engine: Any, session_id: str, result: str) -> None:

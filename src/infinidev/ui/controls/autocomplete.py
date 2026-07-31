@@ -18,6 +18,8 @@ COMMANDS = [
     ("/models list", "List available Ollama models"),
     ("/models set", "Change Ollama model (e.g., /models set llama3)"),
     ("/models manage", "Pick a model interactively"),
+    ("/effort", "Reasoning depth: show the levels this model accepts"),
+    ("/effort high", "Set reasoning effort (levels vary per model)"),
     ("/settings", "Show or edit settings configuration"),
     ("/settings browse", "Open settings editor modal"),
     ("/think", "Gather context deeply before next task (enables gather phase)"),

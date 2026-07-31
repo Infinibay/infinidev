@@ -382,7 +382,9 @@ class InfinidevApp:
         if last is not None and last.get("streaming") is True:
             last["streaming"] = False
 
-    def add_message(self, sender: str, text: str, msg_type: str = "agent") -> None:
+    def add_message(
+        self, sender: str, text: str, msg_type: str = "agent", **fields: Any,
+    ) -> None:
         """Append a message to the chat history and trigger redraw.
 
         Every message passes through the credential redactor. Individual
@@ -390,6 +392,12 @@ class InfinidevApp:
         what they don't — provider SDKs embed the API key in the request
         URL, so an "Invalid API key" exception stringifies into the
         transcript with the key inside it.
+
+        ``**fields`` are stored verbatim on the message dict for renderers
+        that need structure the body text cannot carry — critic verdicts
+        pass severity and model this way so the compact renderer can count
+        rejects without parsing prose. They are *not* redacted: they are
+        renderer metadata, not user- or provider-supplied text.
         """
         from infinidev.config.secrets import redact
 
@@ -398,6 +406,7 @@ class InfinidevApp:
             "sender": sender,
             "text": redact(str(text)) if text else "",
             "type": msg_type,
+            **fields,
         })
         self._chat_history_control.invalidate_cache()
         # Thread-safe invalidate — safe to call from worker threads
@@ -527,11 +536,10 @@ class InfinidevApp:
         # Context calculator — fetch actual model context window size
         from infinidev.ui.context_calculator import calculator
         self.context_calculator = calculator
-        import asyncio
         try:
-            asyncio.run(self.context_calculator.update_model_context())
+            self.context_calculator.resolve_model_context()
         except Exception:
-            pass  # Falls back to default 4096
+            logger.warning("model context lookup failed", exc_info=True)
         self._context_status = self.context_calculator.get_context_status()
 
         # Tech detection

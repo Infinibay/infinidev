@@ -236,4 +236,26 @@ class TestHandoffRendering:
         msgs = scripted.calls[0]["messages"]
         handoff = next(m for m in msgs if m["role"] == "user")
         assert "src/auth.py" in handoff["content"]
-        assert "do NOT re-open" in handoff["content"]
+        # The paths are a lead, not something the planner already knows. The
+        # handoff used to say "already read — do NOT re-open", which forbade
+        # reading the only files the packet identifies and contradicted the
+        # system prompt's own account of the packet.
+        assert "contents are NOT included" in handoff["content"]
+        assert "do NOT re-open" not in handoff["content"]
+
+    def test_the_budget_is_stated_in_calls_and_follows_the_setting(
+        self, patch_litellm,
+    ):
+        """It used to hard-code "at most 4 files" beside a system prompt that
+        counts CALLS — two units for one budget, and a number that ignored
+        the argument claiming to express it."""
+        scripted = patch_litellm([
+            _resp([_tc("emit_plan", {
+                "overview": "ok", "steps": [{"title": "x"}],
+            })]),
+        ])
+        run_planner(_sample_escalation(), max_exploration_calls=7)
+        handoff = next(
+            m for m in scripted.calls[0]["messages"] if m["role"] == "user"
+        )
+        assert "7 exploration calls" in handoff["content"]

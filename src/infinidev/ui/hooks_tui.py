@@ -144,6 +144,18 @@ class TUIHooks:
         """
         self._app.finalize_streaming_message(speaker, kind)
 
+    def notify_token_usage(self, prompt_tokens: int, lane: str = "chat") -> None:
+        """Feed a real prompt size into the context meter."""
+        calculator = self._app.context_calculator
+        if calculator is None or prompt_tokens <= 0:
+            return
+        if lane == "task":
+            calculator.update_task(prompt_tokens)
+        else:
+            calculator.update_chat(prompt_tokens)
+        self._app._context_status = calculator.get_context_status()
+        self._app.invalidate()
+
     def mark_reply_shown(self) -> None:
         """Record that the chat reply has already been displayed.
 

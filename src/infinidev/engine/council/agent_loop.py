@@ -74,6 +74,10 @@ def run_terminating_loop(
     The agent gets an isolated context slot (its own ``agent_id``), so
     many of these can run concurrently without their tool contexts
     colliding — that is what makes parallel council members safe.
+
+    That same concurrency is why this loop does not feed the context meter:
+    several members hold several different prompts at once, and a single
+    number would flicker between them without describing any of them.
     """
     agent_id = f"{agent_id_prefix}-{uuid.uuid4().hex[:8]}"
     bind_tools_to_agent(tools, agent_id)

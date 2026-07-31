@@ -470,6 +470,8 @@ class LoopEngine(AgentEngine):
         # the previous step finished and need a fresh messages list
         # to attach to.
         messages.extend(self._critic.drain_pending())
+        with best_effort("step_start hook failed"):
+            self._apply_step_start_hook(ctx, messages)
         with best_effort("_trace_iter_prompt failed"):
             _trace_iter_prompt(iteration + 1, messages[0].get("content", ""), messages[1].get("content", ""))
 
@@ -602,6 +604,40 @@ class LoopEngine(AgentEngine):
     ) -> list[dict[str, Any]]:
         """Build the fresh two-message conversation for one iteration."""
         return build_iteration_messages(self, ctx, iteration)
+
+    @staticmethod
+    def _apply_step_start_hook(
+        ctx: ExecutionContext, messages: list[dict[str, Any]],
+    ) -> None:
+        """Fold a ``step_start`` hook's output into this step's prompt.
+
+        Appended to the existing user message rather than added as a new
+        one. The iteration prompt is exactly ``[system, user]``, and a
+        second consecutive user message is rejected outright by Anthropic's
+        API, which requires strict role alternation.
+
+        Nothing here survives the step: the next iteration rebuilds the
+        prompt from summaries, so a start-of-step hook re-runs and speaks
+        again rather than accumulating.
+        """
+        from infinidev.engine.user_hooks import (
+            UserHookEvent, context_block, run_hooks, step_payload,
+        )
+
+        output = run_hooks(
+            UserHookEvent.STEP_START,
+            step_payload(ctx),
+            workspace_path=getattr(ctx, "workspace_path", None),
+        )
+        if not output:
+            return
+
+        block = context_block(UserHookEvent.STEP_START, output.text)
+        for message in reversed(messages):
+            if message.get("role") == "user":
+                message["content"] = f"{message.get('content', '')}\n\n{block}"
+                return
+        messages.append({"role": "user", "content": block})
 
     def _run_inner_loop(
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],

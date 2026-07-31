@@ -21,11 +21,21 @@ check never pays for a critic call:
 3. **Critic** — a ``reject`` verdict from the pair-programming critic.
 4. **Objective** — the step's own deterministic verification. The model does
    not get to decide this one; a check does.
+5. **User hook** — a ``step_end_instruction`` command from the user's
+   ``.infinidev/hooks.json``, holding the step for one more pass of work.
 
 Every gate refuses the same way: by overwriting the ``step_complete`` tool
 result. The model reads that as "your close was overridden by this
 feedback", and following a tool result is its natural mode right after a
 tool call — far more reliable than a bare user-role message.
+
+The hook gate is deliberately **last**. It fires only once the engine's own
+four have agreed the step is finished, which buys two things: the user's
+command is never asked to comment on a step that failed its own
+verification, and it does not run again for each of the correction turns
+that a failing check can cost. Like the note gate it fires at most once per
+step — a hook that re-fired on the retry would hold the step forever, since
+the second ``step_complete`` is indistinguishable from the first.
 """
 
 from __future__ import annotations
@@ -77,11 +87,16 @@ class StepCompleteGate:
         # Per-step count of forced objective-verification correction turns,
         # so one stuck objective cannot starve the whole budget.
         self._verify_attempts: dict[int, int] = {}
+        # Step indices whose end-of-step user hook has already fired. Keyed by
+        # index rather than a flag because steps can be added mid-run, and a
+        # single flag would let step 4 inherit step 3's "already fired".
+        self._hook_fired: set[int] = set()
 
     def reset_run(self) -> None:
         """Forget per-run state at the start of an execution."""
         self._verify_attempts = {}
         self._note_gate_fired = False
+        self._hook_fired = set()
 
     # ── the chain ────────────────────────────────────────────────────
 
@@ -111,7 +126,10 @@ class StepCompleteGate:
         if review.blocked:
             return True
 
-        return self.objective_unmet(ctx, step_complete_call, messages)
+        if self.objective_unmet(ctx, step_complete_call, messages):
+            return True
+
+        return self._user_hook_holds(ctx, step_complete_call, messages)
 
     # ── gate 1: notes ────────────────────────────────────────────────
 
@@ -269,6 +287,64 @@ class StepCompleteGate:
             f"⚠ step_complete blocked — step {active.index} verification "
             f"failed ({check.kind}: {check.spec[:80]}), "
             f"attempt {attempts}/{cap}",
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        )
+        return True
+
+    # ── gate 5: the user's end-of-step hook ──────────────────────────
+
+    def _user_hook_holds(
+        self,
+        ctx: Any,
+        step_complete_call: Any,
+        messages: list[dict[str, Any]],
+    ) -> bool:
+        """Hold the step while a configured ``step_end_instruction`` runs.
+
+        Returns ``False`` — let the step close — for all the ordinary
+        reasons: no hook configured, the hook already fired for this step,
+        the hook printed nothing, or it failed. Only text coming back turns
+        into another turn of work.
+
+        The output is injected but never summarised: whatever the model
+        *does* in response is captured by the step summary, while the
+        instruction itself dies with the step's messages. That asymmetry is
+        the point — the instruction was scaffolding, the work is the record.
+        """
+        from infinidev.engine.user_hooks import (
+            UserHookEvent, run_hooks, step_instruction, step_payload,
+        )
+
+        state = getattr(ctx, "state", None)
+        plan = getattr(state, "plan", None) if state is not None else None
+        active = getattr(plan, "active_step", None) if plan is not None else None
+        # -1 stands in for "no plan yet" — the bootstrap step, before the
+        # model has called add_step. It is a real step to a hook and still
+        # deserves the once-only guarantee.
+        step_key = getattr(active, "index", -1) if active is not None else -1
+        if step_key in self._hook_fired:
+            return False
+
+        output = None
+        with best_effort("step_end_instruction hook failed"):
+            output = run_hooks(
+                UserHookEvent.STEP_END_INSTRUCTION,
+                step_payload(ctx, status=step_complete_status(step_complete_call)),
+                workspace_path=getattr(ctx, "workspace_path", None),
+            )
+        # Marked fired even when the hook produced nothing, so a hook that
+        # prints only sometimes cannot fire twice inside one step.
+        self._hook_fired.add(step_key)
+        if not output:
+            return False
+
+        self._engine._overwrite_step_complete_tool_result(
+            messages, step_complete_call.id, step_instruction(output.text),
+        )
+        emit_log(
+            "info",
+            f"⚠ step_complete held — end-of-step hook added work "
+            f"(step {step_key})",
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         )
         return True

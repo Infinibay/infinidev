@@ -17,6 +17,7 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.verification_result import VerificationResult
@@ -71,17 +72,38 @@ class ObjectiveVerifier:
         passed = run["exit_code"] == 0 and self._observable_ok(observable, run["output"])
         return self._result_from_run(run, passed, observable)
 
+    def _interpreter(self) -> str:
+        """The python that can import this workspace's test dependencies.
+
+        A bare ``python`` is whatever the shell resolves, which outside a
+        venv has no pytest and fails a check the code would have passed.
+        The workspace's own venv wins — the target project may be neither
+        Infinidev nor share its environment — and Infinidev's interpreter is
+        the fallback, since that one at least exists.
+        """
+        for candidate in (".venv/bin/python", "venv/bin/python"):
+            path = os.path.join(self._workspace, candidate)
+            if os.path.exists(path):
+                return shlex.quote(path)
+        return shlex.quote(sys.executable)
+
     def _verify_test_id(self, node_id: str, observable: str) -> VerificationResult:
         # Treat the spec as a pytest node id (the dominant case). Quote it so
         # paths with '::' and special chars survive the shell.
-        command = f"python -m pytest {shlex.quote(node_id)} -q"
+        command = f"{self._interpreter()} -m pytest {shlex.quote(node_id)} -q"
         run = self._run(command)
         passed = run["exit_code"] == 0 and self._observable_ok(observable, run["output"])
         return self._result_from_run(run, passed, observable)
 
     def _verify_file_contains(self, path: str, needle: str) -> VerificationResult:
         abs_path = path if os.path.isabs(path) else os.path.join(self._workspace, path)
-        entry = {"command": f"(file_contains {path!r} ⊇ {needle!r})", "exit_code": 0, "output": ""}
+        # Spelled out rather than set-notation: this string reaches the
+        # developer inside the BLOCKED message (verification_result.py:52).
+        entry = {
+            "command": f"(file_contains {path!r}: required text {needle!r})",
+            "exit_code": 0,
+            "output": "",
+        }
         try:
             with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
                 content = fh.read()

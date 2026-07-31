@@ -46,6 +46,20 @@ def _verbatim_step_budget() -> int:
     except (TypeError, ValueError):
         return 4
 
+
+#: Width a step's hook note keeps once its record collapses to one line.
+#: Enough for a status line or a short verdict, which is what an
+#: every-step hook realistically prints.
+_COLLAPSED_HOOK_CHARS = 160
+
+
+def _clip(text: str, limit: int) -> str:
+    """One-line, length-bounded form of ``text`` for collapsed records."""
+    flat = " ".join(text.split())
+    if len(flat) <= limit:
+        return flat
+    return flat[:limit].rstrip() + "…"
+
 # Static prompt text lives in loop/prompt/text.py; re-exported here so that
 # existing `from ...loop.context import CLI_AGENT_IDENTITY, ...` keeps working.
 from infinidev.engine.loop.prompt.text import (  # noqa: F401
@@ -285,7 +299,16 @@ def build_iteration_prompt(
         summaries = []
         for position, record in enumerate(history_slice):
             if position < collapsed_count:
-                summaries.append(f"- Step {record.step_index}: {record.summary}")
+                line = f"- Step {record.step_index}: {record.summary}"
+                # Hook output is the one thing a collapsed record keeps.
+                # A user who configured step_end_summary asked for text that
+                # outlives the summariser; dropping it at the retention
+                # boundary would make that promise good for four steps only.
+                # Clipped, because the promise is that it stays reachable,
+                # not that it keeps its full width forever.
+                if record.hook_notes:
+                    line += f" [hook: {_clip(record.hook_notes, _COLLAPSED_HOOK_CHARS)}]"
+                summaries.append(line)
                 continue
             lines = [f"### Step {record.step_index}: {record.summary}"]
             if record.changes_made:
@@ -294,6 +317,8 @@ def build_iteration_prompt(
                 lines.append(f"  Context: {record.discovered_context}")
             if record.pending_items:
                 lines.append(f"  Pending: {record.pending_items}")
+            if record.hook_notes:
+                lines.append(f"  Hook: {record.hook_notes}")
             summaries.append("\n".join(lines))
         header = ""
         if collapsed_count:

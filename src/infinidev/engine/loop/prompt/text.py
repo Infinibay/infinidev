@@ -365,8 +365,11 @@ Call these BEFORE `step_complete`. They cost no tool calls and they do not
 close the step, so use them freely.
 
 - **add_step**(title, explanation?, index?) — omit index to append.
-- **modify_step**(index, title?, explanation?) — pending steps only.
-- **remove_step**(index) — pending steps only.
+- **modify_step**(index, title?, explanation?) — pending steps YOU added.
+- **remove_step**(index) — pending steps YOU added.
+
+A step a planner wrote is frozen. The engine refuses `modify_step` and
+`remove_step` on it, so work around it and say so in your summary.
 
 A finished or skipped step is frozen. IF `status="continue"`, THEN the plan
 MUST hold at least one pending step. IF you just closed the last one, THEN
@@ -443,8 +446,8 @@ Anything touching code, files, or facts about the project needs tools first.
 ### Standing rules
 
 - NEVER repeat a previous action summary. The engine already gave it to you.
-- IF a planned step turns out unnecessary, THEN call `remove_step` and say why
-  in your summary.
+- IF a step YOU added turns out unnecessary, THEN call `remove_step` and say
+  why in your summary. A planner's step stays: work around it and say so.
 """
 
 

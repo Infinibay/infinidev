@@ -42,10 +42,16 @@ def _register_custom_models() -> None:
             "cache_creation_input_token_cost": 3.75e-07,
         }
 
+        # The highspeed variants are the ones litellm's map keeps missing —
+        # it indexes MiniMax's fast tier under a different suffix, so every
+        # `-highspeed` id the provider actually serves needs registering here
+        # or the request is rejected as an unknown model.
         custom = {
             "minimax/MiniMax-M3": {**_M27_BASE},
             "minimax/MiniMax-M2.7": {**_M27_BASE},
             "minimax/MiniMax-M2.7-highspeed": {**_M27_BASE},
+            "minimax/MiniMax-M2.5-highspeed": {**_M27_BASE},
+            "minimax/MiniMax-M2.1-highspeed": {**_M27_BASE},
         }
 
         for model_id, info in custom.items():
@@ -76,6 +82,12 @@ def _install_global_response_normalizer() -> None:
     Streaming responses (generator) are passed through unchanged;
     callers that consume streams and assemble content must call
     ``strip_think_blocks`` on the assembled text themselves.
+
+    The same boundary also repairs the one backend that refuses to answer
+    a non-streaming request at all — see ``_needs_forced_streaming`` in the
+    ChatGPT-subscription section below. Those helpers are defined further
+    down the module and resolved when a request runs, not when this
+    installs, so they live beside the rest of that provider's knowledge.
     """
     try:
         import litellm
@@ -86,7 +98,12 @@ def _install_global_response_normalizer() -> None:
         _original = litellm.completion
 
         def _wrapped(*args: Any, **kwargs: Any) -> Any:
-            response = _original(*args, **kwargs)
+            if _is_codex_request(kwargs):
+                kwargs = _sanitized_for_codex(kwargs)
+            if _needs_forced_streaming(kwargs):
+                response = _completion_via_forced_stream(_original, args, kwargs)
+            else:
+                response = _original(*args, **kwargs)
             if kwargs.get("stream"):
                 return response
             try:
@@ -138,16 +155,199 @@ def _extract_provider(model: str) -> str:
     return ""
 
 
-def _is_native_provider(model: str) -> bool:
-    """Return True if LiteLLM handles this provider's endpoint natively."""
-    from infinidev.config.providers import get_provider
+_NATIVE_MODEL_PREFIXES = {"deepseek", "anthropic", "gemini", "openai"}
 
-    provider_id = settings.LLM_PROVIDER
+
+def _is_native_provider_id(provider_id: str, model: str) -> bool:
+    """Whether LiteLLM reaches this provider's endpoint without an api_base."""
+    from infinidev.config.providers import PROVIDERS, get_provider
+
     provider = get_provider(provider_id)
     if provider.is_native:
         return True
-    # Fallback: check model prefix for backward compatibility
-    return _extract_provider(model) in {"deepseek", "anthropic", "gemini", "openai"}
+    # A registered provider's own flag settles it. The prefix heuristic below
+    # only exists for ids that predate the registry, and consulting it anyway
+    # would misroute openai_subscription: its models carry the `openai/`
+    # prefix but must reach chatgpt.com, where the OAuth token is valid —
+    # api.openai.com would reject it as a malformed key.
+    if provider_id in PROVIDERS:
+        return False
+    return _extract_provider(model) in _NATIVE_MODEL_PREFIXES
+
+
+def _is_native_provider(model: str) -> bool:
+    """Return True if LiteLLM handles this provider's endpoint natively."""
+    return _is_native_provider_id(settings.LLM_PROVIDER, model)
+
+
+# ── ChatGPT subscription (Codex) ─────────────────────────────────────
+
+CHATGPT_SUBSCRIPTION_PROVIDER = "openai_subscription"
+
+# `openai/` selects LiteLLM's OpenAI transport, `responses/` flips it onto
+# the Responses API. The Codex backend serves no /chat/completions endpoint,
+# so without the second half every request 404s.
+_SUBSCRIPTION_PREFIX = "openai/responses/"
+
+
+def _normalize_subscription_model(model: str) -> str:
+    """Force the ``openai/responses/`` prefix onto a subscription model.
+
+    Users type (and settings files inherit) bare slugs like ``gpt-5.5``, or
+    an ``openai/`` prefix copied from the metered provider. Both are the
+    right *model* pointed at the wrong *protocol*, and the resulting 404 says
+    nothing useful — so normalise instead of failing, exactly as the
+    ``ollama/`` → ``ollama_chat/`` correction below does.
+    """
+    if model.startswith(_SUBSCRIPTION_PREFIX):
+        return model
+    bare = model
+    for prefix in ("responses/", "openai/"):
+        if bare.startswith(prefix):
+            bare = bare[len(prefix) :]
+            break
+    return f"{_SUBSCRIPTION_PREFIX}{bare}"
+
+
+def _apply_chatgpt_subscription(params: dict[str, Any], provider_id: str) -> None:
+    """Point *params* at the Codex backend with a live OAuth credential.
+
+    Mutates in place, and is a no-op for every other provider. Called last by
+    each ``get_litellm_params*`` builder so it can override the api_key and
+    api_base those functions derived from settings — under this provider both
+    are wrong by construction: there is no key to configure, and the base URL
+    is fixed by the backend rather than chosen by the user.
+    """
+    if provider_id != CHATGPT_SUBSCRIPTION_PROVIDER:
+        return
+
+    from infinidev.config import openai_oauth
+    from infinidev.config.providers import get_provider
+
+    params["model"] = _normalize_subscription_model(params.get("model", ""))
+
+    # Resolves (and refreshes) on every call. Cheap in the common case — a
+    # stat, a read and a clock comparison — and a run that outlives its token
+    # is otherwise a 401 halfway through a step.
+    creds = openai_oauth.resolve()
+    params["api_key"] = creds.access_token
+    params["api_base"] = get_provider(provider_id).default_base_url
+
+    headers = params.setdefault("extra_headers", {})
+    headers.update(openai_oauth.request_headers(account_id=creds.account_id))
+
+    # The Responses API defaults `store` to true, which would file every
+    # Infinidev turn into server-side conversation history. Off, explicitly.
+    extra_body = params.setdefault("extra_body", {})
+    extra_body.setdefault("store", False)
+
+    # GPT-5.x reasoning models reject an explicit temperature. The developer
+    # loop pins 0.2 for tool-calling stability (see get_litellm_params), which
+    # is right for local models and a 400 here.
+    params.pop("temperature", None)
+
+
+def _codex_api_base() -> str:
+    """The Codex backend's base URL, normalised for comparison.
+
+    Read from the provider registry rather than written here twice, so the
+    URL has exactly one definition.
+    """
+    from infinidev.config.providers import get_provider
+
+    base = get_provider(CHATGPT_SUBSCRIPTION_PROVIDER).default_base_url or ""
+    return base.rstrip("/").lower()
+
+
+def _is_codex_request(kwargs: dict[str, Any]) -> bool:
+    """Whether this request is bound for the Codex backend.
+
+    The api_base decides it, not the model string: ``openai/responses/`` says
+    which protocol is spoken, and every restriction repaired below belongs to
+    the *host* that is listening.
+    """
+    api_base = str(kwargs.get("api_base") or "").rstrip("/").lower()
+    if not api_base:
+        return False
+    try:
+        return api_base == _codex_api_base()
+    except Exception as exc:  # provider registry unavailable: behave as before
+        logger.debug("codex-backend check skipped: %s", exc)
+        return False
+
+
+# Parameters the Codex backend refuses. ``max_tokens`` is the one that bites:
+# LiteLLM renders it as the Responses API's ``max_output_tokens``, which this
+# backend answers with "Unsupported parameter: max_output_tokens", and nine
+# call sites in the engine set it. ``temperature`` is popped by
+# _apply_chatgpt_subscription and then put back by the planner's own
+# ``setdefault(0.1)``, so it has to be caught here too. The rest are rejected
+# by the Responses transport and cost nothing to drop.
+_CODEX_UNSUPPORTED_PARAMS = (
+    "max_tokens",
+    "max_completion_tokens",
+    "temperature",
+    "top_p",
+    "stop",
+    "presence_penalty",
+    "frequency_penalty",
+)
+
+
+def _sanitized_for_codex(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """A copy of *kwargs* without the parameters this backend rejects.
+
+    A copy, because callers reuse their kwargs dict across loop iterations
+    and a caller that finds its own settings edited underneath it is a bug
+    that surfaces far from here.
+    """
+    dropped = [k for k in _CODEX_UNSUPPORTED_PARAMS if k in kwargs]
+    if not dropped:
+        return kwargs
+    logger.debug("dropping unsupported Codex params: %s", ", ".join(dropped))
+    return {k: v for k, v in kwargs.items() if k not in _CODEX_UNSUPPORTED_PARAMS}
+
+
+def _needs_forced_streaming(kwargs: dict[str, Any]) -> bool:
+    """Whether this request goes to a backend that answers streams only.
+
+    The Codex backend rejects every non-streaming request with HTTP 400 and
+    ``{"detail":"Stream must be set to true"}``.
+
+    Five call sites ask for a whole response rather than a stream (the
+    analyst planner, both spec-elaborator passes, the council loop and the
+    work summariser), and every one of them 400s under this provider. Each
+    also inherits ``num_retries=3``, so a single such call burns four
+    requests against the user's plan before the error surfaces.
+    """
+    if kwargs.get("stream"):
+        return False
+    return _is_codex_request(kwargs)
+
+
+def _completion_via_forced_stream(
+    original: Any, args: tuple, kwargs: dict[str, Any]
+) -> Any:
+    """Request the stream the backend insists on, return the whole response.
+
+    ``stream_chunk_builder`` reassembles the chunks into the same
+    ``ModelResponse`` a non-streaming call produces, tool calls and usage
+    included, so the caller never learns that its request was rewritten.
+    """
+    import litellm
+
+    stream_kwargs = dict(kwargs)
+    stream_kwargs["stream"] = True
+    chunks = list(original(*args, **stream_kwargs))
+
+    rebuilt = litellm.stream_chunk_builder(chunks, messages=kwargs.get("messages"))
+    if rebuilt is None:
+        raise RuntimeError(
+            f"The Codex backend streamed {len(chunks)} chunks that rebuilt "
+            "into no response. Retry, or set LLM_PROVIDER to a metered "
+            "provider for this run."
+        )
+    return rebuilt
 
 
 def _get_model_size_b(model: str | None = None) -> int:
@@ -197,19 +397,42 @@ def _is_small_model(model: str | None = None) -> bool:
 
     Detection order:
       1. Explicit size suffix in the name (e.g. "qwen3:9b" → 9 < 40 → True).
-      2. Substring match against ``_SMALL_MODEL_NAME_HINTS`` for known
+      2. A model the Codex catalog publishes is hosted, whatever its name
+         suggests. ``gpt-5.4-mini`` matched the generic ``-mini`` marker and
+         was forced to "low" reasoning plus the trimmed small-model toolset,
+         even though the catalog states it accepts low, medium, high and
+         xhigh. A published capability outranks a substring guess.
+      3. Substring match against ``_SMALL_MODEL_NAME_HINTS`` for known
          local/open-weight families that don't carry a size in their tag
          (e.g. ``glm-4.7-flash:latest`` — previously classified as large).
-      3. Default False (treat unknown as large; safer for hosted big models).
+      4. Default False (treat unknown as large; safer for hosted big models).
     """
     name = (model or settings.LLM_MODEL or "").lower()
     size = _get_model_size_b(name)
     if 0 < size < 40:
         return True
+    if _has_published_reasoning_levels(name):
+        return False
     for hint in _SMALL_MODEL_NAME_HINTS:
         if hint in name:
             return True
     return False
+
+
+def _has_published_reasoning_levels(name: str) -> bool:
+    """Whether the Codex catalog names this model and its reasoning levels.
+
+    Read from the catalog rather than from ``settings.LLM_PROVIDER`` so the
+    answer is about the model in hand — the review extractor and the council
+    can each point at a different one within a single run.
+    """
+    try:
+        from infinidev.config.codex_catalog import reasoning_levels
+
+        return bool(reasoning_levels(name.rsplit("/", 1)[-1]))
+    except Exception as exc:  # catalog unreadable: fall through to the hints
+        logger.debug("catalog check skipped for %s: %s", name, exc)
+        return False
 
 
 def get_litellm_params_for_review_extractor() -> dict[str, Any]:
@@ -276,6 +499,8 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
         "X-Client-Version": _version,
     }
 
+    _apply_chatgpt_subscription(params, provider_id)
+
     return params
 
 
@@ -341,6 +566,8 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
         "X-Client-Version": _version,
     }
 
+    _apply_chatgpt_subscription(params, provider_id)
+
     return params
 
 
@@ -402,6 +629,8 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
         "X-Client-Name": "infinidev-assistant",
         "X-Client-Version": _version,
     }
+
+    _apply_chatgpt_subscription(params, provider_id)
 
     return params
 
@@ -496,5 +725,7 @@ def get_litellm_params() -> dict[str, Any]:
     if settings.LLM_PROVIDER == "minimax":
         extra = params.setdefault("extra_body", {})
         extra.setdefault("reasoning_split", True)
+
+    _apply_chatgpt_subscription(params, settings.LLM_PROVIDER)
 
     return params

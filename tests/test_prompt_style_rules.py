@@ -74,7 +74,22 @@ HEDGE = re.compile(
     r"|try to|ideally|generally|typically|usually|sometimes|tends to)\b",
     re.I,
 )
-ARROW = re.compile(r"→|=>")
+ARROW = re.compile(r"→|=>|->")
+
+# Words that hand the model a decision and withhold the criterion to decide
+# it. Distinct from a hedge: a hedge gives permission to skip the
+# instruction, while one of these leaves the instruction standing and makes
+# the model invent the threshold. "Run the relevant test" reads as guidance
+# and specifies nothing — relevant to what? The fix is never a synonym; it is
+# the criterion the word stood in for ("the test covering the file you
+# edited").
+UNKNOWN = re.compile(
+    r"\b(?:appropriate(?:ly)?|relevant|as needed|as required|if necessary"
+    r"|suitable|adequate(?:ly)?|reasonable|sufficient|meaningful|various"
+    r"|where applicable|as applicable|and so on|etc\.|and more"
+    r"|proper(?:ly)?|enough information|non-trivial|significant)\b",
+    re.I,
+)
 
 # Files whose prompt text legitimately carries these words, each with the
 # reason. A new entry has to be argued for rather than slipped in.
@@ -94,6 +109,36 @@ HEDGE_ALLOWED_SUBSTRINGS = (
     "what the code should do",    # describing what a test states
     "I should now read",          # quoting filler the model must not emit
 )
+
+# ASCII "->" is banned for the same reason as the glyph, with two files where
+# it is not an arrow at all: a return-type annotation inside a quoted code
+# example, and the pseudo-code DSL that already earns a HEDGE exemption.
+ARROW_EXEMPT = {
+    "phases/investigate.py",
+    "variants/coding.py",
+}
+
+# Declared debt, not approval. Every file here carried unknown-word text when
+# the rule was introduced; the list exists so the rule can guard NEW writing
+# immediately instead of waiting for a sweep of the old. Removing an entry is
+# the fix. Adding one needs an argument.
+UNKNOWN_BASELINE = {
+    "chat_agent/system.py",
+    "flows/develop.py",
+    "flows/document.py",
+    "init_project.py",
+    "phases/execute.py",
+    "phases/investigate.py",
+    "phases/questions.py",
+    "reviewer/extractor_system.py",
+    "reviewer/judge_system.py",
+    "reviewer/system.py",
+    "tech/typescript.py",
+    "tool_hints.py",
+    "variants/coding.py",
+    "variants/extra_simple.py",
+    "variants/generalized.py",
+}
 
 
 # ── Deriving the surface ──────────────────────────────────────────────────
@@ -273,6 +318,8 @@ def test_no_hedging_in_prompt_text(path: pathlib.Path) -> None:
 
 @pytest.mark.parametrize("path", _prompt_files(), ids=_rel)
 def test_no_arrow_glyphs_in_prompt_text(path: pathlib.Path) -> None:
+    if _rel(path) in ARROW_EXEMPT:
+        pytest.skip(f"{_rel(path)} is exempt — see ARROW_EXEMPT")
     offenders = [
         line.strip()
         for text in _prompt_strings(path)
@@ -282,6 +329,87 @@ def test_no_arrow_glyphs_in_prompt_text(path: pathlib.Path) -> None:
     assert not offenders, (
         'Arrows read worse than the word does. Write "then", "Output:" or '
         '"INSTEAD:":\n  ' + "\n  ".join(offenders)
+    )
+
+
+@pytest.mark.parametrize("path", _prompt_files(), ids=_rel)
+def test_no_unknown_implying_words_in_prompt_text(path: pathlib.Path) -> None:
+    """A word that names no criterion makes the model invent one."""
+    if _rel(path) in UNKNOWN_BASELINE:
+        pytest.skip(f"{_rel(path)} is declared debt — see UNKNOWN_BASELINE")
+    offenders = [
+        line.strip()
+        for text in _prompt_strings(path)
+        for line in text.splitlines()
+        if UNKNOWN.search(line)
+    ]
+    assert not offenders, (
+        "These words hand the model a decision without the criterion to "
+        "decide it. Replace each with what it stood in for:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+# ── The same rules, where nobody was looking ──────────────────────────────
+#
+# A tool's ``description=`` strings are serialised into the function-call
+# schema and reach the model in the SAME request as the system prompt — often
+# with more weight, since they sit beside the parameter it is about to fill.
+# Scanning only ``prompts/`` left that surface unguarded, and it is where a
+# live "Prefer a DETERMINISTIC kind" survived every pass of this file.
+
+
+def _schema_strings(tool: object) -> list[str]:
+    """Every description string in the schema this tool sends to the model."""
+    from infinidev.engine.schema_sanitizer import tool_to_openai_schema
+
+    out: list[str] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "description" and isinstance(value, str):
+                    out.append(value)
+                elif isinstance(value, (dict, list)):
+                    walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    try:
+        walk(tool_to_openai_schema(tool))
+    except Exception:  # pragma: no cover - a tool that cannot serialise
+        return []
+    return out
+
+
+def _every_bound_tool() -> list:
+    from infinidev.tools import get_tools_for_role
+
+    seen: set[str] = set()
+    tools = []
+    for role in ("developer", "chat_agent", "planner"):
+        for tool in get_tools_for_role(role):
+            if tool.name not in seen:
+                seen.add(tool.name)
+                tools.append(tool)
+    return tools
+
+
+def test_tool_schemas_follow_the_same_rules() -> None:
+    offenders: list[str] = []
+    for tool in _every_bound_tool():
+        for text in _schema_strings(tool):
+            for line in text.splitlines():
+                for label, rx in (("hedge", HEDGE), ("arrow", ARROW),
+                                  ("unknown", UNKNOWN)):
+                    if rx.search(line) and not any(
+                        s in line for s in HEDGE_ALLOWED_SUBSTRINGS
+                    ):
+                        offenders.append(f"[{tool.name}/{label}] {line.strip()}")
+    assert not offenders, (
+        "Tool descriptions reach the model in the same request as the system "
+        "prompt:\n  " + "\n  ".join(offenders)
     )
 
 

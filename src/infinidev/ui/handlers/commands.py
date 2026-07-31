@@ -75,6 +75,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "\n"
         "COMMANDS\n"
         "  /models [list|set|manage]    Show or change the model\n"
+        "  /effort [level]              Reasoning depth this model accepts\n"
         "  /settings [key] [value]      Show or change settings\n"
         "  /mcp [restart <name>]        Index server health (Ken and others)\n"
         "  /plan <task>                 Plan, review, then execute\n"
@@ -97,6 +98,10 @@ def _cmd_settings(app: InfinidevApp, parts: list[str]) -> None:
 
 def _cmd_models(app: InfinidevApp, parts: list[str]) -> None:
     handle_models(app, parts)
+
+
+def _cmd_effort(app: InfinidevApp, parts: list[str]) -> None:
+    handle_effort(app, parts)
 
 
 def _cmd_findings(app: InfinidevApp, parts: list[str]) -> None:
@@ -368,6 +373,7 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/help": _cmd_help,
     "/settings": _cmd_settings,
     "/models": _cmd_models,
+    "/effort": _cmd_effort,
     "/debug": _cmd_debug,
     "/notes": _cmd_notes,
     "/findings": _cmd_findings,
@@ -440,6 +446,101 @@ def handle_settings(app: InfinidevApp, parts: list[str]) -> None:
 
 
 # ── Models subcommand handler ───────────────────────────────────────────
+
+
+def _effort_choices() -> tuple[list[str], bool]:
+    """The reasoning levels worth offering, and whether they came from a model.
+
+    On the ChatGPT subscription the levels are per-model and published by the
+    Codex catalog, so a frontier model offers ``max`` and ``ultra`` while a
+    smaller one stops at ``xhigh``. Offering a level the model does not have
+    earns a 400 the user cannot predict, so the catalog decides. Every other
+    provider gets the generic presets, which is what THINKING_BUDGET has
+    always meant there.
+    """
+    from infinidev.config.llm import CHATGPT_SUBSCRIPTION_PROVIDER
+    from infinidev.config.settings import settings
+    from infinidev.config.thinking_budget import subscription_efforts
+
+    if settings.LLM_PROVIDER == CHATGPT_SUBSCRIPTION_PROVIDER:
+        levels = subscription_efforts()
+        if levels:
+            return levels, True
+    return ["low", "medium", "high", "ultra"], False
+
+
+def _effort_in_effect() -> str:
+    """What the next request will actually carry, described in one line.
+
+    Built by running the real ``apply_thinking_budget`` over an empty kwargs
+    dict rather than by re-deriving it here. A description that can disagree
+    with the code is worse than no description.
+    """
+    from infinidev.config.settings import settings
+    from infinidev.config.thinking_budget import apply_thinking_budget
+
+    probe: dict[str, Any] = {}
+    try:
+        apply_thinking_budget(probe, settings.LLM_PROVIDER, settings.LLM_MODEL)
+    except Exception as exc:
+        return f"could not resolve ({exc})"
+
+    if "reasoning_effort" in probe:
+        return f"reasoning_effort={probe['reasoning_effort']}"
+    if "thinking" in probe:
+        return f"thinking={probe['thinking']}"
+    if "max_tokens" in probe:
+        return f"max_tokens={probe['max_tokens']}"
+    return "no thinking parameter sent"
+
+
+def handle_effort(app: InfinidevApp, parts: list[str]) -> None:
+    """Show or set the reasoning effort, bounded by what the model accepts.
+
+    Usage: ``/effort`` · ``/effort high`` · ``/effort max``
+    """
+    from infinidev.config.settings import settings, reload_all
+
+    choices, from_catalog = _effort_choices()
+    current = (settings.THINKING_BUDGET or "").lower().strip()
+
+    if len(parts) == 1:
+        source = (
+            f"published by {settings.LLM_MODEL}"
+            if from_catalog
+            else "generic presets for this provider"
+        )
+        listed = "\n".join(
+            f"  {'>' if level == current else ' '} {level}" for level in choices
+        )
+        extra = "" if current in choices else f"\n  (current: {current})"
+        app.add_message(
+            "System",
+            f"Reasoning effort — {source}\n{listed}{extra}\n\n"
+            f"In effect now: {_effort_in_effect()}\n"
+            f"Change it with /effort <level>",
+            "system",
+        )
+        return
+
+    wanted = parts[1].lower().strip()
+    if wanted not in choices:
+        app.add_message(
+            "System",
+            f"'{wanted}' is not available for {settings.LLM_MODEL}.\n"
+            f"Choose one of: {', '.join(choices)}",
+            "system",
+        )
+        return
+
+    settings.save_user_settings({"THINKING_BUDGET": wanted})
+    reload_all()
+    app.add_message(
+        "System",
+        f"Reasoning effort set to {wanted}. In effect: {_effort_in_effect()}",
+        "system",
+    )
+    app._update_status_bar()
 
 
 def handle_models(app: InfinidevApp, parts: list[str]) -> None:

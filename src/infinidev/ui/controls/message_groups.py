@@ -42,7 +42,12 @@ NEVER_GROUP_TYPES: frozenset[str] = frozenset({
 # Types that group but render with a dedicated compact-collapsible path
 # (NOT the generic "header + last message" group rendering). The chat
 # renderer special-cases these.
-COMPACT_GROUP_TYPES: frozenset[str] = frozenset({"tool_call"})
+#
+# ``critic`` joins ``tool_call`` here for the same reason: it is frequent,
+# advisory machine output. It differs in one way — a *single* verdict also
+# takes the compact path, because one critic paragraph is as interruptive
+# as three, whereas one tool call is worth showing outright.
+COMPACT_GROUP_TYPES: frozenset[str] = frozenset({"tool_call", "critic"})
 
 
 def identify_groups(messages: list[dict[str, Any]]) -> list[MessageGroup]:

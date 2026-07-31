@@ -33,6 +33,12 @@ _PRESET_TOKENS: dict[str, int] = {
     "low": 1024,
     "medium": 4096,
     "high": 16384,
+    # Reasoning tiers the Codex catalog publishes above "high". A user who
+    # picks one on a subscription model and later switches provider gets the
+    # deepest budget that provider understands rather than a silent drop to
+    # "medium", which is where an unmapped preset used to land.
+    "xhigh": 32768,
+    "max": 65536,
     "ultra": 0,  # 0 = no limit
 }
 
@@ -41,8 +47,17 @@ _OPENAI_EFFORT: dict[str, str] = {
     "low": "low",
     "medium": "medium",
     "high": "high",
-    "ultra": "high",  # o-series has no "unlimited"
+    "xhigh": "high",  # o-series tops out at high
+    "max": "high",
+    "ultra": "high",
 }
+
+# Reasoning depth, shallowest first. The Codex catalog names these per model;
+# the order is what turns "give me the deepest this model has" into a pick.
+_EFFORT_ORDER: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+# Presets that mean "as deep as this model goes" rather than a fixed budget.
+_UNCAPPED_PRESETS = frozenset({"ultra", "max"})
 
 
 def _resolve_tokens() -> int:
@@ -77,6 +92,79 @@ def _budget_with_headroom(tokens: int, ctx: int) -> int:
     if ctx and ctx > 0:
         return min(raw, max(1024, int(ctx * 0.75)))
     return raw
+
+
+def _subscription_provider() -> str:
+    """The ChatGPT-subscription provider id (imported lazily: config.llm
+    imports settings, which this module also imports)."""
+    from infinidev.config.llm import CHATGPT_SUBSCRIPTION_PROVIDER
+
+    return CHATGPT_SUBSCRIPTION_PROVIDER
+
+
+def subscription_efforts(model: str | None = None) -> list[str]:
+    """Reasoning levels *this* model publishes, shallowest first.
+
+    Empty when there is no catalog to read. Exposed because the ``/effort``
+    command offers exactly these, and offering a level the model does not
+    have is a 400 the user has no way to predict.
+    """
+    from infinidev.config.codex_catalog import reasoning_levels
+
+    slug = (model or settings.LLM_MODEL or "").rsplit("/", 1)[-1]
+    supported = set(reasoning_levels(slug))
+    return [level for level in _EFFORT_ORDER if level in supported]
+
+
+def _subscription_effort(model: str, preset: str, tokens: int) -> str:
+    """Map a thinking preset onto a reasoning effort the model accepts.
+
+    The catalog is consulted rather than assumed: sending an effort a model
+    does not list is a 400, and the levels are per-model.  With no catalog on
+    disk the mapping falls back to the o-series keywords, which every GPT-5.x
+    model accepts.
+
+    Two behaviours worth knowing, both learned from the backend:
+
+    A preset that IS one of the model's own levels is passed through
+    untouched, which is what lets ``/effort max`` mean ``max`` instead of
+    being rounded to the nearest generic tier.
+
+    ``ultra`` means "the deepest this model offers" and resolves against the
+    catalog rather than to a fixed keyword.  It used to hardcode ``xhigh``,
+    and that is precisely the level LiteLLM refuses on ``gpt-5.6-*``: its
+    version check recognises "gpt-5.4+" but not the named 5.6 variants, so
+    the request died before reaching a backend that would have accepted
+    ``max`` and ``ultra`` happily.
+    """
+    from infinidev.config.codex_catalog import reasoning_levels
+
+    supported = reasoning_levels(model.rsplit("/", 1)[-1])
+
+    # The user named a level this model publishes. Nothing to translate.
+    if preset in supported:
+        return preset
+
+    effort = _OPENAI_EFFORT.get(preset, "medium")
+    if preset == "custom":
+        if tokens <= 1024:
+            effort = "low"
+        elif tokens <= 8192:
+            effort = "medium"
+        else:
+            effort = "high"
+
+    if not supported:
+        return effort
+
+    if preset in _UNCAPPED_PRESETS:
+        deepest = [level for level in _EFFORT_ORDER if level in supported]
+        if deepest:
+            return deepest[-1]
+
+    if effort not in supported:
+        return "medium" if "medium" in supported else supported[0]
+    return effort
 
 
 def _is_openai_reasoning_model(model: str) -> bool:
@@ -122,6 +210,15 @@ def apply_thinking_budget(
             kwargs.pop("thinking", None)
         else:
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": max(1024, tokens)}
+        return
+
+    # ── ChatGPT subscription (Codex) ─────────────────────────────
+    # Every model the subscription serves is a GPT-5.x reasoning model, so
+    # there is nothing to sniff for — but the levels differ per model, and
+    # the catalog says which. That is what lets "ultra" reach xhigh where the
+    # model has it instead of being flattened to high like the o-series.
+    if provider_id == _subscription_provider():
+        kwargs["reasoning_effort"] = _subscription_effort(model, preset, tokens)
         return
 
     # ── OpenAI (o-series reasoning models) ───────────────────────
@@ -230,7 +327,11 @@ def _disable_thinking(
         kwargs.pop("thinking", None)
         return
 
-    # OpenAI o-series: set reasoning_effort to low (closest to "off")
+    # OpenAI o-series and the ChatGPT subscription: reasoning cannot be turned
+    # off on these models, so "low" is as close to off as the API goes.
+    if provider_id == _subscription_provider():
+        kwargs["reasoning_effort"] = "low"
+        return
     if provider_id == "openai" and _is_openai_reasoning_model(model):
         kwargs["reasoning_effort"] = "low"
         return

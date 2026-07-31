@@ -51,6 +51,13 @@ SENDER_COLORS = {
     "system": "#7a7a7a",
 }
 
+# ── Critic verdict colors ───────────────────────────────────────────────
+# Muted on purpose — see the NAME_COLORS entries below. A reject keeps
+# enough red to be scannable; a recommendation reads as grey prose.
+CRITIC_REJECT = "#b06070"
+CRITIC_RECOMMEND = "#7f8694"
+CRITIC_INFO = "#6d7f88"
+
 NAME_COLORS = {
     "Tool": "#9b8ec4",
     "Step": "#5e9bcf",
@@ -58,11 +65,14 @@ NAME_COLORS = {
     "Verifier": "#5ab87a",
     "Shell": "#a0a0a0",
     "System": "#888888",
-    # Pair-programming critic verdicts — one color per severity so
-    # the user can scan and spot rejects/recs at a glance.
-    "Assistant · REJECT": "#ff5577",
-    "Assistant · RECOMMEND": "#ffaa44",
-    "Assistant · INFO": "#5ab8d4",
+    # Pair-programming critic verdicts. Deliberately quiet: the critic
+    # speaks on most steps, and at the old saturations (#ffaa44 amber for
+    # every recommendation) it out-shouted the assistant's actual reply.
+    # Severity is still distinguishable — a reject stays red enough to
+    # catch the eye — but advisory output no longer competes with content.
+    "Assistant · REJECT": CRITIC_REJECT,
+    "Assistant · RECOMMEND": CRITIC_RECOMMEND,
+    "Assistant · INFO": CRITIC_INFO,
 }
 
 # ── Diff colors ─────────────────────────────────────────────────────────

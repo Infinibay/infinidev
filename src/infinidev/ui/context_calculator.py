@@ -13,24 +13,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _estimate_tokens(text: str, model: str) -> int:
-    """Estimate tokens for *text* using the model's tokenizer when known.
-
-    litellm.token_counter picks the right tokenizer for known models and
-    falls back to a sensible default otherwise — far better than the old
-    chars/4 heuristic.  If anything goes wrong (unknown model, import error),
-    fall back to ~4 chars per token so the bar still moves.
-    """
-    if not text:
-        return 0
-    try:
-        import litellm
-
-        return int(litellm.token_counter(model=model or "gpt-3.5-turbo", text=text))
-    except Exception:
-        return len(text) // 4
-
-
 class ContextWindowCalculator:
     """Calculates and tracks context window usage.
 
@@ -48,35 +30,49 @@ class ContextWindowCalculator:
         self._task_prompt_tokens: int = 0
         self._warned_over_budget: bool = False
 
-    async def update_model_context(self) -> None:
-        """Resolve the model's *effective* context window.
+    def resolve_model_context(self) -> None:
+        """Resolve the model's *effective* context window, blocking.
 
         Delegates to :func:`get_model_context_window`, the single source of
         truth shared with the LoopEngine.  For Ollama that is the real ceiling
         (``num_ctx``, capped by the trained length) — NOT the trained length,
         which the server ignores and truncates past.  Sets ``self.max_context``
         to ``None`` when unknown; the TUI renders ``None`` as ``?``.
-        """
-        import asyncio
 
+        Synchronous on purpose. The TUI resolves this during startup, which
+        already runs inside prompt_toolkit's event loop, and the async version
+        below used to be reached through ``asyncio.run`` — which raises inside
+        a running loop. The raise was swallowed, so every model displayed ``?``
+        no matter what the catalog said.
+        """
         from infinidev.config.llm import get_litellm_params
         from infinidev.config.settings import settings
-        from infinidev.engine.loop.model_context import get_model_context_window
+        from infinidev.engine.loop.model_context import (
+            _bare_model,
+            get_model_context_window,
+        )
 
-        llm_params = get_litellm_params()
+        # Building params can fail on a credential problem — the ChatGPT
+        # subscription raises when its OAuth login is missing or expired.
+        # That is a real error, but it belongs to the first LLM call, where
+        # the message reaches the user; here it would only blank the status
+        # line, so fall back to the configured name and an unknown window.
+        try:
+            llm_params = get_litellm_params()
+        except Exception as exc:
+            logger.info("Context window unresolved (%s); showing '?'", exc)
+            self.model_name = _bare_model(settings.LLM_MODEL or "")
+            self.max_context = None
+            return
+
         model = llm_params.get("model", settings.LLM_MODEL)
         provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
 
-        # Strip provider prefixes to get bare model name for display.
-        self.model_name = model.split("/", 1)[1] if "/" in model else model
-
-        # The resolver may do a blocking HTTP call to Ollama on first lookup
-        # (memoized thereafter); keep it off the event loop thread.
-        self.max_context = await asyncio.to_thread(
-            get_model_context_window,
-            llm_params,
-            provider_id,
-        )
+        # Strip provider prefixes to get bare model name for display. Shared
+        # with the context lookup so the status line cannot name one model
+        # while sizing another (`openai/responses/gpt-5.5` → `gpt-5.5`).
+        self.model_name = _bare_model(model)
+        self.max_context = get_model_context_window(llm_params, provider_id)
 
         if self.max_context:
             logger.info(
@@ -87,18 +83,24 @@ class ContextWindowCalculator:
                 f"Model {self.model_name}: context window unknown, will display as '?'"
             )
 
-    def update_chat(
-        self, user_input: str, session_summaries: list[str] | None = None
-    ) -> None:
-        """Estimate chat context tokens from user input + session history.
+    async def update_model_context(self) -> None:
+        """Async wrapper: the lookup may block on an HTTP call to Ollama."""
+        import asyncio
 
-        Uses the model's tokenizer via litellm when available, falling back to
-        ~4 chars per token.
+        await asyncio.to_thread(self.resolve_model_context)
+
+    def update_chat(self, prompt_tokens: int = 0) -> None:
+        """Record the chat agent's real prompt size from its last LLM call.
+
+        This used to estimate from the user's message plus the session
+        summaries, which measured the one part of the prompt that is
+        negligible. The system prompt alone is ~4 400 tokens before a single
+        tool schema or tool result — a turn that reported 108 was carrying
+        tens of thousands. Only ``usage.prompt_tokens`` off the response knows
+        the real number, so that is the only thing this accepts.
         """
-        text = user_input
-        if session_summaries:
-            text += "\n".join(session_summaries)
-        self._last_prompt_tokens = _estimate_tokens(text, self.model_name)
+        if prompt_tokens > 0:
+            self._last_prompt_tokens = prompt_tokens
 
     def update_task(self, task_prompt_tokens: int = 0) -> None:
         """Update task context with the exact prompt_tokens from the last LLM call."""
@@ -119,6 +121,16 @@ class ContextWindowCalculator:
                     task_prompt_tokens,
                     self.max_context,
                 )
+
+    def start_task(self) -> None:
+        """Mark a new task boundary.
+
+        The developer's prompt is rebuilt from scratch each task, so its
+        context usage genuinely drops to zero here. Without this the bar would
+        keep showing the previous task's peak until the next call landed.
+        """
+        self._task_prompt_tokens = 0
+        self._warned_over_budget = False
 
     def get_context_status(self) -> dict[str, Any]:
         """Get current context window status for the UI.
@@ -219,8 +231,14 @@ def _get_initial_model_name() -> str:
         return "ollama_chat/qwen2.5-coder:7b"
     from infinidev.config.llm import get_litellm_params
 
-    llm_params = get_litellm_params()
-    return llm_params.get("model", settings.LLM_MODEL)
+    # Runs at import time to seed the module-level calculator, so anything
+    # that can raise here takes the whole TUI down before it draws. A
+    # misconfigured provider must degrade to a name in the status line, not
+    # to an ImportError.
+    try:
+        return get_litellm_params().get("model", settings.LLM_MODEL)
+    except Exception:
+        return settings.LLM_MODEL
 
 
 calculator = ContextWindowCalculator(

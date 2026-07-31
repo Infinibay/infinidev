@@ -19,6 +19,7 @@ from infinidev.engine.analysis.plan import Plan, PlanStepSpec
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
+from infinidev.engine.token_usage import report_prompt_tokens
 from infinidev.engine.oversized_result import (
     DuplicateCallGuard,
     handle_oversized_result,
@@ -48,6 +49,7 @@ def run_planner(
     workspace_path: Optional[str] = None,
     max_exploration_calls: int = _DEFAULT_MAX_EXPLORATION_CALLS,
     max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+    hooks: Any | None = None,
 ) -> Plan:
     """Produce a Plan from the chat agent's escalation packet.
 
@@ -74,7 +76,7 @@ def run_planner(
     # them, make them visible to the planner too (it may need to decide
     # scope based on what the image actually shows). Text-only fallback
     # for non-vision models so the paths are at least mentioned.
-    _user_text = _render_handoff(escalation)
+    _user_text = _render_handoff(escalation, max_exploration_calls)
     _user_content: Any = _user_text
     if escalation.attachments:
         try:
@@ -103,6 +105,7 @@ def run_planner(
             escalation=escalation,
             max_exploration_calls=max_exploration_calls,
             max_iterations=max_iterations,
+            hooks=hooks,
         )
     except Exception as exc:
         logger.exception("Planner loop failed")
@@ -124,6 +127,7 @@ def _run_llm_loop(
     escalation: EscalationPacket,
     max_exploration_calls: int,
     max_iterations: int,
+    hooks: Any | None = None,
 ) -> Plan:
     import litellm
 
@@ -144,6 +148,10 @@ def _run_llm_loop(
         call_kwargs.setdefault("max_tokens", 3000)
 
         response = litellm.completion(**call_kwargs)
+        report_prompt_tokens(
+            hooks, response, lane="chat",
+            messages=messages, model=call_kwargs.get("model", ""),
+        )
         message = response.choices[0].message
         tool_calls = getattr(message, "tool_calls", None) or []
 
@@ -219,7 +227,10 @@ def _run_llm_loop(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _render_handoff(escalation: EscalationPacket) -> str:
+def _render_handoff(
+    escalation: EscalationPacket,
+    max_exploration_calls: int = _DEFAULT_MAX_EXPLORATION_CALLS,
+) -> str:
     lines = [
         "HANDOFF FROM CHAT AGENT",
         "",
@@ -231,7 +242,10 @@ def _render_handoff(escalation: EscalationPacket) -> str:
     ]
     if escalation.opened_files:
         lines.append("")
-        lines.append("opened_files (already read by chat agent — do NOT re-open):")
+        lines.append(
+            "opened_files (paths the chat agent judged worth opening; "
+            "their contents are NOT included here):"
+        )
         for path in escalation.opened_files:
             lines.append(f"  - {path}")
     if escalation.user_signal:
@@ -260,7 +274,7 @@ def _render_handoff(escalation: EscalationPacket) -> str:
             logger.debug("design_brief render failed; skipping", exc_info=True)
     lines.append("")
     lines.append(
-        "Your turn. Explore at most 4 files if truly needed, "
+        f"Your turn. At most {max_exploration_calls} exploration calls, "
         "then emit the plan via emit_plan."
     )
     return "\n".join(lines)
