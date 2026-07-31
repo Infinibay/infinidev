@@ -124,7 +124,7 @@ class TestAfterEditRule(BehaviorRule):
             if has_edits_this_step:
                 return [Feedback("bad",
                     "NOTE: You edited files but did not run tests this step. "
-                    "Consider running tests to verify your changes.", -1)]
+                    "Run the tests covering what you edited.", -1)]
         return []
 
 

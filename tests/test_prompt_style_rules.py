@@ -37,9 +37,14 @@ import pytest
 PROMPTS_DIR = pathlib.Path(__file__).resolve().parents[1] / "src/infinidev/prompts"
 
 # Prompt modules that live outside ``prompts/`` because the loop builds them.
+# ``behavior_rules`` is here because its Feedback strings are appended to the
+# tool result the model reads next — the same surface as a prompt, written in
+# a file nobody thinks of as one, which is where a "Consider running tests"
+# survived every pass of this file.
 LOOP_PROMPT_MODULES = [
     "infinidev.engine.loop.prompt.text",
     "infinidev.engine.guidance.library",
+    "infinidev.engine.loop.behavior_rules",
 ]
 
 # ken's published surface. The MCP bridge discovers these from ``tools/list``
@@ -108,6 +113,12 @@ HEDGE_ALLOWED_SUBSTRINGS = (
     '"It should work"',           # quoting the phrase the rule forbids
     "what the code should do",    # describing what a test states
     "I should now read",          # quoting filler the model must not emit
+)
+
+# Same idea for the unknown-word rule: a prompt that quotes a header the
+# engine emits verbatim is not the one choosing the wording.
+UNKNOWN_ALLOWED_SUBSTRINGS = (
+    "Known lessons relevant to this action",  # tool_executor.py:378, verbatim
 )
 
 # ASCII "->" is banned for the same reason as the glyph, with two files where
@@ -427,7 +438,21 @@ def test_the_loops_own_prompts_follow_the_same_rules(module: str) -> None:
         for line in text.splitlines()
         if ARROW.search(line)
     ]
+    # The unknown-word rule carries a baseline for ``prompts/`` because the
+    # tree already had offenders when it was written. These three modules had
+    # none, so they are held to it outright.
+    unknowns = [
+        line.strip()
+        for text in texts
+        for line in text.splitlines()
+        if UNKNOWN.search(line)
+        and not any(s in line for s in UNKNOWN_ALLOWED_SUBSTRINGS)
+    ]
 
     assert not bad_tools, f"{module} names missing tools: {sorted(bad_tools)}"
     assert not hedges, f"{module} hedges:\n  " + "\n  ".join(hedges)
     assert not arrows, f"{module} uses arrows:\n  " + "\n  ".join(arrows)
+    assert not unknowns, (
+        f"{module} hands the model a decision without the criterion to make "
+        f"it:\n  " + "\n  ".join(unknowns)
+    )

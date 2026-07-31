@@ -98,7 +98,8 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "     wrong first attempt is more "
             "     useful than another read — the test failure that "
             "     follows will tell you what's actually wrong.\n"
-            "  4. Run the relevant test (or static check) and let "
+            "  4. Run the test covering the file you just edited (or a "
+            "     static check on it) and let "
             "     the result drive the next iteration.\n\n"
             "NEVER do these:\n"
             "  - read_file on a file you've already opened in this task\n"
@@ -191,7 +192,7 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "cargo test, go test, rspec, and node:test.\n\n"
             "After reading the structured failures, add_note the EXACT "
             "failure mode (file:line + what was expected vs actual), THEN "
-            "open the relevant file, THEN edit. Patching blindly without "
+            "open the file named in that failure, THEN edit. Patching blindly without "
             "reading the failure is the main reason a small model loops "
             "on the same broken edit."
         ),
@@ -298,9 +299,9 @@ _LIBRARY: dict[str, GuidanceEntry] = {
             "Your last responses contained text only and no tool calls. "
             "The loop cannot make progress without tool calls. Pick the "
             "single most useful next action right now (read a file, edit "
-            "a file, run a command) and emit it as a tool call. If you "
-            "are unsure what to do, call read_file on the most relevant "
-            "file or list_directory on the workspace."
+            "a file, run a command) and emit it as a tool call. IF you do "
+            "not know which one, THEN call read_file on the file named in "
+            "your current step, or list_directory on the workspace."
         ),
         example=(
             "Wrong:\n"
