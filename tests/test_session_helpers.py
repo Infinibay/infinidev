@@ -144,6 +144,35 @@ class TestContextManagerCompact:
         assert "T_recent" in msgs[3]["content"]
         assert "[truncated" not in msgs[3]["content"]
 
+    def test_first_round_of_a_step_is_never_truncated(self):
+        """With one assistant turn there is no history yet — nothing is old.
+
+        This is the shape of every step's first tool call, and the cutoff
+        used to default to ``len(messages)``: the result was cut to 200
+        chars on the way in, before the model ever read it.
+        """
+        from infinidev.engine.loop.context_manager import ContextManager
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "u"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "t1"}]},
+            {"role": "tool", "content": "TRACEBACK" + "!" * 3000, "tool_call_id": "t1"},
+        ]
+        ContextManager.compact_for_small(msgs)
+        assert msgs[3]["content"].startswith("TRACEBACK")
+        assert "[truncated" not in msgs[3]["content"]
+        assert len(msgs[3]["content"]) > 3000
+
+    def test_no_assistant_at_all_compacts_nothing(self):
+        from infinidev.engine.loop.context_manager import ContextManager
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "u"},
+            {"role": "tool", "content": "T" * 500, "tool_call_id": "t1"},
+        ]
+        ContextManager.compact_for_small(msgs)
+        assert len(msgs[2]["content"]) == 500
+
 
 # ── _is_error_result ─────────────────────────────────────────────────────
 

@@ -73,15 +73,22 @@ class ToolRunner:
         self.append_assistant_message(ctx, classified, messages, llm_result)
 
         tool_results_text: list[str] = []
+        deferred: list[dict[str, Any]] = []
         action_tool_calls = self._run_batches(
             ctx, classified, messages, action_tool_calls, iteration,
-            guard, tracker, tool_results_text,
+            guard, tracker, tool_results_text, deferred,
         )
 
         if ctx.is_small:
             ContextManager.compact_for_small(messages)
 
         self.append_pseudo_results(ctx, classified, messages, tool_results_text)
+        # Only now is the assistant→tool block closed. Everything the model
+        # asked for has an answer — the real tools from the batches above,
+        # the pseudo-tools from the line before — so a ``user`` turn can
+        # finally follow without wedging itself between a tool call and its
+        # result. Anything appended before this point would split the block.
+        messages.extend(deferred)
         return action_tool_calls
 
     def run_pseudo_only(
@@ -191,8 +198,16 @@ class ToolRunner:
         guard: Any,
         tracker: Any,
         tool_results_text: list[str],
+        deferred: list[dict[str, Any]],
     ) -> int:
-        """Execute every batch, stopping early if the user cancels."""
+        """Execute every batch, stopping early if the user cancels.
+
+        *deferred* collects the ``user`` turns each batch produced (images,
+        the budget nudge) so the caller can write them once the whole
+        assistant→tool block is closed. Batches must not write them
+        themselves: a second batch appends its results behind the first
+        batch's ``user`` turn, and the block is split.
+        """
         hook_meta = {
             "agent_name": ctx.agent_name,
             "iteration": iteration,
@@ -232,7 +247,7 @@ class ToolRunner:
 
             action_tool_calls = self._append_results(
                 ctx, batch_results, messages, action_tool_calls, iteration,
-                is_parallel, guard, tracker, tool_results_text,
+                is_parallel, guard, tracker, tool_results_text, deferred,
                 attachments_by_tc,
             )
             ctx.state.tick_opened_files(1)
@@ -315,16 +330,23 @@ class ToolRunner:
         guard: Any,
         tracker: Any,
         tool_results_text: list[str],
+        deferred: list[dict[str, Any]],
         attachments_by_tc: dict[str, list] | None = None,
     ) -> int:
         """Write one batch's results into the conversation.
 
-        Two things are deliberately deferred to the end. Image messages,
-        because some providers (Minimax among them) reject a ``user`` turn
-        wedged between an assistant's tool calls and their results, so the
+        Two things never go into *messages* here. Image messages, because
+        some providers (Minimax among them) reject a ``user`` turn wedged
+        between an assistant's tool calls and their results, so the
         assistant→tool block has to stay contiguous. And the budget nudge,
         because firing it mid-batch would interleave a warning with results
         the model has not read yet.
+
+        Both go to *deferred* instead of straight into the conversation.
+        Deferring them to the end of this batch is not enough: a write tool
+        gets a batch of its own, and pseudo-tool acks are appended after
+        every batch has run, so either one would land behind the ``user``
+        turn and split the block anyway. ``run_regular`` owns the flush.
         """
         pending_images: list[dict[str, Any]] = []
         pending_nudge: str | None = None
@@ -390,13 +412,16 @@ class ToolRunner:
 
             pending_nudge = self._budget_nudge(ctx, action_tool_calls) or pending_nudge
 
-        messages.extend(pending_images)
+        deferred.extend(pending_images)
 
         if pending_nudge is not None:
             if ctx.manual_tc:
+                # Manual mode has no tool channel: results are prose in a
+                # single ``user`` turn, so the nudge rides along with them
+                # and there is no block to split.
                 tool_results_text.append(f"\n⚠ STEP BUDGET: {pending_nudge}")
             else:
-                messages.append({"role": "user", "content": pending_nudge})
+                deferred.append({"role": "user", "content": pending_nudge})
 
         return action_tool_calls
 

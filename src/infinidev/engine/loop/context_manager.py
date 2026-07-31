@@ -60,9 +60,13 @@ class ContextManager:
         200 chars, preventing context bloat from large tool outputs.
         The system and first user message are always preserved.
         """
-        # Count assistant messages from the end to find the cutoff
+        # Count assistant messages from the end to find the cutoff.
+        # The default is "nothing is old yet": with fewer than two assistant
+        # rounds there is no history to compact, and defaulting to
+        # len(messages) instead truncated the result the model was about to
+        # read — every step's first tool call came back as a 224-char stub.
         assistant_count = 0
-        cutoff_idx = len(messages)
+        cutoff_idx = 2
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("role") == "assistant":
                 assistant_count += 1
