@@ -153,7 +153,47 @@ el unknown obliga a adivinar.** El arreglo de un unknown nunca es un sinónimo �
 es el criterio que la palabra estaba tapando ("el test que cubre el archivo que
 editaste").
 
-### 10. El ejemplo concreto va al final, completo
+### 10. Una regla de método es una ruedita, y hay que decir cómo se saca
+
+Este es el principio que ordena a los otros nueve, y el más fácil de perder de
+vista cuando uno está escribiendo reglas.
+
+Un prompt guía a un agente; no lo restringe. Las reglas de método son rueditas
+de bicicleta: existen para sostener al que todavía no puede ver si el caso
+aplica. **El agente que ve por qué la regla existe, y ve que en este caso no
+aplica, tiene que poder sacárselas.** Un prompt que no deja hacer eso convierte
+cada situación no prevista en un error forzado.
+
+Pero no todo es ruedita. Hay que separar tres clases, porque tratarlas igual
+rompe en las dos direcciones:
+
+| clase | ejemplos | se puede abandonar |
+|---|---|---|
+| **la máquina** | el turno termina en la primera llamada; el contador corta a las N; `step_complete` es lo único que cierra un paso | no: no es una regla, es física |
+| **la barra** | reportar lo que se corrió tal como salió; el producto es del usuario; no declarar hecho lo no verificado | no: valen más cuando saltearlas conviene |
+| **el método** | explorar antes de editar; tres faltas y parás; una capa antes que la otra; granularidad del paso | **sí, nombrando la razón** |
+
+El planner ya lo hace con una frase:
+
+> These shapes come from plans that worked. **Depart from one when following it
+> would produce a step nobody can verify**, and put the reason in that step's
+> `detail` so the developer inherits it.
+
+Dos consecuencias prácticas al escribir:
+
+1. **La razón de una regla de método no es decoración: es la condición de
+   salida.** Una regla sin su razón no se puede abandonar bien — el agente solo
+   puede obedecerla o violarla a ciegas. Por eso el principio 4 (consecuencia,
+   no justificación) y este son el mismo principio visto de los dos lados.
+2. **El registro imperativo se mantiene** (principio 5). La salida no se escribe
+   ablandando cada frase — eso reintroduce el hedging y devuelve la ambigüedad
+   a cada línea. Se declara **una vez**, con su condición: *desviate y nombrá
+   por qué en el resumen*. Una desviación que se puede nombrar es criterio; una
+   que no, es un error disfrazado.
+
+El default sigue siendo la ruedita: quien no puede juzgar todavía, la tiene.
+
+### 11. El ejemplo concreto va al final, completo
 
 El planner cierra con una llamada `emit_plan` entera, con valores reales, no con
 placeholders. Un ejemplo con `<tu valor acá>` obliga a inferir el formato; uno
@@ -163,19 +203,22 @@ completo se copia.
 
 ## Cómo revisar un prompt
 
-Nueve preguntas, en orden de cuánto revelan:
+Diez preguntas, en orden de cuánto revelan:
 
 1. ¿Está ordenado como el trabajo, o como un índice? *(reordená dos secciones:
    si no se rompe nada, es un índice)*
 2. ¿Cuál es la regla raíz? Si no la podés nombrar en una frase, no hay.
 3. ¿Cada regla dice qué pasa si no se cumple?
-4. ¿Los verbos cuyo sujeto es el modelo son imperativos puros?
-5. ¿Los hechos de la máquina están separados del método?
+4. **¿Se distingue la máquina, de la barra, del método? ¿Y dice el método cómo
+   se abandona?** *(si toda regla es igual de absoluta, cada caso no previsto
+   se vuelve un error forzado)*
+5. ¿Los verbos cuyo sujeto es el modelo son imperativos puros?
 6. ¿Declara que no puede ver el problema concreto y quién gana en caso de
    desacuerdo?
 7. ¿Los antipatrones tienen ejemplo, no solo prohibición?
 8. ¿Sobrevive `uv run pytest tests/test_prompt_style_rules.py`?
 9. ¿Un lector que nunca vio el sistema puede ejecutarlo sin preguntar nada?
+10. **¿Un lector que sabe más que el prompt puede seguir trabajando?**
 
 ---
 
