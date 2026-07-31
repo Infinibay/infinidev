@@ -42,6 +42,14 @@ WRITE_TOOLS = {
     "write_report", "delete_report",
     "update_documentation", "delete_documentation",
     "send_message",
+    # Plan edits are a read-modify-write on one shared LoopPlan: the
+    # auto-assigned index is computed from the current steps and consumed
+    # by apply_operations, which reassigns the list, appends and sorts it
+    # in place. Three add_step calls in one turn were dispatched to a
+    # thread pool together. The GIL makes a loss unlikely today (~0.7 ms
+    # per batch, under the 5 ms switch interval) and certain under a
+    # free-threaded build; serialising them costs nothing either way.
+    "add_step", "modify_step", "remove_step",
 }
 
 MAX_TRACK_FILE_SIZE = 1_000_000  # 1 MB — skip tracking larger files
