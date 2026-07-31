@@ -1,19 +1,19 @@
 # Infinidev
 
-A terminal-based AI programming assistant powered by local LLMs. It runs an autonomous agent loop that can read, write, and edit code, execute commands, manage git, search the web, and maintain a persistent knowledge base — all from your terminal.
+A terminal-based AI programming assistant for modern coding models. It runs an autonomous agent loop that can read, write, and edit code, execute commands, manage git, search the web, and maintain a persistent knowledge base — all from your terminal.
 
-Designed to work with open-weight models (7B-14B) running on consumer hardware via [Ollama](https://ollama.com).
+The primary target is a single configured SOTA reasoning or coding model with a long context window, including models around 1M tokens where the provider supports them. LiteLLM keeps the backend provider-agnostic; local open-weight models through [Ollama](https://ollama.com) remain a supported compatibility path.
 
 ![Infinidev TUI](public/screenshot.png)
 
 ## Features
 
-- **Plan-execute-summarize loop** — the agent breaks tasks into steps, executes them with tools, and summarizes results. No bloated context windows.
+- **Plan-execute-summarize loop** — the agent keeps context relevant through step summaries, evidence pointers, and on-demand recall instead of filling even a large window indiscriminately.
 - **Full-featured TUI** — tabbed interface with chat, file explorer, syntax-highlighted editor, sidebar with live progress, and autocomplete for commands.
 - **Live file change diffs** — collapsible widgets showing colorized unified diffs with line numbers for every file the agent modifies, updated in real time during task execution.
 - **Context window tracking** — dual progress bars showing Chat Usage (your input + session history) and Task Usage (actual prompt tokens from the LLM), with automatic budget warnings when context runs low.
 - **Settings editor** — modal settings browser with section grouping, inline editing, and save/cancel buttons. Accessible via `/settings`.
-- **Persistent knowledge base** — the agent records what it learns about your project (classes, patterns, APIs) and recalls it in future sessions. Critical for small models.
+- **Persistent knowledge base** — the agent records what it learns about your project (classes, patterns, APIs) and recalls it across steps and future sessions.
 - **Dual tool-calling modes** — auto-detects whether the LLM supports native function calling or falls back to JSON-in-text parsing.
 - **30+ built-in tools** — file operations, git, shell, web search/fetch, knowledge management with semantic dedup.
 - **Project-local state** — settings, DB, and logs live in `.infinidev/` inside your project directory.
@@ -24,7 +24,8 @@ Designed to work with open-weight models (7B-14B) running on consumer hardware v
 ## Requirements
 
 - Python 3.13+
-- [Ollama](https://ollama.com) running locally (or any LiteLLM-compatible provider)
+- A LiteLLM-compatible model provider
+- [Ollama](https://ollama.com) when using a local open-weight model
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
 ## Quickstart
@@ -35,7 +36,7 @@ git clone https://github.com/Infinibay/infinidev.git
 cd infinidev
 uv sync
 
-# Make sure Ollama is running with a model
+# Local-model option: make sure Ollama is running with a model
 ollama pull qwen3-coder:30b
 
 # Launch
@@ -216,10 +217,10 @@ src/infinidev/
 The core loop:
 1. **Plan** — LLM produces 2-3 initial steps
 2. **Execute** — one step at a time, calling tools as needed
-3. **Summarize** — LLM produces a compact summary; raw output is discarded
-4. **Repeat** — prompt is rebuilt from scratch each iteration using only summaries
+3. **Summarize and archive** — the step conclusion stays on the plan while raw tool evidence moves into searchable working memory
+4. **Repeat** — the next prompt is rebuilt from the plan, durable summaries, and recalled evidence when needed
 
-This keeps the context window small and predictable, which is critical for 7B models.
+This keeps context focused, attributable, and recoverable. A long context window provides headroom; it does not make every old tool result equally relevant.
 
 ## Knowledge Base
 

@@ -464,7 +464,12 @@ class ReviewEngine:
                 title = s.get("title") or s.get("explanation", "")
                 files = s.get("files") or []
                 files_str = f" [{', '.join(files)}]" if files else ""
-                plan_lines.append(f"{num}. {title}{files_str}")
+                # A step that was never run, or that the developer gave up on,
+                # reads identically to a finished one without this. The status
+                # has always been in the dict; all three plan blocks dropped it.
+                status = s.get("status", "")
+                status_str = f"  ({status.upper()})" if status and status != "done" else ""
+                plan_lines.append(f"{num}. {title}{files_str}{status_str}")
                 detail = s.get("explanation", "")
                 if detail and detail != title:
                     plan_lines.append(f"   → {detail[:300]}")
@@ -565,7 +570,12 @@ class ReviewEngine:
                 title = s.get("title") or s.get("explanation", "")
                 files = s.get("files") or []
                 files_str = f" [{', '.join(files)}]" if files else ""
-                plan_lines.append(f"{num}. {title}{files_str}")
+                # A step that was never run, or that the developer gave up on,
+                # reads identically to a finished one without this. The status
+                # has always been in the dict; all three plan blocks dropped it.
+                status = s.get("status", "")
+                status_str = f"  ({status.upper()})" if status and status != "done" else ""
+                plan_lines.append(f"{num}. {title}{files_str}{status_str}")
                 detail = s.get("explanation", "")
                 if detail and detail != title:
                     plan_lines.append(f"   → {detail[:300]}")
@@ -670,7 +680,12 @@ class ReviewEngine:
                 title = s.get("title") or s.get("explanation", "")
                 files = s.get("files") or []
                 files_str = f" [{', '.join(files)}]" if files else ""
-                plan_lines.append(f"{num}. {title}{files_str}")
+                # A step that was never run, or that the developer gave up on,
+                # reads identically to a finished one without this. The status
+                # has always been in the dict; all three plan blocks dropped it.
+                status = s.get("status", "")
+                status_str = f"  ({status.upper()})" if status and status != "done" else ""
+                plan_lines.append(f"{num}. {title}{files_str}{status_str}")
                 detail = s.get("explanation", "")
                 if detail and detail != title:
                     plan_lines.append(f"   → {detail[:300]}")

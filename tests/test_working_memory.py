@@ -75,7 +75,9 @@ def _step_messages() -> list[dict]:
 
 def test_step_output_is_archived_with_its_call(memory):
     stored = memory.archive_step(1, _step_messages(), summary="")
-    assert stored == 2
+    assert len(stored) == 2
+    # The titles come back so the caller can render them as recall queries.
+    assert any("read_file" in title for title in stored)
     records = memory.search("verify token", limit=5)
     titles = [record.title for record in records]
     assert any("read_file" in title and "jwt.py" in title for title in titles)
@@ -89,12 +91,12 @@ def test_trivial_tool_output_is_not_archived(memory):
         },
         {"role": "tool", "tool_call_id": "c", "content": "OK"},
     ]
-    assert memory.archive_step(1, messages, summary="") == 0
+    assert memory.archive_step(1, messages, summary="") == []
 
 
 def test_identical_output_is_stored_once(memory):
     memory.archive_step(1, _step_messages(), summary="")
-    assert memory.archive_step(2, _step_messages(), summary="") == 0
+    assert memory.archive_step(2, _step_messages(), summary="") == []
 
 
 def test_step_summary_is_archived_when_substantial(memory):
@@ -196,7 +198,7 @@ def test_archiving_never_raises_when_storage_fails(monkeypatch, memory):
     monkeypatch.setattr(
         "infinidev.engine.working_memory.execute_with_retry", boom, raising=True
     )
-    assert memory.archive_step(1, _step_messages(), summary="") == 0
+    assert memory.archive_step(1, _step_messages(), summary="") == []
     assert memory.search("anything") == []
 
 

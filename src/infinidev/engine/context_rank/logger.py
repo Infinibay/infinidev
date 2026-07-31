@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 # ── Async interaction writer ───────────────────────────────────────
 
 _QUEUE_MAXSIZE = 10_000  # cap memory; put() blocks if full
-_interaction_queue: queue.Queue[tuple | None] = queue.Queue(maxsize=_QUEUE_MAXSIZE)
+_interaction_queue: queue.Queue[tuple | threading.Event | None] = queue.Queue(
+    maxsize=_QUEUE_MAXSIZE
+)
 _writer_thread: threading.Thread | None = None
 _writer_lock = threading.Lock()
 
@@ -131,11 +133,15 @@ def flush() -> None:
         logger.warning("cr-writer thread died — restarting")
         _ensure_writer()
 
-    # 3. Wait for the writer thread to drain its queue
-    if _writer_thread is not None and _writer_thread.is_alive() and not _interaction_queue.empty():
+    # 3. Synchronize with the writer even when the queue looks empty. The
+    # writer can dequeue the final batch before committing it; checking
+    # Queue.empty() in that window makes flush return while SQLite still lacks
+    # the rows that the caller is about to read.
+    if _writer_thread is not None and _writer_thread.is_alive():
         done = threading.Event()
         _interaction_queue.put(done)
-        done.wait(timeout=5.0)
+        if not done.wait(timeout=5.0):
+            logger.warning("ContextRank writer did not flush within 5 seconds")
 
 # ── Tool → event mapping ────────────────────────────────────────────
 

@@ -16,6 +16,7 @@ from infinidev.config import settings
 from infinidev.engine.loop import work_summary as ws
 from infinidev.engine.loop.action_record import ActionRecord
 from infinidev.engine.loop.loop_state import LoopState
+from infinidev.engine.loop.plan_step import PlanStep
 
 
 class _FakeTracker:
@@ -76,6 +77,30 @@ def test_returns_none_when_nothing_happened():
     assert ws.build_work_summary(
         LoopState(), None, final_answer="hi", status="done",
     ) is None
+
+
+def test_unfinished_plan_is_preserved_without_file_changes_or_history():
+    state = LoopState()
+    state.plan.steps = [
+        PlanStep(index=1, title="Finished", status="done", user_approved=True),
+        PlanStep(
+            index=2,
+            title="Could not run integration tests",
+            status="blocked",
+            user_approved=True,
+        ),
+        PlanStep(index=3, title="Update docs", status="pending", user_approved=True),
+    ]
+
+    out = ws.build_work_summary(
+        state, None, final_answer="Stopped early.", status="blocked",
+    )
+
+    assert out is not None
+    assert "Unfinished plan steps" in out
+    assert "Could not run integration tests (blocked, approved scope)" in out
+    assert "Update docs (pending, approved scope)" in out
+    assert "Finished" not in out
 
 
 def test_disabled_returns_none(monkeypatch):

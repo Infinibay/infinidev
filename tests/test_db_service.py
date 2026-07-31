@@ -46,6 +46,35 @@ class TestExecuteWithRetry:
         assert result == 1
         assert call_count == 3
 
+    def test_retry_includes_connection_setup(self, monkeypatch):
+        """A WAL lock can happen before the callback receives a connection."""
+        from infinidev.code_intel import _db
+
+        _db._conn_cache.conn = None
+        _db._conn_cache.path = None
+        attempts = 0
+        fake_conn = MagicMock()
+
+        def _flaky_open(_path):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return fake_conn
+
+        monkeypatch.setattr(_db, "_new_connection", _flaky_open)
+        monkeypatch.setattr(_db.random, "uniform", lambda _a, _b: 0.0)
+
+        result = _db.execute_with_retry(
+            lambda _conn: "opened",
+            db_path="/tmp/retry-open.db",
+            max_retries=2,
+            base_delay=0,
+        )
+
+        assert result == "opened"
+        assert attempts == 2
+
     def test_max_retries_exceeded(self, temp_db):
         """All attempts fail raises final exception."""
         def _always_locked(conn):

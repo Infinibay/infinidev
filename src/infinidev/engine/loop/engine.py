@@ -541,8 +541,6 @@ class LoopEngine(AgentEngine):
         step_messages_start: int, iteration: int,
     ) -> None:
         """Advance plan, summarize, log, dispatch hooks after a step completes."""
-        step_result = step_mgr.auto_split(ctx, step_result)
-
         _hook_manager.dispatch(_HookContext(
             event=_HookEvent.STEP_TRANSITION,
             metadata={"step_result": step_result, "plan": ctx.state.plan, "iteration": iteration},

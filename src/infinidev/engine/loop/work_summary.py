@@ -62,7 +62,9 @@ per file (not the code).
 3. **Challenges / problems** — anything that went wrong, was tricky, was \
 worked around, or remains broken. These matter most: they stop the next \
 turn from repeating mistakes.
-4. **Other notes worth remembering** — decisions, follow-ups, things the \
+4. **Unfinished plan steps** — scope that was pending, active, blocked or \
+skipped when the run ended. Preserve it explicitly for the next turn. \
+5. **Other notes worth remembering** — decisions, follow-ups, things the \
 user should be reminded of.
 
 Aim for 120-250 words. If almost nothing happened, say so in one line."""
@@ -91,7 +93,7 @@ def build_work_summary(
 
     facts = _collect_facts(state, file_tracker)
     # Nothing changed and no meaningful work recorded — not worth a turn.
-    if not facts["files"] and not facts["steps"]:
+    if not facts["files"] and not facts["steps"] and not facts["unexecuted_steps"]:
         return None
 
     deterministic = _render_deterministic(facts, status=status)
@@ -139,7 +141,22 @@ def _collect_facts(
 
     notes = list(state.notes) if state is not None else []
 
-    return {"files": files, "steps": steps, "notes": notes}
+    unexecuted_steps: list[dict[str, Any]] = []
+    if state is not None:
+        for step in state.plan.steps:
+            if step.status != "done":
+                unexecuted_steps.append({
+                    "title": step.title,
+                    "status": step.status,
+                    "approved": step.user_approved,
+                })
+
+    return {
+        "files": files,
+        "steps": steps,
+        "notes": notes,
+        "unexecuted_steps": unexecuted_steps,
+    }
 
 
 # ── Deterministic rendering (fallback + LLM input) ──────────────────────
@@ -178,6 +195,13 @@ def _render_deterministic(facts: dict[str, Any], *, status: str) -> str:
     if challenges:
         lines.append("Challenges / problems encountered:")
         lines.extend(challenges)
+        lines.append("")
+
+    if facts["unexecuted_steps"]:
+        lines.append("Unfinished plan steps:")
+        for step in facts["unexecuted_steps"]:
+            scope = ", approved scope" if step["approved"] else ""
+            lines.append(f"- {step['title']} ({step['status']}{scope})")
         lines.append("")
 
     if facts["notes"]:

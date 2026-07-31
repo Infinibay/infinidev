@@ -426,8 +426,11 @@ out of context loses ALL progress, so this outranks finishing the plan.
 Call `add_step`, `modify_step` and `remove_step` BEFORE `step_complete`. They
 cost no tool calls and they do not close the step.
 
-- **add_step**(title, explanation?, index?) — omit index to append.
-- **modify_step**(index, title?, explanation?) — pending steps YOU added.
+- **add_step**(title, explanation?, index?, before?) — omit index to append.
+  Pass before=N to insert a prerequisite ahead of step N; step N and the ones
+  after it shift down by one.
+- **modify_step**(index, title?, explanation?, expected_output?) — any pending
+  step, including one a planner wrote.
 - **remove_step**(index) — pending steps YOU added.
 
 A step names THREE things: the file, the function or class, the change.
@@ -444,18 +447,24 @@ your summary.
 
 ## The machine
 
-These five are facts about the engine, not advice. The engine does not read
+These six are facts about the engine, not advice. The engine does not read
 this page.
 
 1. Text alone does not close a step. Only a `step_complete` call does.
 2. A `[Tool call N/threshold]` counter follows every tool result. At the
    threshold the step closes on your next call, so make it `step_complete`.
-3. A step a planner wrote is frozen: the engine refuses `modify_step` and
-   `remove_step` on it. Work around it and say so in your summary.
+3. A step a planner wrote can be reworded, not dropped. `modify_step` writes
+   its title, explanation and expected_output; `remove_step` is refused on it.
+   IF what you read makes the step wrong, THEN reword it and say what changed
+   in your summary.
 4. IF `status="continue"`, THEN the plan MUST hold at least one pending step.
    IF you just closed the last one, THEN add more or set `status="done"`.
 5. Raw tool output is archived out of your context when the step closes.
-   `recall_context` searches that archive.
+   `recall_context` searches that archive. The `[evidence, recall_context
+   these: ...]` labels in the plan are the exact queries that pull it back.
+6. `status="done"` is refused while an approved plan step is still pending.
+   Finish those approved steps, or close each one you cannot do with
+   `status="blocked"`, then set `status="done"`.
 
 The `think` tool is for reasoning you want kept: reading a traceback, choosing
 between two approaches, working out why a test failed. The user sees it, so it

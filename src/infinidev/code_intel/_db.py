@@ -11,12 +11,13 @@ compatibility with the rest of the codebase.
 """
 
 import logging
-import sqlite3
 import random
+import re
+import sqlite3
 import threading
 import time
-import re
 from typing import Any, Callable, TypeVar
+
 from infinidev.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -27,15 +28,21 @@ T = TypeVar("T")
 def _new_connection(db_path: str) -> sqlite3.Connection:
     """Open a brand-new SQLite connection with the project's pragmas."""
     conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute("PRAGMA temp_store = MEMORY")
-    conn.execute("PRAGMA mmap_size = 67108864")  # 64MB memory-mapped I/O
-    conn.execute("PRAGMA wal_autocheckpoint = 1000")  # defer checkpoints
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        # Install the busy handler before journal_mode: switching a new
+        # connection into WAL itself needs an exclusive lock.
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA temp_store = MEMORY")
+        conn.execute("PRAGMA mmap_size = 67108864")  # 64MB memory-mapped I/O
+        conn.execute("PRAGMA wal_autocheckpoint = 1000")  # defer checkpoints
+        return conn
+    except sqlite3.Error:
+        conn.close()
+        raise
 
 
 # Per-thread connection cache. SQLite connections aren't safe to share
@@ -88,56 +95,58 @@ def execute_with_retry(
     from infinidev.engine.static_analysis_timer import measure as _sa_measure
     with _sa_measure("db_write"):
         for attempt in range(max_retries):
-            conn = get_pooled_connection(db_path)
+            conn: sqlite3.Connection | None = None
             try:
+                # Opening the connection is part of the retried operation:
+                # PRAGMA journal_mode can contend before fn ever runs.
+                conn = get_pooled_connection(db_path)
                 return fn(conn)
-            except sqlite3.DatabaseError as e:
-                # DatabaseError is the parent of OperationalError AND
-                # the class raised for header corruption ("disk image
-                # is malformed", "file is not a database"). Catching
-                # the parent lets one branch handle both busy-retry
-                # and stale-cache recovery.
-                err_msg = str(e).lower()
-                if ("locked" in err_msg or "busy" in err_msg) and attempt < max_retries - 1:
-                    try:
-                        conn.rollback()
-                    except sqlite3.Error:
-                        pass
+            except sqlite3.DatabaseError as error:
+                err_msg = str(error).lower()
+                locked = "locked" in err_msg or "busy" in err_msg
+                if locked and attempt < max_retries - 1:
+                    if conn is not None:
+                        try:
+                            conn.rollback()
+                        except sqlite3.Error:
+                            pass
                     delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
                     time.sleep(delay)
                     continue
-                # Stale-cache recovery: a subprocess (e.g. an external
-                # reindex via execute_command) can mutate the DB file
-                # under our cached file handle, leaving it pointing at
-                # bytes that no longer parse as a SQLite header.
+
                 stale = (
                     "not a database" in err_msg
                     or "disk image is malformed" in err_msg
                     or "no such table" in err_msg
                 )
                 if stale and attempt < max_retries - 1:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except sqlite3.Error:
+                            pass
+                    _conn_cache.conn = None
+                    _conn_cache.path = None
+                    continue
+
+                if conn is not None:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
                     try:
                         conn.close()
                     except sqlite3.Error:
                         pass
-                    _conn_cache.conn = None
-                    _conn_cache.path = None
-                    continue
-                try:
-                    conn.rollback()
-                except sqlite3.Error:
-                    pass
-                try:
-                    conn.close()
-                except sqlite3.Error:
-                    pass
                 _conn_cache.conn = None
+                _conn_cache.path = None
                 raise
             except Exception:
-                try:
-                    conn.rollback()
-                except sqlite3.Error:
-                    pass
+                if conn is not None:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
                 raise
         raise sqlite3.OperationalError(f"Database busy after {max_retries} retries")
 

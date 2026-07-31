@@ -11,6 +11,10 @@ back for one more turn, and the order is deliberate — cheapest and most
 mechanical first, LLM-backed last, so a step that fails the note-discipline
 check never pays for a critic call:
 
+0. **Scope** — ``status="done"`` while approved steps are still pending.
+   This is the counterweight to letting the model reword an approved step: the
+   wording is its business, the scope is the user's. A list comprehension over
+   the plan, so an attempt to end the run early costs nothing to refuse.
 1. **Notes** — a small model that never called ``add_note`` is about to
    throw away everything it learned, since raw tool output does not survive
    the step boundary. Fires at most once per step: a second attempt is
@@ -63,6 +67,13 @@ _NOTE_NUDGE = (
 # missing note to be a real loss, and nagging it reads as noise.
 _MIN_CALLS_BEFORE_NOTE_GATE = 2
 
+# How many times a run may be told that ending here would abandon plan steps.
+# Bounded for the same reason the objective gate is: a model that has decided
+# it is finished twice will not be talked out of it a third time, and the run
+# is worth more finished-with-the-gap-recorded than spinning. Two, not three —
+# the first refusal is the useful one, the second catches a misread.
+_SCOPE_GATE_MAX_ATTEMPTS = 2
+
 
 def step_complete_status(step_complete_call: Any) -> str:
     """Best-effort read of the ``status`` argument, defaulting to continue."""
@@ -94,6 +105,11 @@ class StepCompleteGate:
         # index rather than a flag because steps can be added mid-run, and a
         # single flag would let step 4 inherit step 3's "already fired".
         self._hook_fired: set[int] = set()
+        # Run-level, unlike the other three: the scope gate is about the plan
+        # as a whole, not about the step being closed. Keying it per step would
+        # hand the model a fresh pair of attempts at every step it tries to end
+        # the run from.
+        self._scope_attempts = 0
 
     @staticmethod
     def _step_key(ctx: Any) -> int:
@@ -115,6 +131,7 @@ class StepCompleteGate:
         self._verify_attempts = {}
         self._note_fired = set()
         self._hook_fired = set()
+        self._scope_attempts = 0
 
     # ── the chain ────────────────────────────────────────────────────
 
@@ -128,6 +145,9 @@ class StepCompleteGate:
         reasoning: str | None,
     ) -> bool:
         """``True`` when the step must stay open for one more turn."""
+        if self._scope_open(ctx, step_complete_call, messages):
+            return True
+
         if self._notes_missing(ctx, step_complete_call, messages, action_tool_calls):
             return True
 
@@ -147,6 +167,96 @@ class StepCompleteGate:
             return True
 
         return self._user_hook_holds(ctx, step_complete_call, messages)
+
+    # ── gate 0: the user's scope ─────────────────────────────────────
+
+    def _scope_open(
+        self,
+        ctx: Any,
+        step_complete_call: Any,
+        messages: list[dict[str, Any]],
+    ) -> bool:
+        """Refuse a ``done`` that would leave approved plan steps unstarted.
+
+        The plan is the only durable statement of what the user asked for, and
+        this is what makes it safe to let the model rewrite the *wording* of an
+        approved step: it can say what a step means, it cannot decide the step
+        no longer needs doing. Ending the run is where that difference becomes
+        visible, so this is where it is checked.
+
+        Ordered first in the chain because it is a comprehension over at most a
+        handful of steps: an attempt to finish early is refused before it can
+        cost a critic call or a verification subprocess.
+
+        ``blocked`` is deliberately not caught. A step closed as blocked was
+        attempted and reported, which is the honest outcome this gate exists to
+        distinguish from a silent drop.
+        """
+        if step_complete_status(step_complete_call) != "done":
+            return False
+
+        plan = getattr(ctx.state, "plan", None)
+        if plan is None or not plan.steps:
+            return False
+
+        undischarged = plan.undischarged(
+            exclude_index=self._step_key(ctx),
+            approved_only=True,
+        )
+        if not undischarged:
+            return False
+
+        self._scope_attempts += 1
+        titles = [f"  {s.index}. {s.title}" for s in undischarged]
+
+        if self._scope_attempts > _SCOPE_GATE_MAX_ATTEMPTS:
+            # Honour the close rather than spin, but a plan step that quietly
+            # went undone is exactly what the reviewer and the next turn need
+            # to be told about. ``notes`` is the channel that survives the
+            # prompt rebuild and reaches both.
+            note = (
+                f"⚠ Run ended with {len(undischarged)} plan step(s) not "
+                "executed from the approved plan:\n"
+                + "\n".join(titles)
+            )
+            emit_log("error", note, project_id=ctx.project_id, agent_id=ctx.agent_id)
+            with best_effort("scope-gate note append failed"):
+                ctx.state.notes.append(note)
+            return False
+
+        exits = (
+            "These steps carry the scope committed to for the user. Finish "
+            "them, or close each one you cannot do with status=\"blocked\" and "
+            "say why. Rewording a step does not discharge it."
+        )
+        self._engine._overwrite_step_complete_tool_result(
+            messages,
+            step_complete_call.id,
+            (
+                f"step_complete BLOCKED — you set status=\"done\", but "
+                f"{len(undischarged)} step(s) from the plan have not been "
+                f"started:\n" + "\n".join(titles) + "\n\n" + exits + " Then set "
+                f"status=\"done\" (attempt {self._scope_attempts}/"
+                f"{_SCOPE_GATE_MAX_ATTEMPTS})."
+            ),
+        )
+        with best_effort("scope-gate loop event failed"):
+            emit_loop_event(
+                "loop_scope_gate", ctx.project_id, ctx.agent_id,
+                {
+                    "undischarged": [s.index for s in undischarged],
+                    "attempt": self._scope_attempts,
+                    "blocked": True,
+                },
+            )
+        emit_log(
+            "info",
+            f"⚠ step_complete blocked — {len(undischarged)} approved step(s) "
+            f"still pending, attempt {self._scope_attempts}/"
+            f"{_SCOPE_GATE_MAX_ATTEMPTS}",
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        )
+        return True
 
     # ── gate 1: notes ────────────────────────────────────────────────
 

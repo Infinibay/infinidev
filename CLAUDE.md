@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Infinidev is a terminal-based AI programming tool that uses an agent loop to execute tasks autonomously. It's a CLI-focused evolution of the Infinibay multi-agent system, designed to work with local open-weight LLMs (via Ollama/LiteLLM) on consumer hardware. The `research_copy/` directory contains the original web-based Infinibay prototype (backend + React frontend) and is not part of the active CLI tool.
+Infinidev is a terminal-based AI programming tool that uses an agent loop to execute tasks autonomously. It is a CLI-focused evolution of the Infinibay multi-agent system. The primary product baseline is one configured SOTA reasoning or coding model with a long context window, including roughly 1M-token models where available. LiteLLM keeps providers interchangeable, and local open-weight models via Ollama remain a supported compatibility path rather than the architectural ceiling. The `research_copy/` directory contains the original web-based Infinibay prototype (backend and React frontend) and is not part of the active CLI tool.
+
+The plan-execute-summarize cycle is a relevance and continuity mechanism, not merely a workaround for small windows: closed steps retain conclusions and searchable evidence pointers while the next iteration receives the context useful to its current objective. Do not justify a product-wide design solely by constraints of a 7B model, though capability probes and compact tool sets must continue to keep local models functional.
 
 ## Build & Run
 
@@ -350,7 +352,7 @@ when touching key bindings or startup.
 
 ### Config (`config/`)
 
-- `settings.py` — All settings use `INFINIBAY_` env var prefix. Key: `LLM_MODEL` (LiteLLM format like `ollama/qwen2.5-coder:7b`), `LLM_BASE_URL`, `SANDBOX_ENABLED`, loop limits.
+- `settings.py` — All settings use `INFINIBAY_` env var prefix. Key: `LLM_MODEL` (LiteLLM format like `ollama_chat/qwen3-coder:30b` or a configured hosted model), `LLM_BASE_URL`, `SANDBOX_ENABLED`, loop limits.
 - `llm.py` — `get_litellm_params()` builds the dict for `litellm.completion()`.
 - `model_capabilities.py` — Runtime probing of FC support, JSON mode, schema sanitization needs.
 - `openai_oauth.py`, `codex_catalog.py` — the ChatGPT-subscription provider (below).

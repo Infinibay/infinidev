@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -129,6 +130,42 @@ class TestInteractionLogger:
         # Untracked
         result = classify_tool_call("think", {"text": "hmm"})
         assert result is None
+
+    def test_flush_waits_for_a_dequeued_batch_to_commit(self, cr_db, monkeypatch):
+        """Queue.empty() is not proof that the writer has committed."""
+        from infinidev.engine.context_rank import logger as cr_logger
+
+        dequeued = threading.Event()
+        release_commit = threading.Event()
+        original_commit = cr_logger._commit_batch
+
+        def delayed_commit(batch):
+            dequeued.set()
+            assert release_commit.wait(timeout=2.0)
+            original_commit(batch)
+
+        monkeypatch.setattr(cr_logger, "_commit_batch", delayed_commit)
+        cr_logger.log_interaction(
+            "sess-race", "task-race", None, 0,
+            "file_read", "race.py", "file", 1.0,
+        )
+        assert dequeued.wait(timeout=2.0)
+
+        flushed = threading.Event()
+
+        def run_flush():
+            cr_logger.flush()
+            flushed.set()
+
+        waiter = threading.Thread(target=run_flush)
+        waiter.start()
+        assert not flushed.wait(timeout=0.05), (
+            "flush returned after dequeue but before the batch committed"
+        )
+
+        release_commit.set()
+        waiter.join(timeout=2.0)
+        assert flushed.is_set()
 
     def test_snapshot_session_scores(self, cr_db):
         from infinidev.engine.context_rank.logger import (

@@ -52,6 +52,18 @@ No separate lint/format/typecheck tool is configured. There is no `ruff`, `black
 
 Settings live in `src/infinidev/config/settings.py` (a `pydantic_settings.BaseSettings`). All env vars use the `INFINIDEV_` prefix (legacy `INFINIBAY_` aliases still exist). Project-local runtime state is created in `.infinidev/` (cwd-relative); never commit secrets, generated databases, logs, model outputs, or large finetune artifacts.
 
+## Model Target & Context Strategy
+
+The primary product target is one configured SOTA reasoning or coding model with a
+long context window, including approximately 1M tokens when the provider and model
+support it. Local open-weight models through Ollama remain supported, but they are a
+compatibility path rather than the constraint that should determine the architecture.
+
+Treat plan-execute-summarize, working memory, and recall as relevance and continuity
+mechanisms, not only as token-saving workarounds. Do not justify a product-wide design
+solely by 7B-model or small-window pressure. Keep existing capability probes and compact
+fallbacks functional so local models do not break.
+
 ## Testing Guidelines
 
 The suite uses `pytest` with `pytest-asyncio` in auto mode (`asyncio_mode = "auto"` in `pyproject.toml`). `pytest.ini_options` excludes `tests/finetune` and `tests/examples/taskqueue` from collection.

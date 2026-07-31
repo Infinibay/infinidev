@@ -57,9 +57,12 @@ introduce new errors, stop and report the pattern as blocked rather than \
 digging deeper. After writing or editing code, always run the relevant tests \
 before finishing.
 
-Use add_step to append follow-up steps you discover, and use modify_step/remove_step \
-ONLY on steps you added yourself — the approved plan steps are fixed and cannot be \
-modified or removed. Always do this BEFORE calling step_complete. After completing each step's work, \
+Use add_step to append follow-up steps you discover, or add_step(before=N) to insert \
+a prerequisite ahead of step N. Use modify_step on any pending step, including one \
+the planner wrote, when what you have read makes its title or its expected_output \
+wrong. Use remove_step ONLY on steps you added yourself: an approved step states what \
+the user asked for, so it stays on the plan even when you rewrite how it is worded. \
+Always do this BEFORE calling step_complete. After completing each step's work, \
 call step_complete with a summary (~150 tokens) and status \
 (continue/done/blocked). The final_answer field is the only thing the \
 user sees -- it must be complete and self-contained. Before setting \

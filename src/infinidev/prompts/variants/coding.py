@@ -90,8 +90,9 @@ def execute_loop(task):
 
     # ── Planning ──────────────────────────────────────────────────
     if plan_already_seeded:            # chat-agent-first path (the usual case)
-        execute(plan)                  # approved steps are fixed
-        never(recreate_or_remove_or_modify_user_approved_steps)
+        execute(plan)                  # approved steps carry the user's scope
+        modify_step(index, title, expected_output)  # reword one the run proved wrong
+        never(remove_or_recreate_user_approved_steps)
     else:                              # legacy / no-plan path
         plan = create_steps(concrete=True)   # steps grow organically as you learn
         for step in plan:

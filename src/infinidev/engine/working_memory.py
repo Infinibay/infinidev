@@ -166,33 +166,35 @@ class WorkingMemory:
         step_index: int,
         messages: list[dict[str, Any]],
         summary: str = "",
-    ) -> int:
-        """Archive a finished step's raw exchanges. Returns entries stored.
+    ) -> list[str]:
+        """Archive a finished step's raw exchanges. Returns the titles stored.
 
         Called at the exact moment the loop discards ``messages`` — every
         tool result that mattered goes to disk before the prompt is rebuilt
         without it.
+
+        The titles, not a count, because they are what a caller can *use*: each
+        one is the label a row was filed under, which makes it the query that
+        pulls that row back through ``recall_context``. The plan block renders
+        them so a closed step points at its own evidence.
         """
         if not self._ready:
-            return 0
+            return []
         records = list(self._extract(step_index, messages, summary))
-        stored = 0
-        for record in records:
-            if self._store(record):
-                stored += 1
-        if stored:
-            self._archived += stored
+        titles = [record.title for record in records if self._store(record)]
+        if titles:
+            self._archived += len(titles)
             logger.debug(
                 "archived %d entries from step %d (session %s)",
-                stored,
+                len(titles),
                 step_index,
                 self.session_id,
             )
-        return stored
+        return titles
 
     def archive_calls(
         self, step_index: int, calls: list[tuple[str, str, str]]
-    ) -> int:
+    ) -> list[str]:
         """Archive ``(name, arguments, result)`` triples caught at the source.
 
         ``archive_step`` reconstructs exchanges by pairing assistant tool
@@ -203,11 +205,12 @@ class WorkingMemory:
         supports or how aggressively its context was compacted.
 
         Deduplication happens in ``_store`` by content hash, so calling
-        this alongside ``archive_step`` stores each exchange once.
+        this alongside ``archive_step`` stores each exchange once. Returns the
+        titles stored, for the same reason ``archive_step`` does.
         """
         if not self._ready:
-            return 0
-        stored = 0
+            return []
+        titles: list[str] = []
         for name, arguments, body in calls:
             if len(body) < MIN_ARCHIVE_CHARS:
                 continue
@@ -215,12 +218,12 @@ class WorkingMemory:
                 args = json.loads(arguments) if arguments else {}
             except (json.JSONDecodeError, TypeError):
                 args = {}
+            title = _format_call(name, args if isinstance(args, dict) else {})
             if self.remember(
-                _format_call(name, args if isinstance(args, dict) else {}),
-                body, kind="tool_output", step_index=step_index,
+                title, body, kind="tool_output", step_index=step_index,
             ):
-                stored += 1
-        return stored
+                titles.append(title)
+        return titles
 
     def remember(
         self, title: str, content: str, *, kind: str = "note", step_index: int = 0

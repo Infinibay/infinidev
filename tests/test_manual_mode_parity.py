@@ -89,7 +89,9 @@ def test_archive_calls_stores_what_the_tool_returned(tmp_path):
         ("execute_command", json.dumps({"command": "pytest"}), traceback),
     ])
 
-    assert stored == 1
+    # The returned label is not decoration: it is the title the row was filed
+    # under, which is what the plan block renders so the model can recall it.
+    assert stored == ["execute_command(command=pytest)"]
     hits = memory.search("pytest failure assertion", limit=5)
     assert any("expected 3, got 4" in (h.content or "") for h in hits), (
         "in manual mode this is the only path — archive_step sees no "
@@ -99,7 +101,7 @@ def test_archive_calls_stores_what_the_tool_returned(tmp_path):
 
 def test_archive_calls_skips_results_too_short_to_be_worth_recalling(tmp_path):
     memory = WorkingMemory("session-short", db_path=str(tmp_path / "wm.db"))
-    assert memory.archive_calls(1, [("git_status", "{}", "clean")]) == 0
+    assert memory.archive_calls(1, [("git_status", "{}", "clean")]) == []
 
 
 def test_archive_calls_survives_unparseable_arguments(tmp_path):
@@ -107,7 +109,7 @@ def test_archive_calls_survives_unparseable_arguments(tmp_path):
     stored = memory.archive_calls(1, [
         ("read_file", "{not json", "x" * 200),
     ])
-    assert stored == 1, "a malformed argument string must not lose the result"
+    assert len(stored) == 1, "a malformed argument string must not lose the result"
 
 
 # ── synthetic ids ────────────────────────────────────────────────────

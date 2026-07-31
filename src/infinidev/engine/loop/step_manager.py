@@ -12,7 +12,6 @@ from infinidev.engine.engine_logging import (
     log as _log,
     log_finish as _log_finish,
     DIM as _DIM,
-    YELLOW as _YELLOW,
     RESET as _RESET,
 )
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
@@ -100,21 +99,15 @@ class StepManager:
     def __init__(self, engine: "LoopEngine") -> None:
         self._engine = engine
 
-    def auto_split(self, ctx: ExecutionContext, step_result: StepResult) -> StepResult:
-        """Prevent premature 'done' when plan steps are still pending."""
-        if step_result.status == "done" and not step_result.final_answer:
-            pending = sum(1 for s in ctx.state.plan.steps if s.status == "pending")
-            if pending > 0:
-                step_result.status = "continue"
-                _emit_log(
-                    "warning",
-                    f"{_YELLOW}⚠ Override: status='done' but {pending} steps pending → continue{_RESET}",
-                    project_id=ctx.project_id, agent_id=ctx.agent_id,
-                )
-        return step_result
-
     def advance_plan(self, ctx: ExecutionContext, step_result: StepResult) -> None:
-        """Create or update plan from step_result, activate next step."""
+        """Create or update plan from step_result, activate next step.
+
+        ``auto_split`` used to sit in front of this, turning a premature
+        ``done`` back into ``continue``. It only fired when ``final_answer``
+        was empty, so ``step_complete(status="done", final_answer="…")`` walked
+        past every pending step — the scope gate now catches both, before the
+        step closes rather than after.
+        """
         if not ctx.state.plan.steps:
             if step_result.next_steps:
                 ctx.state.plan.apply_operations(step_result.next_steps)
@@ -124,7 +117,12 @@ class StepManager:
                         s.status = "active"
                         break
         else:
-            ctx.state.plan.mark_active_done()
+            # A step the model gave up on is recorded as given up on. Filing it
+            # as ``done`` told run_report, and through it the reviewer, that the
+            # work had succeeded.
+            ctx.state.plan.mark_active(
+                "blocked" if step_result.status == "blocked" else "done"
+            )
             if step_result.next_steps:
                 ctx.state.plan.apply_operations(step_result.next_steps)
             ctx.state.plan.activate_next()
@@ -163,12 +161,17 @@ class StepManager:
     ) -> None:
         """Run summarizer, build ActionRecord, append to history, preload files."""
         step_index = ctx.state.plan.active_step.index if ctx.state.plan.active_step else iteration + 1
-        # An ``explore`` step did not advance the plan, so the newest done
-        # step is the *previous* one and would misfile this record.
+        # An ``explore`` step did not advance the plan, so the newest closed
+        # step is the *previous* one and would misfile this record. ``blocked``
+        # counts as closed here: the step is over, and its archived context is
+        # worth as much as a successful step's — more, since the next attempt
+        # needs to know what failed.
         if step_result.status != "explore":
-            done_steps = [s for s in ctx.state.plan.steps if s.status == "done"]
-            if done_steps:
-                step_index = done_steps[-1].index
+            closed = [
+                s for s in ctx.state.plan.steps if s.status in ("done", "blocked")
+            ]
+            if closed:
+                step_index = closed[-1].index
 
         _summarizer_on = (
             self._engine._summarizer_override
@@ -203,7 +206,11 @@ class StepManager:
         # The prompt is rebuilt from summaries only, so without this the
         # raw tool output would be unrecoverable; with it, the model can
         # pull any of it back via recall_context.
-        self._archive_evicted_context(ctx, step_index, messages, record.summary)
+        titles = self._archive_evicted_context(ctx, step_index, messages, record.summary)
+        # Written after archiving, not before: the evidence labels only exist
+        # once the rows do, and a label pointing at a row that failed to store
+        # would be a query returning nothing.
+        self._record_outcome(ctx, step_index, record.summary, titles)
 
         # The user's end-of-step hook, if any. Runs after the summariser so
         # it can be handed the summary the step actually produced, and its
@@ -267,40 +274,107 @@ class StepManager:
     def _archive_evicted_context(
         ctx: ExecutionContext, step_index: int,
         messages: list[dict[str, Any]], summary: str,
-    ) -> None:
+    ) -> list[str]:
         """Persist the step's raw exchanges into searchable working memory.
 
+        Returns the titles the archive filed them under. Each is a working
+        query for ``recall_context``, which is what lets the plan block point
+        back at the evidence instead of merely asserting a step happened.
+
         Best-effort by design: the archive is an aid, and a storage hiccup
-        must never fail a step that already did its work.
+        must never fail a step that already did its work — hence the empty
+        list on every failure path rather than a raise.
         """
         # Drained before the settings check on purpose: the queue is filled
         # on every tool call, so returning early without emptying it would
         # accumulate every result of the whole task in memory.
         pending, ctx.state.pending_archive = list(ctx.state.pending_archive), []
         if not _get_settings().WORKING_MEMORY_ENABLED:
-            return
+            return []
+        titles: list[str] = []
         with best_effort("working-memory archive failed"):
             from infinidev.engine.working_memory import get_working_memory
 
             memory = get_working_memory(ctx.session_id)
-            stored = memory.archive_step(step_index, messages, summary)
+            titles = memory.archive_step(step_index, messages, summary)
             # The transcript is one source; the bodies captured as the tools
             # returned them are the other. Neither is redundant: the first
             # carries the step summary, the second survives manual mode and
             # small-model compaction. Content-hash dedup keeps the overlap
             # from being stored twice.
-            stored += memory.archive_calls(step_index, pending)
-            if stored:
+            titles += memory.archive_calls(step_index, pending)
+            if titles:
                 _log(
-                    f"   {_DIM}🗄  Archived {stored} excerpt(s) "
+                    f"   {_DIM}🗄  Archived {len(titles)} excerpt(s) "
                     f"— recall with recall_context{_RESET}"
                 )
+        return titles
+
+    @staticmethod
+    def _record_outcome(
+        ctx: ExecutionContext, step_index: int, summary: str, titles: list[str],
+    ) -> None:
+        """Write what the step established, and how to get the evidence back.
+
+        Two renderings of a finished step used to sit in the prompt saying
+        almost the same thing: its line in ``<plan>`` and its collapsed line in
+        ``<previous-actions>``. This makes the first one carry something the
+        second cannot — the archive labels — so the model can go from "step 2
+        established X" to the raw tool output behind X in one call.
+
+        The step-summary record is filtered out of the evidence: recalling it
+        returns the sentence already on the line, which is the one thing the
+        model does not need to ask for.
+        """
+        step = next(
+            (s for s in ctx.state.plan.steps if s.index == step_index), None
+        )
+        if step is None:
+            return
+        if summary and not step.conclusion:
+            head = summary.strip().split(". ")[0].strip()
+            step.conclusion = (head if 0 < len(head) <= 160 else summary.strip()[:160])
+        evidence = [t for t in titles if not t.startswith("Summary of step ")]
+        if evidence and not step.evidence:
+            step.evidence = evidence[:4]
+
+    @staticmethod
+    def _record_undischarged(ctx: ExecutionContext) -> None:
+        """Note any plan step the run never reached, on every way out.
+
+        The scope gate refuses a ``done`` that would strand steps, but it only
+        sees a ``step_complete`` call. A run can also end by exhausting its
+        iterations, by tripping the loop guard, or through the idle-completion
+        branch where every remaining step is ``blocked`` and therefore not
+        pending. Recording it here — one place all of those pass through —
+        means a stranded step is visible to the reviewer and to the next turn's
+        work summary no matter which exit was taken.
+        """
+        plan = getattr(ctx.state, "plan", None)
+        if plan is None or not plan.steps:
+            return
+        stranded = plan.undischarged()
+        if not stranded:
+            return
+        approved = sum(1 for s in stranded if s.user_approved)
+        note = (
+            f"⚠ Run ended with {len(stranded)} plan step(s) not executed "
+            f"({approved} from the approved plan):\n"
+            + "\n".join(f"  {s.index}. {s.title}" for s in stranded)
+        )
+        # Only once: the gate may already have written the same finding when it
+        # ran out of attempts, and two copies in the prompt read as two facts.
+        if any(n.startswith("⚠ Run ended with") for n in ctx.state.notes):
+            return
+        with best_effort("undischarged-step note append failed"):
+            ctx.state.notes.append(note)
 
     def finish(
         self, ctx: ExecutionContext, status: str,
         iteration: int, result: str | None = None,
     ) -> str:
         """Common finish logic: deactivate tracker, log, emit events, store stats."""
+        self._record_undischarged(ctx)
         ctx.file_tracker.deactivate()
         # Retain the terminal status + state so the pipeline can build the
         # hidden end-of-task work summary after execute() returns.
