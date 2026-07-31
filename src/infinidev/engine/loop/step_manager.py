@@ -163,9 +163,12 @@ class StepManager:
     ) -> None:
         """Run summarizer, build ActionRecord, append to history, preload files."""
         step_index = ctx.state.plan.active_step.index if ctx.state.plan.active_step else iteration + 1
-        done_steps = [s for s in ctx.state.plan.steps if s.status == "done"]
-        if done_steps:
-            step_index = done_steps[-1].index
+        # An ``explore`` step did not advance the plan, so the newest done
+        # step is the *previous* one and would misfile this record.
+        if step_result.status != "explore":
+            done_steps = [s for s in ctx.state.plan.steps if s.status == "done"]
+            if done_steps:
+                step_index = done_steps[-1].index
 
         _summarizer_on = (
             self._engine._summarizer_override

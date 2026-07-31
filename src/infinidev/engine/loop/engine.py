@@ -80,6 +80,11 @@ from infinidev.engine.trace_log import (
 
 logger = logging.getLogger(__name__)
 
+# Explorations one step may request before it is made to get on with the
+# work. The step no longer advances on ``explore``, so without this the
+# model could ask for the same decomposition indefinitely.
+_MAX_EXPLORE_PER_STEP = 2
+
 
 def _seed_state_from_plan(state, plan) -> None:
     """Populate ``state.plan`` from an analyst-emitted Plan.
@@ -150,6 +155,7 @@ class LoopEngine(AgentEngine):
         self._cr_last_pivot_key: tuple[int, str] | None = None
         # Fetched on the first iteration of a run, rendered on all of them.
         self._project_knowledge: list[dict] = []
+        self._explore_attempts: dict[int, int] = {}
 
     def inject_message(self, message: str) -> None:
         """Inject a user message into the running loop (thread-safe)."""
@@ -288,6 +294,7 @@ class LoopEngine(AgentEngine):
         initial_plan: Any | None = None,
         initial_attachments: list[Any] | None = None,
         task: Any | None = None,
+        preserve_file_tracker: bool = False,
     ) -> str:
         """Plan-execute-summarize loop.
 
@@ -316,6 +323,7 @@ class LoopEngine(AgentEngine):
             nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
             task=task,
+            preserve_file_tracker=preserve_file_tracker,
         )
         # On a resumed session the engine is brand-new (lazily created in
         # the TUI) but the session_id is the SAME as yesterday's. Re-load
@@ -346,6 +354,7 @@ class LoopEngine(AgentEngine):
         consecutive_all_done = 0
         self._step_gate.reset_run()
         self._critic.reset_run()
+        self._explore_attempts: dict[int, int] = {}
 
         # Ken's session lifecycle is NOT opened here. A developer run is one
         # task inside a conversation, and /sessions/end snapshots scores and
@@ -539,7 +548,13 @@ class LoopEngine(AgentEngine):
             metadata={"step_result": step_result, "plan": ctx.state.plan, "iteration": iteration},
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         ))
-        step_mgr.advance_plan(ctx, step_result)
+        # ``explore`` asks for the step to be broken down, not finished.
+        # Advancing here marked it done before TreeEngine had even run, and
+        # nothing reactivates a step — ``apply_operations`` will not even
+        # re-add it when it is user_approved. The step stays active and the
+        # exploration's findings land on it.
+        if step_result.status != "explore":
+            step_mgr.advance_plan(ctx, step_result)
 
         with best_effort("ContextRank step activation failed"):
             _cr_active = ctx.state.plan.active_step
@@ -583,7 +598,21 @@ class LoopEngine(AgentEngine):
     ) -> str | None:
         """Check if the task should terminate. Returns result string or None."""
         if step_result.status == "explore":
+            # Now that the plan no longer advances past an explored step,
+            # nothing else stops the model from asking to explore the same
+            # step forever. The second attempt runs the exploration and
+            # then demotes the step to a normal one, so its findings are
+            # kept and the step has to be executed.
+            key = ctx.state.plan.active_step.index if ctx.state.plan.active_step else -1
+            self._explore_attempts[key] = self._explore_attempts.get(key, 0) + 1
             self._handle_explore(ctx, step_result, iteration)
+            if self._explore_attempts[key] >= _MAX_EXPLORE_PER_STEP:
+                _emit_log("warning",
+                          f"{_YELLOW}⚠ step {key} asked to explore "
+                          f"{self._explore_attempts[key]}x — continuing with "
+                          f"what the exploration found{_RESET}",
+                          project_id=ctx.project_id, agent_id=ctx.agent_id)
+                step_result.status = "continue"
             return None
 
         if step_result.status == "done":

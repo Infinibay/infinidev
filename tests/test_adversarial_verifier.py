@@ -145,7 +145,7 @@ class _FakeEngine:
     def get_file_tracker(self): return None
     def get_changed_files_summary(self): return ""
     def get_file_change_reasons(self): return {}
-    def execute(self, *, agent, task_prompt, verbose=True):
+    def execute(self, *, agent, task_prompt, verbose=True, **kwargs):
         self.execute_calls.append(task_prompt)
         return "fixed"
 

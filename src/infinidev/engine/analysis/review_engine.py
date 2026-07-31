@@ -1066,6 +1066,7 @@ def run_review_rework_loop(
                 agent=agent,
                 task_prompt=fix_prompt,
                 verbose=True,
+                preserve_file_tracker=True,
             )
             return new_result if new_result and new_result.strip() else current_result
         finally:
@@ -1202,7 +1203,10 @@ def run_review_rework_loop(
             fix_prompt = (fix_description, task_prompt[1])
             agent.activate_context(session_id=session_id)
             try:
-                new_result = engine.execute(agent=agent, task_prompt=fix_prompt, verbose=True)
+                new_result = engine.execute(
+                    agent=agent, task_prompt=fix_prompt, verbose=True,
+                    preserve_file_tracker=True,
+                )
                 if new_result and new_result.strip():
                     current_result = new_result
             finally:
@@ -1319,6 +1323,7 @@ def run_review_rework_loop(
                 agent=agent,
                 task_prompt=fix_prompt,
                 verbose=True,
+                preserve_file_tracker=True,
             )
             if not result or not result.strip():
                 result = "Done. (no additional output)"

@@ -126,7 +126,7 @@ class _FakeEngine:
     def get_file_tracker(self): return None
     def get_changed_files_summary(self): return ""
     def get_file_change_reasons(self): return {}
-    def execute(self, *, agent, task_prompt, verbose=True):
+    def execute(self, *, agent, task_prompt, verbose=True, **kwargs):
         self.execute_calls.append(task_prompt)
         # The act of "fixing" is simulated by the test mutating the workspace
         # between rounds; here we just return the next canned result.
@@ -165,7 +165,7 @@ class TestReworkLoopObjectiveReverify:
         check = StepVerification(kind="file_contains", spec="MARKER", observable="ready")
 
         class _FixingEngine(_FakeEngine):
-            def execute(self, *, agent, task_prompt, verbose=True):
+            def execute(self, *, agent, task_prompt, verbose=True, **kwargs):
                 self.execute_calls.append(task_prompt)
                 marker.write_text("ready")   # the fix
                 return "fixed"

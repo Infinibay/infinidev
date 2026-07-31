@@ -136,3 +136,33 @@ class FileChangeTracker:
         self._reasons.clear()
         self._deleted_symbols.clear()
         self._active = True
+
+    def merge_from(self, other: "FileChangeTracker") -> None:
+        """Fold an earlier run's changes into this one.
+
+        For the review's rework loop, which re-enters ``execute()`` on the
+        same engine: each entry installs a fresh tracker, so after a rework
+        pass the reviewer only saw the files that pass happened to touch.
+        A file created in the first pass and merely edited in the second
+        was reported as "modified", and a rework that wrote nothing at all
+        reported no changes — which skips review entirely and silently
+        drops the rejection that caused the rework.
+
+        The OLDEST original wins, because that is what makes a diff read
+        against the state before the turn began (and what keeps "created"
+        from decaying into "modified"). Current content, being the newest,
+        always comes from *self*.
+        """
+        for path, original in other._originals.items():
+            # *other* ran first, so its "before" is the older one and wins
+            # outright — this is what keeps a file created in the first
+            # pass from reading as merely modified after the second.
+            self._originals[path] = original
+        for path, content in other._current.items():
+            self._current.setdefault(path, content)
+        for path, count in other._change_counts.items():
+            self._change_counts[path] = self._change_counts.get(path, 0) + count
+        for path, reasons in other._reasons.items():
+            self._reasons[path] = list(reasons) + self._reasons.get(path, [])
+        for path, symbols in other._deleted_symbols.items():
+            self._deleted_symbols.setdefault(path, set()).update(symbols)

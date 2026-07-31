@@ -85,6 +85,14 @@ def build_execution_context(
     engine._summarizer_override = kwargs.get("summarizer_enabled")
 
     file_tracker = FileChangeTracker()
+    # Opt-in carry-forward, for callers that re-enter execute() inside one
+    # user turn (the review's rework loop). Never automatic: the engine is
+    # reused across turns, so an unconditional merge would report last
+    # turn's files as changed in this one.
+    if kwargs.get("preserve_file_tracker"):
+        previous = getattr(engine, "_last_file_tracker", None)
+        if previous is not None:
+            file_tracker.merge_from(previous)
     engine._last_file_tracker = file_tracker
     engine._last_total_tool_calls = 0
 
