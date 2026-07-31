@@ -26,5 +26,11 @@ class StepResult(BaseModel):
     # Post-processing metadata (set by _run_inner_loop, consumed by step_manager)
     action_tool_calls: int = 0
     behavior_tracker: Any = Field(default=None, exclude=True)
+    # Whether the model emitted ANY function call this step, pseudo-tools
+    # included. ``action_tool_calls`` counts only executed regular tools, so
+    # it measures budget, not liveness: a step closed with think +
+    # step_complete has zero of them while being perfectly well-behaved.
+    # The abort for "the model cannot produce function calls" reads this.
+    saw_tool_calls: bool = False
 
 

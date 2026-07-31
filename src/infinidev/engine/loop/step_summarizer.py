@@ -192,12 +192,26 @@ def _truncate_step_messages(messages: list[dict], max_tokens: int) -> str:
     return "\n".join(parts)
 
 
-def _synthesize_final(state: LoopState) -> str:
-    """Synthesize a final answer from accumulated history when loop exhausts iterations."""
-    if not state.history:
-        return "No actions were completed."
+_FINAL_HEADERS = {
+    "cancelled": "Task stopped by the user. Completed before stopping:",
+    "exhausted": "Task execution summary (iteration limit reached):",
+}
 
-    parts = ["Task execution summary (iteration limit reached):"]
+
+def _synthesize_final(state: LoopState, status: str = "exhausted") -> str:
+    """Build a final answer from history when no step produced one.
+
+    The header names the reason. A cancelled run reported "iteration limit
+    reached", which is not what happened and is read by the reviewer, the
+    end-of-task hooks and next turn's work summary.
+    """
+    if not state.history:
+        return (
+            "Task stopped by the user before any step completed."
+            if status == "cancelled" else "No actions were completed."
+        )
+
+    parts = [_FINAL_HEADERS.get(status, _FINAL_HEADERS["exhausted"])]
     for record in state.history:
         parts.append(f"- Step {record.step_index}: {record.summary}")
     return "\n".join(parts)

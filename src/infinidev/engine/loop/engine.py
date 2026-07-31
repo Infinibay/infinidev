@@ -204,8 +204,23 @@ class LoopEngine(AgentEngine):
         return step_complete_status(step_complete_call)
 
     def cancel(self) -> None:
-        """Signal the engine to stop after the current tool call."""
+        """Signal the engine to stop after the current tool call.
+
+        Stays set until ``begin_turn`` clears it, so every phase of the
+        turn that follows — review, rework, the end-of-task hooks — can
+        see that the user asked to stop.
+        """
         self._cancel_event.set()
+
+    def begin_turn(self) -> None:
+        """Open a new user turn: forget any cancellation from the last one.
+
+        The engine instance outlives a single ``execute()`` (the TUI keeps
+        one per session, and the review's rework loop re-enters it), so a
+        user turn is the only boundary at which "the user asked to stop"
+        stops being true.
+        """
+        self._cancel_event.clear()
 
     @property
     def is_cancelled(self) -> bool:
@@ -330,6 +345,7 @@ class LoopEngine(AgentEngine):
         llm_caller, tool_proc, guard, step_mgr = self._init_execution(ctx, task_prompt)
         consecutive_all_done = 0
         self._step_gate.reset_run()
+        self._critic.reset_run()
 
         # Ken's session lifecycle is NOT opened here. A developer run is one
         # task inside a conversation, and /sessions/end snapshots scores and
@@ -341,10 +357,7 @@ class LoopEngine(AgentEngine):
         # ``ToolRunner._report_to_ken``.
         for iteration in range(ctx.start_iteration, ctx.max_iterations):
             if self._cancel_event.is_set():
-                logger.info("LoopEngine: cancelled by user")
-                _emit_log("info", f"{_YELLOW}\u26a0 Task cancelled by user{_RESET}",
-                          project_id=ctx.project_id, agent_id=ctx.agent_id)
-                break
+                return self._finish_cancelled(ctx, step_mgr, iteration - 1)
 
             messages, step_messages_start = self._run_iteration_preamble(ctx, iteration)
 
@@ -353,8 +366,19 @@ class LoopEngine(AgentEngine):
                 step_messages_start=step_messages_start,
             )
 
-            # Track consecutive text-only iterations
-            if step_result.action_tool_calls == 0:
+            # A step interrupted mid-flight did not finish, so the plan must
+            # not advance over it and the summariser must not be paid for
+            # (a 30s LLM call, started after the user asked to stop). The
+            # step stays ``active``, which is what the reviewer and the next
+            # turn's work summary should see.
+            if self._cancel_event.is_set():
+                return self._finish_cancelled(ctx, step_mgr, iteration)
+
+            # Track consecutive text-only iterations. The question is
+            # whether the model produced function calls at all, which is
+            # not what ``action_tool_calls`` measures — a step closed with
+            # think + step_complete has zero of those and is not a stall.
+            if not step_result.saw_tool_calls:
                 guard.mark_text_only_iteration()
                 if guard.text_only_iterations >= 3:
                     _emit_log("error",
@@ -386,6 +410,22 @@ class LoopEngine(AgentEngine):
 
     # ── Extracted phases of execute() ──────────────────────────────────
 
+    def _finish_cancelled(
+        self, ctx: ExecutionContext, step_mgr: StepManager, iteration: int,
+    ) -> str:
+        """Close a run the user stopped, as its own terminal status.
+
+        ``cancelled`` is a status and not just a flag on purpose: it is what
+        ``finish`` writes to ``_last_status``, and from there the pipeline,
+        the reviewer, the ``task_end_*`` hooks and the next turn's work
+        summary all read it. Falling through to the exhausted-iterations
+        ending told every one of them the loop had run out of budget.
+        """
+        logger.info("LoopEngine: cancelled by user")
+        _emit_log("info", f"{_YELLOW}⚠ Task cancelled by user{_RESET}",
+                  project_id=ctx.project_id, agent_id=ctx.agent_id)
+        return step_mgr.finish(ctx, "cancelled", iteration)
+
     def _init_execution(
         self, ctx: ExecutionContext, task_prompt: tuple[str, str],
     ) -> tuple[LLMCaller, ToolProcessor, LoopGuard, StepManager]:
@@ -403,7 +443,12 @@ class LoopEngine(AgentEngine):
         guard = LoopGuard(is_small=ctx.is_small)
         step_mgr = StepManager(self)
 
-        self._cancel_event.clear()
+        # The cancel flag is NOT cleared here. A user turn can enter
+        # execute() more than once — the review's rework loop re-enters the
+        # same engine up to three times — and clearing it per call meant a
+        # cancelled run was resurrected by the very next phase, which then
+        # kept writing to the user's repository. Clearing belongs to the
+        # start of a turn; see ``begin_turn``.
         self._last_state = ctx.state
 
         set_loop_state(ctx.agent_id, ctx.state)
@@ -637,6 +682,7 @@ class LoopEngine(AgentEngine):
         """
         step_result: StepResult | None = None
         action_tool_calls = 0
+        saw_tool_calls = False
         is_planning = not ctx.state.plan.steps
 
         llm_caller.reset()
@@ -682,6 +728,13 @@ class LoopEngine(AgentEngine):
             result = llm_caller.call(ctx, messages, is_planning, action_tool_calls)
             _last_llm_call_end = _time.perf_counter()
 
+            # Checked here rather than only inside the regular-tool branch:
+            # a turn that asks for nothing but pseudo-tools never reached
+            # that branch, so cancelling during one was ignored until the
+            # model happened to call a real tool again.
+            if self._cancel_event.is_set():
+                break
+
             try:
                 _trace_llm_response(
                     iteration + 1,
@@ -712,6 +765,7 @@ class LoopEngine(AgentEngine):
                             "tool_name": tc_name,
                         })
                 guard.text_retries = 0
+                saw_tool_calls = True
                 classified = tool_proc.classify(result.tool_calls)
                 tool_proc.process_pseudo_tools(ctx, classified, self)
                 # Reset read-without-note counter when notes are added
@@ -750,6 +804,18 @@ class LoopEngine(AgentEngine):
                 elif classified.step_complete or classified.notes or classified.session_notes or classified.thinks :
                     # Only pseudo-tools, no regular tools
                     self._build_pseudo_only_messages(ctx, classified, messages, result)
+                    ContextManager.expire_thinking(messages)
+                    # A turn that closes the step is going somewhere; one
+                    # that only thinks is the case that can spin forever,
+                    # because nothing here spends the step's budget.
+                    if not classified.step_complete:
+                        forced = guard.handle_pseudo_only(ctx, messages)
+                        if forced:
+                            step_result = forced
+                            break
+
+                if classified.regular:
+                    guard.pseudo_only_rounds = 0
 
                 if classified.step_complete:
                     # Four things can override the model's claim that this
@@ -785,11 +851,15 @@ class LoopEngine(AgentEngine):
                 _emit_log("error", f"{_RED}⚠ Inner loop exhausted: {limit_msg}{_RESET}",
                           project_id=ctx.project_id, agent_id=ctx.agent_id)
 
-        return self._finalize_inner_loop(ctx, step_result, action_tool_calls, tracker)
+        return self._finalize_inner_loop(
+            ctx, step_result, action_tool_calls, tracker,
+            saw_tool_calls=saw_tool_calls,
+        )
 
     def _finalize_inner_loop(
         self, ctx: ExecutionContext, step_result: StepResult | None,
         action_tool_calls: int, tracker: BehaviorTracker,
+        *, saw_tool_calls: bool = False,
     ) -> StepResult:
         """Default step_result, propagate edit state, attach metadata."""
         if step_result is None:
@@ -810,6 +880,7 @@ class LoopEngine(AgentEngine):
                         existing.add(p)
 
         step_result.action_tool_calls = action_tool_calls
+        step_result.saw_tool_calls = saw_tool_calls
         step_result.behavior_tracker = tracker
         return step_result
 

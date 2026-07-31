@@ -18,6 +18,10 @@ if TYPE_CHECKING:
 
 _MAX_SAME_TOOL_CONSECUTIVE = 3
 _MAX_TEXT_RETRIES = 3  # Hard limit per inner loop — all retries are errors
+# Turns of pseudo-tools only (think / add_note, no step_complete) allowed
+# per step. Generous, because thinking then acting is legitimate; it exists
+# to bound the case where the model never gets to the acting part.
+_MAX_PSEUDO_ONLY_ROUNDS = 4
 
 
 class LoopGuard:
@@ -37,6 +41,7 @@ class LoopGuard:
         self.repetition_nudged = False
         self.reads_since_last_note = 0
         self._note_nudged = False
+        self.pseudo_only_rounds = 0
 
     def mark_text_only_iteration(self) -> None:
         """Called when an inner loop produced zero tool calls."""
@@ -149,6 +154,38 @@ class LoopGuard:
                     "Example: add_note(note='verify_token at auth.py line 42, uses JWT')"
                 ),
             })
+
+    def handle_pseudo_only(
+        self, ctx: ExecutionContext, messages: list[dict[str, Any]],
+    ) -> StepResult | None:
+        """Bound a turn that asked for nothing but ``think`` / ``add_note``.
+
+        The inner ``while`` advances on ``action_tool_calls``, which only
+        moves when a *regular* tool runs. A turn of pure pseudo-tools is
+        therefore free: it spends no budget, trips no guard, and can repeat
+        for as long as the model keeps doing it — an unbounded spin that
+        ``max_per_action`` was assumed to cover and does not.
+
+        Returns a ``StepResult`` once the allowance is spent, ``None`` to
+        keep going.
+        """
+        self.pseudo_only_rounds += 1
+        if self.pseudo_only_rounds <= _MAX_PSEUDO_ONLY_ROUNDS:
+            return None
+
+        _emit_log(
+            "warning",
+            f"{_YELLOW}⚠ {self.pseudo_only_rounds} consecutive turns without a "
+            f"real tool call — closing the step{_RESET}",
+            project_id=ctx.project_id, agent_id=ctx.agent_id,
+        )
+        return StepResult(
+            summary=(
+                "Step closed: the model kept thinking and taking notes "
+                "without calling a tool or completing the step."
+            ),
+            status="continue",
+        )
 
     def handle_text_only(
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],

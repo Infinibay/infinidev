@@ -343,5 +343,5 @@ class StepManager:
         with best_effort("ContextRank session finish failed"):
             self._engine._cr_hooks.finish()
         if result is None:
-            return _synthesize_final(ctx.state)
+            return _synthesize_final(ctx.state, status)
         return result

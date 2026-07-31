@@ -32,6 +32,12 @@ from infinidev.engine.loop.critic import AssistantCritic, CriticVerdict
 
 logger = logging.getLogger(__name__)
 
+# How many times one step may be vetoed before the critic's objection is
+# demoted to advice. Two gives the model a real chance to address the
+# objection; beyond that the disagreement is not going to resolve itself,
+# and the critic is advisory by design everywhere else.
+_MAX_REJECTS_PER_STEP = 2
+
 
 @dataclass(slots=True)
 class StepCompleteReview:
@@ -58,8 +64,27 @@ class CriticLiaison:
         # here until the next step's preamble drains them onto a fresh
         # messages list. The list they were produced against is gone.
         self.pending_messages: list[dict[str, Any]] = []
+        # Rejections spent per step index. The reject path is the one gate
+        # in the chain that used to have no bound: a critic that keeps
+        # objecting holds the step open forever, at two LLM calls a turn,
+        # and the pseudo-only turn it produces spends no budget — so
+        # nothing else stops it either. Past the cap the objection is still
+        # delivered, just as advice rather than a veto.
+        self._rejects: dict[int, int] = {}
 
     # ── lifecycle ────────────────────────────────────────────────────
+
+    def reset_run(self) -> None:
+        """Forget per-run state at the start of an execution."""
+        self._rejects = {}
+
+    @staticmethod
+    def _step_key(ctx: Any) -> int:
+        """Index of the step being judged; -1 before a plan exists."""
+        state = getattr(ctx, "state", None)
+        plan = getattr(state, "plan", None) if state is not None else None
+        active = getattr(plan, "active_step", None) if plan is not None else None
+        return getattr(active, "index", -1) if active is not None else -1
 
     def get(self, ctx: Any) -> AssistantCritic | None:
         """The critic for this run, built on first use. ``None`` if off."""
@@ -236,7 +261,20 @@ class CriticLiaison:
             return StepCompleteReview()
 
         model_tag = critic.model_short_name
+        step_key = self._step_key(ctx)
+        if verdict.action == "reject" and self._rejects.get(step_key, 0) >= _MAX_REJECTS_PER_STEP:
+            emit_log(
+                "info",
+                f"⚠ assistant critic ({model_tag}) rejected step_complete "
+                f"{_MAX_REJECTS_PER_STEP}x on step {step_key} — demoting to "
+                f"advice so the step can close",
+                project_id=ctx.project_id,
+                agent_id=ctx.agent_id,
+            )
+            verdict.action = "recommend"
+
         if verdict.action == "reject":
+            self._rejects[step_key] = self._rejects.get(step_key, 0) + 1
             overwrite_result(
                 messages,
                 step_complete_call.id,

@@ -81,9 +81,12 @@ class StepCompleteGate:
 
     def __init__(self, engine: Any) -> None:
         self._engine = engine
-        # One note nudge per step, tracked here rather than on the engine so
-        # the "fires once" rule lives next to the rule it bounds.
-        self._note_gate_fired: bool = False
+        # Step indices whose note nudge has already fired. Keyed the same
+        # way as ``_hook_fired`` and for the same reason: a single flag was
+        # cleared as soon as the gate *passed*, which is not when the step
+        # ends, so any later gate that held the step re-armed it and the
+        # model got "save a note" alternating with "fix the verification".
+        self._note_fired: set[int] = set()
         # Per-step count of forced objective-verification correction turns,
         # so one stuck objective cannot starve the whole budget.
         self._verify_attempts: dict[int, int] = {}
@@ -92,10 +95,25 @@ class StepCompleteGate:
         # single flag would let step 4 inherit step 3's "already fired".
         self._hook_fired: set[int] = set()
 
+    @staticmethod
+    def _step_key(ctx: Any) -> int:
+        """Index of the step a once-per-step guarantee is scoped to.
+
+        -1 stands in for "no plan yet" — the bootstrap step, before the
+        model has called add_step. It is a real step and still deserves
+        the guarantee. Keyed by index rather than a flag because steps can
+        be added mid-run, and a flag would let step 4 inherit step 3's
+        "already fired".
+        """
+        state = getattr(ctx, "state", None)
+        plan = getattr(state, "plan", None) if state is not None else None
+        active = getattr(plan, "active_step", None) if plan is not None else None
+        return getattr(active, "index", -1) if active is not None else -1
+
     def reset_run(self) -> None:
         """Forget per-run state at the start of an execution."""
         self._verify_attempts = {}
-        self._note_gate_fired = False
+        self._note_fired = set()
         self._hook_fired = set()
 
     # ── the chain ────────────────────────────────────────────────────
@@ -112,7 +130,6 @@ class StepCompleteGate:
         """``True`` when the step must stay open for one more turn."""
         if self._notes_missing(ctx, step_complete_call, messages, action_tool_calls):
             return True
-        self._note_gate_fired = False
 
         if self._engine._reject_step_complete_on_late_message(
             ctx, messages, step_complete_call.id,
@@ -145,10 +162,11 @@ class StepCompleteGate:
             return False
         if not ctx.is_small or ctx.state.notes:
             return False
-        if action_tool_calls < _MIN_CALLS_BEFORE_NOTE_GATE or self._note_gate_fired:
+        step_key = self._step_key(ctx)
+        if action_tool_calls < _MIN_CALLS_BEFORE_NOTE_GATE or step_key in self._note_fired:
             return False
 
-        self._note_gate_fired = True
+        self._note_fired.add(step_key)
         if ctx.manual_tc:
             messages.append({"role": "user", "content": _NOTE_NUDGE})
             return True
@@ -315,13 +333,7 @@ class StepCompleteGate:
             UserHookEvent, run_hooks, step_instruction, step_payload,
         )
 
-        state = getattr(ctx, "state", None)
-        plan = getattr(state, "plan", None) if state is not None else None
-        active = getattr(plan, "active_step", None) if plan is not None else None
-        # -1 stands in for "no plan yet" — the bootstrap step, before the
-        # model has called add_step. It is a real step to a hook and still
-        # deserves the once-only guarantee.
-        step_key = getattr(active, "index", -1) if active is not None else -1
+        step_key = self._step_key(ctx)
         if step_key in self._hook_fired:
             return False
 

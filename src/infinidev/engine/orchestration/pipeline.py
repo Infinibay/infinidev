@@ -25,6 +25,7 @@ this file.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -671,6 +672,16 @@ def run_task(
     except AttributeError:
         pass
 
+    # A turn is the scope of a cancellation. The engine outlives it (the
+    # TUI keeps one per session) and execute() no longer clears the flag
+    # itself, because a turn enters execute() several times — the review's
+    # rework loop re-enters the same instance — and clearing it there
+    # resurrected a run the user had stopped. The hook re-entry is the
+    # same turn continuing, so it must not clear anything.
+    if not _hook_reentry:
+        with contextlib.suppress(AttributeError):
+            engine.begin_turn()
+
     from infinidev.engine.task_runtime import TaskRuntime
 
     runtime = TaskRuntime(task_id=session_id, on_event=_runtime_event_bridge(hooks))
@@ -955,6 +966,16 @@ def run_task(
 
         if not is_synthesised(structured_task):
             review_criteria = list(structured_task.acceptance_criteria)
+
+    # Review re-enters engine.execute() up to three times through the
+    # rework loop, and a cancelled run is exactly the one whose tests fail
+    # — it stopped half-way. Reviewing it restarted the developer on the
+    # user's repository minutes after they asked it to stop.
+    if getattr(used_engine, "is_cancelled", False):
+        logger.info("run_task: cancelled — skipping review and end-of-task hooks")
+        runtime.record_step(result, step_id=root_task.id)
+        runtime.complete_current_task(result)
+        return result
 
     result = _run_review_phase(
         engine=used_engine,
