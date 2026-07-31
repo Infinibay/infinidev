@@ -25,7 +25,7 @@ templates use for Claude Code, so nothing here is private API:
     POST /turn-end        {session_id}                   -> {ok}
     POST /sessions/end    {session_id}                   -> {ok}
 
-Two rules are load-bearing.
+Four rules are load-bearing.
 
 **Never fail the host.** Every method returns ``None`` on any error. Ken's
 own contract for hooks is logging-and-shrugging, and a ranker that takes
@@ -37,6 +37,21 @@ created_at DESC LIMIT 50`` with **no agent filter** — the window is shared
 across every agent using this index. Twenty machine-generated plan-step rows
 per task would flush it, and the user's other sessions would lose their
 predictive channel entirely.
+
+**A session is the user's session, not one task.** ``/sessions/start``
+INSERTs a fresh ``cr_sessions`` row whenever the agent_id is not already
+open, and ``/sessions/end`` snapshots the productivity scores the predictive
+channel reads *next* time. Opening and closing around each developer run
+therefore shredded one conversation into a row per task, each with the
+per-turn decay counter restarting at zero. ``start`` is idempotent for
+exactly that reason: every turn may call it, only the first one posts.
+
+**Both directions of the protocol carry payload.** ``/sessions/start`` and
+``/prompts`` answer with the resume brief and the ``<context-rank>`` block —
+the same two blocks Ken hands Claude Code — and ``/turn-end`` *takes* the
+assistant's reply, from which Ken extracts cited paths worth a 2.5×
+multiplier. A client that posts and discards is doing the expensive half of
+the work and skipping the half that pays for it.
 """
 
 from __future__ import annotations
@@ -154,7 +169,20 @@ class KenSession:
     # ── the six events ───────────────────────────────────────────────
 
     def start(self, workspace: str | None = None) -> str | None:
-        """Open the session. Returns Ken's resume brief, if it has one."""
+        """Open the session. Returns Ken's resume brief, if it has one.
+
+        Idempotent, and callers depend on that: every turn opens the
+        session so no host has to own the "is this the first one?"
+        bookkeeping, and only the first call reaches the daemon. The brief
+        comes back exactly once per session for the same reason — it is a
+        *resume* brief, and re-injecting it on turn nine would be telling
+        the model where it left off in a conversation it is already having.
+
+        A failed open is not remembered, so a daemon that comes up mid-
+        session is still picked up by the next turn.
+        """
+        if self._started:
+            return None
         cwd = workspace or (str(self._root) if self._root else os.getcwd())
         result = self._post("/sessions/start", {"cwd": cwd})
         if result is None:
@@ -189,9 +217,22 @@ class KenSession:
             payload["input"] = _as_mapping(arguments)
         self._post("/tools/post", payload)
 
-    def turn_end(self) -> None:
-        """Close the assistant turn, advancing the per-turn decay clock."""
-        self._post("/turn-end", {})
+    def turn_end(self, assistant_text: str = "") -> None:
+        """Close the assistant turn, advancing the per-turn decay clock.
+
+        ``assistant_text`` is not optional in any useful sense. Ken scans
+        the reply for path-shaped tokens, validates them against its file
+        index and records a ``cited`` interaction for each — the strongest
+        single multiplier it has (2.5×), on the theory that a file the
+        model *talked about* mattered even when it never opened it. Posting
+        an empty turn-end leaves that channel dark and stores a blank
+        ``turn_end`` context that future sessions cannot match against.
+
+        Capped to the same 8 000 characters the daemon stores, so a long
+        reply costs one truncation rather than a large POST that is
+        truncated on arrival anyway.
+        """
+        self._post("/turn-end", {"assistant_text": (assistant_text or "")[:8000]})
 
     def end(self) -> None:
         """Close the session, writing the scores the predictive channel reads."""
@@ -268,7 +309,27 @@ def get_ken_session(
     return session
 
 
+def end_ken_sessions() -> None:
+    """Close every open session. Called once, when the host is shutting down.
+
+    Hosts get this instead of a per-session ``end()`` because none of them
+    knows which workspace/session pairs were opened — the TUI, the classic
+    REPL and ``--prompt`` all just want "the conversation is over". Ending
+    is what snapshots the productivity scores, so skipping it costs the
+    *next* session its predictive channel; that makes a best-effort sweep
+    at exit worth more than an exact accounting of who opened what.
+    """
+    with _sessions_lock:
+        sessions = list(_sessions.values())
+        _sessions.clear()
+    for session in sessions:
+        try:
+            session.end()
+        except Exception:  # pragma: no cover - end() already swallows
+            logger.debug("ken session end failed", exc_info=True)
+
+
 def reset_ken_sessions() -> None:
-    """Drop every cached session (tests, and workspace switches)."""
+    """Drop every cached session without closing it (tests, workspace switches)."""
     with _sessions_lock:
         _sessions.clear()

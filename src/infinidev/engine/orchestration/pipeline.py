@@ -529,23 +529,57 @@ def _run_review_phase(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _report_user_turn_to_ken(user_input: str, session_id: str) -> None:
-    """Give Ken the user's actual words, once per turn.
+def _ken_turn_context(user_input: str, session_id: str) -> str:
+    """Open Ken's session for this turn and return what it hands back.
 
     This is the *only* place infinidev writes a ``user_prompt`` row, and it
     has to stay that way. ``similar_past_sessions`` reads the last fifty
     such rows across **every** agent sharing this index — there is no agent
     filter — so one row per plan step would flush the window within a couple
     of tasks and cost the user's other sessions their predictive channel.
+
+    Both calls answer with prompt text, and the answer is the point.
+    ``start`` is idempotent, so only the first turn of a conversation pays
+    for it and only that turn gets the resume brief — Ken's "here is where
+    you left off", already wrapped in ``<ken-session-brief>``. ``prompt``
+    answers every turn with the freshly ranked ``<context-rank>`` block.
+    Neither is re-wrapped here: they arrive tagged, which is precisely how
+    Ken's own hooks feed them to Claude Code.
+    """
+    try:
+        from infinidev.engine.ken_session import get_ken_session
+
+        session = get_ken_session(session_id=session_id)
+        if session is None:
+            return ""
+        return _join_blocks(session.start(), session.prompt(user_input))
+    except Exception:
+        logger.debug("ken turn context failed", exc_info=True)
+        return ""
+
+
+def _report_turn_end_to_ken(result: str, session_id: str) -> None:
+    """Close the assistant turn with the reply Ken needs to read.
+
+    Called from the two *terminal* returns of :func:`run_task` and from
+    neither of the re-entering ones: a ``task_end_instruction`` hook makes
+    the turn continue, and the pass that finally answers the user is the
+    one that ends it. Firing here on the way into ``_reenter`` would
+    advance Ken's per-turn decay clock twice for one exchange.
     """
     try:
         from infinidev.engine.ken_session import get_ken_session
 
         session = get_ken_session(session_id=session_id)
         if session is not None:
-            session.prompt(user_input)
+            session.turn_end(result or "")
     except Exception:
-        logger.debug("ken prompt report failed", exc_info=True)
+        logger.debug("ken turn-end report failed", exc_info=True)
+
+
+def _join_blocks(*parts: str | None) -> str:
+    """Blank-line-join the parts that actually have content."""
+    return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
 def run_task(
@@ -630,12 +664,15 @@ def run_task(
     from infinidev.engine.task_runtime import TaskRuntime
 
     runtime = TaskRuntime(task_id=session_id, on_event=_runtime_event_bridge(hooks))
+    ken_context = ""
     if not _hook_reentry:
         # A re-entered turn is the same user turn continuing, so it neither
         # appends a second user message to the transcript nor reports a
-        # second prompt to Ken — the text is a hook's, not the user's.
+        # second prompt to Ken — the text is a hook's, not the user's. It
+        # also needs no fresh ranking: the blocks the first pass injected
+        # described this same request.
         runtime.append_chat("user", user_input)
-        _report_user_turn_to_ken(user_input, session_id)
+        ken_context = _ken_turn_context(user_input, session_id)
     root_task = runtime.add_task(
         "Follow-up requested by hook" if _hook_reentry else "Working on your request"
     )
@@ -646,10 +683,17 @@ def run_task(
     # (which may answer without escalating) and, further down, the
     # developer's task prompt. Injected into the copies handed to those
     # two, never into ``user_input`` itself, which is already recorded.
-    turn_context = _run_task_start_hook(
-        user_input=user_input,
-        session_id=session_id,
-        skip=_hook_reentry,
+    # Ken's blocks ride the same rail as the hook's output — both are
+    # context about this turn that neither consumer should have to fetch for
+    # itself, and both must stay out of ``user_input``, which is already
+    # recorded as what the user typed.
+    turn_context = _join_blocks(
+        ken_context,
+        _run_task_start_hook(
+            user_input=user_input,
+            session_id=session_id,
+            skip=_hook_reentry,
+        ),
     )
     chat_input = f"{user_input}\n\n{turn_context}" if turn_context else user_input
 
@@ -765,6 +809,11 @@ def run_task(
         hooks.on_phase("idle")
         runtime.complete_current_task(chat_result.reply)
         runtime.append_chat("assistant", chat_result.reply)
+        # A turn the chat agent answered alone is still a turn: it advances
+        # Ken's decay clock, and its reply is scanned for cited paths just
+        # like the developer's. Reporting only the develop path left every
+        # conversational exchange invisible to the ranker.
+        _report_turn_end_to_ken(chat_result.reply, session_id)
         return chat_result.reply
 
     # ── Planner (escalate path) ─────────────────────────────────────────
@@ -829,9 +878,10 @@ def run_task(
     # Build the developer's task prompt from the planner output. The
     # overview is the description; the flow config supplies the
     # canonical expected_output.
-    # The task_start hook's output rides on the description, not on the
-    # expected_output — the latter is the flow's contract and the reviewer
-    # judges against it, so user text there would change what "done" means.
+    # The turn context — Ken's ranked block plus the task_start hook's
+    # output — rides on the description, not on the expected_output: the
+    # latter is the flow's contract and the reviewer judges against it, so
+    # anything added there would change what "done" means.
     task_prompt: tuple[str, str] = (
         f"{escalation.user_request}\n\n{turn_context}"
         if turn_context
@@ -941,6 +991,7 @@ def run_task(
     runtime.record_step(result, step_id=root_task.id)
     runtime.complete_current_task(result)
     runtime.append_chat("assistant", result)
+    _report_turn_end_to_ken(result, session_id)
     return result
 
 

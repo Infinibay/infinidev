@@ -264,3 +264,141 @@ class TestReviewOnlyRunsOnFileChanges:
             hooks=_RecordingHooks(),
         )
         assert review_spy["called"] is False  # the guard inside review
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Ken sees the turn
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Ken's ranker is fed by the session, not by the query. These cover the
+# wiring: which of the pipeline's exits report the turn, and where the two
+# blocks Ken answers with actually land.
+
+
+class _FakeKen:
+    def __init__(self) -> None:
+        self.brief: str | None = "<ken-session-brief>last time: auth.py</ken-session-brief>"
+        self.ranked: str | None = "<context-rank>src/auth.py</context-rank>"
+        self.prompts: list[str] = []
+        self.turn_ends: list[str] = []
+        self.starts = 0
+
+    def start(self, workspace=None):
+        self.starts += 1
+        return self.brief if self.starts == 1 else None
+
+    def prompt(self, text):
+        self.prompts.append(text)
+        return self.ranked
+
+    def turn_end(self, assistant_text=""):
+        self.turn_ends.append(assistant_text)
+
+
+@pytest.fixture
+def ken(monkeypatch):
+    fake = _FakeKen()
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.get_ken_session",
+        lambda workspace=None, session_id=None: fake,
+    )
+    return fake
+
+
+class TestKenSeesTheTurn:
+    def test_a_chat_only_turn_is_still_a_turn(self, monkeypatch, ken):
+        """The reply the chat agent produced is scanned for cited paths just
+        like the developer's, and the turn advances Ken's decay clock either
+        way. Reporting only the develop path left every conversational
+        exchange invisible to the ranker."""
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(
+                kind="respond", reply="It lives in src/auth.py."
+            ),
+        )
+
+        run_task(
+            agent=_FakeAgent(), user_input="where is the JWT check?",
+            session_id="s", engine=_FakeEngine(), reviewer=_FakeReviewer(),
+            hooks=_RecordingHooks(),
+        )
+
+        assert ken.prompts == ["where is the JWT check?"]
+        assert ken.turn_ends == ["It lives in src/auth.py."]
+
+    def test_kens_blocks_reach_the_chat_agent(self, monkeypatch, ken):
+        """The chat agent decides whether to escalate. Handing it the ranked
+        context after that decision would be too late to matter."""
+        seen: dict[str, str] = {}
+
+        def _chat(message, *a, **kw):
+            seen["input"] = message
+            return ChatAgentResult(kind="respond", reply="ok")
+
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent", _chat,
+        )
+
+        run_task(
+            agent=_FakeAgent(), user_input="fix the JWT bug", session_id="s",
+            engine=_FakeEngine(), reviewer=_FakeReviewer(),
+            hooks=_RecordingHooks(),
+        )
+
+        assert "fix the JWT bug" in seen["input"]
+        assert "<ken-session-brief>" in seen["input"]
+        assert "<context-rank>" in seen["input"]
+
+    def test_kens_blocks_reach_the_developer(self, monkeypatch, ken):
+        """They ride the task description, never the expected_output — that
+        one is the flow's contract and the reviewer judges against it."""
+        escalation = EscalationPacket(
+            user_request="fix the JWT bug",
+            understanding="Fix JWT validation",
+            opened_files=["src/auth.py"],
+            user_visible_preview="Voy.",
+            user_signal="dale",
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(kind="escalate", escalation=escalation),
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.analysis.planner.run_planner",
+            lambda *a, **kw: Plan(
+                overview="Patch it.",
+                steps=[PlanStepSpec(title="Patch", detail="d", expected_output="ok")],
+            ),
+        )
+
+        engine = _FakeEngine(result_text="Fixed src/auth.py.")
+        run_task(
+            agent=_FakeAgent(), user_input="fix the JWT bug", session_id="s",
+            engine=engine, reviewer=_FakeReviewer(), hooks=_RecordingHooks(),
+        )
+
+        description, expected_output = engine.captured_task_prompt
+        assert "<context-rank>" in description
+        assert "<context-rank>" not in expected_output
+        assert ken.turn_ends == ["Fixed src/auth.py."]
+
+    def test_the_session_is_opened_once_per_conversation(self, monkeypatch, ken):
+        """Not once per task: /sessions/start INSERTs a fresh cr_sessions row,
+        so a row per turn shreds one conversation into many and restarts the
+        per-turn decay counter each time."""
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            lambda *a, **kw: ChatAgentResult(kind="respond", reply="ok"),
+        )
+
+        for text in ("first", "second", "third"):
+            run_task(
+                agent=_FakeAgent(), user_input=text, session_id="s",
+                engine=_FakeEngine(), reviewer=_FakeReviewer(),
+                hooks=_RecordingHooks(),
+            )
+
+        assert ken.starts == 3, "every turn asks; the client decides"
+        assert ken.prompts == ["first", "second", "third"]
+        assert len(ken.turn_ends) == 3

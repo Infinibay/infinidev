@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 # we accept whatever they answer (the SDK downgrades gracefully).
 PROTOCOL_VERSION = "2025-06-18"
 
-CLIENT_INFO = {"name": "infinidev", "version": "0.13.0"}
+CLIENT_INFO = {"name": "infinidev", "version": "0.14.0"}
 
 # stderr lines kept per server for diagnostics (`/mcp` panel, logs).
 _STDERR_RING = 40

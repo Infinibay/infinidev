@@ -338,6 +338,22 @@ def _install_classic_event_bridge() -> None:
 _install_classic_event_bridge()
 
 
+def _end_ken_sessions() -> None:
+    """Close Ken's sessions on the way out. Never raises — this runs at exit.
+
+    Every entry point calls it, because the alternative is a ``cr_sessions``
+    row left open with its scores never snapshotted. Ken's own hooks get
+    this for free from the host's ``SessionEnd`` event; infinidev is its own
+    host, so it has to remember.
+    """
+    try:
+        from infinidev.engine.ken_session import end_ken_sessions
+
+        end_ken_sessions()
+    except Exception:
+        logging.debug("ken session end failed", exc_info=True)
+
+
 def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
                        continue_session: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
@@ -366,46 +382,52 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
     hooks = NonInteractiveHooks()
     engine = LoopEngine()
 
-    # /explore and /brainstorm prefixes bypass the full pipeline and run
-    # the TreeEngine directly with no analysis or review.
-    if prompt_text.startswith("/explore "):
-        problem = prompt_text[len("/explore "):]
-        result = run_flow_task(
-            agent=agent, flow="explore",
-            task_prompt=(problem, ""),  # expected_output picked up from flow_config
-            session_id=session_id, engine=engine, hooks=hooks,
-            use_tree_engine=True,
-        )
-        click.echo(result or "Done.")
-        return
-    if prompt_text.startswith("/brainstorm "):
-        problem = prompt_text[len("/brainstorm "):]
-        result = run_flow_task(
-            agent=agent, flow="brainstorm",
-            task_prompt=(problem, ""),
-            session_id=session_id, engine=engine, hooks=hooks,
-            use_tree_engine=True,
-        )
-        click.echo(result or "Done.")
-        return
+    # A one-shot run is still a conversation as far as Ken is concerned:
+    # the turn opens its session lazily inside run_task, and every exit
+    # path — including the two flow shortcuts — has to close it.
+    try:
+        # /explore and /brainstorm prefixes bypass the full pipeline and run
+        # the TreeEngine directly with no analysis or review.
+        if prompt_text.startswith("/explore "):
+            problem = prompt_text[len("/explore "):]
+            result = run_flow_task(
+                agent=agent, flow="explore",
+                task_prompt=(problem, ""),  # expected_output picked up from flow_config
+                session_id=session_id, engine=engine, hooks=hooks,
+                use_tree_engine=True,
+            )
+            click.echo(result or "Done.")
+            return
+        if prompt_text.startswith("/brainstorm "):
+            problem = prompt_text[len("/brainstorm "):]
+            result = run_flow_task(
+                agent=agent, flow="brainstorm",
+                task_prompt=(problem, ""),
+                session_id=session_id, engine=engine, hooks=hooks,
+                use_tree_engine=True,
+            )
+            click.echo(result or "Done.")
+            return
 
-    # Every turn runs through chat agent → (maybe escalate) → planner →
-    # developer. The chat agent itself detects action-verb requests and
-    # escalates immediately, so the legacy imperative bypass is gone.
-    result = run_task(
-        agent=agent,
-        user_input=prompt_text,
-        session_id=session_id,
-        engine=engine,
-        reviewer=ReviewEngine(),
-        hooks=hooks,
-        use_phase_engine=use_phase_engine,
-    )
-    # Don't echo the reply again if it was already streamed/notified to
-    # the terminal by the respond branch (the develop path leaves the
-    # flag False, so its result still prints).
-    if not getattr(hooks, "reply_already_shown", False):
-        click.echo(result or "Done.")
+        # Every turn runs through chat agent → (maybe escalate) → planner →
+        # developer. The chat agent itself detects action-verb requests and
+        # escalates immediately, so the legacy imperative bypass is gone.
+        result = run_task(
+            agent=agent,
+            user_input=prompt_text,
+            session_id=session_id,
+            engine=engine,
+            reviewer=ReviewEngine(),
+            hooks=hooks,
+            use_phase_engine=use_phase_engine,
+        )
+        # Don't echo the reply again if it was already streamed/notified to
+        # the terminal by the respond branch (the develop path leaves the
+        # flag False, so its result still prints).
+        if not getattr(hooks, "reply_already_shown", False):
+            click.echo(result or "Done.")
+    finally:
+        _end_ken_sessions()
 
 
 @click.command()
@@ -761,6 +783,11 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         renderer.unsubscribe()
     except Exception:
         pass
+
+    # Close Ken's session for the conversation that just ended. /sessions/end
+    # is what snapshots the productivity scores its predictive channel reads
+    # NEXT time, so skipping it costs the next session, not this one.
+    _end_ken_sessions()
 
     # Cleanup background services — the IndexQueue was started inside
     # _bootstrap_single_prompt_runtime() and registered globally; fetch

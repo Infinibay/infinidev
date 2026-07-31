@@ -329,80 +329,58 @@ class LoopEngine(AgentEngine):
         consecutive_all_done = 0
         self._step_gate.reset_run()
 
-        # Ken's reactive and predictive channels are computed from the
-        # session, not from the query: without these two calls the ranker
-        # answers with only the name/text family. The finally is not
-        # optional — /sessions/end is what writes the scores the
-        # predictive channel reads on the NEXT run.
-        self._ken_session_start(ctx)
-        try:
-            for iteration in range(ctx.start_iteration, ctx.max_iterations):
-                if self._cancel_event.is_set():
-                    logger.info("LoopEngine: cancelled by user")
-                    _emit_log("info", f"{_YELLOW}\u26a0 Task cancelled by user{_RESET}",
+        # Ken's session lifecycle is NOT opened here. A developer run is one
+        # task inside a conversation, and /sessions/end snapshots scores and
+        # closes the cr_sessions row — doing that per run turned a single
+        # conversation into a row per task with the per-turn decay counter
+        # restarting each time. The pipeline owns start/turn-end (per user
+        # turn) and the host owns end (per process); what this loop still
+        # feeds Ken is the reactive channel, one event per tool call, from
+        # ``ToolRunner._report_to_ken``.
+        for iteration in range(ctx.start_iteration, ctx.max_iterations):
+            if self._cancel_event.is_set():
+                logger.info("LoopEngine: cancelled by user")
+                _emit_log("info", f"{_YELLOW}\u26a0 Task cancelled by user{_RESET}",
+                          project_id=ctx.project_id, agent_id=ctx.agent_id)
+                break
+
+            messages, step_messages_start = self._run_iteration_preamble(ctx, iteration)
+
+            step_result = self._run_inner_loop(
+                ctx, messages, iteration, llm_caller, tool_proc, guard,
+                step_messages_start=step_messages_start,
+            )
+
+            # Track consecutive text-only iterations
+            if step_result.action_tool_calls == 0:
+                guard.mark_text_only_iteration()
+                if guard.text_only_iterations >= 3:
+                    _emit_log("error",
+                              f"{_RED}\u26a0 Model failed to produce tool calls for "
+                              f"{guard.text_only_iterations} consecutive iterations "
+                              f"\u2014 aborting task{_RESET}",
                               project_id=ctx.project_id, agent_id=ctx.agent_id)
-                    break
+                    return step_mgr.finish(ctx, "blocked", iteration,
+                                           "Model unable to produce function calls after multiple attempts.")
+            else:
+                guard.mark_productive_iteration()
 
-                messages, step_messages_start = self._run_iteration_preamble(ctx, iteration)
+            self._run_post_step(ctx, step_result, step_mgr, messages, step_messages_start, iteration)
 
-                step_result = self._run_inner_loop(
-                    ctx, messages, iteration, llm_caller, tool_proc, guard,
-                    step_messages_start=step_messages_start,
-                )
+            term = self._check_termination(ctx, step_result, step_mgr, iteration, consecutive_all_done)
+            if term is not None:
+                return term
 
-                # Track consecutive text-only iterations
-                if step_result.action_tool_calls == 0:
-                    guard.mark_text_only_iteration()
-                    if guard.text_only_iterations >= 3:
-                        _emit_log("error",
-                                  f"{_RED}\u26a0 Model failed to produce tool calls for "
-                                  f"{guard.text_only_iterations} consecutive iterations "
-                                  f"\u2014 aborting task{_RESET}",
-                                  project_id=ctx.project_id, agent_id=ctx.agent_id)
-                        return step_mgr.finish(ctx, "blocked", iteration,
-                                               "Model unable to produce function calls after multiple attempts.")
-                else:
-                    guard.mark_productive_iteration()
+            # Update consecutive all-done counter
+            if step_result.status == "explore":
+                consecutive_all_done = 0
+            elif ctx.state.plan.steps and not ctx.state.plan.has_pending:
+                consecutive_all_done += 1
+            else:
+                consecutive_all_done = 0
 
-                self._run_post_step(ctx, step_result, step_mgr, messages, step_messages_start, iteration)
-
-                term = self._check_termination(ctx, step_result, step_mgr, iteration, consecutive_all_done)
-                if term is not None:
-                    return term
-
-                # Update consecutive all-done counter
-                if step_result.status == "explore":
-                    consecutive_all_done = 0
-                elif ctx.state.plan.steps and not ctx.state.plan.has_pending:
-                    consecutive_all_done += 1
-                else:
-                    consecutive_all_done = 0
-
-            # Outer loop exhausted
-            return step_mgr.finish(ctx, "exhausted", ctx.max_iterations - 1)
-        finally:
-            self._ken_session_end()
-
-    # ── Ken session reporting ──────────────────────────────────────────
-    # Never raises: a ranker that can take down a coding session is worse
-    # than no ranker, which is Ken's own contract for its hooks.
-
-    def _ken_session_start(self, ctx: ExecutionContext) -> None:
-        with best_effort("ken session start failed"):
-            from infinidev.engine.ken_session import get_ken_session
-
-            session = get_ken_session(getattr(ctx, "workspace_path", None))
-            if session is not None:
-                session.start()
-
-    def _ken_session_end(self) -> None:
-        with best_effort("ken session end failed"):
-            from infinidev.engine.ken_session import get_ken_session
-
-            session = get_ken_session()
-            if session is not None:
-                session.turn_end()
-                session.end()
+        # Outer loop exhausted
+        return step_mgr.finish(ctx, "exhausted", ctx.max_iterations - 1)
 
     # ── Extracted phases of execute() ──────────────────────────────────
 

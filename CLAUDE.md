@@ -190,6 +190,51 @@ The local index has not gone away: the symbol *writer* tools
 positions Ken does not provide, and every tool that needs it indexes the
 file it is about to touch on demand. `/reindex` still forces a full sweep.
 
+### Ken's session events (`engine/ken_session.py`)
+
+Ken's ranker fuses six channels, and three of them — reactive, predictive,
+explicit-mention — cannot be computed from a query string. They need a
+stream of events. Ken ships that stream as `ken hook <event>` shims that
+Claude Code and Codex invoke as subprocesses; **infinidev skips the shims
+and speaks the daemon's HTTP protocol directly**, which is the same
+interface at one less fork per event.
+
+The six events and who owns each:
+
+| event | fires | owner |
+|---|---|---|
+| `/sessions/start` | first turn of a conversation | `pipeline._ken_turn_context` — idempotent, so every turn may ask |
+| `/prompts` | once per USER turn, never per step | same |
+| `/tools/pre` + `/tools/post` | every tool call | `loop/tool_runner._report_to_ken` |
+| `/turn-end` | both terminal exits of `run_task` | `pipeline._report_turn_end_to_ken` |
+| `/sessions/end` | process shutdown | `end_ken_sessions()`, called by the TUI, the classic REPL and `--prompt` |
+
+Four things are load-bearing rather than incidental:
+
+- **A session is the user's conversation, not one task.** `/sessions/start`
+  INSERTs a fresh `cr_sessions` row and `/sessions/end` snapshots the
+  productivity scores the predictive channel reads *next* time. Opening and
+  closing around each `LoopEngine.execute()` — where this used to live —
+  shredded one conversation into a row per task, each restarting the
+  per-turn decay counter at zero.
+- **Both directions carry payload.** `/sessions/start` answers with the
+  resume brief and `/prompts` with the `<context-rank>` block — already
+  tagged, so neither is re-wrapped. They ride the same rail as the
+  `task_start` hook's output: into the chat agent's input *and* the
+  developer's task description, never the `expected_output`.
+- **`/turn-end` takes the assistant's reply.** Ken scans it for cited paths
+  and fires its strongest multiplier (2.5×) on each. Posting an empty
+  turn-end leaves that channel dark. A chat-only turn reports too — it is
+  still a turn.
+- **Never fail the host, in either direction.** Every method returns `None`
+  on error, the client goes quiet after three consecutive failures, and a
+  failed *open* is not remembered so a daemon that comes up mid-session is
+  still picked up.
+
+`KEN_SESSION_ENABLED` gates the whole thing. `engine/context_rank/` is a
+separate, local ranker with its own SQLite tables — same idea, different
+implementation, not a client of any of this.
+
 ### User hooks (`engine/user_hooks/`)
 
 Shell commands the user binds to six lifecycle points in
@@ -198,6 +243,11 @@ Not to be confused with `engine/hooks/`, which is the *in-process* hook
 manager the engine registers Python callbacks on — that one can rewrite a
 tool call, this one can only contribute text. Nothing ships enabled: with
 no config file the subsystem is inert.
+
+Nor is this the vehicle for Ken (above), despite the shape being similar.
+Ken needs per-tool-call granularity these six events do not have, needs
+structured answers rather than prompt text, and must not be switchable off
+by a `"task_start": []` written to turn off something else.
 
 A hook declares `command` (stdout is the output) **or** `prompt` (fixed
 text, no subprocess). Config merges **per event**: the first file to

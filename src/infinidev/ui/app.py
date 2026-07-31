@@ -1410,5 +1410,15 @@ def run_tui(continue_session: bool = False, resume: bool = False) -> None:
             app_state._update_status_bar()
         app_state.run()
     finally:
+        # Ken's session spans the whole TUI, not one task — /sessions/end
+        # is what snapshots the productivity scores its predictive channel
+        # reads on the NEXT run, so it belongs here and nowhere earlier.
+        # Before stderr is restored, because it must not print either.
+        try:
+            from infinidev.engine.ken_session import end_ken_sessions
+
+            end_ken_sessions()
+        except Exception:
+            logger.debug("ken session end failed", exc_info=True)
         sys.stderr.close()
         sys.stderr = original_stderr
