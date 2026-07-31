@@ -8,6 +8,7 @@ import pytest
 from infinidev.config.settings import settings
 from infinidev.engine.analysis.grounded_spec import (
     Assumption,
+    Clarification,
     GroundedSpec,
     RejectedAlternative,
     ResolvedFact,
@@ -72,7 +73,13 @@ class TestGroundedSpec:
             in_scope=["public endpoints"],
             out_of_scope=["admin endpoints"],
             assumptions=[Assumption("per-IP limiting", "no config found")],
-            clarifications_needed=["per-user or global?"],
+            clarifications_needed=[
+                Clarification(
+                    question="per-user or global?",
+                    options=["per-user", "global"],
+                    default="per-user",
+                )
+            ],
             design_direction="token bucket middleware",
             alternatives_rejected=[RejectedAlternative("global dict", "no TTL")],
         )
@@ -80,7 +87,10 @@ class TestGroundedSpec:
         assert "Out of scope" in rendered
         assert "admin endpoints" in rendered
         assert "ASSUMPTIONS" in rendered
-        assert "OPEN PRODUCT QUESTIONS" in rendered
+        # The planner is told to BUILD the default, not to stall on the question.
+        assert "PRODUCT DECISIONS" in rendered
+        assert "proceeding with: per-user" in rendered
+        assert "alternatives: global" in rendered
         assert "token bucket middleware" in rendered
 
 
@@ -144,6 +154,77 @@ class TestDeterministicDiscard:
         assert winner is None and rejected == [] and risks == []
 
 
+# ── Clarification admissibility (the anti-questionnaire gate — no LLM) ────
+
+class TestAdmissibleClarifications:
+    def _q(self, question, **kw):
+        base = {"question": question, "options": ["a", "b"], "default": "a"}
+        base.update(kw)
+        return base
+
+    def test_keeps_a_well_formed_decision(self):
+        kept, demoted = se._admissible_clarifications([self._q("per-user or global?")], 2)
+        assert len(kept) == 1 and demoted == []
+        assert kept[0].default == "a"
+
+    def test_question_without_default_is_demoted_not_asked(self):
+        # "What compute budget is available?" — no default to commit to, so it
+        # is a survey question, not a decision.
+        kept, demoted = se._admissible_clarifications(
+            [self._q("what compute budget?", default="")], 2
+        )
+        assert kept == []
+        assert len(demoted) == 1
+        assert "what compute budget?" in demoted[0].statement
+
+    def test_question_without_alternatives_is_demoted(self):
+        kept, demoted = se._admissible_clarifications(
+            [self._q("which datasets are authorised?", options=[], default="the public ones")], 2
+        )
+        assert kept == []
+        assert "the public ones" in demoted[0].statement
+
+    def test_bare_string_is_demoted(self):
+        # A pre-gate model emitting plain strings carries nothing actionable.
+        kept, demoted = se._admissible_clarifications(["which benchmarks define success?"], 2)
+        assert kept == []
+        assert len(demoted) == 1
+
+    def test_caps_at_max_and_demotes_the_overflow(self):
+        raw = [self._q(f"decision {i}?") for i in range(10)]
+        kept, demoted = se._admissible_clarifications(raw, 2)
+        assert len(kept) == 2
+        # Nothing is lost — the other eight are stated as assumptions.
+        assert len(demoted) == 8
+        assert all("proceeding with: a" in d.statement for d in demoted)
+
+    def test_zero_max_asks_nothing(self):
+        kept, demoted = se._admissible_clarifications([self._q("x?")], 0)
+        assert kept == [] and len(demoted) == 1
+
+    def test_dedupes_on_the_question(self):
+        raw = [self._q("Per-user or global?"), self._q("per-user or global")]
+        kept, demoted = se._admissible_clarifications(raw, 2)
+        assert len(kept) == 1 and demoted == []
+
+    def test_default_missing_from_options_is_added(self):
+        kept, _ = se._admissible_clarifications(
+            [self._q("x?", options=["b", "c"], default="a")], 2
+        )
+        assert kept[0].options[0] == "a"
+
+    def test_demoted_clarifications_reach_the_spec_as_assumptions(self):
+        spec = se._assemble(
+            "req", "understanding",
+            {"deliverable": "d", "gaps": []},
+            {"resolved_facts": [], "assumptions": [],
+             "clarifications_needed": [self._q("q1?"), {"question": "q2?"}]},
+            None, [], [],
+        )
+        assert len(spec.clarifications_needed) == 1
+        assert any("q2?" in a.statement for a in spec.assumptions)
+
+
 # ── End-to-end with mocked LLM ────────────────────────────────────────────
 
 class TestElaborateEndToEnd:
@@ -167,7 +248,14 @@ class TestElaborateEndToEnd:
                 {"question": "is there existing middleware?", "answer": "no", "evidence": "api.py:1"},
             ],
             "assumptions": [],
-            "clarifications_needed": ["per-user or global?"],
+            "clarifications_needed": [
+                {
+                    "question": "per-user or global?",
+                    "options": ["per-user", "global"],
+                    "default": "per-user",
+                    "impact": "changes the bucket key",
+                }
+            ],
         })
         candidates = _tool_resp("emit_candidates", {
             "candidates": [
@@ -188,7 +276,8 @@ class TestElaborateEndToEnd:
         assert spec.deliverable == "Throttle the public API"
         assert spec.out_of_scope == ["admin"]
         assert spec.evidence_count == 1
-        assert spec.clarifications_needed == ["per-user or global?"]
+        assert [c.question for c in spec.clarifications_needed] == ["per-user or global?"]
+        assert spec.clarifications_needed[0].default == "per-user"
         # The hallucinated candidate (ghost.py) was deterministically discarded.
         assert spec.design_direction == "token bucket in api.py"
         assert any("ghost.py" in r.why_rejected for r in spec.alternatives_rejected)

@@ -55,12 +55,26 @@ Cada gap detectado en P1 se **etiqueta** por tipo, y el tipo decide quién lo re
 |-------------|------------------------------------------|-------------------|
 | `technical` | ¿ya hay middleware? ¿el endpoint es sync/async? ¿qué storage? | **El loop, autónomo, contra el código** (read_file, code_search, Recipe Bank) |
 | `theory`    | ¿token bucket vs sliding window? ¿jitter/cap? | **El loop, contra evidencia externa** (retrieval/web o tier fuerte), con cita |
-| `product_intent` | ¿per-user o global? ¿qué límite? ¿bloquea o encola? | **Se ESCALA al usuario** — nunca se inventa |
+| `product_intent` | ¿per-user o global? ¿bloquea o encola? | **Se decide un default y se SURFACEA al usuario** — nunca se inventa en silencio |
 
 El loop rellena lo técnico/teórico autónomamente; **junta** los gaps de producto
-y los devuelve al usuario en **una sola ronda** (no goteo). Default razonable +
-assumption explícita cuando el gap de producto NO cambia el diseño (así no se
-vuelve molesto); escala solo cuando un gap de producto *cambiaría* el diseño.
+y los devuelve al usuario en **una sola ronda** (no goteo), cada uno con el
+default que se está implementando.
+
+**Un gap solo cuenta como `product_intent` si pasa las tres condiciones**
+(el test vive en el prompt de P1 y su cumplimiento se verifica en código):
+
+1. se pueden nombrar 2-4 alternativas concretas y más de una es defendible;
+2. elegir mal implica **reescribir** código, no ajustar una constante después;
+3. no se resuelve leyendo el repo, siguiendo sus convenciones ni releyendo el pedido.
+
+Lo que **nunca** se pregunta: presupuesto de cómputo, hardware, plazos,
+almacenamiento; licencias, procedencia de datasets, privacidad, compliance;
+benchmarks, métricas, baselines, umbrales de éxito; si el resultado es
+prototipo o producción; qué archivo es autoritativo cuando se puede abrir;
+naming/formato que el repo ya define; cualquier cosa que el usuario ya dijo.
+Ese era el modo de falla real: diez preguntas de gestión de proyecto antes de
+escribir una línea.
 
 ---
 
@@ -90,13 +104,32 @@ que no está en sus pesos sin necesitar otro modelo.
 - Para cada gap `theory`: resolver por **retrieval/web** (capa Inteligencia) — el
   conocimiento sale de la fuente externa, el modelo solo la lee y la cita. Sin
   evidencia encontrada → flag explícito (no se fabrica).
-- Para cada gap `product_intent`: **NO resolver**; encolar en `clarifications_needed[]`.
+- Para cada gap `product_intent`: **NO decidir por convicción propia**; encolar en
+  `clarifications_needed[]` **con sus `options` y su `default`** (el default es lo
+  que efectivamente se construye este turno).
 
-### P3 — Escalación de gaps de producto  *(la frontera del usuario)*
-- Si `clarifications_needed[]` tiene gaps **materiales** (que cambian el diseño) →
-  **escalar al usuario**: presentar las preguntas en una sola ronda y pausar.
-- Gaps de producto NO materiales → default sensato + assumption surfaced (no bloquea).
-- Reusa el seam `escalate`/`respond` que ya devuelve control al usuario.
+### P3 — Surfaceo de decisiones de producto  *(la frontera del usuario)*
+
+**La forma es el filtro, y se aplica en código, no en el prompt.**
+`_admissible_clarifications()` decide qué llega al usuario, porque un modelo bajo
+la instrucción "enumerá los gaps" produce de forma fiable un cuestionario de diez
+ítems. El criterio es estructural, no temático — una lista negra de palabras
+mataría preguntas legítimas y no vería la próxima tanda de ilegítimas:
+
+- sin `default` al que comprometerse → no es una decisión, es una encuesta;
+- menos de dos `options` concretas → no hay bifurcación demostrada;
+- más allá de `SPEC_ELABORATION_MAX_CLARIFICATIONS` (default **2**) → por debajo
+  del umbral de impacto de este turno.
+
+**Nada se descarta**: cada rechazo se convierte en `Assumption`, así la decisión
+sigue enunciada en el spec y visible en review — simplemente no interrumpe.
+`MAX_CLARIFICATIONS=0` desactiva el preguntar por completo (todo pasa a assumption).
+
+El surfaceo **no bloquea**: el usuario ve *"voy con X (alternativas: Y)"* y
+corrige si quiere. El planner recibe el mismo default bajo `PRODUCT DECISIONS`
+con la instrucción de **construirlo**, no de planear alrededor de la pregunta ni
+de sustituirlo por otra alternativa. (Una ronda que suspende y reanuda el turno
+sigue siendo v2; el seam `escalate`/`respond` está disponible para eso.)
 
 ### P4 — Autocrítica & descarte  *(la pasada que el chico omite — pero el descarte lo hace la ejecución, no el modelo)*
 Un modelo chico no se autocritica bien (arXiv:2404.17140: necesita un *verificador

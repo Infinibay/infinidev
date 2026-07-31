@@ -49,6 +49,34 @@ class RejectedAlternative:
 
 
 @dataclass(frozen=True)
+class Clarification:
+    """A product decision that genuinely forks the implementation.
+
+    The shape is the filter. A question only earns the user's attention if
+    the model can name the concrete ``options`` and commit to the ``default``
+    it will build in the meantime — an open-ended question with no
+    alternatives and no default is a questionnaire, not a decision, and
+    ``_admissible_clarifications`` demotes it to an assumption.
+
+    ``default`` is load-bearing: it is what actually gets implemented, so the
+    turn proceeds instead of stalling on an answer that may never come.
+    """
+
+    question: str
+    options: list[str] = field(default_factory=list)
+    default: str = ""
+    impact: str = ""  # what changes in the code depending on the answer
+
+    def render(self) -> str:
+        """One line: the decision, what we build now, what else was possible."""
+        others = [o for o in self.options if o.strip() and o != self.default]
+        line = f"{self.question} — proceeding with: {self.default}"
+        if others:
+            line += f" (alternatives: {'; '.join(others)})"
+        return line
+
+
+@dataclass(frozen=True)
 class GroundedSpec:
     """The elaborated specification handed to the planner.
 
@@ -62,9 +90,10 @@ class GroundedSpec:
     out_of_scope: list[str] = field(default_factory=list)
     resolved_facts: list[ResolvedFact] = field(default_factory=list)
     assumptions: list[Assumption] = field(default_factory=list)
-    # Product-intent gaps surfaced for the user. In v1 these are shown
-    # (not blocking); v2 adds a suspend/resume clarification round.
-    clarifications_needed: list[str] = field(default_factory=list)
+    # Product decisions surfaced for the user. Non-blocking: each carries the
+    # default that IS implemented this turn, so the user corrects course
+    # instead of being interrogated before any work happens.
+    clarifications_needed: list[Clarification] = field(default_factory=list)
     design_direction: str = ""
     alternatives_rejected: list[RejectedAlternative] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
@@ -103,8 +132,15 @@ class GroundedSpec:
             lines.append("  ASSUMPTIONS (unverified — flag if any is wrong):")
             lines += [f"    - {a.statement}" for a in self.assumptions]
         if self.clarifications_needed:
-            lines.append("  OPEN PRODUCT QUESTIONS (the user must decide — do NOT invent answers):")
-            lines += [f"    - {q}" for q in self.clarifications_needed]
+            # The planner is told to BUILD the default, not to stall on the
+            # question: the user was shown the same default and can correct
+            # it. What the planner must not do is silently pick a third
+            # option, or block the plan waiting for an answer.
+            lines.append(
+                "  PRODUCT DECISIONS (implement the stated default; do NOT invent a "
+                "different answer and do NOT block on these):"
+            )
+            lines += [f"    - {c.render()}" for c in self.clarifications_needed]
         if self.design_direction:
             lines.append(f"  Design direction: {self.design_direction}")
         if self.alternatives_rejected:
@@ -123,7 +159,7 @@ class GroundedSpec:
             "out_of_scope": self.out_of_scope,
             "resolved_facts": [vars(f) for f in self.resolved_facts],
             "assumptions": [vars(a) for a in self.assumptions],
-            "clarifications_needed": self.clarifications_needed,
+            "clarifications_needed": [vars(c) for c in self.clarifications_needed],
             "design_direction": self.design_direction,
             "alternatives_rejected": [vars(r) for r in self.alternatives_rejected],
             "risks": self.risks,

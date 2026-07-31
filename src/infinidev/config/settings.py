@@ -158,6 +158,11 @@ class Settings(BaseSettings):
     SPEC_ELABORATION_MIN_CHARS: int = 40  # Skip elaboration for requests shorter than this (trivial)
     SPEC_ELABORATION_MAX_EVIDENCE_CALLS: int = 4  # Read-only tool calls budget in the grounding pass
     SPEC_ELABORATION_CANDIDATES: int = 3  # N candidate design directions generated in the critique pass
+    # Hard ceiling on the product decisions surfaced to the user per task.
+    # A senior engineer raises at most one or two before starting; anything
+    # past this is demoted to a stated assumption, never dropped. 0 disables
+    # asking entirely (every decision becomes an assumption).
+    SPEC_ELABORATION_MAX_CLARIFICATIONS: int = 2
     # NB: static-analysis latency reporting is opt-in via the
     # INFINIDEV_ENABLE_SA_TIMER env var, not a settings field — see
     # ``engine.static_analysis_timer.is_enabled``.

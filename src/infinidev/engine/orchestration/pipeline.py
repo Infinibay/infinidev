@@ -269,14 +269,24 @@ def _run_elaboration_phase(
         if spec is None:
             return escalation
 
-        # Surface open product questions to the user (v1: non-blocking —
-        # shown so they can correct course; v2 adds suspend/resume).
+        # Surface the product decisions to the user — non-blocking, and each
+        # one states the default that IS being built, so this reads as "here
+        # is what I chose, correct me" rather than as a questionnaire the
+        # user has to clear before any work starts. The gate in
+        # ``_admissible_clarifications`` already capped and filtered these.
         if spec.clarifications_needed:
-            qs = "\n".join(f"  • {q}" for q in spec.clarifications_needed)
+            lines = []
+            for c in spec.clarifications_needed:
+                others = [o for o in c.options if o.strip() and o != c.default]
+                line = f"  • {c.question} — voy con: {c.default}"
+                if others:
+                    line += f" (alternativas: {'; '.join(others)})"
+                lines.append(line)
             hooks.notify(
                 "Infinidev",
-                "Antes de implementar, hay decisiones de producto que son tuyas "
-                f"(asumo defaults razonables si no respondés):\n{qs}",
+                "Decisiones de producto que tomé por vos. Sigo adelante con "
+                "estos defaults; decime si alguno no es el que querés:\n"
+                + "\n".join(lines),
                 "agent",
             )
         return _dc_replace(escalation, grounded_spec=spec)

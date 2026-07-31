@@ -30,6 +30,7 @@ from infinidev.config.llm import get_litellm_params
 from infinidev.config.settings import settings
 from infinidev.engine.analysis.grounded_spec import (
     Assumption,
+    Clarification,
     GroundedSpec,
     RejectedAlternative,
     ResolvedFact,
@@ -145,6 +146,23 @@ _ANALYZE_TOOL = {
                             "question": {"type": "string"},
                             "kind": {"type": "string", "enum": ["technical", "theory", "product_intent"]},
                             "why_it_matters": {"type": "string"},
+                            # product_intent only: naming the concrete options
+                            # and committing to a default is what separates a
+                            # real fork in the implementation from a
+                            # project-management questionnaire.
+                            "options": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "product_intent only: the 2-4 concrete alternatives.",
+                            },
+                            "default": {
+                                "type": "string",
+                                "description": "product_intent only: the option you WILL implement if the user says nothing. Must be one of options.",
+                            },
+                            "impact": {
+                                "type": "string",
+                                "description": "product_intent only: what changes in the code depending on the answer.",
+                            },
                         },
                         "required": ["question", "kind"],
                     },
@@ -157,14 +175,37 @@ _ANALYZE_TOOL = {
 
 
 def _pass_analyze(request: str, understanding: str, opened: list[str]) -> dict:
+    max_q = max(0, settings.SPEC_ELABORATION_MAX_CLARIFICATIONS)
     sys = (
         "You are elaborating a software task before it is planned. Do NOT design "
         "or write code. Analyse the request precisely and enumerate the GAPS that "
         "must be resolved before it is implementable. Tag each gap:\n"
         "- technical: resolvable by reading the codebase (does X exist? sync or async?).\n"
         "- theory: needs external knowledge (which algorithm? standard approach?).\n"
-        "- product_intent: a PRODUCT decision only the user can make (which behaviour? "
-        "what value?). NEVER invent answers to these.\n"
+        "- product_intent: a decision that FORKS the implementation and that only "
+        "the user can settle.\n\n"
+        "You act like a senior engineer who was handed this task: you start "
+        "working and raise a decision only when you would genuinely stop at a "
+        "keyboard. A gap is product_intent ONLY if all three hold:\n"
+        "  1. You can name 2-4 concrete alternatives, and more than one is defensible.\n"
+        "  2. Picking wrong means REWRITING code, not tweaking a constant later.\n"
+        "  3. It cannot be settled by reading the repo, following its existing "
+        "conventions, or re-reading the request.\n"
+        "Fails any of the three? It is not product_intent. Resolve it as a "
+        "technical gap by reading, or take the conventional choice and move on.\n\n"
+        "NEVER ask about (assume the obvious answer and keep going): compute "
+        "budget, hardware, deadlines, storage or artifact size; licensing, dataset "
+        "provenance, privacy or compliance; benchmarks, metrics, baselines, "
+        "success thresholds or acceptable regressions; whether the result is a "
+        "prototype, an experiment or production-ready; which file or link is "
+        "authoritative when you could just open it; naming, formatting or style "
+        "the repo already settles; anything the user already stated in the "
+        "request; how to verify the work.\n"
+        f"At most {max_q} product_intent gaps, ordered by impact — {max_q} is a "
+        "ceiling, not a target, and zero is the common and correct answer. Each "
+        "one MUST carry `options`, a `default` (the option you will implement if "
+        "the user stays silent) and `impact`. If you cannot commit to a default, "
+        "it is not a real decision: drop it.\n"
         "State what is OUT of scope — what the request does NOT ask for."
     )
     opened_str = ("\nFiles already read upstream:\n  " + "\n  ".join(opened)) if opened else ""
@@ -217,8 +258,17 @@ _GROUNDING_TOOL = {
                 },
                 "clarifications_needed": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Product-intent questions for the USER. Never answer these.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string"},
+                            "options": {"type": "array", "items": {"type": "string"}, "description": "The 2-4 concrete alternatives."},
+                            "default": {"type": "string", "description": "The option that WILL be implemented if the user stays silent."},
+                            "impact": {"type": "string", "description": "What changes in the code depending on the answer."},
+                        },
+                        "required": ["question", "options", "default"],
+                    },
+                    "description": "Product decisions for the USER. Carry them through with their default; never replace the default with an invented answer.",
                 },
             },
             "required": ["resolved_facts"],
@@ -245,7 +295,10 @@ def _pass_ground(
         "and answer with the evidence (file:line). If you cannot find evidence, record "
         "it as an ASSUMPTION, never invent a fact.\n"
         "- theory gaps: answer from knowledge or a web search; cite the source.\n"
-        "- product_intent gaps: do NOT answer — put them in clarifications_needed.\n"
+        "- product_intent gaps: do NOT settle them yourself — carry them into "
+        "clarifications_needed WITH the options and the default already stated "
+        "for them (that default is what gets built this turn). Drop any that a "
+        "read just answered, or that has no default you can commit to.\n"
         f"You may make at most {settings.SPEC_ELABORATION_MAX_EVIDENCE_CALLS} read "
         "calls, then call emit_grounding."
     )
@@ -270,9 +323,19 @@ def _pass_ground(
     )
     if not args:
         # Degrade: every gap becomes an explicit clarification/assumption.
-        prod = [g["question"] for g in gaps if g.get("kind") == "product_intent"]
+        # The product ones keep the options/default pass A committed to, so a
+        # failed grounding pass costs evidence, never the ability to proceed.
+        prod = [
+            {
+                "question": g.get("question", ""),
+                "options": g.get("options", []) or [],
+                "default": g.get("default", "") or "",
+                "impact": g.get("impact", "") or "",
+            }
+            for g in gaps if g.get("kind") == "product_intent"
+        ]
         assum = [
-            {"statement": f"Unresolved: {g['question']}", "why_no_evidence": "grounding pass failed"}
+            {"statement": f"Unresolved: {g.get('question', '')}", "why_no_evidence": "grounding pass failed"}
             for g in gaps if g.get("kind") != "product_intent"
         ]
         return {"resolved_facts": [], "assumptions": assum, "clarifications_needed": prod}
@@ -374,6 +437,84 @@ def _deterministic_discard(
     return winner, rejected, risks
 
 
+# ── Admissibility gate (deterministic — the prompt is not the filter) ─────
+
+
+def _admissible_clarifications(
+    raw: list[Any],
+    max_n: int,
+) -> tuple[list[Clarification], list[Assumption]]:
+    """Keep the decisions that are worth the user's attention; demote the rest.
+
+    Prompt rules alone do not hold here — a model under a "enumerate the gaps"
+    instruction reliably produces a ten-item questionnaire about budget,
+    licensing and benchmarks. So admissibility is enforced in code, on SHAPE
+    rather than on topic (a keyword blacklist would kill legitimate questions
+    and miss the next batch of illegitimate ones):
+
+    - no ``default`` we can commit to  → not a decision, it is a survey;
+    - fewer than two concrete options  → no demonstrated fork in the design;
+    - beyond ``max_n``                 → below the impact bar for this turn.
+
+    Nothing is discarded: every rejection becomes an Assumption, so the choice
+    is still stated in the spec and still visible in review — it just does not
+    interrupt the user. Returns (clarifications, extra_assumptions).
+    """
+    kept: list[Clarification] = []
+    demoted: list[Assumption] = []
+    seen: set[str] = set()
+
+    for entry in raw or []:
+        # A bare string is a pre-gate model (or an older payload): it carries a
+        # question and nothing to act on, which is exactly what fails the gate.
+        if isinstance(entry, str):
+            entry = {"question": entry}
+        if not isinstance(entry, dict):
+            continue
+
+        question = (entry.get("question") or "").strip()
+        if not question:
+            continue
+        key = question.lower().rstrip("?. ")
+        if key in seen:
+            continue
+        seen.add(key)
+
+        default = (entry.get("default") or "").strip()
+        options = [
+            o.strip() for o in (entry.get("options") or []) if isinstance(o, str) and o.strip()
+        ]
+        # The default is an option whether or not the model listed it as one.
+        if default and default not in options:
+            options.insert(0, default)
+        impact = (entry.get("impact") or "").strip()
+
+        if not default:
+            demoted.append(Assumption(
+                statement=f"No user decision taken on: {question} — going with the conventional choice",
+                why_no_evidence="surfaced without a default to fall back on",
+            ))
+            continue
+        if len(options) < 2:
+            demoted.append(Assumption(
+                statement=f"{question} — proceeding with: {default}",
+                why_no_evidence="no alternative was named, so this is not a real fork",
+            ))
+            continue
+        if len(kept) >= max_n:
+            demoted.append(Assumption(
+                statement=f"{question} — proceeding with: {default}",
+                why_no_evidence=f"below the top {max_n} product decisions for this turn",
+            ))
+            continue
+
+        kept.append(Clarification(
+            question=question, options=options, default=default, impact=impact
+        ))
+
+    return kept, demoted
+
+
 # ── Assembly ──────────────────────────────────────────────────────────────
 
 
@@ -404,7 +545,14 @@ def _assemble(
         for a in grounding.get("assumptions", [])
         if a.get("statement")
     ]
-    clarifications = [c for c in grounding.get("clarifications_needed", []) if c]
+    # Questions the model wants to ask are filtered on shape, then whatever
+    # did not survive is folded back in as a stated assumption — surfaced in
+    # the spec, just not in the user's face.
+    clarifications, demoted = _admissible_clarifications(
+        grounding.get("clarifications_needed", []) or [],
+        max(0, settings.SPEC_ELABORATION_MAX_CLARIFICATIONS),
+    )
+    assumptions.extend(demoted)
     in_scope = analysis.get("in_scope", []) or []
     out_of_scope = analysis.get("out_of_scope", []) or []
     deliverable = analysis.get("deliverable", "") or request

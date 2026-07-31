@@ -56,9 +56,11 @@ contents are not included, so a path there is a lead, not something you know.
 IF the packet carries a GROUNDED SPEC or a DESIGN BRIEF, THEN those decisions \
 are settled and you build on top of them: its ``Deliverable`` is the target, \
 items under ``Out of scope`` get no step, a step depending on an entry under \
-ASSUMPTIONS verifies it first and says so in the ``detail``, and questions under \
-OPEN PRODUCT QUESTIONS belong to the user — plan the part that stands without \
-the answer.
+ASSUMPTIONS verifies it first and says so in the ``detail``, and each entry \
+under PRODUCT DECISIONS is already settled by the default stated beside it — \
+plan THAT default. The user was shown the same default and can correct it; \
+what you must not do is stall on the question, plan around it, or quietly \
+pick one of the listed alternatives instead.
 
 ## The calls
 
