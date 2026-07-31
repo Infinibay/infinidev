@@ -190,6 +190,38 @@ class WorkingMemory:
             )
         return stored
 
+    def archive_calls(
+        self, step_index: int, calls: list[tuple[str, str, str]]
+    ) -> int:
+        """Archive ``(name, arguments, result)`` triples caught at the source.
+
+        ``archive_step`` reconstructs exchanges by pairing assistant tool
+        calls with their ``role: "tool"`` results, which only exists in
+        function-calling mode and only until ``compact_for_small`` rewrites
+        it. This path takes the body the tool actually returned, so what
+        gets archived does not depend on which tool-calling mode the model
+        supports or how aggressively its context was compacted.
+
+        Deduplication happens in ``_store`` by content hash, so calling
+        this alongside ``archive_step`` stores each exchange once.
+        """
+        if not self._ready:
+            return 0
+        stored = 0
+        for name, arguments, body in calls:
+            if len(body) < MIN_ARCHIVE_CHARS:
+                continue
+            try:
+                args = json.loads(arguments) if arguments else {}
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            if self.remember(
+                _format_call(name, args if isinstance(args, dict) else {}),
+                body, kind="tool_output", step_index=step_index,
+            ):
+                stored += 1
+        return stored
+
     def remember(
         self, title: str, content: str, *, kind: str = "note", step_index: int = 0
     ) -> bool:

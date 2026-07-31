@@ -63,12 +63,37 @@ class TestUserMessageInjector:
         assert sum(1 for m in messages if m.get("tool_call_id") == "sc1") == 1
 
     def test_reject_appends_when_no_prior_result(self):
+        """FC mode: the assistant announced the call, so answer on that channel.
+
+        The assistant turn carries ``tool_calls`` because that is what
+        ``ToolRunner.append_assistant_message`` builds in FC mode — and it
+        is what makes appending a ``role: "tool"`` message valid here.
+        """
+        inj = UserMessageInjector()
+        inj.inject("late")
+        messages: list[dict] = [{
+            "role": "assistant", "content": "done",
+            "tool_calls": [{
+                "id": "sc9", "type": "function",
+                "function": {"name": "step_complete", "arguments": "{}"},
+            }],
+        }]
+        assert inj.reject_step_complete_on_late_message(_ctx(), messages, "sc9") is True
+        assert messages[-1]["role"] == "tool"
+        assert messages[-1]["tool_call_id"] == "sc9"
+        assert "late" in messages[-1]["content"]
+
+    def test_reject_speaks_prose_when_the_transcript_has_no_tool_channel(self):
+        """Manual mode: the same assistant turn, but as prose.
+
+        There is no tool call to answer, so a ``role: "tool"`` message
+        here answers something nobody asked and invalidates the request.
+        """
         inj = UserMessageInjector()
         inj.inject("late")
         messages: list[dict] = [{"role": "assistant", "content": "done"}]
         assert inj.reject_step_complete_on_late_message(_ctx(), messages, "sc9") is True
-        assert messages[-1]["role"] == "tool"
-        assert messages[-1]["tool_call_id"] == "sc9"
+        assert messages[-1]["role"] == "user"
         assert "late" in messages[-1]["content"]
 
     def test_overwrite_static_rewrites_in_place(self):

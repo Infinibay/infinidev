@@ -265,10 +265,28 @@ class LLMCaller:
         self._MAX_MALFORMED_RETRIES = 4
         self._on_thinking_chunk = on_thinking_chunk
         self._on_stream_status = on_stream_status
+        self._synthetic_id_seq = 0
 
     def reset(self) -> None:
         """Reset per-inner-loop counters."""
         self._malformed_retries = 0
+        # Ids only have to be unique within one ``messages`` list, and the
+        # engine calls reset() once per step — the exact lifetime of that
+        # list.
+        self._synthetic_id_seq = 0
+
+    def _next_synthetic_id(self, prefix: str) -> str:
+        """Mint an id for a tool call that was parsed out of text.
+
+        Seeded from its own counter rather than ``action_tool_calls``,
+        which advances only when a *regular* tool actually runs. A pass
+        containing a pseudo-tool consumed ids without moving that counter,
+        so the next pass reissued one: two different calls under one id,
+        two ``role: "tool"`` results answering it, and a transcript both
+        OpenAI and Anthropic reject.
+        """
+        self._synthetic_id_seq += 1
+        return f"{prefix}_{self._synthetic_id_seq}"
 
     def call(
         self,
@@ -407,7 +425,7 @@ class LLMCaller:
             self._malformed_retries = 0
             tool_calls = [
                 _ManualToolCall(
-                    id=f"manual_{action_tool_calls + i}",
+                    id=self._next_synthetic_id("manual"),
                     name=pc["name"],
                     arguments=(
                         json.dumps(pc["arguments"])
@@ -415,7 +433,7 @@ class LLMCaller:
                         else str(pc["arguments"])
                     ),
                 )
-                for i, pc in enumerate(parsed)
+                for pc in parsed
             ]
             return LLMCallResult(
                 tool_calls=tool_calls, message=message,
@@ -509,7 +527,7 @@ class LLMCaller:
 
         return [
             _ManualToolCall(
-                id=f"fc_fallback_{action_tool_calls + i}",
+                id=self._next_synthetic_id("fc_fallback"),
                 name=pc["name"],
                 arguments=(
                     json.dumps(pc["arguments"])

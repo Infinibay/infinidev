@@ -383,6 +383,14 @@ class ToolRunner:
             if feedback := tracker.drain_feedback():
                 body += f"\n{feedback}"
 
+            # Queue the raw exchange for working memory before anything
+            # downstream gets to shorten it. Both branches: the archiver
+            # cannot recover this from the transcript in manual mode (no
+            # tool messages) nor on small models (compacted in place).
+            ctx.state.pending_archive.append(
+                (tc.function.name, str(tc.function.arguments or ""), body)
+            )
+
             if ctx.manual_tc:
                 tool_results_text.append(
                     f"[Tool: {tc.function.name}] Result:\n{body}"

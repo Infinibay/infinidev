@@ -270,14 +270,23 @@ class StepManager:
         Best-effort by design: the archive is an aid, and a storage hiccup
         must never fail a step that already did its work.
         """
+        # Drained before the settings check on purpose: the queue is filled
+        # on every tool call, so returning early without emptying it would
+        # accumulate every result of the whole task in memory.
+        pending, ctx.state.pending_archive = list(ctx.state.pending_archive), []
         if not _get_settings().WORKING_MEMORY_ENABLED:
             return
         with best_effort("working-memory archive failed"):
             from infinidev.engine.working_memory import get_working_memory
 
-            stored = get_working_memory(ctx.session_id).archive_step(
-                step_index, messages, summary
-            )
+            memory = get_working_memory(ctx.session_id)
+            stored = memory.archive_step(step_index, messages, summary)
+            # The transcript is one source; the bodies captured as the tools
+            # returned them are the other. Neither is redundant: the first
+            # carries the step summary, the second survives manual mode and
+            # small-model compaction. Content-hash dedup keeps the overlap
+            # from being stored twice.
+            stored += memory.archive_calls(step_index, pending)
             if stored:
                 _log(
                     f"   {_DIM}🗄  Archived {stored} excerpt(s) "

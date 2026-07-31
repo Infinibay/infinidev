@@ -128,9 +128,17 @@ class UserMessageInjector:
         ``_build_pseudo_only_messages``) and rewrite its content in
         place rather than appending a second one. On OpenAI both
         approaches work; on Anthropic appending duplicates raises.
-        Falls back to a fresh append if no prior result is found —
-        that path keeps the loop well-formed even if the assumption
-        breaks.
+
+        This is the single place four of the five step_complete gates
+        deliver their feedback, so it is also the single place that has
+        to know what shape the conversation is in. In manual mode there
+        is no tool channel at all — the assistant turn is prose, acks
+        come back as ``user`` — and appending a ``role: "tool"`` message
+        answering a call no assistant ever announced makes the next
+        request invalid. The check is on the transcript rather than on
+        ``ctx.manual_tc`` because this function is reached from four
+        callers and one static wrapper, and a fact already visible in
+        the messages does not need to be threaded through all of them.
         """
         for msg in reversed(messages):
             if (
@@ -139,6 +147,14 @@ class UserMessageInjector:
             ):
                 msg["content"] = new_body
                 return
+
+        speaks_tool_protocol = any(
+            msg.get("role") == "tool" or msg.get("tool_calls") for msg in messages
+        )
+        if not speaks_tool_protocol:
+            messages.append({"role": "user", "content": new_body})
+            return
+
         messages.append({
             "role": "tool",
             "tool_call_id": step_complete_id,
