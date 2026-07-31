@@ -39,4 +39,11 @@ class ClassifiedCalls:
     session_notes: list[Any] = field(default_factory=list)
     thinks: list[Any] = field(default_factory=list)
 
+    # add_note call id → the result the model should be told, filled in by
+    # ``ToolProcessor.process_pseudo_tools``. A note can be stored, stored
+    # after evicting an auto-note, or dropped when the budget is full;
+    # acknowledging all three as ``{"status": "noted"}`` taught the model
+    # that a note it never saved was safe.
+    note_results: dict[str, str] = field(default_factory=dict)
+
 

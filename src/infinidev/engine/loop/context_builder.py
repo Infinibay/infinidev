@@ -250,7 +250,12 @@ def build_iteration_messages(
     with measure("prompt_build"):
         user_prompt = build_iteration_prompt(
             ctx.desc, ctx.expected, effective_state,
-            project_knowledge=engine._project_knowledge if first_turn else None,
+            # Fetched once (hence the cache on the engine), rendered every
+            # iteration. Each iteration builds a brand-new two-message
+            # conversation, so "the model already saw it" is never true
+            # here — dropping the block after turn one simply deleted the
+            # project's facts from the model's context.
+            project_knowledge=engine._project_knowledge,
             context_rank_result=_rank_at_pivot(engine, ctx, iteration),
             max_context_tokens=ctx.max_context_tokens,
             session_notes=engine.session_notes or None,
@@ -270,8 +275,10 @@ def _rank_at_pivot(engine: Any, ctx: ExecutionContext, iteration: int) -> Any | 
     """Recompute the context ranking, but only where it can have changed.
 
     A pivot is the first iteration or a change of active step. Between
-    pivots the model has already seen the ``<context-rank>`` block and the
-    ranking would come back the same, so re-sending it is pure token cost.
+    pivots the ranking would come back the same, so recomputing it is
+    wasted work — but the *block* is still re-sent from cache, because
+    each iteration builds a fresh conversation and a block that is not
+    rendered is a block the model cannot see.
     """
     result = None
     with best_effort("ContextRank ranking failed"):
@@ -280,7 +287,7 @@ def _rank_at_pivot(engine: Any, ctx: ExecutionContext, iteration: int) -> Any | 
         active = ctx.state.plan.active_step
         pivot_key = (active.index, active.title) if active else (-1, "")
         if iteration != ctx.start_iteration and pivot_key == engine._cr_last_pivot_key:
-            return None
+            return engine._cr_cached_result
 
         from infinidev.engine.context_rank.ranker import rank
 

@@ -160,10 +160,13 @@ class ToolRunner:
         intent through the tool channel — but each one still needs a result,
         or the provider sees an unanswered tool call.
         """
+        def note_result(call: Any) -> str:
+            return classified.note_results.get(call.id, '{"status": "noted"}')
+
         if ctx.manual_tc:
             texts = tool_results_text if tool_results_text is not None else []
-            texts += ['[Tool: add_note] Result:\n{"status": "noted"}'
-                      for _ in classified.notes]
+            texts += [f'[Tool: add_note] Result:\n{note_result(n)}'
+                      for n in classified.notes]
             texts += ['[Tool: add_session_note] Result:\n{"status": "noted"}'
                       for _ in classified.session_notes]
             texts += ['[Tool: think] Result:\n{"status": "acknowledged"}'
@@ -180,7 +183,7 @@ class ToolRunner:
         for think in classified.thinks:
             ack(think, '{"status": "acknowledged"}')
         for note in classified.notes:
-            ack(note, '{"status": "noted"}')
+            ack(note, note_result(note))
         for note in classified.session_notes:
             ack(note, '{"status": "noted"}')
         if classified.step_complete:

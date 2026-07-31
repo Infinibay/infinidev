@@ -148,6 +148,8 @@ class LoopEngine(AgentEngine):
         self._cr_hooks = ContextRankHooks()
         self._cr_cached_result: Any | None = None
         self._cr_last_pivot_key: tuple[int, str] | None = None
+        # Fetched on the first iteration of a run, rendered on all of them.
+        self._project_knowledge: list[dict] = []
 
     def inject_message(self, message: str) -> None:
         """Inject a user message into the running loop (thread-safe)."""
