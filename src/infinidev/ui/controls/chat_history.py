@@ -129,8 +129,8 @@ class ChatHistoryControl(UIControl):
         self._anim_handle = None         # pending animation-frame timer handle
         self._hit_bound: bool = False    # set when a scroll step clamps at an edge
         # ── Compact tool-group state ──────────────────────────────────
-        # When the agent is working the last tool group reads "Running N
-        # tools…"; otherwise "Ran N tools". Collapse/expand state is keyed
+        # A group reads "Running" only while one of its tool messages is
+        # active; otherwise it reads "Ran". Collapse/expand state is keyed
         # by the group's start_index (default: collapsed).
         self._busy: bool = False
         self._tool_group_states: dict[int, bool] = {}   # start_index → collapsed
@@ -142,19 +142,11 @@ class ChatHistoryControl(UIControl):
 
     @busy.setter
     def busy(self, value: bool) -> None:
-        """Toggle the 'agent is working' state.
-
-        The tool-group summary depends on this (Running… vs Ran), and the
-        line cache is keyed only on (msg_count, width) — neither changes
-        when the turn ends — so we must drop the cache here or the summary
-        would stay frozen on "Running…" after the agent finishes.
-        """
+        """Track whether the agent is working and invalidate its cached view."""
         if bool(value) != self._busy:
             self._busy = bool(value)
             self._line_cache = None
-            # Also bypass the streaming throttle: without this, a turn that
-            # ends within _REBUILD_MIN_INTERVAL of the last rebuild would
-            # keep reusing _last_lines and leave the summary on "Running…".
+            # Bypass the throttle so lifecycle changes appear next frame.
             self._last_rebuild = 0.0
 
     def invalidate_cache(self) -> None:
@@ -500,7 +492,11 @@ class ChatHistoryControl(UIControl):
     @work_label.setter
     def work_label(self, value: str) -> None:
         """What the agent is doing right now, shown beside the spinner."""
-        self._work_label = (value or "").strip()
+        normalized = (value or "").strip()
+        if normalized != self._work_label:
+            self._work_label = normalized
+            if self._show_thinking:
+                self._work_started_at = time.monotonic()
 
     def preferred_width(self, max_available_width: int) -> int | None:
         return None  # fill available
@@ -691,13 +687,12 @@ class ChatHistoryControl(UIControl):
         lines: list[list[tuple[str, str]]] = []
         self._clickable_lines = {}
         groups = identify_groups(self._messages)
-        n_groups = len(groups)
 
-        for gi, group in enumerate(groups):
+        for group in groups:
             # Compact, collapsible tool groups (claude-code style) take a
             # dedicated render path instead of the generic header+messages.
             if group.msg_type == "tool_call":
-                self._render_tool_group(group, gi == n_groups - 1, width, lines)
+                self._render_tool_group(group, width, lines)
                 continue
             if group.msg_type == "critic":
                 self._render_critic_group(group, width, lines)
@@ -769,7 +764,7 @@ class ChatHistoryControl(UIControl):
         self._cache_width = width
         return lines
 
-    def _render_tool_group(self, group, is_last: bool, width: int,
+    def _render_tool_group(self, group, width: int,
                            lines: list[list[tuple[str, str]]]) -> None:
         """Render a run of tool calls as one compact, collapsible group.
 
@@ -779,12 +774,15 @@ class ChatHistoryControl(UIControl):
         from infinidev.ui.controls.tool_call_widget import build_tool_group
 
         idx = group.start_index
-        collapsed = self._tool_group_states.get(idx, True)   # default collapsed
+        running = any(bool(message.get("running")) for message in group.messages)
+        collapsed = self._tool_group_states.get(idx, not running)
         expanded_set = self._tool_expanded.get(idx, set())
-        live = self._busy and is_last
+        live = running
 
-        def _toggle_group(_idx=idx):
-            self._tool_group_states[_idx] = not self._tool_group_states.get(_idx, True)
+        def _toggle_group(_idx=idx, _default=not running):
+            self._tool_group_states[_idx] = not self._tool_group_states.get(
+                _idx, _default,
+            )
 
         def _toggle_tool(local_i: int, _idx=idx):
             s = self._tool_expanded.setdefault(_idx, set())

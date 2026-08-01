@@ -787,6 +787,19 @@ class ToolCallWidget:
             sections = formatter(args, result, error, width) if formatter else _fmt_default(tool_name, args, result, error, width)
         except Exception:
             sections = _fmt_default(tool_name, args, result, error, width)
+        if msg.get("running"):
+            live_lines = list(msg.get("live_output_tail") or [])
+            partial = str(msg.get("_live_output_partial") or "")
+            if partial:
+                live_lines.append(partial)
+            live_lines = live_lines[-20:]
+            sections.append(_spacer())
+            sections.append(_status("● running", ok=True))
+            if live_lines:
+                sections.append(_label(f"latest output · last {len(live_lines)} lines"))
+                sections.append(_block("\n".join(live_lines), _TC_OUT_FG))
+            else:
+                sections.append(_label("(waiting for output…)"))
 
         # ── 2. Header line: "▸ tool_name ───────  [⧉]"  ───────────────
         # The copy button anchors to the right edge; the horizontal
@@ -948,7 +961,7 @@ _TG_DIM_FG = TEXT_MUTED            # arrows / separators
 
 
 def _tool_status(msg: dict[str, Any]) -> str:
-    """``"ok"``, ``"err"`` or ``"skipped"`` for one tool message.
+    """Return the compact-row status for one tool message.
 
     ``"skipped"`` is the file-too-large refusal: nothing was read, nothing
     failed. Rendering it as an error would send the user hunting for a bug
@@ -956,6 +969,8 @@ def _tool_status(msg: dict[str, Any]) -> str:
     """
     from infinidev.engine.oversized_result import is_oversized_refusal
 
+    if msg.get("running"):
+        return "running"
     if is_oversized_refusal(msg.get("result") or ""):
         return "skipped"
     return "ok" if _tool_ok(msg) else "err"
@@ -1050,6 +1065,7 @@ def build_tool_group(
         for i, msg in enumerate(messages):
             status = statuses[i]
             row_icon, row_style = {
+                "running": (_TG_LIVE_ICON, _TC_BAR_FG + " bold"),
                 "ok": (_TG_OK_ICON, _TC_OK_FG),
                 "err": (_TG_ERR_ICON, _TC_FAIL_FG),
                 "skipped": (_TG_SKIP_ICON, _TC_WARN_FG),

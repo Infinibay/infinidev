@@ -13,9 +13,9 @@ from infinidev.ui.controls.chat_history import ChatHistoryControl
 from infinidev.ui.controls.tool_call_widget import build_tool_group
 
 
-def _tool(name, text, *, result="", error=""):
+def _tool(name, text, *, result="", error="", running=False):
     return {"type": "tool_call", "tool_name": name, "text": text,
-            "args": {}, "result": result, "error": error}
+            "args": {}, "result": result, "error": error, "running": running}
 
 
 def _flat(lines) -> str:
@@ -93,8 +93,8 @@ def test_expand_individual_tool_reveals_full_detail():
 # ── Live vs done summary ────────────────────────────────────────────────
 
 
-def test_live_group_reads_running_when_busy():
-    c = ChatHistoryControl([_tool("read_file", "read_file a.py")])
+def test_live_group_reads_running_for_active_tool():
+    c = ChatHistoryControl([_tool("read_file", "read_file a.py", running=True)])
     c.busy = True
     out = _render(c)
     assert "Running" in out
@@ -104,6 +104,14 @@ def test_live_group_reads_running_when_busy():
 def test_done_group_reads_ran_when_idle():
     c = ChatHistoryControl([_tool("read_file", "read_file a.py")])
     c.busy = False
+    out = _render(c)
+    assert "Ran" in out
+    assert "Running" not in out
+
+
+def test_busy_agent_does_not_keep_completed_tool_running():
+    c = ChatHistoryControl([_tool("read_file", "read_file a.py", running=False)])
+    c.busy = True
     out = _render(c)
     assert "Ran" in out
     assert "Running" not in out
@@ -127,13 +135,15 @@ def test_running_flips_to_ran_immediately_within_throttle_window():
     # the summary would stay on "Running…" for up to ~180ms. The busy setter
     # must also reset _last_rebuild so the flip lands on the very next frame.
     import time
-    c = ChatHistoryControl([_tool("read_file", "read_file a.py")])
+    message = _tool("read_file", "read_file a.py", running=True)
+    c = ChatHistoryControl([message])
     c.busy = True
     lines, _, _ = c._build_lines(80)          # establishes _last_lines + a
     assert "Running" in _flat(lines)          # recent _last_rebuild
     # Simulate the turn ending an instant later (still inside the throttle
     # window) — do NOT touch _line_cache/_last_rebuild manually.
     c._last_rebuild = time.monotonic()
+    message["running"] = False
     c.busy = False
     lines, _, _ = c._build_lines(80)
     flat = _flat(lines)

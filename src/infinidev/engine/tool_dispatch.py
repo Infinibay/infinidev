@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import uuid
 from typing import Any
 
 from infinidev.engine.schema_sanitizer import (
@@ -458,6 +459,7 @@ def execute_tool_call(
     from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent
 
     _meta = dict(hook_metadata) if hook_metadata else {}
+    _meta["tool_run_id"] = str(_meta.get("tool_run_id") or uuid.uuid4().hex)
     ctx = HookContext(
         event=HookEvent.PRE_TOOL,
         tool_name=name,
@@ -473,7 +475,15 @@ def execute_tool_call(
 
     # Execute
     try:
-        result = tool._run(**args)
+        from infinidev.engine.tool_progress import tool_progress_context
+
+        with tool_progress_context(
+            ctx.metadata["tool_run_id"],
+            ctx.project_id,
+            ctx.agent_id,
+            cancel_event=ctx.metadata.get("cancel_event"),
+        ):
+            result = tool._run(**args)
         # Unwrap ToolResult (text + optional image attachments). The text
         # goes into the role=tool message; attachments are surfaced via
         # attachments_out so the engine can push them as a follow-up

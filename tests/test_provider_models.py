@@ -76,14 +76,21 @@ def test_kimi_catalog_excludes_the_sunsetting_k2_line() -> None:
 # guess on purpose: an over-stated window is worse than an unknown one,
 # because the loop packs context until the backend truncates it silently.
 #
-#   qwen:*  litellm indexes DashScope under prefixes that never match this
-#           provider's `custom_openai/`; only the 3.6 tier has a documented
-#           1M window, so the rest have no verifiable source.
+#   qwen:*  LiteLLM indexes DashScope under prefixes that never match this
+#           provider's `custom_openai/`; entries remain here only when the
+#           current Alibaba catalog does not publish a precise window.
 #   others  single models litellm's map has not picked up.
 _CONTEXT_WINDOW_GAPS = {
-    "qwen:*",
-    "mistral:ministral-3b-latest",
-    "gmi:deepseek-ai/DeepSeek-R1",
+    "qwen:qwen3-32b",
+    "qwen:qwen3-30b-a3b",
+    "qwen:qwen3-235b-a22b",
+    "qwen:qwen3-coder-flash",
+    "qwen:qwen3-max",
+    "qwen:qwen-max",
+    "qwen:qwen-plus",
+    "qwen:qwen-turbo",
+    "qwen:qwen-flash",
+    "qwen:qwq-plus",
 }
 
 
@@ -115,3 +122,37 @@ def test_catalog_models_resolve_a_context_window() -> None:
                 missing.append(f"{pid}:{model}")
 
     assert not missing, f"no context window for: {missing}"
+
+
+def test_documented_context_windows_win_over_litellm(monkeypatch) -> None:
+    """A known-but-stale LiteLLM row must not override provider documentation."""
+    import litellm
+
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    monkeypatch.setitem(
+        litellm.model_cost,
+        "openai/gpt-5.4-mini",
+        {"max_input_tokens": 272_000},
+    )
+    monkeypatch.setitem(
+        litellm.model_cost,
+        "minimax/MiniMax-M2.5",
+        {"max_input_tokens": 1_000_000},
+    )
+
+    assert get_model_context_window(
+        {"model": "openai/gpt-5.4-mini"}, "openai"
+    ) == 400_000
+    assert get_model_context_window(
+        {"model": "minimax/MiniMax-M2.5"}, "minimax"
+    ) == 204_800
+
+
+def test_openai_api_gpt_56_uses_the_full_model_window() -> None:
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+        assert get_model_context_window(
+            {"model": f"openai/{model}"}, "openai"
+        ) == 1_050_000

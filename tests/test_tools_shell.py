@@ -1,12 +1,14 @@
 """Tests for ExecuteCommandTool."""
 
 import json
+import signal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from infinidev.config.settings import settings
 from infinidev.tools.shell.execute_command import ExecuteCommandTool
+from infinidev.tools.shell.execute_command_tool import _effective_command_timeout
 
 
 class TestExecuteCommand:
@@ -50,6 +52,31 @@ class TestExecuteCommand:
         data = json.loads(result)
         assert "error" in data
         assert "timed out" in data["error"].lower()
+
+    def test_configured_timeout_is_a_hard_ceiling(self, monkeypatch):
+        monkeypatch.setattr(settings, "COMMAND_TIMEOUT", 7)
+
+        assert _effective_command_timeout(None) == 7
+        assert _effective_command_timeout(0) == 7
+        assert _effective_command_timeout(-1) == 7
+        assert _effective_command_timeout(3) == 3
+        assert _effective_command_timeout(300) == 7
+
+    def test_terminate_signals_the_entire_process_group(self):
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.wait.return_value = 0
+
+        with patch(
+            "infinidev.tools.shell.execute_command_tool.os.killpg",
+        ) as killpg:
+            ExecuteCommandTool._terminate(proc)
+
+        assert killpg.call_args_list == [
+            ((4321, signal.SIGTERM),),
+            ((4321, 0),),
+            ((4321, signal.SIGKILL),),
+        ]
 
     def test_execute_stdout_truncation(self, bound_tool, auto_approve_permissions):
         """Output longer than 10K is truncated to last 10K chars."""

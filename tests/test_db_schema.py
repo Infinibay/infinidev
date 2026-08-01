@@ -86,7 +86,8 @@ class TestSchemaWiring:
         c.close()
         for t in (
             "projects", "findings", "artifacts", "sessions", "conversation_turns",
-            "session_notes", "library_docs", "ci_files", "ci_symbols", "ci_references",
+            "session_notes", "session_messages", "session_runtime_state",
+            "library_docs", "ci_files", "ci_symbols", "ci_references",
             "cr_interactions", "cr_session_scores",
         ):
             assert t in tables, f"missing core table: {t}"

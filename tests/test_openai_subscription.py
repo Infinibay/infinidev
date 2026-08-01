@@ -521,6 +521,35 @@ def test_context_window_uses_the_subscription_catalog(codex_home):
     assert window == 258_400
 
 
+def test_gpt_56_subscription_does_not_use_the_larger_api_window(codex_home):
+    """The API model has 1.05M context, but Codex subscriptions are capped by
+    their own catalog and must not inherit the metered API limit."""
+    from infinidev.engine.loop.model_context import (
+        get_model_context_window,
+        get_model_max_context_window,
+    )
+
+    _write_catalog(
+        codex_home,
+        [
+            {
+                "slug": "gpt-5.6-sol",
+                "context_window": 272_000,
+                "effective_context_window_percent": 95,
+            }
+        ],
+    )
+    window = get_model_context_window(
+        {"model": "openai/responses/gpt-5.6-sol"},
+        "openai_subscription",
+    )
+    assert window == 258_400
+    assert get_model_max_context_window(
+        {"model": "openai/responses/gpt-5.6-sol"},
+        "openai_subscription",
+    ) == 1_050_000
+
+
 def test_bare_model_strips_the_protocol_segment():
     from infinidev.engine.loop.model_context import _bare_model
 

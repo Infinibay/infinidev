@@ -3,12 +3,14 @@
 Covers:
 - ``_format_count`` compact formatting and the 1000k → 1.0M roll-over
 - ``build_usage_bar_fragments`` clamping for out-of-range percentages
+- distinct model-maximum and provider-usable context labels
 """
 
 from __future__ import annotations
 
 from infinidev.ui.managers.context_render import (
     _format_count,
+    build_context_fragments,
     build_usage_bar_fragments,
 )
 from infinidev.ui.theme import BAR_WIDTH, BAR_FILLED
@@ -22,6 +24,7 @@ def test_format_count_basic():
     assert _format_count(0) == "0"
     assert _format_count(999) == "999"
     assert _format_count(12_345) == "12k"
+    assert _format_count(1_050_000) == "1.05M"
     assert _format_count(2_500_000) == "2.5M"
 
 
@@ -51,3 +54,18 @@ def test_usage_bar_upper_clamps_pct_above_one():
     # An over-100% pct must not exceed BAR_WIDTH filled cells.
     frags = build_usage_bar_fragments("Chat", 100, 100, 1.5)
     assert len(_bar_cells(frags)) == BAR_WIDTH
+
+
+def test_context_header_distinguishes_model_max_from_usable_window():
+    status = {
+        "model": "gpt-5.6-sol",
+        "max_context": 258_400,
+        "model_max_context": 1_050_000,
+        "chat": {},
+        "tasks": {},
+    }
+
+    rendered = "".join(text for _style, text in build_context_fragments(status, ""))
+
+    assert "1.05M model" in rendered
+    assert "258k usable" in rendered

@@ -7,13 +7,17 @@ replay (model sees the whole prior conversation exactly once on resume).
 """
 
 from infinidev.db.service import (
-    register_session,
-    store_conversation_turn,
+    get_all_turns,
     get_last_session,
+    get_session_messages,
+    get_session_notes,
+    get_session_runtime_state,
     list_recent_sessions,
     persist_session_note,
-    get_session_notes,
-    get_all_turns,
+    persist_session_runtime_state,
+    register_session,
+    store_conversation_turn,
+    store_session_message,
 )
 
 
@@ -109,6 +113,158 @@ class TestAllTurns:
         assert len(content) < 5000
 
 
+class TestStructuredSessionState:
+    def test_tool_call_is_updated_in_place_without_truncation(self, temp_db):
+        register_session("s", "/work")
+        message_id = store_session_message(
+            "s",
+            {
+                "sender": "Tool",
+                "type": "tool_call",
+                "tool_name": "read_file",
+                "args": {"path": "src/app.py"},
+                "result": "",
+                "running": True,
+                "_live_output_partial": "not durable",
+            },
+        )
+        store_session_message(
+            "s",
+            {
+                "sender": "Tool",
+                "type": "tool_call",
+                "tool_name": "read_file",
+                "args": {"path": "src/app.py"},
+                "result": "x" * 5000,
+                "running": False,
+            },
+            message_id=message_id,
+        )
+
+        messages = get_session_messages("s")
+
+        assert len(messages) == 1
+        assert messages[0]["result"] == "x" * 5000
+        assert messages[0]["args"] == {"path": "src/app.py"}
+        assert "_live_output_partial" not in messages[0]
+        assert messages[0]["_resume_message_id"] == message_id
+
+    def test_task_plan_and_sidebar_round_trip(self, temp_db):
+        register_session("s", "/work")
+        steps = [
+            {"index": 1, "title": "Inspect", "status": "done"},
+            {"index": 2, "title": "Implement", "status": "active"},
+        ]
+        persist_session_runtime_state(
+            "s",
+            task_description="Restore the complete session",
+            plan_steps=steps,
+            ui_state={
+                "plan_text": "Step 2: Implement",
+                "steps_text": "v Inspect\n> Implement",
+                "touched_files": {"src/app.py": 2},
+            },
+        )
+
+        state = get_session_runtime_state("s")
+
+        assert state["task_description"] == "Restore the complete session"
+        assert state["plan_steps"] == steps
+        assert state["ui_state"]["touched_files"] == {"src/app.py": 2}
+
+    def test_resume_bundle_includes_messages_and_runtime_state(self, temp_db):
+        from infinidev.cli.session_resume import resumed_session_state
+
+        register_session("s", "/work")
+        store_session_message(
+            "s",
+            {"sender": "Thinking", "text": "intermediate", "type": "think"},
+        )
+        persist_session_runtime_state(
+            "s",
+            task_description="Original task",
+            plan_steps=[{"title": "One", "status": "done"}],
+        )
+
+        state = resumed_session_state("s")
+
+        assert state["messages"][0]["type"] == "think"
+        assert state["task_description"] == "Original task"
+        assert state["plan_steps"] == [{"title": "One", "status": "done"}]
+
+    def test_repaint_prefers_structured_messages_over_legacy_turns(self):
+        from types import SimpleNamespace
+
+        from infinidev.ui.app import InfinidevApp
+
+        class _History:
+            def invalidate_cache(self):
+                pass
+
+        app = SimpleNamespace(
+            _resume_request={
+                "turns": [
+                    ("user", "older legacy request"),
+                    ("user", "legacy duplicate"),
+                ],
+                "state": {
+                    "messages": [
+                        {
+                            "sender": "You",
+                            "text": "legacy duplicate",
+                            "type": "user",
+                        },
+                        {
+                            "sender": "Tool",
+                            "text": "read_file",
+                            "type": "tool_call",
+                            "running": True,
+                            "result": "",
+                        },
+                        {"sender": "Thinking", "text": "why", "type": "think"},
+                    ],
+                    "ui_state": {
+                        "plan_text": "Step 2",
+                        "steps_text": "v Inspect\n> Implement",
+                        "touched_files": {"src/app.py": 1},
+                    },
+                },
+            },
+            session_id="session-123",
+            chat_messages=[],
+            _restoring_session=True,
+            _chat_history_control=_History(),
+            _plan_text="",
+            _steps_text="",
+            _actions_text="",
+            _touched_files={},
+        )
+
+        def _add_message(sender, text, msg_type):
+            app.chat_messages.append(
+                {"sender": sender, "text": text, "type": msg_type}
+            )
+
+        app.add_message = _add_message
+        InfinidevApp._repaint_resumed_history(app)
+
+        assert [message["type"] for message in app.chat_messages] == [
+            "system",
+            "user",
+            "user",
+            "tool_call",
+            "think",
+        ]
+        texts = [message["text"] for message in app.chat_messages]
+        assert texts.count("legacy duplicate") == 1
+        assert texts.index("older legacy request") < texts.index("legacy duplicate")
+        assert app.chat_messages[3]["running"] is False
+        assert "Interrupted" in app.chat_messages[3]["error"]
+        assert app._steps_text == "v Inspect\n> Implement"
+        assert app._actions_text == "Idle"
+        assert app._restoring_session is False
+
+
 class TestFullHistoryReplay:
     def test_replay_is_consumed_once(self):
         from infinidev.engine.orchestration import chat_agent as ca
@@ -124,3 +280,38 @@ class TestFullHistoryReplay:
         before = set(ca._FULL_HISTORY_ONCE)
         ca.request_full_history_once("")
         assert set(ca._FULL_HISTORY_ONCE) == before
+
+    def test_first_resumed_prompt_includes_structured_execution_state(self, temp_db):
+        from infinidev.engine.orchestration import chat_agent as ca
+
+        register_session("resume-state", "/work")
+        store_conversation_turn("resume-state", "user", "original request")
+        store_session_message(
+            "resume-state",
+            {
+                "sender": "Tool",
+                "type": "tool_call",
+                "tool_name": "read_file",
+                "args": {"path": "src/app.py"},
+                "result": "complete tool result",
+                "running": False,
+            },
+        )
+        persist_session_runtime_state(
+            "resume-state",
+            task_description="Original task description",
+            plan_steps=[{"title": "Inspect state", "status": "done"}],
+        )
+
+        ca.request_full_history_once("resume-state")
+        first = ca._build_user_message("continue", "resume-state")
+        second = ca._build_user_message("another turn", "resume-state")
+
+        assert isinstance(first, str)
+        assert "<resumed-session-state>" in first
+        assert "Original task description" in first
+        assert "Inspect state" in first
+        assert "read_file" in first
+        assert "complete tool result" in first
+        assert isinstance(second, str)
+        assert "<resumed-session-state>" not in second

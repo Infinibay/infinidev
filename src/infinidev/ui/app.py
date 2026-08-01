@@ -47,9 +47,10 @@ class InfinidevApp:
 
     def __init__(self, resume_session: dict | None = None) -> None:
         # Pre-resolved by run_tui when -c/--resume was passed:
-        # {"session_id": str, "turns": [(role, content), ...]}. Stored
-        # before the init helpers so _init_engine_state can adopt the id.
+        # {"session_id": str, "turns": [...], "state": {...}}. Stored before
+        # the init helpers so _init_engine_state can adopt the id.
         self._resume_request: dict = resume_session or {}
+        self._restoring_session = bool(self._resume_request)
         self._init_ui_state()
         self._init_chat_subsystem()
         self._init_sidebar_state()
@@ -141,6 +142,10 @@ class InfinidevApp:
         # Reuse the resumed session_id so all the by-session machinery
         # (chat history, findings, ContextRank, session notes) re-engages.
         self.session_id: str = self._resume_request.get("session_id") or str(uuid.uuid4())
+        resumed_state = self._resume_request.get("state") or {}
+        self._task_description = str(resumed_state.get("task_description") or "")
+        plan_steps = resumed_state.get("plan_steps") or []
+        self._session_plan_steps = plan_steps if isinstance(plan_steps, list) else []
 
     def _init_analysis_state(self) -> None:
         self._analysis_waiting: bool = False
@@ -254,26 +259,81 @@ class InfinidevApp:
         self._chat_history_control.invalidate_cache()
 
     def _repaint_resumed_history(self) -> None:
-        """Repaint the prior conversation into the scrollback on resume.
+        """Repaint the complete prior transcript and sidebar state on resume.
 
         Display-only — costs zero tokens. The model itself gets the full
         history on its first turn via the replay queued in
         ``begin_resumed_session`` (chat_agent.request_full_history_once).
         """
-        turns = self._resume_request.get("turns") or []
-        if not turns:
-            return
-        self.add_message(
-            "System",
-            f"↻ Resumed session {self.session_id[:8]} — "
-            f"{len(turns)} prior turns restored.",
-            "system",
-        )
-        for role, content in turns:
-            if role == "user":
-                self.add_message("You", content, "user")
-            else:
-                self.add_message("Infinidev", content, "agent")
+        try:
+            state = self._resume_request.get("state") or {}
+            messages = state.get("messages") or []
+            turns = self._resume_request.get("turns") or []
+            if not messages and not turns:
+                return
+
+            structured_messages: list[dict[str, Any]] = []
+            for raw_message in messages:
+                if not isinstance(raw_message, dict):
+                    continue
+                message = dict(raw_message)
+                if message.get("type") == "banner":
+                    continue
+                message["streaming"] = False
+                if message.get("running"):
+                    message["running"] = False
+                    message["error"] = (
+                        message.get("error")
+                        or "Interrupted before the previous session closed."
+                    )
+                structured_messages.append(message)
+
+            # A session first created by an older release can have legacy
+            # conversation turns followed by new structured events. Prepend
+            # only turns that are not already represented, preserving the old
+            # history without duplicating new user/final-agent messages.
+            legacy_messages: list[dict[str, Any]] = []
+            for role, content in turns:
+                msg_type = "user" if role == "user" else "agent"
+                sender = "You" if role == "user" else "Infinidev"
+                duplicate = any(
+                    message.get("type") == msg_type
+                    and message.get("sender") == sender
+                    and message.get("text") == content
+                    for message in structured_messages
+                )
+                if not duplicate:
+                    legacy_messages.append({
+                        "sender": sender,
+                        "text": content,
+                        "type": msg_type,
+                        "streaming": False,
+                    })
+
+            restored_messages = [*legacy_messages, *structured_messages]
+            self.add_message(
+                "System",
+                f"↻ Resumed session {self.session_id[:8]} — "
+                f"{len(restored_messages)} prior events restored.",
+                "system",
+            )
+            self.chat_messages.extend(restored_messages)
+
+            ui_state = state.get("ui_state") or {}
+            if isinstance(ui_state, dict):
+                self._plan_text = str(ui_state.get("plan_text") or "")
+                self._steps_text = str(ui_state.get("steps_text") or "")
+                touched = ui_state.get("touched_files") or {}
+                if isinstance(touched, dict):
+                    self._touched_files = {
+                        str(path): int(count)
+                        for path, count in touched.items()
+                        if isinstance(count, int)
+                    }
+            self._actions_text = "Idle"
+            self._chat_history_control.invalidate_cache()
+        finally:
+            self._restoring_session = False
 
     # ── Run ──────────────────────────────────────────────────────────
 
@@ -381,6 +441,52 @@ class InfinidevApp:
         last = self.chat_messages[-1] if self.chat_messages else None
         if last is not None and last.get("streaming") is True:
             last["streaming"] = False
+            self._persist_session_message(last)
+
+    def _persist_session_message(self, message: dict[str, Any]) -> None:
+        """Best-effort persistence for one structured transcript row."""
+        if (
+            getattr(self, "_restoring_session", False)
+            or not getattr(self, "session_id", "")
+        ):
+            return
+        try:
+            from infinidev.db.service import store_session_message
+
+            message_id = store_session_message(
+                self.session_id,
+                message,
+                message_id=message.get("_resume_message_id"),
+            )
+            if message_id is not None:
+                message["_resume_message_id"] = message_id
+        except Exception:
+            logger.debug("session message persistence failed", exc_info=True)
+
+    def _persist_runtime_state(self) -> None:
+        """Best-effort persistence for task, plan, and sidebar state."""
+        if (
+            getattr(self, "_restoring_session", False)
+            or not getattr(self, "session_id", "")
+        ):
+            return
+        try:
+            from infinidev.db.service import persist_session_runtime_state
+
+            persist_session_runtime_state(
+                self.session_id,
+                task_description=getattr(self, "_task_description", ""),
+                plan_steps=getattr(self, "_session_plan_steps", []),
+                ui_state={
+                    "plan_text": getattr(self, "_plan_text", ""),
+                    "steps_text": getattr(self, "_steps_text", ""),
+                    "actions_text": getattr(self, "_actions_text", ""),
+                    "context_flow": getattr(self, "_context_flow", ""),
+                    "touched_files": getattr(self, "_touched_files", {}),
+                },
+            )
+        except Exception:
+            logger.debug("session runtime-state persistence failed", exc_info=True)
 
     def add_message(
         self, sender: str, text: str, msg_type: str = "agent", **fields: Any,
@@ -402,12 +508,19 @@ class InfinidevApp:
         from infinidev.config.secrets import redact
 
         self._seal_open_stream()
-        self.chat_messages.append({
+        message = {
             "sender": sender,
             "text": redact(str(text)) if text else "",
             "type": msg_type,
             **fields,
-        })
+        }
+        self.chat_messages.append(message)
+        persist_message = getattr(self, "_persist_session_message", None)
+        if callable(persist_message):
+            persist_message(message)
+        persist_state = getattr(self, "_persist_runtime_state", None)
+        if callable(persist_state):
+            persist_state()
         self._chat_history_control.invalidate_cache()
         # Thread-safe invalidate — safe to call from worker threads
         try:
@@ -478,6 +591,8 @@ class InfinidevApp:
         if target is None:
             return
         target["streaming"] = False
+        self._persist_session_message(target)
+        self._persist_runtime_state()
         self._chat_history_control.invalidate_cache()
         try:
             self.invalidate()
@@ -665,6 +780,8 @@ class InfinidevApp:
                            user_text, getattr(self, "_engine_running", None))
         self._autocomplete.dismiss()
         _sublogger.warning("[SUBMIT] autocomplete dismissed")
+        if not self._engine_running and user_text.strip():
+            self._task_description = user_text.strip()
         # Each turn gets its own touched-files tally, so the sidebar shows
         # what *this* request changed rather than the whole session.
         self._touched_files = {}
@@ -1049,12 +1166,15 @@ class InfinidevApp:
         if self.engine:
             self.engine.cancel()
         # Hidden message — stays in chat_messages for context but not rendered
-        self.chat_messages.append({
+        message = {
             "sender": "System",
             "text": "[Task cancelled by user]",
             "type": "system",
             "visible": False,
-        })
+        }
+        self.chat_messages.append(message)
+        self._persist_session_message(message)
+        self._persist_runtime_state()
         self._chat_history_control.invalidate_cache()
         # Queue a cancel-acknowledgement turn (runs after engine finishes)
         cancel_prompt = (
@@ -1378,9 +1498,10 @@ def _resolve_tui_resume(continue_session: bool, resume: bool) -> dict | None:
     if not chosen:
         sid = str(uuid.uuid4())
         sr.begin_fresh_session(sid)
-        return {"session_id": sid, "turns": []}
+        return {"session_id": sid, "turns": [], "state": {}}
     sid = chosen["session_id"]
-    return {"session_id": sid, "turns": sr.begin_resumed_session(sid)}
+    turns = sr.begin_resumed_session(sid)
+    return {"session_id": sid, "turns": turns, "state": sr.resumed_session_state(sid)}
 
 
 def run_tui(continue_session: bool = False, resume: bool = False) -> None:

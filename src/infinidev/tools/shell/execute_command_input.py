@@ -26,7 +26,11 @@ class ExecuteCommandInput(BaseModel):
         ),
     )
     timeout: int = Field(
-        default=300, description="Max execution time in seconds. 0 or negative = no timeout."
+        default=120,
+        description=(
+            "Requested execution time in seconds. The configured COMMAND_TIMEOUT "
+            "is a hard ceiling; zero or negative uses that ceiling."
+        ),
     )
     cwd: str | None = Field(
         default=None, description="Working directory for the command"

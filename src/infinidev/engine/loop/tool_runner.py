@@ -220,6 +220,7 @@ class ToolRunner:
             "completion_tokens": ctx.state.last_completion_tokens,
             "project_id": ctx.project_id,
             "agent_id": ctx.agent_id,
+            "cancel_event": self._engine._cancel_event,
         }
         # tc.id → the images that call produced. Flushed as their own user
         # turn later; see ``_append_results``.

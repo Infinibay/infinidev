@@ -3,12 +3,15 @@
 import logging
 import os
 import re
+import signal
 import select
 import shlex
 import subprocess
 import time
 from typing import Type
+
 from pydantic import BaseModel, Field
+
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.stdin_prompt import (
@@ -196,6 +199,18 @@ def check_command_permission(
     return None  # Unknown mode — allow
 
 
+def _effective_command_timeout(requested: int | None) -> int:
+    """Apply the user-configured ceiling; foreground commands are never infinite."""
+    try:
+        configured = int(settings.COMMAND_TIMEOUT)
+    except (TypeError, ValueError):
+        configured = 120
+    ceiling = max(1, configured)
+    if requested is None or requested <= 0:
+        return ceiling
+    return min(max(1, int(requested)), ceiling)
+
+
 class ExecuteCommandTool(InfinibayBaseTool):
     name: str = "execute_command"
     description: str = (
@@ -211,7 +226,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
     def _run(
         self,
         command: str,
-        timeout: int = 300,
+        timeout: int | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         rationale: str = "",
@@ -250,7 +265,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
         if not cwd or not isinstance(cwd, str):
             cwd = self.workspace_path or os.getcwd()
 
-        effective_timeout = timeout if timeout > 0 else None
+        effective_timeout = _effective_command_timeout(timeout)
 
         try:
             from infinidev.engine.static_analysis_timer import measure as _sa_measure
@@ -269,7 +284,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
             return self._success(result)
 
         except subprocess.TimeoutExpired:
-            return self._error(f"Command timed out after {timeout}s")
+            return self._error(f"Command timed out after {effective_timeout}s")
         except Exception as e:
             return self._error(f"Execution failed: {e}")
 
@@ -288,21 +303,27 @@ class ExecuteCommandTool(InfinibayBaseTool):
         ``sudo`` exit with "no tty present" instead of hanging the
         parent terminal.
         """
-        result = subprocess.run(
+        proc = subprocess.Popen(
             command,
             shell=True,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             cwd=cwd,
             env=run_env,
+            start_new_session=True,
         )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except BaseException:
+            self._terminate(proc)
+            raise
         return {
-            "exit_code": result.returncode,
-            "stdout": (result.stdout or "")[-10000:],
-            "stderr": (result.stderr or "")[-5000:],
-            "success": result.returncode == 0,
+            "exit_code": proc.returncode,
+            "stdout": (stdout or "")[-10000:],
+            "stderr": (stderr or "")[-5000:],
+            "success": proc.returncode == 0,
         }
 
     def _run_with_stdin_detection(
@@ -329,10 +350,15 @@ class ExecuteCommandTool(InfinibayBaseTool):
             cwd=cwd,
             env=run_env,
             bufsize=0,
+            start_new_session=True,
         )
 
         stdout_buf = bytearray()
         stderr_buf = bytearray()
+        from infinidev.engine.tool_progress import (
+            emit_tool_output,
+            is_tool_cancelled,
+        )
         seen_prompts: set[str] = set()
         # Only scan stderr bytes emitted AFTER the last handled prompt,
         # so overlapping regexes on the same prompt text don't re-fire.
@@ -357,10 +383,15 @@ class ExecuteCommandTool(InfinibayBaseTool):
                         data = b""
                     if not data:
                         continue
+                    emit_tool_output(data.decode(errors="replace"))
                     if r is proc.stdout:
                         stdout_buf.extend(data)
                     else:
                         stderr_buf.extend(data)
+
+                if is_tool_cancelled():
+                    killed_reason = "Command interrupted by user"
+                    break
 
                 # Check for prompt AFTER reading fresh stderr, since
                 # the fragment may have landed just now.
@@ -416,8 +447,10 @@ class ExecuteCommandTool(InfinibayBaseTool):
             try:
                 rest_out, rest_err = proc.communicate(timeout=2)
                 if rest_out:
+                    emit_tool_output(rest_out.decode(errors="replace"))
                     stdout_buf.extend(rest_out)
                 if rest_err:
+                    emit_tool_output(rest_err.decode(errors="replace"))
                     stderr_buf.extend(rest_err)
             except subprocess.TimeoutExpired:
                 self._terminate(proc)
@@ -438,16 +471,40 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     pass
 
     @staticmethod
-    def _terminate(proc: subprocess.Popen) -> None:
-        """Terminate a subprocess gracefully, escalating to kill."""
+    def _signal_process_group(proc: subprocess.Popen, sig: int) -> None:
+        """Signal the subprocess session, falling back to its leader."""
         try:
-            proc.terminate()
-        except Exception:
+            os.killpg(proc.pid, sig)
+            return
+        except (OSError, PermissionError, ProcessLookupError):
+            if proc.poll() is not None:
+                return
+        try:
+            if sig == signal.SIGKILL:
+                proc.kill()
+            else:
+                proc.terminate()
+        except OSError:
             pass
+
+    @classmethod
+    def _terminate(cls, proc: subprocess.Popen) -> None:
+        """Terminate the whole subprocess group, escalating to kill."""
+        cls._signal_process_group(proc, signal.SIGTERM)
         try:
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            pass
+
+        # The shell leader can exit while cargo/test descendants remain.
+        # Always try the original process-group id before considering the
+        # command stopped; killpg still works after the leader has exited.
+        try:
+            os.killpg(proc.pid, 0)
+        except (OSError, PermissionError, ProcessLookupError):
+            return
+        cls._signal_process_group(proc, signal.SIGKILL)
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            logger.warning("Process group %s did not exit after SIGKILL", proc.pid)

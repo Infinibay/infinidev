@@ -31,7 +31,10 @@ def _format_count(value: int | None) -> str:
     # 999_500..999_999 rounds up to 1000k under the ``k`` branch, so roll it
     # over to ``1.0M`` instead of showing a four-digit ``1000k``.
     if value >= 999_500:
-        return f"{value / 1_000_000:.1f}M"
+        compact = f"{value / 1_000_000:.2f}".rstrip("0")
+        if compact.endswith("."):
+            compact += "0"
+        return f"{compact}M"
     if value >= 1_000:
         return f"{value / 1_000:.0f}k"
     return str(value)
@@ -89,12 +92,21 @@ def build_context_fragments(
     """Render the full sidebar context block (model + chat/task bars)."""
     model = context_status.get("model", "unknown")
     max_ctx = context_status.get("max_context")  # may be None (unknown)
+    model_max_ctx = context_status.get("model_max_context")
     flow_part = f"  {context_flow}" if context_flow else ""
 
     fragments: list[tuple[str, str]] = []
     fragments.append((f"{TEXT}", f" {model}"))
     if max_ctx is None:
         fragments.append((f"{TEXT_DIM}", " · ? ctx"))
+    elif model_max_ctx is not None and model_max_ctx > max_ctx:
+        fragments.append(
+            (
+                f"{TEXT_DIM}",
+                f" · {_format_count(model_max_ctx)} model"
+                f" · {_format_count(max_ctx)} usable",
+            )
+        )
     else:
         fragments.append((f"{TEXT_DIM}", f" · {_format_count(max_ctx)} ctx"))
     if flow_part:

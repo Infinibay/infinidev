@@ -1,10 +1,8 @@
 """Session resume — the `-c`/`--continue` and `--resume` machinery.
 
-Infinidev's context is cheap by construction: raw tool output is
-discarded and every turn rebuilds the prompt from compact summaries.
-So "continue yesterday's work" does NOT mean replaying a heavy
-transcript (the Claude `-c` cost) — it means *reusing the same
-``session_id``* so the existing machinery re-engages:
+Infinidev keeps model context compact while persisting the complete
+structured transcript separately. "Continue yesterday's work" reuses
+the same ``session_id`` so the existing machinery re-engages:
 
   * ``conversation_turns`` — the chat agent already reads history by
     session_id, so prior turns reappear automatically.
@@ -13,9 +11,14 @@ transcript (the Claude `-c` cost) — it means *reusing the same
   * ``session_notes`` — now persisted (see db.service) and re-loaded by
     the LoopEngine on first ``execute``.
 
-This module only resolves *which* session_id to reuse and, on the
-first resumed turn, asks the chat agent to replay the full history
-once (the user opted into "historial completo al modelo").
+  * ``session_messages`` — UI messages, tool calls/results, reasoning,
+    diffs, and renderer metadata for an exact repaint.
+  * ``session_runtime_state`` — task description, plan steps, and
+    sidebar state.
+
+This module resolves *which* session_id to reuse and, on the first
+resumed turn, asks the chat agent to replay the model-facing history
+once.
 """
 from __future__ import annotations
 
@@ -23,10 +26,12 @@ import os
 from datetime import datetime, timezone
 
 from infinidev.db.service import (
+    get_all_turns,
     get_last_session,
+    get_session_messages,
+    get_session_runtime_state,
     list_recent_sessions,
     register_session,
-    get_all_turns,
 )
 
 
@@ -75,6 +80,17 @@ def begin_resumed_session(session_id: str, workspace_path: str | None = None) ->
     from infinidev.engine.orchestration.chat_agent import request_full_history_once
     request_full_history_once(session_id)
     return get_all_turns(session_id)
+
+
+def resumed_session_state(session_id: str) -> dict:
+    """Return the structured transcript and latest runtime snapshot."""
+    runtime = get_session_runtime_state(session_id)
+    return {
+        "messages": get_session_messages(session_id),
+        "task_description": runtime.get("task_description", ""),
+        "plan_steps": runtime.get("plan_steps", []),
+        "ui_state": runtime.get("ui_state", {}),
+    }
 
 
 def begin_fresh_session(session_id: str, workspace_path: str | None = None) -> None:

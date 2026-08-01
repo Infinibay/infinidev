@@ -112,13 +112,17 @@ class TestContextWindowCalculator:
 
     def test_context_status_format(self):
         """Test context status dictionary format."""
-        calc = ContextWindowCalculator(max_context=4096)
+        calc = ContextWindowCalculator(
+            max_context=4096,
+            model_max_context=8192,
+        )
         calc.update_chat(500)
         calc.update_task(task_prompt_tokens=1000)
         status = calc.get_context_status()
 
         assert "model" in status
         assert "max_context" in status
+        assert status["model_max_context"] == 8192
         assert "chat" in status
         assert "tasks" in status
         assert status["max_context"] == 4096

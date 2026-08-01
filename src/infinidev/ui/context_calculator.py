@@ -21,11 +21,17 @@ class ContextWindowCalculator:
     - total_tokens: Cumulative tokens across all LLM calls in the current task
     """
 
-    def __init__(self, model_name: str = "", max_context: int | None = None):
+    def __init__(
+        self,
+        model_name: str = "",
+        max_context: int | None = None,
+        model_max_context: int | None = None,
+    ):
         self.model_name = model_name
         # max_context is None when we don't know the model's context window.
         # Display code should render this as "?" instead of a misleading number.
         self.max_context: int | None = max_context
+        self.model_max_context: int | None = model_max_context
         self._last_prompt_tokens: int = 0
         self._task_prompt_tokens: int = 0
         self._warned_over_budget: bool = False
@@ -50,6 +56,7 @@ class ContextWindowCalculator:
         from infinidev.engine.loop.model_context import (
             _bare_model,
             get_model_context_window,
+            get_model_max_context_window,
         )
 
         # Building params can fail on a credential problem — the ChatGPT
@@ -63,6 +70,7 @@ class ContextWindowCalculator:
             logger.info("Context window unresolved (%s); showing '?'", exc)
             self.model_name = _bare_model(settings.LLM_MODEL or "")
             self.max_context = None
+            self.model_max_context = None
             return
 
         model = llm_params.get("model", settings.LLM_MODEL)
@@ -73,6 +81,7 @@ class ContextWindowCalculator:
         # while sizing another (`openai/responses/gpt-5.5` → `gpt-5.5`).
         self.model_name = _bare_model(model)
         self.max_context = get_model_context_window(llm_params, provider_id)
+        self.model_max_context = get_model_max_context_window(llm_params, provider_id)
 
         if self.max_context:
             logger.info(
@@ -158,6 +167,7 @@ class ContextWindowCalculator:
         return {
             "model": self.model_name or "unknown",
             "max_context": max_ctx,  # may be None
+            "model_max_context": self.model_max_context,
             "chat": {
                 "name": "prompt",
                 "current_tokens": prompt,

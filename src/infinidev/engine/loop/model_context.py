@@ -28,13 +28,20 @@ from infinidev.engine._best_effort import best_effort
 # Ollama failure doesn't cause repeated timeouts on subsequent calls.
 _OLLAMA_CTX_CACHE: dict[tuple[str, str], int | None] = {}
 
-# Cloud context windows used only as a *fallback* when the installed litellm
-# doesn't know the model yet (frontier models ship faster than litellm's cost
-# map updates).  litellm is consulted first and wins when it has the model, so
-# these self-heal on the next litellm upgrade instead of silently going stale.
+# Provider-documented cloud context windows.  These entries win over LiteLLM:
+# its bundled cost map can know a model while still carrying an older limit
+# (for example GPT-5.4 mini at 272k instead of 400k, or MiniMax M2.5 at 1M
+# instead of 204.8k).  Models absent here still fall back to LiteLLM so dynamic
+# catalogs such as OpenRouter continue to work without a local mirror.
 _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     # OpenAI
-    "gpt-5.4": 1_000_000,
+    "gpt-5.6-sol": 1_050_000,
+    "gpt-5.6-terra": 1_050_000,
+    "gpt-5.6-luna": 1_050_000,
+    "gpt-5.6": 1_050_000,
+    "gpt-5.5-pro": 1_050_000,
+    "gpt-5.5": 1_050_000,
+    "gpt-5.4": 1_050_000,
     "gpt-5.4-mini": 400_000,
     "gpt-5.4-nano": 400_000,
     "o3": 200_000,
@@ -71,26 +78,31 @@ _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     "glm-5": 200_000,
     "glm-5-turbo": 200_000,
     "glm-4.7": 200_000,
-    "glm-4.7-flash": 128_000,
+    "glm-4.7-flash": 200_000,
     "glm-4.6": 200_000,
     "glm-4.5": 128_000,
-    "glm-4.5-flash": 128_000,
+    "glm-4.5-flash": 200_000,
     "glm-4.5-air": 128_000,
-    # Qwen — litellm indexes DashScope models under prefixes that never match
-    # the `custom_openai/` one this provider uses, so the whole catalog
-    # resolves to "unknown" without entries here. Only the tier Alibaba
-    # documents as 1M is listed; the rest stay unknown rather than guessed,
-    # because an over-stated window makes the loop pack context until the
-    # backend truncates it silently — strictly worse than showing "?".
+    # Qwen — LiteLLM indexes DashScope models under prefixes that never match
+    # this provider's `custom_openai/` prefix.  Only limits explicitly listed
+    # by Alibaba are included; the unlisted legacy aliases remain unknown.
+    "qwen3.7-max": 1_000_000,
+    "qwen3.7-plus": 1_000_000,
+    "qwen3.6-max-preview": 256_000,
     "qwen3.6-plus": 1_000_000,
     "qwen3.6-flash": 1_000_000,
-    "qwen3.6-max-preview": 1_000_000,
+    "qwen3.5-plus": 1_000_000,
+    "qwen3.5-flash": 1_000_000,
+    "qwen3.5-397b-a17b": 256_000,
+    "qwen3.5-122b-a10b": 256_000,
+    "qwen3-coder-plus": 1_000_000,
     # Kimi — K3 is a 1M-context model; the 256k figure here was the K2 line's.
     "kimi-k3": 1_048_576,
     "kimi-k2.7-code": 256_000,
     "kimi-k2.6": 256_000,
-    # Minimax
-    "MiniMax-M3": 204_800,
+    # MiniMax. M3 is a separate 1M model; the M2 API family is 204.8k total
+    # input + output despite several LiteLLM entries currently claiming 1M.
+    "MiniMax-M3": 1_000_000,
     "MiniMax-M2.7": 204_800,
     "MiniMax-M2.7-highspeed": 204_800,
     "MiniMax-M2.5": 204_800,
@@ -98,6 +110,22 @@ _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     "MiniMax-M2.1": 204_800,
     "MiniMax-M2.1-highspeed": 204_800,
     "MiniMax-M2": 204_800,
+    # Mistral aliases. These values track what each current `-latest` alias
+    # serves, not the retired snapshots that LiteLLM still associates with a
+    # few of the names.
+    "mistral-large-latest": 262_144,
+    "mistral-medium-latest": 262_144,
+    "mistral-small-latest": 262_144,
+    "ministral-3b-latest": 262_144,
+    "ministral-8b-latest": 262_144,
+    "magistral-medium-latest": 131_072,
+    "magistral-small-latest": 131_072,
+    "codestral-latest": 131_072,
+    "devstral-medium-latest": 256_000,
+    "devstral-small-latest": 256_000,
+    "pixtral-large-latest": 128_000,
+    # GMI's hosted DeepSeek-R1 deployment advertises a 128k total window.
+    "deepseek-ai/DeepSeek-R1": 128_000,
 }
 
 
@@ -144,12 +172,15 @@ def _fetch_ollama_trained_context(model: str, base_url: str) -> int | None:
 
 
 def _cloud_context_window(model: str) -> int | None:
-    """``max_input_tokens`` for a cloud model, or None if unknown.
+    """Documented input/context limit for a cloud model, or None if unknown.
 
-    litellm's cost map is authoritative (it self-updates on upgrade); the
-    hand-maintained override map only fills gaps for models litellm lacks.
+    Provider-documented overrides are authoritative for known catalog models;
+    LiteLLM fills in dynamic and otherwise-unlisted model ids.
     """
     bare = _bare_model(model)
+    for name in (bare, model):
+        if name in _CLOUD_CTX_OVERRIDES:
+            return _CLOUD_CTX_OVERRIDES[name]
     try:
         import litellm
 
@@ -161,9 +192,6 @@ def _cloud_context_window(model: str) -> int | None:
                     return int(ctx)
     except Exception:
         pass
-    for name in (bare, model):
-        if name in _CLOUD_CTX_OVERRIDES:
-            return _CLOUD_CTX_OVERRIDES[name]
     return None
 
 
@@ -212,6 +240,34 @@ def get_model_context_window(
         # num_ctx unset: best-effort trained length (note: Ollama's own default
         # window is far smaller, so this can still over-report — set num_ctx).
         return trained
+
+    return _cloud_context_window(model)
+
+
+def get_model_max_context_window(
+    llm_params: dict[str, Any],
+    provider_id: str | None = None,
+) -> int | None:
+    """The model's advertised maximum, independent of a smaller served limit.
+
+    This is display metadata only.  Prompt budgeting must use
+    :func:`get_model_context_window`, because a provider surface can enforce a
+    lower ceiling than the underlying model (notably ChatGPT subscriptions).
+    """
+    from infinidev.config.settings import settings
+
+    model = llm_params.get("model") or settings.LLM_MODEL or ""
+    if provider_id is None:
+        provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
+
+    if _is_ollama(model, provider_id):
+        base_url = (
+            llm_params.get("base_url")
+            or llm_params.get("api_base")
+            or settings.LLM_BASE_URL
+            or "http://localhost:11434"
+        )
+        return _fetch_ollama_trained_context(model, base_url)
 
     return _cloud_context_window(model)
 

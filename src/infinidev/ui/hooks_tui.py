@@ -42,6 +42,11 @@ class TUIHooks:
         # worker shows the developer's result.
         self.reply_already_shown = False
 
+    def _persist_runtime_state(self) -> None:
+        persist = getattr(self._app, "_persist_runtime_state", None)
+        if callable(persist):
+            persist()
+
     # ── Phase / status ───────────────────────────────────────────────────
 
     def on_phase(self, phase: str) -> None:
@@ -70,6 +75,7 @@ class TUIHooks:
             # known; this gives a sensible default if execute() is reached
             # before notify() has set anything.
             self._app._context_flow = self._app._context_flow or "develop"
+        self._persist_runtime_state()
         self._app.invalidate()
 
     def on_status(self, level: str, msg: str) -> None:
@@ -97,18 +103,14 @@ class TUIHooks:
     def notify_error(
         self, speaker: str, msg: str, traceback_text: str,
     ) -> None:
-        # Direct append so we can attach the custom fields that
-        # ErrorWidget consumes — add_message() only accepts
-        # sender/text/type.
         self._app._chat_history_control.show_thinking = False
-        self._app.chat_messages.append({
-            "sender": speaker,
-            "text": msg,
-            "type": "error",
-            "error_traceback": traceback_text or "",
-            "collapsed": True,
-        })
-        self._app._chat_history_control.invalidate_cache()
+        self._app.add_message(
+            speaker,
+            msg,
+            "error",
+            error_traceback=traceback_text or "",
+            collapsed=True,
+        )
         # notify_error is terminal — do NOT re-enable show_thinking here,
         # or a completed/errored turn would show a spurious "thinking..."
         # spinner underneath the error. The worker also resets it to False
@@ -227,17 +229,24 @@ class TUIHooks:
         # _on_step_start callback that lived inside run_plan_task.
         completed_set = set(completed)
         lines: list[str] = []
+        persisted_steps: list[dict] = []
         for s in all_steps:
             s_num = s.get("step", 0)
             s_title = s.get("title", "")
             if s_num in completed_set or s_num < step_num:
+                status = "done"
                 lines.append(f"v {s_title}")
             elif s_num == step_num:
+                status = "active"
                 lines.append(f"> {s_title}")
             else:
+                status = "pending"
                 lines.append(f"o {s_title}")
+            persisted_steps.append({**s, "status": status})
+        self._app._session_plan_steps = persisted_steps
         self._app._steps_text = "\n".join(lines)
         self._app._actions_text = f"Executing step {step_num}/{total}..."
+        self._persist_runtime_state()
         self._app.invalidate()
 
     def on_file_change(self, path: str) -> None:

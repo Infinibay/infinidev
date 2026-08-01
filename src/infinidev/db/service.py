@@ -1,10 +1,12 @@
 """Database service for Infinidev CLI."""
 
-import re
-import sqlite3
+import json
 import logging
 import os
+import re
+import sqlite3
 from typing import Any
+
 from infinidev.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -289,6 +291,142 @@ def get_session_notes(session_id: str, limit: int = 50) -> list[str]:
         ).fetchall()
         return [r["note_text"] for r in rows if r["note_text"]]
     return execute_with_retry(_query) or []
+
+
+def store_session_message(
+    session_id: str,
+    message: dict[str, Any],
+    *,
+    message_id: int | None = None,
+) -> int | None:
+    """Insert or update one structured, UI-visible session message.
+
+    ``conversation_turns`` remains the compact model-facing history. This
+    ledger preserves renderer data such as tool arguments/results, diffs,
+    reasoning messages, and critic metadata so ``-c`` can rebuild the actual
+    transcript. Private runtime-only keys are intentionally omitted.
+    """
+    if not session_id or not isinstance(message, dict):
+        return None
+
+    from infinidev.config.secrets import redact
+
+    public_message = {
+        key: value
+        for key, value in message.items()
+        if not str(key).startswith("_")
+    }
+    payload = redact(json.dumps(public_message, ensure_ascii=False, default=str))
+
+    def _upsert(conn):
+        if message_id is not None:
+            cursor = conn.execute(
+                "UPDATE session_messages SET message_json = ? "
+                "WHERE id = ? AND session_id = ?",
+                (payload, message_id, session_id),
+            )
+            if cursor.rowcount:
+                conn.commit()
+                return message_id
+        cursor = conn.execute(
+            "INSERT INTO session_messages (session_id, message_json) VALUES (?, ?)",
+            (session_id, payload),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+    return execute_with_retry(_upsert)
+
+
+def get_session_messages(session_id: str) -> list[dict[str, Any]]:
+    """Return the complete structured transcript for ``session_id``."""
+    if not session_id:
+        return []
+
+    def _query(conn):
+        rows = conn.execute(
+            "SELECT id, message_json FROM session_messages "
+            "WHERE session_id = ? ORDER BY id ASC",
+            (session_id,),
+        ).fetchall()
+        messages: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                message = json.loads(row["message_json"])
+            except (TypeError, json.JSONDecodeError):
+                logger.warning("Skipping malformed session message id=%s", row["id"])
+                continue
+            if not isinstance(message, dict):
+                continue
+            message["_resume_message_id"] = row["id"]
+            messages.append(message)
+        return messages
+
+    return execute_with_retry(_query) or []
+
+
+def persist_session_runtime_state(
+    session_id: str,
+    *,
+    task_description: str = "",
+    plan_steps: list[dict[str, Any]] | None = None,
+    ui_state: dict[str, Any] | None = None,
+) -> None:
+    """Persist the latest task/plan/sidebar snapshot for session resume."""
+    if not session_id:
+        return
+
+    plan_json = json.dumps(plan_steps or [], ensure_ascii=False, default=str)
+    ui_json = json.dumps(ui_state or {}, ensure_ascii=False, default=str)
+
+    def _upsert(conn):
+        conn.execute(
+            """
+            INSERT INTO session_runtime_state
+                (session_id, task_description, plan_steps_json, ui_state_json, updated_at)
+            VALUES (?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+            ON CONFLICT(session_id) DO UPDATE SET
+                task_description = excluded.task_description,
+                plan_steps_json = excluded.plan_steps_json,
+                ui_state_json = excluded.ui_state_json,
+                updated_at = excluded.updated_at
+            """,
+            (session_id, task_description, plan_json, ui_json),
+        )
+        conn.commit()
+
+    execute_with_retry(_upsert)
+
+
+def get_session_runtime_state(session_id: str) -> dict[str, Any]:
+    """Load the durable task/plan/sidebar snapshot for ``session_id``."""
+    if not session_id:
+        return {}
+
+    def _query(conn):
+        row = conn.execute(
+            "SELECT task_description, plan_steps_json, ui_state_json "
+            "FROM session_runtime_state WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return {}
+
+        try:
+            plan_steps = json.loads(row["plan_steps_json"] or "[]")
+        except (TypeError, json.JSONDecodeError):
+            plan_steps = []
+        try:
+            ui_state = json.loads(row["ui_state_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            ui_state = {}
+        return {
+            "task_description": row["task_description"] or "",
+            "plan_steps": plan_steps if isinstance(plan_steps, list) else [],
+            "ui_state": ui_state if isinstance(ui_state, dict) else {},
+        }
+
+    return execute_with_retry(_query) or {}
 
 
 def get_all_turns(

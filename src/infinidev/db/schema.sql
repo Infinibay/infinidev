@@ -152,6 +152,26 @@ CREATE TABLE IF NOT EXISTS session_notes (
 CREATE INDEX IF NOT EXISTS idx_session_notes_session
     ON session_notes(session_id, created_at);
 
+-- Structured transcript rows are kept separate from ``conversation_turns``.
+-- The latter is model context; these rows are display/runtime state and may
+-- contain tool calls, reasoning, diffs, critic messages, and renderer metadata.
+CREATE TABLE IF NOT EXISTS session_messages (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT NOT NULL REFERENCES sessions(session_id),
+    message_json TEXT NOT NULL,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_session_messages_session
+    ON session_messages(session_id, id);
+
+CREATE TABLE IF NOT EXISTS session_runtime_state (
+    session_id          TEXT PRIMARY KEY REFERENCES sessions(session_id),
+    task_description    TEXT,
+    plan_steps_json     TEXT NOT NULL DEFAULT '[]',
+    ui_state_json       TEXT NOT NULL DEFAULT '{}',
+    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Library documentation cache (FTS5)
 -- ─────────────────────────────────────────────────────────────────────────────

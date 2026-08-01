@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 _registered = False
 
+_HIDDEN_TOOLS = {"think", "step_complete", "add_note", "add_session_note", "send_message"}
+
 
 # ── Helpers (imported from canonical engine_logging module) ───────────────
 
@@ -36,6 +38,37 @@ def _extract_preview(tool_name: str, result: str) -> str:
 def _extract_error(result: str) -> str:
     from infinidev.engine.engine_logging import extract_tool_error
     return extract_tool_error(result)
+
+
+def _arguments_dict(arguments: dict[str, Any] | str) -> dict[str, Any]:
+    if isinstance(arguments, dict):
+        return arguments
+    try:
+        parsed = json.loads(arguments) if arguments else {}
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+# ── PRE_TOOL: announce execution before a potentially long tool blocks ───
+
+def _on_pre_tool(ctx: HookContext) -> None:
+    """Emit a running tool row before execution begins."""
+    if ctx.skip or ctx.tool_name in _HIDDEN_TOOLS:
+        return
+
+    tool_args = _arguments_dict(ctx.arguments)
+    event_bus.emit("loop_tool_start", ctx.project_id, ctx.agent_id, {
+        "agent_id": ctx.agent_id,
+        "agent_name": ctx.metadata.get("agent_name", ctx.agent_id),
+        "tool_run_id": ctx.metadata.get("tool_run_id", ""),
+        "tool_name": ctx.tool_name,
+        "tool_detail": _extract_detail(ctx.tool_name, tool_args),
+        "tool_arguments": tool_args,
+        "call_num": ctx.metadata.get("call_num", 0),
+        "total_calls": ctx.metadata.get("total_calls", 0),
+        "iteration": ctx.metadata.get("iteration", 0),
+    })
 
 
 # ── POST_TOOL: emit loop_tool_call + special handling ────────────────────
@@ -65,18 +98,12 @@ def _on_post_tool(ctx: HookContext) -> None:
     # Parse the raw arguments dict so the UI can render tool-specific
     # parameter views (e.g. code_interpreter shows the full code, not
     # just a 1-line tool_detail).
-    if isinstance(ctx.arguments, dict):
-        tool_args_dict: dict = ctx.arguments
-    else:
-        try:
-            parsed = json.loads(ctx.arguments) if ctx.arguments else {}
-            tool_args_dict = parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            tool_args_dict = {}
+    tool_args_dict = _arguments_dict(ctx.arguments)
 
     event_bus.emit("loop_tool_call", ctx.project_id, ctx.agent_id, {
         "agent_id": ctx.agent_id,
         "agent_name": ctx.metadata.get("agent_name", ctx.agent_id),
+        "tool_run_id": ctx.metadata.get("tool_run_id", ""),
         "tool_name": ctx.tool_name,
         "tool_detail": tool_detail,
         "tool_error": tool_error,
@@ -225,6 +252,7 @@ def register_ui_hooks() -> None:
     _registered = True
 
     # Priority 200: run after user hooks (default 100)
+    hook_manager.register(HookEvent.PRE_TOOL, _on_pre_tool, priority=200, name="ui:tool_start")
     hook_manager.register(HookEvent.POST_TOOL, _on_post_tool, priority=200, name="ui:tool_call")
     hook_manager.register(HookEvent.POST_TOOL, _on_think, priority=200, name="ui:think")
     hook_manager.register(HookEvent.PRE_STEP, _on_pre_step, priority=200, name="ui:step_start")
@@ -238,6 +266,7 @@ def unregister_ui_hooks() -> None:
         return
     _registered = False
 
+    hook_manager.unregister(HookEvent.PRE_TOOL, _on_pre_tool)
     hook_manager.unregister(HookEvent.POST_TOOL, _on_post_tool)
     hook_manager.unregister(HookEvent.POST_TOOL, _on_think)
     hook_manager.unregister(HookEvent.PRE_STEP, _on_pre_step)

@@ -18,6 +18,43 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+LIVE_TOOL_OUTPUT_LINES = 20
+_LIVE_TOOL_LINE_CHARS = 1000
+_RUNTIME_STATE_EVENTS = {
+    "loop_step_update",
+    "loop_tool_start",
+    "loop_tool_call",
+    "loop_file_changed",
+    "tree_init",
+    "tree_node_exploring",
+    "tree_node_resolved",
+    "tree_propagation",
+    "tree_synthesizing",
+    "tree_finished",
+}
+
+
+def _tool_message(app: InfinidevApp, run_id: str) -> dict[str, Any] | None:
+    if not run_id:
+        return None
+    for message in reversed(app.chat_messages):
+        if message.get("tool_run_id") == run_id:
+            return message
+    return None
+
+
+def _append_live_output(message: dict[str, Any], chunk: str) -> None:
+    """Append output while retaining only a small, renderable line tail."""
+    partial = str(message.get("_live_output_partial") or "")
+    text = partial + str(chunk).replace("\r\n", "\n").replace("\r", "\n")
+    parts = text.split("\n")
+    partial = parts.pop() if parts else ""
+
+    lines = list(message.get("live_output_tail") or [])
+    lines.extend(line[-_LIVE_TOOL_LINE_CHARS:] for line in parts)
+    message["live_output_tail"] = lines[-LIVE_TOOL_OUTPUT_LINES:]
+    message["_live_output_partial"] = partial[-_LIVE_TOOL_LINE_CHARS:]
+
 
 def process_event(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
     """Dispatch a single event to the appropriate handler.
@@ -27,6 +64,13 @@ def process_event(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> N
     """
     try:
         _dispatch(app, event_type, data)
+        if (
+            event_type in _RUNTIME_STATE_EVENTS
+            or (event_type == "loop_stream_status" and data.get("phase") == "done")
+        ):
+            persist = getattr(app, "_persist_runtime_state", None)
+            if callable(persist):
+                persist()
     except Exception:
         logger.debug("process_event(%s) failed", event_type, exc_info=True)
         app.add_log(f"x UI event error: {event_type}")
@@ -46,6 +90,9 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         app._streaming_token_count = 0
         app._actions_text = ""  # Reset so "waiting for LLM..." animation shows
         steps = data.get("plan_steps", [])
+        app._session_plan_steps = [
+            dict(step) for step in steps if isinstance(step, dict)
+        ]
         if steps:
             lines = []
             for s in steps:
@@ -78,8 +125,54 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             completion_tokens=data.get("completion_tokens", 0),
         )
 
+    elif event_type == "loop_tool_start":
+        app._streaming_tool_name = None
+        app._streaming_token_count = 0
+
+        tool_name = data.get("tool_name", "")
+        tool_detail = data.get("tool_detail", "")
+        tool_args = data.get("tool_arguments") or {}
+        if not isinstance(tool_args, dict):
+            tool_args = {}
+        live_detail = str(tool_args.get("command") or tool_detail or "")
+        app._actions_text = f">> {tool_name}"
+        if live_detail:
+            app._actions_text += f"\n   {live_detail}"
+
+        message = {
+            "sender": "Tool",
+            "text": live_detail or tool_name,
+            "type": "tool_call",
+            "tool_run_id": data.get("tool_run_id", ""),
+            "tool_name": tool_name,
+            "args": tool_args,
+            "result": "",
+            "error": "",
+            "running": True,
+            "live_output_tail": [],
+            "_live_output_partial": "",
+            "visible": True,
+        }
+        app.chat_messages.append(message)
+        persist = getattr(app, "_persist_session_message", None)
+        if callable(persist):
+            persist(message)
+        label_detail = live_detail[:120]
+        app._chat_history_control.work_label = (
+            f"Running {tool_name}: {label_detail}".rstrip(": ")
+        )
+        app._chat_history_control.invalidate_cache()
+        app.invalidate()
+
+    elif event_type == "loop_tool_output":
+        message = _tool_message(app, data.get("tool_run_id", ""))
+        if message is not None and message.get("running"):
+            _append_live_output(message, data.get("chunk", ""))
+            app._chat_history_control.invalidate_cache()
+            app.invalidate()
+
     elif event_type == "loop_tool_call":
-        # Clear streaming state — tool is now executing.
+        # The tool completed; replace its running row instead of duplicating it.
         app._streaming_tool_name = None
         app._streaming_token_count = 0
 
@@ -102,19 +195,35 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
                 action_text += f"   {line}\n"
         app._actions_text = action_text.rstrip()
 
-        # EVERY tool call lands in chat as a unified `tool_call` message,
-        # rendered by ToolCallWidget. No more silent drops, no accordion.
-        app.chat_messages.append({
+        message = _tool_message(app, data.get("tool_run_id", ""))
+        display_text = (message or {}).get("text") or tool_detail or tool_name
+        completed = {
             "sender": "Tool",
-            "text": tool_detail or tool_name,
+            "text": display_text,
             "type": "tool_call",
             "tool_name": tool_name,
             "args": tool_args if isinstance(tool_args, dict) else {},
             "result": tool_result_full,
             "error": tool_error,
             "exec_data": data.get("exec_data"),
+            "running": False,
             "visible": True,
-        })
+        }
+        if message is None:
+            completed["tool_run_id"] = data.get("tool_run_id", "")
+            app.chat_messages.append(completed)
+            message = completed
+        else:
+            resume_message_id = message.get("_resume_message_id")
+            message.clear()
+            message.update(completed)
+            message["tool_run_id"] = data.get("tool_run_id", "")
+            if resume_message_id is not None:
+                message["_resume_message_id"] = resume_message_id
+        persist = getattr(app, "_persist_session_message", None)
+        if callable(persist):
+            persist(message)
+        app._chat_history_control.work_label = "Working"
         app._chat_history_control.invalidate_cache()
         app.invalidate()
 
@@ -140,7 +249,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         basename = os.path.basename(path)
         count_str = f" ({num_changes} edits)" if num_changes > 1 else ""
         header = f"{icon} {basename}{count_str}"
-        app.chat_messages.append({
+        message = {
             "sender": "File",
             "text": header,
             "type": "diff",
@@ -148,7 +257,11 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             "diff_path": path,
             "diff_action": action,
             "collapsed": False,  # always expanded — user wants no accordion
-        })
+        }
+        app.chat_messages.append(message)
+        persist = getattr(app, "_persist_session_message", None)
+        if callable(persist):
+            persist(message)
         app._chat_history_control.invalidate_cache()
         app.invalidate()
 
