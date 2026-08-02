@@ -51,6 +51,7 @@ from infinidev.tools.knowledge import (
     DeleteFindingTool,
     WriteReportTool,
     ReadReportTool,
+    ReadCommandOutputTool,
     DeleteReportTool,
     SearchKnowledgeTool,
     SummarizeFindingsTool,
@@ -151,6 +152,7 @@ KNOWLEDGE_TOOLS = [
     DeleteFindingTool,
     WriteReportTool,
     ReadReportTool,
+    ReadCommandOutputTool,
     DeleteReportTool,
     SearchKnowledgeTool,
     SummarizeFindingsTool,
@@ -290,6 +292,16 @@ def get_tools_for_role(
         + CODE_INTEL_TOOLS
         + META_TOOLS
     )
+    # Keep the disabled-by-default capture feature out of the tool schema and
+    # generated prompt entirely. This preserves the pre-feature prompt surface
+    # when all flags are off; a handle reader is useful only if this run can
+    # produce handles in the first place.
+    from infinidev.config.settings import settings
+
+    if not settings.COMMAND_OUTPUT_CAPTURE_ENABLED:
+        local_tool_classes = [
+            cls for cls in local_tool_classes if cls is not ReadCommandOutputTool
+        ]
     def _declared_name(cls) -> str | None:
         field = cls.model_fields.get("name")
         return getattr(field, "default", None) if field is not None else None
@@ -341,9 +353,10 @@ def get_tools_for_role(
         # list exists because a 90-tool schema wrecks its selection. MCP
         # tools join it only once MCP_TOOL_FILTER names which ones matter,
         # so "expose everything" never silently lands on a 7B model.
-        from infinidev.config.settings import settings
-
         narrowed = str(getattr(settings, "MCP_TOOL_FILTER", "*") or "*").strip()
         extra = mcp_tool_classes if narrowed and narrowed != "*" else []
-        return [cls() for cls in _vision_filter(SMALL_MODEL_TOOLS) + extra]
+        small_classes = _vision_filter(SMALL_MODEL_TOOLS)
+        if settings.COMMAND_OUTPUT_CAPTURE_ENABLED:
+            small_classes.append(ReadCommandOutputTool)
+        return [cls() for cls in small_classes + extra]
     return [cls() for cls in all_tool_classes]

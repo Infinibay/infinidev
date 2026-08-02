@@ -94,18 +94,11 @@ class LoopState(BaseModel):
     # "this looks like X.y" message every time it edits the same
     # method. Reset by clearing the state (i.e. between tasks).
     similarity_warned_files: list[str] = Field(default_factory=list)
-    # Raw ``(tool_name, arguments, result)`` triples for the current step,
-    # queued the moment a tool returns and drained when the step is
-    # archived to working memory.
-    #
-    # The archiver used to reconstruct these from the message list, which
-    # worked only in one of the three configurations. In manual mode there
-    # are no ``role: "tool"`` messages to read, so it archived nothing at
-    # all; on small models ``compact_for_small`` had already truncated the
-    # results in place, so it archived 200-char stubs. Capturing the body
-    # at the source makes the archive independent of what later happens to
-    # the transcript — which is the whole promise of working memory: the
-    # model's context is compacted, the record is not.
+    # ``(tool_name, arguments, model_view)`` triples for the current step.
+    # The body is captured after test-output and memory annotations plus the
+    # budget/critic suffixes, so the archive contains exactly what the model
+    # received — never a private full command-output blob. It also survives
+    # manual mode and small-model transcript compaction.
     pending_archive: list[tuple[str, str, str]] = Field(default_factory=list)
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:

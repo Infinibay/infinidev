@@ -204,8 +204,8 @@ class StepManager:
 
         # Archive everything that is about to leave the model's context.
         # The prompt is rebuilt from summaries only, so without this the
-        # raw tool output would be unrecoverable; with it, the model can
-        # pull any of it back via recall_context.
+        # model-visible tool output would be unrecoverable; private full command
+        # output is never copied here and remains behind its validated handle.
         titles = self._archive_evicted_context(ctx, step_index, messages, record.summary)
         # Written after archiving, not before: the evidence labels only exist
         # once the rows do, and a label pointing at a row that failed to store
@@ -217,6 +217,18 @@ class StepManager:
         # output lands on the record rather than in it — see
         # ActionRecord.hook_notes for why that distinction matters.
         record.hook_notes = self._step_end_summary_hook(ctx, step_index, record.summary)
+
+        # Closure notes are independently opt-in and run only after the existing
+        # archive → outcome → hook sequence. Failures cannot rewrite the summary,
+        # reorder hooks, or disturb legacy archiving. Their path-free descriptor
+        # view is the only command-output state carried into the rebuilt prompt.
+        handle_view = self._record_command_output_notes(
+            ctx, step_index, record.summary
+        )
+        if handle_view:
+            record.discovered_context = "\n".join(
+                part for part in (record.discovered_context, handle_view) if part
+            )
 
         # Merge behavior tracker data if available
         bt = step_result.behavior_tracker
@@ -309,6 +321,73 @@ class StepManager:
                     f"— recall with recall_context{_RESET}"
                 )
         return titles
+
+    @staticmethod
+    def _record_command_output_notes(
+        ctx: ExecutionContext, step_index: int, summary: str,
+    ) -> str:
+        """Persist short traceable notes for command-output handles, if enabled.
+
+        Descriptors are drained even when disabled so a later settings change
+        cannot turn handles from earlier steps into notes with the wrong step
+        identity. The note contains no command, output, path, or secret-bearing
+        metadata — only the closed-step summary and an opaque artifact identity.
+        """
+        handles = list(getattr(ctx, "pending_command_output_handles", ()) or ())
+        if hasattr(ctx, "pending_command_output_handles"):
+            ctx.pending_command_output_handles = []
+        settings = _get_settings()
+        if not handles or not settings.COMMAND_OUTPUT_AUTO_NOTES_ENABLED:
+            return ""
+
+        rendered: list[str] = []
+        with best_effort("command-output closure note failed"):
+            from infinidev.engine.working_memory import (
+                create_traceable_note,
+                get_working_memory,
+            )
+
+            memory = get_working_memory(ctx.session_id)
+            stored = []
+            note_summary = summary.strip() or f"Completed step {step_index}"
+            for handle in handles:
+                artifact_id = handle.get("artifact_id")
+                tool_call_id = handle.get("tool_call_id")
+                stream = handle.get("stream")
+                if (
+                    type(artifact_id) is not int
+                    or artifact_id <= 0
+                    or not isinstance(tool_call_id, str)
+                    or not tool_call_id
+                    or stream not in ("stdout", "stderr")
+                    or handle.get("type") != "command_output"
+                ):
+                    continue
+                note = create_traceable_note(
+                    "auto_note",
+                    note_summary,
+                    source_artifact_id=artifact_id,
+                    step_index=step_index,
+                    tool_call_id=tool_call_id,
+                    occurrence_id=f"command-output:{artifact_id}",
+                )
+                if memory.remember_traceable(note):
+                    stored.append(note)
+                    rendered.append(
+                        "Command output: "
+                        f"artifact_id={artifact_id}, type=command_output, "
+                        f"stream={stream}, char_count={handle['char_count']}, "
+                        f"byte_count={handle['byte_count']}"
+                    )
+
+            if (
+                settings.COMMAND_OUTPUT_NOTE_COMPACTION_ENABLED
+                and len(stored) > 1
+            ):
+                memory.compact_traceable_notes(
+                    stored, note_summary, step_index=step_index,
+                )
+        return "\n".join(rendered)
 
     @staticmethod
     def _record_outcome(

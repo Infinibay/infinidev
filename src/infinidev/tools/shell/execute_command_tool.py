@@ -319,12 +319,12 @@ class ExecuteCommandTool(InfinibayBaseTool):
         except BaseException:
             self._terminate(proc)
             raise
-        return {
-            "exit_code": proc.returncode,
-            "stdout": (stdout or "")[-10000:],
-            "stderr": (stderr or "")[-5000:],
-            "success": proc.returncode == 0,
-        }
+        return self._capture_before_truncation(
+            exit_code=proc.returncode,
+            stdout=stdout or "",
+            stderr=stderr or "",
+            success=proc.returncode == 0,
+        )
 
     def _run_with_stdin_detection(
         self,
@@ -435,13 +435,13 @@ class ExecuteCommandTool(InfinibayBaseTool):
 
             if killed_reason is not None:
                 self._terminate(proc)
-                return {
-                    "exit_code": -1,
-                    "stdout": stdout_buf.decode(errors="replace")[-10000:],
-                    "stderr": stderr_buf.decode(errors="replace")[-5000:],
-                    "killed_reason": killed_reason,
-                    "success": False,
-                }
+                return self._capture_before_truncation(
+                    exit_code=-1,
+                    stdout=stdout_buf.decode(errors="replace"),
+                    stderr=stderr_buf.decode(errors="replace"),
+                    success=False,
+                    killed_reason=killed_reason,
+                )
 
             # Drain any remaining output after the process exits.
             try:
@@ -455,12 +455,12 @@ class ExecuteCommandTool(InfinibayBaseTool):
             except subprocess.TimeoutExpired:
                 self._terminate(proc)
 
-            return {
-                "exit_code": proc.returncode if proc.returncode is not None else -1,
-                "stdout": stdout_buf.decode(errors="replace")[-10000:],
-                "stderr": stderr_buf.decode(errors="replace")[-5000:],
-                "success": proc.returncode == 0,
-            }
+            return self._capture_before_truncation(
+                exit_code=proc.returncode if proc.returncode is not None else -1,
+                stdout=stdout_buf.decode(errors="replace"),
+                stderr=stderr_buf.decode(errors="replace"),
+                success=proc.returncode == 0,
+            )
         finally:
             # Ensure file descriptors are closed in every branch.
             for f in (proc.stdin, proc.stdout, proc.stderr):
@@ -469,6 +469,74 @@ class ExecuteCommandTool(InfinibayBaseTool):
                         f.close()
                 except Exception:
                     pass
+
+    def _capture_before_truncation(
+        self,
+        *,
+        exit_code: int,
+        stdout: str,
+        stderr: str,
+        success: bool,
+        killed_reason: str | None = None,
+    ) -> dict:
+        """Optionally persist over-limit streams, then apply legacy slices.
+
+        Capture is an additive, best-effort side effect. With the flag off,
+        incomplete context, invalid limits, quota exhaustion, or any store
+        failure, this returns exactly the dictionary produced before capture
+        existed. A handle is attached only after the store has durably written,
+        verified, and catalogued the complete decoded pre-slice text.
+        """
+        result: dict = {
+            "exit_code": exit_code,
+            "stdout": stdout[-10000:],
+            "stderr": stderr[-5000:],
+        }
+        if killed_reason is not None:
+            # Preserve the legacy insertion/JSON key order for interrupted runs.
+            result["killed_reason"] = killed_reason
+        result["success"] = success
+
+        if not settings.COMMAND_OUTPUT_CAPTURE_ENABLED:
+            return result
+
+        over_limit = {
+            stream: text
+            for stream, text, limit in (
+                ("stdout", stdout, 10000),
+                ("stderr", stderr, 5000),
+            )
+            if len(text) > limit
+        }
+        if not over_limit:
+            return result
+
+        project_id = self.project_id
+        session_id = self.session_id
+        if project_id is None or not session_id:
+            logger.debug(
+                "Skipping command-output capture without project/session context"
+            )
+            return result
+
+        try:
+            from infinidev.engine.command_output_store import CommandOutputStore
+
+            handles = CommandOutputStore().store_streams(
+                project_id=project_id,
+                session_id=session_id,
+                streams=over_limit,
+            )
+        except Exception:
+            logger.debug("Command-output capture failed", exc_info=True)
+            return result
+
+        if handles:
+            result["command_output_handles"] = {
+                stream: handle.to_dict()
+                for stream, handle in handles.items()
+            }
+        return result
 
     @staticmethod
     def _signal_process_group(proc: subprocess.Popen, sig: int) -> None:

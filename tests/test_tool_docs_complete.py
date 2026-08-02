@@ -7,6 +7,9 @@ the offending tools — add them to TOOL_DESCRIPTIONS (and the relevant
 category in ``build_tool_usage_section``) to fix it.
 """
 
+import pytest
+
+from infinidev.config.settings import settings
 from infinidev.tools import get_tools_for_role
 from infinidev.prompts.tool_hints import (
     MCP_TOOL_HINTS,
@@ -20,26 +23,27 @@ from infinidev.prompts.tool_hints import (
 _PSEUDO_TOOLS = {"step_complete", "add_note", "add_session_note", "think"}
 
 
-def _local_tools():
+def _local_tools(monkeypatch: pytest.MonkeyPatch):
     """Tools defined in this repo — everything except the MCP bridge.
 
-    ``supports_vision=True`` on purpose: this guards the *catalog*, not the
-    runtime gating, and whether ``view_image`` is registered depends on the
-    configured model. Letting that decide would make the guard pass or fail
-    according to whoever's ``settings.json`` is on the machine.
+    Runtime feature and capability gates are forced open on purpose: this guards
+    the complete *catalog*, not one deployment's current prompt. Letting defaults
+    decide would make a correctly documented opt-in tool look stale, or make a
+    missing description invisible until production enables the feature.
 
     Tools discovered from an MCP server carry the server's own name and
     description, so the hand-written catalog cannot be the source of truth
     for them and this guard does not apply to them.
     """
+    monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
     return [
         t for t in get_tools_for_role("developer", supports_vision=True)
         if getattr(t, "mcp_server", None) is None
     ]
 
 
-def test_every_developer_tool_has_a_description():
-    names = {t.name for t in _local_tools()}
+def test_every_developer_tool_has_a_description(monkeypatch):
+    names = {t.name for t in _local_tools(monkeypatch)}
     missing = sorted(n for n in names if n not in TOOL_DESCRIPTIONS)
     assert not missing, (
         "These registered developer tools are missing from "
@@ -58,9 +62,9 @@ def test_every_mcp_tool_arrives_with_a_description():
     assert not blank, f"MCP tools registered with no description: {blank}"
 
 
-def test_no_stale_catalog_entries():
+def test_no_stale_catalog_entries(monkeypatch):
     """Every catalog entry maps to a real tool or a known pseudo-tool."""
-    valid = {t.name for t in _local_tools()} | _PSEUDO_TOOLS
+    valid = {t.name for t in _local_tools(monkeypatch)} | _PSEUDO_TOOLS
     # Retired names still resolve through the dispatcher, so a hint carrying
     # one is documentation, not rot. Read the alias table rather than listing
     # them here — a hand-kept copy is what goes stale.
@@ -77,8 +81,9 @@ def test_no_stale_catalog_entries():
     )
 
 
-def test_usage_section_lists_every_available_tool():
+def test_usage_section_lists_every_available_tool(monkeypatch):
     """build_tool_usage_section must place every available tool in a category."""
+    monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
     tools = get_tools_for_role("developer")
     available = get_available_tool_names(tools)
     section = build_tool_usage_section(available)

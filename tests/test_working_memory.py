@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from infinidev.engine.working_memory import (
+    MAX_NOTE_GENERATION,
+    TraceableNoteError,
+    TraceableNoteEnvelope,
     WorkingMemory,
+    create_traceable_note,
     get_working_memory,
     reset_working_memory,
 )
@@ -200,6 +204,150 @@ def test_archiving_never_raises_when_storage_fails(monkeypatch, memory):
     )
     assert memory.archive_step(1, _step_messages(), summary="") == []
     assert memory.search("anything") == []
+
+
+def test_failed_insert_can_be_retried(monkeypatch, memory):
+    """The in-process hash cache must only change after a confirmed insert."""
+    from infinidev.engine import working_memory as working_memory_mod
+
+    real_execute = working_memory_mod.execute_with_retry
+    calls = 0
+
+    def fail_once(fn, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient write failure")
+        return real_execute(fn, *args, **kwargs)
+
+    monkeypatch.setattr(working_memory_mod, "execute_with_retry", fail_once)
+    content = "retryable context that is long enough to be worth archiving"
+    assert memory.remember("retry", content) is False
+    assert memory.remember("retry", content) is True
+    assert memory.stats()["entries"] == 1
+
+
+# ── traceable notes ───────────────────────────────────────────────────────
+
+
+def test_equal_note_text_keeps_distinct_occurrences_and_provenance(memory):
+    first = create_traceable_note(
+        "auto_note", "same derived fact", source_artifact_id=11,
+        step_index=2, tool_call_id="call-a", occurrence_id="occurrence-a",
+    )
+    second = create_traceable_note(
+        "auto_note", "same derived fact", source_artifact_id=12,
+        step_index=2, tool_call_id="call-b", occurrence_id="occurrence-b",
+    )
+
+    assert memory.remember_traceable(first)
+    assert memory.remember_traceable(second)
+    loaded = memory.load_traceable_notes(kinds=("auto_note",))
+    assert [note.occurrence_id for note in loaded] == ["occurrence-a", "occurrence-b"]
+    assert [note.source_artifact_id for note in loaded] == [11, 12]
+    assert [note.tool_call_id for note in loaded] == ["call-a", "call-b"]
+
+
+def test_traceable_notes_survive_registry_restart(tmp_path, monkeypatch):
+    from infinidev.code_intel import _db as ci_db
+    from infinidev.config import settings as settings_mod
+
+    db_path = str(tmp_path / "restart.db")
+    monkeypatch.setattr(settings_mod.settings, "DB_PATH", db_path)
+    ci_db._conn_cache.__dict__.clear()
+    reset_working_memory()
+    original = WorkingMemory("trace-session", embed=False)
+    note = create_traceable_note(
+        "auto_note", "fact retained after a process-local reset",
+        source_artifact_id=33, step_index=4, tool_call_id="call-restart",
+        occurrence_id="restart-occurrence",
+    )
+    assert original.remember_traceable(note)
+
+    reset_working_memory()
+    reopened = WorkingMemory("trace-session", embed=False)
+    assert reopened.load_traceable_notes() == [note]
+
+
+def test_compaction_is_ordered_immutable_and_idempotent(memory):
+    first = create_traceable_note(
+        "auto_note", "first fact", source_artifact_id=21,
+        step_index=1, tool_call_id="call-1", occurrence_id="source-1",
+    )
+    second = create_traceable_note(
+        "auto_note", "second fact", source_artifact_id=22,
+        step_index=3, tool_call_id="call-2", occurrence_id="source-2",
+    )
+    assert memory.remember_traceable(first)
+    assert memory.remember_traceable(second)
+
+    compacted = memory.compact_traceable_notes(
+        [first, second], "first and second imply a stable conclusion",
+        step_index=4, tool_call_id="analysis-call",
+    )
+    repeated = memory.compact_traceable_notes(
+        [first, second], "retry produced different prose that must not fork identity",
+        step_index=99, tool_call_id="retry-call",
+    )
+
+    assert repeated == compacted
+    assert compacted.parent_ids == ("source-1", "source-2")
+    assert [citation.occurrence_id for citation in compacted.citations] == [
+        "source-1", "source-2",
+    ]
+    loaded = memory.load_traceable_notes()
+    assert loaded[:2] == [first, second], "source notes must remain unchanged and ordered"
+    assert loaded[2:] == [compacted], "repeating a compaction must not create another row"
+
+
+def test_reversing_sources_changes_compaction_identity_and_order(memory):
+    first = create_traceable_note(
+        "auto_note", "first", step_index=1, occurrence_id="ordered-1",
+    )
+    second = create_traceable_note(
+        "auto_note", "second", step_index=1, occurrence_id="ordered-2",
+    )
+    forward = memory.compact_traceable_notes([first, second], "combined")
+    reverse = memory.compact_traceable_notes([second, first], "combined")
+    assert forward.occurrence_id != reverse.occurrence_id
+    assert reverse.parent_ids == ("ordered-2", "ordered-1")
+    assert [item.occurrence_id for item in reverse.citations] == [
+        "ordered-2", "ordered-1",
+    ]
+
+
+def test_compaction_limits_generation_without_deleting_sources(memory):
+    source = create_traceable_note(
+        "auto_note", "base", step_index=1, occurrence_id="generation-0",
+    )
+    chain = [source]
+    current = source
+    for generation in range(1, MAX_NOTE_GENERATION + 1):
+        sibling = create_traceable_note(
+            "auto_note", f"sibling {generation}", step_index=generation,
+            occurrence_id=f"generation-source-{generation}",
+        )
+        current = memory.compact_traceable_notes(
+            [current, sibling], f"generation {generation} summary"
+        )
+        chain.append(current)
+        assert current.generation == generation
+
+    with pytest.raises(TraceableNoteError, match="generation"):
+        memory.compact_traceable_notes([current], "one generation too far")
+    assert all(note.summary for note in chain)
+
+
+def test_traceable_note_json_round_trip_is_versioned_and_validated():
+    note = create_traceable_note(
+        "artifact_analysis", "safe summary", step_index=2,
+        occurrence_id="analysis-source",
+    )
+    restored = TraceableNoteEnvelope.from_json(note.to_json())
+    assert restored == note
+    assert restored.to_dict()["version"] == 1
+    with pytest.raises(TraceableNoteError, match="unsupported traceable note version"):
+        TraceableNoteEnvelope.from_json(note.to_json().replace('"version":1', '"version":2'))
 
 
 # ── prompt retention policy ───────────────────────────────────────────────

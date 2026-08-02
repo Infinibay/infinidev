@@ -190,6 +190,45 @@ def test_tui_subprocess_path_emits_live_output(
     assert "first\nsecond\n" in "".join(seen)
 
 
+def test_tui_path_captures_exact_precut_output(
+    bound_tool,
+    auto_approve_permissions,
+    monkeypatch,
+    tmp_path,
+):
+    from infinidev.config.settings import settings
+    from infinidev.engine.command_output_store import (
+        CommandOutputHandle,
+        CommandOutputStore,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
+    stdout = "stdin-route-head\n" + "λ" * 10_050
+    set_stdin_input_handler(lambda command, prompt, out, err: None)
+    try:
+        tool = bound_tool(ExecuteCommandTool)
+        result = tool._run(
+            command=f"python3 -c \"import sys; sys.stdout.write({stdout!r})\""
+        )
+    finally:
+        set_stdin_input_handler(None)
+
+    data = json.loads(result)
+    assert data["stdout"] == stdout[-10000:]
+    raw = data["command_output_handles"]["stdout"]
+    handle = CommandOutputHandle(
+        artifact_id=raw["artifact_id"],
+        artifact_type=raw["type"],
+        stream=raw["stream"],
+        char_count=raw["char_count"],
+        byte_count=raw["byte_count"],
+    )
+    assert CommandOutputStore().read_text(
+        handle, project_id=tool.project_id, session_id=tool.session_id
+    ) == stdout
+
+
 def test_cancel_event_interrupts_running_command(
     bound_tool,
     auto_approve_permissions,

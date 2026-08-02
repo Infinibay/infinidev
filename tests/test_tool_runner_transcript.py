@@ -11,6 +11,7 @@ tools" into "the run died mid-step".
 
 from __future__ import annotations
 
+import json
 import threading
 from types import SimpleNamespace
 
@@ -186,3 +187,111 @@ def test_nudge_fires_once_across_batches():
     ]))
     nudges = [m for m in messages if m.get("role") == "user" and m is not messages[1]]
     assert len(nudges) == 1
+
+
+# ── command-output descriptor propagation ─────────────────────────────
+
+
+def _append_command_result(result: str):
+    ctx = _ctx()
+    runner = ToolRunner(_engine(nudge_at=99))
+    messages: list[dict] = []
+    runner._append_results(
+        ctx,
+        [(_call("cmd-1", "execute_command", '{"command": "pytest"}'), result)],
+        messages,
+        action_tool_calls=0,
+        iteration=0,
+        is_parallel=False,
+        guard=LoopGuard(is_small=False),
+        tracker=BehaviorTracker(set()),
+        tool_results_text=[],
+        deferred=[],
+    )
+    return ctx, messages
+
+
+def test_no_handle_preserves_result_return_and_archive_view(monkeypatch):
+    original = json.dumps(
+        {"exit_code": 0, "stdout": "ok", "stderr": "", "success": True}
+    )
+    monkeypatch.setattr(
+        ToolRunner,
+        "capture_test_output",
+        staticmethod(lambda ctx, args, result: result),
+    )
+
+    ctx, messages = _append_command_result(original)
+
+    expected_body = original + "\n[Tool call 1/4 for this step]"
+    assert messages == [
+        {"role": "tool", "tool_call_id": "cmd-1", "content": expected_body}
+    ]
+    assert ctx.state.pending_archive == [
+        ("execute_command", '{"command": "pytest"}', expected_body)
+    ]
+    assert not hasattr(ctx, "pending_command_output_handles")
+
+
+def test_valid_handle_is_propagated_without_changing_model_view(monkeypatch):
+    original = json.dumps({
+        "exit_code": 0,
+        "stdout": "tail",
+        "stderr": "",
+        "success": True,
+        "command_output_handles": {
+            "stdout": {
+                "artifact_id": 41,
+                "type": "command_output",
+                "stream": "stdout",
+                "char_count": 12001,
+                "byte_count": 12001,
+            }
+        },
+    })
+    monkeypatch.setattr(
+        ToolRunner,
+        "capture_test_output",
+        staticmethod(lambda ctx, args, result: result),
+    )
+
+    ctx, messages = _append_command_result(original)
+
+    assert messages[0]["content"].startswith(original)
+    assert ctx.state.pending_archive[0][2] == messages[0]["content"]
+    assert ctx.pending_command_output_handles == [{
+        "artifact_id": 41,
+        "type": "command_output",
+        "stream": "stdout",
+        "char_count": 12001,
+        "byte_count": 12001,
+        "tool_call_id": "cmd-1",
+    }]
+
+
+def test_invalid_handle_is_not_propagated(monkeypatch):
+    original = json.dumps({
+        "exit_code": 0,
+        "stdout": "tail",
+        "stderr": "",
+        "success": True,
+        "command_output_handles": {
+            "stdout": {
+                "artifact_id": 41,
+                "type": "command_output",
+                "stream": "stderr",
+                "char_count": 12001,
+                "byte_count": 12001,
+            }
+        },
+    })
+    monkeypatch.setattr(
+        ToolRunner,
+        "capture_test_output",
+        staticmethod(lambda ctx, args, result: result),
+    )
+
+    ctx, messages = _append_command_result(original)
+
+    assert messages[0]["content"].startswith(original)
+    assert not hasattr(ctx, "pending_command_output_handles")

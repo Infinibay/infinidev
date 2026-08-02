@@ -86,6 +86,90 @@ class TestExecuteCommand:
         data = json.loads(result)
         assert len(data["stdout"]) <= 10001  # 10K + possible newline
 
+    def test_capture_disabled_preserves_exact_truncated_shape(
+        self, bound_tool, auto_approve_permissions, monkeypatch
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+        monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", False)
+        stdout = "head-" + "x" * 12_000
+        stderr = "error-" + "y" * 6_000
+
+        data = tool._capture_before_truncation(
+            exit_code=9, stdout=stdout, stderr=stderr, success=False
+        )
+
+        assert data == {
+            "exit_code": 9,
+            "stdout": stdout[-10000:],
+            "stderr": stderr[-5000:],
+            "success": False,
+        }
+
+    def test_sealed_capture_reconstructs_exact_precut_text(
+        self, bound_tool, auto_approve_permissions, monkeypatch, tmp_path
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
+        stdout = "START-SECRET\n" + "π" * 10_100
+        command = (
+            "python3 -c \"import sys; "
+            f"sys.stdout.write({stdout!r})\""
+        )
+
+        data = json.loads(tool._run(command=command))
+
+        assert data["stdout"] == stdout[-10000:]
+        raw = data["command_output_handles"]["stdout"]
+        from infinidev.engine.command_output_store import (
+            CommandOutputHandle,
+            CommandOutputStore,
+        )
+        handle = CommandOutputHandle(
+            artifact_id=raw["artifact_id"],
+            artifact_type=raw["type"],
+            stream=raw["stream"],
+            char_count=raw["char_count"],
+            byte_count=raw["byte_count"],
+        )
+        assert CommandOutputStore().read_text(
+            handle, project_id=tool.project_id, session_id=tool.session_id
+        ) == stdout
+
+    def test_capture_failure_keeps_legacy_result_and_announces_no_handle(
+        self, bound_tool, auto_approve_permissions, monkeypatch
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+        monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
+        monkeypatch.setattr(settings, "COMMAND_OUTPUT_MAX_ARTIFACT_BYTES", 3)
+        stdout = "x" * 10_001
+
+        data = tool._capture_before_truncation(
+            exit_code=0, stdout=stdout, stderr="", success=True
+        )
+
+        assert data == {
+            "exit_code": 0,
+            "stdout": stdout[-10000:],
+            "stderr": "",
+            "success": True,
+        }
+
+    def test_invalid_capture_limits_soft_disable_without_handle(
+        self, bound_tool, auto_approve_permissions, monkeypatch
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+        monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
+        monkeypatch.setattr(settings, "COMMAND_OUTPUT_STORE_TIMEOUT_SECONDS", 0)
+        stdout = "x" * 10_001
+
+        data = tool._capture_before_truncation(
+            exit_code=0, stdout=stdout, stderr="", success=True
+        )
+
+        assert "command_output_handles" not in data
+        assert data["stdout"] == stdout[-10000:]
+
     def test_execute_custom_cwd(self, bound_tool, auto_approve_permissions, workspace_dir):
         """cwd parameter is respected."""
         tool = bound_tool(ExecuteCommandTool)

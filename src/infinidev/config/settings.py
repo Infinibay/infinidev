@@ -94,6 +94,21 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5MB
     MAX_DIR_LISTING: int = 1000
 
+    # Private command-output capture. Disabled by default so execute_command's
+    # return shape and filesystem/database side effects stay backward compatible.
+    # Enabling is fail-closed unless every bound below is a positive integer.
+    COMMAND_OUTPUT_CAPTURE_ENABLED: bool = False
+    COMMAND_OUTPUT_MAX_ARTIFACT_BYTES: int = 10 * 1024 * 1024
+    COMMAND_OUTPUT_MAX_SESSION_BYTES: int = 100 * 1024 * 1024
+    COMMAND_OUTPUT_MAX_PROJECT_BYTES: int = 500 * 1024 * 1024
+    COMMAND_OUTPUT_STORE_TIMEOUT_SECONDS: int = 5
+    COMMAND_OUTPUT_RETENTION_SECONDS: int = 7 * 24 * 60 * 60
+    COMMAND_OUTPUT_SWEEP_GRACE_SECONDS: int = 60 * 60
+    # Independent opt-ins: capture may expose a handle without creating durable
+    # notes, and note compaction can be evaluated separately from note creation.
+    COMMAND_OUTPUT_AUTO_NOTES_ENABLED: bool = False
+    COMMAND_OUTPUT_NOTE_COMPACTION_ENABLED: bool = False
+
     # LLM (via LiteLLM)
     # Provider ID — the authoritative list is PROVIDERS in config/providers.py.
     # `openai_subscription` bills against a ChatGPT plan via `codex login`

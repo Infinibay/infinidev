@@ -60,6 +60,228 @@ MAX_EMBED_CHARS = 1200
 # ``limit`` does the real filtering.
 MIN_RECALL_SCORE = 0.12
 
+# Traceable notes live inside ``working_memory.content`` as versioned JSON.
+# Keeping the envelope in the existing private archive avoids a canonical DB
+# migration while still giving every occurrence a stable identity.
+TRACEABLE_NOTE_SCHEMA = "infinidev.traceable_note"
+TRACEABLE_NOTE_VERSION = 1
+TRACEABLE_NOTE_TYPES = frozenset({"auto_note", "artifact_analysis"})
+MAX_NOTE_PARENTS = 16
+MAX_NOTE_CITATIONS = 64
+MAX_NOTE_GENERATION = 4
+MAX_NOTE_SUMMARY_CHARS = 4000
+MAX_NOTE_ID_CHARS = 200
+
+
+class TraceableNoteError(ValueError):
+    """A traceable note is malformed or exceeds a provenance limit."""
+
+
+@dataclass(frozen=True, slots=True)
+class NoteCitation:
+    """Structured pointer to one source occurrence, never copied source text."""
+
+    occurrence_id: str
+    source_artifact_id: int | None
+    step_index: int
+    tool_call_id: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "occurrence_id": self.occurrence_id,
+            "source_artifact_id": self.source_artifact_id,
+            "step_index": self.step_index,
+            "tool_call_id": self.tool_call_id,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "NoteCitation":
+        return cls(
+            occurrence_id=_validate_note_id(value.get("occurrence_id")),
+            source_artifact_id=_validate_artifact_id(value.get("source_artifact_id")),
+            step_index=_validate_step_index(value.get("step_index")),
+            tool_call_id=_validate_tool_call_id(value.get("tool_call_id")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TraceableNoteEnvelope:
+    """Immutable, versioned note with complete occurrence provenance."""
+
+    note_type: str
+    occurrence_id: str
+    source_artifact_id: int | None
+    step_index: int
+    tool_call_id: str | None
+    generation: int
+    parent_ids: tuple[str, ...]
+    summary: str
+    citations: tuple[NoteCitation, ...]
+    schema: str = TRACEABLE_NOTE_SCHEMA
+    version: int = TRACEABLE_NOTE_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "version": self.version,
+            "type": self.note_type,
+            "occurrence_id": self.occurrence_id,
+            "source_artifact_id": self.source_artifact_id,
+            "step_index": self.step_index,
+            "tool_call_id": self.tool_call_id,
+            "generation": self.generation,
+            "parent_ids": list(self.parent_ids),
+            "summary": self.summary,
+            "citations": [citation.to_dict() for citation in self.citations],
+        }
+
+    def to_json(self) -> str:
+        """Return a canonical representation while retaining list order."""
+        return json.dumps(
+            self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+
+    @classmethod
+    def from_json(cls, content: str) -> "TraceableNoteEnvelope":
+        try:
+            value = json.loads(content)
+        except (json.JSONDecodeError, TypeError) as err:
+            raise TraceableNoteError("traceable note is not valid JSON") from err
+        if not isinstance(value, dict):
+            raise TraceableNoteError("traceable note must be a JSON object")
+        if value.get("schema") != TRACEABLE_NOTE_SCHEMA:
+            raise TraceableNoteError("unknown traceable note schema")
+        if value.get("version") != TRACEABLE_NOTE_VERSION:
+            raise TraceableNoteError("unsupported traceable note version")
+        note_type = value.get("type")
+        if note_type not in TRACEABLE_NOTE_TYPES:
+            raise TraceableNoteError("unsupported traceable note type")
+        parent_values = value.get("parent_ids", [])
+        citation_values = value.get("citations", [])
+        if not isinstance(parent_values, list) or not isinstance(citation_values, list):
+            raise TraceableNoteError("parents and citations must be arrays")
+        if len(parent_values) > MAX_NOTE_PARENTS:
+            raise TraceableNoteError("traceable note has too many parents")
+        if len(citation_values) > MAX_NOTE_CITATIONS:
+            raise TraceableNoteError("traceable note has too many citations")
+        try:
+            citations = tuple(
+                NoteCitation.from_dict(item) for item in citation_values
+                if isinstance(item, dict)
+            )
+        except (TypeError, ValueError) as err:
+            raise TraceableNoteError("invalid traceable note citation") from err
+        if len(citations) != len(citation_values):
+            raise TraceableNoteError("traceable note citation must be an object")
+        generation = _validate_generation(value.get("generation"))
+        summary = _redact_note_summary(value.get("summary"))
+        return cls(
+            note_type=note_type,
+            occurrence_id=_validate_note_id(value.get("occurrence_id")),
+            source_artifact_id=_validate_artifact_id(value.get("source_artifact_id")),
+            step_index=_validate_step_index(value.get("step_index")),
+            tool_call_id=_validate_tool_call_id(value.get("tool_call_id")),
+            generation=generation,
+            parent_ids=tuple(_validate_note_id(item) for item in parent_values),
+            summary=summary,
+            citations=citations,
+        )
+
+
+def _validate_note_id(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise TraceableNoteError("traceable note identity must be non-empty")
+    value = value.strip()
+    if len(value) > MAX_NOTE_ID_CHARS:
+        raise TraceableNoteError("traceable note identity is too long")
+    return value
+
+
+def _validate_artifact_id(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise TraceableNoteError("source_artifact_id must be a positive integer")
+    return value
+
+
+def _validate_step_index(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TraceableNoteError("step_index must be a non-negative integer")
+    return value
+
+
+def _validate_tool_call_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise TraceableNoteError("tool_call_id must be a non-empty string")
+    value = value.strip()
+    if len(value) > MAX_NOTE_ID_CHARS:
+        raise TraceableNoteError("tool_call_id is too long")
+    return value
+
+
+def _validate_generation(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TraceableNoteError("generation must be an integer")
+    if value < 0 or value > MAX_NOTE_GENERATION:
+        raise TraceableNoteError("traceable note generation is out of range")
+    return value
+
+
+def _redact_note_summary(summary: str) -> str:
+    if not isinstance(summary, str) or not summary.strip():
+        raise TraceableNoteError("traceable note summary must be non-empty")
+    from infinidev.config.secrets import redact
+
+    redacted = redact(summary.strip())
+    if len(redacted) > MAX_NOTE_SUMMARY_CHARS:
+        raise TraceableNoteError("traceable note summary is too long")
+    return redacted
+
+
+def create_traceable_note(
+    note_type: str,
+    summary: str,
+    *,
+    source_artifact_id: int | None = None,
+    step_index: int = 0,
+    tool_call_id: str | None = None,
+    occurrence_id: str | None = None,
+    citations: tuple[NoteCitation, ...] | list[NoteCitation] | None = None,
+) -> TraceableNoteEnvelope:
+    """Create one source occurrence without conflating equal summaries."""
+    if note_type not in TRACEABLE_NOTE_TYPES:
+        raise TraceableNoteError("unsupported traceable note type")
+    note_id = _validate_note_id(occurrence_id or f"note:{uuid.uuid4()}")
+    artifact_id = _validate_artifact_id(source_artifact_id)
+    step = _validate_step_index(step_index)
+    call_id = _validate_tool_call_id(tool_call_id)
+    note_citations = tuple(citations or ())
+    if len(note_citations) > MAX_NOTE_CITATIONS:
+        raise TraceableNoteError("traceable note has too many citations")
+    if not all(isinstance(item, NoteCitation) for item in note_citations):
+        raise TraceableNoteError("citations must contain NoteCitation values")
+    if not note_citations:
+        note_citations = (
+            NoteCitation(note_id, artifact_id, step, call_id),
+        )
+    envelope = TraceableNoteEnvelope(
+        note_type=note_type,
+        occurrence_id=note_id,
+        source_artifact_id=artifact_id,
+        step_index=step,
+        tool_call_id=call_id,
+        generation=0,
+        parent_ids=(),
+        summary=_redact_note_summary(summary),
+        citations=note_citations,
+    )
+    if len(envelope.to_json()) > MAX_ARCHIVE_CHARS:
+        raise TraceableNoteError("traceable note envelope is too large")
+    return envelope
+
 
 @dataclass(slots=True)
 class MemoryRecord:
@@ -150,6 +372,7 @@ class WorkingMemory:
         self._embed_enabled = embed
         self._db_path = db_path or settings.DB_PATH
         self._seen_hashes: set[str] = set()
+        self._store_lock = threading.Lock()
         self._archived = 0
         self._recalled = 0
         try:
@@ -242,6 +465,149 @@ class WorkingMemory:
         )
         return self._store(record)
 
+    def remember_traceable(self, note: TraceableNoteEnvelope) -> bool:
+        """Store a validated note envelope without changing legacy ``remember``."""
+        if not self._ready:
+            return False
+        # Round-trip validation prevents callers from constructing an invalid
+        # dataclass directly and bypassing the version/limit checks.
+        validated = TraceableNoteEnvelope.from_json(note.to_json())
+        content = validated.to_json()
+        if len(content) > MAX_ARCHIVE_CHARS:
+            raise TraceableNoteError("traceable note envelope is too large")
+        return self._store(MemoryRecord(
+            id=validated.occurrence_id,
+            session_id=self.session_id,
+            step_index=validated.step_index,
+            kind=validated.note_type,
+            title=f"{validated.note_type}:{validated.occurrence_id}"[:200],
+            content=content,
+            created_at=_now(),
+        ))
+
+    def load_traceable_notes(
+        self, *, kinds: tuple[str, ...] = ("auto_note", "artifact_analysis")
+    ) -> list[TraceableNoteEnvelope]:
+        """Load source and compacted notes in immutable creation order."""
+        selected = tuple(kind for kind in kinds if kind in TRACEABLE_NOTE_TYPES)
+        if not self._ready or not selected:
+            return []
+        placeholders = ",".join("?" for _ in selected)
+
+        def _select(conn):
+            return conn.execute(
+                f"SELECT content FROM working_memory WHERE session_id = ? "
+                f"AND kind IN ({placeholders}) ORDER BY created_at, rowid",
+                (self.session_id, *selected),
+            ).fetchall()
+
+        try:
+            rows = execute_with_retry(_select, db_path=self._db_path) or []
+        except Exception:
+            logger.debug("traceable note select failed", exc_info=True)
+            return []
+        notes: list[TraceableNoteEnvelope] = []
+        for (content,) in rows:
+            try:
+                notes.append(TraceableNoteEnvelope.from_json(content))
+            except TraceableNoteError:
+                logger.debug("ignored invalid traceable note %s", content[:80])
+        return notes
+
+    def compact_traceable_notes(
+        self,
+        sources: list[TraceableNoteEnvelope] | tuple[TraceableNoteEnvelope, ...],
+        summary: str,
+        *,
+        step_index: int | None = None,
+        tool_call_id: str | None = None,
+    ) -> TraceableNoteEnvelope:
+        """Create or return one deterministic immutable analysis.
+
+        ``sources`` is intentionally ordered: parent order and citation order
+        survive compaction. Source rows are never updated or deleted. Repeating
+        the same ordered compaction derives the same occurrence id, so the DB
+        unique constraint makes the operation idempotent.
+        """
+        if not sources:
+            raise TraceableNoteError("compaction requires at least one source")
+        if len(sources) > MAX_NOTE_PARENTS:
+            raise TraceableNoteError("compaction has too many parents")
+        validated = tuple(
+            TraceableNoteEnvelope.from_json(source.to_json()) for source in sources
+        )
+        parent_ids = tuple(source.occurrence_id for source in validated)
+        if len(set(parent_ids)) != len(parent_ids):
+            raise TraceableNoteError("compaction sources must be distinct occurrences")
+        generation = max(source.generation for source in validated) + 1
+        _validate_generation(generation)
+        citations = _merge_citations(validated)
+        compacted_step = (
+            max(source.step_index for source in validated)
+            if step_index is None else _validate_step_index(step_index)
+        )
+        compacted_call = _validate_tool_call_id(tool_call_id)
+        redacted_summary = _redact_note_summary(summary)
+        identity_payload = json.dumps(
+            {
+                "schema": TRACEABLE_NOTE_SCHEMA,
+                "version": TRACEABLE_NOTE_VERSION,
+                "session_id": self.session_id,
+                "type": "artifact_analysis",
+                "parents": parent_ids,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        occurrence_id = "analysis:" + hashlib.sha256(
+            identity_payload.encode("utf-8")
+        ).hexdigest()
+        # Same ordered sources mean the same occurrence, independent of a
+        # caller retry producing slightly different prose or metadata. The
+        # first immutable row wins; subsequent calls return that exact row.
+        existing = next(
+            (
+                item for item in self.load_traceable_notes(
+                    kinds=("artifact_analysis",)
+                )
+                if item.occurrence_id == occurrence_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        note = TraceableNoteEnvelope(
+            note_type="artifact_analysis",
+            occurrence_id=occurrence_id,
+            source_artifact_id=None,
+            step_index=compacted_step,
+            tool_call_id=compacted_call,
+            generation=generation,
+            parent_ids=parent_ids,
+            summary=redacted_summary,
+            citations=citations,
+        )
+        if len(note.to_json()) > MAX_ARCHIVE_CHARS:
+            raise TraceableNoteError("compacted note envelope is too large")
+        if self.remember_traceable(note):
+            return note
+        # A concurrent compactor may have inserted this deterministic id after
+        # the lookup above. Return the immutable winner, not an unstored local
+        # variant; an actual storage failure stays explicit to the caller.
+        existing = next(
+            (
+                item for item in self.load_traceable_notes(
+                    kinds=("artifact_analysis",)
+                )
+                if item.occurrence_id == occurrence_id
+            ),
+            None,
+        )
+        if existing is None:
+            raise TraceableNoteError("compacted note could not be persisted")
+        return existing
+
     def _extract(
         self, step_index: int, messages: list[dict[str, Any]], summary: str
     ):
@@ -295,12 +661,9 @@ class WorkingMemory:
 
     def _store(self, record: MemoryRecord) -> bool:
         digest = hashlib.sha256(record.content.encode("utf-8")).hexdigest()
-        if digest in self._seen_hashes:
-            return False
-        self._seen_hashes.add(digest)
 
         def _insert(conn):
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT OR IGNORE INTO working_memory ("
                 " id, session_id, step_index, kind, title, content,"
                 " content_hash, embedding, created_at"
@@ -317,13 +680,22 @@ class WorkingMemory:
                 ),
             )
             conn.commit()
-            return conn.total_changes
+            return cursor.rowcount == 1
 
-        try:
-            execute_with_retry(_insert, db_path=self._db_path)
-        except Exception:
-            logger.debug("working_memory insert failed", exc_info=True)
-            return False
+        # Serialise the in-process cache check with the DB insert. Crucially,
+        # a failed INSERT does not poison the cache: a later retry of the same
+        # content still reaches SQLite.
+        with self._store_lock:
+            if digest in self._seen_hashes:
+                return False
+            try:
+                inserted = bool(execute_with_retry(_insert, db_path=self._db_path))
+            except Exception:
+                logger.debug("working_memory insert failed", exc_info=True)
+                return False
+            if not inserted:
+                return False
+            self._seen_hashes.add(digest)
         if self._embed_enabled:
             self._enqueue_embed(record)
         return True
@@ -556,6 +928,29 @@ class WorkingMemory:
             return 0
         self._seen_hashes.clear()
         return int(removed)
+
+
+def _merge_citations(
+    sources: tuple[TraceableNoteEnvelope, ...],
+) -> tuple[NoteCitation, ...]:
+    """Flatten citations in source order, keeping first occurrence identity."""
+    merged: list[NoteCitation] = []
+    seen: set[tuple[str, int | None, int, str | None]] = set()
+    for source in sources:
+        for citation in source.citations:
+            key = (
+                citation.occurrence_id,
+                citation.source_artifact_id,
+                citation.step_index,
+                citation.tool_call_id,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(citation)
+            if len(merged) > MAX_NOTE_CITATIONS:
+                raise TraceableNoteError("compaction has too many citations")
+    return tuple(merged)
 
 
 def _row_to_record(row: tuple, score: float) -> MemoryRecord:

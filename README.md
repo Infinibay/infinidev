@@ -151,6 +151,9 @@ Settings are stored in `.infinidev/settings.json` in your project directory. The
 | `LOOP_MAX_ITERATIONS` | `50` | Max planning iterations per task |
 | `LOOP_MAX_TOTAL_TOOL_CALLS` | `200` | Global tool call limit per task |
 | `LOOP_HISTORY_WINDOW` | `0` | Summaries to keep (0 = all) |
+| `COMMAND_OUTPUT_CAPTURE_ENABLED` | `false` | Opt in to private, bounded capture of command streams that exceed the normal truncation limit. See [`docs/COMMAND_OUTPUT_CAPTURE.md`](docs/COMMAND_OUTPUT_CAPTURE.md). |
+| `COMMAND_OUTPUT_AUTO_NOTES_ENABLED` | `false` | Independently create traceable closure notes for captured-output handles. |
+| `COMMAND_OUTPUT_NOTE_COMPACTION_ENABLED` | `false` | Independently compact newly created closure notes without replacing their sources. |
 | `FORGEJO_API_URL` | `""` | Forgejo API URL |
 | `FORGEJO_OWNER` | `""` | Forgejo owner |
 | `INFINIDEV_MNN_MODEL_PATH` | unset | Override for the MNN model path. Only needed to point at a custom location; leave unset to use the auto-managed default under `~/.infinidev/models/`. |

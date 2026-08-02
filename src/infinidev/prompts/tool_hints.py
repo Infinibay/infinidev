@@ -151,6 +151,11 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Read a saved report by id (omit id to list reports)",
         "read_report(report_id=3)",
     ),
+    "read_command_output": (
+        "Read a bounded byte range from a private execute_command output handle",
+        "read_command_output(artifact_id=7, type='command_output', "
+        "stream='stdout', char_count=12000, byte_count=12000, offset=0)",
+    ),
     "delete_report": (
         "Delete a saved report artifact by id",
         "delete_report(artifact_id=3)",
@@ -446,6 +451,7 @@ def build_tool_usage_section(
                 "summarize_findings",
                 "write_report",
                 "read_report",
+                "read_command_output",
                 "delete_report",
             ],
         ),

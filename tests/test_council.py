@@ -8,6 +8,7 @@ without any model calls.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -319,6 +320,310 @@ class TestRunner:
         empty = CouncilRoster(question="Q", members=[], opening_threads=[])
         monkeypatch.setattr(MOD, "seed_council", lambda *a, **k: empty)
         assert RUN.run_council("handoff") is None
+
+
+# ── Isolated private command-output analysis ─────────────────────────────
+
+
+class TestCommandOutputAnalysis:
+    @pytest.fixture
+    def stored_output(self, tmp_path, temp_db):
+        from infinidev.engine.command_output_store import CommandOutputStore
+
+        store = CommandOutputStore(
+            root=tmp_path / "private" / "command_output",
+            db_path=temp_db,
+        )
+        text = "phase one passed\nphase two failed: expected 3, got 4\n"
+        handle = store.store_streams(
+            project_id=1,
+            session_id="analysis-session",
+            streams={"stdout": text},
+        )["stdout"]
+        return store, handle, text
+
+    @staticmethod
+    def _successful_loop(text, seen):
+        def fake_loop(**kwargs):
+            seen.update(kwargs)
+            assert kwargs["project_id"] is None
+            assert kwargs["session_id"] is None
+            assert kwargs["workspace_path"] is None
+            assert kwargs["terminator_names"] == {"submit_artifact_analysis"}
+            assert [tool.name for tool in kwargs["tools"]] == [
+                "read_output_range",
+                "submit_artifact_analysis",
+            ]
+            assert all(tool.is_read_only for tool in kwargs["tools"])
+            reader = kwargs["tools"][0]
+            response = json.loads(reader._run(offset=0, limit=len(text.encode())))
+            assert response["content"] == text
+            return RUN.LoopResult(
+                terminator="submit_artifact_analysis",
+                args={
+                    "summary": "One phase passed and the second failed.",
+                    "claims": [
+                        {
+                            "kind": "fact",
+                            "statement": "The second phase reported a mismatch.",
+                            "citations": [{
+                                "start_offset": 0,
+                                "end_offset": len(text.encode()),
+                            }],
+                        },
+                        {
+                            "kind": "inference",
+                            "statement": "The assertion likely compares integer values.",
+                            "citations": [{
+                                "start_offset": 0,
+                                "end_offset": len(text.encode()),
+                            }],
+                        },
+                    ],
+                },
+            )
+
+        return fake_loop
+
+    def test_analysis_is_explicit_isolated_grounded_and_persisted(
+        self, stored_output, temp_db, monkeypatch
+    ):
+        from infinidev.code_intel import _db as ci_db
+        from infinidev.config import settings as settings_mod
+        from infinidev.engine.working_memory import (
+            get_working_memory,
+            reset_working_memory,
+        )
+
+        store, handle, text = stored_output
+        monkeypatch.setattr(settings_mod.settings, "DB_PATH", temp_db)
+        ci_db._conn_cache.__dict__.clear()
+        reset_working_memory()
+        seen = {}
+        monkeypatch.setattr(
+            RUN,
+            "run_terminating_loop",
+            self._successful_loop(text, seen),
+        )
+
+        note = RUN.analyze_command_output(
+            handle,
+            "Why did the run fail?",
+            project_id=1,
+            session_id="analysis-session",
+            step_index=7,
+            tool_call_id="cmd-call",
+            max_iterations=3,
+            store=store,
+        )
+
+        assert note is not None
+        assert note.note_type == "artifact_analysis"
+        assert note.source_artifact_id == handle.artifact_id
+        assert note.step_index == 7
+        assert note.tool_call_id == "cmd-call"
+        assert note.citations[0].occurrence_id == (
+            f"command-output:{handle.artifact_id}"
+        )
+        assert "FACT [bytes" in note.summary
+        assert "INFERENCE [bytes" in note.summary
+        assert text not in note.summary
+        assert seen["max_iterations"] == 3
+        assert "read_file" not in {tool.name for tool in seen["tools"]}
+        assert "web_search" not in {tool.name for tool in seen["tools"]}
+        assert "recall_context" not in {tool.name for tool in seen["tools"]}
+        assert get_working_memory("analysis-session").load_traceable_notes(
+            kinds=("artifact_analysis",)
+        ) == [note]
+        reset_working_memory()
+
+    def test_analysis_requires_an_explicit_call(self, monkeypatch):
+        monkeypatch.setattr(MOD, "seed_council", lambda *a, **k: _roster(0))
+        called = False
+
+        def unexpected(*args, **kwargs):
+            nonlocal called
+            called = True
+            raise AssertionError("ordinary council must not analyze private output")
+
+        monkeypatch.setattr(RUN, "analyze_command_output", unexpected)
+        RUN.run_council("ordinary design handoff")
+        assert called is False
+
+    @pytest.mark.parametrize(
+        ("project_id", "session_id"),
+        [(2, "analysis-session"), (1, "other-session")],
+    )
+    def test_invalid_scope_fails_before_model_call(
+        self, stored_output, monkeypatch, project_id, session_id
+    ):
+        store, handle, _ = stored_output
+
+        def model_must_not_run(**kwargs):
+            raise AssertionError("invalid handles must fail before an LLM call")
+
+        monkeypatch.setattr(RUN, "run_terminating_loop", model_must_not_run)
+        assert RUN.analyze_command_output(
+            handle,
+            "inspect",
+            project_id=project_id,
+            session_id=session_id,
+            store=store,
+        ) is None
+
+    def test_read_budget_is_bounded_and_cannot_select_another_artifact(
+        self, stored_output
+    ):
+        store, handle, _ = stored_output
+        reader = RUN._ScopedCommandOutputReader(
+            store=store,
+            handle=handle,
+            project_id=1,
+            session_id="analysis-session",
+        )
+        assert set(reader.args_schema.model_fields) == {"offset", "limit"}
+        for _ in range(RUN._COMMAND_ANALYSIS_MAX_READ_CALLS):
+            assert "error" not in json.loads(reader._run(offset=0, limit=1))
+        exhausted = json.loads(reader._run(offset=0, limit=1))
+        assert "budget exhausted" in exhausted["error"]
+
+    def test_unread_or_invalid_citation_fails_without_persisting(
+        self, stored_output, temp_db, monkeypatch
+    ):
+        from infinidev.code_intel import _db as ci_db
+        from infinidev.config import settings as settings_mod
+        from infinidev.engine.working_memory import (
+            get_working_memory,
+            reset_working_memory,
+        )
+
+        store, handle, text = stored_output
+        monkeypatch.setattr(settings_mod.settings, "DB_PATH", temp_db)
+        ci_db._conn_cache.__dict__.clear()
+        reset_working_memory()
+
+        def fake_loop(**kwargs):
+            kwargs["tools"][0]._run(offset=0, limit=5)
+            return RUN.LoopResult(
+                terminator="submit_artifact_analysis",
+                args={
+                    "summary": "unsupported",
+                    "claims": [{
+                        "kind": "fact",
+                        "statement": "This was not in the returned range.",
+                        "citations": [{
+                            "start_offset": text.index("failed"),
+                            "end_offset": len(text.encode()),
+                        }],
+                    }],
+                },
+            )
+
+        monkeypatch.setattr(RUN, "run_terminating_loop", fake_loop)
+        assert RUN.analyze_command_output(
+            handle,
+            "inspect",
+            project_id=1,
+            session_id="analysis-session",
+            store=store,
+        ) is None
+        assert get_working_memory("analysis-session").load_traceable_notes(
+            kinds=("artifact_analysis",)
+        ) == []
+        reset_working_memory()
+
+    def test_seeded_secret_is_redacted_before_model_and_note_storage(
+        self, tmp_path, temp_db, monkeypatch
+    ):
+        from infinidev.code_intel import _db as ci_db
+        from infinidev.config import settings as settings_mod
+        from infinidev.engine.command_output_store import CommandOutputStore
+        from infinidev.engine.working_memory import reset_working_memory
+
+        secret = "API_TOKEN=seeded-private-value-123456"
+        text = f"start\n{secret}\nfailed\n"
+        store = CommandOutputStore(
+            root=tmp_path / "private" / "command_output",
+            db_path=temp_db,
+        )
+        handle = store.store_streams(
+            project_id=1,
+            session_id="analysis-session",
+            streams={"stderr": text},
+        )["stderr"]
+        monkeypatch.setattr(settings_mod.settings, "DB_PATH", temp_db)
+        ci_db._conn_cache.__dict__.clear()
+        reset_working_memory()
+        seen = {}
+
+        def fake_loop(**kwargs):
+            rendered = json.loads(
+                kwargs["tools"][0]._run(offset=0, limit=len(text.encode()))
+            )["content"]
+            seen["rendered"] = rendered
+            return RUN.LoopResult(
+                terminator="submit_artifact_analysis",
+                args={
+                    "summary": f"Failure follows {secret}",
+                    "claims": [{
+                        "kind": "fact",
+                        "statement": f"Output contains {secret}",
+                        "citations": [{
+                            "start_offset": 0,
+                            "end_offset": len(text.encode()),
+                        }],
+                    }],
+                },
+            )
+
+        monkeypatch.setattr(RUN, "run_terminating_loop", fake_loop)
+        note = RUN.analyze_command_output(
+            handle,
+            f"inspect {secret}",
+            project_id=1,
+            session_id="analysis-session",
+            store=store,
+        )
+
+        assert note is not None
+        assert secret not in seen["rendered"]
+        assert "seeded-private-value-123456" not in seen["rendered"]
+        assert secret not in note.to_json()
+        assert "seeded-private-value-123456" not in note.to_json()
+        reset_working_memory()
+
+    def test_model_failure_isolated_and_secret_never_persists(
+        self, stored_output, temp_db, monkeypatch
+    ):
+        from infinidev.code_intel import _db as ci_db
+        from infinidev.config import settings as settings_mod
+        from infinidev.engine.working_memory import (
+            get_working_memory,
+            reset_working_memory,
+        )
+
+        store, handle, _ = stored_output
+        secret = "sk-proj-this-is-a-seeded-private-value"
+        monkeypatch.setattr(settings_mod.settings, "DB_PATH", temp_db)
+        monkeypatch.setattr(settings_mod.settings, "LLM_API_KEY", secret)
+        ci_db._conn_cache.__dict__.clear()
+        reset_working_memory()
+
+        def crash(**kwargs):
+            raise RuntimeError(f"provider rejected {secret}")
+
+        monkeypatch.setattr(RUN, "run_terminating_loop", crash)
+        assert RUN.analyze_command_output(
+            handle,
+            f"inspect without revealing {secret}",
+            project_id=1,
+            session_id="analysis-session",
+            store=store,
+        ) is None
+        assert get_working_memory("analysis-session").load_traceable_notes(
+            kinds=("artifact_analysis",)
+        ) == []
+        reset_working_memory()
 
 
 # ── Escalation packet wiring ─────────────────────────────────────────────

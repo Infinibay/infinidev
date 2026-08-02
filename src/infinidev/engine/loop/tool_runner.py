@@ -369,6 +369,11 @@ class ToolRunner:
                 )
 
             if tc.function.name == "execute_command":
+                # The tool result already contains only the legacy truncated
+                # streams plus path-free descriptors. Capture descriptors before
+                # test parsing can append prose and make the JSON non-parseable;
+                # never alter the result the model receives.
+                self._propagate_command_output_handles(ctx, tc.id, result)
                 result = self.capture_test_output(ctx, tc.function.arguments, result)
 
             if not tool_error:
@@ -436,6 +441,68 @@ class ToolRunner:
                 deferred.append({"role": "user", "content": pending_nudge})
 
         return action_tool_calls
+
+    @staticmethod
+    def _propagate_command_output_handles(
+        ctx: ExecutionContext, tool_call_id: str, result: str,
+    ) -> None:
+        """Retain only path-free, internally consistent output descriptors.
+
+        ``ExecuteCommandTool`` has already durably verified these handles before
+        publishing them. ToolRunner performs a second structural check because
+        this boundary is where untrusted tool text becomes loop state. Invalid or
+        partial descriptors are ignored; the model-visible result is untouched.
+        """
+        try:
+            payload = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        raw_handles = payload.get("command_output_handles")
+        if not isinstance(raw_handles, dict):
+            return
+
+        propagated: list[dict[str, int | str]] = []
+        for stream, raw in raw_handles.items():
+            if stream not in ("stdout", "stderr") or not isinstance(raw, dict):
+                return
+            if set(raw) != {
+                "artifact_id", "type", "stream", "char_count", "byte_count",
+            }:
+                return
+            artifact_id = raw.get("artifact_id")
+            char_count = raw.get("char_count")
+            byte_count = raw.get("byte_count")
+            if (
+                type(artifact_id) is not int
+                or artifact_id <= 0
+                or raw.get("type") != "command_output"
+                or raw.get("stream") != stream
+                or type(char_count) is not int
+                or char_count < 0
+                or type(byte_count) is not int
+                or byte_count < 0
+                or not isinstance(tool_call_id, str)
+                or not tool_call_id
+            ):
+                return
+            propagated.append({
+                "artifact_id": artifact_id,
+                "type": "command_output",
+                "stream": stream,
+                "char_count": char_count,
+                "byte_count": byte_count,
+                "tool_call_id": tool_call_id,
+            })
+
+        if not propagated:
+            return
+        pending = getattr(ctx, "pending_command_output_handles", None)
+        if pending is None:
+            pending = []
+            setattr(ctx, "pending_command_output_handles", pending)
+        pending.extend(propagated)
 
     @staticmethod
     def _report_to_ken(tool_name: str, arguments: Any, tool_error: Any) -> None:

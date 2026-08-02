@@ -82,6 +82,17 @@ tells the model that the detail is one `recall_context` call away. The
 *chat transcript* is never touched by any of this — it is the model's
 memory that gets compacted, not the user's conversation.
 
+Traceable `auto_note` and `artifact_analysis` records use immutable,
+versioned envelopes in the existing working-memory table. Occurrence identity,
+ordered parents, and source citations survive compaction; compacting creates a
+derived record and never rewrites or deletes its sources.
+
+Oversized decoded command streams have a separate, disabled-by-default private
+capture path. SQLite catalogs only a path-free handle with NULL indexed content;
+the text stays in mode-0600 files and can be read only through project/session-
+scoped byte ranges. See `docs/COMMAND_OUTPUT_CAPTURE.md` for flags, limits,
+retention, rollout, and phase-1 exclusions.
+
 Two gotchas worth knowing: `execute_with_retry` does **not** commit, so
 every writer commits inside its own callback (otherwise the embedding
 worker's connection cannot see the rows), and each record carries the

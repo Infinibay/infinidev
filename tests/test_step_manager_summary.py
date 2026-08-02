@@ -120,5 +120,121 @@ def test_step_close_archives_context_into_working_memory(monkeypatch, ctx, tmp_p
 
     memory = get_working_memory("session-1")
     hits = memory.search("http client retry handling", limit=3)
-    assert hits, "closing a step must archive its raw output"
+    assert hits, "closing a step must archive its model-visible output"
     assert "HttpClient" in hits[0].content
+
+
+def _prepare_command_note_test(monkeypatch, ctx, tmp_path):
+    from infinidev.code_intel import _db as ci_db
+    from infinidev.config import settings as settings_mod
+    from infinidev.engine.working_memory import reset_working_memory
+
+    monkeypatch.setattr(settings_mod.settings, "DB_PATH", str(tmp_path / "notes.db"))
+    monkeypatch.setattr(settings_mod.settings, "LOOP_SUMMARIZER_ENABLED", False)
+    monkeypatch.setattr(settings_mod.settings, "WORKING_MEMORY_ENABLED", True)
+    ci_db._conn_cache.__dict__.clear()
+    reset_working_memory()
+    ctx.pending_command_output_handles = [{
+        "artifact_id": 71,
+        "type": "command_output",
+        "stream": "stdout",
+        "char_count": 12_000,
+        "byte_count": 12_000,
+        "tool_call_id": "command-call-1",
+    }]
+    engine = _Engine()
+    engine._summarizer_override = False
+    return step_manager.StepManager(engine)
+
+
+def test_command_output_auto_note_is_disabled_independently(
+    monkeypatch, ctx, tmp_path,
+):
+    from infinidev.config import settings as settings_mod
+    from infinidev.engine.working_memory import get_working_memory
+
+    manager = _prepare_command_note_test(monkeypatch, ctx, tmp_path)
+    monkeypatch.setattr(
+        settings_mod.settings, "COMMAND_OUTPUT_AUTO_NOTES_ENABLED", False
+    )
+
+    manager.summarize_and_record(
+        ctx, StepResult(summary="tests passed", status="continue"), [], 1, 0
+    )
+
+    assert get_working_memory("session-1").load_traceable_notes() == []
+    assert ctx.pending_command_output_handles == []
+    assert ctx.state.history[-1].summary == "tests passed"
+
+
+def test_command_output_auto_note_keeps_identity_and_no_raw_content(
+    monkeypatch, ctx, tmp_path,
+):
+    from infinidev.config import settings as settings_mod
+    from infinidev.engine.working_memory import get_working_memory
+
+    manager = _prepare_command_note_test(monkeypatch, ctx, tmp_path)
+    monkeypatch.setattr(
+        settings_mod.settings, "COMMAND_OUTPUT_AUTO_NOTES_ENABLED", True
+    )
+    monkeypatch.setattr(
+        settings_mod.settings, "COMMAND_OUTPUT_NOTE_COMPACTION_ENABLED", False
+    )
+
+    manager.summarize_and_record(
+        ctx, StepResult(summary="tests passed", status="continue"), [], 1, 0
+    )
+
+    notes = get_working_memory("session-1").load_traceable_notes()
+    assert len(notes) == 1
+    note = notes[0]
+    assert note.occurrence_id == "command-output:71"
+    assert note.source_artifact_id == 71
+    assert note.tool_call_id == "command-call-1"
+    assert note.summary == "tests passed"
+    assert "stdout" not in note.to_json()
+    record = ctx.state.history[-1]
+    assert record.summary == "tests passed"
+    assert record.discovered_context == (
+        "Command output: artifact_id=71, type=command_output, stream=stdout, "
+        "char_count=12000, byte_count=12000"
+    )
+
+
+def test_closure_note_failure_preserves_summary_archive_and_hook_order(
+    monkeypatch, ctx, tmp_path,
+):
+    from infinidev.config import settings as settings_mod
+    from infinidev.engine import working_memory as working_memory_mod
+
+    manager = _prepare_command_note_test(monkeypatch, ctx, tmp_path)
+    monkeypatch.setattr(
+        settings_mod.settings, "COMMAND_OUTPUT_AUTO_NOTES_ENABLED", True
+    )
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_archive_evicted_context",
+        lambda *args: events.append("archive") or ["read_file: safe"],
+    )
+
+    def fail_note(*args, **kwargs):
+        events.append("note")
+        raise RuntimeError("simulated note failure")
+
+    monkeypatch.setattr(working_memory_mod, "create_traceable_note", fail_note)
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_step_end_summary_hook",
+        lambda *args: events.append("hook") or "hook output",
+    )
+
+    manager.summarize_and_record(
+        ctx, StepResult(summary="original summary", status="continue"), [], 1, 0
+    )
+
+    assert events == ["archive", "hook", "note"]
+    record = ctx.state.history[-1]
+    assert record.summary == "original summary"
+    assert record.hook_notes == "hook output"
