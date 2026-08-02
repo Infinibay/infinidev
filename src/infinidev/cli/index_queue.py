@@ -12,6 +12,8 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
+_STOP = object()
+
 
 class IndexQueue:
     """Thread-safe queue that processes file indexing in background."""
@@ -23,7 +25,7 @@ class IndexQueue:
     ):
         self._project_id = project_id
         self._post_index = post_index_callback
-        self._queue: queue.Queue[str] = queue.Queue()
+        self._queue: queue.Queue[str | object] = queue.Queue()
         self._stop = Event()
         self._worker: Thread | None = None
         self._stop_lock = Lock()
@@ -37,11 +39,12 @@ class IndexQueue:
         """Worker loop: pull from queue, call ensure_indexed()."""
         from infinidev.code_intel.smart_index import ensure_indexed
 
-        while not self._stop.is_set():
-            try:
-                path = self._queue.get(timeout=1.0)
-            except queue.Empty:
-                continue
+        while True:
+            path = self._queue.get()
+            if path is _STOP:
+                return
+            if self._stop.is_set():
+                return
 
             try:
                 reindexed = ensure_indexed(self._project_id, path)
@@ -63,6 +66,19 @@ class IndexQueue:
         with self._stop_lock:
             self._stopped = False
         self._stop.clear()
+        # A previous stop enqueued a wake-up sentinel. It is normally consumed
+        # by that worker; drain any leftover one before a stop→start cycle so
+        # the replacement worker cannot exit immediately on stale control data.
+        pending: list[str] = []
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is not _STOP:
+                pending.append(item)
+        for item in pending:
+            self._queue.put(item)
         self._worker = Thread(target=self._process, daemon=True, name="index-queue")
         self._worker.start()
         logger.info("IndexQueue started (project_id=%s)", self._project_id)
@@ -81,6 +97,7 @@ class IndexQueue:
             self._stop.set()
             worker = self._worker
             if worker and worker.is_alive():
+                self._queue.put(_STOP)
                 worker.join(timeout=3.0)
             self._worker = None
             self._stopped = True

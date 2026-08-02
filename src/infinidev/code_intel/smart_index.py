@@ -56,7 +56,13 @@ def ensure_indexed(project_id: int, file_path: str) -> bool:
         count = index_file(project_id, abs_path)
         if count > 0:
             logger.debug("Reindexed %s: %d symbols", abs_path, count)
-        return count > 0
+            return True
+        # A valid config file (or a source file with zero symbols) is still
+        # successfully indexed: index_file stores its hash but returns the
+        # number of symbols, which is legitimately zero. Compare the new hash
+        # instead of treating every zero-symbol result as a failure so queue
+        # callbacks accurately report completed tracking work.
+        return get_file_hash(project_id, abs_path) == current_hash
     except Exception as exc:
         logger.warning("Failed to index %s: %s", abs_path, str(exc)[:100])
         return False

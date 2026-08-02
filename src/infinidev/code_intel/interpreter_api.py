@@ -361,7 +361,7 @@ def iter_symbols(
     Filters:
       * ``kind`` — ``"method"``, ``"class"``, ``"function"``, etc.
       * ``parent`` — exact match on ``parent_symbol`` (the class
-        name for methods). Empty string means top-level symbols.
+        name for methods). Empty string disables this filter.
       * ``language`` — ``"typescript"``, ``"python"``, etc.
       * ``file_path`` — restrict to one file (absolute or relative
         to workspace).

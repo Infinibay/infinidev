@@ -75,13 +75,9 @@ def _format_head_tail_preview(
     out.append(
         "  This file is too large to load in full. To inspect specific parts,"
     )
-    out.append(
-        "  call read_file again with explicit start_line and end_line."
-    )
+    out.append("  call read_file again with explicit offset and limit.")
     out.append("")
-    out.append(
-        "  • read_file(file_path=..., start_line=N, end_line=M)"
-    )
+    out.append("  • read_file(file_path=..., offset=N, limit=COUNT)")
     out.append(
         "      → read a specific line range, e.g. (1, 200) or (500, 700)."
     )
@@ -153,10 +149,10 @@ class ReadFileTool(InfinibayBaseTool):
     name: str = "read_file"
     description: str = (
         "Read file contents with line numbers. Auto-indexes for code "
-        "intelligence. Accepts start_line/end_line for partial reads. "
+        "intelligence. Accepts offset/limit for partial reads. "
         "For files larger than ~800 lines, returns a structured "
         "skeleton (classes, methods, functions, line ranges) instead "
-        "of the full content — call again with start_line/end_line, "
+        "of the full content — call again with offset/limit, "
         "or use get_symbol_code, to zoom in on specific parts."
     )
     args_schema: Type[BaseModel] = ReadFileInput
@@ -286,7 +282,7 @@ class ReadFileTool(InfinibayBaseTool):
             # without burning context. Return a structured skeleton built
             # from tree-sitter (when the language is supported) or a
             # head+tail preview (otherwise). Both end with an explicit
-            # hint pointing the model at read_file(start_line, end_line)
+            # hint pointing the model at read_file(offset, limit)
             # or get_symbol_code,
             # because small models don't discover those tools on their own.
             try:
@@ -384,4 +380,3 @@ class ReadFileTool(InfinibayBaseTool):
         data = resp["data"]
         self._log_tool_usage(f"Read {file_path} (pod, {data.get('total_lines', '?')} lines)")
         return data["content"]
-

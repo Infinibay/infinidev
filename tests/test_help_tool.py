@@ -18,33 +18,38 @@ class TestHelpTool:
         assert "code_intel" in result
 
     def test_category_file(self, bound_tool):
-        """File category lists file tools."""
+        """File category lists the currently registered file tools."""
         tool = bound_tool(HelpTool)
         result = tool._run(context="file")
         assert "read_file" in result
-        assert "create_file" in result
-        assert "replace_lines" in result
+        assert "list_directory" in result
+        assert "code_search" in result
+        assert "replace_lines" not in result
 
     def test_category_edit(self, bound_tool):
-        """Edit category lists edit tools."""
+        """Edit category lists live edit tools, not retired alternatives."""
         tool = bound_tool(HelpTool)
         result = tool._run(context="edit")
-        assert "edit_symbol" in result
-        assert "replace_lines" in result
+        assert "create_file" in result
+        assert "edit_file" in result
+        assert "edit_symbol" not in result
+        assert "replace_lines" not in result
 
-    def test_specific_tool(self, bound_tool):
-        """Specific tool returns detailed help."""
+    def test_retired_tool_points_to_replacement(self, bound_tool):
+        """Retired tools return actionable migration help."""
         tool = bound_tool(HelpTool)
         result = tool._run(context="replace_lines")
-        assert "PARAMS:" in result
-        assert "EXAMPLES:" in result
-        assert "start_line" in result
+        assert "was retired" in result
+        assert "edit_file" in result
+        assert "old_string" in result
 
     def test_specific_tool_create_file(self, bound_tool):
-        """create_file help includes examples."""
+        """create_file help is rendered from its live schema and hints."""
         tool = bound_tool(HelpTool)
         result = tool._run(context="create_file")
-        assert "FAILS if the file already exists" in result
+        assert "Fails if the file already exists" in result
+        assert "## Parameters" in result
+        assert "## Example" in result
 
     def test_unknown_topic(self, bound_tool):
         """Returns helpful message for unknown topics."""

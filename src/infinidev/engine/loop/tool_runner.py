@@ -220,7 +220,7 @@ class ToolRunner:
             "completion_tokens": ctx.state.last_completion_tokens,
             "project_id": ctx.project_id,
             "agent_id": ctx.agent_id,
-            "cancel_event": self._engine._cancel_event,
+            "cancel_event": self._engine._tool_cancel_event,
         }
         # tc.id → the images that call produced. Flushed as their own user
         # turn later; see ``_append_results``.
@@ -231,18 +231,22 @@ class ToolRunner:
             # make the second one's line numbers meaningless.
             is_parallel = len(batch) > 1 and batch[0].function.name not in WRITE_TOOLS
 
-            if is_parallel:
-                hook_meta["call_num"] = action_tool_calls + 1
-                hook_meta["total_calls"] = ctx.state.total_tool_calls + 1
-                batch_results = execute_tool_calls_parallel(
-                    batch, ctx.tool_dispatch,
-                    hook_metadata=hook_meta,
-                    attachments_by_tc=attachments_by_tc,
-                )
-            else:
-                batch_results = self._run_serial(
-                    ctx, batch, hook_meta, action_tool_calls, attachments_by_tc,
-                )
+            self._engine._begin_tool_batch()
+            try:
+                if is_parallel:
+                    hook_meta["call_num"] = action_tool_calls + 1
+                    hook_meta["total_calls"] = ctx.state.total_tool_calls + 1
+                    batch_results = execute_tool_calls_parallel(
+                        batch, ctx.tool_dispatch,
+                        hook_metadata=hook_meta,
+                        attachments_by_tc=attachments_by_tc,
+                    )
+                else:
+                    batch_results = self._run_serial(
+                        ctx, batch, hook_meta, action_tool_calls, attachments_by_tc,
+                    )
+            finally:
+                self._engine._finish_tool_batch()
 
             if self._engine._cancel_event.is_set():
                 self._answer_unreached(ctx, messages, batch,

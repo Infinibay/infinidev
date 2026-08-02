@@ -36,13 +36,29 @@ def _call(call_id: str, name: str, arguments: str = "{}"):
 
 
 def _engine(nudge_at: int | None = 1):
-    """An engine stub with the four attributes ToolRunner reaches for."""
-    return SimpleNamespace(
+    """An engine stub with the cancellation scope ToolRunner collaborates with."""
+    tool_cancel_event = threading.Event()
+    tool_running_event = threading.Event()
+    engine = SimpleNamespace(
         _nudge_threshold_override=nudge_at,
         _cancel_event=threading.Event(),
+        _tool_cancel_event=tool_cancel_event,
+        _tool_running_event=tool_running_event,
         _cr_hooks=SimpleNamespace(on_tool_call=lambda *a, **k: None),
         _hooks=None,
     )
+
+    def begin_tool_batch() -> None:
+        tool_cancel_event.clear()
+        tool_running_event.set()
+
+    def finish_tool_batch() -> None:
+        tool_running_event.clear()
+        tool_cancel_event.clear()
+
+    engine._begin_tool_batch = begin_tool_batch
+    engine._finish_tool_batch = finish_tool_batch
+    return engine
 
 
 def _ctx(manual_tc: bool = False):

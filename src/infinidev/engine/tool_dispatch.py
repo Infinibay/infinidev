@@ -33,6 +33,28 @@ from infinidev.engine.schema_sanitizer import (
 
 logger = logging.getLogger(__name__)
 
+_USER_STOPPED_TOOL_ERROR = (
+    "The user stopped this tool execution. Do not retry the same call unchanged; "
+    "choose a narrower approach or ask the user before retrying."
+)
+
+
+def _mark_result_stopped_by_user(result: str) -> str:
+    """Preserve partial output while making user cancellation explicit to the agent."""
+    try:
+        payload = json.loads(result) if result else {}
+    except (json.JSONDecodeError, TypeError):
+        payload = {"partial_result": result} if result else {}
+
+    if not isinstance(payload, dict):
+        payload = {"partial_result": payload}
+    previous_error = payload.get("error")
+    if previous_error and previous_error != _USER_STOPPED_TOOL_ERROR:
+        payload["error_before_cancellation"] = previous_error
+    payload["error"] = _USER_STOPPED_TOOL_ERROR
+    payload["cancelled_by_user"] = True
+    return json.dumps(payload)
+
 
 def build_tool_dispatch(tools: list[Any]) -> dict[str, Any]:
     """Build a name→tool instance dispatch map."""
@@ -46,12 +68,10 @@ _TOOL_ALIASES: dict[str, str] = {
     "remove_method": "remove_symbol",
     "write_file": "create_file",
     "find_definition": "search_symbols",
-    # partial_read was a 6-line wrapper that just delegated to read_file
-    # with offset/limit. read_file now accepts start_line/end_line as
-    # native parameters, so the wrapper added zero value. Aliased here
-    # for any model that learned the old name; the parameter mapping
-    # below converts (start_line, end_line) to read_file's signature
-    # without the model needing to know.
+    # partial_read was a 6-line wrapper around read_file's offset/limit.
+    # The executor still accepts its start_line/end_line arguments for
+    # backward compatibility, while the public read_file schema exposes
+    # offset/limit as the canonical parameters.
     "partial_read": "read_file",
     # ``help`` collides with Python's builtin ``help()`` which confuses
     # the model — in the bridge experiment, qwen tried to run
@@ -474,8 +494,12 @@ def execute_tool_call(
     args = ctx.arguments
 
     # Execute
+    cancelled_by_user = False
     try:
-        from infinidev.engine.tool_progress import tool_progress_context
+        from infinidev.engine.tool_progress import (
+            is_tool_cancelled,
+            tool_progress_context,
+        )
 
         with tool_progress_context(
             ctx.metadata["tool_run_id"],
@@ -483,7 +507,8 @@ def execute_tool_call(
             ctx.agent_id,
             cancel_event=ctx.metadata.get("cancel_event"),
         ):
-            result = tool._run(**args)
+            result = None if is_tool_cancelled() else tool._run(**args)
+            cancelled_by_user = is_tool_cancelled()
         # Unwrap ToolResult (text + optional image attachments). The text
         # goes into the role=tool message; attachments are surfaced via
         # attachments_out so the engine can push them as a follow-up
@@ -504,6 +529,14 @@ def execute_tool_call(
             error_msg += f"\n\nSuggestion: {suggestion}"
         result_str = json.dumps({"error": error_msg})
 
+        cancel_event = ctx.metadata.get("cancel_event")
+        cancelled_by_user = bool(
+            cancel_event is not None and cancel_event.is_set()
+        )
+
+    if cancelled_by_user:
+        result_str = _mark_result_stopped_by_user(result_str)
+
     # --- Post-tool hook ---
     ctx.event = HookEvent.POST_TOOL
     ctx.result = result_str
@@ -513,14 +546,17 @@ def execute_tool_call(
 
 # Tool failure → alternative suggestion mapping
 _TOOL_ALTERNATIVES: dict[str, str] = {
-    "edit_symbol": "Try replace_lines instead — read the file first to get line numbers.",
-    "add_symbol": "Try replace_lines or create_file instead.",
-    "remove_symbol": "Try replace_lines to delete the line range instead.",
-    "partial_read": "Try read_file with the full path instead.",
+    "edit_symbol": (
+        "Read the symbol with get_symbol_code, then replace its exact source "
+        "with edit_file."
+    ),
+    "add_symbol": "Use edit_file to insert into an existing file, or create_file for a new one.",
+    "remove_symbol": "Use edit_file with the symbol source and new_string=''.",
+    "partial_read": "Use read_file with file_path, offset, and limit.",
     "web_fetch": "Try web_search to find the information instead.",
     "web_search": "Try execute_command with 'curl' as a fallback.",
     "code_search": "Try glob to find the file, then read_file to search its contents.",
-    "create_file": "If the file already exists, use replace_lines or edit_symbol to modify it.",
+    "create_file": "If the file already exists, use edit_file to modify it.",
 }
 
 

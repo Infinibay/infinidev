@@ -34,7 +34,7 @@ class IterSymbolsInput(BaseModel):
         default="",
         description=(
             "Exact match on the parent symbol name (the class for "
-            "methods). Empty string only matches top-level symbols. "
+            "methods). Leave empty to include symbols under every parent. "
             "Use this when you want every method of one specific class."
         ),
     )

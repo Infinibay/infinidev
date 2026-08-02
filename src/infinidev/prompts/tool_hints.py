@@ -15,8 +15,8 @@ from __future__ import annotations
 TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     # File I/O
     "read_file": (
-        "Read a file with line numbers (pass start_line/end_line for a range)",
-        "read_file(file_path='src/main.py', start_line=10, end_line=50)",
+        "Read a file with line numbers (pass offset/limit for a range)",
+        "read_file(file_path='src/main.py', offset=10, limit=41)",
     ),
     "create_file": (
         "Create a NEW file (fails if file exists)",
@@ -45,7 +45,7 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "git_branch(branch_name='fix-auth', create=True)",
     ),
     "git_commit": (
-        "Commit staged changes",
+        "Stage and commit selected files, or all changes when files is omitted",
         "git_commit(message='Fix auth expiry check')",
     ),
     "git_diff": (
@@ -59,7 +59,8 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     # Shell
     "execute_command": (
         "Run a shell command",
-        "execute_command(command='python -m pytest tests/ -x -q')",
+        "execute_command(command='python -m pytest tests/ -x -q', "
+        "rationale='Run the project tests and stop at the first failure')",
     ),
     "code_interpreter": (
         "Run Python code in a sandbox. Great for analyzing, parsing, "
@@ -111,7 +112,7 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     # Knowledge
     "record_finding": (
         "Save a finding to the knowledge base",
-        "record_finding(topic='auth module', content='uses JWT with HS256')",
+        "record_finding(title='auth module', content='uses JWT with HS256')",
     ),
     "search_findings": (
         "Search saved findings",
@@ -163,11 +164,11 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     # Library documentation cache
     "find_documentation": (
         "Look up cached documentation for a library",
-        "find_documentation(library_name='fastapi', topic='background tasks')",
+        "find_documentation(library_name='fastapi', query='background tasks')",
     ),
     "update_documentation": (
-        "Save/update cached documentation for a library",
-        "update_documentation(library_name='fastapi', content='...')",
+        "Fetch and cache structured documentation for a library",
+        "update_documentation(library_name='fastapi', version='latest')",
     ),
     "delete_documentation": (
         "Remove cached documentation for a library",

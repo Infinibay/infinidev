@@ -22,8 +22,8 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.mouse_events import MouseEventType
 
 from infinidev.ui.theme import (
-    TEXT, TEXT_MUTED, TEXT_DIM, PRIMARY, ACCENT, SUCCESS,
-    SURFACE, SURFACE_LIGHT,
+    TEXT, TEXT_MUTED, TEXT_DIM, PRIMARY, ACCENT, SUCCESS, WARNING,
+    SURFACE, SURFACE_DARK, SURFACE_LIGHT,
     STYLE_SIDEBAR_CONTENT, CHAT_INPUT_HEIGHT,
     SCROLLBAR_BG, SCROLLBAR_FG,
 )
@@ -167,6 +167,10 @@ class InfinidevApp:
         self._permission_waiting: bool = False
         self._permission_event = None
         self._permission_approved: bool = False
+        self._permission_state: dict[str, str] = {}
+        self._permission_details_buffer = None
+        self._permission_allow_button = None
+        self._permission_deny_button = None
 
     def _init_content_windows(self) -> None:
         self._float_container = None
@@ -204,11 +208,16 @@ class InfinidevApp:
         set_copy_feedback(self._on_copy_feedback)
         global_kb = create_global_keybindings(self)
         self._layout = build_layout(self)
+        from infinidev.ui.dialogs.permission_detail import create_permission_dialog
+        if self._float_container is not None:
+            self._float_container.floats.append(create_permission_dialog(self))
         from prompt_toolkit.styles import Style as PTStyle
         app_style = PTStyle.from_dict({
             "scrollbar.background": f"bg:{SCROLLBAR_BG}",
             "scrollbar.button":    f"bg:{SCROLLBAR_FG}",
             "scrollbar.arrow":     f"{SCROLLBAR_FG}",
+            "button":              f"{TEXT} bg:{SURFACE_DARK}",
+            "button.focused":      f"#111111 bg:{WARNING} bold",
         })
         self.app = Application(
             layout=self._layout,
@@ -311,13 +320,14 @@ class InfinidevApp:
                     })
 
             restored_messages = [*legacy_messages, *structured_messages]
+            self.chat_messages.extend(restored_messages)
             self.add_message(
                 "System",
                 f"↻ Resumed session {self.session_id[:8]} — "
-                f"{len(restored_messages)} prior events restored.",
+                f"{len(restored_messages)} prior events restored. "
+                "PgUp to browse the full history.",
                 "system",
             )
-            self.chat_messages.extend(restored_messages)
 
             ui_state = state.get("ui_state") or {}
             if isinstance(ui_state, dict):
@@ -667,30 +677,57 @@ class InfinidevApp:
     # ── Permission handler ───────────────────────────────────────────
 
     def _handle_permission_request(self, tool_name: str, description: str, details: str) -> bool:
-        """Handle permission request from worker thread. Blocks until user responds."""
+        """Show the permission modal and block the worker until it is resolved."""
         import threading
+        from prompt_toolkit.document import Document
+
+        from infinidev.ui.dialogs.permission_detail import DIALOG_NAME
 
         evt = threading.Event()
         self._permission_event = evt
         self._permission_waiting = True
         self._permission_approved = False
+        self._permission_state = {
+            "tool_name": tool_name,
+            "description": description,
+            "details": details,
+        }
 
-        # Show permission UI — update state and invalidate
         preview = details.split("\n")[0][:80]
         if len(details) > len(preview):
             preview += "..."
-        self._actions_text = f"PERMISSION REQUIRED\n{preview}\n\n[Allow] [Deny] — respond with 'allow' or 'deny'"
+        self._actions_text = f"Awaiting permission: {preview}"
         self._permission_details = f"{description}\n\n{details}"
+        if self._permission_details_buffer is not None:
+            self._permission_details_buffer.set_document(
+                Document(details or "(no details provided)"),
+                bypass_readonly=True,
+            )
+        self.active_dialog = DIALOG_NAME
+        try:
+            if self._permission_deny_button is not None:
+                self.app.layout.focus(self._permission_deny_button)
+        except Exception:
+            pass
         self.invalidate()
 
-        # For now, permission is handled via chat input
-        # The user types "allow" or "deny" and it's intercepted in _handle_submit
         evt.wait()
 
         approved = self._permission_approved
         self._permission_event = None
         self._permission_waiting = False
         return approved
+
+    def _resolve_permission(self, approved: bool) -> None:
+        """Resolve the pending permission request from a button or keybinding."""
+        if not self._permission_waiting or self._permission_event is None:
+            return
+        self._permission_approved = approved
+        self._actions_text = "Approved — continuing..." if approved else "Denied"
+        self.active_dialog = None
+        self._permission_event.set()
+        self.focus_chat()
+        self.invalidate()
 
     # ── Stdin-prompt handler ─────────────────────────────────────────
 
@@ -780,6 +817,19 @@ class InfinidevApp:
                            user_text, getattr(self, "_engine_running", None))
         self._autocomplete.dismiss()
         _sublogger.warning("[SUBMIT] autocomplete dismissed")
+
+        # Backward-compatible typed permission responses. The modal normally
+        # owns focus, but handling these here avoids leaking allow/deny into
+        # the transcript if a terminal sends the text through the composer.
+        if self._permission_waiting and self._permission_event is not None:
+            lower = user_text.strip().lower()
+            if lower in ("allow", "y", "yes"):
+                self._resolve_permission(True)
+                return
+            if lower in ("deny", "n", "no"):
+                self._resolve_permission(False)
+                return
+
         if not self._engine_running and user_text.strip():
             self._task_description = user_text.strip()
         # Each turn gets its own touched-files tally, so the sidebar shows
@@ -787,22 +837,6 @@ class InfinidevApp:
         self._touched_files = {}
         self.add_message("You", user_text, "user")
         _sublogger.warning("[SUBMIT] message added")
-
-        # Permission response
-        if self._permission_waiting and self._permission_event is not None:
-            lower = user_text.strip().lower()
-            if lower in ("allow", "y", "yes"):
-                self._permission_approved = True
-                self._permission_event.set()
-                self._actions_text = "Approved -- continuing..."
-                self.invalidate()
-                return
-            elif lower in ("deny", "n", "no"):
-                self._permission_approved = False
-                self._permission_event.set()
-                self._actions_text = "Denied"
-                self.invalidate()
-                return
 
         # Analysis answer feed-back
         if self._analysis_waiting and self._analysis_event is not None:
@@ -1082,6 +1116,9 @@ class InfinidevApp:
         pass
 
     def handle_escape(self) -> None:
+        if self.active_dialog == "permission_request" and self._permission_waiting:
+            self._resolve_permission(False)
+            return
         if self.active_dialog:
             self.active_dialog = None
             self.focus_chat()
@@ -1091,7 +1128,8 @@ class InfinidevApp:
             self._autocomplete.dismiss()
             self.invalidate()
             return
-        # Hold-Escape to cancel running task
+        # Double-Escape stops only the foreground tool. Holding Escape keeps
+        # the broader task-cancellation gesture available.
         if self._engine_running and self.engine is not None:
             now = time.monotonic()
             if self._cancel_hold_start is None:
@@ -1103,7 +1141,19 @@ class InfinidevApp:
                     _th.Thread(target=self._cancel_hold_watcher, daemon=True,
                                name="cancel-hold").start()
             else:
+                since_last = now - self._cancel_last_escape
                 self._cancel_last_escape = now
+                cancel_tool = getattr(self.engine, "cancel_active_tool", None)
+                if (
+                    since_last <= self._DOUBLE_ESCAPE_SECONDS
+                    and callable(cancel_tool)
+                    and cancel_tool()
+                ):
+                    self._cancel_hold_start = None
+                    self._update_cancel_bar()
+                    self.flash_status("Stopping current tool — the agent will be notified")
+                    self.invalidate()
+                    return
                 elapsed = now - self._cancel_hold_start
                 if elapsed >= 3.0:
                     self._execute_cancel()
@@ -1114,6 +1164,7 @@ class InfinidevApp:
     # ── Hold-to-cancel helpers ──────────────────────────────────────
 
     _CANCEL_HOLD_SECONDS = 3.0
+    _DOUBLE_ESCAPE_SECONDS = 0.5
     _CANCEL_BAR_WIDTH = 6
 
     def _cancel_hold_watcher(self) -> None:
@@ -1122,8 +1173,8 @@ class InfinidevApp:
             while self._cancel_hold_start is not None:
                 time.sleep(0.1)
                 now = time.monotonic()
-                # User released Escape (no event in last 300ms)
-                if now - self._cancel_last_escape > 0.3:
+                # User released Escape (and did not complete a double press).
+                if now - self._cancel_last_escape > self._DOUBLE_ESCAPE_SECONDS:
                     self._cancel_hold_start = None
                     self._update_cancel_bar()
                     self.invalidate()
@@ -1154,7 +1205,16 @@ class InfinidevApp:
         progress = min(1.0, elapsed / self._CANCEL_HOLD_SECONDS)
         filled = int(progress * self._CANCEL_BAR_WIDTH)
         bar = "\u2588" * filled + "\u2591" * (self._CANCEL_BAR_WIDTH - filled)
-        self.status_bar_control.set_status(f"Cancelling... [{bar}]")
+        has_active_tool = bool(
+            self.engine is not None
+            and getattr(self.engine, "has_active_tool", False)
+        )
+        hint = (
+            "Esc again: stop tool · hold: cancel task"
+            if has_active_tool
+            else "Hold Esc: cancel task"
+        )
+        self.status_bar_control.set_status(f"{hint} [{bar}]")
 
     def _execute_cancel(self) -> None:
         """Trigger engine cancellation and queue a response turn."""

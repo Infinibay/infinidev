@@ -197,6 +197,12 @@ def create_global_keybindings(app_state) -> KeyBindings:
     @kb.add("escape")
     def cancel_task(event):
         """Cancel the currently running task, dismiss dialog."""
+        if (
+            getattr(app_state, "active_dialog", None) == "permission_request"
+            and getattr(app_state, "_permission_event", None) is not None
+        ):
+            app_state._resolve_permission(False)
+            return
         # stdin-prompt modal: Esc means "kill the subprocess", not
         # just close. Route to the stdin handler's resolution.
         if (
@@ -226,6 +232,43 @@ def create_global_keybindings(app_state) -> KeyBindings:
             pass
         app_state._stdin_prompt_result = text
         evt.set()
+
+    _permission_active = Condition(
+        lambda: getattr(app_state, "active_dialog", None) == "permission_request"
+        and getattr(app_state, "_permission_event", None) is not None
+    )
+
+    @kb.add("y", filter=_permission_active)
+    def permission_allow(event):
+        """Approve the permission request without leaving the modal."""
+        app_state._resolve_permission(True)
+
+    @kb.add("n", filter=_permission_active)
+    def permission_deny(event):
+        """Deny the permission request without leaving the modal."""
+        app_state._resolve_permission(False)
+
+    def _switch_permission_button(event):
+        allow_button = getattr(app_state, "_permission_allow_button", None)
+        deny_button = getattr(app_state, "_permission_deny_button", None)
+        if allow_button is None or deny_button is None:
+            return
+        target = (
+            deny_button
+            if event.app.layout.has_focus(allow_button)
+            else allow_button
+        )
+        event.app.layout.focus(target)
+
+    @kb.add("tab", filter=_permission_active)
+    @kb.add("right", filter=_permission_active)
+    def permission_focus_next(event):
+        _switch_permission_button(event)
+
+    @kb.add("s-tab", filter=_permission_active)
+    @kb.add("left", filter=_permission_active)
+    def permission_focus_previous(event):
+        _switch_permission_button(event)
 
     return kb
 

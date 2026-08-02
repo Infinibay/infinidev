@@ -1,7 +1,7 @@
 """Tests for IndexQueue background indexing."""
 
 import os
-import time
+import threading
 
 import pytest
 
@@ -25,12 +25,12 @@ class TestIndexQueue:
         py_file = workspace_dir / "hello.py"
         py_file.write_text("def greet():\n    return 'hello'\n")
 
-        q = IndexQueue(project_id=1)
+        indexed = threading.Event()
+        q = IndexQueue(project_id=1, post_index_callback=lambda _: indexed.set())
         q.start()
         q.enqueue(str(py_file))
 
-        # Give worker time to process
-        time.sleep(1.0)
+        assert indexed.wait(5.0), "index worker did not process the file"
         q.stop()
 
         # Check that the file was indexed
@@ -44,11 +44,17 @@ class TestIndexQueue:
         py_file.write_text("x = 1\n")
 
         called_with = []
-        q = IndexQueue(project_id=1, post_index_callback=lambda p: called_with.append(p))
+        indexed = threading.Event()
+
+        def record(path: str) -> None:
+            called_with.append(path)
+            indexed.set()
+
+        q = IndexQueue(project_id=1, post_index_callback=record)
         q.start()
         q.enqueue(str(py_file))
 
-        time.sleep(1.0)
+        assert indexed.wait(5.0), "post-index callback did not fire"
         q.stop()
 
         assert len(called_with) == 1
@@ -60,12 +66,17 @@ class TestIndexQueue:
         py_file.write_text("a = 1\n")
 
         call_count = []
-        q = IndexQueue(project_id=1, post_index_callback=lambda p: call_count.append(1))
+        first_indexed = threading.Event()
+
+        def record(_: str) -> None:
+            call_count.append(1)
+            first_indexed.set()
+
+        q = IndexQueue(project_id=1, post_index_callback=record)
         q.start()
         q.enqueue(str(py_file))
-        time.sleep(0.5)
+        assert first_indexed.wait(5.0), "first index did not complete"
         q.enqueue(str(py_file))  # same content, should skip
-        time.sleep(0.5)
         q.stop()
 
         assert len(call_count) == 1  # only indexed once
@@ -75,10 +86,11 @@ class TestIndexQueue:
         toml_file = workspace_dir / "pyproject.toml"
         toml_file.write_text('[project]\nname = "test"\n')
 
-        q = IndexQueue(project_id=1)
+        indexed = threading.Event()
+        q = IndexQueue(project_id=1, post_index_callback=lambda _: indexed.set())
         q.start()
         q.enqueue(str(toml_file))
-        time.sleep(1.0)
+        assert indexed.wait(5.0), "config file was not indexed"
         q.stop()
 
         from infinidev.code_intel.index import get_file_hash

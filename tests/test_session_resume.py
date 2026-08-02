@@ -112,6 +112,26 @@ class TestAllTurns:
         assert "[...truncated middle...]" in content
         assert len(content) < 5000
 
+    def test_resume_returns_every_turn_without_truncation(self, temp_db):
+        from infinidev.cli.session_resume import begin_resumed_session
+
+        register_session("complete-history", "/work")
+        for index in range(205):
+            store_conversation_turn(
+                "complete-history",
+                "user" if index % 2 == 0 else "assistant",
+                f"turn {index}",
+            )
+        long_reply = "complete reply " + ("x" * 5000)
+        store_conversation_turn("complete-history", "assistant", long_reply)
+
+        turns = begin_resumed_session("complete-history", "/work")
+
+        assert len(turns) == 206
+        assert turns[0] == ("user", "turn 0")
+        assert turns[204] == ("user", "turn 204")
+        assert turns[-1] == ("assistant", long_reply)
+
 
 class TestStructuredSessionState:
     def test_tool_call_is_updated_in_place_without_truncation(self, temp_db):
@@ -249,20 +269,69 @@ class TestStructuredSessionState:
         InfinidevApp._repaint_resumed_history(app)
 
         assert [message["type"] for message in app.chat_messages] == [
-            "system",
             "user",
             "user",
             "tool_call",
             "think",
+            "system",
         ]
         texts = [message["text"] for message in app.chat_messages]
         assert texts.count("legacy duplicate") == 1
         assert texts.index("older legacy request") < texts.index("legacy duplicate")
-        assert app.chat_messages[3]["running"] is False
-        assert "Interrupted" in app.chat_messages[3]["error"]
+        assert app.chat_messages[2]["running"] is False
+        assert "Interrupted" in app.chat_messages[2]["error"]
         assert app._steps_text == "v Inspect\n> Implement"
         assert app._actions_text == "Idle"
         assert app._restoring_session is False
+
+    def test_repaint_keeps_the_entire_chat_scrollable(self):
+        from types import SimpleNamespace
+
+        from infinidev.ui.app import InfinidevApp
+        from infinidev.ui.controls.chat_history import ChatHistoryControl
+
+        turns = [
+            (
+                "user" if index % 2 == 0 else "assistant",
+                f"complete historical message {index}",
+            )
+            for index in range(240)
+        ]
+        chat_messages: list[dict] = []
+        history = ChatHistoryControl(chat_messages)
+        app = SimpleNamespace(
+            _resume_request={"turns": turns, "state": {}},
+            session_id="session-long",
+            chat_messages=chat_messages,
+            _restoring_session=True,
+            _chat_history_control=history,
+            _plan_text="",
+            _steps_text="",
+            _actions_text="",
+            _touched_files={},
+        )
+
+        def _add_message(sender, text, msg_type):
+            app.chat_messages.append(
+                {"sender": sender, "text": text, "type": msg_type}
+            )
+
+        app.add_message = _add_message
+        InfinidevApp._repaint_resumed_history(app)
+        content = history.create_content(width=80, height=24)
+        rendered = "".join(
+            text
+            for line in (history._line_cache or [])
+            for _style, text in line
+        )
+
+        assert "complete historical message 0" in rendered
+        assert "complete historical message 239" in rendered
+        assert content.line_count > 24
+        assert content.cursor_position.y == content.line_count - 1
+        history.scroll_home()
+        top = history.create_content(width=80, height=24)
+        assert top.cursor_position.y == 0
 
 
 class TestFullHistoryReplay:

@@ -79,7 +79,11 @@ def begin_resumed_session(session_id: str, workspace_path: str | None = None) ->
     # Defer the import so a missing chat_agent (unlikely) never blocks resume.
     from infinidev.engine.orchestration.chat_agent import request_full_history_once
     request_full_history_once(session_id)
-    return get_all_turns(session_id)
+    return get_all_turns(
+        session_id,
+        limit=None,
+        max_chars_per_turn=None,
+    )
 
 
 def resumed_session_state(session_id: str) -> dict:

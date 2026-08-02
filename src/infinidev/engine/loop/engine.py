@@ -23,6 +23,7 @@ state carried forward is the plan and the summaries — never the transcript.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -132,7 +133,10 @@ class LoopEngine(AgentEngine):
         self._nudge_threshold_override: int | None = None
         self._summarizer_override: bool | None = None
         self._supports_vision_cached: bool | None = None
-        self._cancel_event: __import__('threading').Event = __import__('threading').Event()
+        self._cancel_event = threading.Event()
+        self._tool_cancel_event = threading.Event()
+        self._tool_running_event = threading.Event()
+        self._tool_state_lock = threading.Lock()
         # Optional OrchestrationHooks. When set by the caller (typically
         # the pipeline before execute()), the engine forwards file-change
         # and step-start callbacks so a UI can render live progress.
@@ -217,6 +221,34 @@ class LoopEngine(AgentEngine):
         see that the user asked to stop.
         """
         self._cancel_event.set()
+        # Wake a cooperative foreground tool immediately as well. The task
+        # flag remains set after the tool returns, so the loop still stops.
+        self._tool_cancel_event.set()
+
+    def cancel_active_tool(self) -> bool:
+        """Ask the current foreground tool batch to stop, without ending the task."""
+        with self._tool_state_lock:
+            if not self._tool_running_event.is_set():
+                return False
+            self._tool_cancel_event.set()
+            return True
+
+    @property
+    def has_active_tool(self) -> bool:
+        """Return whether the foreground loop is currently executing a tool batch."""
+        return self._tool_running_event.is_set()
+
+    def _begin_tool_batch(self) -> None:
+        """Open a foreground-tool cancellation scope."""
+        with self._tool_state_lock:
+            self._tool_cancel_event.clear()
+            self._tool_running_event.set()
+
+    def _finish_tool_batch(self) -> None:
+        """Close the current foreground-tool cancellation scope."""
+        with self._tool_state_lock:
+            self._tool_running_event.clear()
+            self._tool_cancel_event.clear()
 
     def begin_turn(self) -> None:
         """Open a new user turn: forget any cancellation from the last one.
@@ -227,6 +259,8 @@ class LoopEngine(AgentEngine):
         stops being true.
         """
         self._cancel_event.clear()
+        self._tool_cancel_event.clear()
+        self._tool_running_event.clear()
 
     @property
     def is_cancelled(self) -> bool:

@@ -64,19 +64,10 @@ _ACCEL_WINDOW  = 0.09       # notches within this gap (s) count as a flick
 _MAX_ACCEL     = 6.0        # max flick multiplier (fast wheel = more force)
 _MAX_VELOCITY  = 16.0       # hard cap on velocity (lines/frame)
 _MIN_VELOCITY  = 0.35       # glide stops once velocity drops below this
-# Friction is defined per frame, but ``call_later`` only guarantees a
-# *lower* bound: while the agent streams, a transcript rebuild can push a
-# frame well past 16 ms. Decaying per *tick* rather than per unit time would
-# make the glide outlive its budget exactly when the app is busiest, so the
-# feel would drift with load. ``_tick`` therefore integrates over however
-# much time actually passed.
-#
-# A late frame is normal — rendering a long transcript can easily cost a
-# few hundred milliseconds — so lateness is absorbed, not punished: one
-# tick integrates at most this many frames and the glide carries on. The
-# closed-form series below is self-limiting anyway, so the clamp is mostly
-# there to keep a hiccup from landing as one visible jump.
-_MAX_CATCHUP   = 6.0        # ~100 ms
+# Each callback advances exactly one physics frame. A long transcript can
+# delay call_later callbacks; converting that delay into catch-up frames
+# makes one visible tick jump farther as the chat grows. Per-tick integration
+# keeps the line distance independent of transcript size and render cost.
 # A gap this long is not a slow frame, it is a suspended process. The
 # gesture is over; resume to a stopped viewport rather than flinging it
 # the whole remaining distance at once.
@@ -313,56 +304,34 @@ class ChatHistoryControl(UIControl):
             self._scroll_offset = new
             self._follow_tail = False
 
-    def _elapsed_frames(self) -> tuple[float, bool]:
-        """How many frames this tick stands for, and whether it went stale.
-
-        Never fewer than one — a tick is at least one frame of work — and
-        never more than ``_MAX_CATCHUP``. Returning exactly 1.0 when there
-        is no usable timestamp keeps the model deterministic under a
-        synchronous test loop, where consecutive ticks land microseconds
-        apart.
-        """
+    def _tick_went_stale(self) -> bool:
+        """Return whether the pending gesture expired while the app was suspended."""
         try:
             now = time.monotonic()
         except Exception:
-            return 1.0, False
+            return False
         last, self._last_tick_t = self._last_tick_t, now
         if last <= 0.0:
-            return 1.0, False
-        elapsed = now - last
-        if elapsed >= _STALL_SECONDS:
-            return 1.0, True
-        return max(1.0, min(_MAX_CATCHUP, elapsed / _ANIM_INTERVAL)), False
+            return False
+        return now - last >= _STALL_SECONDS
 
     def _tick(self) -> None:
-        """Advance the glide by however much time has actually passed.
-
-        Over ``n`` frames the velocity decays geometrically, so the distance
-        covered is the sum of that series, ``v·(1 − fⁿ)/(1 − f)`` — not
-        ``v·n``, which would apply the *starting* velocity across the whole
-        interval and overshoot on any late frame. At ``n = 1`` the two agree
-        exactly, so a punctual frame behaves as it always did.
-
-        The series is self-limiting: as ``n`` grows the distance converges
-        on ``v/(1 − f)``, the tail the glide was going to travel anyway.
-        """
+        """Advance the glide by one fixed physics frame."""
         self._anim_handle = None
         v = self._velocity
         if abs(v) < _MIN_VELOCITY:
             self._stop_glide()
             return
-        frames, stalled = self._elapsed_frames()
-        if stalled:
+        if self._tick_went_stale():
             self._stop_glide()
             return
 
-        decay = _FRICTION**frames
         self._hit_bound = False
-        self._frac += v * (1.0 - decay) / (1.0 - _FRICTION)
+        self._frac += v
         step = int(self._frac)
         self._frac -= step
         self._apply_scroll_step(step)
-        self._velocity = v * decay
+        self._velocity = v * _FRICTION
         try:
             from prompt_toolkit.application import get_app
             get_app().invalidate()

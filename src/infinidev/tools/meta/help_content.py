@@ -1,7 +1,8 @@
-"""Static help content and category index for the ``help`` tool.
+"""Categories and detailed code-interpreter reference for ``help``.
 
-Extracted verbatim from help_tool.py — pure data, no logic. The HelpTool
-class imports HELP_CONTENT and _CATEGORY_INDEX from here.
+Ordinary tool help is generated from each registered Pydantic schema. Only
+the code-interpreter bridge needs hand-written content because its 13 helper
+functions live inside the executed Python process rather than in that schema.
 """
 
 # ---------------------------------------------------------------------------
@@ -9,13 +10,37 @@ class imports HELP_CONTENT and _CATEGORY_INDEX from here.
 # ---------------------------------------------------------------------------
 
 _CATEGORY_INDEX = {
-    "file": ["read_file", "create_file", "replace_lines", "add_content_after_line", "add_content_before_line", "list_directory", "glob", "code_search", "view_image"],
-    "code_intel": ["get_symbol_code", "list_symbols", "search_symbols", "find_references", "project_structure", "analyze_code"],
-    "edit": ["edit_symbol", "add_symbol", "remove_symbol", "replace_lines", "add_content_after_line", "add_content_before_line", "rename_symbol", "move_symbol"],
+    "file": [
+        "read_file", "list_directory", "glob", "code_search", "view_image",
+    ],
+    "edit": ["create_file", "edit_file", "rename_symbol", "move_symbol"],
+    "code_intel": [
+        "get_symbol_code", "list_symbols", "search_symbols", "find_references",
+        "project_structure", "analyze_code", "find_similar_methods",
+        "search_by_docstring", "iter_symbols", "project_stats",
+    ],
     "git": ["git_branch", "git_commit", "git_diff", "git_status"],
-    "shell": ["execute_command", "code_interpreter"],
-    "knowledge": ["record_finding", "search_findings", "search_knowledge"],
-    "web": ["web_search", "web_fetch"],
+    "shell": [
+        "execute_command", "code_interpreter", "run_in_background",
+        "background_status", "stop_background_task", "wait_for_background_task",
+    ],
+    "knowledge": [
+        "record_finding", "search_findings", "search_knowledge", "update_finding",
+        "validate_finding", "reject_finding", "delete_finding",
+        "summarize_findings", "write_report", "read_report",
+        "read_command_output", "delete_report",
+    ],
+    "web": ["web_search", "web_fetch", "code_search_web"],
+    "docs": [
+        "find_documentation", "update_documentation", "delete_documentation",
+    ],
+    "planning": [
+        "add_step", "modify_step", "remove_step", "declare_test_command",
+        "tail_test_output",
+    ],
+    "communication": ["send_message"],
+    "meta": ["help", "recall_context"],
+    "protocol": ["step_complete", "add_note", "add_session_note", "think"],
 }
 
 HELP_CONTENT: dict[str | None, str] = {
@@ -485,7 +510,7 @@ code_interpreter(code, libraries_used?, timeout?)
 
 Execute Python code in an isolated subprocess. Beyond plain data
 analysis, the script has read-only access to the project's code
-intelligence index via 11 pre-imported bridge functions.
+intelligence index via 13 pre-imported bridge functions.
 
 PARAMS:
   code (str, required)                — Python code to execute
@@ -544,7 +569,7 @@ TIPS:
   * Call project_stats() FIRST in any analysis script to orient.
   * iter_symbols is the right tool for "walk all X".
     find_symbols needs a search query — do NOT pass "" to it.
-  * Bridge is read-only. Use create_file / replace_lines to edit.
+  * Bridge is read-only. Use create_file / edit_file to write.
   * Each bridge function has a dedicated help entry —
     call help("code_interpreter.function_name") for details.""",
 
@@ -677,8 +702,8 @@ have a search query.
 
 PARAMS:
   kind      (str, optional)    — "method", "class", "function", etc.
-  parent    (str, optional)    — exact match on parent_symbol. Use
-                                  "" for top-level symbols.
+  parent    (str, optional)    — exact match on parent_symbol. Leave
+                                  empty to include every parent.
   language  (str, optional)    — "typescript", "python", etc.
   file_path (str, optional)    — restrict to one file.
   limit     (int, default 5000)— max results. High default because
@@ -695,8 +720,8 @@ EXAMPLE:
   for name, n in by_class.most_common(10):
       print(f"{n:3}  {name}")
 
-  # "Every TypeScript function at the top level"
-  top_funcs = iter_symbols(kind="function", language="typescript", parent="")
+  # "Every TypeScript function"
+  funcs = iter_symbols(kind="function", language="typescript")
 
 WHEN TO USE: "all methods", "all classes in X language", "every
 method of class Foo". find_symbols is a SEARCH tool; this is an
@@ -1244,4 +1269,13 @@ EXAMPLES:
   analyze_code()  # full project scan
 
 RETURNS: JSON with errors, warnings, hints grouped by severity.""",
+}
+
+# Registered tools are rendered from their live descriptions and fields in
+# help_tool.py. Export only the bridge reference whose inner functions cannot
+# be represented by the outer code_interpreter schema.
+HELP_CONTENT = {
+    topic: content
+    for topic, content in HELP_CONTENT.items()
+    if isinstance(topic, str) and topic.startswith("code_interpreter")
 }

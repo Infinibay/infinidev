@@ -430,32 +430,38 @@ def get_session_runtime_state(session_id: str) -> dict[str, Any]:
 
 
 def get_all_turns(
-    session_id: str, limit: int = 200, max_chars_per_turn: int = 2000
+    session_id: str,
+    limit: int | None = 200,
+    max_chars_per_turn: int | None = 2000,
 ) -> list[tuple[str, str]]:
-    """Return up to ``limit`` turns (oldest first) as ``(role, content)``.
+    """Return conversation turns oldest first as role/content pairs.
 
-    Powers two resume needs: repainting the prior conversation into the
-    UI scrollback (zero token cost) and seeding the model with the full
-    history on the first resumed turn. Per-turn content is capped like
-    :func:`get_recent_turns_full` so one huge reply can't dominate.
+    Passing None disables the corresponding limit. The normal defaults keep
+    callers bounded, while the TUI resume path opts out because rendering
+    local scrollback costs no model-context tokens and must preserve the
+    complete prior chat.
     """
     def _query(conn):
         # Exclude hidden work-summary turns: this powers the UI scrollback
         # repaint, and those turns are internal hand-off notes the user is
         # never meant to see. The model still gets them via
         # get_recent_turns_full().
-        rows = conn.execute(
+        query = (
             "SELECT role, content FROM conversation_turns WHERE session_id = ? "
-            "AND role != 'work_summary' "
-            "ORDER BY created_at ASC LIMIT ?",
-            (session_id, limit),
-        ).fetchall()
+            "AND role != 'work_summary' ORDER BY created_at ASC, id ASC"
+        )
+        params: list[Any] = [session_id]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(max(0, limit))
+        rows = conn.execute(query, params).fetchall()
+
         results: list[tuple[str, str]] = []
         for row in rows:
             content = row["content"] or ""
             if not content:
                 continue
-            if len(content) > max_chars_per_turn:
+            if max_chars_per_turn is not None and len(content) > max_chars_per_turn:
                 head = content[: max_chars_per_turn // 2]
                 tail = content[-(max_chars_per_turn // 2):]
                 content = f"{head}\n\n[...truncated middle...]\n\n{tail}"

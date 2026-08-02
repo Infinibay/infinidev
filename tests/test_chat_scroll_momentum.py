@@ -118,33 +118,29 @@ def test_ordinary_scroll_does_not_overshoot_a_viewport(monkeypatch):
     assert moved <= 15, f"overshoot of {moved} lines after an ordinary scroll"
 
 
-# ── Friction is per unit time, not per tick ─────────────────────────────
+# ── Every callback is one fixed scroll tick ─────────────────────────────
 
 
-def test_a_late_frame_decays_as_much_as_the_frames_it_replaced(monkeypatch):
-    """``call_later`` only guarantees a lower bound, and a transcript
-    rebuild mid-stream can stretch a frame well past 16 ms. Decaying per
-    *tick* would make the glide outlive its budget exactly when the app is
-    busy — the feel would drift with load."""
+def test_short_and_long_transcripts_move_the_same_lines_per_tick(monkeypatch):
+    """Render latency must not turn one visible tick into a multi-line catch-up."""
     t = [100.0]
     monkeypatch.setattr(ch.time, "monotonic", lambda: t[0])
 
-    on_time = _make()
-    on_time._velocity = 10.0
-    on_time._last_tick_t = t[0]
-    for _ in range(3):                 # three punctual frames
-        t[0] += ch._ANIM_INTERVAL
-        on_time._tick()
+    short = _make(100)
+    short._velocity = 10.0
+    short._last_tick_t = t[0]
+    t[0] += ch._ANIM_INTERVAL
+    short._tick()
 
-    t[0] = 100.0
-    late = _make()
-    late._velocity = 10.0
-    late._last_tick_t = t[0]
-    t[0] += 3 * ch._ANIM_INTERVAL      # one frame, three frames late
-    late._tick()
+    t[0] = 200.0
+    long = _make(2_000)
+    long._velocity = 10.0
+    long._last_tick_t = t[0]
+    t[0] += 0.3                        # simulate its more expensive render
+    long._tick()
 
-    assert abs(late._velocity - on_time._velocity) < 1e-6
-    assert abs(late._scroll_offset - on_time._scroll_offset) <= 1
+    assert long._scroll_offset == short._scroll_offset
+    assert long._velocity == short._velocity
 
 
 def test_a_stall_stops_the_glide_instead_of_teleporting(monkeypatch):
@@ -162,22 +158,19 @@ def test_a_stall_stops_the_glide_instead_of_teleporting(monkeypatch):
     assert c._scroll_offset == before
 
 
-def test_a_merely_slow_frame_does_not_kill_the_glide(monkeypatch):
+def test_a_merely_slow_tick_does_not_kill_the_glide(monkeypatch):
     """Rendering a long transcript mid-stream can cost a few hundred
     milliseconds. Treating that as a stall would make the scroll stick
-    exactly while the agent is working — lateness is absorbed instead."""
+    exactly while the agent is working."""
     t = [100.0]
     monkeypatch.setattr(ch.time, "monotonic", lambda: t[0])
     c = _make()
     c._velocity = 10.0
     c._last_tick_t = t[0]
-    t[0] += 0.3                        # one very slow frame
+    t[0] += 0.3                        # one very slow tick
     c._tick()
     assert c._velocity > 0.0
-    assert c._scroll_offset > 0
-    # …and it absorbs at most _MAX_CATCHUP frames, so the hiccup does not
-    # land as one visible jump.
-    assert c._scroll_offset <= 10.0 * ch._MAX_CATCHUP
+    assert c._scroll_offset == 10
 
 
 # ── Direction / bounds ──────────────────────────────────────────────────
