@@ -17,18 +17,28 @@ import importlib
 import inspect
 import pkgutil
 import re
+from unittest.mock import patch
 
 import pytest
 
 from infinidev.engine.tool_dispatch import _RETIRED_TOOLS
+from infinidev.tools import get_tools_for_role
 
 
 # Modules whose module-level strings become prompt text. Walked as packages
 # so a new prompt file is covered the day it is added.
 PROMPT_PACKAGES = [
     "infinidev.prompts",
+    "infinidev.engine.analysis",
+    "infinidev.engine.behavior",
+    "infinidev.engine.council",
     "infinidev.engine.loop.prompt",
     "infinidev.engine.guidance",
+    "infinidev.engine.phases",
+    "infinidev.engine.tree",
+    "infinidev.gather",
+    "infinidev.tools.docs",
+    "infinidev.tools.meta",
 ]
 
 # Two modules classify names the model *emitted* rather than telling it what
@@ -119,4 +129,27 @@ def test_no_prompt_source_names_a_retired_tool(retired: str) -> None:
     assert not offenders, (
         f"{retired!r} was retired but still appears in prompt-module source: "
         + ", ".join(sorted(set(offenders)))
+    )
+
+
+@pytest.mark.parametrize("retired", sorted(_RETIRED_TOOLS))
+def test_no_live_tool_schema_names_a_retired_tool(retired: str) -> None:
+    """Tool descriptions and field help are part of the runtime prompt."""
+    word = re.compile(rf"\b{re.escape(retired)}\b")
+    offenders: list[str] = []
+
+    with patch("infinidev.tools.discover_mcp_tool_classes", return_value=[]):
+        tools = get_tools_for_role("developer", supports_vision=True)
+
+    for tool in tools:
+        if word.search(tool.description or ""):
+            offenders.append(f"{tool.name}.description")
+        schema = getattr(tool, "args_schema", None)
+        for field_name, field in getattr(schema, "model_fields", {}).items():
+            if word.search(field.description or ""):
+                offenders.append(f"{tool.name}.{field_name}")
+
+    assert not offenders, (
+        f"{retired!r} was retired but still appears in live tool schema text: "
+        + ", ".join(sorted(offenders))
     )

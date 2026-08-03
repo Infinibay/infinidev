@@ -21,9 +21,9 @@ Output EXACTLY this JSON format (no markdown, no code fences, just JSON):
 {
   "files_to_preload": ["path1", "path2"],
   "changes_made": "Files modified: what changed and why. Include brief diffs if possible.",
-  "discovered": "Relevant classes, files, function signatures, architecture patterns, web content, command results found.",
+  "discovered": "Classes, files, function signatures, architecture patterns, web content, and command results found in this step.",
   "pending": "What still needs doing: code to fix/implement, problems found, things to investigate.",
-  "anti_patterns": "What went wrong or was wasteful. Failed approaches, dead ends, repeated errors that should NOT be repeated.",
+  "anti_patterns": "What went wrong or was wasteful. Failed approaches, dead ends, and repeated errors that must NOT be repeated.",
   "summary": "1-2 sentences: what was done, how, and why."
 }
 
@@ -171,7 +171,7 @@ def _truncate_step_messages(messages: list[dict], max_tokens: int) -> str:
                     fn = tc.get("function", {})
                     name = fn.get("name", "?")
                     args = str(fn.get("arguments", ""))[:300]
-                    tc_lines.append(f"  → {name}({args})")
+                    tc_lines.append(f"  Tool: {name}({args})")
                 line = "Assistant tool calls:\n" + "\n".join(tc_lines)
             else:
                 line = f"Assistant: {content[:500]}"

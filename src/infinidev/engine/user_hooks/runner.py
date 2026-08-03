@@ -28,13 +28,13 @@ other; they are the same data at two levels of ceremony.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
 import logging
 import os
-import subprocess
-from dataclasses import dataclass, field
 from typing import Any
 
+from infinidev.engine.subprocess_runner import run_captured
 from infinidev.engine.user_hooks.config import HookSpec, get_hooks
 from infinidev.engine.user_hooks.events import UserHookEvent
 
@@ -105,22 +105,14 @@ def _run_one(
         logger.debug("hook payload not serialisable for %s", spec.event.value)
 
     try:
-        completed = subprocess.run(
+        completed = run_captured(
             spec.command,
             shell=True,
             cwd=workspace_path or None,
-            input=stdin_payload,
-            capture_output=True,
-            text=True,
             timeout=spec.timeout,
             env=_env_for(payload, spec.event),
+            input_text=stdin_payload,
         )
-    except subprocess.TimeoutExpired:
-        logger.warning(
-            "hook %s (%s) timed out after %.0fs — output discarded",
-            spec.event.value, spec.label(), spec.timeout,
-        )
-        return None
     except (OSError, ValueError) as exc:
         logger.warning(
             "hook %s (%s) could not be started: %s",
@@ -128,11 +120,18 @@ def _run_one(
         )
         return None
 
-    if completed.returncode != 0:
+    if completed.timed_out:
+        logger.warning(
+            "hook %s (%s) timed out after %.0fs — output discarded",
+            spec.event.value, spec.label(), spec.timeout,
+        )
+        return None
+
+    if completed.exit_code != 0:
         stderr = (completed.stderr or "").strip()
         logger.warning(
             "hook %s (%s) exited %d — output discarded%s",
-            spec.event.value, spec.label(), completed.returncode,
+            spec.event.value, spec.label(), completed.exit_code,
             f": {stderr[:400]}" if stderr else "",
         )
         return None

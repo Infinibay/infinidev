@@ -2,7 +2,21 @@
 name = "infinidev"
 version = "0.14.1"
 description = "A terminal-based AI programming tool using agent loops."
-authors = [{ name = "Andres Borek", email = "andres.b.dev@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE.md"]
+authors = [{ name = "Infinibay LLC", email = "andres@infinibay.net" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
+
 dependencies = [
     "pydantic>=2.11.0",
     "pydantic-settings>=2.10.0",
@@ -17,8 +31,6 @@ dependencies = [
     "httpx>=0.28.0",
     "duckduckgo-search>=8.1.0",
     "trafilatura>=2.0.0",
-    "pypdf>=5.0.0",
-    "pytest>=9.0.0",
     "textual>=8.1.1",
     "tree-sitter>=0.23.0",
     "tree-sitter-python>=0.23.0",
@@ -36,7 +48,6 @@ dependencies = [
     "tree-sitter-markdown>=0.3.0",
     "tree-sitter-regex>=0.24.0",
     "watchfiles>=0.24.0",
-    "datasets>=4.8.4",
     "tree-sitter-typescript>=0.23.2",
     "tree-sitter-c>=0.24.1",
     "yappi>=1.6.0",
@@ -47,6 +58,11 @@ dependencies = [
     "wordfreq>=3.1.1",
     "langdetect>=1.0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Infinibay/infinidev"
+Repository = "https://github.com/Infinibay/infinidev.git"
+Issues = "https://github.com/Infinibay/infinidev/issues"
 
 [project.scripts]
 infinidev = "infinidev.cli.main:main"
@@ -70,9 +86,27 @@ cuda = ["cupy-cuda12x>=13.0.0"]
 # Install: `pip install 'infinidev[mnn]'` then run
 # `python scripts/convert_minilm_to_mnn.py`.
 mnn = ["MNN>=3.5.0", "transformers>=4.40,<5"]
+finetune = [
+    "accelerate>=1.10,<2",
+    "bitsandbytes>=0.46,<1; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "datasets>4.1,<4.4",
+    "deepspeed>=0.17,<1; platform_system == 'Linux'",
+    "peft>=0.17,<1",
+    "torch>=2.7,<3",
+    "transformers>=4.57.1,<5",
+]
+finetune-unsloth = [
+    "datasets>4.1,<4.4",
+    "torch>=2.7,<3",
+    "transformers>=4.57.1,<5",
+    "trl>=0.24,<2",
+    "unsloth>=2026.3.17,<2027; platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
 
 [dependency-groups]
 dev = [
+    "chardet>=5.2,<6",
+    "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
     "swebench>=4.1.0",
 ]

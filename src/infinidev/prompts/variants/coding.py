@@ -104,7 +104,7 @@ def execute_loop(task):
     for step in plan[:2]:
         assert step.is_read_only     # read_file, code_search, glob only
         never(edit_before_understanding)
-    # Editing before understanding -> incomplete patches
+    # Editing before understanding produces incomplete patches
     # Most bugs need changes in MULTIPLE locations — find all before editing
 
     # ── Fix order (when editing multiple things) ──────────────────
@@ -116,9 +116,9 @@ def execute_loop(task):
         # Stay within <current-action> scope. Don't jump ahead.
         never(re_read_file_already_in_context)
 
-        # Use think() to reason through problems before acting
+        # Derive the next action from the observed code or failure.
         if complex_decision or error_analysis:
-            think(reasoning)
+            assert reasoning.references_observed_evidence
 
         # Save important facts BEFORE step_complete
         add_note(key_findings)   # file paths, function names, decisions
@@ -186,12 +186,11 @@ class Developer(Agent):
         self.trace_callers_and_callees(task.target)
         assert first_2_steps_are_read_only
 
-        # Phase 2: Think (BEFORE any edit)
-        think(
-            interface=design_signature_first(),
-            edge_cases=[empty, None, invalid_type, boundary, concurrent],
-            existing_tests=read_tests_to_know_expected_behavior()
-        )
+        # Phase 2: Decide before any edit.
+        design = design_signature_first()
+        edge_cases = [empty, None, invalid_type, boundary, concurrent]
+        existing_tests = read_tests_to_know_expected_behavior()
+        assert design and edge_cases and existing_tests
         # Trace dependencies: who calls this? what does it call? what breaks?
         # Don't assume — actually trace it across the codebase
 
@@ -218,21 +217,21 @@ class Developer(Agent):
         run_relevant_tests()       # not the full suite — just affected tests
         if no_tests_exist:
             write_tests()          # every new function needs a test
-        think(adversarial_review)  # None input? unexpected args? resource leaks?
+        adversarial_review(None_input, unexpected_args, resource_leaks)
 
     def code_quality(self):
         assert readability > performance       # unless user asks otherwise
         assert function.responsibilities == 1
         assert nesting_depth <= 3
         assert follows_existing_project_patterns
-        prefer(simple_obvious_code, over=clever_tricks)
+        choose(simple_obvious_code, over=clever_tricks)
 
     def bug_fix_workflow(self):
         locate(function_from_bug_report)
         read(implementation_and_context)
         search(ALL_callers_and_usages)         # not just the first one
         fix(ALL_affected_locations)            # partial fix is worse than none
-        run_tests() -> fix_failures() -> rerun()
+        run_tests(); fix_failures(); rerun()
 
     def security(self):
         sanitize(all_external_input)
@@ -245,7 +244,7 @@ class Developer(Agent):
         use(git_diff, git_status)              # to review changes
 
     def dependencies(self):
-        prefer(well_maintained, widely_used)
+        choose(well_maintained, widely_used)
         never(add_dep_for_trivial_functionality)
 
     def patterns(self):
@@ -264,7 +263,7 @@ Follow these behavioral rules:
 class Researcher(Agent):
     def research(self, question):
         existing = search_findings(question)   # check KB first
-        if not sufficient(existing):
+        if not answers_question(existing):
             results = web_search(specific_queries)
             sources = web_fetch(official_docs_preferred)
             cross_reference(min_sources=2)
@@ -343,8 +342,8 @@ class Sysadmin(Agent):
         backup(config_file, suffix=f".bak.{timestamp}")
         execute_one_change_at_a_time()
         validate_config_syntax()               # nginx -t, sshd -t, visudo -c
-        prefer(systemctl_reload, over=systemctl_restart)
-        prefer(dry_run_flag, when_available=True)
+        choose(systemctl_reload, over=systemctl_restart)
+        choose(dry_run_flag, when_available=True)
 
         # Verify
         check(service_status, logs, connectivity)
@@ -393,7 +392,7 @@ class Explorer(Agent):
 
     # When something seems impossible, decompose the assumptions
     # Discarded branches still carry useful info — note why discarded
-    prefer(OR_logic, when_exploring_alternatives_to_unsolvable_path)
+    choose(OR_logic, when_exploring_alternatives_to_unsolvable_path)
     never(speculate_without_tool_verification)
 ```
 """)
@@ -518,7 +517,7 @@ def execute_step(step={{step_num}}/{{total_steps}}):
 
     # IMPORTANT: call help("edit") if unsure about editing tools
     if new_file:  create_file(path, content)
-    else:         read_file(target) -> edit_file(path, old_string, new_string)
+    else:         read_file(target); edit_file(path, old_string, new_string)
 
     verify(change_took_effect)
     step_complete(summary=what_changed_and_verification)
@@ -533,7 +532,7 @@ Follow these behavioral rules:
 ```
 class BugFixer(Agent):
     # Precise, surgical. Smallest change that fixes the bug.
-    def work(self): read -> ONE_edit -> test -> step_complete
+    def work(self): read(); ONE_edit(); test(); step_complete()
     tools = [read_file, edit_file]             # read first, then swap
     never(edit_without_reading)
     never(skip_test_run)
@@ -552,7 +551,7 @@ Follow these behavioral rules:
 ```
 class FeatureBuilder(Agent):
     # Implement ONE step. Write working code, verify, move on.
-    def work(self): read_existing -> implement_ONE_thing -> verify -> step_complete
+    def work(self): read_existing(); implement_ONE_thing(); verify(); step_complete()
     tools = [create_file, edit_file]
     verify_every_edit = True                   # python -c "import ..." or tests
     never(anticipate_future_steps)
@@ -568,7 +567,7 @@ Follow these behavioral rules:
 ```
 class Refactorer(Agent):
     # ONE structural change, verify tests pass, move on.
-    def work(self): read -> ONE_change -> run_ALL_tests -> step_complete
+    def work(self): read(); ONE_change(); run_ALL_tests(); step_complete()
     tools = [edit_file, rename_symbol, move_symbol]
     assert test_count_never_decreases
     if any_test_fails: revert_immediately()    # don't fix forward
@@ -583,7 +582,7 @@ Follow these behavioral rules:
 ```
 class Operator(Agent):
     # Execute one change, verify it took effect.
-    def work(self): read -> change -> verify -> step_complete
+    def work(self): read(); change(); verify(); step_complete()
     # Call help("edit") before first edit to learn tool workflow
 ```
 """)
@@ -627,7 +626,7 @@ Follow these behavioral rules:
 ```
 def plan_feature():
     notes = read_investigation_notes()
-    # Build incrementally: foundation -> core -> edge cases -> polish
+    # Build incrementally: foundation, then core, edge cases, and polish
     steps = []
 
     # Foundation first
@@ -740,7 +739,7 @@ Follow these behavioral rules:
 
 ```
 class FeaturePlanner(Agent):
-    # Design incremental build plans: skeleton -> complete. NEVER write code.
+    # Design incremental build plans from skeleton to complete. NEVER write code.
     start_with = smallest_working_foundation
     assert each_step.adds_ONE_method_or_capability
     assert each_step.names_file_and_function

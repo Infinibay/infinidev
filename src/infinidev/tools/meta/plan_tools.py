@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Type
 
@@ -75,123 +74,7 @@ class RemoveStepInput(BaseModel):
     index: int = Field(description="Step number to remove")
 
 
-# ── Mini-plan tools (durable, MCP-friendly) ─────────────────────────────────
-
-
-class PlanAddInput(BaseModel):
-    name: str = Field(
-        default="rewrite", description="Plan name (file under .infinidev/plans)."
-    )
-    title: str = Field(description="Plan item title.")
-    depends_on: list[str] = Field(
-        default_factory=list, description="Item ids this item depends on."
-    )
-    idempotency_key: str = Field(
-        default="", description="Stable key; reused calls are no-ops."
-    )
-
-
-class PlanUpdateInput(BaseModel):
-    name: str = Field(default="rewrite", description="Plan name.")
-    item_id: str = Field(description="Item id to update.")
-    status: str | None = Field(
-        default=None,
-        description="pending | active | blocked | completed | failed | cancelled.",
-    )
-    notes: str | None = Field(
-        default=None, description="Free-form notes to record on the item."
-    )
-
-
-class PlanRemoveInput(BaseModel):
-    name: str = Field(default="rewrite", description="Plan name.")
-    item_id: str = Field(description="Item id to remove.")
-
-
-class PlanListInput(BaseModel):
-    name: str = Field(default="rewrite", description="Plan name.")
-
-
-class PlanAddTool(InfinibayBaseTool):
-    name: str = "plan_add"
-    description: str = "Add an item to a durable mini-plan (idempotent by key)."
-    args_schema: Type[BaseModel] = PlanAddInput
-    is_read_only: bool = False
-
-    def _run(
-        self,
-        name: str = "rewrite",
-        title: str = "",
-        depends_on: list[str] | None = None,
-        idempotency_key: str = "",
-    ) -> str:
-        from infinidev.engine.plan_store import add_plan_item
-
-        item = add_plan_item(
-            name,
-            title,
-            depends_on=depends_on or [],
-            idempotency_key=idempotency_key,
-        )
-        return json.dumps({"status": "ok", "item": item.to_dict()})
-
-
-class PlanUpdateTool(InfinibayBaseTool):
-    name: str = "plan_update"
-    description: str = "Update an item's status or notes by id."
-    args_schema: Type[BaseModel] = PlanUpdateInput
-    is_read_only: bool = False
-
-    def _run(
-        self,
-        name: str = "rewrite",
-        item_id: str = "",
-        status: str | None = None,
-        notes: str | None = None,
-    ) -> str:
-        from infinidev.engine.plan_store import update_plan_item
-
-        item = update_plan_item(name, item_id, status=status, notes=notes)
-        if item is None:
-            return json.dumps({"status": "missing", "item_id": item_id})
-        return json.dumps({"status": "ok", "item": item.to_dict()})
-
-
-class PlanRemoveTool(InfinibayBaseTool):
-    name: str = "plan_remove"
-    description: str = "Remove an item from a mini-plan by id."
-    args_schema: Type[BaseModel] = PlanRemoveInput
-    is_read_only: bool = False
-
-    def _run(self, name: str = "rewrite", item_id: str = "") -> str:
-        from infinidev.engine.plan_store import remove_plan_item
-
-        removed = remove_plan_item(name, item_id)
-        return json.dumps(
-            {"status": "ok" if removed else "missing", "item_id": item_id}
-        )
-
-
-class PlanListTool(InfinibayBaseTool):
-    name: str = "plan_list"
-    description: str = "List the items of a mini-plan, including pending and completed."
-    args_schema: Type[BaseModel] = PlanListInput
-    is_read_only: bool = True
-
-    def _run(self, name: str = "rewrite") -> str:
-        from infinidev.engine.plan_store import load_plan, next_pending_items
-
-        plan = load_plan(name)
-        return json.dumps(
-            {
-                "name": plan.name,
-                "items": [item.to_dict() for item in plan.items],
-                "runnable": [item.id for item in next_pending_items(plan)],
-            }
-        )
-
-
-# ── Legacy step tools — preserved for the existing pipeline ──────────────────
+# ── Execution-plan tools ─────────────────────────────────────────────────────
 
 
 class AddStepTool(InfinibayBaseTool):

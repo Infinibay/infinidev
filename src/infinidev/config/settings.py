@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     # Turns a vague requirement into a grounded spec BEFORE planning.
     # Runs once per task between the chat agent's escalation and the
     # planner, on the single configured model. See engine/analysis/
-    # spec_elaborator.py and docs_spec_elaboration_loop.md.
+    # spec_elaborator.py and docs/SPEC_ELABORATION.md.
     SPEC_ELABORATION_ENABLED: bool = True
     SPEC_ELABORATION_MIN_CHARS: int = 40  # Skip elaboration for requests shorter than this (trivial)
     SPEC_ELABORATION_MAX_EVIDENCE_CALLS: int = 4  # Read-only tool calls budget in the grounding pass

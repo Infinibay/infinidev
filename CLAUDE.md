@@ -133,24 +133,24 @@ Every iteration builds an XML-structured prompt: `<task>`, `<plan-overview>` (st
 
 ### Tools (`tools/`)
 
-All tools inherit from `InfinibayBaseTool` (extends CrewAI's `BaseTool`). Tools are bound to agents via `bind_tools_to_agent()` and resolve context (project_id, task_id, workspace_path) from a process-global dict.
+All tools inherit from the project's Pydantic-based `InfinibayBaseTool`. Tools are bound to agents via `bind_tools_to_agent()` and resolve context (project_id, task_id, workspace_path) from a process-global dict.
 
 Categories:
-- **file**: `read_file`, `partial_read`, `create_file`, `replace_lines`, `list_directory`, `code_search`, `glob`
-- **code_intel**: `get_symbol_code`, `list_symbols`, `search_symbols`, `find_references`, `edit_symbol`, `add_symbol`, `remove_symbol`, `project_structure`
+- **file**: `read_file`, `create_file`, `edit_file`, `list_directory`, `code_search`, `glob`, `view_image`
+- **code_intel**: `get_symbol_code`, `list_symbols`, `search_symbols`, `find_references`, `project_structure`, `analyze_code`, `rename_symbol`, `move_symbol`, `find_similar_methods`, `search_by_docstring`, `iter_symbols`, `project_stats`
 - **git**: `git_branch`, `git_commit`, `git_diff`, `git_status`
-- **shell**: `execute_command`, `code_interpreter`
-- **knowledge**: `record_finding`, `read_findings`, `search_findings` (with semantic dedup)
-- **meta**: `help` (dynamic tool documentation), `recall_context` (working-memory retrieval)
+- **shell**: `execute_command`, `code_interpreter`, and background-process lifecycle tools
+- **knowledge**: `record_finding`, `search_findings`, `search_knowledge`, validation/update/delete tools, and reports
+- **meta**: `help`, `recall_context`, execution-plan mutation, and test-output tools
 - **mcp** (`tools/mcp_bridge.py`): every tool a configured MCP server publishes, under the server's own name — `ken_rank`, `ken_recall`, `ken_callgraph`, … Discovered at runtime from `tools/list`, never hand-written.
 - **chat_agent** (tier-exclusive): `respond`, `escalate` — terminators for the chat agent's loop; never bound to the developer.
 - **planner** (tier-exclusive): `emit_plan` — the planner's single-shot terminator that produces the `Plan` artifact.
 
-The base class exposes `is_read_only: bool = False`. The 18 pure-read tools (file reads, code-intel lookups, git diff/status, findings reads) override it to `True`. `get_tools_for_role("chat_agent")` and `get_tools_for_role("planner")` filter the full toolset by this attribute — the schema passed to LiteLLM is the security boundary, not prompt rules.
+The base class exposes `is_read_only: bool = False`. Pure-read tools override it to `True`. `get_tools_for_role("chat_agent")` and `get_tools_for_role("planner")` filter the full toolset by this attribute — the schema passed to LiteLLM is the security boundary, not prompt rules.
 
-Key tool design: `read_file` auto-indexes files via tree-sitter for code intelligence. `replace_lines` uses deterministic line-range replacement (no text matching). Symbol tools (`edit_symbol`, `add_symbol`, `remove_symbol`) use the code index to locate symbols by qualified name.
+Key tool design: `read_file` auto-indexes files via tree-sitter for code intelligence. `edit_file` replaces an exact text match and refuses ambiguous or missing matches. Cross-file symbol refactors remain separate because they update references and imports throughout the index.
 
-Tool schemas are validated at runtime — hallucinated parameters are rejected before execution. Old tool names (`edit_method`, `add_method`, `remove_method`, `write_file`, `find_definition`) are aliased to new names in `engine/loop_tools.py`.
+Tool schemas are validated at runtime — hallucinated parameters are rejected before execution. Compatible historical names are resolved or given a direct migration error in `engine/tool_dispatch.py`; they are not exposed in current schemas or prompts.
 
 ### MCP and Ken (`engine/mcp_client.py`, `engine/ken_client.py`)
 
@@ -198,10 +198,10 @@ takes `start`/`stop`/`restart`.
 **Ken owns the project index.** The TUI no longer runs a full tree-sitter
 sweep at startup — that indexed the same tree Ken already indexes, cost
 seconds before the user could type, and narrated itself in the transcript.
-The local index has not gone away: the symbol *writer* tools
-(`edit_symbol`, `add_symbol`, `get_symbol_code`) need line-accurate
-positions Ken does not provide, and every tool that needs it indexes the
-file it is about to touch on demand. `/reindex` still forces a full sweep.
+The local index has not gone away: symbol lookup and cross-file refactoring
+tools need line-accurate positions Ken does not provide, and every tool that
+needs them indexes the relevant file on demand. `/reindex` still forces a
+full sweep.
 
 ### Ken's session events (`engine/ken_session.py`)
 

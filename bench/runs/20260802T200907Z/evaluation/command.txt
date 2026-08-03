@@ -1,0 +1,14 @@
+cwd: bench/runs/20260802T200907Z/evaluation
+
+Environment overrides (sensitive values omitted):
+  Benchmark context: Codex subscription session validated before agent runs
+  PYTHONPATH=$REPO:$REPO/src
+
+Command:
+uv --project "$REPO" run python -m bench.evaluate \
+  --predictions "$RUN_ROOT/predictions.combined.jsonl" \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --split test \
+  --run-id infinidev-openai-subscription-20260802T200907Z \
+  --max-workers 1 \
+  --timeout 1800

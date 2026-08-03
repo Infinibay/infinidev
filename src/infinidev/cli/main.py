@@ -436,7 +436,11 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
 @click.option("--prompt", "-p", default=None, help="Run a single prompt non-interactively and exit.")
 @click.option("--model", "-m", default=None, help="Override LLM model for this run (e.g., ollama_chat/qwen3:32b).")
 @click.option("--provider", default=None, help="Override LLM provider (ollama, openai, anthropic, gemini, etc.).")
-@click.option("--think", is_flag=True, help="Use phase engine (ANALYZE → PLAN → EXECUTE) for deeper reasoning.")
+@click.option(
+    "--think",
+    is_flag=True,
+    help="Use the phase engine to analyze, plan, and then execute.",
+)
 @click.option("--profile", is_flag=True, help="Enable session profiling (saves to ~/.infinidev/profiles/).")
 @click.option("--continue", "-c", "continue_session", is_flag=True, help="Resume the most recent session in this directory.")
 @click.option("--resume", is_flag=True, help="Pick a recent session to resume from a list.")

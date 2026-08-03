@@ -420,7 +420,7 @@ def check_orphaned_references(
 ) -> list[Diagnostic]:
     """Find symbols that were removed but still have active references elsewhere.
 
-    Detects "código desconectado" — symbols that existed in a file before an
+    Detects disconnected code: symbols that existed in a file before an
     edit/delete and are now referenced from other files that were not part of
     the same change batch.
 

@@ -59,7 +59,7 @@ PERSPECTIVE_LENSES: list[dict] = [
         "name": "Stupidest Thing That Works",
         "prompt": (
             "What is the dumbest, most embarrassingly simple solution "
-            "that could actually work? No elegance allowed."
+            "that survives the stated constraints? No elegance allowed."
         ),
     },
     {
@@ -214,7 +214,7 @@ DIVERGE_SCHEMA: dict = {
                 "feasibility_signals": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Early signals suggesting this could work",
+                    "description": "Early evidence that the idea survives its constraints",
                 },
                 "verification_steps": {
                     "type": "array",

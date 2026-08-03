@@ -18,13 +18,15 @@ through and see the model's chain of thought across the whole run.
 from __future__ import annotations
 
 import json
+import logging
 import os
-import sys
 import threading
 import time
 from typing import Any
 
 from infinidev.engine._best_effort import best_effort
+
+logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
 _HANDLE = None
@@ -70,7 +72,7 @@ def _w(text: str) -> None:
                 _HANDLE.write(text)
                 _HANDLE.write("\n")
             except Exception as exc:  # pragma: no cover - tracing must never raise
-                print(f"[trace_log] write failed: {exc}", file=sys.stderr)
+                logger.warning("Trace log write failed: %s", exc)
 
 
 def _banner(char: str, label: str) -> str:

@@ -1,0 +1,72 @@
+{
+  "run_id": "infinidev-openai-subscription-20260802T200907Z",
+  "artifact_run_id": "20260802T200907Z",
+  "started_at_utc": "2026-08-02T20:47:03Z",
+  "finished_at_utc": "2026-08-02T20:53:23Z",
+  "duration_seconds": 380.3,
+  "exit_code": 0,
+  "command": [
+    "uv",
+    "--project",
+    "$REPO",
+    "run",
+    "python",
+    "-m",
+    "bench.evaluate",
+    "--predictions",
+    "bench/runs/20260802T200907Z/predictions.combined.jsonl",
+    "--dataset",
+    "princeton-nlp/SWE-bench_Lite",
+    "--split",
+    "test",
+    "--run-id",
+    "infinidev-openai-subscription-20260802T200907Z",
+    "--max-workers",
+    "1",
+    "--timeout",
+    "1800"
+  ],
+  "parameters": {
+    "dataset": "princeton-nlp/SWE-bench_Lite",
+    "split": "test",
+    "predictions": "bench/runs/20260802T200907Z/predictions.combined.jsonl",
+    "max_workers": 1,
+    "timeout_seconds_per_instance": 1800
+  },
+  "environment": {
+    "python": "3.13.3",
+    "infinidev": "0.14.0",
+    "datasets": "4.8.4",
+    "swebench": "4.1.0",
+    "litellm": "1.82.2",
+    "docker_sdk": "7.1.0",
+    "docker_server": "5.4.1",
+    "docker_storage_driver": "overlay"
+  },
+  "git_commit": "7fbd80b9f726a76c57ddb71e37caa402ba8088c3",
+  "authentication": {
+    "provider": "openai_subscription",
+    "model": "gpt-5.6-sol",
+    "codex_session_configured": true,
+    "sensitive_values_recorded": false
+  },
+  "results": {
+    "submitted_instances": 2,
+    "completed_instances": 2,
+    "resolved_instances": 1,
+    "unresolved_instances": 1,
+    "empty_patch_instances": 0,
+    "error_instances": 0,
+    "resolved_ids": [
+      "astropy__astropy-12907"
+    ],
+    "unresolved_ids": [
+      "astropy__astropy-14182"
+    ]
+  },
+  "result_file": "gpt-5.6-sol.infinidev-openai-subscription-20260802T200907Z.json",
+  "notes": [
+    "The timestamps and duration describe the outer evaluation process, including harness startup and cleanup.",
+    "Only sanitized subscription-session status is stored in this file."
+  ]
+}

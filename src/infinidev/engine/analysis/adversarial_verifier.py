@@ -48,7 +48,7 @@ _SYSTEM_PROMPT = (
     "demonstrably satisfies the objective. Quote a substantial, distinctive "
     "span (a full line or clause, not a single short token) so the evidence "
     "can be located unambiguously. Put that exact text in cited_evidence. "
-    "No quote → not a PASS.\n"
+    "A PASS without that quote is invalid.\n"
     "- verdict FAIL: the evidence is missing, partial, or you would have to "
     "assume/infer it.\n"
     "- verdict UNVERIFIABLE: the objective genuinely cannot be judged from "

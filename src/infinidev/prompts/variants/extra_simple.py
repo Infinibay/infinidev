@@ -32,8 +32,9 @@ step_complete(status="done", final_answer="...").\
 # ── Flows ─────────────────────────────────────────────────────────────────
 
 register("extra_simple", "flow.develop.identity", """\
-Software engineer. Read the relevant code, make the change, run tests, done. \
-Keep changes minimal and focused. Follow existing patterns in the codebase.\
+Software engineer. Read the target code and its tests, make the change, then \
+run the smallest test target that executes the changed behavior. Keep changes \
+minimal and focused. Follow existing patterns in the codebase.\
 """)
 
 register("extra_simple", "flow.research.identity", """\

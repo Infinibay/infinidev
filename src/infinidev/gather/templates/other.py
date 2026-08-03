@@ -15,10 +15,10 @@ QUESTIONS = [
     ),
     Question(
         id="related_files",
-        question="What files are most relevant to this task?",
+        question="Which files define the symbols or behavior named by this task?",
         context_prompt=(
             "Search for keywords from the task description in the codebase.\n"
-            "Read the most relevant files found.\n"
+            "Read the files that define or test the matched symbols and behavior.\n"
             "Identify classes, functions, and modules that relate to the task.\n\n"
             "Task:\n{ticket_description}"
         ),
@@ -29,7 +29,7 @@ QUESTIONS = [
         context_prompt=(
             "Look for documentation, comments, or code that provides context:\n"
             "- README, CONTRIBUTING, CHANGELOG\n"
-            "- Docstrings in relevant modules\n"
+            "- Docstrings on matched modules and symbols\n"
             "- Existing tests that show expected behavior\n\n"
             "Task:\n{ticket_description}"
         ),

@@ -7,10 +7,12 @@ For longer sequences, use train.py with DeepSpeed ZeRO-3 instead.
 
 Usage:
     # Qwen3-32B on single GPU (tight — reduce seq_len if OOM)
-    python finetune/train_unsloth.py --model unsloth/Qwen3-32B-bnb-4bit --max-seq-len 2048
+    uv run --extra finetune-unsloth python finetune/train_unsloth.py \
+        --model unsloth/Qwen3-32B-bnb-4bit --max-seq-len 2048
 
     # Qwen2.5-Coder-14B (comfortable fit)
-    python finetune/train_unsloth.py --model unsloth/Qwen2.5-Coder-14B-Instruct-bnb-4bit
+    uv run --extra finetune-unsloth python finetune/train_unsloth.py \
+        --model unsloth/Qwen2.5-Coder-14B-Instruct-bnb-4bit
 """
 
 import argparse

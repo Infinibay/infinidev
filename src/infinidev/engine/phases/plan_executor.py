@@ -148,11 +148,8 @@ def _execute_plan(
             max_total_tool_calls=1000,
             max_tool_calls_per_action=0,
             nudge_threshold=0,
-            summarizer_enabled=not (depth_config and depth_config.aggressive_summarizer),
+            summarizer_enabled=True,
             identity_override=strategy.execute_identity or None,
-            allow_only_add_steps=depth_config.allow_only_add_steps if depth_config else True,
-            reject_write_on_existing=depth_config.reject_write_on_existing if depth_config else False,
-            require_test_before_complete=depth_config.require_test_before_complete if depth_config else False,
         )
 
         last_engine = engine

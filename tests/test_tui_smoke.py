@@ -16,6 +16,18 @@ from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
+from infinidev.config.settings import settings
+
+
+@pytest.fixture(autouse=True)
+def _isolated_ui_settings(tmp_path, monkeypatch):
+    """Keep panel persistence from leaking across tests or into the real home."""
+    original_sidebar = settings.UI_SIDEBAR_VISIBLE
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    settings.UI_SIDEBAR_VISIBLE = False
+    yield
+    settings.UI_SIDEBAR_VISIBLE = original_sidebar
+
 
 class _SizedOutput(DummyOutput):
     def get_size(self) -> Size:

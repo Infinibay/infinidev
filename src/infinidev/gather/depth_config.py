@@ -17,7 +17,7 @@ class DepthConfig:
     - minimal: no phases, single LoopEngine, model is free
     - light: force-read first, model creates own plan, light nudges
     - standard: full QUESTIONS→INVESTIGATE→PLAN→EXECUTE pipeline
-    - deep: full pipeline + strict guardrails (mandatory tests, anti-rewrite, auto-revert)
+    - deep: full pipeline with a stricter execution prompt
     """
     # Phase control
     skip_questions: bool = False
@@ -31,15 +31,7 @@ class DepthConfig:
 
     # Execute control
     replan_max_rounds: int = 3
-    allow_only_add_steps: bool = True  # restrict next_steps to add-only
-
-    # Guardrails (deep mode)
-    reject_write_on_existing: bool = False   # force edit_method over write_file
-    require_test_before_complete: bool = False  # reject step_complete without test
-    auto_revert_on_regression: bool = False  # revert if test count drops
-    aggressive_summarizer: bool = False  # summarize more frequently
 
     # Prompt style
     prompt_suffix: str = ""  # extra text appended to execute prompts
-
 

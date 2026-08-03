@@ -1,16 +1,10 @@
-"""Tests for file tools: ReadFile, WriteFile."""
+"""Tests for the read-file tool."""
 
 import json
-import os
-import stat
 from unittest.mock import patch
 
-import pytest
-
 from infinidev.config.settings import settings
-from infinidev.tools.base.db import execute_with_retry
 from infinidev.tools.file.read_file import ReadFileTool
-from infinidev.tools.file.write_file import WriteFileTool
 
 
 # ── ReadFile ─────────────────────────────────────────────────────────────────
@@ -112,113 +106,3 @@ class TestReadFile:
         data = json.loads(result)
         assert "error" in data
         assert "denied" in data["error"].lower()
-
-
-# ── WriteFile ────────────────────────────────────────────────────────────────
-
-
-class TestWriteFile:
-    """Tests for WriteFileTool."""
-
-    def test_write_new_file(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """Creates a new file and returns action=created."""
-        tool = bound_tool(WriteFileTool)
-        file_path = str(workspace_dir / "new_file.txt")
-        result = tool._run(file_path=file_path, content="hello world")
-        data = json.loads(result)
-        assert data["action"] == "created"
-        assert os.path.exists(file_path)
-        with open(file_path) as f:
-            assert f.read() == "hello world"
-
-    def test_write_overwrites_existing(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """mode='w' replaces content."""
-        tool = bound_tool(WriteFileTool)
-        file_path = str(workspace_dir / "sample.txt")
-        result = tool._run(file_path=file_path, content="replaced")
-        data = json.loads(result)
-        assert data["action"] == "modified"
-        with open(file_path) as f:
-            assert f.read() == "replaced"
-
-    def test_write_append_mode(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """mode='a' appends content."""
-        tool = bound_tool(WriteFileTool)
-        file_path = str(workspace_dir / "sample.txt")
-        tool._run(file_path=file_path, content="appended", mode="a")
-        with open(file_path) as f:
-            content = f.read()
-        assert content.endswith("appended")
-        assert "line one" in content
-
-    def test_write_creates_parent_directories(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """Nested file_path creates all parent dirs."""
-        tool = bound_tool(WriteFileTool)
-        file_path = str(workspace_dir / "a" / "b" / "c.txt")
-        tool._run(file_path=file_path, content="deep")
-        assert os.path.exists(file_path)
-        with open(file_path) as f:
-            assert f.read() == "deep"
-
-    def test_write_preserves_permissions(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """File permissions are preserved after overwrite."""
-        tool = bound_tool(WriteFileTool)
-        file_path = str(workspace_dir / "exec.sh")
-        with open(file_path, "w") as f:
-            f.write("#!/bin/bash\necho hi")
-        os.chmod(file_path, 0o755)
-        original_mode = os.stat(file_path).st_mode
-
-        tool._run(file_path=file_path, content="#!/bin/bash\necho bye")
-        new_mode = os.stat(file_path).st_mode
-        assert stat.S_IMODE(new_mode) == stat.S_IMODE(original_mode)
-
-    def test_write_size_limit_enforced(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """Content exceeding MAX_FILE_SIZE_BYTES returns error."""
-        original = settings.MAX_FILE_SIZE_BYTES
-        settings.MAX_FILE_SIZE_BYTES = 50
-        try:
-            tool = bound_tool(WriteFileTool)
-            result = tool._run(file_path=str(workspace_dir / "big.txt"), content="x" * 100)
-            data = json.loads(result)
-            assert "error" in data
-            assert "too large" in data["error"].lower()
-        finally:
-            settings.MAX_FILE_SIZE_BYTES = original
-
-    def test_write_records_artifact_change(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """After write, artifact_changes table has a row."""
-        tool = bound_tool(WriteFileTool)
-        file_path = str(workspace_dir / "audited.txt")
-        tool._run(file_path=file_path, content="audited content")
-
-        rows = execute_with_retry(
-            lambda c: c.execute("SELECT * FROM artifact_changes WHERE file_path = ?", (file_path,)).fetchall()
-        )
-        assert len(rows) >= 1
-        row = dict(rows[0])
-        assert row["action"] == "created"
-
-    def test_write_sandbox_blocked(self, bound_tool, sandbox_enabled, auto_approve_permissions):
-        """Sandbox check rejects out-of-bounds path."""
-        tool = bound_tool(WriteFileTool)
-        with patch.object(tool, "_is_pod_mode", return_value=False):
-            result = tool._run(file_path="/etc/shadow", content="nope")
-        data = json.loads(result)
-        assert "error" in data
-        assert "denied" in data["error"].lower()
-
-    def test_write_append_size_limit(self, bound_tool, workspace_dir, auto_approve_permissions):
-        """Existing + appended content exceeding limit returns error."""
-        original = settings.MAX_FILE_SIZE_BYTES
-        settings.MAX_FILE_SIZE_BYTES = 100
-        try:
-            tool = bound_tool(WriteFileTool)
-            file_path = str(workspace_dir / "sample.txt")  # already ~50 bytes
-            result = tool._run(file_path=file_path, content="x" * 80, mode="a")
-            data = json.loads(result)
-            assert "error" in data
-            assert "too large" in data["error"].lower()
-        finally:
-            settings.MAX_FILE_SIZE_BYTES = original
-

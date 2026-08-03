@@ -1,0 +1,18 @@
+cwd: bench/runs/20260802T200907Z/astropy__astropy-14182
+
+Environment overrides (sensitive values omitted):
+  Subscription authorization: existing Codex CLI session (location not recorded)
+  HOME=$CASE_DIR/home
+  CODEX_HOME=${CODEX_HOME:-$HOME/.codex} (resolved before HOME isolation; value not recorded)
+  PYTHONPATH=$REPO:$REPO/src
+
+Command:
+uv --project "$REPO" run python -m bench.run_swebench \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --split test \
+  --instance-id astropy__astropy-14182 \
+  --model gpt-5.6-sol \
+  --timeout 1800 \
+  --output "$CASE_DIR/predictions.jsonl" \
+  --workdir "$CASE_DIR/work" \
+  --no-resume

@@ -58,7 +58,8 @@ Use these EXACT topic prefixes so findings are searchable and consistent:
 - **Be complete.** Each finding stands on its own — useful without
   needing to read other findings.
 - **Set confidence to 1.0** — you are reading the actual code, not guessing.
-- **Tag findings** with relevant keywords for searchability.
+- **Tag findings** with the concrete subsystem, symbol, and behavior names a
+  later search will use.
 - **One finding per concept.** Do not cram everything into one giant finding.
   Separate structure from classes from patterns.
 

@@ -113,12 +113,12 @@ class TestFormatToolCatalog:
         assert "second line" not in catalog
 
     def test_empty_catalog_message(self):
-        assert "(sin catálogo" in _format_tool_catalog({})
+        assert "(no tool catalog" in _format_tool_catalog({})
 
     def test_missing_description_falls_back(self):
         out = _format_tool_catalog({"foo": ""})
         assert "foo" in out
-        assert "sin descripción" in out
+        assert "no description" in out
 
 
 class TestStripPrincipalSystem:

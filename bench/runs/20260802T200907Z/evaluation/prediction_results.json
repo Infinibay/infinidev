@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "run_id": "infinidev-openai-subscription-20260802T200907Z",
+  "predictions_path": "bench/runs/20260802T200907Z/predictions.combined.jsonl",
+  "official_result_path": "bench/runs/20260802T200907Z/evaluation/gpt-5.6-sol.infinidev-openai-subscription-20260802T200907Z.json",
+  "results": [
+    {
+      "instance_id": "astropy__astropy-12907",
+      "model_name_or_path": "gpt-5.6-sol",
+      "prediction_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/predictions.jsonl",
+      "patch_status": "non_empty",
+      "runner_exit_code": 0,
+      "evaluation_status": "resolved",
+      "official_result_fields": [
+        "submitted_ids",
+        "completed_ids",
+        "resolved_ids"
+      ]
+    },
+    {
+      "instance_id": "astropy__astropy-14182",
+      "model_name_or_path": "gpt-5.6-sol",
+      "prediction_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/predictions.jsonl",
+      "patch_status": "non_empty",
+      "runner_exit_code": 0,
+      "evaluation_status": "unresolved",
+      "official_result_fields": [
+        "submitted_ids",
+        "completed_ids",
+        "unresolved_ids"
+      ]
+    }
+  ]
+}

@@ -11,13 +11,13 @@ QUESTIONS = [
             "to the one being requested. Look for:\n"
             "- Similar functionality already implemented\n"
             "- Patterns used for comparable features (how are they structured?)\n"
-            "- Code that could be reused or extended\n\n"
+            "- Code whose interface or behavior matches part of the request\n\n"
             "Feature request:\n{ticket_description}"
         ),
     ),
     Question(
         id="integration_points",
-        question="Where should this feature be integrated? What entry points, routers, or registries need modification?",
+        question="Which entry points, routers, or registries dispatch the behavior this feature extends?",
         context_prompt=(
             "Identify the integration points for this feature:\n"
             "- Entry points (main, CLI commands, API routes)\n"
@@ -46,14 +46,14 @@ QUESTIONS = [
             "Check what dependencies are needed:\n"
             "- Internal modules that the feature will import/use\n"
             "- External libraries already in requirements (can be reused?)\n"
-            "- New external libraries that might be needed\n"
+            "- Missing capability that requires a new external library\n"
             "- Check requirements.txt, pyproject.toml, or package.json\n\n"
             "Feature request:\n{ticket_description}"
         ),
     ),
     Question(
         id="test_patterns",
-        question="How are similar features tested in this project? What test patterns should be followed?",
+        question="Which tests execute analogous features, and what fixtures and commands do they use?",
         context_prompt=(
             "Find tests for features similar to the one being requested:\n"
             "- What test framework is used?\n"

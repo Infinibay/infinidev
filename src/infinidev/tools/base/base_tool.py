@@ -60,21 +60,13 @@ def normalize_tool_result(value: Any) -> tuple[str, list["ImageAttachment"]]:
 
 
 class BaseTool(BaseModel, ABC):
-    """Minimal pydantic base for Infinibay tools (replaces ``crewai.tools.BaseTool``).
+    """Minimal Pydantic contract for Infinibay tools.
 
-    Infinibay only ever used four things from crewai's tool base: the
-    ``name`` / ``description`` / ``args_schema`` pydantic fields, the abstract
-    ``_run``, and a ``run()`` that validates kwargs against ``args_schema``
-    before dispatching to ``_run`` — plus the convenience of deriving
-    ``args_schema`` from the ``_run`` signature when a tool doesn't declare one.
-    All of that is reproduced here.
-
-    Deliberately NOT reproduced: crewai's ``model_post_init`` description
-    mutation (tools now expose their declared ``description`` verbatim — the
-    schema the LLM sees is cleaner), usage metering, env-var plumbing, and
-    checkpoint serialization. None were used by Infinibay. Production dispatch
-    goes through ``_run`` directly (see ``loop/tools.py``); ``run()`` exists for
-    parity and tests.
+    The contract consists of ``name``, ``description``, ``args_schema``, the
+    abstract ``_run`` method, and validated synchronous/asynchronous dispatch.
+    Tools that omit ``args_schema`` receive one derived from their ``_run``
+    signature. Runtime descriptions remain exactly as declared so the live
+    schema is the single documentation authority.
     """
 
     class _ArgsSchemaPlaceholder(BaseModel):
@@ -97,8 +89,7 @@ class BaseTool(BaseModel, ABC):
     def _derive_args_schema(cls, v: Any) -> type[BaseModel]:
         """Use the declared schema, or synthesize one from ``_run``'s signature.
 
-        Mirrors crewai so tools that don't set ``args_schema`` (mostly test
-        dummies) still get a schema built from their ``_run`` parameters.
+        This keeps schema-less test tools and small internal terminators valid.
         """
         if isinstance(v, type) and v is not cls._ArgsSchemaPlaceholder:
             return v
@@ -180,7 +171,7 @@ class InfinibayBaseTool(BaseTool, ABC):
     is_read_only: bool = False
 
     def run(self, *args: Any, **kwargs: Any) -> Any:
-        """Override CrewAI's run() to strip kwargs not accepted by _run().
+        """Strip kwargs not accepted by ``_run`` before validated dispatch.
 
         LLMs (especially Gemini) sometimes pass context fields like
         ``project_id`` or ``agent_id`` as tool arguments even though

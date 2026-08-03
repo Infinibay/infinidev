@@ -16,11 +16,11 @@ from __future__ import annotations
 import logging
 import os
 import shlex
-import subprocess
 import sys
 
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.verification_result import VerificationResult
+from infinidev.engine.subprocess_runner import run_captured
 
 logger = logging.getLogger(__name__)
 
@@ -84,19 +84,21 @@ class ObjectiveVerifier:
         for candidate in (".venv/bin/python", "venv/bin/python"):
             path = os.path.join(self._workspace, candidate)
             if os.path.exists(path):
-                return shlex.quote(path)
-        return shlex.quote(sys.executable)
+                return path
+        return sys.executable
 
     def _verify_test_id(self, node_id: str, observable: str) -> VerificationResult:
-        # Treat the spec as a pytest node id (the dominant case). Quote it so
-        # paths with '::' and special chars survive the shell.
-        command = f"{self._interpreter()} -m pytest {shlex.quote(node_id)} -q"
+        # A node id is data, not shell syntax. Passing an argv sequence keeps a
+        # crafted filename from becoming another command.
+        command = [self._interpreter(), "-m", "pytest", node_id, "-q"]
         run = self._run(command)
         passed = run["exit_code"] == 0 and self._observable_ok(observable, run["output"])
         return self._result_from_run(run, passed, observable)
 
     def _verify_file_contains(self, path: str, needle: str) -> VerificationResult:
-        abs_path = path if os.path.isabs(path) else os.path.join(self._workspace, path)
+        workspace = os.path.realpath(self._workspace)
+        candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
+        abs_path = os.path.realpath(candidate)
         # Spelled out rather than set-notation: this string reaches the
         # developer inside the BLOCKED message (verification_result.py:52).
         entry = {
@@ -104,6 +106,18 @@ class ObjectiveVerifier:
             "exit_code": 0,
             "output": "",
         }
+        try:
+            inside_workspace = os.path.commonpath((workspace, abs_path)) == workspace
+        except ValueError:
+            inside_workspace = False
+        if not inside_workspace:
+            entry["exit_code"] = 1
+            entry["output"] = f"Refused to read outside the workspace: {path}"
+            return VerificationResult(
+                passed=False,
+                summary="file_contains path is outside the workspace",
+                commands_run=[entry],
+            )
         try:
             with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
                 content = fh.read()
@@ -127,7 +141,7 @@ class ObjectiveVerifier:
         # Cheap, language-agnostic existence check via grep. -r recursive,
         # -I skip binaries, -F fixed string, -q quiet (exit code only),
         # -- end-of-options so a symbol starting with '-' is safe.
-        command = f"grep -rIqF -- {shlex.quote(symbol)} ."
+        command = ["grep", "-rIqF", "--", symbol, "."]
         run = self._run(command)
         passed = run["exit_code"] == 0
         run["output"] = (
@@ -157,22 +171,46 @@ class ObjectiveVerifier:
             summary = f"required output not found: {observable!r}"
         return VerificationResult(passed=passed, summary=summary, commands_run=[run])
 
-    def _run(self, command: str) -> dict:
-        """Execute a shell command and capture truncated output."""
+    def _run(self, command: str | list[str]) -> dict:
+        """Execute an approved command and capture truncated output."""
+        display_command = command if isinstance(command, str) else shlex.join(command)
+
+        # Planner-authored checks are untrusted model output. They must use the
+        # same permission policy as execute_command instead of silently gaining
+        # a second shell-execution path.
+        from infinidev.tools.shell.execute_command_tool import check_command_permission
+
+        permission_error = check_command_permission(
+            display_command,
+            description="Run objective verification command",
+        )
+        if permission_error:
+            return {
+                "command": display_command,
+                "exit_code": -1,
+                "output": permission_error,
+            }
+
         try:
-            proc = subprocess.run(
+            proc = run_captured(
                 command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self._timeout,
+                shell=isinstance(command, str),
                 cwd=self._workspace,
+                timeout=self._timeout,
             )
             output = (proc.stdout + proc.stderr).strip()
             if len(output) > 3000:
                 output = output[-3000:]
-            return {"command": command, "exit_code": proc.returncode, "output": output}
-        except subprocess.TimeoutExpired:
-            return {"command": command, "exit_code": -1, "output": f"Command timed out after {self._timeout}s"}
+            if proc.timed_out:
+                return {
+                    "command": display_command,
+                    "exit_code": -1,
+                    "output": f"Command timed out after {self._timeout}s",
+                }
+            return {
+                "command": display_command,
+                "exit_code": proc.exit_code,
+                "output": output,
+            }
         except Exception as exc:  # pragma: no cover - defensive
-            return {"command": command, "exit_code": -1, "output": f"Error: {exc}"}
+            return {"command": display_command, "exit_code": -1, "output": f"Error: {exc}"}

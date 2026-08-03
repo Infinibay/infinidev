@@ -1,5 +1,4 @@
 from .record_finding import RecordFindingTool
-from .read_findings import ReadFindingsTool
 from .search_findings import SearchFindingsTool
 from .validate_finding import ValidateFindingTool
 from .reject_finding import RejectFindingTool
@@ -14,7 +13,6 @@ from .summarize_findings import SummarizeFindingsTool
 
 __all__ = [
     "RecordFindingTool",
-    "ReadFindingsTool",
     "SearchFindingsTool",
     "ValidateFindingTool",
     "RejectFindingTool",

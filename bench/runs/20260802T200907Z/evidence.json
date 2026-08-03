@@ -1,0 +1,254 @@
+{
+  "schema_version": 2,
+  "run_id": "20260802T200907Z",
+  "evidence_policy": {
+    "sanitized": true,
+    "contains_credentials": false,
+    "raw_environment_captured": false,
+    "note": "This manifest preserves the benchmark facts needed for review without copying OAuth tokens, account data, CODEX_HOME contents, or absolute session paths."
+  },
+  "prevalidation": {
+    "generation_cli": {
+      "repository_entrypoint": "bench/run_swebench.py",
+      "module_invocation": "python -m bench.run_swebench",
+      "purpose": "Load selected SWE-bench instances and run Infinidev to produce predictions.jsonl."
+    },
+    "evaluation_cli": {
+      "repository_entrypoint": "bench/evaluate.py",
+      "module_invocation": "python -m bench.evaluate",
+      "official_subprocess": "python -m swebench.harness.run_evaluation",
+      "purpose": "Validate predictions and delegate scoring to the official SWE-bench evaluator."
+    },
+    "provider_selection": {
+      "settings_file": ".infinidev/settings.json in each isolated HOME",
+      "settings": {
+        "LLM_PROVIDER": "openai_subscription",
+        "LLM_MODEL": "gpt-5.6-sol"
+      },
+      "normalized_model": "openai/responses/gpt-5.6-sol",
+      "mechanism": "The runner forwards --model gpt-5.6-sol to BenchConfig; Infinidev reads LLM_PROVIDER=openai_subscription from the isolated project settings and uses the existing Codex OAuth session through CODEX_HOME."
+    },
+    "dependencies": {
+      "declared_in_bench_requirements": {
+        "datasets": ">=2.14.0",
+        "swebench": ">=1.0.0"
+      },
+      "observed_versions": {
+        "python": "3.13.3",
+        "infinidev": "0.14.0",
+        "datasets": "4.8.4",
+        "swebench": "4.1.0",
+        "litellm": "1.82.2",
+        "docker_sdk": "7.1.0",
+        "docker_server": "5.4.1"
+      }
+    },
+    "codex_session": {
+      "status_check": "Infinidev sanitized Codex-session status API",
+      "configured": true,
+      "expired_at_prevalidation": false,
+      "usable_without_openai_api_key": true,
+      "sensitive_values_recorded": false,
+      "scope": "Boolean health/configuration state only; no token, account identity, or credential path is retained."
+    },
+    "focused_provider_tests": {
+      "source": "tests/test_openai_subscription.py",
+      "command": "uv run pytest tests/test_openai_subscription.py -v --color=no",
+      "result_at_prevalidation": "57 passed",
+      "retained_output_path": "bench/runs/20260802T200907Z/validation-pytest.txt",
+      "exit_code": 0
+    },
+    "source_files_reviewed": [
+      "bench/run_swebench.py",
+      "bench/config.py",
+      "bench/requirements.txt",
+      "src/infinidev/config/llm.py",
+      "src/infinidev/config/providers.py",
+      "src/infinidev/config/settings.py",
+      "tests/test_openai_subscription.py"
+    ]
+  },
+  "generation_invocation_template": {
+    "working_directory": "$CASE_DIR",
+    "environment": {
+      "HOME": "$CASE_DIR/home",
+      "CODEX_HOME": "${CODEX_HOME:-$HOME/.codex}",
+      "PYTHONPATH": "$REPO:$REPO/src"
+    },
+    "command": "uv --project $REPO run python -m bench.run_swebench --dataset princeton-nlp/SWE-bench_Lite --split test --instance-id $INSTANCE_ID --model gpt-5.6-sol --timeout 1800 --output $CASE_DIR/predictions.jsonl --workdir $CASE_DIR/work --no-resume",
+    "parameters": {
+      "dataset": "princeton-nlp/SWE-bench_Lite",
+      "split": "test",
+      "provider": "openai_subscription",
+      "model": "gpt-5.6-sol",
+      "timeout_seconds": 1800,
+      "resume": false
+    }
+  },
+  "attempts": [
+    {
+      "instance_id": "astropy__astropy-12907",
+      "attempt": 1,
+      "exit_code": 1,
+      "duration_seconds": 0.289,
+      "status": "harness_setup_failure",
+      "reason": "The relative bench/run.log parent directory did not exist in the isolated working directory.",
+      "metadata_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/attempt-1/metadata.json",
+      "counted_as_evaluated_prediction": false
+    },
+    {
+      "instance_id": "astropy__astropy-14182",
+      "attempt": 1,
+      "exit_code": 1,
+      "duration_seconds": 0.321,
+      "status": "harness_setup_failure",
+      "reason": "The relative bench/run.log parent directory did not exist in the isolated working directory.",
+      "metadata_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/attempt-1/metadata.json",
+      "counted_as_evaluated_prediction": false
+    },
+    {
+      "instance_id": "astropy__astropy-12907",
+      "attempt": 2,
+      "command_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/command.txt",
+      "metadata_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/metadata.json",
+      "prediction_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/predictions.jsonl",
+      "exit_code": 0,
+      "duration_seconds": 1824.271,
+      "started_at_utc": "2026-08-02T20:14:45Z",
+      "finished_at_utc": "2026-08-02T20:45:09Z",
+      "runner_log_summary": [
+        "Dataset loaded and filtered to the single requested instance.",
+        "Instance checkout prepared from base commit d16bfe05a744.",
+        "Agent reached the 1800-second timeout; the harness captured a partial 44-line non-empty patch.",
+        "Runner completed 1/1 and wrote one JSONL prediction."
+      ],
+      "prediction": {
+        "instance_id": "astropy__astropy-12907",
+        "model_name_or_path": "gpt-5.6-sol",
+        "format": "single-line JSONL",
+        "model_patch": "non_empty",
+        "patch_line_count_reported_by_runner": 44
+      },
+      "status": "completed_with_salvaged_patch"
+    },
+    {
+      "instance_id": "astropy__astropy-14182",
+      "attempt": 2,
+      "command_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/command.txt",
+      "metadata_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/metadata.json",
+      "prediction_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/predictions.jsonl",
+      "exit_code": 0,
+      "duration_seconds": 1824.297,
+      "started_at_utc": "2026-08-02T20:14:45Z",
+      "finished_at_utc": "2026-08-02T20:45:09Z",
+      "runner_log_summary": [
+        "Dataset loaded and filtered to the single requested instance.",
+        "Instance checkout prepared from base commit a5917978be39.",
+        "Agent reached the 1800-second timeout; the harness captured a partial 60-line non-empty patch.",
+        "Runner completed 1/1 and wrote one JSONL prediction."
+      ],
+      "prediction": {
+        "instance_id": "astropy__astropy-14182",
+        "model_name_or_path": "gpt-5.6-sol",
+        "format": "single-line JSONL",
+        "model_patch": "non_empty",
+        "patch_line_count_reported_by_runner": 60
+      },
+      "status": "completed_with_salvaged_patch"
+    }
+  ],
+  "artifact_inventory": {
+    "declared_path_count": 12,
+    "all_paths_exist_at_validation": true,
+    "paths": [
+      "bench/runs/20260802T200907Z/astropy__astropy-12907/attempt-1/metadata.json",
+      "bench/runs/20260802T200907Z/astropy__astropy-14182/attempt-1/metadata.json",
+      "bench/runs/20260802T200907Z/astropy__astropy-12907/command.txt",
+      "bench/runs/20260802T200907Z/astropy__astropy-12907/metadata.json",
+      "bench/runs/20260802T200907Z/astropy__astropy-12907/predictions.jsonl",
+      "bench/runs/20260802T200907Z/astropy__astropy-14182/command.txt",
+      "bench/runs/20260802T200907Z/astropy__astropy-14182/metadata.json",
+      "bench/runs/20260802T200907Z/astropy__astropy-14182/predictions.jsonl",
+      "bench/runs/20260802T200907Z/predictions.combined.jsonl",
+      "bench/runs/20260802T200907Z/evaluation/metadata.json",
+      "bench/runs/20260802T200907Z/evaluation/prediction_results.json",
+      "bench/runs/20260802T200907Z/evaluation/gpt-5.6-sol.infinidev-openai-subscription-20260802T200907Z.json"
+    ]
+  },
+  "evaluation": {
+    "input_path": "bench/runs/20260802T200907Z/predictions.combined.jsonl",
+    "repository_command": "uv run python -m bench.evaluate --predictions bench/runs/20260802T200907Z/predictions.combined.jsonl --dataset princeton-nlp/SWE-bench_Lite --split test --run-id infinidev-openai-subscription-20260802T200907Z --max-workers 1 --timeout 1800",
+    "official_command": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite --split test --predictions_path bench/runs/20260802T200907Z/predictions.combined.jsonl --max_workers 1 --run_id infinidev-openai-subscription-20260802T200907Z --timeout 1800",
+    "metadata_path": "bench/runs/20260802T200907Z/evaluation/metadata.json",
+    "trace_path": "bench/runs/20260802T200907Z/evaluation/prediction_results.json",
+    "official_result_path": "bench/runs/20260802T200907Z/evaluation/gpt-5.6-sol.infinidev-openai-subscription-20260802T200907Z.json",
+    "exit_code": 0,
+    "duration_seconds": 380.3,
+    "official_summary": {
+      "submitted": 2,
+      "completed": 2,
+      "resolved": 1,
+      "unresolved": 1,
+      "empty_patches": 0,
+      "errors": 0
+    },
+    "per_prediction": [
+      {
+        "instance_id": "astropy__astropy-12907",
+        "prediction_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/predictions.jsonl",
+        "patch_status": "non_empty",
+        "official_verdict": "resolved",
+        "official_result_fields": [
+          "submitted_ids",
+          "completed_ids",
+          "resolved_ids"
+        ]
+      },
+      {
+        "instance_id": "astropy__astropy-14182",
+        "prediction_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/predictions.jsonl",
+        "patch_status": "non_empty",
+        "official_verdict": "unresolved",
+        "official_result_fields": [
+          "submitted_ids",
+          "completed_ids",
+          "unresolved_ids"
+        ]
+      }
+    ]
+  },
+  "retained_validations": {
+    "focused_provider_tests": {
+      "path": "bench/runs/20260802T200907Z/validation-pytest.txt",
+      "command": "uv run pytest tests/test_openai_subscription.py -v --color=no",
+      "exit_code": 0,
+      "result": "57 passed"
+    },
+    "markdown_links": {
+      "path": "bench/runs/20260802T200907Z/validation-links.json",
+      "checked_occurrences": 44,
+      "unique_local_targets": 21,
+      "failed_occurrences": 0,
+      "exit_code": 0
+    },
+    "sensitive_data_scan": {
+      "path": "bench/runs/20260802T200907Z/validation-sensitive-data.json",
+      "selection": "Git-versionable benchmark artifacts excluding generated isolated HOME trees and the self-referential scan output",
+      "patterns_checked": 8,
+      "files_scanned": 19,
+      "matched_files": 0,
+      "sensitive_pattern_matches": 0,
+      "exit_code": 0
+    }
+  },
+  "aggregate": {
+    "selected_instances": 2,
+    "total_process_launches": 4,
+    "completed_generation_runs": 2,
+    "predictions_with_non_empty_patch": 2,
+    "officially_resolved": 1,
+    "official_resolution_rate": 0.5,
+    "agent_duration_seconds_sum": 3648.568,
+    "note": "The two final generation processes ran in parallel; the sum is cumulative instance time, not wall-clock series time."
+  }
+}

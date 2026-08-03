@@ -5,10 +5,11 @@ from infinidev.gather.models import Question
 QUESTIONS = [
     Question(
         id="current_config",
-        question="What is the current configuration relevant to this task?",
+        question="Which configuration keys control the service or behavior named by this task?",
         context_prompt=(
-            "Read configuration files, environment variables, and settings relevant "
-            "to this task. Check .env files, config directories, and settings modules.\n\n"
+            "Read configuration files, environment variables, and settings that name "
+            "the target service, command, package, or behavior. Check .env files, config "
+            "directories, and settings modules.\n\n"
             "Task:\n{ticket_description}"
         ),
     ),

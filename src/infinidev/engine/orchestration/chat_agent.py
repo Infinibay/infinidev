@@ -185,7 +185,7 @@ def run_chat_agent(
         if hooks is not None:
             with best_effort("chat agent stream finalize failed"):
                 hooks.notify_stream_end("Infinidev", "agent")
-        return _fallback_respond(_detect_lang(user_input), exc=exc)
+        return _fallback_respond(exc=exc)
     finally:
         try:
             cr_hooks.finish()
@@ -391,7 +391,7 @@ def _build_respond(
     message = (args.get("message") or "").strip()
     if not message:
         return _fallback_respond(
-            _detect_lang(user_input), reason="empty_respond", streamed=streamed,
+            reason="empty_respond", streamed=streamed,
         )
     return ChatAgentResult(kind="respond", reply=message, streamed=streamed)
 
@@ -407,7 +407,7 @@ def _build_escalate(
         # Carry `streamed` so the pipeline still finalizes any orphaned
         # streaming bubble opened before the (empty) escalate fired.
         return _fallback_respond(
-            _detect_lang(user_input), reason="empty_escalate", streamed=streamed,
+            reason="empty_escalate", streamed=streamed,
         )
     opened = args.get("opened_files") or []
     if not isinstance(opened, list):
@@ -476,7 +476,6 @@ def _build_max_iter_escalation(
                     seen_files.add(val)
                     opened.append(val)
 
-    lang = _detect_lang(user_input)
     if tool_names:
         counts: dict[str, int] = {}
         for n in tool_names:
@@ -487,38 +486,19 @@ def _build_max_iter_escalation(
     else:
         tools_summary = "(none)"
 
-    if lang == "es":
-        understanding = (
-            f"[Auto-escalación: el chat agent agotó su presupuesto de "
-            f"{iterations} iteraciones sin concluir.] "
-            f"Pedido textual del usuario: {user_input.strip()!r}. "
-            f"Tools que alcancé a invocar: {tools_summary}. "
-            f"Archivos consultados: "
-            f"{', '.join(opened) if opened else '(ninguno)'}. "
-            f"No llegué a sintetizar una respuesta final; pasá al "
-            f"developer con este contexto para que continúe la "
-            f"investigación y/o implemente lo que el usuario pide."
-        )
-        preview = (
-            "Investigué bastante sin cerrar la respuesta — paso el "
-            "contexto al developer para continuar."
-        )
-    else:
-        understanding = (
-            f"[Auto-escalation: the chat agent exhausted its "
-            f"{iterations}-iteration budget without concluding.] "
-            f"Literal user request: {user_input.strip()!r}. "
-            f"Tools I managed to invoke: {tools_summary}. "
-            f"Files inspected: "
-            f"{', '.join(opened) if opened else '(none)'}. "
-            f"I did not synthesize a final answer; hand this context "
-            f"to the developer to continue the investigation and/or "
-            f"implement what the user is asking for."
-        )
-        preview = (
-            "I investigated extensively without wrapping up — handing "
-            "context to the developer to continue."
-        )
+    understanding = (
+        f"[Auto-escalation: the chat agent exhausted its "
+        f"{iterations}-iteration budget without concluding.] "
+        f"Literal user request: {user_input.strip()!r}. "
+        f"Tools invoked: {tools_summary}. "
+        f"Files inspected: {', '.join(opened) if opened else '(none)'}. "
+        f"No final answer was synthesized. Continue the investigation or "
+        f"implementation from this context."
+    )
+    preview = (
+        "The chat-agent budget ended before a final answer; its evidence is "
+        "being handed to the developer."
+    )
 
     packet = EscalationPacket(
         user_request=user_input.strip(),
@@ -605,57 +585,22 @@ def _tool_call_to_dict(tc: Any) -> dict[str, Any]:
     }
 
 
-# Fallback messages keyed by (language, reason). The chat agent's system
-# prompt tells the model to match the user's language, but the fallback
-# paths bypass the model entirely — so we have to localize ourselves or
-# hardcode one language and surprise users in the other. A tiny heuristic
-# is good enough here (greetings / action verbs / punctuation cover most
-# short chats); the LLM still handles the normal path.
-_FALLBACK_MESSAGES: dict[tuple[str, str], str] = {
+_FALLBACK_MESSAGES: dict[str, str] = {
     # Note: "max_iter" does NOT appear here. When the chat agent
     # exhausts its budget without a terminator, the loop synthesizes
     # an EscalationPacket (see _build_max_iter_escalation) and hands
     # off to the planner/developer instead of replying to the user.
-    ("es", "empty_respond"): "No supe cómo contestarte. ¿Podrías reformular?",
-    ("en", "empty_respond"): "I don't know how to answer that. Could you rephrase?",
-    ("es", "empty_escalate"): (
-        "Detecté que querías que haga algo, pero no me quedó clara la "
-        "consigna. ¿Podrías decirme qué implementar?"
-    ),
-    ("en", "empty_escalate"): (
+    "empty_respond": "I don't know how to answer that. Please rephrase the question.",
+    "empty_escalate": (
         "I detected that you wanted me to do something, but the request "
-        "isn't clear. Could you tell me what to implement?"
+        "isn't clear. Please clarify what to implement and state the expected result."
     ),
-    ("es", "exception"): "Tuve un problema procesando tu mensaje. ¿Podrías repetirlo?",
-    ("en", "exception"): "I ran into a problem processing your message. Could you try again?",
+    "exception": "I ran into a problem processing your message. Please retry.",
 }
 
 
-def _detect_lang(text: str) -> str:
-    """Cheap Spanish-vs-English heuristic for fallback messages only.
-
-    Not used for the normal LLM path — the model handles that. Returns
-    ``"es"`` when obvious Spanish markers appear, ``"en"`` otherwise.
-    Default English because the codebase and prompts lean English.
-    """
-    if not text:
-        return "en"
-    lowered = text.lower()
-    # Unicode markers that only appear in Spanish (ñ, ¿, ¡, accented vowels)
-    if any(ch in lowered for ch in "ñáéíóúü¿¡"):
-        return "es"
-    # Common Spanish function words
-    spanish_markers = (" que ", " por ", " para ", " con ", " los ", " las ",
-                       " una ", " dale", " hacé", " decí", " implementá",
-                       " arreglá", " agregá", " borrá", "hola", "gracias", "chau")
-    padded = f" {lowered} "
-    if any(m in padded for m in spanish_markers):
-        return "es"
-    return "en"
-
-
 def _fallback_respond(
-    lang: str, *, reason: str = "exception", exc: Exception | None = None,
+    *, reason: str = "exception", exc: Exception | None = None,
     streamed: bool = False,
 ) -> ChatAgentResult:
     """Build a respond result from a localized fallback message.
@@ -672,10 +617,7 @@ def _fallback_respond(
     """
     if exc is not None:
         logger.warning("chat_agent fallback (reason=%s): %s", reason, exc)
-    message = _FALLBACK_MESSAGES.get(
-        (lang, reason),
-        _FALLBACK_MESSAGES[("en", reason if (("en", reason) in _FALLBACK_MESSAGES) else "exception")],
-    )
+    message = _FALLBACK_MESSAGES.get(reason, _FALLBACK_MESSAGES["exception"])
     tb_text: str | None = None
     if exc is not None:
         tb_text = "".join(

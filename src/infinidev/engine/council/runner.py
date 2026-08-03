@@ -494,11 +494,11 @@ def run_council(
 
         _say(
             "Council",
-            "Convoco un consejo de "
-            f"{len(roster.members)} subagentes para debatir:\n"
+            "Convening a council of "
+            f"{len(roster.members)} agents to debate:\n"
             f"  {roster.question}\n\n"
             + "\n".join(
-                f"  • {m.member_id}: {m.objective}" for m in roster.members
+                f"  - {m.member_id}: {m.objective}" for m in roster.members
             ),
         )
 

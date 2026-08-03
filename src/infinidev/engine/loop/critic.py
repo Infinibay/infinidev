@@ -86,7 +86,7 @@ _SYSTEM_PROMPT = (
     "skip them and emit_verdict directly — that's the common case.\n\n"
     "Your four objectives, in priority order:\n\n"
     "1. **Help the principal reach the user's goal.** Their task is "
-    "your task. Anything you say should move them toward done.\n\n"
+    "your task. Make every statement move them toward done.\n\n"
     "2. **Safeguard code quality, efficiency, and system security.** "
     "If a tool call would write broken/insecure code, run a "
     "destructive command, edit a file the principal hasn't read, "
@@ -127,8 +127,8 @@ _SYSTEM_PROMPT = (
     "turn. Use reads only when verifying a specific claim would "
     "change your verdict.\n"
     "- Never call write tools (edit_file, execute_command, "
-    "etc.) — they aren't exposed to you. Describe what the "
-    "principal should do, don't do it yourself.\n"
+    "etc.) — they aren't exposed to you. Describe the action for the "
+    "principal; do not execute it yourself.\n"
     "- Don't echo the prefix the engine adds (\"[ASSISTANT - "
     "<action>]:\") inside your message — the engine prepends it; "
     "you'd just be duplicating noise.\n"
@@ -160,7 +160,7 @@ _EMIT_VERDICT_TOOL: dict[str, Any] = {
                         "continue=nothing to add (empty message); "
                         "information=fact/context the principal is missing; "
                         "recommendation=better alternative with rationale; "
-                        "reject=dangerous/wrong action that should not proceed."
+                        "reject=dangerous/wrong action that must not proceed."
                     ),
                 },
                 "message": {
@@ -229,9 +229,9 @@ def _format_proposed_calls(tool_calls: Iterable[Any]) -> str:
 
 def _format_tool_catalog(tool_descriptions: dict[str, str]) -> str:
     if not tool_descriptions:
-        return "(sin catálogo disponible)"
+        return "(no tool catalog available)"
     return "\n".join(
-        f"- {name}: {(desc or '').strip().splitlines()[0] if desc else '(sin descripción)'}"
+        f"- {name}: {(desc or '').strip().splitlines()[0] if desc else '(no description)'}"
         for name, desc in sorted(tool_descriptions.items())
     )
 
@@ -394,8 +394,8 @@ CONSULT_ASSISTANT_SCHEMA: dict[str, Any] = {
                 "context_hint": {
                     "type": "string",
                     "description": (
-                        "Optional. Extra context the assistant might "
-                        "need that isn't already in the conversation "
+                        "Optional. Extra context the assistant needs "
+                        "that isn't already in the conversation "
                         "(e.g. which files you've considered, what "
                         "you've already ruled out)."
                     ),

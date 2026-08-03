@@ -7,7 +7,7 @@ check failed spuriously and triggered an unnecessary developer re-run.
 
 from __future__ import annotations
 
-import os
+from unittest.mock import patch
 
 from infinidev.engine.analysis.verification_engine import VerificationEngine
 
@@ -45,3 +45,22 @@ class TestFileToModule:
 
     def test_non_python_skipped(self):
         assert self.eng._file_to_module("/work/proj/readme.md") is None
+
+    def test_invalid_module_syntax_is_skipped(self):
+        path = "/work/proj/x;__import__('os').system('false').py"
+        assert self.eng._file_to_module(path) is None
+
+
+def test_permission_denial_prevents_verification_command(tmp_path):
+    marker = tmp_path / "should-not-exist"
+    engine = VerificationEngine(workspace=str(tmp_path))
+
+    with patch(
+        "infinidev.tools.shell.execute_command_tool.check_command_permission",
+        return_value="Command denied by user",
+    ):
+        result = engine._run(["touch", str(marker)])
+
+    assert result["exit_code"] == -1
+    assert "denied" in result["output"].lower()
+    assert not marker.exists()

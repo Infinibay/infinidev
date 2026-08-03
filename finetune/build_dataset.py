@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Build training dataset from structured v3 scenarios.
-
-v2 changes:
-- qwen_native format: 1 tool call per assistant turn, Qwen-native tags
-- Label masking info: marks which tokens are assistant (trainable) vs context (masked)
-- Tools schema in system prompt matching Ollama's injection format
-- Explicit stop instruction after tool calls
+"""Build model-specific training datasets from validated structured scenarios.
 
 Usage:
     python -m finetune.build_dataset --format qwen_native   # recommended
@@ -16,74 +10,53 @@ import argparse
 import json
 import random
 from pathlib import Path
+from typing import Any
+
+from finetune.tool_catalog import get_training_tool_schemas
+from finetune.validate_quality import validate_scenario
 
 BASE_DIR = Path(__file__).parent
 SCENARIOS_DIR = BASE_DIR / "scenarios_v3"
 DATASET_DIR = BASE_DIR / "output" / "dataset"
 
 
-# ── Tools schema (matches Ollama injection format) ────────────────────────────
+class DatasetValidationError(ValueError):
+    """Raised when source scenarios cannot produce a trustworthy dataset."""
 
-TOOLS_SCHEMA = [
-    {"name": "read_file", "description": "Read file with line numbers", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
-    {"name": "partial_read", "description": "Read line range", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}}, "required": ["path", "start_line", "end_line"]}},
-    {"name": "create_file", "description": "Create new file (fails if exists)", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-    {"name": "replace_lines", "description": "Replace line range in file", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "content": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}}, "required": ["file_path", "content", "start_line", "end_line"]}},
-    {"name": "add_content_after_line", "description": "Insert after line", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "line_number": {"type": "integer"}, "content": {"type": "string"}}, "required": ["file_path", "line_number", "content"]}},
-    {"name": "add_content_before_line", "description": "Insert before line", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "line_number": {"type": "integer"}, "content": {"type": "string"}}, "required": ["file_path", "line_number", "content"]}},
-    {"name": "edit_symbol", "description": "Replace method/function by name", "parameters": {"type": "object", "properties": {"symbol": {"type": "string"}, "new_code": {"type": "string"}, "file_path": {"type": "string"}}, "required": ["symbol", "new_code"]}},
-    {"name": "add_symbol", "description": "Add method to class/file", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "code": {"type": "string"}, "class_name": {"type": "string"}}, "required": ["file_path", "code"]}},
-    {"name": "remove_symbol", "description": "Remove method/function", "parameters": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "rename_symbol", "description": "Rename everywhere", "parameters": {"type": "object", "properties": {"symbol": {"type": "string"}, "new_name": {"type": "string"}}, "required": ["symbol", "new_name"]}},
-    {"name": "move_symbol", "description": "Move to another file", "parameters": {"type": "object", "properties": {"symbol": {"type": "string"}, "target_file": {"type": "string"}}, "required": ["symbol", "target_file"]}},
-    {"name": "get_symbol_code", "description": "Get source of symbol", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
-    {"name": "list_symbols", "description": "List symbols in file", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}}, "required": ["file_path"]}},
-    {"name": "search_symbols", "description": "Search symbols across project", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-    {"name": "find_references", "description": "Find all usages", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
-    {"name": "analyze_code", "description": "Detect code issues", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}}, "required": []}},
-    {"name": "help", "description": "Get help for tools", "parameters": {"type": "object", "properties": {"context": {"type": "string"}}, "required": []}},
-    {"name": "execute_command", "description": "Run shell command", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-    {"name": "add_note", "description": "Save info for later", "parameters": {"type": "object", "properties": {"note": {"type": "string"}}, "required": ["note"]}},
-    {"name": "think", "description": "Reason before acting (user sees this)", "parameters": {"type": "object", "properties": {"reasoning": {"type": "string"}}, "required": ["reasoning"]}},
-    {"name": "step_complete", "description": "Signal step done", "parameters": {"type": "object", "properties": {"summary": {"type": "string"}, "status": {"type": "string"}, "next_steps": {"type": "array", "items": {"type": "object", "properties": {"op": {"type": "string"}, "index": {"type": "integer"}, "title": {"type": "string"}, "description": {"type": "string"}}}}, "final_answer": {"type": "string"}}, "required": ["summary", "status"]}},
-    {"name": "send_message", "description": "Message to user", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
-    {"name": "list_directory", "description": "List files at path", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
-    {"name": "glob", "description": "Find files by pattern", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
-    {"name": "code_search", "description": "Search text/regex in files", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
-    {"name": "project_structure", "description": "Show directory tree", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
-    {"name": "git_status", "description": "Git status", "parameters": {"type": "object", "properties": {}, "required": []}},
-    {"name": "git_diff", "description": "Git diff", "parameters": {"type": "object", "properties": {}, "required": []}},
-    {"name": "git_branch", "description": "Git branch ops", "parameters": {"type": "object", "properties": {"branch_name": {"type": "string"}}, "required": ["branch_name"]}},
-    {"name": "git_commit", "description": "Git commit", "parameters": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}},
-    {"name": "web_search", "description": "Search the web using DuckDuckGo", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "num_results": {"type": "integer"}}, "required": ["query"]}},
-    {"name": "web_fetch", "description": "Fetch readable content from URL", "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "format": {"type": "string"}}, "required": ["url"]}},
-    {"name": "code_search_web", "description": "Search web for code examples and API docs", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "language": {"type": "string"}, "num_results": {"type": "integer"}}, "required": ["query"]}},
-]
+
+def _function_schemas() -> list[dict[str, Any]]:
+    """Return the inner function objects used by model-specific formatters."""
+    return [schema["function"] for schema in get_training_tool_schemas()]
 
 
 def build_system_prompt_with_tools() -> str:
     """Build system prompt with tools schema in Qwen/Ollama format."""
     tools_json = "\n".join(
-        json.dumps({"type": "function", "function": t}, ensure_ascii=False)
-        for t in TOOLS_SCHEMA
+        json.dumps({"type": "function", "function": schema}, ensure_ascii=False)
+        for schema in _function_schemas()
     )
-    return f"""You are an expert software engineer. You work methodically: understand → plan → execute → verify.
+    return f"""You are Infinidev's implementation agent.
+
+Ground every action in the user's task, repository evidence from this turn, or a tool result.
 
 # Tools
 
-You may call one or more functions to assist with the user query.
-
-You are provided with function signatures within <tools></tools> XML tags:
+The runtime exposes these function schemas:
 <tools>
 {tools_json}
 </tools>
 
-For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+Inspect the files that establish the requested behavior before changing state. After each change,
+run the smallest command that exercises that behavior. Report completion only when the tool output
+contains concrete evidence that the requested result exists.
+
+Return exactly one function call in each assistant turn, using this format:
 <tool_call>
-{{"name": <function-name>, "arguments": <args-json-object>}}
+{{"name": "read_file", "arguments": {{"file_path": "src/main.py"}}}}
 </tool_call>
 
-IMPORTANT: After calling a tool, STOP immediately and wait for the result. Do NOT generate tool outputs yourself. The system will execute the tool and return the real result."""
+The tool call ends the assistant turn. Wait for the runtime result before deciding the next action.
+Never invent tool output. Finish with step_complete only after verification succeeds."""
 
 
 def expand_tool_calls(scenario: dict) -> list[dict]:
@@ -118,7 +91,11 @@ def expand_tool_calls(scenario: dict) -> list[dict]:
                 i += 1  # skip the tool turn
 
             # Split results by --- separator
-            results = [r.strip() for r in tool_result.split("\n---\n")] if "---" in tool_result else [tool_result]
+            results = (
+                [result.strip() for result in tool_result.split("\n---\n")]
+                if "---" in tool_result
+                else [tool_result]
+            )
 
             # Pad results if fewer than tool calls
             while len(results) < len(tool_calls):
@@ -169,12 +146,12 @@ def _gemma4_encode_value(value) -> str:
 
 
 def _gemma4_tool_declarations() -> str:
-    """Build Gemma 4 tool declarations from TOOLS_SCHEMA.
+    """Build Gemma 4 tool declarations from live function schemas.
 
     Format: <|tool>declaration:name{description:<|"|>...<|"|>,parameters:{...}}<|tool|>
     """
     decls = []
-    for tool in TOOLS_SCHEMA:
+    for tool in _function_schemas():
         name = tool["name"]
         desc = _gemma4_escape(tool.get("description", ""))
         params = tool.get("parameters", {})
@@ -320,14 +297,18 @@ def format_qwen_native(scenario: dict) -> str:
             if tool_calls:
                 tc = tool_calls[0]  # 1 per turn after expansion
                 tc_json = json.dumps(tc, ensure_ascii=False)
-                parts.append(f"<|im_start|>assistant\n<tool_call>\n{tc_json}\n</tool_call><|im_end|>")
+                parts.append(
+                    f"<|im_start|>assistant\n<tool_call>\n{tc_json}\n</tool_call><|im_end|>"
+                )
             else:
                 content = turn.get("content", "")
                 parts.append(f"<|im_start|>assistant\n{content}<|im_end|>")
 
         elif role == "tool":
             content = turn.get("content", "")
-            parts.append(f"<|im_start|>user\n<tool_response>\n{content}\n</tool_response><|im_end|>")
+            parts.append(
+                f"<|im_start|>user\n<tool_response>\n{content}\n</tool_response><|im_end|>"
+            )
 
     return "\n".join(parts)
 
@@ -367,51 +348,70 @@ def compute_assistant_mask(text: str, tokenizer) -> list[int]:
     return mask
 
 
-def build_dataset(fmt: str = "qwen_native"):
-    """Read all scenario files and build the dataset."""
-    DATASET_DIR.mkdir(parents=True, exist_ok=True)
-
-    all_examples = []
+def _load_validated_scenarios() -> list[tuple[Path, dict[str, Any]]]:
+    """Load every scenario and reject the batch if any input is invalid."""
     scenario_files = sorted(SCENARIOS_DIR.glob("*.jsonl"))
-
     if not scenario_files:
-        print(f"No scenario files found in {SCENARIOS_DIR}")
-        return
+        raise DatasetValidationError(f"No scenario files found in {SCENARIOS_DIR}")
 
+    scenarios: list[tuple[Path, dict[str, Any]]] = []
+    problems: list[str] = []
     for sf in scenario_files:
-        with open(sf) as f:
+        with sf.open(encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     scenario = json.loads(line)
-
-                    if fmt == "qwen_native":
-                        text = format_qwen_native(scenario)
-                    elif fmt == "gemma4":
-                        text = format_gemma4(scenario)
-                    elif fmt == "gemma4_bare":
-                        text = format_gemma4_bare(scenario)
-                    elif fmt == "raw":
-                        text = json.dumps(scenario, ensure_ascii=False)
-                    else:
-                        text = format_qwen_native(scenario)  # default
-
-                    all_examples.append({
-                        "text": text,
-                        "metadata": {
-                            "repo": scenario.get("repo", sf.stem),
-                            "lang": scenario.get("lang", ""),
-                            "type": scenario.get("type", ""),
-                        },
-                    })
                 except json.JSONDecodeError as e:
-                    print(f"  [error] {sf.name}:{line_num}: {e}")
-                except Exception as e:
-                    print(f"  [error] {sf.name}:{line_num}: {e}")
+                    problems.append(f"{sf.name}:{line_num}: invalid JSON: {e}")
+                    continue
+                result = validate_scenario(scenario, source=f"{sf.name}:{line_num}")
+                if result["errors"]:
+                    problems.extend(
+                        f"{sf.name}:{line_num}: {message}" for message in result["errors"]
+                    )
+                    continue
+                scenarios.append((sf, scenario))
 
-    print(f"Loaded {len(all_examples)} examples from {len(scenario_files)} files (format: {fmt})")
+    if problems:
+        shown = "\n".join(f"  - {problem}" for problem in problems[:20])
+        omitted = len(problems) - min(len(problems), 20)
+        suffix = f"\n  - ... {omitted} additional errors" if omitted else ""
+        raise DatasetValidationError(
+            f"Refusing to build from {len(problems)} validation errors:\n{shown}{suffix}\n"
+            "Run `uv run python -m finetune.validate_quality` for the full audit."
+        )
+    return scenarios
+
+
+def build_dataset(fmt: str = "qwen_native") -> tuple[Path, Path]:
+    """Build train and validation files from a fully valid scenario batch."""
+    scenarios = _load_validated_scenarios()
+    all_examples: list[dict[str, Any]] = []
+    for source_file, scenario in scenarios:
+        if fmt == "qwen_native":
+            text = format_qwen_native(scenario)
+        elif fmt == "gemma4":
+            text = format_gemma4(scenario)
+        elif fmt == "gemma4_bare":
+            text = format_gemma4_bare(scenario)
+        elif fmt == "raw":
+            text = json.dumps(scenario, ensure_ascii=False)
+        else:
+            raise ValueError(f"Unsupported dataset format: {fmt}")
+
+        all_examples.append({
+            "text": text,
+            "metadata": {
+                "repo": scenario.get("repo", source_file.stem),
+                "lang": scenario.get("lang", ""),
+                "type": scenario.get("type", ""),
+            },
+        })
+
+    print(f"Loaded {len(all_examples)} validated examples (format: {fmt})")
 
     random.seed(42)
     random.shuffle(all_examples)
@@ -423,8 +423,9 @@ def build_dataset(fmt: str = "qwen_native"):
     train_path = DATASET_DIR / f"train_{fmt}.jsonl"
     val_path = DATASET_DIR / f"val_{fmt}.jsonl"
 
+    DATASET_DIR.mkdir(parents=True, exist_ok=True)
     for path, data in [(train_path, train_examples), (val_path, val_examples)]:
-        with open(path, "w") as f:
+        with path.open("w", encoding="utf-8") as f:
             for ex in data:
                 f.write(json.dumps(ex, ensure_ascii=False) + "\n")
 
@@ -451,7 +452,7 @@ def build_dataset(fmt: str = "qwen_native"):
             tc_closed = sample.count("<|tool_call|>")
             print(f"\nSample check (first example):")
             print(f"  Tool calls: {tc_count}")
-            print(f"  Properly closed (<|tool_call|>): {tc_closed}")
+            print(f"  Closing markers (<|tool_call|>): {tc_closed}")
             print(f"  Match: {'YES' if tc_count == tc_closed else 'NO — mismatch!'}")
             has_system = "<|turn>system" in sample
             print(f"  System turn: {'YES' if has_system else 'NO (bare mode)'}")
@@ -460,17 +461,25 @@ def build_dataset(fmt: str = "qwen_native"):
             im_end_after_tc = sample.count("</tool_call><|im_end|>")
             print(f"\nSample check (first example):")
             print(f"  Tool calls: {tc_count}")
-            print(f"  Properly closed (</tool_call><|im_end|>): {im_end_after_tc}")
-            print(f"  Match: {'YES' if tc_count == im_end_after_tc else 'NO — some tool calls not properly closed!'}")
+            print(f"  Closing markers (</tool_call><|im_end|>): {im_end_after_tc}")
+            match = "YES" if tc_count == im_end_after_tc else "NO - marker count differs!"
+            print(f"  Match: {match}")
+    return train_path, val_path
 
 
-def main():
+def main() -> int:
+    """Parse CLI arguments and return a process exit code."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--format", "-f", default="qwen_native",
                         choices=["qwen_native", "gemma4", "gemma4_bare", "raw"])
     args = parser.parse_args()
-    build_dataset(args.format)
+    try:
+        build_dataset(args.format)
+    except DatasetValidationError as exc:
+        print(exc)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

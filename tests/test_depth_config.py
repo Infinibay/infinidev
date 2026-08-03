@@ -34,30 +34,23 @@ class TestDepthConfigs:
         cfg = DEPTH_CONFIGS[DepthLevel.minimal]
         assert cfg.skip_questions is True
         assert cfg.skip_investigate is True
-        assert cfg.reject_write_on_existing is False
-        assert cfg.require_test_before_complete is False
 
     def test_light_skips_questions_investigate(self):
         cfg = DEPTH_CONFIGS[DepthLevel.light]
         assert cfg.skip_questions is True
         assert cfg.skip_investigate is True
-        assert cfg.reject_write_on_existing is False
 
     def test_standard_runs_everything(self):
         cfg = DEPTH_CONFIGS[DepthLevel.standard]
         assert cfg.skip_questions is False
         assert cfg.skip_investigate is False
-        assert cfg.reject_write_on_existing is False
-        assert cfg.require_test_before_complete is False
 
-    def test_deep_has_guardrails(self):
+    def test_deep_uses_stricter_execution_prompt(self):
         cfg = DEPTH_CONFIGS[DepthLevel.deep]
         assert cfg.skip_questions is False
         assert cfg.skip_investigate is False
-        assert cfg.reject_write_on_existing is True
-        assert cfg.require_test_before_complete is True
-        assert cfg.auto_revert_on_regression is True
-        assert cfg.aggressive_summarizer is True
+        assert "MUST run tests" in cfg.prompt_suffix
+        assert "Use edit_file" in cfg.prompt_suffix
 
     def test_depth_ordering_questions(self):
         """Deeper levels allow more questions."""

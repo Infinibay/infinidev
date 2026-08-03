@@ -25,7 +25,6 @@ from infinidev.engine.schema_sanitizer import (
     STEP_COMPLETE_SCHEMA,
     ADD_NOTE_SCHEMA,
     ADD_SESSION_NOTE_SCHEMA,
-    THINK_SCHEMA,
     ADD_STEP_SCHEMA,
     MODIFY_STEP_SCHEMA,
     REMOVE_STEP_SCHEMA,
@@ -243,8 +242,8 @@ def execute_tool_call(
 ) -> str:
     """Execute a tool call and return the result as a string.
 
-    Calls ``tool._run()`` directly (bypassing CrewAI's ``BaseTool.run()``)
-    with kwargs filtering to strip hallucinated parameters.
+    Calls ``tool._run()`` directly with kwargs filtering to strip hallucinated
+    parameters.
 
     If ``attachments_out`` is provided and the tool returned a
     ``ToolResult`` with image attachments, those ``ImageAttachment`` objects

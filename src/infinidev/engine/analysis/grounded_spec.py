@@ -8,7 +8,7 @@ for the user, and a design direction chosen with its rejected alternatives.
 This is a frozen dataclass attached to the EscalationPacket (mirroring
 ``design_brief``) and rendered into the planner handoff so the planner builds
 steps on top of a complete spec instead of the raw request. See
-``docs_spec_elaboration_loop.md`` for the full design.
+``docs/SPEC_ELABORATION.md`` for the runtime contract.
 
 Every field is produced by the single configured model (no tiering) plus
 deterministic checks; ``render_for_planner`` is the only contract the planner

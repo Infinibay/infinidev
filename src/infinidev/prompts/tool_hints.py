@@ -268,10 +268,6 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Save a note that persists across tasks in this session",
         "add_session_note(note='Auth uses JWT RS256, verify_token at src/auth/jwt.py:42')",
     ),
-    "think": (
-        "Reason before acting (does not count as tool call)",
-        "think(reasoning='The bug is in...')",
-    ),
 }
 
 
@@ -335,7 +331,6 @@ _PROTOCOL_TOOLS = {
     "step_complete",
     "add_note",
     "add_session_note",
-    "think",
     "respond",
     "escalate",
     "emit_plan",
@@ -658,7 +653,7 @@ def build_execute_prompt(
         '- Do NOT refactor, clean up, or "improve" adjacent code',
         "- Do NOT add error handling for cases that can't happen",
         "- Do NOT add abstractions for one-time operations",
-        "- Verify your edit: run the relevant test",
+        "- Verify your edit with the smallest test target that executes the changed behavior",
         "- Call step_complete when done",
         "",
         build_editing_rules(available_tools),
@@ -678,6 +673,6 @@ def get_available_tool_names(tools: list) -> set[str]:
         name = getattr(t, "name", None) or getattr(t, "_name", None)
         if name:
             names.add(name)
-    # Engine pseudo-tools are always available
-    names.update({"step_complete", "add_note", "add_session_note", "think"})
+    # Engine pseudo-tools are always available.
+    names.update({"step_complete", "add_note", "add_session_note"})
     return names

@@ -13,7 +13,7 @@ from __future__ import annotations
 PERSONA_PALETTE: list[tuple[str, str]] = [
     (
         "advocate-mvp",
-        "Pushes for the simplest thing that could work. Attacks "
+        "Pushes for the smallest design that satisfies the stated constraints. Attacks "
         "over-engineering and speculative generality; asks 'what is the "
         "smallest change that solves the actual problem?'",
     ),
@@ -37,7 +37,7 @@ PERSONA_PALETTE: list[tuple[str, str]] = [
     (
         "integrator",
         "Cares how the change fits the existing codebase: what it touches, "
-        "what conventions it must follow, what it might break elsewhere.",
+        "what conventions it must follow, and what it can break elsewhere.",
     ),
 ]
 

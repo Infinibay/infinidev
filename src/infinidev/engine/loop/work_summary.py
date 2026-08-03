@@ -20,7 +20,7 @@ The summary deliberately captures, per the product requirement:
   * what was done in each file (prose, not code — code only when it is
     genuinely load-bearing);
   * challenges / problems hit along the way (so they are not repeated);
-  * anything else relevant enough to remember.
+  * any verified decision or follow-up that affects a future run.
 
 Synthesis uses the single configured model when enabled; a deterministic
 assembly from the same source data is the always-available fallback, so
@@ -64,8 +64,8 @@ worked around, or remains broken. These matter most: they stop the next \
 turn from repeating mistakes.
 4. **Unfinished plan steps** — scope that was pending, active, blocked or \
 skipped when the run ended. Preserve it explicitly for the next turn. \
-5. **Other notes worth remembering** — decisions, follow-ups, things the \
-user should be reminded of.
+5. **Other notes worth remembering** — decisions, follow-ups, and reminders \
+for the user.
 
 Aim for 120-250 words. If almost nothing happened, say so in one line."""
 

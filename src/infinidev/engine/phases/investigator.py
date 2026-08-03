@@ -110,7 +110,7 @@ def _investigate(agent: Any,
 
         if verbose:
             note_count = len(engine._last_state.notes) if engine._last_state else 0
-            _log(f"    {DIM}→ {note_count} notes: {answer_text[:100]}{RESET}")
+            _log(f"    {DIM}Notes ({note_count}): {answer_text[:100]}{RESET}")
 
     return answers, all_notes
 
@@ -233,7 +233,7 @@ def _investigate_iteratively(agent: Any,
 
         if verbose:
             note_count = len(engine._last_state.notes) if engine._last_state else 0
-            _log(f"    {DIM}→ {note_count} notes: {answer_text[:100]}{RESET}")
+            _log(f"    {DIM}Notes ({note_count}): {answer_text[:100]}{RESET}")
 
     def _investigate_with_followups(question: dict, label_prefix: str, depth: int) -> None:
         """Investigate a question, then recursively investigate follow-ups."""
@@ -260,7 +260,7 @@ def _investigate_iteratively(agent: Any,
         for j, fq in enumerate(followups):
             if total_investigated >= max_questions:
                 break
-            fu_label = f"{label_prefix} → F{j+1}"
+            fu_label = f"{label_prefix} / F{j+1}"
             _investigate_with_followups(fq, fu_label, depth + 1)
 
     # Investigate each seed question with follow-ups

@@ -37,7 +37,7 @@ def _generate_questions_text_mode(
         f"Task: {description}\n\n"
         f"{strategy.questions_prompt}\n\n"
         f"Output a NUMBERED LIST of {q_min}-{max_questions} questions.\n"
-        f"Each question should be answerable by reading code or running commands.\n\n"
+        f"Make every question answerable by reading code or running commands.\n\n"
         f"Example format:\n"
         f"1. Where is the auth module and what function handles login?\n"
         f"2. Are there existing tests for the login flow?\n"

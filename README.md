@@ -246,3 +246,12 @@ uv run pytest tests/
 # Run a specific test
 uv run pytest tests/test_tui.py::test_space_inserts_space_character -v
 ```
+
+Prompt changes must follow [`docs/PROMPTING.md`](docs/PROMPTING.md). The current
+specification-elaboration design is documented in
+[`docs/SPEC_ELABORATION.md`](docs/SPEC_ELABORATION.md).
+
+## License
+
+Infinidev is distributed under the MIT License. Copyright (c) 2026 Infinibay LLC
+<andres@infinibay.net>. See [`LICENSE.md`](LICENSE.md).

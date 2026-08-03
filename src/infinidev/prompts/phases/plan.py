@@ -142,7 +142,7 @@ Use add_step() to ADD steps to the plan, then step_complete when done.
 ## EXAMPLES OF GOOD PLANNING
 
 Example 1 — Planning a new endpoint:
-  1. think: "Notes say: routes use @app.get, return Pydantic models, auth via Depends. Need /reports endpoint"
+  1. Evidence: notes say routes use @app.get, return Pydantic models, and auth via Depends; the task needs /reports
   2. add_step(index=2, title="Add GET /reports route skeleton in routes/reports.py with empty response, register in app.py")
      add_step(index=3, title="Add report query logic in routes/reports.py — filter orders by date range, aggregate by category")
      add_step(index=4, title="Run pytest tests/test_reports.py to check progress")
@@ -152,7 +152,7 @@ Example 1 — Planning a new endpoint:
   3. step_complete: status="done", summary="Plan complete: 5 steps"
 
 Example 2 — Planning a from-scratch implementation:
-  1. think: "61 tests, need Database class. Build order: storage, then CREATE, then INSERT, then SELECT, then WHERE, then JOINs, then aggregates"
+  1. Evidence: 61 tests require a Database class; dependencies order storage, CREATE, INSERT, SELECT, WHERE, JOINs, then aggregates
   2. add_step(index=2, title="Create file with class skeleton: __init__() with storage dict, execute() dispatcher")
      add_step(index=3, title="Add CREATE TABLE parsing in execute() — extract table name, column names and types")
      add_step(index=4, title="Add INSERT INTO execution — parse columns and values, handle auto-increment")
@@ -220,7 +220,7 @@ Use add_step() to ADD steps to the plan, then step_complete when done.
 ## EXAMPLES OF GOOD PLANNING
 
 Example — Extracting helpers from a monolith:
-  1. think: "Notes say: process() is 130 lines, 3 blocks. Callers: main.py and tests. 48 tests passing"
+  1. Evidence: process() has 130 lines in 3 blocks, callers are main.py and tests, and all 48 tests pass
   2. add_step(index=2, title="Extract _parse_csv() from process() lines 20-55 — move to new function, call from process()")
      add_step(index=3, title="Run full test suite to verify 48 tests still pass")
      add_step(index=4, title="Extract _aggregate() from process() lines 56-95")

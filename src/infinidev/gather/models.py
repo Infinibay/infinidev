@@ -26,11 +26,6 @@ DEPTH_CONFIGS: dict[DepthLevel, DepthConfig] = {
         plan_min_steps=1,
         plan_max_rounds=2,
         replan_max_rounds=1,
-        allow_only_add_steps=False,  # model is free
-        reject_write_on_existing=False,
-        require_test_before_complete=False,
-        auto_revert_on_regression=False,
-        aggressive_summarizer=False,
         prompt_suffix="",
     ),
     DepthLevel.light: DepthConfig(
@@ -41,11 +36,6 @@ DEPTH_CONFIGS: dict[DepthLevel, DepthConfig] = {
         plan_min_steps=2,
         plan_max_rounds=3,
         replan_max_rounds=2,
-        allow_only_add_steps=True,
-        reject_write_on_existing=False,
-        require_test_before_complete=False,
-        auto_revert_on_regression=False,
-        aggressive_summarizer=False,
         prompt_suffix="\nReminder: verify your changes work before calling step_complete.",
     ),
     DepthLevel.standard: DepthConfig(
@@ -56,11 +46,6 @@ DEPTH_CONFIGS: dict[DepthLevel, DepthConfig] = {
         plan_min_steps=3,
         plan_max_rounds=5,
         replan_max_rounds=3,
-        allow_only_add_steps=True,
-        reject_write_on_existing=False,
-        require_test_before_complete=False,
-        auto_revert_on_regression=False,
-        aggressive_summarizer=False,
         prompt_suffix="",
     ),
     DepthLevel.deep: DepthConfig(
@@ -71,18 +56,12 @@ DEPTH_CONFIGS: dict[DepthLevel, DepthConfig] = {
         plan_min_steps=5,
         plan_max_rounds=5,
         replan_max_rounds=3,
-        allow_only_add_steps=True,
-        reject_write_on_existing=True,
-        require_test_before_complete=True,
-        auto_revert_on_regression=True,
-        aggressive_summarizer=True,
         prompt_suffix=(
             "\nSTRICT RULES (deep mode):\n"
             "- You MUST run tests before calling step_complete\n"
-            "- Do NOT use write_file on files that already exist — use edit_method or edit_file\n"
+            "- Use edit_file for existing files and create_file only for new files\n"
             "- Each step should change at most ONE method or function\n"
             "- If tests regress, STOP and rethink before proceeding"
         ),
     ),
 }
-

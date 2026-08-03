@@ -1,0 +1,176 @@
+{
+  "exit_code": 0,
+  "patterns": [
+    {
+      "id": "authorization_header_credential",
+      "match_count": 0,
+      "regex_ascii": "(?im)^\\s*authorization\\s*:\\s*(?:bearer|basic)\\s+[A-Za-z0-9+/=_-]{12,}\\s*$"
+    },
+    {
+      "id": "aws_access_key_id",
+      "match_count": 0,
+      "regex_ascii": "(?<![A-Z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])"
+    },
+    {
+      "id": "github_token",
+      "match_count": 0,
+      "regex_ascii": "(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255})(?![A-Za-z0-9_])"
+    },
+    {
+      "id": "jwt_compact",
+      "match_count": 0,
+      "regex_ascii": "(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])"
+    },
+    {
+      "id": "openai_api_key",
+      "match_count": 0,
+      "regex_ascii": "(?<![A-Za-z0-9_-])sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"
+    },
+    {
+      "id": "pem_private_key",
+      "match_count": 0,
+      "regex_ascii": "-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"
+    },
+    {
+      "id": "sensitive_assignment",
+      "match_count": 0,
+      "regex_ascii": "(?ix)[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|password)[\"']?\\s*(?:=|:)\\s*[\"'](?!\\$|\\{|<|redacted|none|null)[A-Za-z0-9+/=_-]{12,}[\"']"
+    },
+    {
+      "id": "uri_embedded_password",
+      "match_count": 0,
+      "regex_ascii": "(?i)\\b[a-z][a-z0-9+.-]{2,20}://[^\\s/:@]+:[^\\s/@]{4,}@"
+    }
+  ],
+  "scanner": {
+    "algorithm": "Enumerate Git-versionable benchmark candidates; exclude generated per-case HOME cache trees and this self-referential output; scan bytes with the recorded regexes without emitting matches; hash every scanned file.",
+    "command": "uv run python <deterministic stdlib scanner executed during English report translation; selection, regexes, algorithm, runtime, hashes, and result retained in this artifact>",
+    "name": "stdlib-sensitive-pattern-scanner",
+    "runtime": "Python 3.13.3",
+    "version": 1
+  },
+  "schema_version": 1,
+  "scope": {
+    "candidate_file_count": 20,
+    "candidate_selection_command": "git ls-files --cached --others --exclude-standard -- bench/openai_subscription_swebench_20260802.md bench/runs/20260802T200907Z",
+    "excludes": [
+      "bench/runs/20260802T200907Z/*/home/**",
+      "bench/runs/20260802T200907Z/validation-sensitive-data.json"
+    ],
+    "exclusion_reasons": {
+      "bench/runs/20260802T200907Z/*/home/**": "Generated isolated HOME dependency/cache trees are runtime inputs, not retained benchmark evidence.",
+      "bench/runs/20260802T200907Z/validation-sensitive-data.json": "The scanner result cannot include its own stable hash."
+    },
+    "file_count": 19,
+    "file_list_sha256": "e6367138d140bb93052fe9ab52ce7970c0c72d3fa364516edd82b35d7fdd99cb",
+    "files": [
+      {
+        "path": "bench/openai_subscription_swebench_20260802.md",
+        "sha256": "d859cf6ebd3b93024b732c487536b125b77ba9495b2224bf2ae517bb02290f56",
+        "size_bytes": 15383
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-12907/attempt-1/command.txt",
+        "sha256": "8dfe24c78a393b51ca7e12ff5ec5e6838fd8218e9088373026bf7e3f2eba9f71",
+        "size_bytes": 631
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-12907/attempt-1/metadata.json",
+        "sha256": "f7586d6fbd8e752267f3f5582a26db0b492baafa222eb6674842f7a43c561090",
+        "size_bytes": 770
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-12907/command.txt",
+        "sha256": "8dfe24c78a393b51ca7e12ff5ec5e6838fd8218e9088373026bf7e3f2eba9f71",
+        "size_bytes": 631
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-12907/metadata.json",
+        "sha256": "eb4fb6330ae6a359fb12d6b98e7ae3426ad8b31abd7069610a87ca330071b900",
+        "size_bytes": 789
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-12907/predictions.jsonl",
+        "sha256": "dcfc22cba791fa24581802448422ebd0231e018d7e74b0073985f885a572b875",
+        "size_bytes": 1889
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-14182/attempt-1/command.txt",
+        "sha256": "0de28ff0bcf64b1ac8d17a435a3405ff14daecbbaab9baa8590f521afc9fb142",
+        "size_bytes": 631
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-14182/attempt-1/metadata.json",
+        "sha256": "d35d035d87ca4b248e7d1a14c55dc451b758b8f08a7c8fbf571155b1591733f8",
+        "size_bytes": 770
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-14182/command.txt",
+        "sha256": "0de28ff0bcf64b1ac8d17a435a3405ff14daecbbaab9baa8590f521afc9fb142",
+        "size_bytes": 631
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-14182/metadata.json",
+        "sha256": "63cdb588b75e992fb2030edd6ba00773d53a294a895d61b047cec54c58db30cf",
+        "size_bytes": 789
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/astropy__astropy-14182/predictions.jsonl",
+        "sha256": "6297d6f1970e4ca0fc209aa5da06608f27a8239781311b63631877308d9522f8",
+        "size_bytes": 1913
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/evaluation/command.txt",
+        "sha256": "2ec44ff8df463917bd0a2a98d197c483dddfd400f843dc7009aaff57be92eaff",
+        "size_bytes": 476
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/evaluation/gpt-5.6-sol.infinidev-openai-subscription-20260802T200907Z.json",
+        "sha256": "10455c6ca88a986d27fc901125bc9cc2fe754ad0aff273dc4b0860605469b8c5",
+        "size_bytes": 10585
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/evaluation/metadata.json",
+        "sha256": "a82f7e2ebfbd83d5335e41e4debde635a6b12d4dc849bbe1a080d2d3982fa6ad",
+        "size_bytes": 1965
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/evaluation/prediction_results.json",
+        "sha256": "367f1299ce369eab70b6ad06c4bd18feb246199f0ca5a1d627a4f7fc0aa948cf",
+        "size_bytes": 1159
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/evidence.json",
+        "sha256": "35c5a9b62c967f2389946c24b8bea5f093cb256d737849fcb3922adabc08aeb3",
+        "size_bytes": 10992
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/predictions.combined.jsonl",
+        "sha256": "a54c22088011220360017447d5e223a16c07b111416e0a9bd91130c3fb6d8794",
+        "size_bytes": 3802
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/validation-links.json",
+        "sha256": "d46548253ff8c736f9b4a0a006377e3148f4c68f21bf73c161ee0eb77f04fed8",
+        "size_bytes": 5586
+      },
+      {
+        "path": "bench/runs/20260802T200907Z/validation-pytest.txt",
+        "sha256": "fdbc2f0832e94cdcb9c4f300231cf6a6b0fd902fafae8ff9e490798d5df7267c",
+        "size_bytes": 6503
+      }
+    ],
+    "includes": [
+      "bench/openai_subscription_swebench_20260802.md",
+      "bench/runs/20260802T200907Z"
+    ]
+  },
+  "summary": {
+    "files_scanned": 19,
+    "matched_content_emitted": false,
+    "matched_files": 0,
+    "patterns_checked": 8,
+    "result": "pass",
+    "sensitive_pattern_matches": 0
+  }
+}

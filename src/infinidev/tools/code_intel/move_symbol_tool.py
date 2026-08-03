@@ -145,7 +145,7 @@ class MoveSymbolTool(InfinibayBaseTool):
         if os.path.abspath(source_path) == os.path.abspath(target_path):
             return self._error(
                 "Moving a symbol within the same file is not supported. "
-                "Use remove_symbol + add_symbol (or edit_symbol) instead."
+                "Use edit_file to relocate it within that file."
             )
 
         # Permission check both endpoints BEFORE any write (a move rewrites the
@@ -384,5 +384,4 @@ class MoveSymbolTool(InfinibayBaseTool):
                         continue
 
         return updated_count
-
 

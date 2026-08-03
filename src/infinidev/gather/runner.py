@@ -128,7 +128,8 @@ def _extract_json_array(text: str) -> list | None:
 
 _SYNTHESIZER_SYSTEM_PROMPT = """\
 Given a conversation history and the user's latest message, produce a complete, \
-self-contained task description that any developer could understand without additional context.
+self-contained task description containing the task, scope, constraints, technical \
+details, and expected outcome without relying on the conversation.
 
 Include: what needs to be done, why, any technical details mentioned, and the expected outcome.
 

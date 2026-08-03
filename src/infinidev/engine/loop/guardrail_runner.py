@@ -53,7 +53,7 @@ def apply_guardrail(
     for attempt in range(max_retries):
         try:
             validation = guardrail(result)
-            # CrewAI guardrail convention: returns (success, result_or_feedback)
+            # Tuple guardrails return (success, result_or_feedback).
             if isinstance(validation, tuple):
                 success, feedback = validation
                 if success:

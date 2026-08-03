@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
 
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.objective_verifier import ObjectiveVerifier
@@ -106,6 +109,20 @@ class TestObjectiveVerifierCommand:
         assert r.passed is True
         assert r.commands_run == []
 
+    def test_permission_denial_prevents_execution(self, tmp_path):
+        marker = tmp_path / "should-not-exist"
+        with patch(
+            "infinidev.tools.shell.execute_command_tool.check_command_permission",
+            return_value="Command denied by user",
+        ):
+            result = ObjectiveVerifier(str(tmp_path)).verify(
+                StepVerification(kind="command", spec=f"touch {marker.name}")
+            )
+
+        assert result.passed is False
+        assert "denied" in result.commands_run[0]["output"].lower()
+        assert not marker.exists()
+
 
 class TestObjectiveVerifierFileContains:
     def test_present(self, tmp_path):
@@ -131,6 +148,21 @@ class TestObjectiveVerifierFileContains:
         assert r.passed is False
         assert "unreadable" in r.summary
 
+    def test_path_outside_workspace_is_rejected(self, tmp_path):
+        outside = tmp_path.parent / "outside.txt"
+        outside.write_text("SECRET")
+
+        result = ObjectiveVerifier(str(tmp_path)).verify(
+            StepVerification(
+                kind="file_contains",
+                spec=str(outside),
+                observable="SECRET",
+            )
+        )
+
+        assert result.passed is False
+        assert "outside the workspace" in result.summary
+
 
 class TestObjectiveVerifierSymbolExists:
     def test_found(self, tmp_path):
@@ -148,6 +180,7 @@ class TestObjectiveVerifierSymbolExists:
         assert r.passed is False
 
 
+@pytest.mark.usefixtures("auto_approve_permissions")
 class TestObjectiveVerifierTestId:
     def test_passing_node(self, tmp_path):
         (tmp_path / "test_sample.py").write_text("def test_ok():\n    assert 1 + 1 == 2\n")
@@ -162,6 +195,20 @@ class TestObjectiveVerifierTestId:
             StepVerification(kind="test_id", spec="test_sample.py::test_bad")
         )
         assert r.passed is False
+
+    def test_node_id_is_not_interpreted_as_shell_syntax(self, tmp_path):
+        (tmp_path / "test_sample.py").write_text("def test_ok():\n    assert True\n")
+        marker = tmp_path / "injected"
+
+        result = ObjectiveVerifier(str(tmp_path)).verify(
+            StepVerification(
+                kind="test_id",
+                spec="test_sample.py::test_ok; touch injected",
+            )
+        )
+
+        assert result.passed is False
+        assert not marker.exists()
 
 
 # ── evidence_summary capture ─────────────────────────────────────────────

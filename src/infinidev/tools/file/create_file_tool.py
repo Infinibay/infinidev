@@ -37,7 +37,7 @@ class CreateFileTool(InfinibayBaseTool):
         if os.path.exists(file_path):
             return self._error(
                 f"File already exists: {file_path}. "
-                "Use replace_lines or edit_symbol to modify existing files."
+                "Use edit_file to modify an existing file."
             )
 
         # Check content size
@@ -123,4 +123,3 @@ class CreateFileTool(InfinibayBaseTool):
             "action": "created",
             "size_bytes": data["size_bytes"],
         })
-

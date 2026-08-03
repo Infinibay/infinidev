@@ -11,19 +11,17 @@ from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.file import (
     ReadFileTool, ListDirectoryTool, CodeSearchTool, GlobTool,
-    CreateFileTool, ReplaceLinesTool, WriteFileTool,
-    AddContentAfterLineTool, AddContentBeforeLineTool,
+    CreateFileTool,
 )
 from infinidev.tools.code_intel import (
     FindReferencesTool, GetSymbolCodeTool, ListSymbolsTool, SearchSymbolsTool,
     ProjectStructureTool, AnalyzeCodeTool, FindSimilarMethodsTool,
     SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool,
-    EditSymbolTool, AddSymbolTool, RemoveSymbolTool,
     RenameSymbolTool, MoveSymbolTool,
 )
 from infinidev.tools.git import GitDiffTool, GitStatusTool, GitCommitTool, GitBranchTool
 from infinidev.tools.knowledge import (
-    ReadFindingsTool, SearchFindingsTool, RecordFindingTool,
+    SearchFindingsTool, RecordFindingTool,
     UpdateFindingTool, DeleteFindingTool,
 )
 from infinidev.tools.shell import ExecuteCommandTool, CodeInterpreterTool
@@ -42,15 +40,13 @@ EXPECTED_READ_ONLY = {
     ProjectStructureTool, AnalyzeCodeTool, FindSimilarMethodsTool,
     SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool,
     GitDiffTool, GitStatusTool,
-    ReadFindingsTool, SearchFindingsTool,
+    SearchFindingsTool,
     WebSearchTool, WebFetchTool, CodeSearchWebTool,
 }
 
 # Tools that MUST remain write-capable — forbidden in chat_agent whitelist.
 KNOWN_WRITE_TOOLS = {
-    CreateFileTool, ReplaceLinesTool, WriteFileTool,
-    AddContentAfterLineTool, AddContentBeforeLineTool,
-    EditSymbolTool, AddSymbolTool, RemoveSymbolTool,
+    CreateFileTool,
     RenameSymbolTool, MoveSymbolTool,
     GitCommitTool, GitBranchTool,
     RecordFindingTool, UpdateFindingTool, DeleteFindingTool,

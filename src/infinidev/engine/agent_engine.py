@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class AgentEngine(ABC):
-    """Interface for agent execution engines (CrewAI, Claude Code, etc.)."""
+    """Common interface implemented by the loop and tree engines."""
 
     @abstractmethod
     def execute(
@@ -29,7 +29,7 @@ class AgentEngine(ABC):
         """Execute a task using the given agent and return the string result.
 
         Args:
-            agent: A InfinibayAgent instance with role, backstory, tools, etc.
+            agent: An InfinibayAgent instance with role, backstory, and tools.
             task_prompt: (description, expected_output) tuple.
             verbose: Whether to enable verbose logging.
             guardrail: Validation function for the output.
@@ -39,4 +39,3 @@ class AgentEngine(ABC):
             event_id: Agent event row ID for crash recovery checkpointing.
             resume_state: LoopState dict to resume from after crash.
         """
-

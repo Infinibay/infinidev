@@ -7,10 +7,13 @@ pattern — dialogs are created on first open and reused thereafter.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from infinidev.ui.app import InfinidevApp
+
+logger = logging.getLogger(__name__)
 
 
 class DialogManager:
@@ -431,35 +434,23 @@ class DialogManager:
         dialog opens immediately with whatever state is already cached and a
         background thread refreshes it.
         """
-        import logging as _log
-        _logger = _log.getLogger("infinidev.tui.debug_panel")
-        _logger.warning("[OPEN_DEBUG] enter, engine_running=%s",
-                        getattr(self._app, "_engine_running", None))
-
         if self._debug_state is None:
-            _logger.warning("[OPEN_DEBUG] lazy-init dialog")
             self._init_debug_dialog()
-            _logger.warning("[OPEN_DEBUG] lazy-init done")
 
         state = self._debug_state
         state.section_cursor = 0
         state.scroll = 0
         state.focus = "sections"
 
-        _logger.warning("[OPEN_DEBUG] setting active_dialog")
         self._app.active_dialog = "debug_panel"
-        _logger.warning("[OPEN_DEBUG] focusing sections window")
         try:
             self._app.app.layout.focus(self._debug_sections_window)
         except Exception as exc:
-            _logger.warning("[OPEN_DEBUG] focus failed: %s", exc)
-        _logger.warning("[OPEN_DEBUG] invalidate")
+            logger.debug("Debug panel focus failed: %s", exc)
         self._app.invalidate()
 
-        _logger.warning("[OPEN_DEBUG] scheduling background snapshot")
         from infinidev.ui.workers import run_in_background
         run_in_background(self._app, _refresh_debug_state, self._app, state)
-        _logger.warning("[OPEN_DEBUG] return — dialog should be visible")
 
     def _init_debug_dialog(self) -> None:
         """Create the debug panel dialog and register as a Float."""
@@ -589,9 +580,6 @@ def _refresh_debug_state(app, state) -> None:
 
     Must never raise — the UI is already showing the dialog.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     engine = app.engine
     if engine is None:
         state.session_notes = []

@@ -112,7 +112,10 @@ def build_execution_context(
         agent.backstory,
         tech_hints=getattr(agent, "_tech_hints", None),
         session_summaries=getattr(agent, "_session_summaries", None),
-        identity_override=getattr(agent, "_system_prompt_identity", None),
+        identity_override=(
+            kwargs.get("identity_override")
+            or getattr(agent, "_system_prompt_identity", None)
+        ),
         protocol_override=getattr(agent, "_system_prompt_protocol", None),
         small_model=is_small,
         workspace_path=getattr(agent, "workspace_path", None),

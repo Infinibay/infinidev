@@ -3,12 +3,12 @@
 import json
 import os
 import shlex
-import subprocess
 from typing import Type
 
 from pydantic import BaseModel, Field
 
 from infinidev.config.settings import settings
+from infinidev.engine.subprocess_runner import run_captured
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.file.code_search_input import CodeSearchInput
 
@@ -28,12 +28,13 @@ class CodeSearchTool(InfinibayBaseTool):
     def _has_git(path: str) -> bool:
         """Return True if *path* is inside a git repository."""
         try:
-            r = subprocess.run(
+            result = run_captured(
                 ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, cwd=path, timeout=5,
+                cwd=path,
+                timeout=5,
             )
-            return r.returncode == 0
-        except Exception:
+            return not result.timed_out and result.exit_code == 0
+        except OSError:
             return False
 
     def _run(
@@ -112,6 +113,7 @@ class CodeSearchTool(InfinibayBaseTool):
                         find_cmd.extend(["("] + find_expr + [")"])
                 # Strip -r from grep for file-list mode
                 cmd = [g for g in cmd if g != "-r"]
+                cmd.append("-H")
                 cmd.extend(["--", pattern])
                 shell_cmd = (
                     " ".join(_shell_quote(c) for c in find_cmd)
@@ -119,22 +121,23 @@ class CodeSearchTool(InfinibayBaseTool):
                     + " ".join(_shell_quote(c) for c in cmd)
                 )
                 try:
-                    result = subprocess.run(
-                        shell_cmd, shell=True,
-                        capture_output=True, text=True, timeout=30,
+                    result = run_captured(
+                        shell_cmd,
+                        shell=True,
                         cwd=file_path,
+                        timeout=30,
                     )
-                except subprocess.TimeoutExpired:
-                    return self._error("Search timed out (pattern may be too broad)")
-                except FileNotFoundError:
+                except OSError:
                     return self._error("grep is not installed or not in PATH")
+                if result.timed_out:
+                    return self._error("Search timed out (pattern may be too broad)")
 
-                if result.returncode in (1, 123):
+                if result.exit_code in (1, 123):
                     return json.dumps({
                         "pattern": pattern, "file_path": file_path,
                         "match_count": 0, "truncated": False, "matches": [],
                     })
-                if result.returncode not in (0, 1, 123):
+                if result.exit_code not in (0, 1, 123):
                     return self._error(f"Search failed: {result.stderr.strip()}")
 
                 # Skip the normal command execution below
@@ -144,19 +147,20 @@ class CodeSearchTool(InfinibayBaseTool):
 
         if cmd is not None:
             try:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=30,
+                result = run_captured(
+                    cmd,
                     cwd=file_path,
+                    timeout=30,
                 )
-            except subprocess.TimeoutExpired:
-                return self._error("Search timed out (pattern may be too broad)")
-            except FileNotFoundError:
+            except OSError:
                 return self._error(
                     "git/grep is not installed or not in PATH"
                 )
+            if result.timed_out:
+                return self._error("Search timed out (pattern may be too broad)")
 
         # grep/git-grep returns 1 when no matches found
-        if result.returncode in (1, 123):
+        if result.exit_code in (1, 123):
             return json.dumps({
                 "pattern": pattern,
                 "file_path": file_path,
@@ -164,7 +168,7 @@ class CodeSearchTool(InfinibayBaseTool):
                 "truncated": False,
                 "matches": [],
             })
-        if result.returncode not in (0, 1):
+        if result.exit_code not in (0, 1):
             return self._error(f"Search failed: {result.stderr.strip()}")
 
         lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
@@ -276,4 +280,3 @@ class CodeSearchTool(InfinibayBaseTool):
             "truncated": False,
             "matches": data["matches"],
         })
-

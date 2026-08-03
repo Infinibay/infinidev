@@ -229,7 +229,7 @@ class TestGracefulFailureModes:
         monkeypatch.setattr(_lit, "completion", _explode)
         result = run_chat_agent("hola")
         assert result.kind == "respond"
-        assert "problema" in result.reply.lower() or "error" in result.reply.lower()
+        assert "problem" in result.reply.lower() or "error" in result.reply.lower()
 
 
 class TestLanguageAwareFallbacks:

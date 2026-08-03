@@ -816,9 +816,8 @@ _QUERY_STOP_ZIPF = 5.0
 # get filtered as high-frequency words.  Does NOT match dots, so
 # "Agent.handleEvent" becomes ["Agent", "handleEvent"] which keeps
 # both halves distinct for the Zipf lookup.  Also allows non-ASCII
-# unicode letters via \p{L}-style fallback so that Spanish
-# ("autenticación"), French ("autenticación"), German
-# ("Authentifizierung"), etc. tokenize correctly.
+# Unicode letters via a \p{L}-style fallback so that words in languages
+# other than English tokenize correctly.
 _QUERY_TOKEN_RE = re.compile(r"[^\W\d_][\w]*", re.UNICODE)
 
 # Minimum number of tokens that must survive filtering before we

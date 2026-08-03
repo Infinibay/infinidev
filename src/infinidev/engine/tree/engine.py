@@ -10,15 +10,17 @@ Two modes:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import logging
-import sys
 import time
 from typing import Any
 
-from dataclasses import dataclass
-
+from infinidev.config.llm import get_litellm_params
+from infinidev.config.model_capabilities import get_model_capabilities
+from infinidev.db.service import store_exploration_tree
 from infinidev.engine.base import AgentEngine
+from infinidev.engine.engine_logging import log as _engine_log
 from infinidev.engine.tree.context import (
     INIT_TREE_SCHEMA,
     RESOLVE_NODE_SCHEMA,
@@ -44,10 +46,6 @@ from infinidev.engine.tool_dispatch import (
     execute_tool_call,
     tool_to_openai_schema,
 )
-from infinidev.config.llm import get_litellm_params
-from infinidev.config.model_capabilities import get_model_capabilities
-from infinidev.db.service import store_exploration_tree
-
 logger = logging.getLogger(__name__)
 
 # ── Event handling via centralized EventBus ─────────────────────────────────
@@ -65,9 +63,7 @@ def _emit_tree_event(
     """Emit event with human-readable message for TUI/classic mode."""
     data["user_message"] = user_message
     event_bus.emit(event_type, project_id, agent_id, data)
-    # Also print in classic mode (no TUI subscriber)
-    if not event_bus.has_subscribers:
-        print(user_message, file=sys.stderr, flush=True)
+    _engine_log(user_message)
 
 
 # ── Pretty logging ──────────────────────────────────────────────────────────
@@ -88,8 +84,7 @@ from infinidev.engine.engine_logging import (
 
 
 def _log(msg: str) -> None:
-    if not event_bus.has_subscribers:
-        print(msg, file=sys.stderr, flush=True)
+    _engine_log(msg)
 
 
 # LLM calling — imported from canonical module (includes retry, hooks,
@@ -249,7 +244,10 @@ class TreeEngine(AgentEngine):
             "logic": root.logic,
             "total_tokens": tree.total_tokens,
             "total_llm_calls": tree.total_llm_calls,
-        }, f"🌳 Tree initialized: \"{root.problem_statement[:80]}\" → {len(root.children)} sub-problems ({root.logic})")
+        }, (
+            f"🌳 Tree initialized: \"{root.problem_statement[:80]}\" with "
+            f"{len(root.children)} sub-problems ({root.logic})"
+        ))
 
         # ── PHASE 2: EXPLORE LOOP ────────────────────────────────────────
         _log(f"\n{_BOLD}Phase 2: Exploration{_RESET}")
@@ -530,7 +528,10 @@ class TreeEngine(AgentEngine):
                         "total_tokens": tree.total_tokens,
                         "total_tool_calls": tree.total_tool_calls,
                         "prompt_tokens": _last_prompt_tokens,
-                    }, f"  ✅ [{node.id}] → {node.state} ({node.confidence}): {(node.exploration_summary or '')[:80]}")
+                    }, (
+                        f"  ✅ [{node.id}] is {node.state} ({node.confidence}): "
+                        f"{(node.exploration_summary or '')[:80]}"
+                    ))
 
                     tree.explored_node_ids.append(node.id)
                     resolved = True

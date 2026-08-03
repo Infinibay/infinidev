@@ -37,21 +37,21 @@ Thumbs.db
 htmlcov/
 .coverage
 
-# uv
-uv.lock
-
 # Claude code
 .claude/
 
 # Fine-tuning data (large repos + model weights)
 finetune/repos/
-finetune/output/checkpoints*/
-finetune/output/merged*/
-finetune/output/model*/
-finetune/output/finetune.db
-finetune/output/training_log*.txt
+finetune/output/
+finetune/validation_report.txt
 finetune/__pycache__/
 unsloth_compiled_cache/
+
+# Benchmark and example output
+bench/runs/
+bench/predictions*.jsonl
+examples/**/build.log
+examples/**/*.db
 
 
 # ken — local index, daemon socket, logs

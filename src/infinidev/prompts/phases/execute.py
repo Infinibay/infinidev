@@ -33,7 +33,7 @@ Files you may modify: {{step_files}}
 - Do NOT refactor, clean up, or "improve" adjacent code
 - Do NOT add error handling for cases that can't happen
 - Do NOT add abstractions for one-time operations — 3 similar lines > premature helper
-- Verify your edit: run the relevant test
+- Verify your edit with the smallest test target that executes the changed behavior
 - Call step_complete when done
 
 """ + _EDIT_CONTRACT + """
@@ -111,8 +111,8 @@ Files you may modify: {{step_files}}
 - Do NOT refactor, clean up, or "improve" adjacent code
 - Do NOT add error handling for internal code paths — only validate at boundaries
 - Do NOT create helpers or abstractions for one-time operations
-- After EVERY edit, verify by running the project's check for that language
-  (an import/compile check or the relevant test), then proceed
+- After EVERY edit, run the language import/compile check and the smallest
+  test target that executes the changed behavior, then proceed
 - Call step_complete with a summary of what you changed
 
 """ + _EDIT_CONTRACT + """
@@ -177,7 +177,8 @@ You are a developer implementing ONE step. Write production-ready code for this 
 
 ## Rules
 - create_file for a new file, edit_file to change an existing one
-- Verify EVERY edit by running the project's check for that language (an import/compile check or the relevant test), then proceed
+- Verify EVERY edit with the language import/compile check and the smallest
+  test target that executes the changed behavior, then proceed
 - If a test fails after your edit, fix it before moving on
 - Don't anticipate future steps — stay focused on the current one
 - Don't add extras: no logging, no docstrings, no type hints unless asked

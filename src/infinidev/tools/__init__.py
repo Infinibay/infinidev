@@ -1,15 +1,10 @@
 from infinidev.tools.file import (
     ReadFileTool,
-    WriteFileTool,
-    MultiEditFileTool,
     EditFileTool,
     ListDirectoryTool,
     CodeSearchTool,
     GlobTool,
     CreateFileTool,
-    ReplaceLinesTool,
-    AddContentAfterLineTool,
-    AddContentBeforeLineTool,
     ViewImageTool,
 )
 from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
@@ -19,10 +14,6 @@ from infinidev.tools.meta.plan_tools import (
     AddStepTool,
     ModifyStepTool,
     RemoveStepTool,
-    PlanAddTool,
-    PlanListTool,
-    PlanRemoveTool,
-    PlanUpdateTool,
 )
 from infinidev.tools.meta.declare_test_command_tool import DeclareTestCommandTool
 from infinidev.tools.meta.tail_test_output_tool import TailTestOutputTool
@@ -43,7 +34,6 @@ from infinidev.tools.shell import (
 from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
 from infinidev.tools.knowledge import (
     RecordFindingTool,
-    ReadFindingsTool,
     SearchFindingsTool,
     ValidateFindingTool,
     RejectFindingTool,
@@ -69,18 +59,11 @@ from infinidev.tools.docs import (
     UpdateDocumentationTool,
 )
 from infinidev.tools.code_intel import (
-    FindDefinitionTool,
     FindReferencesTool,
     ListSymbolsTool,
     SearchSymbolsTool,
     GetSymbolCodeTool,
     ProjectStructureTool,
-    EditSymbolTool,
-    AddSymbolTool,
-    RemoveSymbolTool,
-    EditMethodTool,
-    AddMethodTool,
-    RemoveMethodTool,  # backward-compat aliases
     AnalyzeCodeTool,
     RenameSymbolTool,
     MoveSymbolTool,
@@ -94,12 +77,6 @@ FILE_TOOLS = [
     ReadFileTool,
     CreateFileTool,
     EditFileTool,
-    # ReplaceLinesTool / AddContentAfterLineTool / AddContentBeforeLineTool are
-    # unbound: all three are `edit_file` with a different way of pointing at
-    # the text. Line numbers shift as soon as an earlier edit in the same step
-    # lands, so an off-by-one writes into the wrong place and reports success;
-    # an exact-text match refuses instead. MultiEditFileTool stays unbound for
-    # the same reason it always was — one way to edit a file.
     ListDirectoryTool,
     CodeSearchTool,
     GlobTool,
@@ -115,15 +92,6 @@ META_TOOLS = [
     AddStepTool,
     ModifyStepTool,
     RemoveStepTool,
-    # PlanAddTool / PlanListTool / PlanUpdateTool / PlanRemoveTool are
-    # deliberately not bound. They back a second, durable plan under
-    # `.infinidev/plans` — but nothing in the engine, the prompt or the
-    # review ever reads it back, so writing to it is a no-op the model
-    # pays ~425 tokens of schema to be tempted by. Worse, two ways to
-    # "manage a plan" is exactly the ambiguity that makes tool selection
-    # unreliable: `add_step` is the one that steers the run.
-    # `plan_store` and `plan_tools` stay in the tree — rebinding them is
-    # this list, once something consumes the store.
     DeclareTestCommandTool,
     TailTestOutputTool,
 ]
@@ -139,12 +107,6 @@ SHELL_TOOLS = [
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
 KNOWLEDGE_TOOLS = [
     RecordFindingTool,
-    # ReadFindingsTool is unbound: it and `search_knowledge` were both
-    # full-text search over findings, and two tools for one algorithm is the
-    # ambiguity that makes tool selection unreliable. `search_knowledge`
-    # absorbed its browse mode and its session/type filters; the name still
-    # resolves through `_TOOL_ALIASES`. `search_findings` stays — semantic
-    # search is a different algorithm, not a different spelling.
     SearchFindingsTool,
     ValidateFindingTool,
     RejectFindingTool,
@@ -178,11 +140,6 @@ CODE_INTEL_TOOLS = [
     SearchSymbolsTool,
     GetSymbolCodeTool,
     ProjectStructureTool,
-    # EditSymbolTool / AddSymbolTool / RemoveSymbolTool are unbound: replacing,
-    # inserting or deleting a symbol body is `edit_file` addressed by name.
-    # RenameSymbolTool and MoveSymbolTool stay — those rewrite every reference
-    # and import across the index, which is an algorithm the model cannot
-    # reproduce by editing files one at a time.
     AnalyzeCodeTool,
     RenameSymbolTool,
     MoveSymbolTool,

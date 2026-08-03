@@ -24,10 +24,10 @@ For "Sort order is wrong in the task list — shows oldest first instead of newe
 
 ## EXAMPLES OF BAD QUESTIONS (DO NOT GENERATE THESE)
 
-- "What is this project?" (too broad, not relevant to the bug)
+- "What is this project?" (does not narrow the bug's location or cause)
 - "What programming language is used?" (obvious from the code)
 - "Can you explain the architecture?" (not targeted — ask about the specific area)
-- "What should I fix?" (the task already tells you)
+- "Which fix is required?" (the task already tells you)
 """
 
 BUG_FALLBACK = [
@@ -55,7 +55,7 @@ For "Implement a caching layer for database queries":
 2. What existing caching infrastructure exists? (Redis, in-memory, none)
 3. Which queries are most frequently called and would benefit from caching?
 4. Are there tests that verify query results? Will caching change behavior?
-5. What is the project structure and where should new modules go?
+5. Where do existing modules with this responsibility live?
 
 For "Build a module from scratch based on a test specification":
 1. What is the full public API expected? (classes, methods, signatures, return types)
@@ -66,15 +66,15 @@ For "Build a module from scratch based on a test specification":
 
 ## EXAMPLES OF BAD QUESTIONS (DO NOT GENERATE THESE)
 
-- "What should I implement?" (the task already says this)
+- "Which implementation is required?" (the task already says this)
 - "Is there documentation?" (go read the files instead of asking)
 - "How does everything work?" (too broad — ask about specific areas)
-- "What tests should I write?" (read the test file to find out)
+- "Which test is required?" (read the test file to find out)
 """
 
 FEATURE_FALLBACK = [
     "What is the expected API and behavior? (read tests/specs if they exist)",
-    "What existing code patterns should the implementation follow?",
+    "Which existing code patterns govern this implementation?",
     "What is the current test baseline?",
     "What are the dependencies between components? (build order)",
 ]
@@ -100,7 +100,7 @@ For "Move UserService from services/ to a new domain/ directory":
 ## EXAMPLES OF BAD QUESTIONS (DO NOT GENERATE THESE)
 
 - "What does the code do?" (too vague — ask about the specific function/class)
-- "Should I refactor this?" (the task already asks you to)
+- "Is a refactor part of the task?" (the task already says this)
 """
 
 REFACTOR_FALLBACK = [
@@ -117,11 +117,11 @@ Generate questions to understand the current state before making changes.
 
 For "Change the API timeout from 30s to 60s":
 1. Where is the timeout configured? (file, line, env var)
-2. Are there other timeout settings that might need to change too?
+2. Which other timeout settings share this value or behavior?
 
 For "Figure out why the deploy is failing":
 1. What does the deploy error log say?
-2. What changed recently that could cause the failure?
+2. Which recent change first introduced the failure?
 3. What is the deploy process? (scripts, CI config, commands)
 
 ## EXAMPLES OF BAD QUESTIONS

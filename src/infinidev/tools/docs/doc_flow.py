@@ -87,7 +87,7 @@ class DocFlow:
         # Step 2: fetch content from URLs
         raw_content = self._fetch_content(urls, library_name=library_name)
         if not raw_content:
-            raise RuntimeError(f"Could not fetch content from any URL for {library_name}")
+            raise RuntimeError(f"No URL returned fetchable content for {library_name}")
 
         # Step 3: plan sections via LLM
         sections = self._plan_sections(library_name, language, raw_content)
@@ -270,9 +270,9 @@ a developer can reference while coding.
 RULES:
 - Write ONLY about the software library "{library_name}", not about the general meaning of the word.
 - ONLY use information present in the source material below. Do NOT invent or guess.
-- If the source material does not contain relevant information for this section, \
+- If the source material contains no facts about this section, \
   respond with exactly: SKIP_SECTION
-- Use markdown formatting with proper headers (##, ###).
+- Use markdown headings at levels ## and ###.
 - ALWAYS include code examples in {language} using fenced code blocks (```{language}).
 - For "API Reference" sections: list classes, methods, functions with their signatures, \
   parameter types, return types, and a one-line description. Format as a reference, not prose.
@@ -282,7 +282,7 @@ RULES:
   and a minimal "hello world" example.
 - Be specific and concrete. Show actual function/class names, not generic descriptions.
 
-Source material (extract relevant information for "{title}"):
+Source material (extract facts for "{title}"):
 {chunk}"""
 
             try:

@@ -473,7 +473,7 @@ class ReviewEngine:
                 plan_lines.append(f"{num}. {title}{files_str}{status_str}")
                 detail = s.get("explanation", "")
                 if detail and detail != title:
-                    plan_lines.append(f"   → {detail[:300]}")
+                    plan_lines.append(f"   Detail: {detail[:300]}")
             parts.append("\n".join(plan_lines))
 
         parts.append(f"## Developer's Report\n{developer_result}")
@@ -582,7 +582,7 @@ class ReviewEngine:
                 plan_lines.append(f"{num}. {title}{files_str}{status_str}")
                 detail = s.get("explanation", "")
                 if detail and detail != title:
-                    plan_lines.append(f"   → {detail[:300]}")
+                    plan_lines.append(f"   Detail: {detail[:300]}")
             parts.append("\n".join(plan_lines))
 
         if automated_checks:
@@ -696,7 +696,7 @@ class ReviewEngine:
                 plan_lines.append(f"{num}. {title}{files_str}{status_str}")
                 detail = s.get("explanation", "")
                 if detail and detail != title:
-                    plan_lines.append(f"   → {detail[:300]}")
+                    plan_lines.append(f"   Detail: {detail[:300]}")
             parts.append("\n".join(plan_lines))
 
         # Automated checks (deterministic evidence — pre-classified severity)
@@ -949,8 +949,9 @@ class ReviewEngine:
             )
             for path, v in list(test_counts.items())[:15]:
                 lines.append(
-                    f"    • {path}: {v.get('before', 0)} → {v.get('after', 0)} "
-                    f"(Δ {v.get('delta', 0):+d})"
+                    f"    • {path}: before {v.get('before', 0)}, "
+                    f"after {v.get('after', 0)} "
+                    f"(change {v.get('delta', 0):+d})"
                 )
 
         file_symbols = checks.get("file_symbols") or {}
@@ -1217,7 +1218,7 @@ def run_review_rework_loop(
             if unverified:
                 _notify(
                     "objectives_unverified",
-                    f"{len(unverified)} objective(s) could not be verified — "
+                    f"{len(unverified)} objective(s) remain unverified — "
                     f"surfaced for human confirmation",
                 )
             if not failed:

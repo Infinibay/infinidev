@@ -147,9 +147,9 @@ class DesignBrief:
 
     def render_user_preview(self) -> str:
         """Short, user-facing summary shown via ``notify`` after the council."""
-        head = f"Consejo deliberó — enfoque elegido: {self.chosen_approach}"
+        head = f"Council decision - selected approach: {self.chosen_approach}"
         if self.dissent:
-            head += f"\n(Disidencia registrada: {self.dissent[0]})"
+            head += f"\n(Recorded dissent: {self.dissent[0]})"
         return head
 
 

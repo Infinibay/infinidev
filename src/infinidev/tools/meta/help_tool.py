@@ -102,14 +102,12 @@ def _pseudo_tool_schemas() -> dict[str, dict[str, Any]]:
         ADD_NOTE_SCHEMA,
         ADD_SESSION_NOTE_SCHEMA,
         STEP_COMPLETE_SCHEMA,
-        THINK_SCHEMA,
     )
 
     schemas = [
         STEP_COMPLETE_SCHEMA,
         ADD_NOTE_SCHEMA,
         ADD_SESSION_NOTE_SCHEMA,
-        THINK_SCHEMA,
     ]
     return {schema["function"]["name"]: schema["function"] for schema in schemas}
 

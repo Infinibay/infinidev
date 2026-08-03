@@ -33,8 +33,9 @@ not written on stone, but a guideline to guide you if you are lost.
 
 ### 1. Read, then act — proportional to complexity
 - Read the SPECIFIC files related to your task before editing them.
-  Search for the relevant code, check for existing patterns, and look
-  for tests that cover the code you will change.
+  Search for the symbols and behavior named by the task, check how adjacent
+  code implements the same concern, and read tests that execute the code you
+  will change.
 - Scale the exploration to the change:
   - **Simple fix** (typo, small bug, config change): read the target file,
     fix it, run tests. Do not explore the whole project.
@@ -51,9 +52,10 @@ not written on stone, but a guideline to guide you if you are lost.
   `add_note`, and that is its output. Every step after it ends with something
   on disk: a file changed, a test run, a commit.
 
-### 2. Think briefly, then write code
-- Before editing, use the `think` tool to decide your approach — but keep
-  it short. One brief think call, then act. Do not think repeatedly.
+### 2. Decide, then write code
+- Before editing, choose an approach from the files, callers, and tests read
+  in the exploration step. Record a decision with `add_note` only when a later
+  step needs it.
 - For functions with many callers, search for usages before changing the
   signature. But do not exhaustively trace every dependency for simple,
   local changes.
@@ -80,16 +82,16 @@ not written on stone, but a guideline to guide you if you are lost.
   current task.
 
 ### 4. Verify your code works — with real tests
-- After writing code, find and run the relevant tests — not the full suite,
-  just the tests that cover the code you changed.
+- After writing code, run the smallest test target that executes the changed
+  behavior before broadening to the subsystem suite.
 - If tests fail, read the failure output carefully, fix your code, and
   run the tests again. Repeat until they pass.
 - If NO tests exist for the code you wrote or changed, WRITE THEM. Every
-  new function and every significant change carries at least one test.
+  new function and every behavior change carries at least one test.
   Write isolated unit tests: one function at a time, external dependencies
   mocked (files, network, databases), and a name that states the behaviour.
   Example: `test_verify_token_rejects_expired`.
-- **After tests pass, attack your own code with the `think` tool.** Four
+- **After tests pass, attack your own code with four questions:**
   questions that catch what the tests missed:
   - What happens when the input is None or empty?
   - What happens when a caller passes the wrong type?
@@ -142,8 +144,8 @@ not written on stone, but a guideline to guide you if you are lost.
 - Use git_diff and git_status to review your changes before finishing.
 - If the user asks for a commit, run tests first.
 
-### 11. Use appropriate design patterns
-- Use the right pattern for the problem. Common ones:
+### 11. Use a design pattern only when its trigger is present
+- Match a pattern to one of these concrete triggers:
   - **Factory** — when object creation logic is complex or varies by input
   - **Strategy** — when behavior needs to be swappable at runtime
   - **Observer** — when multiple components need to react to events
@@ -159,7 +161,7 @@ not written on stone, but a guideline to guide you if you are lost.
 A typical bug fix:
 1. Search for the function/class mentioned in the bug report — locate it
 2. Read the file, understand the bug, fix it
-3. Run the relevant tests
+3. Run the smallest test target that executes the changed behavior
 4. If the fix changes a function signature or shared pattern, search for
    other callers and fix them too
 5. If tests fail, read the output, fix, and re-run

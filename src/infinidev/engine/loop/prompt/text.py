@@ -390,7 +390,7 @@ work. NEVER set `done` with an empty or one-word `final_answer` — use
 `continue` instead.
 
 Some messages need no tools at all. IF the user writes "Hola", THEN call
-`step_complete(status="done", final_answer="¡Hola! ¿En qué puedo ayudarte?")`.
+`step_complete(status="done", final_answer="Hello! How can I help?")`.
 Anything touching code, files, or facts about the project needs tools first.
 
 ## When to stop instead of pushing on
@@ -466,11 +466,6 @@ this page.
 6. `status="done"` is refused while an approved plan step is still pending.
    Finish those approved steps, or close each one you cannot do with
    `status="blocked"`, then set `status="done"`.
-
-The `think` tool is for reasoning you want kept: reading a traceback, choosing
-between two approaches, working out why a test failed. The user sees it, so it
-carries a finding or a decision. "Let me think step by step" and "I understand
-your request" carry neither.
 
 ## A full close
 

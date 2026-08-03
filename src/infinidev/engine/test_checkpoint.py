@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 import os
 import re
-import subprocess
 
 from infinidev.engine._best_effort import best_effort
+from infinidev.engine.subprocess_runner import run_captured
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +64,31 @@ class TestCheckpoint:
         if not self.command:
             return (0, 0)
 
+        from infinidev.tools.shell.execute_command_tool import check_command_permission
+
+        permission_error = check_command_permission(
+            self.command,
+            description="Run automatic test checkpoint",
+        )
+        if permission_error:
+            logger.warning("Automatic test checkpoint denied: %s", permission_error)
+            self.last_output = permission_error
+            return (self.current, self.total)
+
         try:
-            result = subprocess.run(
+            result = run_captured(
                 self.command,
                 shell=True,
                 cwd=self.workdir,
-                capture_output=True,
-                text=True,
                 timeout=120,
             )
             output = result.stdout + "\n" + result.stderr
             self.last_output = output
+
+            if result.timed_out:
+                logger.warning("Test command timed out after 120s")
+                self.last_output = f"{output}\nTIMEOUT".strip()
+                return (self.current, self.total)
 
             passed, total = self._parse_output(output)
 
@@ -90,10 +104,6 @@ class TestCheckpoint:
 
             return (passed, total)
 
-        except subprocess.TimeoutExpired:
-            logger.warning("Test command timed out after 120s")
-            self.last_output = "TIMEOUT"
-            return (self.current, self.total)
         except Exception as exc:
             logger.warning("Failed to run tests: %s", str(exc)[:200])
             self.last_output = str(exc)

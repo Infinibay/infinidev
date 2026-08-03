@@ -20,7 +20,7 @@ from infinidev.prompts.tool_hints import (
 
 # Engine pseudo-tools and backward-compat aliases that are intentionally not
 # real registered tool classes but ARE valid catalog entries.
-_PSEUDO_TOOLS = {"step_complete", "add_note", "add_session_note", "think"}
+_PSEUDO_TOOLS = {"step_complete", "add_note", "add_session_note"}
 
 
 def _local_tools(monkeypatch: pytest.MonkeyPatch):

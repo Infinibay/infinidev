@@ -1,0 +1,79 @@
+Benchmark validation: focused openai_subscription tests
+Command: uv run pytest tests/test_openai_subscription.py -v --color=no
+Working directory: repository root
+Exit code: 0
+Runtime: Python 3.13.3; pytest 9.0.2; pluggy 1.6.0
+Result: 57 collected; 57 passed; 0 failed; 2.95 seconds
+Output sanitization: the absolute repository path in pytest's interpreter line was replaced with $REPO; no other stdout content was changed. The uv workspace warning on stderr is retained below.
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.3, pytest-9.0.2, pluggy-1.6.0 -- $REPO/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: $REPO
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 57 items
+
+tests/test_openai_subscription.py::test_missing_auth_file_names_the_fix PASSED [  1%]
+tests/test_openai_subscription.py::test_api_key_mode_is_rejected PASSED  [  3%]
+tests/test_openai_subscription.py::test_claims_come_from_the_token_not_the_file PASSED [  5%]
+tests/test_openai_subscription.py::test_credentials_without_refresh_token_are_unusable PASSED [  7%]
+tests/test_openai_subscription.py::test_is_configured_never_raises PASSED [  8%]
+tests/test_openai_subscription.py::test_valid_token_is_used_without_a_network_call PASSED [ 10%]
+tests/test_openai_subscription.py::test_expired_token_triggers_a_refresh PASSED [ 12%]
+tests/test_openai_subscription.py::test_a_rotated_refresh_token_is_written_back PASSED [ 14%]
+tests/test_openai_subscription.py::test_refresh_preserves_unrelated_fields_and_permissions PASSED [ 15%]
+tests/test_openai_subscription.py::test_refresh_keeps_the_old_refresh_token_when_none_is_returned PASSED [ 17%]
+tests/test_openai_subscription.py::test_rejected_refresh_tells_the_user_to_log_in PASSED [ 19%]
+tests/test_openai_subscription.py::test_token_url_override_is_honoured PASSED [ 21%]
+tests/test_openai_subscription.py::test_status_reports_without_leaking_tokens PASSED [ 22%]
+tests/test_openai_subscription.py::test_request_headers_carry_account_and_originator PASSED [ 24%]
+tests/test_openai_subscription.py::test_originator_is_overridable PASSED [ 26%]
+tests/test_openai_subscription.py::test_catalog_lists_visible_models_by_priority PASSED [ 28%]
+tests/test_openai_subscription.py::test_unranked_models_sort_last PASSED [ 29%]
+tests/test_openai_subscription.py::test_context_window_applies_the_effective_percentage PASSED [ 31%]
+tests/test_openai_subscription.py::test_context_window_without_a_percentage_uses_the_raw_window PASSED [ 33%]
+tests/test_openai_subscription.py::test_catalog_falls_back_when_the_cache_is_absent PASSED [ 35%]
+tests/test_openai_subscription.py::test_a_loaded_catalog_is_the_whole_list PASSED [ 36%]
+tests/test_openai_subscription.py::test_a_model_newer_than_the_cache_still_gets_a_context_window PASSED [ 38%]
+tests/test_openai_subscription.py::test_the_offline_fallback_names_only_real_slugs PASSED [ 40%]
+tests/test_openai_subscription.py::test_catalog_entries_are_not_duplicated_by_the_fallback PASSED [ 42%]
+tests/test_openai_subscription.py::test_hidden_catalog_entries_are_not_resurrected_by_the_fallback PASSED [ 43%]
+tests/test_openai_subscription.py::test_reasoning_levels_are_read_from_the_catalog PASSED [ 45%]
+tests/test_openai_subscription.py::test_params_target_the_codex_backend PASSED [ 47%]
+tests/test_openai_subscription.py::test_temperature_is_dropped_for_reasoning_models PASSED [ 49%]
+tests/test_openai_subscription.py::test_assistant_params_also_use_the_subscription PASSED [ 50%]
+tests/test_openai_subscription.py::test_registered_provider_flag_beats_the_prefix_heuristic PASSED [ 52%]
+tests/test_openai_subscription.py::test_context_window_uses_the_subscription_catalog PASSED [ 54%]
+tests/test_openai_subscription.py::test_gpt_56_subscription_does_not_use_the_larger_api_window PASSED [ 56%]
+tests/test_openai_subscription.py::test_bare_model_strips_the_protocol_segment PASSED [ 57%]
+tests/test_openai_subscription.py::test_ultra_reaches_xhigh_when_the_model_supports_it PASSED [ 59%]
+tests/test_openai_subscription.py::test_unsupported_effort_falls_back_to_a_listed_one PASSED [ 61%]
+tests/test_openai_subscription.py::test_disabled_thinking_sends_the_lowest_effort PASSED [ 63%]
+tests/test_openai_subscription.py::test_provider_is_registered_and_selectable PASSED [ 64%]
+tests/test_openai_subscription.py::test_settings_dialog_offers_every_registered_provider PASSED [ 66%]
+tests/test_openai_subscription.py::test_model_discovery_needs_no_network PASSED [ 68%]
+tests/test_openai_subscription.py::test_status_line_survives_a_missing_login PASSED [ 70%]
+tests/test_openai_subscription.py::test_capabilities_preset_exists PASSED [ 71%]
+tests/test_openai_subscription.py::test_a_codex_request_without_stream_is_rewritten PASSED [ 73%]
+tests/test_openai_subscription.py::test_a_real_stream_is_left_alone PASSED [ 75%]
+tests/test_openai_subscription.py::test_other_backends_are_untouched PASSED [ 77%]
+tests/test_openai_subscription.py::test_the_rebuilt_response_carries_the_tool_call PASSED [ 78%]
+tests/test_openai_subscription.py::test_the_callers_kwargs_are_not_mutated PASSED [ 80%]
+tests/test_openai_subscription.py::test_an_empty_stream_names_the_fix PASSED [ 82%]
+tests/test_openai_subscription.py::test_max_tokens_is_dropped_for_codex PASSED [ 84%]
+tests/test_openai_subscription.py::test_temperature_is_dropped_even_when_a_caller_puts_it_back PASSED [ 85%]
+tests/test_openai_subscription.py::test_sanitizing_does_not_edit_the_callers_dict PASSED [ 87%]
+tests/test_openai_subscription.py::test_a_clean_request_is_passed_through_unchanged PASSED [ 89%]
+tests/test_openai_subscription.py::test_a_level_the_model_publishes_is_passed_through PASSED [ 91%]
+tests/test_openai_subscription.py::test_ultra_reaches_the_deepest_level_the_model_has PASSED [ 92%]
+tests/test_openai_subscription.py::test_ultra_settles_for_the_top_of_a_shallower_model PASSED [ 94%]
+tests/test_openai_subscription.py::test_an_unavailable_level_falls_back_to_medium PASSED [ 96%]
+tests/test_openai_subscription.py::test_efforts_are_offered_shallowest_first PASSED [ 98%]
+tests/test_openai_subscription.py::test_efforts_are_empty_without_a_catalog PASSED [100%]
+
+============================== 57 passed in 2.95s ==============================
+
+stderr:
+warning: No `requires-python` value found in the workspace. Defaulting to `>=3.13`.

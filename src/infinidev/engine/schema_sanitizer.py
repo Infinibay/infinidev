@@ -28,7 +28,7 @@ def _inline_defs(schema: dict[str, Any]) -> dict[str, Any]:
     a DANGLING ``$ref`` and silently erase every nested field from the schema
     the LLM sees. Resolving the refs first keeps the nested fields intact.
 
-    No-op for the common case (no ``$defs`` → flat tool schema). A depth guard
+    No-op for the common case (no ``$defs`` and a flat tool schema). A depth guard
     bounds any self-referential model rather than recursing forever.
     """
     defs = schema.get("$defs") or schema.get("definitions")
@@ -91,7 +91,7 @@ def _sanitize_schema_deep(schema: dict[str, Any]) -> dict[str, Any]:
 
 def _simplify_node(node: dict[str, Any]) -> None:
     """Recursively simplify a schema node in-place."""
-    # Resolve anyOf/oneOf → pick first non-null type
+    # Resolve anyOf/oneOf by selecting the first non-null type.
     for key in ("anyOf", "oneOf"):
         if key in node:
             variants = node.pop(key)
@@ -132,7 +132,7 @@ def tool_to_openai_schema(tool: Any) -> dict[str, Any]:
             try:
                 parameters = tool.args_schema.schema()
             except Exception:
-                # Both schema extractions failed → the tool would register with
+                # Both schema extractions failed, so the tool would register with
                 # an EMPTY parameter schema, which CLAUDE.md calls the security
                 # boundary. Make it loud instead of silently shipping a zero-arg
                 # tool the model cannot call correctly.
@@ -179,15 +179,14 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "step_complete",
         "description": (
-            "After finishing the current step objective AND verifying the outcome "
-            "(against the step's expected_output / success criterion), run step_complete. "
-            "Do NOT call this before you have evidence the step succeeded — re-read the file, "
-            "run the test, or check the command output first. "
-            "WARNING: After this call, ALL tool outputs and conversation from this step will be discarded. "
-            "Only the summary and your notes (add_note) survive to the next step. "
-            "Before calling this, save key facts via add_note (file paths, function names, decisions). "
-            "Before status='done', call add_session_note with what you learned. "
-            "To modify the plan, use add_step/modify_step/remove_step BEFORE calling this."
+            "Call step_complete after finishing the current step and checking its "
+            "expected_output or success criterion. Supply the file read, test result, "
+            "or command output that proves success. The engine discards this step's "
+            "tool outputs and conversation after the call; only the summary and notes "
+            "survive. Save file paths, symbol names, and decisions with add_note first. "
+            "Before status='done', record cross-task lessons with add_session_note. "
+            "Change the remaining plan with add_step, modify_step, or remove_step before "
+            "closing the step."
         ),
         "parameters": {
             "type": "object",
@@ -199,15 +198,11 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
                 "evidence_summary": {
                     "type": "string",
                     "description": (
-                        "REQUIRED. Concrete evidence that the step's "
-                        "objective was reached: which command(s) you "
-                        "ran and their outcome, which file(s) you "
-                        "re-read after editing, which test(s) "
-                        "passed. ≥30 chars. Do NOT write 'looks "
-                        "good' or 'should work' — name the actual "
-                        "verification. The assistant critic uses this "
-                        "field to decide whether to accept or reject "
-                        "the step closure."
+                        "Concrete evidence that the step reached its objective: commands "
+                        "and outcomes, files re-read after editing, and tests that passed. "
+                        "Use at least 30 characters. Replace claims such as 'looks good' "
+                        "with the observed verification result. The assistant critic uses "
+                        "this evidence to accept or reject the step closure."
                     ),
                     "minLength": 30,
                 },
@@ -232,10 +227,10 @@ ADD_NOTE_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "add_note",
         "description": (
-            "IMPORTANT: Save a fact to your persistent memory. Your context is rebuilt "
-            "from scratch each step — anything not saved here is PERMANENTLY LOST. "
-            "Call this after every file read, discovery, or decision. "
-            "Notes appear in <notes> at every step. Max 20 notes."
+            "Save a fact to working memory after each file read, discovery, or decision. "
+            "The engine rebuilds context at every step and discards facts absent from "
+            "working memory. Notes appear in <notes> at every step. The store accepts "
+            "at most 20 notes."
         ),
         "parameters": {
             "type": "object",
@@ -276,38 +271,14 @@ ADD_SESSION_NOTE_SCHEMA: dict[str, Any] = {
 }
 
 
-THINK_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "think",
-        "description": (
-            "Think through a problem before acting. Use this when you need to "
-            "reason about what to do next, analyze an error, or plan your approach. "
-            "Your reasoning is shown to the user as a progress update. "
-            "This does NOT count as a tool call — use it freely."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "reasoning": {
-                    "type": "string",
-                    "description": "Your reasoning, analysis, or plan",
-                },
-            },
-            "required": ["reasoning"],
-        },
-    },
-}
-
-
 GENERATE_QUESTION_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "generate_question",
         "description": (
-            "Generate one investigation question about the task. "
-            "Call this once per question. When you have generated enough "
-            "questions, call step_complete with status='done'."
+            "Generate one investigation question about the task. Call this once per "
+            "question. Call step_complete with status='done' after the question set "
+            "covers every unknown that can change the implementation."
         ),
         "parameters": {
             "type": "object",
@@ -435,18 +406,15 @@ REMOVE_STEP_SCHEMA: dict[str, Any] = {
 def build_tool_schemas(tools: list[Any], *, small_model: bool = False) -> list[dict[str, Any]]:
     """Convert a list of tools to OpenAI function-calling schemas.
 
-    Always appends the engine pseudo-tools (step_complete, add_note)
-    so the LLM can signal step completion and take notes.
-    The ``think`` pseudo-tool is excluded for small models to prevent
-    reasoning bloat (small models waste tokens on think → reason → think loops).
+    Always append the active engine pseudo-tools so the model can signal step
+    completion and persist notes. The retired ``think`` pseudo-tool is omitted
+    for every model because it encouraged loops without observable progress.
     """
     schemas = [tool_to_openai_schema(t) for t in tools]
     schemas.append(STEP_COMPLETE_SCHEMA)
     schemas.append(ADD_NOTE_SCHEMA)
     schemas.append(ADD_SESSION_NOTE_SCHEMA)
-    # think pseudo-tool disabled — models abuse it to loop without acting
-    # Plan tools (add_step, modify_step, remove_step) are real tools
-    # registered in META_TOOLS — they get their schemas via tool_to_openai_schema().
+    # Plan tools are registered in META_TOOLS and use tool_to_openai_schema().
 
     # Deep-sanitize schemas for providers that reject anyOf/oneOf/complex constructs
     from infinidev.config.model_capabilities import get_model_capabilities
@@ -521,5 +489,3 @@ def _simplify_schema_for_small(schema: dict[str, Any]) -> dict[str, Any]:
             status_prop["enum"] = [s for s in status_prop["enum"] if s != "explore"]
 
     return schema
-
-

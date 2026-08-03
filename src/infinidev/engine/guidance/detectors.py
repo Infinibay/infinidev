@@ -425,7 +425,7 @@ def _has_stop_planning_start_coding(
     detector checked the total number of plan steps, which penalised
     legitimate planning in the first iteration and failed to trigger
     on the actual pattern. The user pointed out that "agregar steps
-    está bien, agregar 10 steps en un mismo step no" — the signal is
+    step is fine, but adding ten steps inside one step is not" — the signal is
     the RATE of additions inside a single outer-loop step, not the
     cumulative plan size.
 

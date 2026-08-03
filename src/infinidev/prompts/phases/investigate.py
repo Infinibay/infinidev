@@ -104,9 +104,8 @@ Example 1 — Understanding existing patterns:
 
 Example 2 — Reading a test specification:
   1. read_file: "tests/test_payment.py" (lines 1-80)
-  2. think: "Tests expect: create_charge(amount, currency)->str, get_charge(id)->dict with {status, amount}, refund_charge(id)->bool"
-  3. add_note: "API: create_charge(amount, currency)->str, get_charge(id)->dict, refund_charge(id)->bool. Tests use @patch('services.payment.stripe_client')"
-  4. step_complete
+  2. add_note: "API: create_charge(amount, currency) returns str; get_charge(id) returns dict; refund_charge(id) returns bool. Tests use @patch('services.payment.stripe_client')"
+  3. step_complete
 
 Example 3 — Checking existing knowledge:
   1. search_findings: "rate limiter implementation"
@@ -221,7 +220,8 @@ Generate 0-2 follow-up questions ONLY if:
 - A test or config was referenced but not yet read
 
 Do NOT generate follow-ups if:
-- The answers are sufficient for planning
+- Every task-critical path, behavior, and constraint already has an
+  evidence-backed answer
 - The follow-up would just be "read more of the same file"
 - You're curious but it's not essential for the task
 

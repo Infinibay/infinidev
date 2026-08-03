@@ -155,7 +155,7 @@ Respond with ONLY valid JSON in one of these shapes.
   - The ONLY exception is `category: "structural"` — reserved for
     whole-file issues where a single line doesn't make sense (e.g. "test
     file entirely absent", "module not imported anywhere"). For
-    `structural` issues, `file` alone is sufficient.
+    `structural` issues, provide `file` and omit `line` and `quoted_text`.
   - Blocking issues missing `line`/`quoted_text` without the
     `structural` exemption are normally demoted to `important` — but a
     genuine correctness or security problem grounded in the Extraction's

@@ -38,7 +38,8 @@ def get_prompt() -> str:
 - Use discriminated unions with a `type` or `kind` field for variant modelling.
 
 ### Anti-Patterns to Avoid
-- `any` casts at API boundaries — use proper validation instead.
+- `any` casts at API boundaries — validate input against a runtime schema
+  before narrowing the type.
 - Ignoring `Promise` rejections — always attach `.catch()` or use `try/await`.
 - `!` non-null assertions without a comment explaining why the value is guaranteed to exist.
 - `namespace` merging in new code — use ES modules instead.

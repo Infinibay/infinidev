@@ -447,7 +447,7 @@ def build_iteration_prompt(
             "<verification-method>\n"
             "An INDEPENDENT reviewer will judge this objective against the code "
             "at task end, looking for verbatim evidence it was met — assume it "
-            "will try to prove you FAILED. Make it genuinely true, don't just "
+            "will attempt to prove you FAILED. Make it genuinely true, don't just "
             "claim it.\n\n"
             f"  objective: {active_verify.spec}\n"
             "</verification-method>"
@@ -565,7 +565,7 @@ def _render_context_rank(result: Any | None) -> str:
     if result is None or result.empty:
         return ""
     lines = ["<context-rank>",
-             "Based on your current task and past sessions, these resources are likely relevant.",
+             "These resources have the highest ContextRank scores for the current task and session.",
              "Symbol outlines are included so you can act on them directly."]
     if result.files:
         lines.append("\nFiles (by relevance):")
@@ -625,7 +625,7 @@ def _get_file_symbol_outline(file_path: str) -> list[str]:
                     doc = s.docstring.replace("\n", " ").strip()
                     if len(doc) > 120:
                         doc = doc[:117] + "..."
-                    line += f"\n         → {doc}"
+                    line += f"\n         Documentation: {doc}"
                 result.append(line)
         return result[:20]  # Cap to avoid prompt bloat
     except Exception:

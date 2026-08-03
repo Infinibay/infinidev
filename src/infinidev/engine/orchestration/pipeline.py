@@ -279,14 +279,14 @@ def _run_elaboration_phase(
             lines = []
             for c in spec.clarifications_needed:
                 others = [o for o in c.options if o.strip() and o != c.default]
-                line = f"  • {c.question} — voy con: {c.default}"
+                line = f"  - {c.question} - using: {c.default}"
                 if others:
-                    line += f" (alternativas: {'; '.join(others)})"
+                    line += f" (alternatives: {'; '.join(others)})"
                 lines.append(line)
             hooks.notify(
                 "Infinidev",
-                "Decisiones de producto que tomé por vos. Sigo adelante con "
-                "estos defaults; decime si alguno no es el que querés:\n"
+                "Product decisions selected for this run. Execution will use "
+                "these defaults; correct any choice that does not match your intent:\n"
                 + "\n".join(lines),
                 "agent",
             )

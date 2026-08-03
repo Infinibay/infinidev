@@ -1,0 +1,171 @@
+{
+  "checks": [
+    {
+      "kind": "directory",
+      "link": "../src/infinidev/config/",
+      "occurrences": 1,
+      "resolved_path": "src/infinidev/config",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "../tests/test_openai_subscription.py",
+      "occurrences": 1,
+      "resolved_path": "tests/test_openai_subscription.py",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "evaluate.py",
+      "occurrences": 3,
+      "resolved_path": "bench/evaluate.py",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "requirements.txt",
+      "occurrences": 3,
+      "resolved_path": "bench/requirements.txt",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "run_swebench.py",
+      "occurrences": 2,
+      "resolved_path": "bench/run_swebench.py",
+      "result": "pass"
+    },
+    {
+      "kind": "directory",
+      "link": "runs/20260802T200907Z/",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/astropy__astropy-12907/command.txt",
+      "occurrences": 2,
+      "resolved_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/command.txt",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/astropy__astropy-12907/metadata.json",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/metadata.json",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/astropy__astropy-12907/predictions.jsonl",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/astropy__astropy-12907/predictions.jsonl",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/astropy__astropy-14182/command.txt",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/command.txt",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/astropy__astropy-14182/metadata.json",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/metadata.json",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/astropy__astropy-14182/predictions.jsonl",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/astropy__astropy-14182/predictions.jsonl",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/evaluation/command.txt",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/evaluation/command.txt",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/evaluation/gpt-5.6-sol.infinidev-openai-subscription-20260802T200907Z.json",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/evaluation/gpt-5.6-sol.infinidev-openai-subscription-20260802T200907Z.json",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/evaluation/metadata.json",
+      "occurrences": 2,
+      "resolved_path": "bench/runs/20260802T200907Z/evaluation/metadata.json",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/evaluation/prediction_results.json",
+      "occurrences": 2,
+      "resolved_path": "bench/runs/20260802T200907Z/evaluation/prediction_results.json",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/evidence.json",
+      "occurrences": 15,
+      "resolved_path": "bench/runs/20260802T200907Z/evidence.json",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/predictions.combined.jsonl",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/predictions.combined.jsonl",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/validation-links.json",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/validation-links.json",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/validation-pytest.txt",
+      "occurrences": 2,
+      "resolved_path": "bench/runs/20260802T200907Z/validation-pytest.txt",
+      "result": "pass"
+    },
+    {
+      "kind": "file",
+      "link": "runs/20260802T200907Z/validation-sensitive-data.json",
+      "occurrences": 1,
+      "resolved_path": "bench/runs/20260802T200907Z/validation-sensitive-data.json",
+      "result": "pass"
+    }
+  ],
+  "counts": {
+    "external_or_anchor_links_skipped": 0,
+    "failed_occurrences": 0,
+    "local_link_occurrences_checked": 44,
+    "markdown_link_occurrences": 44,
+    "passed_occurrences": 44,
+    "unique_local_targets_checked": 21
+  },
+  "exit_code": 0,
+  "input": "bench/openai_subscription_swebench_20260802.md",
+  "input_sha256": "d859cf6ebd3b93024b732c487536b125b77ba9495b2224bf2ae517bb02290f56",
+  "schema_version": 1,
+  "validator": {
+    "algorithm": "Extract inline Markdown links; skip URI and anchor-only targets; resolve local paths relative to the report; require each path to stay inside the repository and exist.",
+    "command": "uv run python <deterministic stdlib validator executed during English report translation>",
+    "markdown_link_regex": "\\[[^\\]]*\\]\\(([^)]+)\\)",
+    "name": "stdlib-markdown-local-link-validator",
+    "runtime": "Python 3.13.3",
+    "version": 1
+  }
+}

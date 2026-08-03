@@ -7,28 +7,32 @@ from command-specific logic.
 
 from __future__ import annotations
 
-import subprocess
+import logging
+import os
 from typing import TYPE_CHECKING, Any
+
+from infinidev.engine.subprocess_runner import run_captured
 
 if TYPE_CHECKING:
     from infinidev.ui.app import InfinidevApp
 
+logger = logging.getLogger(__name__)
+
 
 def handle_command(app: InfinidevApp, cmd_text: str) -> None:
     """Dispatch a /command to the appropriate handler."""
-    import logging as _log
-    _logger = _log.getLogger("infinidev.tui.cmd")
-    _logger.warning("[CMD] dispatch %r engine_running=%s",
-                    cmd_text, getattr(app, "_engine_running", None))
+    logger.debug(
+        "Dispatching command %r engine_running=%s",
+        cmd_text,
+        getattr(app, "_engine_running", None),
+    )
 
     parts = cmd_text.split()
     cmd = parts[0].lower()
 
     handler = _COMMAND_TABLE.get(cmd)
     if handler:
-        _logger.warning("[CMD] calling handler for %s", cmd)
         handler(app, parts)
-        _logger.warning("[CMD] handler for %s returned", cmd)
     else:
         app.add_message("System", f"Unknown command: {cmd}", "system")
 
@@ -610,19 +614,22 @@ def handle_models(app: InfinidevApp, parts: list[str]) -> None:
 def execute_shell_command(app: InfinidevApp, cmd: str) -> None:
     """Execute a shell command and display results in chat."""
     try:
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=30,
+        result = run_captured(
+            cmd,
+            shell=True,
+            cwd=os.getcwd(),
+            timeout=30,
         )
         output_parts = []
         if result.stdout.strip():
             output_parts.append(result.stdout.strip())
         if result.stderr.strip():
             output_parts.append(f"stderr:\n{result.stderr.strip()}")
-        if result.returncode != 0:
-            output_parts.append(f"Exit code: {result.returncode}")
+        if result.timed_out:
+            output_parts.append("Command timed out after 30 seconds.")
+        elif result.exit_code != 0:
+            output_parts.append(f"Exit code: {result.exit_code}")
         output = "\n".join(output_parts) or "(no output)"
-    except subprocess.TimeoutExpired:
-        output = "Command timed out after 30 seconds."
     except Exception as e:
         output = f"Error: {e}"
     app.add_message("System", output, "system")

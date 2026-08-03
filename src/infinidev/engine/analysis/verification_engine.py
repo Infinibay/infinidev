@@ -7,17 +7,21 @@ real breakage that a text-only reviewer would miss.
 
 from __future__ import annotations
 
+import importlib.util
+import keyword
 import logging
 import os
-import subprocess
+import shlex
+import sys
 from typing import Any
+
+from infinidev.engine.analysis.verification_result import VerificationResult
+from infinidev.engine.subprocess_runner import run_captured
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 120  # seconds per command
 
-
-from infinidev.engine.analysis.verification_result import VerificationResult
 
 class VerificationEngine:
     """Run tests and import checks against changed files.
@@ -69,7 +73,7 @@ class VerificationEngine:
             for py_file in py_files[:5]:  # Limit to 5 files
                 module = self._file_to_module(py_file)
                 if module:
-                    result = self._run(f"python -c 'import {module}'")
+                    result = self._run([sys.executable, "-c", f"import {module}"])
                     commands_run.append(result)
                     if result["exit_code"] != 0:
                         all_passed = False
@@ -153,7 +157,7 @@ class VerificationEngine:
                 lines.append(f"    Fix: {item['fix']}")
         return "\n".join(lines)
 
-    def _detect_test_command(self) -> str | None:
+    def _detect_test_command(self) -> list[str] | None:
         """Detect the project's test runner."""
         ws = self._workspace
 
@@ -161,10 +165,8 @@ class VerificationEngine:
         if os.path.isfile(os.path.join(ws, "pyproject.toml")) or \
            os.path.isfile(os.path.join(ws, "setup.py")) or \
            os.path.isdir(os.path.join(ws, "tests")):
-            # Check if pytest is available
-            check = self._run("python -m pytest --version", timeout=10)
-            if check["exit_code"] == 0:
-                return "python -m pytest --tb=short -q 2>&1 | tail -20"
+            if importlib.util.find_spec("pytest") is not None:
+                return [sys.executable, "-m", "pytest", "--tb=short", "-q"]
 
         # npm test (JavaScript/TypeScript)
         pkg_json = os.path.join(ws, "package.json")
@@ -174,50 +176,62 @@ class VerificationEngine:
                 with open(pkg_json) as f:
                     pkg = json.load(f)
                 if "test" in pkg.get("scripts", {}):
-                    return "npm test 2>&1 | tail -20"
+                    return ["npm", "test"]
             except (json.JSONDecodeError, OSError):
                 pass
 
         # cargo test (Rust)
         if os.path.isfile(os.path.join(ws, "Cargo.toml")):
-            return "cargo test 2>&1 | tail -20"
+            return ["cargo", "test"]
 
         # go test (Go)
         if os.path.isfile(os.path.join(ws, "go.mod")):
-            return "go test ./... 2>&1 | tail -20"
+            return ["go", "test", "./..."]
 
         return None
 
-    def _run(self, command: str, timeout: int | None = None) -> dict[str, Any]:
-        """Execute a shell command and capture output."""
+    def _run(self, command: list[str], timeout: int | None = None) -> dict[str, Any]:
+        """Execute an approved argv sequence and capture output."""
         timeout = timeout or _TIMEOUT
+        display_command = shlex.join(command)
+
+        from infinidev.tools.shell.execute_command_tool import check_command_permission
+
+        permission_error = check_command_permission(
+            display_command,
+            description="Run post-development verification command",
+        )
+        if permission_error:
+            return {
+                "command": display_command,
+                "exit_code": -1,
+                "output": permission_error,
+            }
+
         try:
-            proc = subprocess.run(
+            proc = run_captured(
                 command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
                 cwd=self._workspace,
+                timeout=timeout,
             )
             output = (proc.stdout + proc.stderr).strip()
             # Truncate very long output
             if len(output) > 3000:
                 output = output[-3000:]
+            if proc.timed_out:
+                return {
+                    "command": display_command,
+                    "exit_code": -1,
+                    "output": f"Command timed out after {timeout}s",
+                }
             return {
-                "command": command,
-                "exit_code": proc.returncode,
+                "command": display_command,
+                "exit_code": proc.exit_code,
                 "output": output,
-            }
-        except subprocess.TimeoutExpired:
-            return {
-                "command": command,
-                "exit_code": -1,
-                "output": f"Command timed out after {timeout}s",
             }
         except Exception as exc:
             return {
-                "command": command,
+                "command": display_command,
                 "exit_code": -1,
                 "output": f"Error: {exc}",
             }
@@ -256,4 +270,9 @@ class VerificationEngine:
         # Convert path separators to dots; strip any residual leading/trailing
         # dots defensively so we never emit ``.foo`` or ``foo.``.
         module = path.replace(os.sep, ".").replace("/", ".").strip(".")
+        if not module or any(
+            not part.isidentifier() or keyword.iskeyword(part)
+            for part in module.split(".")
+        ):
+            return None
         return module or None

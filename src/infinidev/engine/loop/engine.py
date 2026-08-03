@@ -325,6 +325,7 @@ class LoopEngine(AgentEngine):
         nudge_threshold: int | None = None,
         nudge_message_template: str | None = None,
         summarizer_enabled: bool | None = None,
+        identity_override: str | None = None,
         initial_plan: Any | None = None,
         initial_attachments: list[Any] | None = None,
         task: Any | None = None,
@@ -356,6 +357,7 @@ class LoopEngine(AgentEngine):
             nudge_threshold=nudge_threshold,
             nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
+            identity_override=identity_override,
             task=task,
             preserve_file_tracker=preserve_file_tracker,
         )

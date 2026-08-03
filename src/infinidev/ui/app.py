@@ -369,11 +369,10 @@ class InfinidevApp:
         of that indexed the same tree twice, cost several seconds of CPU
         before the user could type, and printed two chat messages about it.
 
-        The local tree-sitter index has not gone away — the symbol *writer*
-        tools (edit_symbol, add_symbol, get_symbol_code) need line-accurate
-        positions Ken does not provide, and every tool that needs it indexes
-        the file it is about to touch on demand. `/reindex` still forces a
-        full sweep for anyone who wants one.
+        The local tree-sitter index has not gone away. Symbol lookup and
+        cross-file refactoring need line-accurate positions Ken does not
+        provide, and each tool indexes the relevant file on demand.
+        `/reindex` still forces a full sweep for anyone who wants one.
         """
         self._index_ready = True
         self._warm_up_mcp()
@@ -811,12 +810,11 @@ class InfinidevApp:
 
     def _handle_submit(self, user_text: str) -> None:
         """Called when user presses Enter in chat input."""
-        import logging as _log
-        _sublogger = _log.getLogger("infinidev.tui.submit")
-        _sublogger.warning("[SUBMIT] enter %r engine_running=%s",
-                           user_text, getattr(self, "_engine_running", None))
+        logger.debug(
+            "Submitting input engine_running=%s",
+            getattr(self, "_engine_running", None),
+        )
         self._autocomplete.dismiss()
-        _sublogger.warning("[SUBMIT] autocomplete dismissed")
 
         # Backward-compatible typed permission responses. The modal normally
         # owns focus, but handling these here avoids leaking allow/deny into
@@ -836,7 +834,6 @@ class InfinidevApp:
         # what *this* request changed rather than the whole session.
         self._touched_files = {}
         self.add_message("You", user_text, "user")
-        _sublogger.warning("[SUBMIT] message added")
 
         # Analysis answer feed-back
         if self._analysis_waiting and self._analysis_event is not None:
@@ -862,9 +859,7 @@ class InfinidevApp:
         if user_text.startswith("!"):
             self._execute_shell_command(user_text[1:])
         elif user_text.startswith("/"):
-            _sublogger.warning("[SUBMIT] dispatching slash command")
             self.handle_command(user_text)
-            _sublogger.warning("[SUBMIT] slash command returned")
         else:
             # Auto-detect image paths the user may have dragged into the
             # terminal (they land as plain text in the input buffer).

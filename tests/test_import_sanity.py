@@ -79,3 +79,16 @@ class TestImportAcyclic:
         mod = _fresh_import("infinidev.engine.orchestration")
         assert hasattr(mod, "run_task")
         assert hasattr(mod, "OrchestrationHooks")
+
+    def test_guidance_library_imports_cleanly(self):
+        mod = _fresh_import("infinidev.engine.guidance.library")
+        assert hasattr(mod, "GuidanceEntry")
+
+    def test_guidance_public_exports_import_cleanly(self):
+        mod = _fresh_import("infinidev.engine.guidance")
+        assert hasattr(mod, "detect_stuck_pattern")
+        assert hasattr(mod, "drain_pending_guidance")
+
+    def test_loop_models_imports_without_loading_loop_engine(self):
+        _fresh_import("infinidev.engine.loop.models")
+        assert "infinidev.engine.loop.engine" not in sys.modules

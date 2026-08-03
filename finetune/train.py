@@ -4,10 +4,11 @@
 Supports two strategies for large models (27-32B) on 2x RTX A5000 (24GB):
 
   Strategy 1 — QLoRA single-GPU (fits up to ~14B in 4-bit on one GPU)
-    python finetune/train.py --model Qwen/Qwen2.5-Coder-14B-Instruct
+    uv run --extra finetune python finetune/train.py \
+        --model Qwen/Qwen2.5-Coder-14B-Instruct
 
   Strategy 2 — DeepSpeed ZeRO-3 + LoRA + CPU offload (27-32B across 2 GPUs)
-    torchrun --nproc_per_node=2 finetune/train.py \
+    uv run --extra finetune torchrun --nproc_per_node=2 finetune/train.py \
         --model Qwen/Qwen3-32B \
         --deepspeed finetune/ds_config_zero3.json \
         --no-quantize --max-seq-len 4096

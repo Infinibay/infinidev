@@ -15,7 +15,7 @@ critique/discard, converge — as staged passes the harness owns:
 
 Every pass degrades gracefully: any failure yields a partial (or None)
 GroundedSpec and the pipeline proceeds exactly as before. See
-``docs_spec_elaboration_loop.md``.
+``docs/SPEC_ELABORATION.md``.
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ def _pass_analyze(request: str, understanding: str, opened: list[str]) -> dict:
         "You act like a senior engineer who was handed this task: you start "
         "working and raise a decision only when you would genuinely stop at a "
         "keyboard. A gap is product_intent ONLY if all three hold:\n"
-        "  1. You can name 2-4 concrete alternatives, and more than one is defensible.\n"
+        "  1. You can name 2-4 concrete alternatives, with at least two defensible.\n"
         "  2. Picking wrong means REWRITING code, not tweaking a constant later.\n"
         "  3. It cannot be settled by reading the repo, following its existing "
         "conventions, or re-reading the request.\n"
@@ -198,7 +198,7 @@ def _pass_analyze(request: str, understanding: str, opened: list[str]) -> dict:
         "provenance, privacy or compliance; benchmarks, metrics, baselines, "
         "success thresholds or acceptable regressions; whether the result is a "
         "prototype, an experiment or production-ready; which file or link is "
-        "authoritative when you could just open it; naming, formatting or style "
+        "authoritative when opening it provides the answer; naming, formatting or style "
         "the repo already settles; anything the user already stated in the "
         "request; how to verify the work.\n"
         f"At most {max_q} product_intent gaps, ordered by impact — {max_q} is a "
@@ -376,7 +376,7 @@ def _pass_critique(request: str, analysis: dict, grounding: dict) -> dict:
     n = max(2, settings.SPEC_ELABORATION_CANDIDATES)
     facts = grounding.get("resolved_facts", [])
     facts_str = "\n".join(
-        f"  - {f.get('question', '')} → {f.get('answer', '')}" for f in facts
+        f"  - {f.get('question', '')}: {f.get('answer', '')}" for f in facts
     ) or "  (none)"
     sys = (
         f"Propose {n} DISTINCT candidate design directions for this task. Each must "

@@ -30,11 +30,11 @@ class EscalationPacket:
         opened_files: Files the chat agent already read during its
             conversational turn. The planner SHOULD NOT re-open these
             — the point of the handoff is to avoid redundant I/O.
-        user_visible_preview: Short "voy a implementar X" message the
+        user_visible_preview: Short "I will implement X" message the
             pipeline shows to the user via ``notify`` before the
             planner runs. Avoids dead-air while the planner thinks.
         user_signal: The literal user text the chat agent interpreted
-            as approval (e.g. "sí, dale"). Kept for audit; helps debug
+            as approval (for example, "yes, proceed"). Kept for audit; helps debug
             false-positive escalations later.
     """
 
@@ -52,7 +52,7 @@ class EscalationPacket:
     attachments: list = field(default_factory=list)
     # ── Council (multi-agent deliberation) ──────────────────────────────
     # When the chat agent detects the user asked for a multi-agent
-    # debate ("usá varios subagentes", "que debatan", "armá un consejo")
+    # debate ("use several agents", "debate the design", "form a council")
     # — or judged a design/research task complex enough — it sets
     # ``council_requested``. The pipeline then runs the council phase
     # (engine/council/) before the planner. ``council_focus`` narrows

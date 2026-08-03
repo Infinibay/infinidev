@@ -100,7 +100,7 @@ class RenameSymbolTool(InfinibayBaseTool):
                 f"{len(distinct_defs)} symbols share that bare name across the "
                 f"project, and references are matched by bare name (not "
                 f"class-scoped), so renaming would also rewrite the unrelated "
-                f"ones. Rename it manually or use edit_symbol on the definition."
+                f"ones. Use edit_file on the intended definition instead."
             )
 
         # Find all references to this symbol across the project
@@ -228,5 +228,4 @@ class RenameSymbolTool(InfinibayBaseTool):
             "files_modified": files_modified,
             "total_replacements": total_replacements,
         })
-
 

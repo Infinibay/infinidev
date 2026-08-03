@@ -12,8 +12,9 @@ Hardware target: 2x RTX A5000 (24GB each) + 256GB RAM
 Model target: Qwen3-32B in 4-bit QLoRA
 
 Usage:
-    python finetune/train_senn.py
-    python finetune/train_senn.py --model Qwen/Qwen3-32B --max-seq-len 2048
+    uv run --extra finetune python finetune/train_senn.py
+    uv run --extra finetune python finetune/train_senn.py \
+        --model Qwen/Qwen3-32B --max-seq-len 2048
 """
 
 import argparse

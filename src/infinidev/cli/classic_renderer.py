@@ -541,8 +541,8 @@ def run_with_live_status(
 
     The classic mode used to block the main thread on ``run_task()``,
     which meant the status bar disappeared the moment the user hit
-    Enter — exactly what the user complained about ("el input no
-    debería desaparecer cuando el modelo está pensando").
+    Enter — exactly what the original report described: the input must
+    remain visible while the model is thinking.
 
     Behaviour:
     - Worker thread executes ``task_callable``; the engine's events

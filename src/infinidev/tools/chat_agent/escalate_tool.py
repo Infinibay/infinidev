@@ -23,7 +23,7 @@ class EscalateInput(BaseModel):
         description=(
             "Short message (1 sentence, user's language) shown via the "
             "UI immediately after escalation, before the planner runs. "
-            "Example: 'Voy a implementar X — arranco con el análisis.' "
+            "Example: 'I will implement X; starting with the analysis.' "
             "Prevents dead-air while the planner thinks. Empty string "
             "skips the preview."
         ),
@@ -40,8 +40,8 @@ class EscalateInput(BaseModel):
     user_signal: str = Field(
         "",
         description=(
-            "The exact user text you interpreted as approval (e.g. "
-            "'sí dale', 'implementá eso', 'fix it'). Kept for audit. "
+            "The exact user text you interpreted as approval (for example, "
+            "'yes, proceed', 'implement that', or 'fix it'). Kept for audit. "
             "Empty when the user's first message was itself a direct "
             "action request (no prior chat to approve from)."
         ),
@@ -57,8 +57,8 @@ class EscalateInput(BaseModel):
         False,
         description=(
             "Set True when the user explicitly asked for a multi-agent "
-            "debate ('usá varios subagentes', 'que debatan el diseño', "
-            "'armá un consejo', 'multiagente') OR when the task is a "
+            "debate ('use several agents', 'debate the design', or "
+            "'form a council') OR when the task is a "
             "genuinely complex DESIGN/RESEARCH problem where several "
             "perspectives debating would beat a single pass. Triggers a "
             "deliberation phase before the planner. Leave False for "
@@ -80,8 +80,8 @@ class EscalateTool(InfinibayBaseTool):
     name: str = "escalate"
     description: str = (
         "Hand off this turn to the planner for real work. Use this when "
-        "the user has clearly asked for execution (action verbs like "
-        "'fix', 'implement', 'refactor', 'arreglá', 'implementá') or "
+        "the user has clearly asked for execution (action verbs such as "
+        "'fix', 'implement', or 'refactor') or "
         "has approved a proposal you made in a previous turn. After "
         "this call the planner will write a detailed plan and the "
         "developer will execute it. Do NOT escalate on ambiguous "

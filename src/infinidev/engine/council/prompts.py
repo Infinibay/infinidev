@@ -88,8 +88,8 @@ question. You are ONE voice among several, each with a different persona.
   * your objective in this debate: {assignment.objective}
 
 Stay in character. Argue FROM your persona and TOWARD your objective.
-Do not try to be balanced or play every role — others cover the angles
-you don't. Your value is your distinct perspective.
+Keep your assigned perspective; other members cover the angles you don't.
+Your value is your distinct perspective.
 
 ## The question under debate
 
@@ -138,9 +138,9 @@ You are the MODERATOR judging whether a council debate has converged.
 
 {_LANG_RULE}
 You will see the full channel after the latest round. Decide:
-  * converged = true  → a workable consensus has formed, OR the debate is
+  * converged = true means a workable consensus has formed, OR the debate is
     just repeating itself and another round won't add value.
-  * converged = false → another round would still surface new, useful
+  * converged = false means another round would still surface a new, useful
     argument or unresolved disagreement worth one more pass.
 
 Call ``council_verdict`` EXACTLY once with your decision and a one-line
@@ -178,13 +178,13 @@ every member — not just the majority. Specifically:
     honest reasons.
   * ``research_findings`` — grounded facts surfaced (cite files/symbols).
   * ``affected_files`` — what the work will likely touch.
-  * ``open_risks`` — what the developer should watch for.
+  * ``open_risks`` — failure modes the developer must guard against.
   * ``dissent`` — minority positions, named honestly. Do not bury them.
   * ``user_decision_required`` — set TRUE only if the debate exposed a
     genuine PRODUCT/DESIGN fork that you must NOT decide alone (e.g.
     "optimise for latency or cost?", "which UX?"). Resolve purely
     technical questions yourself. Unresolved dissent over a user-facing
-    tradeoff is the signal that this should be true, and you MUST list the concrete
+    tradeoff requires this to be TRUE, and you MUST list the concrete
     questions in ``open_questions_for_user`` — setting user_decision_required without
     supplying those questions has NO effect (it is ignored), so the brief would proceed
     as if no decision were needed.

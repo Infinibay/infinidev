@@ -256,7 +256,7 @@ def execute_brainstorm(
                 "idea_a": idea_a.id,
                 "idea_b": idea_b.id,
                 "hybrid_id": hybrid.id,
-            }, f"🧬 Crossed [{idea_a.id}] × [{idea_b.id}] → [{hybrid.id}] {hybrid_title}")
+            }, f"🧬 Crossed [{idea_a.id}] × [{idea_b.id}] as [{hybrid.id}] {hybrid_title}")
 
             _log(f"\n{_BOLD}Phase 3b: Explore Hybrid{_RESET}")
             engine._explore_loop(

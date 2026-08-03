@@ -34,7 +34,7 @@ QUESTIONS = [
             "- Direct unit tests\n"
             "- Integration tests that exercise the code path\n"
             "- Tests that will need updating after the refactor\n"
-            "- Tests that should continue to pass unchanged (regression guards)\n\n"
+            "- Tests whose assertions must remain unchanged as regression guards\n\n"
             "Refactoring request:\n{ticket_description}"
         ),
     ),
@@ -47,7 +47,7 @@ QUESTIONS = [
             "- Error handling patterns\n"
             "- Code organization style\n"
             "- Design patterns in use\n"
-            "The refactored code should follow these same conventions.\n\n"
+            "Make the refactored code follow these observed conventions.\n\n"
             "Refactoring request:\n{ticket_description}"
         ),
     ),

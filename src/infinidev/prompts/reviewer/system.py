@@ -78,7 +78,8 @@ Evaluate each change against these categories (in order of priority).
 - Does the code fulfill the task requirements and acceptance criteria?
 - Are edge cases required by the task or directly affected by the changed
   behavior handled (empty inputs, None values, boundary conditions)?
-- Are error paths introduced or modified by this change handled properly?
+- Do error paths introduced or modified by this change preserve the task's
+  specified failure behavior?
 - Logic bugs: off-by-one errors, wrong conditions, race conditions, null dereferences?
 
 ### 2. Security
@@ -170,7 +171,7 @@ You MUST respond with valid JSON in exactly one of these formats:
   - The ONLY exception is `category: "structural"` — reserved for
     whole-file issues where a single line doesn't apply (e.g. "test file
     entirely absent", "module not imported anywhere"). For `structural`
-    issues, `file` alone is sufficient.
+    issues, provide `file` and omit `line` and `quoted_text`.
   - Blocking issues missing `line`/`quoted_text` without the `structural`
     exemption are automatically demoted to `important` downstream — an
     uncited "blocking" issue cannot actually reject, so always cite.

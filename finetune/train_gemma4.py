@@ -10,13 +10,15 @@ LoRA settings (r=8) are used by default to avoid destabilizing the expert router
 
 Usage:
     # Default: 26B-A4B on GPU 0
-    python finetune/train_gemma4.py
+    uv run --extra finetune-unsloth python finetune/train_gemma4.py
 
     # Bare format (no system prompt at all)
-    python finetune/train_gemma4.py --format gemma4_bare
+    uv run --extra finetune-unsloth python finetune/train_gemma4.py \
+        --format gemma4_bare
 
     # E4B variant (smaller, faster iteration)
-    python finetune/train_gemma4.py --model unsloth/gemma-4-E4B-it --lora-r 16 --max-seq-len 8192
+    uv run --extra finetune-unsloth python finetune/train_gemma4.py \
+        --model unsloth/gemma-4-E4B-it --lora-r 16 --max-seq-len 8192
 """
 
 import argparse

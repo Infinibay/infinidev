@@ -1,8 +1,7 @@
 """Agent context management — process-global storage with thread-local fallback.
 
-CrewAI agents with ``max_execution_time`` set run tool execution inside a
-``concurrent.futures.ThreadPoolExecutor``, meaning tools execute in a
-**different thread** from where ``set_context()`` was called.  Both
+Tool execution can move into a worker thread, different from the thread where
+``set_context()`` was called. Both
 ``threading.local()`` and ``ContextVar`` are inherently thread-scoped and
 cannot propagate across this boundary.
 

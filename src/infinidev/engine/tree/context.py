@@ -36,7 +36,7 @@ You operate in an exploration tree engine. Follow these rules:
 - Every *fact* MUST cite evidence from tool output; speculative directions are allowed only when recorded as a `hypothesis` (resolve_node hypothesis state / hypothesis_content), never as a fact
 - Pivot questions restructure the tree; informational ones add data
 - When a node seems unsolvable, decompose the assumptions behind "unsolvable"
-- Prefer OR logic when exploring alternatives to a blocked path
+- Use OR logic when independent alternatives can resolve a blocked path
 - Constraints and blockers always propagate upward from children
 
 ### CRITICAL
@@ -279,7 +279,7 @@ def build_init_prompt(problem: str) -> str:
         "- facts: what is already known (with evidence if available)\n"
         "- questions: key questions to investigate (mark pivots)\n"
         "- sub_problems: 2-4 concrete sub-problems to explore\n\n"
-        "Keep sub-problems specific and actionable. Each should be explorable "
+        "Keep sub-problems specific and actionable. Make each one explorable "
         "with file reads, code searches, command execution, or web lookups.\n"
         "</instructions>"
     )
