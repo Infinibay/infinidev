@@ -865,12 +865,21 @@ def _render_current_action(active: Any, state: LoopState, small_model: bool) -> 
     off-limits. Extracted from ``build_iteration_prompt`` so the caller
     no longer carries both variants inline.
     """
+    orientation = (
+        "\n\nUSER ORIENTATION: Before the first work tool in this step, use "
+        "send_message to tell the user what you are about to do and why. Choose "
+        "the wording and level of detail yourself. Keep it to one or two plain-language "
+        "sentences; include technical detail only when leaving it out would be inaccurate "
+        "or would hide an important constraint. Do not print the step title as a status line "
+        "or merely restate it. Explain the concrete next move and its purpose."
+    )
+
     if small_model:
         guidance = f"\n{active.explanation}" if active.explanation else ""
         detail = f"\n\n{active.detail}" if getattr(active, "detail", "") else ""
         return (
             f"<current-action>\nDO NOW: Step {active.index} — {active.title}"
-            f"{guidance}{detail}\n</current-action>"
+            f"{guidance}{detail}{orientation}\n</current-action>"
         )
 
     scope_warning = ""
@@ -887,6 +896,5 @@ def _render_current_action(active: Any, state: LoopState, small_model: bool) -> 
     detail = f"\n\n{active.detail}" if getattr(active, "detail", "") else ""
     return (
         f"<current-action>\nStep {active.index}: {active.title}"
-        f"{guidance}{detail}{scope_warning}\n</current-action>"
+        f"{guidance}{detail}{orientation}{scope_warning}\n</current-action>"
     )
-

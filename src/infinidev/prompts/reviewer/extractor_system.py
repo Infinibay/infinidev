@@ -73,13 +73,20 @@ exists only on the deleted side, prefix the number with `-` (e.g.
    - Commented-out code blocks left behind
    Do NOT speculate. Only include lines that match one of the patterns
    above with exact text.
-3. **`plan_coverage` MUST map every plan step** given in `## Plan` to a
-   status. If a step has no matching change in any diff, mark it
-   `missing`. If the developer did something unrelated to any plan step,
-   add an `unrelated` entry with `step: null`.
-4. **`report_discrepancies`**: compare the `## Developer's Report`
-   against the diffs. Any concrete factual claim the developer makes
-   that is NOT supported by the diffs goes here. Examples:
+3. **`plan_coverage` MUST map every plan step** given in
+   `## Implementation Plan` to a status, but it is an execution record rather
+   than an acceptance decision.
+   Use the step status, report, current files, and diff together. A reading,
+   investigation, test-run, or other diff-free step is not `missing` merely
+   because it changed no file. Mark `missing` only when a step promises a code
+   or file outcome and the supplied evidence contains no such outcome. Compare
+   unplanned work with `## Original Task` before labeling it `unrelated`; the
+   plan does not define the task boundary.
+4. **`report_discrepancies`**: compare concrete claims in the
+   `## Developer's Report` against the diffs and current file contents. Put a
+   claim here only when those inputs contradict it. Lack of diff evidence is
+   not a contradiction for runtime actions such as reading or running a test.
+   Examples:
    - "added tests for X" but no test file was touched.
    - "removed the old adapter" but the adapter file is unchanged.
    - "renamed fn to fn2" but fn is unchanged in the diff.

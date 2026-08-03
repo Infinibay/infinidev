@@ -314,6 +314,37 @@ class TestReviewEngine:
         assert "Added JWT auth" in prompt
         assert "## Diffs" in prompt
 
+    def test_reviewer_prompts_keep_original_task_authoritative(self):
+        from infinidev.prompts.reviewer.extractor_system import EXTRACTOR_SYSTEM_PROMPT
+        from infinidev.prompts.reviewer.judge_system import JUDGE_SYSTEM_PROMPT
+        from infinidev.prompts.reviewer.system import REVIEWER_SYSTEM_PROMPT
+
+        assert "The plan describes a route, not the destination" in REVIEWER_SYSTEM_PROMPT
+        assert "NEVER reject solely because a plan step lacks a diff" in REVIEWER_SYSTEM_PROMPT
+        assert "none can expand the objective" in JUDGE_SYSTEM_PROMPT
+        assert "NEVER reject solely for a missing plan step" in JUDGE_SYSTEM_PROMPT
+        assert "not `missing` merely" in EXTRACTOR_SYSTEM_PROMPT
+        assert "plan does not define the task boundary" in EXTRACTOR_SYSTEM_PROMPT
+
+    def test_review_rework_prompt_preserves_scope_and_acceptance_criteria(self):
+        from infinidev.engine.analysis.review_engine import (
+            _build_review_rework_description,
+        )
+
+        task = (
+            "Fix duplicate rendering\n\n"
+            "## Acceptance criteria\n- one chat message per event"
+        )
+        prompt = _build_review_rework_description(
+            task,
+            "Add a new analytics dashboard while fixing the renderer.",
+        )
+
+        assert prompt.startswith(task)
+        assert "not permission to expand the task" in prompt
+        assert "Do not add unrelated features" in prompt
+        assert prompt.index("Acceptance criteria") < prompt.index("analytics dashboard")
+
     def test_build_review_prompt_with_feedback(self):
         engine = ReviewEngine()
         engine._review_count = 2
@@ -340,10 +371,14 @@ class TestReviewEngine:
                 "[user] Now add JWT authentication",
             ],
         )
-        assert "## Conversation Context" in prompt
+        assert "## Supplemental Conversation Context" in prompt
         assert "Set up the project structure" in prompt
-        assert ">>> CURRENT REQUEST <<<" in prompt
+        assert "Most recent context entry:" in prompt
         assert "Now add JWT authentication" in prompt
+        assert ">>> CURRENT REQUEST <<<" not in prompt
+        assert prompt.index("## Original Task") < prompt.index(
+            "## Supplemental Conversation Context"
+        )
 
     def test_build_review_prompt_with_file_reasons_and_contents(self):
         engine = ReviewEngine()
@@ -393,7 +428,7 @@ class TestReviewEngine:
         user_msg = messages[1]["content"]
         assert "JWT implementation" in user_msg
         assert "import jwt" in user_msg
-        assert "Conversation Context" in user_msg
+        assert "Supplemental Conversation Context" in user_msg
         assert "[user] Add auth" in user_msg
 
     @patch("litellm.completion")
@@ -603,7 +638,7 @@ class TestMultiPassReview:
             plan_steps=[{"step": 1, "title": "write login"}],
         )
         assert "## Original Task" in prompt
-        assert "## Plan" in prompt
+        assert "## Implementation Plan" in prompt
         assert "## Diffs" in prompt
         # Extractor prompt body should not mention severity/judgment language
         assert "severity" not in prompt.lower()
@@ -871,7 +906,7 @@ class TestFileChangeTrackerReasons:
             previous_feedback="",
             plan_steps=plan,
         )
-        assert "## Plan (what the developer committed to)" in prompt
+        assert "## Implementation Plan (context, not acceptance contract)" in prompt
         assert "1. Add schema [schema.sql]" in prompt
         assert "Create Users table" in prompt
         assert "2. Wire up migration" in prompt
@@ -909,7 +944,7 @@ class TestFileChangeTrackerReasons:
             file_changes_summary="",
             previous_feedback="",
         )
-        assert "## Plan" not in prompt
+        assert "## Implementation Plan" not in prompt
         assert "## Automated Checks" not in prompt
 
     def test_collect_automated_checks_empty_when_no_changes(self):

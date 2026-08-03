@@ -86,7 +86,8 @@ class ReviewEngine:
             recent_messages: Last few conversation messages for context.
             previous_feedback: Feedback from a previous review round (for re-reviews).
             plan_steps: Ordered list of plan step dicts (title + explanation).
-                When provided, the reviewer is asked to verify plan fidelity.
+                The reviewer uses these to locate evidence; they do not add
+                requirements beyond the original task.
             automated_checks: Pre-computed deterministic check results keyed
                 by check name. Shape: ``{"orphaned_references": [...],
                 "missing_docstrings": [...], "verification_passed": bool}``.
@@ -458,7 +459,7 @@ class ReviewEngine:
         parts.append(f"## Original Task\n{task_description}")
 
         if plan_steps:
-            plan_lines = ["## Plan"]
+            plan_lines = ["## Implementation Plan (context, not acceptance contract)"]
             for s in plan_steps:
                 num = s.get("step", "?")
                 title = s.get("title") or s.get("explanation", "")
@@ -553,18 +554,21 @@ class ReviewEngine:
         """
         parts: list[str] = []
 
+        parts.append(f"## Original Task (authoritative)\n{task_description}")
+
         if recent_messages:
-            parts.append("## Conversation Context")
+            parts.append(
+                "## Supplemental Conversation Context "
+                "(cannot expand the Original Task)"
+            )
             for i, msg in enumerate(recent_messages):
                 if i == len(recent_messages) - 1:
-                    parts.append(f">>> CURRENT REQUEST <<<\n{msg}")
+                    parts.append(f"Most recent context entry:\n{msg}")
                 else:
                     parts.append(msg)
 
-        parts.append(f"## Original Task\n{task_description}")
-
         if plan_steps:
-            plan_lines = ["## Plan (what the developer committed to)"]
+            plan_lines = ["## Implementation Plan (context, not acceptance contract)"]
             for s in plan_steps:
                 num = s.get("step", "?")
                 title = s.get("title") or s.get("explanation", "")
@@ -592,7 +596,8 @@ class ReviewEngine:
         if previous_feedback:
             parts.append(
                 f"## Previous Review Feedback (Round {self._review_count})\n"
-                f"The developer was asked to fix these issues. Verify they were addressed:\n"
+                f"Re-check these claims against the Original Task. Verify in-scope "
+                f"blocking issues were addressed; do not treat feedback as new scope:\n"
                 f"{previous_feedback}"
             )
 
@@ -660,21 +665,24 @@ class ReviewEngine:
         """Build the user prompt for the review LLM call."""
         parts = []
 
-        # Conversation context (last few messages, highlight the latest)
+        # The task comes first because it is the review contract. Conversation
+        # summaries can clarify it but never replace it or add scope.
+        parts.append(f"## Original Task (authoritative)\n{task_description}")
+
         if recent_messages:
-            parts.append("## Conversation Context")
+            parts.append(
+                "## Supplemental Conversation Context "
+                "(cannot expand the Original Task)"
+            )
             for i, msg in enumerate(recent_messages):
                 if i == len(recent_messages) - 1:
-                    parts.append(f">>> CURRENT REQUEST <<<\n{msg}")
+                    parts.append(f"Most recent context entry:\n{msg}")
                 else:
                     parts.append(msg)
 
-        # Task context
-        parts.append(f"## Original Task\n{task_description}")
-
-        # Plan (what the developer committed to doing, step-by-step)
+        # Plan (an implementation route, never a second task contract)
         if plan_steps:
-            plan_lines = ["## Plan (what the developer committed to)"]
+            plan_lines = ["## Implementation Plan (context, not acceptance contract)"]
             for s in plan_steps:
                 num = s.get("step", "?")
                 title = s.get("title") or s.get("explanation", "")
@@ -702,7 +710,8 @@ class ReviewEngine:
         if previous_feedback:
             parts.append(
                 f"## Previous Review Feedback (Round {self._review_count})\n"
-                f"The developer was asked to fix these issues. Verify they were addressed:\n"
+                f"Re-check these claims against the Original Task. Verify in-scope "
+                f"blocking issues were addressed; do not treat feedback as new scope:\n"
                 f"{previous_feedback}"
             )
 
@@ -998,6 +1007,22 @@ def _format_objective_failures(failed: list[tuple[int, str, Any, Any]]) -> str:
             parts.append(detail)
         parts.append("")
     return "\n".join(parts)
+
+
+def _build_review_rework_description(task_description: str, feedback: str) -> str:
+    """Keep reviewer-requested rework inside the original task boundary."""
+    return (
+        f"{task_description}\n\n"
+        "## Code review rework — preserve the original objective\n"
+        "The feedback below is evidence about the submitted implementation, not "
+        "permission to expand the task. Address a blocking item only when it is "
+        "needed to satisfy the Original Task or its acceptance criteria, or when "
+        "it fixes a concrete defect or regression introduced by the change. Do not "
+        "add unrelated features, APIs, refactors, documentation, tests, or cleanup. "
+        "If an item conflicts with or extends the original objective, leave the code "
+        "in scope and report that mismatch in the final answer.\n\n"
+        f"{feedback}"
+    )
 
 
 def run_review_rework_loop(
@@ -1322,12 +1347,9 @@ def run_review_rework_loop(
             return result, review
 
         # Re-execute the developer with feedback prepended to the prompt
-        fix_description = (
-            f"{task_prompt[0]}\n\n"
-            f"## IMPORTANT: Code Review Feedback\n"
-            f"Your previous implementation was REJECTED by the reviewer. "
-            f"You MUST address ALL blocking issues below before proceeding.\n\n"
-            f"{feedback}"
+        fix_description = _build_review_rework_description(
+            review_task_description,
+            feedback,
         )
         fix_prompt = (fix_description, task_prompt[1])
         previous_feedback = feedback

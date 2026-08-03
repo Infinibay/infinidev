@@ -330,6 +330,9 @@ class TestRenderCurrentAction:
         assert "DO NOW" in out
         assert "do the thing" in out
         assert "details here" in out
+        assert "send_message" in out
+        assert "plain-language" in out
+        assert "Do not print the step title" in out
 
     def test_regular_model_includes_scope_constraint(self):
         from infinidev.engine.loop.context import _render_current_action
@@ -339,6 +342,7 @@ class TestRenderCurrentAction:
         out = _render_current_action(active, state, small_model=False)
         assert "SCOPE CONSTRAINT" in out
         assert "later thing" in out
+        assert "Choose the wording and level of detail yourself" in out
 
     def test_regular_model_no_scope_when_nothing_pending(self):
         from infinidev.engine.loop.context import _render_current_action

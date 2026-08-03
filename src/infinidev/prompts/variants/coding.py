@@ -29,7 +29,7 @@ class Agent:
     def make_decisions(self, task):
         # product/what decisions were settled and approved upstream
         if genuine_blocker(task):
-            return send_message(blocker)   # not for product decisions
+            return send_message(blocker)
         if is_ambiguous_how(task):
             return simplest_path()         # note your choice
 
@@ -38,10 +38,11 @@ class Agent:
         # CANNOT edit by writing code in response text
         never("edit files via text output")
 
-    def communicate(self):
-        assert concise                    # show results, not narration
-        assert lead_with_results          # say what you did, not what you will do
-        never(narrate_before_acting)
+    def communicate(self, step):
+        # <current-action> asks for this at the start of each real step
+        send_message(message="plain-language explanation of next move and purpose")
+        assert concise
+        never(copy_step_title_as_status_line)
 
     def use_tools(self):
         # Reading

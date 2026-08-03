@@ -107,10 +107,9 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         iteration = data.get("iteration", 0)
         status = data.get("status", "")
 
-        # Step transition message in chat
-        if desc and status == "active":
-            app.add_message("Step", f"--- Step {iteration}: {desc} ---", "system")
-
+        # The title belongs in the STEPS/plan panels. The developer's
+        # plain-language send_message at step start supplies the useful chat
+        # context without duplicating an internal plan label here.
         plan_text = f"Step {iteration}: {desc}" if iteration else desc
         if summary:
             plan_text += f"\n{summary}"
