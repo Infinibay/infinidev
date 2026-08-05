@@ -222,6 +222,7 @@ _TOOL_NAME_PATTERNS = [
 # gemini, ollama) are intentionally excluded.
 _STREAM_USAGE_PROVIDERS = frozenset({
     "openai", "openai_compatible", "vllm", "llama_cpp", "gmi", "qwen",
+    "qwen_subscription",
     "openrouter", "zai", "zai_coding", "kimi", "minimax", "mistral", "deepseek",
 })
 

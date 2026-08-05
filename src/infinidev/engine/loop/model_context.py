@@ -86,8 +86,10 @@ _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     # Qwen — LiteLLM indexes DashScope models under prefixes that never match
     # this provider's `custom_openai/` prefix.  Only limits explicitly listed
     # by Alibaba are included; the unlisted legacy aliases remain unknown.
+    "qwen3.8-max-preview": 1_000_000,
     "qwen3.7-max": 1_000_000,
     "qwen3.7-plus": 1_000_000,
+    "qwen3.7-flash": 1_000_000,
     "qwen3.6-max-preview": 256_000,
     "qwen3.6-plus": 1_000_000,
     "qwen3.6-flash": 1_000_000,

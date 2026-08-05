@@ -189,6 +189,7 @@ def _is_native_provider(model: str) -> bool:
 # ── ChatGPT subscription (Codex) ─────────────────────────────────────
 
 CHATGPT_SUBSCRIPTION_PROVIDER = "openai_subscription"
+QWEN_SUBSCRIPTION_PROVIDER = "qwen_subscription"
 
 # `openai/` selects LiteLLM's OpenAI transport, `responses/` flips it onto
 # the Responses API. The Codex backend serves no /chat/completions endpoint,
@@ -253,16 +254,35 @@ def _apply_chatgpt_subscription(params: dict[str, Any], provider_id: str) -> Non
     params.pop("temperature", None)
 
 
+def _apply_qwen_subscription(params: dict[str, Any], provider_id: str) -> None:
+    """Pin Qwen Token Plan requests to its subscription-only transport."""
+    if provider_id != QWEN_SUBSCRIPTION_PROVIDER:
+        return
+
+    from infinidev.config.providers import get_provider
+
+    model = params.get("model", "")
+    bare = model
+    for prefix in ("custom_openai/", "qwen/", "openai/"):
+        if bare.startswith(prefix):
+            bare = bare[len(prefix) :]
+            break
+    params["model"] = f"custom_openai/{bare}"
+    # Never inherit a metered DashScope URL from an older configuration:
+    # Token Plan credentials are deliberately not interchangeable with it.
+    params["api_base"] = get_provider(provider_id).default_base_url
+
+
 def apply_provider_transport(params: dict[str, Any], provider_id: str) -> None:
     """Apply provider-specific authentication and transport to standalone calls.
 
-    Most Infinidev call builders invoke the internal subscription adapter as
-    their final step. Offline evaluation runners build their own generation
-    parameters, so this small public boundary lets them use the exact same
-    OAuth refresh, endpoint, headers, and no-server-history policy without
-    copying credential logic.
+    Most Infinidev call builders invoke the provider adapters as their final
+    step. Offline evaluation runners build their own generation parameters,
+    so this public boundary keeps fixed subscription endpoints and any
+    provider-specific authentication policy consistent without copying it.
     """
     _apply_chatgpt_subscription(params, provider_id)
+    _apply_qwen_subscription(params, provider_id)
 
 
 def _codex_api_base() -> str:
@@ -517,7 +537,7 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
         "X-Client-Version": _version,
     }
 
-    _apply_chatgpt_subscription(params, provider_id)
+    apply_provider_transport(params, provider_id)
 
     return params
 
@@ -584,7 +604,7 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
         "X-Client-Version": _version,
     }
 
-    _apply_chatgpt_subscription(params, provider_id)
+    apply_provider_transport(params, provider_id)
 
     return params
 
@@ -648,7 +668,7 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
         "X-Client-Version": _version,
     }
 
-    _apply_chatgpt_subscription(params, provider_id)
+    apply_provider_transport(params, provider_id)
 
     return params
 
@@ -744,6 +764,6 @@ def get_litellm_params() -> dict[str, Any]:
         extra = params.setdefault("extra_body", {})
         extra.setdefault("reasoning_split", True)
 
-    _apply_chatgpt_subscription(params, settings.LLM_PROVIDER)
+    apply_provider_transport(params, settings.LLM_PROVIDER)
 
     return params

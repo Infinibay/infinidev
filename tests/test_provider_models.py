@@ -26,6 +26,50 @@ def test_catalog_models_use_provider_prefixes() -> None:
     assert get_provider("minimax").prefix == "minimax/"
 
 
+def test_qwen_token_plan_is_a_separate_fixed_provider() -> None:
+    provider = get_provider("qwen_subscription")
+
+    assert provider.display_name == "Qwen Token Plan (Subscription)"
+    assert provider.prefix == "custom_openai/"
+    assert provider.base_url_editable is False
+    assert provider.default_base_url == (
+        "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+    )
+    assert "custom_openai/qwen3.8-max-preview" in fetch_models(
+        "qwen_subscription"
+    )
+    assert "qwen3.8-max-preview" not in get_provider("qwen").static_models
+
+
+def test_qwen_token_plan_transport_overrides_stale_metered_base() -> None:
+    from infinidev.config.llm import apply_provider_transport
+
+    params = {
+        "model": "qwen/qwen3.8-max-preview",
+        "api_base": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "api_key": "subscription-key",
+    }
+    apply_provider_transport(params, "qwen_subscription")
+
+    assert params == {
+        "model": "custom_openai/qwen3.8-max-preview",
+        "api_base": (
+            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+        ),
+        "api_key": "subscription-key",
+    }
+
+
+def test_qwen_token_plan_has_known_tool_capabilities() -> None:
+    from infinidev.config.model_capabilities import _PROVIDER_PRESETS
+
+    caps = _PROVIDER_PRESETS["qwen_subscription"]
+    assert caps.supports_function_calling is True
+    assert caps.supports_tool_choice_required is True
+    assert caps.needs_schema_sanitization is True
+    assert caps.probed is True
+
+
 # ── Catalogs age silently; these are the guards ──────────────────────
 
 
@@ -91,6 +135,10 @@ _CONTEXT_WINDOW_GAPS = {
     "qwen:qwen-turbo",
     "qwen:qwen-flash",
     "qwen:qwq-plus",
+    "qwen_subscription:qwen3-coder-flash",
+    "qwen_subscription:qwen3-max",
+    "qwen_subscription:qwen-plus",
+    "qwen_subscription:qwen-flash",
 }
 
 

@@ -1,5 +1,5 @@
 {
-  "provider": "qwen",
+  "provider": "qwen_subscription",
   "model": "qwen3.8-max-preview",
   "availability": "token_plan_only",
   "openai_compatible_base_url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",

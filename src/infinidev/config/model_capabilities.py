@@ -538,6 +538,13 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
         needs_schema_sanitization=True,  # Qwen rejects anyOf and complex schemas
         probed=True,
     ),
+    "qwen_subscription": ModelCapabilities(
+        supports_function_calling=True,
+        supports_tool_choice_required=True,
+        supports_json_mode=True,
+        needs_schema_sanitization=True,
+        probed=True,
+    ),
     "gmi": ModelCapabilities(
         # GMI Cloud serves a mixed catalog (DeepSeek, Qwen, Kimi, GLM,
         # Llama, ...) behind one OpenAI-compatible endpoint, so — like

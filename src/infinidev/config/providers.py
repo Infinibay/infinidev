@@ -309,6 +309,35 @@ PROVIDERS: dict[str, ProviderConfig] = {
             "qwq-plus",
         ],
     ),
+    "qwen_subscription": ProviderConfig(
+        id="qwen_subscription",
+        display_name="Qwen Token Plan (Subscription)",
+        prefix="custom_openai/",
+        # Token Plan is a separate service from metered DashScope. Its
+        # subscription keys (sk-sp-...) are only valid against this endpoint.
+        default_base_url=(
+            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+        ),
+        # Keep discovery deterministic: Token Plan availability is a curated
+        # subset of Qwen Cloud and must not be confused with the pay-as-you-go
+        # catalog exposed by DashScope.
+        model_list_format="static",
+        static_models=[
+            "qwen3.8-max-preview",
+            "qwen3.7-max",
+            "qwen3.7-plus",
+            "qwen3.7-flash",
+            "qwen3.6-plus",
+            "qwen3.6-flash",
+            "qwen3.5-plus",
+            "qwen3.5-flash",
+            "qwen3-max",
+            "qwen3-coder-plus",
+            "qwen3-coder-flash",
+            "qwen-plus",
+            "qwen-flash",
+        ],
+    ),
     "gmi": ProviderConfig(
         id="gmi",
         display_name="GMI Cloud",

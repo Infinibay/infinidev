@@ -112,8 +112,9 @@ class Settings(BaseSettings):
 
     # LLM (via LiteLLM)
     # Provider ID — the authoritative list is PROVIDERS in config/providers.py.
-    # `openai_subscription` bills against a ChatGPT plan via `codex login`
-    # instead of an API key; it ignores LLM_API_KEY and LLM_BASE_URL.
+    # Subscription providers are separate routes: `openai_subscription` uses
+    # `codex login`, while `qwen_subscription` uses a Token Plan API key. Both
+    # ignore LLM_BASE_URL so metered and subscription endpoints cannot mix.
     LLM_PROVIDER: str = "ollama"
     LLM_MODEL: str = "ollama_chat/qwen2.5-coder:7b"
     LLM_BASE_URL: str = "http://localhost:11434"
