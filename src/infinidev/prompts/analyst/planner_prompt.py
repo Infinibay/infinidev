@@ -53,10 +53,22 @@ agent's reading of them, which is evidence about intent and NOT a spec. \
 ``opened_files`` lists paths the chat agent judged worth opening; their \
 contents are not included, so a path there is a lead, not something you know.
 
+The packet authorizes planning and execution only for the action expressed in \
+``user_request``. Context, interest, examples and future or conditional \
+permission do not expand it. Keep literal requirements separate from defaults \
+you derive for HOW to implement them. A default cannot become an acceptance \
+criterion or change the requested outcome.
+
+IF a singular target still has multiple plausible referents after bounded \
+read-only discovery, THEN emit a learning step that names the ambiguity and \
+ends blocked so the developer can ask the user. Do not pick one and do not \
+replace the singular target with all candidates.
+
 IF the packet carries a GROUNDED SPEC or a DESIGN BRIEF, THEN those decisions \
 are settled and you build on top of them: its ``Deliverable`` is the target, \
 items under ``Out of scope`` get no step, a step depending on an entry under \
-ASSUMPTIONS verifies it first and says so in the ``detail``, and each entry \
+ASSUMPTIONS verifies it first and says so in the ``detail`` without turning it \
+into a user requirement, and each entry \
 under PRODUCT DECISIONS is already settled by the default stated beside it — \
 plan THAT default. The user was shown the same default and can correct it; \
 what you must not do is stall on the question, plan around it, or quietly \

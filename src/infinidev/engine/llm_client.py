@@ -229,6 +229,7 @@ def call_llm(
     tool_choice: str | dict[str, Any] = "auto",
     on_thinking_chunk: Any | None = None,
     on_stream_status: "Callable[[str, int, str | None], None] | None" = None,
+    retry_attempts: int | None = None,
 ) -> Any:
     """Call litellm.completion with retry for transient errors.
 
@@ -244,17 +245,21 @@ def call_llm(
     """
     import litellm
     from infinidev.config.model_capabilities import get_model_capabilities
-
     caps = get_model_capabilities()
 
     kwargs: dict[str, Any] = {**params, "messages": messages}
     if tools:
         kwargs["tools"] = tools
-        # Downgrade tool_choice if model doesn't support "required"
-        if tool_choice == "required" and not caps.supports_tool_choice_required:
-            kwargs["tool_choice"] = "auto"
-        else:
-            kwargs["tool_choice"] = tool_choice
+        # The ChatGPT/Codex subscription backend supports function tools but
+        # rejects the ``tool_choice`` parameter itself. Omitting it lets the
+        # backend's automatic selection apply on the first request, which is
+        # essential for no-retry evaluation runs.
+        if settings.LLM_PROVIDER != "openai_subscription":
+            # Downgrade tool_choice if model doesn't support "required"
+            if tool_choice == "required" and not caps.supports_tool_choice_required:
+                kwargs["tool_choice"] = "auto"
+            else:
+                kwargs["tool_choice"] = tool_choice
         # /no_think injection is handled by apply_thinking_budget() below —
         # no duplicate injection needed here.
     # Force JSON output — prevents models (especially Ollama) from mixing
@@ -301,8 +306,11 @@ def call_llm(
     if use_streaming and settings.LLM_PROVIDER in _STREAM_USAGE_PROVIDERS:
         kwargs["stream_options"] = {"include_usage": True}
 
+    attempts = LLM_RETRIES if retry_attempts is None else int(retry_attempts)
+    if attempts < 1:
+        raise ValueError("retry_attempts must be positive")
     last_exc: Exception | None = None
-    for attempt in range(1, LLM_RETRIES + 1):
+    for attempt in range(1, attempts + 1):
         try:
             if use_streaming:
                 response = _stream_and_assemble(
@@ -343,12 +351,12 @@ def call_llm(
                     if not is_transient(exc):
                         caps.supports_tool_choice_required = False
                     continue  # retry without tool_choice
-            if not is_transient(exc) or attempt == LLM_RETRIES:
+            if not is_transient(exc) or attempt == attempts:
                 raise
             delay = LLM_RETRY_DELAY * (2 ** (attempt - 1))
             logger.warning(
                 "Transient LLM error (attempt %d/%d), retrying in %.1fs: %s",
-                attempt, LLM_RETRIES, delay, str(exc)[:200],
+                attempt, attempts, delay, str(exc)[:200],
             )
             time.sleep(delay)
     raise last_exc  # type: ignore[misc]

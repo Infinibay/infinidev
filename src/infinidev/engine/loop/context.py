@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from infinidev.config.settings import settings
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.prompt.tools_section import (
@@ -108,12 +109,8 @@ def build_system_prompt(
         protocol = protocol_override or get_variant("loop.protocol") or LOOP_PROTOCOL
         behavior = BEHAVIOR_GUIDELINES
 
-    # Stable prefix: identity + behavior + tech + protocol. Kept in this order
-    # so the whole prefix can be cached as a single block — the dynamic session
-    # context goes AFTER the cache breakpoint marker below. Behavior sits right
-    # under the identity so the honesty/anti-laziness rules frame everything
-    # the agent does, regardless of which prompt variant supplied the identity.
-    parts: list[str] = [identity, behavior]
+    behavior_parts: list[str] = [identity, behavior]
+    execution_parts: list[str] = []
 
     # Tech-specific guidelines (skip for small models — too many tokens)
     if tech_hints and not small_model:
@@ -124,9 +121,11 @@ def build_system_prompt(
             if prompt:
                 tech_sections.append(prompt)
         if tech_sections:
-            parts.append("## Technology Guidelines\n\n" + "\n\n".join(tech_sections))
+            execution_parts.append(
+                "## Technology Guidelines\n\n" + "\n\n".join(tech_sections)
+            )
 
-    parts.append(protocol)
+    execution_parts.append(protocol)
 
     # The project's own instructions go last in the stable prefix: they are
     # meant to override the general guidance above, and the end of the
@@ -137,7 +136,7 @@ def build_system_prompt(
 
         block = render_project_instructions(workspace_path)
         if block:
-            parts.append(block)
+            execution_parts.append(block)
 
     # When the pair-programming critic is enabled, teach the principal
     # that those `--- critic note ---` blocks at the end of tool
@@ -146,7 +145,28 @@ def build_system_prompt(
     with best_effort("critic protocol addendum check failed"):
         from infinidev.config import settings as _settings
         if getattr(_settings, "ASSISTANT_LLM_ENABLED", False):
-            parts.append(CRITIC_PROTOCOL_ADDENDUM)
+            execution_parts.append(CRITIC_PROTOCOL_ADDENDUM)
+
+    from infinidev.engine.prompt_layers import (
+        PromptLayer,
+        PromptLayerKind,
+        compose_layers,
+    )
+
+    stable_prefix = compose_layers(
+        [
+            PromptLayer(
+                PromptLayerKind.BEHAVIOR,
+                "\n\n".join(behavior_parts),
+                "infinidev-core",
+            ),
+            PromptLayer(
+                PromptLayerKind.EXECUTION_POLICY,
+                "\n\n".join(execution_parts),
+                "infinidev-harness-and-repository",
+            ),
+        ]
+    )
 
     # Session context changes every iteration (step summaries grow over
     # time). Emit it AFTER the breakpoint marker so caching-capable
@@ -157,14 +177,18 @@ def build_system_prompt(
         numbered = "\n".join(
             f"{i+1}. {s}" for i, s in enumerate(session_summaries)
         )
-        session_block = f"<session-context>\n{numbered}\n</session-context>"
+        session_block = PromptLayer(
+            PromptLayerKind.CONTEXT_EVIDENCE,
+            f"<session-context>\n{numbered}\n</session-context>",
+            "runtime-session",
+        ).render()
         return (
-            "\n\n".join(parts)
+            stable_prefix
             + f"\n\n{CACHE_BREAKPOINT_MARKER}\n\n"
             + session_block
         )
 
-    return "\n\n".join(parts)
+    return stable_prefix
 
 
 def build_iteration_prompt(
@@ -173,6 +197,7 @@ def build_iteration_prompt(
     state: LoopState,
     *,
     project_knowledge: list[dict] | None = None,
+    context_corpus: str | None = None,
     context_rank_result: Any | None = None,
     max_context_tokens: int = 0,
     session_notes: list[str] | None = None,
@@ -191,7 +216,14 @@ def build_iteration_prompt(
 
     _append_if(parts, _render_smart_summary(state, small_model))
     _append_if(parts, _render_project_knowledge(project_knowledge))
-    _append_if(parts, _render_context_rank(context_rank_result))
+    _append_if(parts, _render_context_corpus(context_corpus))
+    _append_if(
+        parts,
+        _render_context_rank(
+            context_rank_result,
+            max_chars=4_000 if small_model else None,
+        ),
+    )
     _append_if(parts, _render_workspace())
     _append_if(parts, _render_background_completions())
     _append_if(parts, _render_background_tasks())
@@ -555,7 +587,19 @@ def _render_project_knowledge(project_knowledge: list[dict] | None) -> str:
     )
 
 
-def _render_context_rank(result: Any | None) -> str:
+def _render_context_corpus(context_corpus: str | None) -> str:
+    """Render an exact, predeclared repository corpus for controlled studies."""
+    if not context_corpus:
+        return ""
+    return (
+        "<repository-context-corpus>\n"
+        "Predeclared repository evidence for this task:\n"
+        f"{context_corpus}\n"
+        "</repository-context-corpus>"
+    )
+
+
+def _render_context_rank(result: Any | None, *, max_chars: int | None = None) -> str:
     """Render the ContextRank section with enriched resource previews.
 
     For files: includes symbol outlines (functions, classes, methods)
@@ -591,7 +635,19 @@ def _render_context_rank(result: Any | None) -> str:
             if content:
                 lines.append(f"       {content}")
     lines.append("</context-rank>")
-    return "\n".join(lines)
+    rendered = "\n".join(lines)
+    limit = max_chars if max_chars is not None else settings.CONTEXT_RANK_MAX_PROMPT_CHARS
+    limit = max(512, int(limit))
+    if len(rendered) <= limit:
+        return rendered
+    suffix = (
+        "\n  ... automatic context truncated; use Ken tools to inspect more."
+        "\n</context-rank>"
+    )
+    prefix = rendered[: limit - len(suffix)]
+    if "\n" in prefix:
+        prefix = prefix.rsplit("\n", 1)[0]
+    return prefix + suffix
 
 
 def _get_file_symbol_outline(file_path: str) -> list[str]:

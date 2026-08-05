@@ -1,0 +1,3102 @@
+{
+  "interpretation_boundary": "Fixed-order and balanced runs differ in both presentation and sample count. A changed or tied canonical mode reveals sensitivity but does not identify a single causal token bias. Provider letters, mappings, and canonical actions are retained separately.",
+  "models": {
+    "Sol": {
+      "model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "probe_count": 8,
+      "modal_relation_counts": {
+        "changed_unique": 1,
+        "same_unique": 7
+      },
+      "balanced_provider_letter_counts": {
+        "A": 13,
+        "B": 5,
+        "C": 8,
+        "D": 6
+      },
+      "records": [
+        {
+          "probe_id": "preference-implementation-reuse-v2",
+          "category": "implementation_strategy",
+          "scenario": "The same public contract and tests can be satisfied by two hooks in an established export pipeline or by an isolated 90-line implementation. Reuse adds convention complexity; isolation duplicates a small amount of mechanics.",
+          "fixed": {
+            "action_counts": {
+              "D": 3
+            },
+            "provider_letter_counts": {
+              "D": 3
+            },
+            "modal_keys": [
+              "D"
+            ],
+            "modal_actions": [
+              "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "D": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "D"
+            ],
+            "modal_actions": [
+              "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-interrupt-atomicity-v2",
+          "category": "user_interruptions",
+          "scenario": "An eight-second local operation is between temporary write and atomic rename when the user interrupts. The temp state is safe and resumable, and completion has no external effect.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 3,
+              "D": 1
+            },
+            "provider_letter_counts": {
+              "A": 2,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Complete the remaining atomic rename, then respond with the finished local state clearly reported.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-recovery-fallback-v1",
+          "category": "recovery_from_tool_errors",
+          "scenario": "A preferred semantic index is temporarily unavailable. Direct text/source search is slower but current and can answer the same question; waiting may preserve the preferred ranking behavior.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Switch immediately to direct source/text search and document the changed evidence channel."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Switch immediately to direct source/text search and document the changed evidence channel."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-requirements-iteration-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A new internal workflow has three independently deployable slices. Product behavior is understood, but low-impact copy and ordering preferences will improve after users see the first slice.",
+          "fixed": {
+            "action_counts": {
+              "C": 3
+            },
+            "provider_letter_counts": {
+              "C": 3
+            },
+            "modal_keys": [
+              "C"
+            ],
+            "modal_actions": [
+              "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "C",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "C",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "C",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 1,
+              "C": 2,
+              "D": 1
+            },
+            "provider_letter_counts": {
+              "A": 3,
+              "C": 1
+            },
+            "modal_keys": [
+              "C"
+            ],
+            "modal_actions": [
+              "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Draft all requirements provisionally, implement slice one, and ask the user to review the remaining draft against it.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-test-scope-v1",
+          "category": "test_strategy",
+          "scenario": "A localized parser fix has focused regression tests and all 140 impacted-module tests passing. The complete 2,700-test suite takes 38 minutes and historically finds unrelated failures in 2% of runs; no release gate explicitly requires it.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Accept the focused and impacted tests as sufficient, document their coverage, and stop."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 3,
+              "D": 1
+            },
+            "provider_letter_counts": {
+              "A": 2,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Accept the focused and impacted tests as sufficient, document their coverage, and stop."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-uncertainty-presentation-v2",
+          "category": "uncertainty_and_calibration",
+          "scenario": "A reversible recommendation remains preferred across plausible estimates. Residual failure is approximately 10–20%, bounded in impact, with a tested two-minute fallback.",
+          "fixed": {
+            "action_counts": {
+              "B": 3
+            },
+            "provider_letter_counts": {
+              "B": 3
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 3,
+              "D": 1
+            },
+            "provider_letter_counts": {
+              "A": 2,
+              "B": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "D",
+                "canonical_action": "Provide a structured likelihood-impact-fallback table with the 10–20% range and bounded consequences.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-vague-prototype-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "Production remains untouched while an internal search presentation is explored. A reversible prototype costs 30 minutes and a comparison specification costs 20; user preference is not yet known.",
+          "fixed": {
+            "action_counts": {
+              "B": 3
+            },
+            "provider_letter_counts": {
+              "B": 3
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Build one throwaway interactive prototype using existing components and collect concrete feedback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Build one throwaway interactive prototype using existing components and collect concrete feedback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-verification-independence-v2",
+          "category": "evidence_and_verification",
+          "scenario": "Source hash and deterministic regeneration prove an immutable artifact matches. A separate parser with independent code can corroborate that invariant at a cost of 25 minutes.",
+          "fixed": {
+            "action_counts": {
+              "B": 2,
+              "C": 1
+            },
+            "provider_letter_counts": {
+              "B": 2,
+              "C": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "C",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 1,
+              "C": 3
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 2
+            },
+            "modal_keys": [
+              "C"
+            ],
+            "modal_actions": [
+              "Complete with the primary proof and give the user the exact independent check as an optional command."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "changed_unique"
+        }
+      ]
+    },
+    "Terra": {
+      "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "probe_count": 8,
+      "modal_relation_counts": {
+        "balanced_tie_contains_fixed": 1,
+        "changed_unique": 1,
+        "same_unique": 6
+      },
+      "balanced_provider_letter_counts": {
+        "A": 12,
+        "B": 7,
+        "C": 7,
+        "D": 6
+      },
+      "records": [
+        {
+          "probe_id": "preference-implementation-reuse-v2",
+          "category": "implementation_strategy",
+          "scenario": "The same public contract and tests can be satisfied by two hooks in an established export pipeline or by an isolated 90-line implementation. Reuse adds convention complexity; isolation duplicates a small amount of mechanics.",
+          "fixed": {
+            "action_counts": {
+              "D": 3
+            },
+            "provider_letter_counts": {
+              "D": 3
+            },
+            "modal_keys": [
+              "D"
+            ],
+            "modal_actions": [
+              "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "D": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "D"
+            ],
+            "modal_actions": [
+              "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-interrupt-atomicity-v2",
+          "category": "user_interruptions",
+          "scenario": "An eight-second local operation is between temporary write and atomic rename when the user interrupts. The temp state is safe and resumable, and completion has no external effect.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-recovery-fallback-v1",
+          "category": "recovery_from_tool_errors",
+          "scenario": "A preferred semantic index is temporarily unavailable. Direct text/source search is slower but current and can answer the same question; waiting may preserve the preferred ranking behavior.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Switch immediately to direct source/text search and document the changed evidence channel."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Switch immediately to direct source/text search and document the changed evidence channel."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-requirements-iteration-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A new internal workflow has three independently deployable slices. Product behavior is understood, but low-impact copy and ordering preferences will improve after users see the first slice.",
+          "fixed": {
+            "action_counts": {
+              "B": 2,
+              "C": 1
+            },
+            "provider_letter_counts": {
+              "B": 2,
+              "C": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "C",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 1,
+              "C": 2,
+              "D": 1
+            },
+            "provider_letter_counts": {
+              "A": 3,
+              "C": 1
+            },
+            "modal_keys": [
+              "C"
+            ],
+            "modal_actions": [
+              "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Draft all requirements provisionally, implement slice one, and ask the user to review the remaining draft against it.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "changed_unique"
+        },
+        {
+          "probe_id": "preference-test-scope-v1",
+          "category": "test_strategy",
+          "scenario": "A localized parser fix has focused regression tests and all 140 impacted-module tests passing. The complete 2,700-test suite takes 38 minutes and historically finds unrelated failures in 2% of runs; no release gate explicitly requires it.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Accept the focused and impacted tests as sufficient, document their coverage, and stop."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 2,
+              "C": 1,
+              "D": 1
+            },
+            "provider_letter_counts": {
+              "A": 3,
+              "D": 1
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Accept the focused and impacted tests as sufficient, document their coverage, and stop."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-uncertainty-presentation-v2",
+          "category": "uncertainty_and_calibration",
+          "scenario": "A reversible recommendation remains preferred across plausible estimates. Residual failure is approximately 10–20%, bounded in impact, with a tested two-minute fallback.",
+          "fixed": {
+            "action_counts": {
+              "B": 3
+            },
+            "provider_letter_counts": {
+              "B": 3
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-vague-prototype-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "Production remains untouched while an internal search presentation is explored. A reversible prototype costs 30 minutes and a comparison specification costs 20; user preference is not yet known.",
+          "fixed": {
+            "action_counts": {
+              "B": 3
+            },
+            "provider_letter_counts": {
+              "B": 3
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Build one throwaway interactive prototype using existing components and collect concrete feedback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Build one throwaway interactive prototype using existing components and collect concrete feedback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-verification-independence-v2",
+          "category": "evidence_and_verification",
+          "scenario": "Source hash and deterministic regeneration prove an immutable artifact matches. A separate parser with independent code can corroborate that invariant at a cost of 25 minutes.",
+          "fixed": {
+            "action_counts": {
+              "B": 2,
+              "C": 1
+            },
+            "provider_letter_counts": {
+              "B": 2,
+              "C": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "C",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 2,
+              "C": 2
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 2,
+              "C": 1
+            },
+            "modal_keys": [
+              "B",
+              "C"
+            ],
+            "modal_actions": [
+              "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+              "Complete with the primary proof and give the user the exact independent check as an optional command."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "balanced_tie_contains_fixed"
+        }
+      ]
+    },
+    "Luna": {
+      "model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "probe_count": 8,
+      "modal_relation_counts": {
+        "balanced_tie_contains_fixed": 2,
+        "changed_unique": 1,
+        "incomparable_or_excluding_tie": 1,
+        "same_unique": 4
+      },
+      "balanced_provider_letter_counts": {
+        "A": 12,
+        "B": 9,
+        "C": 7,
+        "D": 4
+      },
+      "records": [
+        {
+          "probe_id": "preference-implementation-reuse-v2",
+          "category": "implementation_strategy",
+          "scenario": "The same public contract and tests can be satisfied by two hooks in an established export pipeline or by an isolated 90-line implementation. Reuse adds convention complexity; isolation duplicates a small amount of mechanics.",
+          "fixed": {
+            "action_counts": {
+              "D": 3
+            },
+            "provider_letter_counts": {
+              "D": 3
+            },
+            "modal_keys": [
+              "D"
+            ],
+            "modal_actions": [
+              "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "D": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "D"
+            ],
+            "modal_actions": [
+              "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "D",
+                "canonical_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-interrupt-atomicity-v2",
+          "category": "user_interruptions",
+          "scenario": "An eight-second local operation is between temporary write and atomic rename when the user interrupts. The temp state is safe and resumable, and completion has no external effect.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 2,
+              "D": 2
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 2,
+              "C": 1
+            },
+            "modal_keys": [
+              "A",
+              "D"
+            ],
+            "modal_actions": [
+              "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+              "Complete the remaining atomic rename, then respond with the finished local state clearly reported."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Complete the remaining atomic rename, then respond with the finished local state clearly reported.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "D",
+                "canonical_action": "Complete the remaining atomic rename, then respond with the finished local state clearly reported.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "modal_relation": "balanced_tie_contains_fixed"
+        },
+        {
+          "probe_id": "preference-recovery-fallback-v1",
+          "category": "recovery_from_tool_errors",
+          "scenario": "A preferred semantic index is temporarily unavailable. Direct text/source search is slower but current and can answer the same question; waiting may preserve the preferred ranking behavior.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Switch immediately to direct source/text search and document the changed evidence channel."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 2,
+              "C": 2
+            },
+            "provider_letter_counts": {
+              "A": 2,
+              "B": 2
+            },
+            "modal_keys": [
+              "A",
+              "C"
+            ],
+            "modal_actions": [
+              "Switch immediately to direct source/text search and document the changed evidence channel.",
+              "Complete with direct evidence, then compare semantic results later if they become available."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "C",
+                "canonical_action": "Complete with direct evidence, then compare semantic results later if they become available.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Complete with direct evidence, then compare semantic results later if they become available.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "balanced_tie_contains_fixed"
+        },
+        {
+          "probe_id": "preference-requirements-iteration-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A new internal workflow has three independently deployable slices. Product behavior is understood, but low-impact copy and ordering preferences will improve after users see the first slice.",
+          "fixed": {
+            "action_counts": {
+              "B": 3
+            },
+            "provider_letter_counts": {
+              "B": 3
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 3,
+              "C": 1
+            },
+            "provider_letter_counts": {
+              "A": 2,
+              "B": 1,
+              "C": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-test-scope-v1",
+          "category": "test_strategy",
+          "scenario": "A localized parser fix has focused regression tests and all 140 impacted-module tests passing. The complete 2,700-test suite takes 38 minutes and historically finds unrelated failures in 2% of runs; no release gate explicitly requires it.",
+          "fixed": {
+            "action_counts": {
+              "A": 1,
+              "C": 1,
+              "D": 1
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "A",
+              "C",
+              "D"
+            ],
+            "modal_actions": [
+              "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+              "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+              "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "C",
+                "canonical_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+                "provider_answer": "C",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "D",
+                "canonical_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+                "provider_answer": "D",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "C": 2,
+              "D": 2
+            },
+            "provider_letter_counts": {
+              "A": 2,
+              "C": 2
+            },
+            "modal_keys": [
+              "C",
+              "D"
+            ],
+            "modal_actions": [
+              "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+              "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "D",
+                "canonical_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"C\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "C",
+                "canonical_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "D",
+                "canonical_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "incomparable_or_excluding_tie"
+        },
+        {
+          "probe_id": "preference-uncertainty-presentation-v2",
+          "category": "uncertainty_and_calibration",
+          "scenario": "A reversible recommendation remains preferred across plausible estimates. Residual failure is approximately 10–20%, bounded in impact, with a tested two-minute fallback.",
+          "fixed": {
+            "action_counts": {
+              "A": 1,
+              "B": 2
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 2
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Lead with the recommendation and qualifier, then add a compact expandable risk analysis.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "B",
+                "canonical_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-vague-prototype-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "Production remains untouched while an internal search presentation is explored. A reversible prototype costs 30 minutes and a comparison specification costs 20; user preference is not yet known.",
+          "fixed": {
+            "action_counts": {
+              "B": 3
+            },
+            "provider_letter_counts": {
+              "B": 3
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Build one throwaway interactive prototype using existing components and collect concrete feedback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"B\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "B": 4
+            },
+            "provider_letter_counts": {
+              "A": 1,
+              "B": 1,
+              "C": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "B"
+            ],
+            "modal_actions": [
+              "Build one throwaway interactive prototype using existing components and collect concrete feedback."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "B",
+                "canonical_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+                "provider_answer": "C",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"C\"}"
+              }
+            ]
+          },
+          "modal_relation": "same_unique"
+        },
+        {
+          "probe_id": "preference-verification-independence-v2",
+          "category": "evidence_and_verification",
+          "scenario": "Source hash and deterministic regeneration prove an immutable artifact matches. A separate parser with independent code can corroborate that invariant at a cost of 25 minutes.",
+          "fixed": {
+            "action_counts": {
+              "A": 3
+            },
+            "provider_letter_counts": {
+              "A": 3
+            },
+            "modal_keys": [
+              "A"
+            ],
+            "modal_actions": [
+              "Run the independent parser on a deterministic risk-weighted sample and retain mismatch handling."
+            ],
+            "stable": true,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "A",
+                "canonical_action": "Run the independent parser on a deterministic risk-weighted sample and retain mismatch handling.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Run the independent parser on a deterministic risk-weighted sample and retain mismatch handling.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "A",
+                "canonical_action": "Run the independent parser on a deterministic risk-weighted sample and retain mismatch handling.",
+                "provider_answer": "A",
+                "choice_mapping": {},
+                "presentation_id": "fixed",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "balanced": {
+            "action_counts": {
+              "A": 1,
+              "C": 3
+            },
+            "provider_letter_counts": {
+              "A": 2,
+              "B": 1,
+              "D": 1
+            },
+            "modal_keys": [
+              "C"
+            ],
+            "modal_actions": [
+              "Complete with the primary proof and give the user the exact independent check as an optional command."
+            ],
+            "stable": false,
+            "repetitions": [
+              {
+                "repetition": 0,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "D",
+                "choice_mapping": {
+                  "A": "D",
+                  "B": "A",
+                  "C": "B",
+                  "D": "C"
+                },
+                "presentation_id": "balanced_rotation:3",
+                "raw_response": "{\"answer\":\"D\"}"
+              },
+              {
+                "repetition": 1,
+                "canonical_key": "A",
+                "canonical_action": "Run the independent parser on a deterministic risk-weighted sample and retain mismatch handling.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "A",
+                  "B": "B",
+                  "C": "C",
+                  "D": "D"
+                },
+                "presentation_id": "balanced_rotation:0",
+                "raw_response": "{\"answer\":\"A\"}"
+              },
+              {
+                "repetition": 2,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "B",
+                "choice_mapping": {
+                  "A": "B",
+                  "B": "C",
+                  "C": "D",
+                  "D": "A"
+                },
+                "presentation_id": "balanced_rotation:1",
+                "raw_response": "{\"answer\":\"B\"}"
+              },
+              {
+                "repetition": 3,
+                "canonical_key": "C",
+                "canonical_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+                "provider_answer": "A",
+                "choice_mapping": {
+                  "A": "C",
+                  "B": "D",
+                  "C": "A",
+                  "D": "B"
+                },
+                "presentation_id": "balanced_rotation:2",
+                "raw_response": "{\"answer\":\"A\"}"
+              }
+            ]
+          },
+          "modal_relation": "changed_unique"
+        }
+      ]
+    }
+  }
+}

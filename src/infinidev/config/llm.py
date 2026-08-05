@@ -98,6 +98,12 @@ def _install_global_response_normalizer() -> None:
         _original = litellm.completion
 
         def _wrapped(*args: Any, **kwargs: Any) -> Any:
+            # Evaluation campaigns activate this boundary-wide pacer through a
+            # ContextVar. Keeping it here covers every direct LiteLLM caller,
+            # not only the main developer-loop client.
+            from infinidev.engine.subscription_safety import pace_llm_request
+
+            pace_llm_request()
             if _is_codex_request(kwargs):
                 kwargs = _sanitized_for_codex(kwargs)
             if _needs_forced_streaming(kwargs):
@@ -245,6 +251,18 @@ def _apply_chatgpt_subscription(params: dict[str, Any], provider_id: str) -> Non
     # loop pins 0.2 for tool-calling stability (see get_litellm_params), which
     # is right for local models and a 400 here.
     params.pop("temperature", None)
+
+
+def apply_provider_transport(params: dict[str, Any], provider_id: str) -> None:
+    """Apply provider-specific authentication and transport to standalone calls.
+
+    Most Infinidev call builders invoke the internal subscription adapter as
+    their final step. Offline evaluation runners build their own generation
+    parameters, so this small public boundary lets them use the exact same
+    OAuth refresh, endpoint, headers, and no-server-history policy without
+    copying credential logic.
+    """
+    _apply_chatgpt_subscription(params, provider_id)
 
 
 def _codex_api_base() -> str:

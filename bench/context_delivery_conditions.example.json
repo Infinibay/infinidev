@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "695701733ea2ea1b44fac3b1944bee46fcc2e9201eade435e948057fc6f2e7fa",
+  "shared_run_config": {
+    "fresh_fixture_per_run": true,
+    "same_model_and_generation_parameters": true,
+    "same_tools": true,
+    "same_system_prompt": true,
+    "deterministic_verifier_required": true
+  },
+  "conditions": {
+    "baseline": {
+      "context_source": "baseline",
+      "automatic_context": false,
+      "ken_tools_available": true,
+      "description": "No automatically injected repository evidence; explicit Ken retrieval remains available."
+    },
+    "ranked": {
+      "context_source": "ranked",
+      "automatic_context": true,
+      "ken_tools_available": true,
+      "max_prompt_chars": 12000,
+      "description": "Current bounded ContextRank injection plus the same explicit Ken tools."
+    },
+    "full": {
+      "context_source": "full",
+      "automatic_context": true,
+      "ken_tools_available": true,
+      "corpus_order_bound_per_task": true,
+      "description": "The complete predeclared task evidence corpus in its task-specific front, middle, or end order."
+    }
+  }
+}

@@ -90,6 +90,44 @@ def init_db():
         _migrate_add_column(conn, "cr_interactions", "was_error", "INTEGER DEFAULT 0")
         _migrate_add_column(conn, "cr_session_scores", "productivity", "REAL DEFAULT 1.0")
         _migrate_add_column(conn, "cr_session_scores", "was_edited", "INTEGER DEFAULT 0")
+        # Generated-image operations are isolated by the complete reviewed route.
+        # These values are non-secret; credential_id is a SHA-256 fingerprint.
+        _migrate_add_column(
+            conn, "image_generation_operations", "endpoint", "TEXT NOT NULL DEFAULT ''"
+        )
+        _migrate_add_column(
+            conn, "image_generation_operations", "transport", "TEXT NOT NULL DEFAULT ''"
+        )
+        _migrate_add_column(
+            conn, "image_generation_operations", "adapter", "TEXT NOT NULL DEFAULT ''"
+        )
+        _migrate_add_column(
+            conn, "image_generation_operations", "mechanism", "TEXT NOT NULL DEFAULT ''"
+        )
+        _migrate_add_column(
+            conn, "image_generation_operations", "operation", "TEXT NOT NULL DEFAULT ''"
+        )
+        _migrate_add_column(
+            conn, "image_generation_operations", "revision", "TEXT NOT NULL DEFAULT ''"
+        )
+        _migrate_add_column(
+            conn,
+            "image_generation_operations",
+            "credential_type",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        _migrate_add_column(
+            conn, "image_generation_operations", "account_id", "TEXT NOT NULL DEFAULT ''"
+        )
+        _migrate_add_column(
+            conn,
+            "image_generation_operations",
+            "generation_project_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        _migrate_add_column(
+            conn, "image_generation_operations", "credential_id", "TEXT NOT NULL DEFAULT ''"
+        )
 
         # Seed a default project if none exists.
         row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()

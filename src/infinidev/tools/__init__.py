@@ -7,6 +7,7 @@ from infinidev.tools.file import (
     CreateFileTool,
     ViewImageTool,
 )
+from infinidev.tools.image_generation import GenerateImageTool
 from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
 from infinidev.tools.meta import HelpTool
 from infinidev.tools.meta.recall_context_tool import RecallContextTool
@@ -120,6 +121,7 @@ KNOWLEDGE_TOOLS = [
     SummarizeFindingsTool,
 ]
 CHAT_TOOLS = [SendMessageTool]
+GENERATION_TOOLS = [GenerateImageTool]
 # Exclusive to the chat agent tier — NOT bound to the developer.
 # These are schema-level terminators (like step_complete); the chat
 # orchestrator parses their args directly from the LLM response.
@@ -209,16 +211,12 @@ def get_tools_for_role(
     have to be updated.
     """
     if supports_vision is None:
-        # Use the lightweight vision check directly — it only consults
-        # LiteLLM's static metadata table. Going through
-        # get_model_capabilities() would trigger a full capability probe
-        # (Ollama /api/show or a live litellm.completion for
-        # openai_compatible/vllm), which is too heavy a side-effect for a
-        # tool-list lookup and breaks tests that patch litellm.completion.
+        # Resolve the immutable route snapshot. Static metadata and local
+        # manifests are handled inside the resolver; UNKNOWN fails closed.
         try:
-            from infinidev.config.model_capabilities import _detect_vision_support
+            from infinidev.config.model_capabilities import get_capability_snapshot
 
-            supports_vision = _detect_vision_support()
+            supports_vision = get_capability_snapshot().supports_vision
         except Exception:
             supports_vision = False
 
@@ -249,6 +247,15 @@ def get_tools_for_role(
         + CODE_INTEL_TOOLS
         + META_TOOLS
     )
+    # Generation has a separate route and capability. It must never be inferred
+    # from vision support or the chat model, and unknown/unsupported stays absent.
+    try:
+        from infinidev.config.model_capabilities import get_capability_snapshot
+
+        if get_capability_snapshot().image_generation.supported:
+            local_tool_classes += GENERATION_TOOLS
+    except Exception:
+        pass
     # Keep the disabled-by-default capture feature out of the tool schema and
     # generated prompt entirely. This preserves the pre-feature prompt surface
     # when all flags are off; a handle reader is useful only if this run can

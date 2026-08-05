@@ -1,0 +1,724 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "01bcea91220c1fa59cd86c8f19bf761d66aab36d5c835b75efc4472630c735ce",
+  "condition_manifest_sha256": "174521e5a4329f41572769fe3471ac352eea8d2049550793c6815b646cb6277c",
+  "condition_sha256": "97e867797a9f41d61777d2aa8fcff2676b86abc29a74f318610998249c100e01",
+  "task": {
+    "id": "complex-plan",
+    "family": "complex-plan",
+    "category": "decomposition_and_planning",
+    "split": "validation",
+    "repository_fixture": "complex_plan",
+    "request": "Create PLAN.md for the tenant export change described in requirements.md. Do not implement code. The plan must expose consequential open decisions, define reversible phases, verification, rollout, rollback, and a durable completion handoff.",
+    "verify_command": "{python} verify.py",
+    "expected_changed_paths": [
+      "PLAN.md"
+    ],
+    "forbidden_changed_paths": [
+      "requirements.md",
+      "verify.py"
+    ],
+    "required_final_patterns": [
+      "plan",
+      "verif"
+    ],
+    "required_action_patterns": [],
+    "rubric": [
+      {
+        "id": "functional-plan",
+        "description": "The deterministic verifier confirms every required planning boundary and no source implementation.",
+        "kind": "deterministic",
+        "evidence_source": "verify.py and changed paths",
+        "weight": 1.0
+      },
+      {
+        "id": "decision-ownership",
+        "description": "Consequential retention and rollout choices are surfaced with a recommendation instead of silently decided.",
+        "kind": "human_review",
+        "evidence_source": "PLAN.md and final answer",
+        "weight": 0.8
+      },
+      {
+        "id": "concise-handoff",
+        "description": "The final answer leads with outcome and points to verification and remaining decisions without narrating every step.",
+        "kind": "human_review",
+        "evidence_source": "final answer",
+        "weight": 0.5
+      }
+    ],
+    "review_status": "approved"
+  },
+  "condition": "baseline",
+  "repetition": 0,
+  "provider": "openai_subscription",
+  "model": "gpt-5.6-sol",
+  "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "run_config": {
+    "provider": "openai_subscription",
+    "model": "gpt-5.6-sol",
+    "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+    "base_url": "",
+    "api_key_env": "",
+    "repetitions": 1,
+    "min_request_interval_seconds": 2.0,
+    "max_iterations": 12,
+    "max_total_tool_calls": 80,
+    "max_tool_calls_per_action": 20,
+    "verify_timeout_seconds": 120.0
+  },
+  "final_answer": "Created and verified `PLAN.md` for the tenant export change.\n\nThe plan includes:\n- Consequential open decisions, explicitly preserving the unresolved **24-hour vs. 7-day retention** choice\n- Authorization, storage/delivery security, cancellation, idempotency, progress, capacity, audit, telemetry, and adoption decision gates\n- Seven reversible phases with decision gates, work, verification/exit criteria, and rollback instructions\n- Additive rollout that leaves the synchronous API unchanged until adoption is proven\n- Staged tenant-cohort rollout and explicit promotion/stop criteria\n- Immediate rollback procedures that preserve audit, cleanup, and reconciliation safeguards\n- A verification evidence matrix covering compatibility, authorization, cancellation, retry, audit events, retention cleanup, telemetry, rollout, and rollback\n- Ownership requirements and a durable completion handoff\n\nVerification completed successfully:\n- `python verify.py` passed\n- Additional deterministic structural checks passed for all D1–D10 decisions and phases 0–6\n- Workspace files are exactly `PLAN.md`, `requirements.md`, and `verify.py`\n- No implementation files, `src/` directory, branch, commit, push, or out-of-workspace changes were made",
+  "engine_status": "done",
+  "plan_steps": [
+    {
+      "step": 1,
+      "title": "requirements.md — inspect tenant export requirements and repository planning conventions",
+      "explanation": "Read the requirements and any directly relevant project documentation or existing plan templates, then record the scope, constraints, consequential open decisions, and expected verification without changing implementation files.",
+      "status": "done"
+    },
+    {
+      "step": 2,
+      "title": "PLAN.md — author phased tenant export implementation plan",
+      "explanation": "Create PLAN.md only, structuring work into reversible phases and explicitly covering consequential open decisions, verification, rollout, rollback, and durable completion handoff.",
+      "status": "done"
+    },
+    {
+      "step": 3,
+      "title": "PLAN.md — verify completeness, determinism, and workspace scope",
+      "explanation": "Review the plan against requirements.md, run deterministic textual/workspace checks, and confirm no code, branch, commit, push, or out-of-workspace changes were made.",
+      "status": "done"
+    }
+  ],
+  "action_records": [
+    {
+      "step_index": 1,
+      "summary": "Established the required three-step workflow. The next step is to inspect requirements.md before drafting PLAN.md.",
+      "tool_calls_count": 3,
+      "files_to_preload": [
+        "requirements.md"
+      ],
+      "changes_made": "No files modified. A three-step work plan was registered: inspect requirements/conventions, author PLAN.md, then verify completeness and workspace scope.",
+      "discovered_context": "The task requires creating PLAN.md only, with consequential open decisions, reversible phases, verification, rollout, rollback, and a durable completion handoff. No repository files or conventions have been inspected yet.",
+      "pending_items": "Read requirements.md and relevant planning conventions; create PLAN.md without implementing code; verify requirement coverage, determinism, and that only the intended workspace document changed.",
+      "anti_patterns": "",
+      "hook_notes": "",
+      "behavior_score": 0,
+      "behavior_good": [],
+      "behavior_bad": []
+    },
+    {
+      "step_index": 1,
+      "summary": "Inspected the minimal repository and captured the tenant-export planning constraints and verification vocabulary. Next, finish and validate the code-free PLAN.md for completeness and deterministic workspace scope.",
+      "tool_calls_count": 7,
+      "files_to_preload": [
+        "PLAN.md",
+        "requirements.md",
+        "verify.py"
+      ],
+      "changes_made": "No implementation code was changed. Planning constraints were gathered for the PLAN.md draft; repository status could not be checked because the workspace is not a Git repository.",
+      "discovered_context": "Repository contains only requirements.md and verify.py, with no planning template. The plan must cover additive asynchronous export, synchronous API compatibility, serialized per-tenant workers, personal-data handling, retention, authorization, cancellation, idempotency, audit, cleanup, progress, telemetry, rollout, rollback, and handoff.",
+      "pending_items": "Complete or inspect PLAN.md, then verify it against requirements.md and verify.py. Ensure consequential decisions include 24-hour versus 7-day retention, authorization, storage/delivery security, cancellation semantics, idempotency scope, adoption gates, reversible phases, rollout, rollback, and durable completion handoff.",
+      "anti_patterns": "project_stats failed on an empty index; record_finding failed with a foreign-key error; git_status was inapplicable because the directory is not a Git repository. Do not repeat these calls.",
+      "hook_notes": "",
+      "behavior_score": 0,
+      "behavior_good": [],
+      "behavior_bad": []
+    },
+    {
+      "step_index": 2,
+      "summary": "Created the requested PLAN.md without implementing code. The remaining step is a focused completeness and determinism review against requirements.md.",
+      "tool_calls_count": 4,
+      "files_to_preload": [
+        "PLAN.md",
+        "requirements.md"
+      ],
+      "changes_made": "Files modified: created PLAN.md (30,741 bytes). It is a code-free tenant export delivery plan covering compatibility/security constraints, D1–D10 open decision gates, seven reversible phases, verification and exit criteria, staged rollout, rollback, evidence ownership, and durable completion handoff.",
+      "discovered_context": "PLAN.md is self-contained and preserves the synchronous API while introducing an additive, feature-flagged asynchronous path. Export progress, cancellation, idempotent retry, auditing, authorization, privacy, retention, and data lifecycle are treated as explicit design or release gates.",
+      "pending_items": "Perform the final verification pass against requirements.md: confirm every requirement is traceable, consequential decisions remain visibly unresolved, phases are independently reversible, checks are deterministic, workspace scope is code-free, and rollout/rollback/handoff instructions are actionable. Amend PLAN.md only if gaps are found.",
+      "anti_patterns": "PLAN.md was created before being read, triggering an editor warning; for subsequent edits, read the current file first. Avoid re-drafting the already complete plan instead of performing a focused requirements comparison.",
+      "hook_notes": "",
+      "behavior_score": -2,
+      "behavior_good": [],
+      "behavior_bad": [
+        "WARNING: You are editing PLAN.md without reading it first. Always read a file before modifying it.",
+        "NOTE: You edited files but did not run tests this step. Run the tests covering what you edited."
+      ]
+    },
+    {
+      "step_index": 3,
+      "summary": "Verified PLAN.md for completeness, determinism, reversible phases, rollout, rollback, durable handoff, and workspace scope. No amendments or code implementation were needed.",
+      "tool_calls_count": 2,
+      "files_to_preload": [],
+      "changes_made": "No files modified in this verification step. PLAN.md remained unchanged after passing all checks.",
+      "discovered_context": "python verify.py and stricter read-only assertions passed. Workspace contains only PLAN.md, requirements.md, and verify.py. PLAN.md covers D1–D10, explicitly preserves the 24-hour versus 7-day retention decision, and defines phases 0–6 with verification and rollback, plus rollout, evidence, completion handoff, and done criteria.",
+      "pending_items": "Nothing; the requested code-free planning task is complete.",
+      "anti_patterns": "",
+      "hook_notes": "",
+      "behavior_score": 0,
+      "behavior_good": [],
+      "behavior_bad": []
+    }
+  ],
+  "tool_trace": [
+    {
+      "tool_run_id": "691084a7106d4bd69d04a9d61844760f",
+      "tool_name": "add_step",
+      "arguments": {
+        "title": "requirements.md — inspect tenant export requirements and repository planning conventions",
+        "explanation": "Read the requirements and any directly relevant project documentation or existing plan templates, then record the scope, constraints, consequential open decisions, and expected verification without changing implementation files.",
+        "expected_output": "Requirements and repository conventions are summarized in working memory with all tenant export planning obligations identified."
+      },
+      "result": "{\"status\": \"added\", \"index\": 1, \"total_steps\": 1}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "ba8a59e3c104405bab0e553e2c7b7ce2",
+      "tool_name": "add_step",
+      "arguments": {
+        "title": "PLAN.md — author phased tenant export implementation plan",
+        "explanation": "Create PLAN.md only, structuring work into reversible phases and explicitly covering consequential open decisions, verification, rollout, rollback, and durable completion handoff.",
+        "expected_output": "PLAN.md exists and maps every requirement to actionable, reversible phases without modifying application code."
+      },
+      "result": "{\"status\": \"added\", \"index\": 2, \"total_steps\": 2}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "84cf0f72a8c94d08a16a478096fa56ca",
+      "tool_name": "add_step",
+      "arguments": {
+        "title": "PLAN.md — verify completeness, determinism, and workspace scope",
+        "explanation": "Review the plan against requirements.md, run deterministic textual/workspace checks, and confirm no code, branch, commit, push, or out-of-workspace changes were made.",
+        "expected_output": "Verification demonstrates PLAN.md covers open decisions, phases, verification, rollout, rollback, and handoff, with only the intended workspace file changed."
+      },
+      "result": "{\"status\": \"added\", \"index\": 3, \"total_steps\": 3}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "ab9517c22f5243bf9991e4bc245086c1",
+      "tool_name": "send_message",
+      "arguments": {
+        "message": "I’ll inspect the repository’s documentation and any existing planning templates, then capture the tenant-export constraints and unresolved product choices so the implementation plan follows local conventions without touching code."
+      },
+      "result": "{\"status\": \"delivered\"}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "d650d0e889be42bc90c5bf566e4d569f",
+      "tool_name": "project_structure",
+      "arguments": {
+        "file_path": ".",
+        "depth": 3
+      },
+      "result": "Project structure of /tmp/infinidev-agent-task-4bxvwpwr/repo (depth=3):\nrequirements.md\nverify.py",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "bcdaeea60b5e41eab402ba0a86dbed87",
+      "tool_name": "glob",
+      "arguments": {
+        "file_path": ".",
+        "pattern": "**/{PLAN,README,CONTRIBUTING,ARCHITECTURE,DESIGN}*.md",
+        "max_depth": 5,
+        "max_results": 100
+      },
+      "result": "{\"pattern\": \"**/{PLAN,README,CONTRIBUTING,ARCHITECTURE,DESIGN}*.md\", \"file_path\": \"/tmp/infinidev-agent-task-4bxvwpwr/repo\", \"content_pattern\": null, \"match_count\": 0, \"truncated\": false, \"matches\": []}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "799bc56d7d17447d9ae967efca8c023e",
+      "tool_name": "project_stats",
+      "arguments": {},
+      "result": "{\"error\": \"Index is empty for this project. Run /reindex or call read_file on a few source files to seed the index.\"}",
+      "result_truncated": false,
+      "failed": true
+    },
+    {
+      "tool_run_id": "627103f5972046d08cf84d26f69cdb5b",
+      "tool_name": "read_file",
+      "arguments": {
+        "file_path": "verify.py"
+      },
+      "result": "     1\tfrom pathlib import Path\n     2\t\n     3\t\n     4\tplan = Path(\"PLAN.md\")\n     5\tassert plan.is_file(), \"PLAN.md was not created\"\n     6\ttext = plan.read_text(encoding=\"utf-8\").lower()\n     7\tfor required in (\n     8\t    \"retention\",\n     9\t    \"authorization\",\n    10\t    \"cancel\",\n    11\t    \"idempot\",\n    12\t    \"audit\",\n    13\t    \"compatib\",\n    14\t    \"cleanup\",\n    15\t    \"handoff\",\n    16\t    \"phase\",\n    17\t    \"progress\",\n    18\t    \"telemetry\",\n    19\t    \"rollout\",\n    20\t    \"rollback\",\n    21\t    \"test\",\n    22\t):\n    23\t    assert required in text, f\"PLAN.md omits {required}\"\n    24\tassert any(marker in text for marker in (\"open decision\", \"user decision\", \"confirm\"))\n    25\tassert not Path(\"src\").exists(), \"planning task must not add implementation\"",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "fcffab5f736546e6a87900b2f8d45022",
+      "tool_name": "record_finding",
+      "arguments": {
+        "title": "Tenant export planning constraints and repository convention",
+        "content": "Repository has only requirements.md and verify.py and no plan template. PLAN.md must be self-contained and code-free. It must phase an additive asynchronous tenant export while preserving the synchronous API until measured adoption, account for a one-tenant-at-a-time worker, personal-data handling, progress/cancellation/idempotent retry/audit, unresolved 24-hour versus 7-day retention, compatibility/authorization/cleanup/telemetry verification, staged rollout, immediate rollback, and a durable handoff. verify.py checks those concepts and that no src directory is created.",
+        "confidence": 1,
+        "tags": [
+          "tenant-export",
+          "planning",
+          "requirements"
+        ],
+        "finding_type": "project_context",
+        "sources": [
+          "requirements.md",
+          "verify.py"
+        ]
+      },
+      "result": "{\"error\": \"Failed to record finding: FOREIGN KEY constraint failed\"}",
+      "result_truncated": false,
+      "failed": true
+    },
+    {
+      "tool_run_id": "c2d08a9f5c944b2aa6b409a0093c78ac",
+      "tool_name": "git_status",
+      "arguments": {},
+      "result": "{\"error\": \"fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\"}",
+      "result_truncated": false,
+      "failed": true
+    },
+    {
+      "tool_run_id": "8decbe7eb2904315ad29be3f8dcb54bf",
+      "tool_name": "send_message",
+      "arguments": {
+        "message": "I’ll draft a self-contained PLAN.md that keeps the asynchronous path additive and feature-flagged, makes unresolved security and retention choices explicit, and gives each delivery phase clear exit and rollback conditions."
+      },
+      "result": "{\"status\": \"delivered\"}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "353d2f7ff6da4e68973058ece4002d6f",
+      "tool_name": "help",
+      "arguments": {
+        "context": "edit"
+      },
+      "result": "EDIT TOOLS\n\n  create_file(file_path, content)\n    Create a new file.\n\n  edit_file(file_path, old_string, new_string, replace_all?, rationale?)\n    Replace exact text in an existing file.\n\n  rename_symbol(symbol, new_name, file_path?)\n    Rename a symbol and update all references and imports across the project.\n\n  move_symbol(symbol, target_file, target_class?, after_line?)\n    Move a symbol to another file or class, updating imports across the project.",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "2fbbe20fc3f54ffe9f92765e0a07cd3b",
+      "tool_name": "create_file",
+      "arguments": {
+        "file_path": "PLAN.md",
+        "content": "# Tenant Export Delivery Plan\n\n## 1. Purpose and constraints\n\nDeliver an asynchronous tenant-record export path while leaving the current synchronous API behavior and contract unchanged until measured adoption proves that a later change is safe. The asynchronous path must support progress visibility, cancellation, idempotent retry, and an audit trail. Because exports may contain personal data, authorization and data lifecycle controls are release gates rather than follow-up hardening.\n\nThis document is an implementation plan only. It does not select unresolved product or security policy, define a final endpoint name, or authorize removal of the synchronous path.\n\n### Non-negotiable outcomes\n\n- The existing synchronous API remains available and compatible throughout this plan. No client is silently redirected to asynchronous behavior.\n- Asynchronous export is additive, disabled by default, and independently controllable with a server-side feature flag or equivalent kill switch.\n- The existing worker continues to process no more than one export for a tenant at a time. Scheduling must not introduce same-tenant concurrency.\n- Every operation is tenant-scoped and subject to explicit authorization checks; possession of an export identifier alone never grants access.\n- Export artifacts are treated as personal data from creation through cleanup, including storage, download, logs, backups, and failure paths.\n- Each phase is reversible. Any database evolution is expand-first and remains readable by the prior application version until rollout is complete.\n- Rollback disables new asynchronous work immediately without deleting evidence, abandoning artifacts, or changing the synchronous API.\n\n## 2. Consequential open decisions\n\nRecord each answer in a durable decision record before the phase whose **Decision gate** references it. Include the approver, date, rationale, affected controls, and review date. Do not infer these choices during implementation.\n\n| ID | Open decision / user decision required | Options or questions to confirm | Why consequential | Required before |\n|---|---|---|---|---|\n| D1 | **Retention period** | Confirm **24 hours or 7 days**; define whether the clock starts at artifact creation or job completion, and how legal hold or failed deletion is handled. | Changes personal-data exposure, storage cost, cleanup scheduling, and user expectations. | Phase 1 contract and Phase 3 storage work |\n| D2 | **Authorization policy** | Confirm which tenant roles may create, view status, cancel, retry, and download; whether service/support operators may act; and whether step-up authentication is required for download. | Determines who can extract personal data and must be enforced consistently at every operation. | Phase 1 |\n| D3 | **Export storage and delivery boundary** | Confirm storage system, region/residency, encryption and key ownership, download mechanism (streamed or short-lived signed access), link lifetime, and whether filenames/content need additional protection. | Defines the principal data leakage and residency risks and affects cleanup behavior. | Phase 3 |\n| D4 | **Cancellation semantics** | Confirm whether cancellation is best-effort or guaranteed before delivery; expected behavior when cancellation races completion; whether partial artifacts are immediately destroyed; and terminal state wording. | Affects state transitions, user promises, worker interruption, audit evidence, and tests. | Phase 1 |\n| D5 | **Idempotency contract** | Confirm caller-provided key versus derived request identity, key scope (tenant + actor + normalized parameters), deduplication window, response for an in-flight/completed/failed/cancelled match, and when a retry may create a new job. | Prevents duplicate personal-data artifacts without incorrectly coalescing distinct requests. | Phase 1 |\n| D6 | **Export contract** | Confirm data fields and format, consistency point/snapshot expectations, size limits, filters, localization, and schema/version signaling. | Determines compatibility, reproducibility, resource use, and what personal data leaves the service. | Phase 1 |\n| D7 | **Progress contract** | Confirm whether progress is exact records/bytes or coarse stages, update frequency, and what clients see when totals are unknown. | Avoids misleading clients and constrains worker/database write volume. | Phase 1 |\n| D8 | **Capacity and fairness policy** | Confirm queue limits, per-tenant outstanding-job limit, global concurrency, priority/fairness, timeout, and overload response while preserving one active job per tenant. | Prevents one tenant from starving others and protects the existing worker and synchronous API. | Phase 2 |\n| D9 | **Adoption criterion and synchronous API future** | Confirm the observation window and thresholds for eligible-tenant adoption, success rate, latency, support burden, and client compatibility. Any synchronous deprecation/removal requires a separate approved plan. | Prevents premature behavior change and gives “adoption is proven” an auditable meaning. | Phase 5 rollout; any later API change |\n| D10 | **Audit and telemetry access** | Confirm required audit event taxonomy, audit retention, authorized viewers, correlation fields, telemetry system, and restrictions on tenant identifiers or export contents in logs/metrics/traces. | Balances traceability with minimization of personal data and operational metadata. | Phase 1 design and Phase 4 instrumentation |\n\nIf a decision is not approved by its gate, pause that phase. A temporary default is acceptable only when explicitly approved and recorded with an expiry; it must not silently become policy.\n\n## 3. Target behavior and contracts to design\n\nPhase 1 must turn the approved decisions into a versioned contract before implementation. Exact route and field names should follow repository conventions discovered during implementation; behavior must include the following.\n\n### Job lifecycle\n\nUse a persisted state machine with explicit allowed transitions, for example:\n\n`queued -> running -> completed`\n\nwith terminal or exceptional paths to `cancelled` and `failed`. Define cancellation-requested behavior if cancellation cannot be atomic. A terminal state must never return to a non-terminal state. Persist timestamps, tenant scope, requesting actor, normalized request parameters or their safe digest, progress, error category safe for clients, artifact metadata, retention deadline, and correlation identifiers.\n\nState changes must be conditional/transactional so duplicate deliveries, retries, and cancellation/completion races cannot publish two artifacts or overwrite a terminal outcome. Recovery after worker restart must be specified and tested.\n\n### Asynchronous operations\n\nDefine authenticated operations to:\n\n1. request an export with an idempotency identity;\n2. read status and progress;\n3. request cancellation;\n4. retry according to the approved idempotency policy; and\n5. retrieve a completed artifact before expiry.\n\nResponses must distinguish accepted, existing idempotent result, unauthorized/forbidden, not found without cross-tenant disclosure, conflict/invalid transition, expired, rate- or capacity-limited, and internal failure. Polling guidance and any retry hints must be documented. No asynchronous response may alter status codes, payloads, timing promises, or side effects of the current synchronous API.\n\n### Security and data lifecycle\n\n- Re-evaluate current tenant membership and role authorization on every create, status, cancel, retry, and download operation; do not rely only on authorization captured at creation.\n- Bind each job and artifact to a tenant and enforce tenant scope in both application queries and storage access. Use opaque identifiers and prevent identifier enumeration from revealing existence.\n- Minimize export contents to the approved contract. Never place export payloads, secrets, download tokens, or sensitive request parameters in application logs, audit details, metrics, traces, queue messages, or error text.\n- Encrypt artifacts in transit and at rest according to D3. Keep delivery credentials short-lived and avoid reusable public URLs.\n- Set the approved retention deadline explicitly and make cleanup idempotent. Cleanup covers completed, cancelled, failed, orphaned, and partially written artifacts, plus stale delivery credentials and metadata according to policy.\n- If artifact deletion fails, deny further download after expiry, retry cleanup with bounded backoff, emit an alert and audit event, and retain enough non-sensitive metadata to prove resolution.\n\n### Audit trail\n\nEmit durable, queryable audit events for request accepted/deduplicated/rejected, worker start, meaningful progress milestones if approved, cancellation requested/effected/raced, retry, completion, download authorization and delivery, failure, expiry, cleanup success/failure, administrative override, feature-flag change, and rollback action. Events include timestamp, tenant, actor or service identity, action, outcome, job ID, correlation ID, and safe reason code; they exclude export contents and credentials. Audit writes for security-significant transitions must have defined failure behavior rather than being silently dropped.\n\n## 4. Reversible implementation phases\n\nDo not begin a phase until the prior phase exit criteria and the listed decision gate are met. Keep incomplete behavior unreachable in production behind the asynchronous export flag.\n\n### Phase 0 — Baseline, discovery, and decision records\n\n**Decision gate:** none; this phase gathers evidence and owners for D1–D10.\n\n**Work**\n\n- Inventory the current synchronous API contract, authorization checks, tenant scoping, export generation path, worker execution model, persistence, storage, cleanup facilities, audit framework, telemetry, deployment topology, and operational ownership.\n- Capture baseline synchronous request volume, latency, errors, resource use, and current export sizes without logging export data.\n- Identify schema migration and feature-flag conventions, worker restart/recovery behavior, and how the one-tenant-at-a-time invariant is currently enforced.\n- Create the D1–D10 decision records, a threat model/data-flow diagram, and a compatibility fixture or characterization test for the synchronous API.\n\n**Verification / exit criteria**\n\n- The current synchronous behavior is represented by automated compatibility tests and production-safe baseline telemetry.\n- Data flows and trust boundaries identify every location where personal data or delivery credentials can exist.\n- Each decision has an accountable approver and due date; no gated implementation begins with an implicit answer.\n\n**Rollback:** documentation, tests, and non-sensitive baseline dashboards are additive. Remove only unused draft observability; no runtime behavior changes.\n\n### Phase 1 — Contract, state model, and inactive persistence\n\n**Decision gate:** D1, D2, D4, D5, D6, D7, and D10 approved.\n\n**Work**\n\n- Specify and review the versioned asynchronous API, status/progress representation, terminal states, errors, polling guidance, cancellation race semantics, retry behavior, and idempotency scope/window.\n- Add backward-compatible persistence using expand-only migrations: nullable/new tables or fields, indexes, uniqueness constraints for idempotency, and conditional state-transition support. Do not repurpose fields used by the synchronous path.\n- Implement the domain state machine and tenant-scoped repository boundaries behind a disabled flag, including retention deadline and artifact state metadata but no production artifact creation.\n- Define audit event schemas and safe reason codes. Document which transition and audit writes are atomic, and the recovery path where atomicity is unavailable.\n\n**Verification / exit criteria**\n\n- Unit and database tests cover every allowed and forbidden transition, terminal-state immutability, concurrent idempotent requests, cross-tenant key isolation, cancellation/completion races, and migration forward/backward application.\n- Contract tests prove the existing synchronous API is byte-/field-/status-compatible for representative success and error cases with the flag both off and on.\n- A prior application version can run safely against the expanded schema; down migration is not required for immediate application rollback.\n\n**Rollback:** keep additive schema dormant, disable the flag, and deploy the prior application version. Remove schema only in a later cleanup release after confirming no mixed-version process uses it.\n\n### Phase 2 — Queueing, worker execution, progress, cancellation, and retry\n\n**Decision gate:** D8 approved; Phase 1 contracts frozen for the rollout scope.\n\n**Work**\n\n- Add asynchronous request admission and durable enqueueing behind the disabled flag, with authorization, capacity controls, and transactional protection against a persisted job being lost before enqueue.\n- Adapt the existing worker to claim work safely while enforcing at most one active export per tenant. Define leases/heartbeats, stale-job recovery, bounded retries, poison-job handling, and fairness under D8.\n- Generate progress from committed work or coarse stages according to D7; make updates monotonic, bounded, and resilient to duplicate delivery.\n- Check cancellation before start and at safe checkpoints during generation. Prevent publication after effective cancellation and destroy partial artifacts according to D4.\n- Make retries idempotent across request replay, queue redelivery, process crash, and timeout. Ensure only one canonical downloadable artifact can win.\n\n**Verification / exit criteria**\n\n- Tests cover duplicate requests and queue delivery, process termination/restart, stale leases, timeout, concurrent tenants, same-tenant serialization, queue saturation, fairness, monotonic progress, and retry exhaustion.\n- Deterministic race tests cover cancel-before-start, cancel-during-generation, cancel-versus-completion, retry-versus-cleanup, and duplicate completion.\n- Load tests demonstrate selected queue and resource limits do not materially regress synchronous API service levels; results are compared with Phase 0 baselines.\n\n**Rollback:** disable admission first, then stop new worker claims. Allow approved in-flight behavior (finish or cancel per D4), preserve job state for reconciliation, and continue the synchronous API. The prior version remains schema-compatible.\n\n### Phase 3 — Protected artifacts, delivery, retention, and cleanup\n\n**Decision gate:** D1 and D3 approved; privacy/security review accepts the data flow.\n\n**Work**\n\n- Write artifacts to the approved encrypted, tenant-isolated storage location using temporary/non-downloadable state, then atomically publish only a successfully completed artifact.\n- Add authorized retrieval with current-role revalidation, short-lived delivery credentials or protected streaming, expiry enforcement, safe content disposition, and no cache/public exposure inconsistent with D3.\n- Implement retention cleanup from the persisted deadline. Include partial/orphaned artifacts and terminal job states; make deletion retries idempotent and observable.\n- Add reconciliation that finds metadata-without-artifact, artifact-without-metadata, expired-but-readable, and stuck partial uploads without scanning or exposing artifact contents.\n\n**Verification / exit criteria**\n\n- Authorization tests cover allowed roles, revoked membership, changed role, cross-tenant IDs, guessed IDs, expired links, replayed credentials, and operator access.\n- Storage tests verify encryption/configuration, tenant isolation, atomic publication, partial-write cleanup, and that cancelled/failed jobs never expose artifacts.\n- Time-controlled tests prove cleanup at the selected retention boundary for completed, cancelled, failed, partial, and orphaned artifacts; deletion failure denies download, retries, alerts, audits, and eventually reconciles.\n- Privacy review verifies data minimization and confirms logs, telemetry, audit events, queues, and errors contain no export payload or delivery credential.\n\n**Rollback:** disable create and download surfaces, revoke/expire outstanding delivery credentials where supported, stop publication, and keep cleanup/reconciliation running. Do not restore expired artifacts. Preserve minimal audit/job metadata according to approved policy.\n\n### Phase 4 — End-to-end integration, telemetry, and operational readiness\n\n**Decision gate:** D9 metrics are defined; on-call, security, privacy, and support accept operating procedures.\n\n**Work**\n\n- Wire the complete asynchronous path under separate controls for request admission, worker claiming, and artifact download so rollback can isolate a faulty stage.\n- Add dashboards and alerts for queue depth/age, admission rejection, job duration by stage, progress staleness, completion/failure/cancellation/retry rates, worker leases, same-tenant concurrency violations, artifact publication/download failures, cleanup backlog/age, deletion failures, audit delivery failures, and synchronous API health.\n- Define service-level indicators and alert thresholds from baseline/load evidence. Keep telemetry dimensions bounded and free of personal data; use controlled correlation tooling for job-level diagnosis.\n- Write runbooks for stuck jobs, cancellation races, duplicate requests, queue overload, worker restart, storage outage, unauthorized-access alert, audit outage, cleanup failure, flag rollback, artifact reconciliation, and customer support escalation.\n- Exercise deployment and immediate rollback in a production-like environment, including mixed application/worker versions and queued jobs.\n\n**Verification / exit criteria**\n\n- End-to-end tests cover create, progress, completion, authorized download, cancellation, idempotent retry, audit sequence, retention expiry/cleanup, and each declared failure mode.\n- Compatibility tests and comparative load tests remain green for the synchronous API.\n- A rollback drill demonstrates the async entry point can be disabled immediately, workers drained/stopped safely, downloads controlled, cleanup preserved, and the prior release restored without schema rollback or data loss.\n- Alerts are triggered synthetically and route to named responders; runbook steps and required permissions are validated rather than only reviewed.\n\n**Rollback:** execute the runbook in Section 6. Observability, audit ingestion, and cleanup remain active even when user-facing async behavior is disabled.\n\n### Phase 5 — Staged rollout and adoption observation\n\n**Decision gate:** D9 approved and all Phase 4 exit criteria signed off.\n\n**Work and promotion gates**\n\n1. **Internal/test tenants:** enable only for controlled accounts; use synthetic or approved data. Validate audit sequence, authorization, cancellation, retries, cleanup, dashboards, and support workflow.\n2. **Small allowlist:** enable selected low-risk tenants that have opted into the async contract. Hold through at least one complete retention and cleanup cycle. Compare synchronous baselines and inspect every failed/cancelled job.\n3. **Broader cohorts:** increase by explicit tenant cohorts, not random global exposure. At each hold point assess D9 adoption, job success and latency, queue age, authorization denials, cancellation effectiveness, duplicate suppression, cleanup backlog, support contacts, and synchronous API regression.\n4. **General availability of additive async API:** enable only after all approved thresholds remain satisfied for the observation window and security/privacy/on-call owners sign off. Keep the synchronous API unchanged and available.\n\nEach cohort promotion is a separate recorded approval. Stop promotion on any threshold breach, unexplained audit gap, cross-tenant signal, retention/cleanup breach, or synchronous regression. Roll back the affected cohort or all asynchronous access depending on blast radius.\n\n**Verification / exit criteria**\n\n- Cohort reports include denominator-based adoption, reliability, security, lifecycle, and compatibility metrics, not only successful-job counts.\n- At least one full selected-retention cleanup cycle has been observed in production before broad promotion.\n- Immediate rollback has been re-checked in the deployed configuration.\n- D9 adoption criteria are met or the async path remains an optional limited feature. This plan never treats low adoption as permission to remove the synchronous API.\n\n**Rollback:** remove cohorts from admission, then follow Section 6. Rollout configuration must be versioned/audited so the exact last-known-good cohort can be restored.\n\n### Phase 6 — Stabilization and deferred cleanup\n\n**Decision gate:** production observation window complete; no unresolved security, cleanup, audit, or compatibility issue.\n\n**Work**\n\n- Resolve rollout findings and verify retained artifacts and job metadata conform to approved lifecycle policy.\n- Remove only obsolete transitional code or schema that evidence proves unused, in a separate release after all old application/worker versions are gone. Keep feature controls and rollback capability for the agreed stabilization period.\n- Evaluate the synchronous API only against D9. Any deprecation, behavior change, or removal requires separate product approval, client communication, compatibility plan, rollout, and rollback; it is not part of this delivery.\n- Produce the durable completion handoff in Section 8.\n\n**Verification / exit criteria**\n\n- No orphaned artifact, overdue cleanup, unexplained audit gap, stuck job, or unresolved high-severity alert remains.\n- Final evidence is linked and reproducible from immutable build/deployment identifiers.\n- Operational owners accept dashboards, alerts, runbooks, access, and lifecycle responsibilities.\n\n**Rollback:** postpone cleanup and retain backward-compatible structures. Disable async behavior through the established controls if a late defect appears; keep synchronous behavior intact.\n\n## 5. Verification and completion evidence matrix\n\nAutomate tests where practical and retain test output, environment/build identity, and approver links. Production evidence must use safe metadata and must not copy personal data into tickets or reports.\n\n| Required evidence | Minimum proof before rollout | Production/rollout proof |\n|---|---|---|\n| Compatibility | Contract/characterization tests show synchronous success and error responses, authorization, and side effects are unchanged with async controls off/on; comparative load test meets agreed regression budget. | Dashboard comparison by cohort and rollback drill confirm synchronous health remains within threshold. |\n| Authorization and isolation | Role matrix tests for every operation; revoked/changed access; cross-tenant, enumeration, and storage-isolation tests; security review. | Denial and anomaly telemetry reviewed without exposing identifiers; controlled canary confirms current-role revalidation. |\n| Cancellation | State/race tests at queued, running, publication, and completed boundaries; partial artifact deletion verified. | Canary cancellation traces and audit sequence match D4; no downloadable cancelled artifact. |\n| Idempotent request and retry | Concurrent request, redelivery, crash/restart, timeout, and cleanup-race tests prove one canonical job/artifact under D5. | Duplicate-suppression/retry metrics and sampled safe audit correlations show expected outcomes. |\n| Audit trail | Event-schema tests and end-to-end expected event sequences, including rejected and failure paths; audit sink outage behavior tested. | Audit delivery dashboard has no unexplained gaps; authorized reviewer can reconstruct canary lifecycle. |\n| Retention and cleanup | Time-controlled boundary tests for all artifact/job outcomes and failed deletion/reconciliation. | At least one full retention cycle observed; cleanup backlog, overdue artifacts, and deletion alerts meet thresholds. |\n| Progress visibility | Monotonicity, unknown-total, throttling, stale worker, and terminal-state tests. | Progress freshness and polling/load metrics remain within D7 limits. |\n| Telemetry and operations | Dashboard queries, bounded dimensions, redaction checks, synthetic alerts, and runbook exercises. | Named responders receive canary alerts; cohort scorecards are archived at each promotion. |\n| Rollout | Feature controls and tenant cohorts tested in production-like mixed-version deployments. | Each promotion approval records thresholds, evidence, cohort, release ID, and observation interval. |\n| Rollback | Drill covers admission off, worker drain/stop, download control, prior-version deploy, cleanup continuation, and reconciliation. | Time-to-disable and recovery evidence meet the approved immediate-rollback objective in the deployed environment. |\n\nAlso run repository-standard unit, integration, API contract, migration, security, concurrency/race, load, and end-to-end test suites. A release cannot rely solely on happy-path tests or manual inspection.\n\n## 6. Immediate rollback procedure\n\nPrepare and rehearse exact platform commands in the operator runbook; do not embed environment-specific credentials in this plan.\n\n1. **Declare and record the rollback:** identify release/cohort and reason, open an incident if warranted, preserve correlation and deployment IDs, and begin an audit trail.\n2. **Stop admission:** disable asynchronous export creation globally or for affected cohorts. Confirm the synchronous API still serves its unchanged contract.\n3. **Contain execution:** stop new worker claims. Depending on D4 and incident type, drain safe in-flight jobs or request cancellation. For suspected authorization/data isolation issues, prefer containment and disable retrieval immediately.\n4. **Control artifacts:** disable or restrict downloads, revoke outstanding delivery credentials where possible, and prevent new publication. Do not delete evidence blindly; quarantine or clean artifacts according to security response and retention policy.\n5. **Restore software:** deploy the last-known-good application and worker versions. Do not reverse expand-only schema while mixed/older processes or job metadata may depend on it.\n6. **Keep safeguards alive:** continue audit ingestion, retention cleanup, deletion retries, telemetry, and reconciliation even when async execution is off.\n7. **Reconcile:** account for every admitted job and artifact as completed, safely cancelled, failed, quarantined, or queued for approved recovery. Verify no expired or cancelled artifact is downloadable.\n8. **Validate recovery:** run synchronous compatibility smoke tests, tenant-isolation checks, queue/artifact/cleanup queries, and alert checks. Record actual disable and recovery times.\n9. **Decide re-enable separately:** require root cause, remediation evidence, regression tests, and a new cohort approval. Never auto-re-enable solely because metrics return to normal.\n\nA rollback is complete only when user-facing exposure is contained, synchronous compatibility is verified, in-flight data is reconciled, and cleanup/audit controls are confirmed healthy.\n\n## 7. Release gates and ownership\n\nBefore implementation begins, assign named owners (people or teams) for product decisions, API/client compatibility, worker/queue, storage/security, privacy, audit, telemetry/on-call, cleanup, support, rollout approval, and incident rollback. Capture ownership in the repository’s normal durable location.\n\nA phase gate must record:\n\n- decision records and approvals applicable to the phase;\n- release/build and migration identifiers;\n- test and review evidence links;\n- known limitations and accepted risks with expiry dates;\n- rollout cohort, observation window, and measured thresholds;\n- rollback version, flag locations, responsible operator, and drill result; and\n- explicit go/no-go signatures from product plus security/privacy/operations where applicable.\n\nNo individual should need undocumented knowledge to operate or roll back the feature.\n\n## 8. Durable completion handoff\n\nThe delivery is not complete until a version-controlled handoff index points to durable, access-controlled artifacts for:\n\n- approved D1–D10 decision records and the versioned async API/export schema;\n- architecture and personal-data flow/threat model, including storage region, encryption/key boundary, and lifecycle;\n- job state machine, idempotency, cancellation, retry/recovery, and one-active-job-per-tenant invariants;\n- migration sequence, compatibility window, feature controls, cohort configuration, and last-known-good versions;\n- complete test reports and the evidence matrix above, tied to immutable build IDs;\n- privacy and security review approvals plus any risk acceptances and expiry dates;\n- telemetry dashboards, alert definitions, service indicators/thresholds, audit queries, and data-redaction rules;\n- operator/support/security runbooks, escalation contacts, required access, rollback drill record, and measured recovery time;\n- retention and cleanup configuration, reconciliation results, deletion-failure procedure, and proof of a production cleanup cycle;\n- rollout cohort reports, D9 adoption assessment, customer/support communications, and unresolved follow-up owners/dates; and\n- final status of every migration and temporary compatibility mechanism, including explicit criteria and owner for later removal.\n\nThe receiving engineering and operations owners must walk through a fresh-job lifecycle and a rollback using only the handoff materials. They sign acceptance after confirming access to dashboards, audit evidence, flags, storage controls, cleanup tooling, and escalation paths. Archive the signed handoff with the release record; keep links stable beyond the implementation team’s involvement.\n\n## 9. Definition of done\n\nThe tenant export change is complete only when:\n\n1. the additive asynchronous path satisfies the approved contract and all required authorization, cancellation, idempotency, audit, progress, retention cleanup, telemetry, and personal-data controls;\n2. the synchronous API remains compatible and available, with production evidence through the approved observation window;\n3. staged rollout gates and at least one full retention cycle have passed without unresolved release-blocking issues;\n4. immediate rollback has been demonstrated in the deployed configuration and leaves audit/cleanup protections operating;\n5. all artifacts and jobs are accounted for, and no overdue or unauthorized artifact is retrievable; and\n6. the durable completion handoff is accepted by named engineering and operations owners.\n\nAny future synchronous API deprecation is explicitly outside this definition of done and requires its own approved change plan.\n"
+      },
+      "result": "{\"file_path\": \"/tmp/infinidev-agent-task-4bxvwpwr/repo/PLAN.md\", \"action\": \"created\", \"size_bytes\": 30741}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "a6644ef9f3c543b79a1922292ed7d5b9",
+      "tool_name": "read_file",
+      "arguments": {
+        "file_path": "PLAN.md"
+      },
+      "result": "     1\t# Tenant Export Delivery Plan\n     2\t\n     3\t## 1. Purpose and constraints\n     4\t\n     5\tDeliver an asynchronous tenant-record export path while leaving the current synchronous API behavior and contract unchanged until measured adoption proves that a later change is safe. The asynchronous path must support progress visibility, cancellation, idempotent retry, and an audit trail. Because exports may contain personal data, authorization and data lifecycle controls are release gates rather than follow-up hardening.\n     6\t\n     7\tThis document is an implementation plan only. It does not select unresolved product or security policy, define a final endpoint name, or authorize removal of the synchronous path.\n     8\t\n     9\t### Non-negotiable outcomes\n    10\t\n    11\t- The existing synchronous API remains available and compatible throughout this plan. No client is silently redirected to asynchronous behavior.\n    12\t- Asynchronous export is additive, disabled by default, and independently controllable with a server-side feature flag or equivalent kill switch.\n    13\t- The existing worker continues to process no more than one export for a tenant at a time. Scheduling must not introduce same-tenant concurrency.\n    14\t- Every operation is tenant-scoped and subject to explicit authorization checks; possession of an export identifier alone never grants access.\n    15\t- Export artifacts are treated as personal data from creation through cleanup, including storage, download, logs, backups, and failure paths.\n    16\t- Each phase is reversible. Any database evolution is expand-first and remains readable by the prior application version until rollout is complete.\n    17\t- Rollback disables new asynchronous work immediately without deleting evidence, abandoning artifacts, or changing the synchronous API.\n    18\t\n    19\t## 2. Consequential open decisions\n    20\t\n    21\tRecord each answer in a durable decision record before the phase whose **Decision gate** references it. Include the approver, date, rationale, affected controls, and review date. Do not infer these choices during implementation.\n    22\t\n    23\t| ID | Open decision / user decision required | Options or questions to confirm | Why consequential | Required before |\n    24\t|---|---|---|---|---|\n    25\t| D1 | **Retention period** | Confirm **24 hours or 7 days**; define whether the clock starts at artifact creation or job completion, and how legal hold or failed deletion is handled. | Changes personal-data exposure, storage cost, cleanup scheduling, and user expectations. | Phase 1 contract and Phase 3 storage work |\n    26\t| D2 | **Authorization policy** | Confirm which tenant roles may create, view status, cancel, retry, and download; whether service/support operators may act; and whether step-up authentication is required for download. | Determines who can extract personal data and must be enforced consistently at every operation. | Phase 1 |\n    27\t| D3 | **Export storage and delivery boundary** | Confirm storage system, region/residency, encryption and key ownership, download mechanism (streamed or short-lived signed access), link lifetime, and whether filenames/content need additional protection. | Defines the principal data leakage and residency risks and affects cleanup behavior. | Phase 3 |\n    28\t| D4 | **Cancellation semantics** | Confirm whether cancellation is best-effort or guaranteed before delivery; expected behavior when cancellation races completion; whether partial artifacts are immediately destroyed; and terminal state wording. | Affects state transitions, user promises, worker interruption, audit evidence, and tests. | Phase 1 |\n    29\t| D5 | **Idempotency contract** | Confirm caller-provided key versus derived request identity, key scope (tenant + actor + normalized parameters), deduplication window, response for an in-flight/completed/failed/cancelled match, and when a retry may create a new job. | Prevents duplicate personal-data artifacts without incorrectly coalescing distinct requests. | Phase 1 |\n    30\t| D6 | **Export contract** | Confirm data fields and format, consistency point/snapshot expectations, size limits, filters, localization, and schema/version signaling. | Determines compatibility, reproducibility, resource use, and what personal data leaves the service. | Phase 1 |\n    31\t| D7 | **Progress contract** | Confirm whether progress is exact records/bytes or coarse stages, update frequency, and what clients see when totals are unknown. | Avoids misleading clients and constrains worker/database write volume. | Phase 1 |\n    32\t| D8 | **Capacity and fairness policy** | Confirm queue limits, per-tenant outstanding-job limit, global concurrency, priority/fairness, timeout, and overload response while preserving one active job per tenant. | Prevents one tenant from starving others and protects the existing worker and synchronous API. | Phase 2 |\n    33\t| D9 | **Adoption criterion and synchronous API future** | Confirm the observation window and thresholds for eligible-tenant adoption, success rate, latency, support burden, and client compatibility. Any synchronous deprecation/removal requires a separate approved plan. | Prevents premature behavior change and gives “adoption is proven” an auditable meaning. | Phase 5 rollout; any later API change |\n    34\t| D10 | **Audit and telemetry access** | Confirm required audit event taxonomy, audit retention, authorized viewers, correlation fields, telemetry system, and restrictions on tenant identifiers or export contents in logs/metrics/traces. | Balances traceability with minimization of personal data and operational metadata. | Phase 1 design and Phase 4 instrumentation |\n    35\t\n    36\tIf a decision is not approved by its gate, pause that phase. A temporary default is acceptable only when explicitly approved and recorded with an expiry; it must not silently become policy.\n    37\t\n    38\t## 3. Target behavior and contracts to design\n    39\t\n    40\tPhase 1 must turn the approved decisions into a versioned contract before implementation. Exact route and field names should follow repository conventions discovered during implementation; behavior must include the following.\n    41\t\n    42\t### Job lifecycle\n    43\t\n    44\tUse a persisted state machine with explicit allowed transitions, for example:\n    45\t\n    46\t`queued -> running -> completed`\n    47\t\n    48\twith terminal or exceptional paths to `cancelled` and `failed`. Define cancellation-requested behavior if cancellation cannot be atomic. A terminal state must never return to a non-terminal state. Persist timestamps, tenant scope, requesting actor, normalized request parameters or their safe digest, progress, error category safe for clients, artifact metadata, retention deadline, and correlation identifiers.\n    49\t\n    50\tState changes must be conditional/transactional so duplicate deliveries, retries, and cancellation/completion races cannot publish two artifacts or overwrite a terminal outcome. Recovery after worker restart must be specified and tested.\n    51\t\n    52\t### Asynchronous operations\n    53\t\n    54\tDefine authenticated operations to:\n    55\t\n    56\t1. request an export with an idempotency identity;\n    57\t2. read status and progress;\n    58\t3. request cancellation;\n    59\t4. retry according to the approved idempotency policy; and\n    60\t5. retrieve a completed artifact before expiry.\n    61\t\n    62\tResponses must distinguish accepted, existing idempotent result, unauthorized/forbidden, not found without cross-tenant disclosure, conflict/invalid transition, expired, rate- or capacity-limited, and internal failure. Polling guidance and any retry hints must be documented. No asynchronous response may alter status codes, payloads, timing promises, or side effects of the current synchronous API.\n    63\t\n    64\t### Security and data lifecycle\n    65\t\n    66\t- Re-evaluate current tenant membership and role authorization on every create, status, cancel, retry, and download operation; do not rely only on authorization captured at creation.\n    67\t- Bind each job and artifact to a tenant and enforce tenant scope in both application queries and storage access. Use opaque identifiers and prevent identifier enumeration from revealing existence.\n    68\t- Minimize export contents to the approved contract. Never place export payloads, secrets, download tokens, or sensitive request parameters in application logs, audit details, metrics, traces, queue messages, or error text.\n    69\t- Encrypt artifacts in transit and at rest according to D3. Keep delivery credentials short-lived and avoid reusable public URLs.\n    70\t- Set the approved retention deadline explicitly and make cleanup idempotent. Cleanup covers completed, cancelled, failed, orphaned, and partially written artifacts, plus stale delivery credentials and metadata according to policy.\n    71\t- If artifact deletion fails, deny further download after expiry, retry cleanup with bounded backoff, emit an alert and audit event, and retain enough non-sensitive metadata to prove resolution.\n    72\t\n    73\t### Audit trail\n    74\t\n    75\tEmit durable, queryable audit events for request accepted/deduplicated/rejected, worker start, meaningful progress milestones if approved, cancellation requested/effected/raced, retry, completion, download authorization and delivery, failure, expiry, cleanup success/failure, administrative override, feature-flag change, and rollback action. Events include timestamp, tenant, actor or service identity, action, outcome, job ID, correlation ID, and safe reason code; they exclude export contents and credentials. Audit writes for security-significant transitions must have defined failure behavior rather than being silently dropped.\n    76\t\n    77\t## 4. Reversible implementation phases\n    78\t\n    79\tDo not begin a phase until the prior phase exit criteria and the listed decision gate are met. Keep incomplete behavior unreachable in production behind the asynchronous export flag.\n    80\t\n    81\t### Phase 0 — Baseline, discovery, and decision records\n    82\t\n    83\t**Decision gate:** none; this phase gathers evidence and owners for D1–D10.\n    84\t\n    85\t**Work**\n    86\t\n    87\t- Inventory the current synchronous API contract, authorization checks, tenant scoping, export generation path, worker execution model, persistence, storage, cleanup facilities, audit framework, telemetry, deployment topology, and operational ownership.\n    88\t- Capture baseline synchronous request volume, latency, errors, resource use, and current export sizes without logging export data.\n    89\t- Identify schema migration and feature-flag conventions, worker restart/recovery behavior, and how the one-tenant-at-a-time invariant is currently enforced.\n    90\t- Create the D1–D10 decision records, a threat model/data-flow diagram, and a compatibility fixture or characterization test for the synchronous API.\n    91\t\n    92\t**Verification / exit criteria**\n    93\t\n    94\t- The current synchronous behavior is represented by automated compatibility tests and production-safe baseline telemetry.\n    95\t- Data flows and trust boundaries identify every location where personal data or delivery credentials can exist.\n    96\t- Each decision has an accountable approver and due date; no gated implementation begins with an implicit answer.\n    97\t\n    98\t**Rollback:** documentation, tests, and non-sensitive baseline dashboards are additive. Remove only unused draft observability; no runtime behavior changes.\n    99\t\n   100\t### Phase 1 — Contract, state model, and inactive persistence\n   101\t\n   102\t**Decision gate:** D1, D2, D4, D5, D6, D7, and D10 approved.\n   103\t\n   104\t**Work**\n   105\t\n   106\t- Specify and review the versioned asynchronous API, status/progress representation, terminal states, errors, polling guidance, cancellation race semantics, retry behavior, and idempotency scope/window.\n   107\t- Add backward-compatible persistence using expand-only migrations: nullable/new tables or fields, indexes, uniqueness constraints for idempotency, and conditional state-transition support. Do not repurpose fields used by the synchronous path.\n   108\t- Implement the domain state machine and tenant-scoped repository boundaries behind a disabled flag, including retention deadline and artifact state metadata but no production artifact creation.\n   109\t- Define audit event schemas and safe reason codes. Document which transition and audit writes are atomic, and the recovery path where atomicity is unavailable.\n   110\t\n   111\t**Verification / exit criteria**\n   112\t\n   113\t- Unit and database tests cover every allowed and forbidden transition, terminal-state immutability, concurrent idempotent requests, cross-tenant key isolation, cancellation/completion races, and migration forward/backward application.\n   114\t- Contract tests prove the existing synchronous API is byte-/field-/status-compatible for representative success and error cases with the flag both off and on.\n   115\t- A prior application version can run safely against the expanded schema; down migration is not required for immediate application rollback.\n   116\t\n   117\t**Rollback:** keep additive schema dormant, disable the flag, and deploy the prior application version. Remove schema only in a later cleanup release after confirming no mixed-version process uses it.\n   118\t\n   119\t### Phase 2 — Queueing, worker execution, progress, cancellation, and retry\n   120\t\n   121\t**Decision gate:** D8 approved; Phase 1 contracts frozen for the rollout scope.\n   122\t\n   123\t**Work**\n   124\t\n   125\t- Add asynchronous request admission and durable enqueueing behind the disabled flag, with authorization, capacity controls, and transactional protection against a persisted job being lost before enqueue.\n   126\t- Adapt the existing worker to claim work safely while enforcing at most one active export per tenant. Define leases/heartbeats, stale-job recovery, bounded retries, poison-job handling, and fairness under D8.\n   127\t- Generate progress from committed work or coarse stages according to D7; make updates monotonic, bounded, and resilient to duplicate delivery.\n   128\t- Check cancellation before start and at safe checkpoints during generation. Prevent publication after effective cancellation and destroy partial artifacts according to D4.\n   129\t- Make retries idempotent across request replay, queue redelivery, process crash, and timeout. Ensure only one canonical downloadable artifact can win.\n   130\t\n   131\t**Verification / exit criteria**\n   132\t\n   133\t- Tests cover duplicate requests and queue delivery, process termination/restart, stale leases, timeout, concurrent tenants, same-tenant serialization, queue saturation, fairness, monotonic progress, and retry exhaustion.\n   134\t- Deterministic race tests cover cancel-before-start, cancel-during-generation, cancel-versus-completion, retry-versus-cleanup, and duplicate completion.\n   135\t- Load tests demonstrate selected queue and resource limits do not materially regress synchronous API service levels; results are compared with Phase 0 baselines.\n   136\t\n   137\t**Rollback:** disable admission first, then stop new worker claims. Allow approved in-flight behavior (finish or cancel per D4), preserve job state for reconciliation, and continue the synchronous API. The prior version remains schema-compatible.\n   138\t\n   139\t### Phase 3 — Protected artifacts, delivery, retention, and cleanup\n   140\t\n   141\t**Decision gate:** D1 and D3 approved; privacy/security review accepts the data flow.\n   142\t\n   143\t**Work**\n   144\t\n   145\t- Write artifacts to the approved encrypted, tenant-isolated storage location using temporary/non-downloadable state, then atomically publish only a successfully completed artifact.\n   146\t- Add authorized retrieval with current-role revalidation, short-lived delivery credentials or protected streaming, expiry enforcement, safe content disposition, and no cache/public exposure inconsistent with D3.\n   147\t- Implement retention cleanup from the persisted deadline. Include partial/orphaned artifacts and terminal job states; make deletion retries idempotent and observable.\n   148\t- Add reconciliation that finds metadata-without-artifact, artifact-without-metadata, expired-but-readable, and stuck partial uploads without scanning or exposing artifact contents.\n   149\t\n   150\t**Verification / exit criteria**\n   151\t\n   152\t- Authorization tests cover allowed roles, revoked membership, changed role, cross-tenant IDs, guessed IDs, expired links, replayed credentials, and operator access.\n   153\t- Storage tests verify encryption/configuration, tenant isolation, atomic publication, partial-write cleanup, and that cancelled/failed jobs never expose artifacts.\n   154\t- Time-controlled tests prove cleanup at the selected retention boundary for completed, cancelled, failed, partial, and orphaned artifacts; deletion failure denies download, retries, alerts, audits, and eventually reconciles.\n   155\t- Privacy review verifies data minimization and confirms logs, telemetry, audit events, queues, and errors contain no export payload or delivery credential.\n   156\t\n   157\t**Rollback:** disable create and download surfaces, revoke/expire outstanding delivery credentials where supported, stop publication, and keep cleanup/reconciliation running. Do not restore expired artifacts. Preserve minimal audit/job metadata according to approved policy.\n   158\t\n   159\t### Phase 4 — End-to-end integration, telemetry, and operational readiness\n   160\t\n   161\t**Decision gate:** D9 metrics are defined; on-call, security, privacy, and support accept operating procedures.\n   162\t\n   163\t**Work**\n   164\t\n   165\t- Wire the complete asynchronous path under separate controls for request admission, worker claiming, and artifact download so rollback can isolate a faulty stage.\n   166\t- Add dashboards and alerts for queue depth/age, admission rejection, job duration by stage, progress staleness, completion/failure/cancellation/retry rates, worker leases, same-tenant concurrency violations, artifact publication/download failures, cleanup backlog/age, deletion failures, audit delivery failures, and synchronous API health.\n   167\t- Define service-level indicators and alert thresholds from baseline/load evidence. Keep telemetry dimensions bounded and free of personal data; use controlled correlation tooling for job-level diagnosis.\n   168\t- Write runbooks for stuck jobs, cancellation races, duplicate requests, queue overload, worker restart, storage outage, unauthorized-access alert, audit outage, cleanup failure, flag rollback, artifact reconciliation, and customer support escalation.\n   169\t- Exercise deployment and immediate rollback in a production-like environment, including mixed application/worker versions and queued jobs.\n   170\t\n   171\t**Verification / exit criteria**\n   172\t\n   173\t- End-to-end tests cover create, progress, completion, authorized download, cancellation, idempotent retry, audit sequence, retention expiry/cleanup, and each declared failure mode.\n   174\t- Compatibility tests and comparative load tests remain green for the synchronous API.\n   175\t- A rollback drill demonstrates the async entry point can be disabled immediately, workers drained/stopped safely, downloads controlled, cleanup preserved, and the prior release restored without schema rollback or data loss.\n   176\t- Alerts are triggered synthetically and route to named responders; runbook steps and required permissions are validated rather than only reviewed.\n   177\t\n   178\t**Rollback:** execute the runbook in Section 6. Observability, audit ingestion, and cleanup remain active even when user-facing async behavior is disabled.\n   179\t\n   180\t### Phase 5 — Staged rollout and adoption observation\n   181\t\n   182\t**Decision gate:** D9 approved and all Phase 4 exit criteria signed off.\n   183\t\n   184\t**Work and promotion gates**\n   185\t\n   186\t1. **Internal/test tenants:*",
+      "result_truncated": true,
+      "failed": false
+    },
+    {
+      "tool_run_id": "bd2a41a6e03f4b4db295a14f6003f677",
+      "tool_name": "send_message",
+      "arguments": {
+        "message": "I’ll run the repository’s verifier plus a stricter read-only check of the plan’s required decisions, reversible phase structure, rollout/rollback/handoff sections, and workspace file scope. This will confirm the document is complete without making any code or repository-history changes."
+      },
+      "result": "{\"status\": \"delivered\"}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "8e2b663237014b769688b7d5883f6063",
+      "tool_name": "execute_command",
+      "arguments": {
+        "command": "python verify.py && python - <<'PY'\nfrom pathlib import Path\n\nroot = Path.cwd().resolve()\nplan = Path('PLAN.md').read_text(encoding='utf-8')\nrequirements = Path('requirements.md').read_text(encoding='utf-8')\n\nrequired_sections = [\n    '## 2. Consequential open decisions',\n    '## 4. Reversible implementation phases',\n    '## 5. Verification and completion evidence matrix',\n    '## 6. Immediate rollback procedure',\n    '## 8. Durable completion handoff',\n    '## 9. Definition of done',\n]\nfor section in required_sections:\n    assert section in plan, f'missing section: {section}'\nfor decision in range(1, 11):\n    assert f'| D{decision} |' in plan, f'missing decision D{decision}'\nfor phase in range(0, 7):\n    marker = f'### Phase {phase} '\n    assert marker in plan, f'missing phase {phase}'\n    phase_text = plan.split(marker, 1)[1].split('### Phase ', 1)[0]\n    assert '**Verification / exit criteria**' in phase_text, f'phase {phase} lacks verification'\n    assert '**Rollback:**' in phase_text, f'phase {phase} lacks rollback'\nassert '**24 hours or 7 days**' in plan, 'retention choice is not explicit'\nassert 'current synchronous API' in plan, 'synchronous compatibility constraint missing'\nassert 'one export for a tenant at a time' in plan, 'worker serialization constraint missing'\nassert 'does not select unresolved product or security policy' in plan, 'open decisions are not preserved'\nassert requirements.strip(), 'requirements.md unexpectedly empty'\n\nfiles = sorted(\n    str(path.relative_to(root))\n    for path in root.rglob('*')\n    if path.is_file() and '__pycache__' not in path.parts\n)\nassert files == ['PLAN.md', 'requirements.md', 'verify.py'], f'unexpected workspace files: {files}'\nassert not Path('src').exists(), 'implementation source directory exists'\nprint('STRICT_PLAN_CHECK: PASS')\nprint('WORKSPACE_FILES:', ', '.join(files))\nprint('PHASES_CHECKED: 0-6; each has verification and rollback')\nprint('OPEN_DECISIONS_CHECKED: D1-D10, including explicit 24 hours vs 7 days')\nprint('REQUIRED_SECTIONS_CHECKED: decisions, phases, evidence, rollback, handoff, done')\nPY",
+        "cwd": "/tmp/infinidev-agent-task-4bxvwpwr/repo",
+        "timeout": 120,
+        "rationale": "Run the supplied verifier and deterministic structural/scope assertions to prove PLAN.md covers all required planning controls and no implementation files were created."
+      },
+      "result": "{\"exit_code\": 0, \"stdout\": \"STRICT_PLAN_CHECK: PASS\\nWORKSPACE_FILES: PLAN.md, requirements.md, verify.py\\nPHASES_CHECKED: 0-6; each has verification and rollback\\nOPEN_DECISIONS_CHECKED: D1-D10, including explicit 24 hours vs 7 days\\nREQUIRED_SECTIONS_CHECKED: decisions, phases, evidence, rollback, handoff, done\\n\", \"stderr\": \"\", \"success\": true}",
+      "result_truncated": false,
+      "failed": false
+    }
+  ],
+  "changed_paths": [
+    "PLAN.md"
+  ],
+  "forbidden_changes": [],
+  "missing_expected_changes": [],
+  "final_pattern_checks": {
+    "plan": true,
+    "verif": true
+  },
+  "action_pattern_checks": {},
+  "prompt_composition_history": [
+    {
+      "iteration": 0,
+      "system_chars": 7147,
+      "user_chars": 1115,
+      "tool_schema_chars": 46395,
+      "request_static_chars": 54657,
+      "user_sections": {
+        "expected-output": 514,
+        "plan": 188,
+        "task": 255,
+        "unclassified": 6,
+        "workspace": 152
+      }
+    },
+    {
+      "iteration": 1,
+      "system_chars": 7147,
+      "user_chars": 4745,
+      "tool_schema_chars": 46395,
+      "request_static_chars": 58287,
+      "user_sections": {
+        "context-budget": 91,
+        "current-action": 1224,
+        "expected-output": 596,
+        "next-actions": 158,
+        "opened-files": 867,
+        "plan": 368,
+        "previous-actions": 769,
+        "smart-context-summary": 247,
+        "task": 255,
+        "unclassified": 18,
+        "workspace": 152
+      }
+    },
+    {
+      "iteration": 2,
+      "system_chars": 7147,
+      "user_chars": 9000,
+      "tool_schema_chars": 46395,
+      "request_static_chars": 62542,
+      "user_sections": {
+        "avoid": 258,
+        "context-budget": 92,
+        "current-action": 1052,
+        "expected-output": 578,
+        "next-actions": 97,
+        "notes": 1328,
+        "opened-files": 2695,
+        "plan": 375,
+        "previous-actions": 1874,
+        "smart-context-summary": 222,
+        "task": 255,
+        "unclassified": 22,
+        "workspace": 152
+      }
+    },
+    {
+      "iteration": 3,
+      "system_chars": 7147,
+      "user_chars": 72271,
+      "tool_schema_chars": 46395,
+      "request_static_chars": 125813,
+      "user_sections": {
+        "avoid": 481,
+        "behavior-summary": 265,
+        "context-budget": 93,
+        "current-action": 723,
+        "expected-output": 625,
+        "notes": 1705,
+        "opened-files": 64258,
+        "plan": 534,
+        "previous-actions": 3000,
+        "smart-context-summary": 158,
+        "task": 255,
+        "unclassified": 22,
+        "workspace": 152
+      }
+    }
+  ],
+  "request_payload_history": [
+    {
+      "sequence": 0,
+      "mode": "function_calling",
+      "message_count": 2,
+      "message_payload_chars": 8442,
+      "tool_schema_chars": 3889,
+      "request_payload_chars": 12331,
+      "message_content_chars_by_role": {
+        "system": 7245,
+        "user": 1140
+      }
+    },
+    {
+      "sequence": 1,
+      "mode": "function_calling",
+      "message_count": 4,
+      "message_payload_chars": 9265,
+      "tool_schema_chars": 3889,
+      "request_payload_chars": 13154,
+      "message_content_chars_by_role": {
+        "assistant": 2,
+        "system": 7245,
+        "tool": 91,
+        "user": 1140
+      }
+    },
+    {
+      "sequence": 2,
+      "mode": "function_calling",
+      "message_count": 6,
+      "message_payload_chars": 9990,
+      "tool_schema_chars": 3889,
+      "request_payload_chars": 13879,
+      "message_content_chars_by_role": {
+        "assistant": 4,
+        "system": 7245,
+        "tool": 182,
+        "user": 1140
+      }
+    },
+    {
+      "sequence": 3,
+      "mode": "function_calling",
+      "message_count": 8,
+      "message_payload_chars": 10755,
+      "tool_schema_chars": 3889,
+      "request_payload_chars": 14644,
+      "message_content_chars_by_role": {
+        "assistant": 6,
+        "system": 7245,
+        "tool": 273,
+        "user": 1140
+      }
+    },
+    {
+      "sequence": 4,
+      "mode": "function_calling",
+      "message_count": 2,
+      "message_payload_chars": 12128,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 58523,
+      "message_content_chars_by_role": {
+        "system": 7245,
+        "user": 4826
+      }
+    },
+    {
+      "sequence": 5,
+      "mode": "function_calling",
+      "message_count": 4,
+      "message_payload_chars": 12667,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 59062,
+      "message_content_chars_by_role": {
+        "assistant": 2,
+        "system": 7245,
+        "tool": 61,
+        "user": 4826
+      }
+    },
+    {
+      "sequence": 6,
+      "mode": "function_calling",
+      "message_count": 8,
+      "message_payload_chars": 13992,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 60387,
+      "message_content_chars_by_role": {
+        "assistant": 4,
+        "system": 7245,
+        "tool": 634,
+        "user": 4826
+      }
+    },
+    {
+      "sequence": 7,
+      "mode": "function_calling",
+      "message_count": 10,
+      "message_payload_chars": 15155,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 61550,
+      "message_content_chars_by_role": {
+        "assistant": 6,
+        "system": 7245,
+        "tool": 1541,
+        "user": 4826
+      }
+    },
+    {
+      "sequence": 8,
+      "mode": "function_calling",
+      "message_count": 17,
+      "message_payload_chars": 18926,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 65321,
+      "message_content_chars_by_role": {
+        "assistant": 8,
+        "system": 7245,
+        "tool": 1913,
+        "user": 5110
+      }
+    },
+    {
+      "sequence": 9,
+      "mode": "function_calling",
+      "message_count": 2,
+      "message_payload_chars": 16593,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 62988,
+      "message_content_chars_by_role": {
+        "system": 7245,
+        "user": 9291
+      }
+    },
+    {
+      "sequence": 10,
+      "mode": "function_calling",
+      "message_count": 4,
+      "message_payload_chars": 17124,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 63519,
+      "message_content_chars_by_role": {
+        "assistant": 2,
+        "system": 7245,
+        "tool": 61,
+        "user": 9291
+      }
+    },
+    {
+      "sequence": 11,
+      "mode": "function_calling",
+      "message_count": 6,
+      "message_payload_chars": 17870,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 64265,
+      "message_content_chars_by_role": {
+        "assistant": 4,
+        "system": 7245,
+        "tool": 563,
+        "user": 9291
+      }
+    },
+    {
+      "sequence": 12,
+      "mode": "function_calling",
+      "message_count": 8,
+      "message_payload_chars": 49719,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 96114,
+      "message_content_chars_by_role": {
+        "assistant": 6,
+        "system": 7245,
+        "tool": 824,
+        "user": 9291
+      }
+    },
+    {
+      "sequence": 13,
+      "mode": "function_calling",
+      "message_count": 10,
+      "message_payload_chars": 83427,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 129822,
+      "message_content_chars_by_role": {
+        "assistant": 8,
+        "system": 7245,
+        "tool": 34278,
+        "user": 9291
+      }
+    },
+    {
+      "sequence": 14,
+      "mode": "function_calling",
+      "message_count": 12,
+      "message_payload_chars": 84066,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 130461,
+      "message_content_chars_by_role": {
+        "assistant": 10,
+        "system": 7245,
+        "tool": 34303,
+        "user": 9291
+      }
+    },
+    {
+      "sequence": 15,
+      "mode": "function_calling",
+      "message_count": 2,
+      "message_payload_chars": 80476,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 126871,
+      "message_content_chars_by_role": {
+        "system": 7245,
+        "user": 73174
+      }
+    },
+    {
+      "sequence": 16,
+      "mode": "function_calling",
+      "message_count": 4,
+      "message_payload_chars": 81072,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 127467,
+      "message_content_chars_by_role": {
+        "assistant": 2,
+        "system": 7245,
+        "tool": 61,
+        "user": 73174
+      }
+    },
+    {
+      "sequence": 17,
+      "mode": "function_calling",
+      "message_count": 6,
+      "message_payload_chars": 84160,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 130555,
+      "message_content_chars_by_role": {
+        "assistant": 4,
+        "system": 7245,
+        "tool": 461,
+        "user": 73174
+      }
+    },
+    {
+      "sequence": 18,
+      "mode": "function_calling",
+      "message_count": 8,
+      "message_payload_chars": 84776,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 131171,
+      "message_content_chars_by_role": {
+        "assistant": 6,
+        "system": 7245,
+        "tool": 486,
+        "user": 73174
+      }
+    }
+  ],
+  "changed_files_summary": "### /tmp/infinidev-agent-task-4bxvwpwr/repo/PLAN.md (created)\n```diff\n--- a/PLAN.md\n+++ b/PLAN.md\n@@ -0,0 +1,301 @@\n+# Tenant Export Delivery Plan\n+\n+## 1. Purpose and constraints\n+\n+Deliver an asynchronous tenant-record export path while leaving the current synchronous API behavior and contract unchanged until measured adoption proves that a later change is safe. The asynchronous path must support progress visibility, cancellation, idempotent retry, and an audit trail. Because exports may contain personal data, authorization and data lifecycle controls are release gates rather than follow-up hardening.\n+\n+This document is an implementation plan only. It does not select unresolved product or security policy, define a final endpoint name, or authorize removal of the synchronous path.\n+\n+### Non-negotiable outcomes\n+\n+- The existing synchronous API remains available and compatible throughout this plan. No client is silently redirected to asynchronous behavior.\n+- Asynchronous export is additive, disabled by default, and independently controllable with a server-side feature flag or equivalent kill switch.\n+- The existing worker continues to process no more than one export for a tenant at a time. Scheduling must not introduce same-tenant concurrency.\n+- Every operation is tenant-scoped and subject to explicit authorization checks; possession of an export identifier alone never grants access.\n+- Export artifacts are treated as personal data from creation through cleanup, including storage, download, logs, backups, and failure paths.\n+- Each phase is reversible. Any database evolution is expand-first and remains readable by the prior application version until rollout is complete.\n+- Rollback disables new asynchronous work immediately without deleting evidence, abandoning artifacts, or changing the synchronous API.\n+\n+## 2. Consequential open decisions\n+\n+Record each answer in a durable decision record before the phase whose **Decision gate** references it. Include the approver, date, rationale, affected controls, and review date. Do not infer these choices during implementation.\n+\n+| ID | Open decision / user decision required | Options or questions to confirm | Why consequential | Required before |\n+|---|---|---|---|---|\n+| D1 | **Retention period** | Confirm **24 hours or 7 days**; define whether the clock starts at artifact creation or job completion, and how legal hold or failed deletion is handled. | Changes personal-data exposure, storage cost, cleanup scheduling, and user expectations. | Phase 1 contract and Phase 3 storage work |\n+| D2 | **Authorization policy** | Confirm which tenant roles may create, view status, cancel, retry, and download; whether service/support operators may act; and whether step-up authentication is required for download. | Determines who can extract personal data and must be enforced consistently at every operation. | Phase 1 |\n+| D3 | **Export storage and delivery boundary** | Confirm storage system, region/residency, encryption and key ownership, download mechanism (streamed or short-lived signed access), link lifetime, and whether filenames/content need additional protection. | Defines the principal data leakage and residency risks and affects cleanup behavior. | Phase 3 |\n+| D4 | **Cancellation semantics** | Confirm whether cancellation is best-effort or guaranteed before delivery; expected behavior when cancellation races completion; whether partial artifacts are immediately destroyed; and terminal state wording. | Affects state transitions, user promises, worker interruption, audit evidence, and tests. | Phase 1 |\n+| D5 | **Idempotency contract** | Confirm caller-provided key versus derived request identity, key scope (tenant + actor + normalized parameters), deduplication window, response for an in-flight/completed/failed/cancelled match, and when a retry may create a new job. | Prevents duplicate personal-data artifacts without incorrectly coalescing distinct requests. | Phase 1 |\n+| D6 | **Export contract** | Confirm data fields and format, consistency point/snapshot expectations, size limits, filters, localization, and schema/version signaling. | Determines compatibility, reproducibility, resource use, and what personal data leaves the service. | Phase 1 |\n+| D7 | **Progress contract** | Confirm whether progress is exact records/bytes or coarse stages, update frequency, and what clients see when totals are unknown. | Avoids misleading clients and constrains worker/database write volume. | Phase 1 |\n+| D8 | **Capacity and fairness policy** | Confirm queue limits, per-tenant outstanding-job limit, global concurrency, priority/fairness, timeout, and overload response while preserving one active job per tenant. | Prevents one tenant from starving others and protects the existing worker and synchronous API. | Phase 2 |\n+| D9 | **Adoption criterion and synchronous API future** | Confirm the observation window and thresholds for eligible-tenant adoption, success rate, latency, support burden, and client compatibility. Any synchronous deprecation/removal requires a separate approved plan. | Prevents premature behavior change and gives “adoption is proven” an auditable meaning. | Phase 5 rollout; any later API change |\n+| D10 | **Audit and telemetry access** | Confirm required audit event taxonomy, audit retention, authorized viewers, correlation fields, telemetry system, and restrictions on tenant identifiers or export contents in logs/metrics/traces. | Balances traceability with minimization of personal data and operational metadata. | Phase 1 design and Phase 4 instrumentation |\n+\n+If a decision is not approved by its gate, pause that phase. A temporary default is acceptable only when explicitly approved and recorded with an expiry; it must not silently become policy.\n+\n+## 3. Target behavior and contracts to design\n+\n+Phase 1 must turn the approved decisions into a versioned contract before implementation. Exact route and field names should follow repository conventions discovered during implementation; behavior must include the following.\n+\n+### Job lifecycle\n+\n+Use a persisted state machine with explicit allowed transitions, for example:\n+\n+`queued -> running -> completed`\n+\n+with terminal or exceptional paths to `cancelled` and `failed`. Define cancellation-requested behavior if cancellation cannot be atomic. A terminal state must never return to a non-terminal state. Persist timestamps, tenant scope, requesting actor, normalized request parameters or their safe digest, progress, error category safe for clients, artifact metadata, retention deadline, and correlation identifiers.\n+\n+State changes must be conditional/transactional so duplicate deliveries, retries, and cancellation/completion races cannot publish two artifacts or overwrite a terminal outcome. Recovery after worker restart must be specified and tested.\n+\n+### Asynchronous operations\n+\n+Define authenticated operations to:\n+\n+1. request an export with an idempotency identity;\n+2. read status and progress;\n+3. request cancellation;\n+4. retry according to the approved idempotency policy; and\n+5. retrieve a completed artifact before expiry.\n+\n+Responses must distinguish accepted, existing idempotent result, unauthorized/forbidden, not found without cross-tenant disclosure, conflict/invalid transition, expired, rate- or capacity-limited, and internal failure. Polling guidance and any retry hints must be documented. No asynchronous response may alter status codes, payloads, timing promises, or side effects of the current synchronous API.\n+\n+### Security and data lifecycle\n+\n+- Re-evaluate current tenant membership and role authorization on every create, status, cancel, retry, and download operation; do not rely only on authorization captured at creation.\n+- Bind each job and artifact to a tenant and enforce tenant scope in both application queries and storage access. Use opaque identifiers and prevent identifier enumeration from revealing existence.\n+- Minimize export contents to the approved contract. Never place export payloads, secrets, download tokens, or sensitive request parameters in application logs, audit details, metrics, traces, queue messages, or error text.\n+- Encrypt artifacts in transit and at rest according to D3. Keep delivery credentials short-lived and avoid reusable public URLs.\n+- Set the approved retention deadline explicitly and make cleanup idempotent. Cleanup covers completed, cancelled, failed, orphaned, and partially written artifacts, plus stale delivery credentials and metadata according to policy.\n+- If artifact deletion fails, deny further download after expiry, retry cleanup with bounded backoff, emit an alert and audit event, and retain enough non-sensitive metadata to prove resolution.\n+\n+### Audit trail\n+\n+Emit durable, queryable audit events for request accepted/deduplicated/rejected, worker start, meaningful progress milestones if approved, cancellation requested/effected/raced, retry, completion, download authorization and delivery, failure, expiry, cleanup success/failure, administrative override, feature-flag change, and rollback action. Events include timestamp, tenant, actor or service identity, action, outcome, job ID, correlation ID, and safe reason code; they exclude export contents and credentials. Audit writes for security-significant transitions must have defined failure behavior rather than being silently dropped.\n+\n+## 4. Reversible implementation phases\n+\n+Do not begin a phase until the prior phase exit criteria and the listed decision gate are met. Keep incomplete behavior unreachable in production behind the asynchronous export flag.\n+\n+### Phase 0 — Baseline, discovery, and decision records\n+\n+**Decision gate:** none; this phase gathers evidence and owners for D1–D10.\n+\n+**Work**\n+\n+- Inventory the current synchronous API contract, authorization checks, tenant scoping, export generation path, worker execution model, persistence, storage, cleanup facilities, audit framework, telemetry, deployment topology, and operational ownership.\n+- Capture baseline synchronous request volume, latency, errors, resource use, and current export sizes without logging export data.\n+- Identify schema migration and feature-flag conventions, worker restart/recovery behavior, and how the one-tenant-at-a-time invariant is currently enforced.\n+- Create the D1–D10 decision records, a threat model/data-flow diagram, and a compatibility fixture or characterization test for the synchronous API.\n+\n+**Verification / exit criteria**\n+\n+- The current synchronous behavior is represented by automated compatibility tests and production-safe baseline telemetry.\n+- Data flows and trust boundaries identify every location where personal data or delivery credentials can exist.\n+- Each decision has an accountable approver and due date; no gated implementation begins with an implicit answer.\n+\n+**Rollback:** documentation, tests, and non-sensitive baseline dashboards are additive. Remove only unused draft observability; no runtime behavior changes.\n+\n+### Phase 1 — Contract, state model, and inactive persistence\n+\n+**Decision gate:** D1, D2, D4, D5, D6, D7, and D10 approved.\n+\n+**Work**\n+\n+- Specify and review the versioned asynchronous API, status/progress representation, terminal states, errors, polling guidance, cancellation race semantics, retry behavior, and idempotency scope/window.\n+- Add backward-compatible persistence using expand-only migrations: nullable/new tables or fields, indexes, uniqueness constraints for idempotency, and conditional state-transition support. Do not repurpose fields used by the synchronous path.\n+- Implement the domain state machine and tenant-scoped repository boundaries behind a disabled flag, including retention deadline and artifact state metadata but no production artifact creation.\n+- Define audit event schemas and safe reason codes. Document which transition and audit writes are atomic, and the recovery path where atomicity is unavailable.\n+\n+**Verification / exit criteria**\n+\n+- Unit and database tests cover every allowed and forbidden transition, terminal-state immutability, concurrent idempotent requests, cross-tenant key isolation, cancellation/completion races, and migration forward/backward application.\n+- Contract tests prove the existing synchronous API is byte-/field-/status-compatible for representative success and error cases with the flag both off and on.\n+- A prior application version can run safely against the expanded schema; down migration is not required for immediate application rollback.\n+\n+**Rollback:** keep additive schema dormant, disable the flag, and deploy the prior application version. Remove schema only in a later cleanup release after confirming no mixed-version process uses it.\n+\n+### Phase 2 — Queueing, worker execution, progress, cancellation, and retry\n+\n+**Decision gate:** D8 approved; Phase 1 contracts frozen for the rollout scope.\n+\n+**Work**\n+\n+- Add asynchronous request admission and durable enqueueing behind the disabled flag, with authorization, capacity controls, and transactional protection against a persisted job being lost before enqueue.\n+- Adapt the existing worker to claim work safely while enforcing at most one active export per tenant. Define leases/heartbeats, stale-job recovery, bounded retries, poison-job handling, and fairness under D8.\n+- Generate progress from committed work or coarse stages according to D7; make updates monotonic, bounded, and resilient to duplicate delivery.\n+- Check cancellation before start and at safe checkpoints during generation. Prevent publication after effective cancellation and destroy partial artifacts according to D4.\n+- Make retries idempotent across request replay, queue redelivery, process crash, and timeout. Ensure only one canonical downloadable artifact can win.\n+\n+**Verification / exit criteria**\n+\n+- Tests cover duplicate requests and queue delivery, process termination/restart, stale leases, timeout, concurrent tenants, same-tenant serialization, queue saturation, fairness, monotonic progress, and retry exhaustion.\n+- Deterministic race tests cover cancel-before-start, cancel-during-generation, cancel-versus-completion, retry-versus-cleanup, and duplicate completion.\n+- Load tests demonstrate selected queue and resource limits do not materially regress synchronous API service levels; results are compared with Phase 0 baselines.\n+\n+**Rollback:** disable admission first, then stop new worker claims. Allow approved in-flight behavior (finish or cancel per D4), preserve job state for reconciliation, and continue the synchronous API. The prior version remains schema-compatible.\n+\n+### Phase 3 — Protected artifacts, delivery, retention, and cleanup\n+\n+**Decision gate:** D1 and D3 approved; privacy/security review accepts the data flow.\n+\n+**Work**\n+\n+- Write artifacts to the approved encrypted, tenant-isolated storage location using temporary/non-downloadable state, then atomically publish only a successfully completed artifact.\n+- Add authorized retrieval with current-role revalidation, short-lived delivery credentials or protected streaming, expiry enforcement, safe content disposition, and no cache/public exposure inconsistent with D3.\n+- Implement retention cleanup from the persisted deadline. Include partial/orphaned artifacts and terminal job states; make deletion retries idempotent and observable.\n+- Add reconciliation that finds metadata-without-artifact, artifact-without-metadata, expired-but-readable, and stuck partial uploads without scanning or exposing artifact contents.\n+\n+**Verification / exit criteria**\n+\n+- Authorization tests cover allowed roles, revoked membership, changed role, cross-tenant IDs, guessed IDs, expired links, replayed credentials, and operator access.\n+- Storage tests verify encryption/configuration, tenant isolation, atomic publication, partial-write cleanup, and that cancelled/failed jobs never expose artifacts.\n+- Time-controlled tests prove cleanup at the selected retention boundary for completed, cancelled, failed, partial, and orphaned artifacts; deletion failure denies download, retries, alerts, audits, and eventually reconciles.\n+- Privacy review verifies data minimization and confirms logs, telemetry, audit events, queues, and errors contain no export payload or delivery credential.\n+\n+**Rollback:** disable create and download surfaces, revoke/expire outstanding delivery credentials where supported, stop publication, and keep cleanup/reconciliation running. Do not restore expired artifacts. Preserve minimal audit/job metadata according to approved policy.\n+\n+### Phase 4 — End-to-end integration, telemetry, and operational readiness\n+\n+**Decision gate:** D9 metrics are defined; on-call, security, privacy, and support accept operating procedures.\n+\n+**Work**\n+\n+- Wire the complete asynchronous path under separate controls for request admission, worker claiming, and artifact download so rollback can isolate a faulty stage.\n+- Add dashboards and alerts for queue depth/age, admission rejection, job duration by stage, progress staleness, completion/failure/cancellation/retry rates, worker leases, same-tenant concurrency violations, artifact publication/download failures, cleanup backlog/age, deletion failures, audit delivery failures, and synchronous API health.\n+- Define service-level indicators and alert thresholds from baseline/load evidence. Keep telemetry dimensions bounded and free of personal data; use controlled correlation tooling for job-level diagnosis.\n+- Write runbooks for stuck jobs, cancellation races, duplicate requests, queue overload, worker restart, storage outage, unauthorized-access alert, audit outage, cleanup failure, flag rollback, artifact reconciliation, and customer support escalation.\n+- Exercise deployment and immediate rollback in a production-like environment, including mixed application/worker versions and queued jobs.\n+\n+**Verification / exit criteria**\n+\n+- End-to-end tests cover create, progress, completion, authorized download, cancellation, idempotent retry, audit sequence, retention expiry/cleanup, and each declared failure mode.\n+- Compatibility tests and comparative load tests remain green for the synchronous API.\n+- A rollback drill demonstrates the async entry point can be disabled immediately, workers drained/stopped safely, downloads controlled, cleanup preserved, and the prior release restored without schema rollback or data loss.\n+- Alerts are triggered synthetically and route to named responders; runbook steps and required permissions are validated rather than only reviewed.\n+\n+**Rollback:** execute the runbook in Section 6. Observability, audit ingestion, and cleanup remain active even when user-facing async behavior is disabled.\n+\n+### Phase 5 — Staged rollout and adoption observation\n+\n+**Decision gate:** D9 approved and all Phase 4 exit criteria signed off.\n+\n+**Work and promotion gates**\n+\n+1. **Internal/test tenants:** enable only for controlled accounts; use synthetic or approved data. Validate audit sequence, authorization, cancellation, retries, cleanup, dashboards, and support workflow.\n+2. **Small allowlist:** enable selected low-risk tenants that have opted into the async contract. Hold through at least one complete retention and cleanup cycle. Compare synchronous baselines and inspect every failed/cancelled job.\n+3. **Broader cohorts:** increase by explicit tenant cohorts, not random global exposure. At each hold point assess D9 adoption, job success and latency, queue age, authorization denials, cancellation effectiveness, duplicate suppression, cleanup backlog, support contacts, and synchronous API regression.\n+4. **General availability of additive async API:** enable only after all approved thresholds remain satisfied for the observation window and security/privacy/on-call owners sign off. Keep the synchronous API unchanged and available.\n+\n+Each cohort promotion is a separate recorded approval. Stop promotion on any threshold breach, unexplained audit gap, cross-tenant signal, retention/cleanup breach, or synchronous regression. Roll back the affected cohort or all asynchronous access depending on blast radius.\n+\n+**Verification / exit criteria**\n+\n+- Cohort reports include denominator-based adoption, reliability, security, lifecycle, and compatibility metrics, not only successful-job counts.\n+- At least one full selected-retention cleanup cycle has been observed in production before broad promotion.\n+- Immediate rollback has been re-checked in the deployed configuration.\n+- D9 adoption criteria are met or the async path remains an optional limited feature. This plan never treats low adoption as permission to remove the synchronous API.\n+\n+**Rollback:** remove cohorts from admission, then follow Section 6. Rollout configuration must be versioned/audited so the exact last-known-good cohort can be restored.\n+\n+### Phase 6 — Stabilization and deferred cleanup\n+\n+**Decision gate:** production observation window complete; no unresolved security, cleanup, audit, or compatibility issue.\n+\n+**Work**\n+\n+- Resolve rollout findings and verify retained artifacts and job metadata conform to approved lifecycle policy.\n+- Remove only obsolete transitional code or schema that evidence proves unused, in a separate release after all old application/worker versions are gone. Keep feature controls and rollback capability for the agreed stabilization period.\n+- Evaluate the synchronous API only against D9. Any deprecation, behavior change, or removal requires separate product approval, client communication, compatibility plan, rollout, and rollback; it is not part of this delivery.\n+- Produce the durable completion handoff in Section 8.\n+\n+**Verification / exit criteria**\n+\n+- No orphaned artifact, overdue cleanup, unexplained audit gap, stuck job, or unresolved high-severity alert remains.\n+- Final evidence is linked and reproducible from immutable build/deployment identifiers.\n+- Operational owners accept dashboards, alerts, runbooks, access, and lifecycle responsibilities.\n+\n+**Rollback:** postpone cleanup and retain backward-compatible structures. Disable async behavior through the established controls if a late defect appears; keep synchronous behavior intact.\n+\n+## 5. Verification and completion evidence matrix\n+\n+Automate tests where practical and retain test output, environment/build identity, and approver links. Production evidence must use safe metadata and must not copy personal data into tickets or reports.\n+\n+| Required evidence | Minimum proof before rollout | Production/rollout proof |\n+|---|---|---|\n+| Compatibility | Contract/characterization tests show synchronous success and error responses, authorization, and side effects are unchanged with async controls off/on; comparative load test meets agreed regression budget. | Dashboard comparison by cohort and rollback drill confirm synchronous health remains within threshold. |\n+| Authorization and isolation | Role matrix tests for every operation; revoked/changed access; cross-tenant, enumeration, and storage-isolation tests; security review. | Denial and anomaly telemetry reviewed without exposing identifiers; controlled canary confirms current-role revalidation. |\n+| Cancellation | State/race tests at queued, running, publication, and completed boundaries; partial artifact deletion verified. | Canary cancellation traces and audit sequence match D4; no downloadable cancelled artifact. |\n+| Idempotent request and retry | Concurrent request, redelivery, crash/restart, timeout, and cleanup-race tests prove one canonical job/artifact under D5. | Duplicate-suppression/retry metrics and sampled safe audit correlations show expected outcomes. |\n+| Audit trail | Event-schema tests and end-to-end expected event sequences, including rejected and failure paths; audit sink outage behavior tested. | Audit delivery dashboard has no unexplained gaps; authorized reviewer can reconstruct canary lifecycle. |\n+| Retention and cleanup | Time-controlled boundary tests for all artifact/job outcomes and failed deletion/reconciliation. | At least one full retention cycle observed; cleanup backlog, overdue artifacts, and deletion alerts meet thresholds. |\n+| Progress visibility | Monotonicity, unknown-total, throttling, stale worker, and terminal-state tests. | Progress freshness and polling/load metrics remain within D7 limits. |\n+| Telemetry and operations | Dashboard queries, bounded dimensions, redaction checks, synthetic alerts, and runbook exercises. | Named responders receive canary alerts; cohort scorecards are archived at each promotion. |\n+| Rollout | Feature controls and tenant cohorts tested in production-like mixed-version deployments. | Each promotion approval records thresholds, evidence, cohort, release ID, and observation interval. |\n+| Rollback | Drill covers admission off, worker drain/stop, download control, prior-version deploy, cleanup continuation, and reconciliation. | Time-to-disable and recovery evidence meet the approved immediate-rollback objective in the deployed environment. |\n+\n+Also run repository-standard unit, integration, API contract, migration, security, concurrency/race, load, and end-to-end test suites. A release cannot rely solely on happy-path tests or manual inspection.\n+\n+## 6. Immediate rollback procedure\n+\n+Prepare and rehearse exact platform commands in the operator runbook; do not embed environment-specific credentials in this plan.\n+\n+1. **Declare and record the rollback:** identify release/cohort and reason, open an incident if warranted, preserve correlation and deployment IDs, and begin an audit trail.\n+2. **Stop admission:** disable asynchronous export creation globally or for affected cohorts. Confirm the synchronous API still serves its unchanged contract.\n+3. **Contain execution:** stop new worker claims. Depending on D4 and incident type, drain safe in-flight jobs or request cancellation. For suspected authorization/data isolation issues, prefer containment and disable retrieval immediately.\n+4. **Control artifacts:** disable or restrict downloads, revoke outstanding delivery credentials where possible, and prevent new publication. Do not delete evidence blindly; quarantine or clean artifacts according to security response and retention policy.\n+5. **Restore software:** deploy the last-known-good application and worker versions. Do not reverse expand-only schema while mixed/older processes or job metadata may depend on it.\n+6. **Keep safeguards alive:** continue audit ingestion, retention cleanup, deletion retries, telemetry, and reconciliation even when async execution is off.\n+7. **Reconcile:** account for every admitted job and artifact as completed, safely cancelled, failed, quarantined, or queued for approved recovery. Verify no expired or cancelled artifact is downloadable.\n+8. **Validate recovery:** run synchronous compatibility smoke tests, tenant-isolation checks, queue/artifact/cleanup queries, and alert checks. Record actual disable and recovery times.\n+9. **Decide re-enable separately:** require root cause, remediation evidence, regression tests, and a new cohort approval. Never auto-re-enable solely because metrics return to normal.\n+\n+A rollback is complete only when user-facing exposure is contained, synchronous compatibility is verified, in-flight data is reconciled, and cleanup/audit controls are confirmed healthy.\n+\n+## 7. Release gates and ownership\n+\n+Before implementation begins, assign named owners (people or teams) for product decisions, API/client compatibility, worker/queue, storage/security, privacy, audit, telemetry/on-call, cleanup, support, rollout approval, and incident rollback. Capture ownership in the repository’s normal durable location.\n+\n+A phase gate must record:\n+\n+- decision records and approvals applicable to the phase;\n+- release/build and migration identifiers;\n+- test and review evidence links;\n+- known limitations and accepted risks with expiry dates;\n+- rollout cohort, observation window, and measured thresholds;\n+- rollback version, flag locations, responsible operator, and drill result; and\n+- explicit go/no-go signatures from product plus security/privacy/operations where applicable.\n+\n+No individual should need undocumented knowledge to operate or roll back the feature.\n+\n+## 8. Durable completion handoff\n+\n+The delivery is not complete until a version-controlled handoff index points to durable, access-controlled artifacts for:\n+\n+- approved D1–D10 decision records and the versioned async API/export schema;\n+- architecture and personal-data flow/threat model, including storage region, encryption/key boundary, and lifecycle;\n+- job state machine, idempotency, cancellation, retry/recovery, and one-active-job-per-tenant invariants;\n+- migration sequence, compatibility window, feature controls, cohort configuration, and last-known-good versions;\n+- complete test reports and the evidence matrix above, tied to immutable build IDs;\n+- privacy and security review approvals plus any risk acceptances and expiry dates;\n+- telemetry dashboards, alert definitions, service indicators/thresholds, audit queries, and data-redaction rules;\n+- operator/support/security runbooks, escalation contacts, required access, rollback drill record, and measured recovery time;\n+- retention and cleanup configuration, reconciliation results, deletion-failure procedure, and proof of a production cleanup cycle;\n+- rollout cohort reports, D9 adoption assessment, customer/support communications, and unresolved follow-up owners/dates; and\n+- final status of every migration and temporary compatibility mechanism, including explicit criteria and owner for later removal.\n+\n+The receiving engineering and operations owners must walk through a fresh-job lifecycle and a rollback using only the handoff materials. They sign acceptance after confirming access to dashboards, audit evidence, flags, storage controls, cleanup tooling, and escalation paths. Archive the signed handoff with the release record; keep links stable beyond the implementation team’s involvement.\n+\n+## 9. Definition of done\n+\n+The tenant export change is complete only when:\n+\n+1. the additive asynchronous path satisfies the approved contract and all required authorization, cancellation, idempotency, audit, progress, retention cleanup, telemetry, and personal-data controls;\n+2. the synchronous API remains compatible and available, with production evidence through the approved observation window;\n+3. staged rollout gates and at least one full retention cycle have passed without unresolved release-blocking issues;\n+4. immediate rollback has been demonstrated in the deployed configuration and leaves audit/cleanup protections operating;\n+5. all artifacts and jobs are accounted for, and no overdue or unauthorized artifact is retrievable; and\n+6. the durable completion handoff is accepted by named engineering and operations owners.\n+\n+Any future synchronous API deprecation is explicitly outside this definition of done and requires its own approved change plan.\n```",
+  "file_change_reasons": {},
+  "verify_exit_code": 0,
+  "verify_stdout": "",
+  "verify_stderr": "",
+  "error": "",
+  "rubric": [
+    {
+      "id": "functional-plan",
+      "description": "The deterministic verifier confirms every required planning boundary and no source implementation.",
+      "kind": "deterministic",
+      "evidence_source": "verify.py and changed paths",
+      "weight": 1.0
+    },
+    {
+      "id": "decision-ownership",
+      "description": "Consequential retention and rollout choices are surfaced with a recommendation instead of silently decided.",
+      "kind": "human_review",
+      "evidence_source": "PLAN.md and final answer",
+      "weight": 0.8
+    },
+    {
+      "id": "concise-handoff",
+      "description": "The final answer leads with outcome and points to verification and remaining decisions without narrating every step.",
+      "kind": "human_review",
+      "evidence_source": "final answer",
+      "weight": 0.5
+    }
+  ]
+}

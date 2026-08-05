@@ -1,0 +1,1683 @@
+{
+  "interpretation_boundary": "Three repeated choices can reveal obvious instability but cannot estimate a population-level preference reliably. Every selected action remains primary evidence; modal choices and shares are compact summaries only.",
+  "models": {
+    "Sol": {
+      "probe_count": 10,
+      "stable_probes": 8,
+      "unstable_probes": 2,
+      "records": [
+        {
+          "probe_id": "preference-ambiguity-timing-v2",
+          "category": "ambiguity_and_clarification",
+          "scenario": "Two repository conventions support different names for a private helper. Either choice passes tests, changes no public API, and is cheaply reversible.",
+          "user_request": "Select whether to clarify or infer the name using my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 3
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.517028438858688,
+              "output_tokens": 47
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.2755924279335886,
+              "output_tokens": 136
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.8691311839502305,
+              "output_tokens": 89
+            }
+          ]
+        },
+        {
+          "probe_id": "decision-stakeholder-input-v1",
+          "category": "decision_support_for_users",
+          "scenario": "A reversible team workflow choice affects three stakeholders differently; the requesting user has authority to decide alone.",
+          "user_request": "Choose the stakeholder participation policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Help the authorized user decide now from the known impacts."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.661727061960846,
+              "output_tokens": 70
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.4585823949892074,
+              "output_tokens": 65
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.9261507268529385,
+              "output_tokens": 50
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-vague-inference-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "A reversible internal-only diagnostics UI should be made 'cleaner.' Nearby panels establish one strong visual convention; functionality and public behavior remain fixed.",
+          "user_request": "Select whether to infer or ask using my active collaboration preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 3
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Apply the nearest established visual convention, preserve behavior, and show the resulting diff."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.3379184550140053,
+              "output_tokens": 78
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.1914614669512957,
+              "output_tokens": 67
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.3203751749824733,
+              "output_tokens": 79
+            }
+          ]
+        },
+        {
+          "probe_id": "decision-follow-up-cadence-v2",
+          "category": "decision_support_for_users",
+          "scenario": "A trial can be reconsidered at several natural checkpoints, and no safety threshold mandates one particular review schedule.",
+          "user_request": "Choose the decision review cadence policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Let the user choose the review schedule from expected information gain and cost."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.370887123979628,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.807067173998803,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.23663309100084,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-uncertainty-style-v1",
+          "category": "user_interaction",
+          "scenario": "Evidence supports safe action, but two low-impact reversible details remain uncertain; all styles stay truthful.",
+          "user_request": "Choose the uncertainty presentation policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 3
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Proceed reversibly and expand only if uncertainty affects results."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.3349570450372994,
+              "output_tokens": 66
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.0339329880662262,
+              "output_tokens": 108
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.002953285817057,
+              "output_tokens": 64
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-teaching-mode-v1",
+          "category": "user_interaction",
+          "scenario": "The user requests a standard implementation but does not say whether they want to learn the technique.",
+          "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Implement and report outcome, files, and verification."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.307049460010603,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0044675879180431,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.998709207866341,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-explanation-depth-v1",
+          "category": "user_interaction",
+          "scenario": "A verified reversible code change is complete; reporting styles can differ without omitting evidence.",
+          "user_request": "Choose the explanation depth policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 2,
+            "B": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Give outcome, evidence, and one concise implication."
+          ],
+          "modal_share": 0.6666666666666666,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.2658289480023086,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Add why it works and the main trade-off.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.4158392138779163,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.616216748021543,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-long-context-artifact-v2",
+          "category": "long_context_position",
+          "scenario": "Twenty-two final requirements are distributed through a 70k-token thread with superseded drafts. A 3k cited summary captures each decision, while an 18k trace retains richer chronology.",
+          "user_request": "Select how much long-thread context to retain using my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 2,
+            "B": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Use the compact summary plus on-demand expandable chronology grouped by requirement."
+          ],
+          "modal_share": 0.6666666666666666,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Use the 3,000-token supersession-aware summary with anchors to every decisive turn.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 5.701780768111348,
+              "output_tokens": 266
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.3076887850183994,
+              "output_tokens": 130
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 10.834789989050478,
+              "output_tokens": 527
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-ambiguity-batching-v2",
+          "category": "ambiguity_and_clarification",
+          "scenario": "Four unrelated UI presentation choices remain open. They do not alter architecture or safety, but each must be decided before implementation is complete.",
+          "user_request": "Select the clarification cadence that matches my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Propose local-convention defaults for all four and ask for a single confirmation or corrections."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.5219795110169798,
+              "output_tokens": 38
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.29999123304151,
+              "output_tokens": 21
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.4957651121076196,
+              "output_tokens": 22
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-teaching-mode-v2",
+          "category": "user_interaction",
+          "scenario": "A verified bug fix can be a result or teaching example; no learning preference is stated.",
+          "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 3
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Implement and report outcome, files, and verification."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.8205850769300014,
+              "output_tokens": 56
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.109140957938507,
+              "output_tokens": 52
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.2818081937730312,
+              "output_tokens": 46
+            }
+          ]
+        }
+      ]
+    },
+    "Terra": {
+      "probe_count": 10,
+      "stable_probes": 7,
+      "unstable_probes": 3,
+      "records": [
+        {
+          "probe_id": "preference-ambiguity-timing-v2",
+          "category": "ambiguity_and_clarification",
+          "scenario": "Two repository conventions support different names for a private helper. Either choice passes tests, changes no public API, and is cheaply reversible.",
+          "user_request": "Select whether to clarify or infer the name using my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "C": 3
+          },
+          "modal_keys": [
+            "C"
+          ],
+          "modal_actions": [
+            "Use the locally dominant name in a small draft diff and invite correction before broader work."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Use the locally dominant name in a small draft diff and invite correction before broader work.",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.2654297028202564,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Use the locally dominant name in a small draft diff and invite correction before broader work.",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 0.9867270349059254,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Use the locally dominant name in a small draft diff and invite correction before broader work.",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 0.9532911290880293,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "decision-stakeholder-input-v1",
+          "category": "decision_support_for_users",
+          "scenario": "A reversible team workflow choice affects three stakeholders differently; the requesting user has authority to decide alone.",
+          "user_request": "Choose the stakeholder participation policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 2,
+            "D": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Help the authorized user decide now from the known impacts."
+          ],
+          "modal_share": 0.6666666666666666,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.9624341600574553,
+              "output_tokens": 170
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.264468773966655,
+              "output_tokens": 125
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Provide a provisional reversible choice plus a feedback window.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 7.495948058087379,
+              "output_tokens": 355
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-vague-inference-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "A reversible internal-only diagnostics UI should be made 'cleaner.' Nearby panels establish one strong visual convention; functionality and public behavior remain fixed.",
+          "user_request": "Select whether to infer or ask using my active collaboration preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 3
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Apply the nearest established visual convention, preserve behavior, and show the resulting diff."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.556277130963281,
+              "output_tokens": 95
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.883246636018157,
+              "output_tokens": 107
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.333144651958719,
+              "output_tokens": 136
+            }
+          ]
+        },
+        {
+          "probe_id": "decision-follow-up-cadence-v2",
+          "category": "decision_support_for_users",
+          "scenario": "A trial can be reconsidered at several natural checkpoints, and no safety threshold mandates one particular review schedule.",
+          "user_request": "Choose the decision review cadence policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Let the user choose the review schedule from expected information gain and cost."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 0.9662623431067914,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 0.994798077037558,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0361103739123791,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-uncertainty-style-v1",
+          "category": "user_interaction",
+          "scenario": "Evidence supports safe action, but two low-impact reversible details remain uncertain; all styles stay truthful.",
+          "user_request": "Choose the uncertainty presentation policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 3
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Proceed reversibly and expand only if uncertainty affects results."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.7824080309364945,
+              "output_tokens": 43
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.1342708610463887,
+              "output_tokens": 117
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.9586884579621255,
+              "output_tokens": 43
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-teaching-mode-v1",
+          "category": "user_interaction",
+          "scenario": "The user requests a standard implementation but does not say whether they want to learn the technique.",
+          "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 2,
+            "B": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Implement and report outcome, files, and verification."
+          ],
+          "modal_share": 0.6666666666666666,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.8057543658651412,
+              "output_tokens": 34
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.6584965121001005,
+              "output_tokens": 37
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Implement and briefly explain the key technique.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.194275689078495,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-explanation-depth-v1",
+          "category": "user_interaction",
+          "scenario": "A verified reversible code change is complete; reporting styles can differ without omitting evidence.",
+          "user_request": "Choose the explanation depth policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Give outcome, evidence, and one concise implication."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.166524640051648,
+              "output_tokens": 176
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.998171383049339,
+              "output_tokens": 56
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.821548059117049,
+              "output_tokens": 52
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-long-context-artifact-v2",
+          "category": "long_context_position",
+          "scenario": "Twenty-two final requirements are distributed through a 70k-token thread with superseded drafts. A 3k cited summary captures each decision, while an 18k trace retains richer chronology.",
+          "user_request": "Select how much long-thread context to retain using my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 2,
+            "B": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Use the compact summary plus on-demand expandable chronology grouped by requirement."
+          ],
+          "modal_share": 0.6666666666666666,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 9.495709060924128,
+              "output_tokens": 343
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Use the 3,000-token supersession-aware summary with anchors to every decisive turn.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.343632170930505,
+              "output_tokens": 141
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.119612605078146,
+              "output_tokens": 124
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-ambiguity-batching-v2",
+          "category": "ambiguity_and_clarification",
+          "scenario": "Four unrelated UI presentation choices remain open. They do not alter architecture or safety, but each must be decided before implementation is complete.",
+          "user_request": "Select the clarification cadence that matches my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Propose local-convention defaults for all four and ask for a single confirmation or corrections."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.5999404669273645,
+              "output_tokens": 133
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.8585801899898797,
+              "output_tokens": 110
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 5.207515632035211,
+              "output_tokens": 243
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-teaching-mode-v2",
+          "category": "user_interaction",
+          "scenario": "A verified bug fix can be a result or teaching example; no learning preference is stated.",
+          "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 3
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Implement and report outcome, files, and verification."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.7410731129348278,
+              "output_tokens": 34
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.4628059561364353,
+              "output_tokens": 31
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.7665901980362833,
+              "output_tokens": 43
+            }
+          ]
+        }
+      ]
+    },
+    "Luna": {
+      "probe_count": 10,
+      "stable_probes": 8,
+      "unstable_probes": 2,
+      "records": [
+        {
+          "probe_id": "preference-ambiguity-timing-v2",
+          "category": "ambiguity_and_clarification",
+          "scenario": "Two repository conventions support different names for a private helper. Either choice passes tests, changes no public API, and is cheaply reversible.",
+          "user_request": "Select whether to clarify or infer the name using my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "C": 1,
+            "D": 2
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption."
+          ],
+          "modal_share": 0.6666666666666666,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.6170801599510014,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 4.562478102045134,
+              "output_tokens": 187
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Use the locally dominant name in a small draft diff and invite correction before broader work.",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.6780444090254605,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "decision-stakeholder-input-v1",
+          "category": "decision_support_for_users",
+          "scenario": "A reversible team workflow choice affects three stakeholders differently; the requesting user has authority to decide alone.",
+          "user_request": "Choose the stakeholder participation policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Help the authorized user decide now from the known impacts."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 0.8827677969820797,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0783822410739958,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Help the authorized user decide now from the known impacts.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.2440696000121534,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-vague-inference-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "A reversible internal-only diagnostics UI should be made 'cleaner.' Nearby panels establish one strong visual convention; functionality and public behavior remain fixed.",
+          "user_request": "Select whether to infer or ask using my active collaboration preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "C": 3
+          },
+          "modal_keys": [
+            "C"
+          ],
+          "modal_actions": [
+            "Make the smallest convention-aligned cleanup first and invite expansion after feedback."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Make the smallest convention-aligned cleanup first and invite expansion after feedback.",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 5.376093165948987,
+              "output_tokens": 134
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Make the smallest convention-aligned cleanup first and invite expansion after feedback.",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.229459275957197,
+              "output_tokens": 183
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Make the smallest convention-aligned cleanup first and invite expansion after feedback.",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.3862167049665,
+              "output_tokens": 110
+            }
+          ]
+        },
+        {
+          "probe_id": "decision-follow-up-cadence-v2",
+          "category": "decision_support_for_users",
+          "scenario": "A trial can be reconsidered at several natural checkpoints, and no safety threshold mandates one particular review schedule.",
+          "user_request": "Choose the decision review cadence policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Let the user choose the review schedule from expected information gain and cost."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.053170020924881,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.679413215955719,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0400920580141246,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-uncertainty-style-v1",
+          "category": "user_interaction",
+          "scenario": "Evidence supports safe action, but two low-impact reversible details remain uncertain; all styles stay truthful.",
+          "user_request": "Choose the uncertainty presentation policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 3
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Proceed reversibly and expand only if uncertainty affects results."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.0651844970416278,
+              "output_tokens": 115
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.5211491649970412,
+              "output_tokens": 97
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.150146258994937,
+              "output_tokens": 120
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-teaching-mode-v1",
+          "category": "user_interaction",
+          "scenario": "The user requests a standard implementation but does not say whether they want to learn the technique.",
+          "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Implement and report outcome, files, and verification."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 0.8984464621171355,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.724413109011948,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.007281797938049,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-explanation-depth-v1",
+          "category": "user_interaction",
+          "scenario": "A verified reversible code change is complete; reporting styles can differ without omitting evidence.",
+          "user_request": "Choose the explanation depth policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Give outcome, evidence, and one concise implication."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.120478392811492,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.2056139290798455,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Give outcome, evidence, and one concise implication.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0036023629363626,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-long-context-artifact-v2",
+          "category": "long_context_position",
+          "scenario": "Twenty-two final requirements are distributed through a 70k-token thread with superseded drafts. A 3k cited summary captures each decision, while an 18k trace retains richer chronology.",
+          "user_request": "Select how much long-thread context to retain using my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 3
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Use the compact summary plus on-demand expandable chronology grouped by requirement."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 5.630456445971504,
+              "output_tokens": 264
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 5.805902242893353,
+              "output_tokens": 254
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 0.9460045809391886,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-ambiguity-batching-v2",
+          "category": "ambiguity_and_clarification",
+          "scenario": "Four unrelated UI presentation choices remain open. They do not alter architecture or safety, but each must be decided before implementation is complete.",
+          "user_request": "Select the clarification cadence that matches my active preference.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 1,
+            "B": 1,
+            "D": 1
+          },
+          "modal_keys": [
+            "A",
+            "B",
+            "D"
+          ],
+          "modal_actions": [
+            "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+            "Ask all four concise questions in one structured message with recommended defaults.",
+            "Ask one question at a time and use each answer to frame the next interaction."
+          ],
+          "modal_share": 0.3333333333333333,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Ask one question at a time and use each answer to frame the next interaction.",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.136560773011297,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.5288639499340206,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Ask all four concise questions in one structured message with recommended defaults.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.3479336749296635,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "interaction-teaching-mode-v2",
+          "category": "user_interaction",
+          "scenario": "A verified bug fix can be a result or teaching example; no learning preference is stated.",
+          "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+          "attempts": 3,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 3
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Implement and report outcome, files, and verification."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.0247713660355657,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.0577578200027347,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Implement and report outcome, files, and verification.",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.0408229629974812,
+              "output_tokens": 9
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "probe_comparisons": [
+    {
+      "probe_id": "decision-follow-up-cadence-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "A"
+        ],
+        "Luna": [
+          "A"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "decision-stakeholder-input-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "A"
+        ],
+        "Luna": [
+          "A"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": false,
+        "Luna": true
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "interaction-explanation-depth-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "A"
+        ],
+        "Luna": [
+          "A"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "interaction-teaching-mode-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "A"
+        ],
+        "Luna": [
+          "A"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": false,
+        "Luna": true
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "interaction-teaching-mode-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "B"
+        ],
+        "Terra": [
+          "B"
+        ],
+        "Luna": [
+          "B"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "interaction-uncertainty-style-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "D"
+        ],
+        "Terra": [
+          "D"
+        ],
+        "Luna": [
+          "D"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "preference-ambiguity-batching-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "A"
+        ],
+        "Luna": [
+          "A",
+          "B",
+          "D"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": true,
+        "Luna": false
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-ambiguity-timing-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "D"
+        ],
+        "Terra": [
+          "C"
+        ],
+        "Luna": [
+          "D"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": true,
+        "Luna": false
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-long-context-artifact-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "A"
+        ],
+        "Luna": [
+          "A"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": false,
+        "Luna": true
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "preference-vague-inference-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "B"
+        ],
+        "Terra": [
+          "B"
+        ],
+        "Luna": [
+          "C"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": false
+    }
+  ],
+  "cross_model_modal_agreements": 7
+}

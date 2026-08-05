@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "161bee159a087f349c513ddfb18fff9f7074d7962193ca918be51e09e20ac0d1",
+  "assignments": [
+    {
+      "shard": 1,
+      "packet": "shard-01.review-packet.json",
+      "reviews_template": "shard-01.reviews.template.jsonl",
+      "family_ids": [
+        "execution--authorization_and_external_state--contradictions_and_precedence--v1",
+        "execution--decision_support--failure_recovery--v1",
+        "execution--planning--safety_and_reversibility--v1",
+        "execution--user_interaction--evidence_search_and_escalation--v1"
+      ]
+    },
+    {
+      "shard": 2,
+      "packet": "shard-02.review-packet.json",
+      "reviews_template": "shard-02.reviews.template.jsonl",
+      "family_ids": [
+        "pragmatics_implication_and_politeness--authorization_and_external_state--v1",
+        "quantifiers_all_any_each_most_some--decision_support--v1",
+        "register_formal_informal_semiformal--planning--v1",
+        "irrelevant_information_and_noise--user_interaction--v1"
+      ]
+    },
+    {
+      "shard": 3,
+      "packet": "shard-03.review-packet.json",
+      "reviews_template": "shard-03.reviews.template.jsonl",
+      "family_ids": [
+        "compound_requests_and_nested_scope--code_review--v1",
+        "execution--implementation--planning_before_action--v1",
+        "execution--testing_and_verification--speed_vs_completeness--v1",
+        "execution--web_research--priority_resolution--v1"
+      ]
+    },
+    {
+      "shard": 4,
+      "packet": "shard-04.review-packet.json",
+      "reviews_template": "shard-04.reviews.template.jsonl",
+      "family_ids": [
+        "execution--code_review--incremental_execution--v1",
+        "instruction_position_and_order--implementation--v1",
+        "instruction_conflict_and_precedence--testing_and_verification--v1",
+        "output_format_and_schema_language--web_research--v1"
+      ]
+    }
+  ]
+}

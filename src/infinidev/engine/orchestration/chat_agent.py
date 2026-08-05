@@ -100,17 +100,25 @@ def run_chat_agent(
     # developer each own independent slots that do not stomp each other.
     # clear_agent_context in `finally` ensures no leak across turns.
     agent_id = f"chat-agent-{uuid.uuid4().hex[:8]}"
-    # Vision gating: when the model can't see images, demote any
-    # attachments to text paths so the model at least knows they were
-    # referenced, and drop tools/content-blocks that require vision.
-    # Use the lightweight LiteLLM static check here — going through
-    # get_model_capabilities() would trigger a full provider probe.
+    # Resolve the immutable route-specific capability once for this turn.
+    # UNKNOWN deliberately fails closed. When images are present, stop before
+    # tool discovery and completion so the caller can retain the original text,
+    # URLs, and attachment objects for retry after selecting a visual model.
     try:
-        from infinidev.config.model_capabilities import _detect_vision_support
-        _supports_vision = _detect_vision_support()
+        from infinidev.config.model_capabilities import get_capability_snapshot
+
+        _supports_vision = get_capability_snapshot().supports_vision
     except Exception:
         _supports_vision = False
-    tools = get_tools_for_role("chat_agent")
+    if attachments and not _supports_vision:
+        return ChatAgentResult(
+            kind="respond",
+            reply=(
+                "The current model does not have confirmed image-input support. "
+                "No request was sent; your text and attachments were left unchanged."
+            ),
+        )
+    tools = get_tools_for_role("chat_agent", supports_vision=_supports_vision)
     bind_tools_to_agent(tools, agent_id)
     set_context(
         agent_id=agent_id,

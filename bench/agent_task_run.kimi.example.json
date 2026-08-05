@@ -1,0 +1,13 @@
+{
+  "provider": "kimi",
+  "model": "kimi-k3",
+  "model_identity": "kimi:kimi-k3@replace-with-resolved-revision",
+  "base_url": "https://api.moonshot.ai/v1",
+  "api_key_env": "KIMI_API_KEY",
+  "repetitions": 1,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 12,
+  "max_total_tool_calls": 80,
+  "max_tool_calls_per_action": 20,
+  "verify_timeout_seconds": 120.0
+}

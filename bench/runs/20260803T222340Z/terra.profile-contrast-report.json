@@ -1,0 +1,496 @@
+{
+  "interpretation_boundary": "This report compares externally observable selections and raw replies. It does not infer private chain-of-thought. Correctness uses draft normative keys and is exploratory until independent review approves the probes.",
+  "protocol": "Each call used a fresh conversation, no system message, choice-only elicitation, one active request at a time, and no automatic retries.",
+  "models": {
+    "fast-autonomy": {
+      "attempted": 10,
+      "errors": 0,
+      "normative_matches": 0,
+      "normative_total": 0,
+      "preference_total": 10,
+      "utility_profiles": [
+        "fast-autonomy"
+      ],
+      "median_latency_seconds": 1.9450491720344871,
+      "input_tokens": 1734,
+      "output_tokens": 376
+    },
+    "quality-control": {
+      "attempted": 10,
+      "errors": 0,
+      "normative_matches": 0,
+      "normative_total": 0,
+      "preference_total": 10,
+      "utility_profiles": [
+        "quality-control"
+      ],
+      "median_latency_seconds": 2.805453186505474,
+      "input_tokens": 1744,
+      "output_tokens": 389
+    }
+  },
+  "questions": [
+    {
+      "probe_id": "preference-ambiguity-timing-v2",
+      "category": "ambiguity_and_clarification",
+      "family": "preference-ambiguity-timing",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "Two repository conventions support different names for a private helper. Either choice passes tests, changes no public API, and is cheaply reversible.",
+      "user_request": "Select whether to clarify or infer the name using my active preference.",
+      "choices": {
+        "A": "Show both names with their local precedents and recommend one without editing yet.",
+        "B": "Ask one focused naming question and wait before editing.",
+        "C": "Use the locally dominant name in a small draft diff and invite correction before broader work.",
+        "D": "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "D",
+          "selected_action": "Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"D\"}",
+          "error": null,
+          "latency_seconds": 2.6175360288470984,
+          "input_tokens": 188,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "B",
+          "selected_action": "Ask one focused naming question and wait before editing.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"B\"}",
+          "error": null,
+          "latency_seconds": 3.2186541811097413,
+          "input_tokens": 189,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "decision-stakeholder-input-v1",
+      "category": "decision_support_for_users",
+      "family": "decision-stakeholder-input",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "A reversible team workflow choice affects three stakeholders differently; the requesting user has authority to decide alone.",
+      "user_request": "Choose the stakeholder participation policy that best matches the active user preference profile.",
+      "choices": {
+        "A": "Help the authorized user decide now from the known impacts.",
+        "B": "Recommend consulting only the most affected stakeholder first.",
+        "C": "Gather input from all affected stakeholders before recommending.",
+        "D": "Provide a provisional reversible choice plus a feedback window."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "A",
+          "selected_action": "Help the authorized user decide now from the known impacts.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"A\"}",
+          "error": null,
+          "latency_seconds": 1.291833939962089,
+          "input_tokens": 161,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "C",
+          "selected_action": "Gather input from all affected stakeholders before recommending.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"C\"}",
+          "error": null,
+          "latency_seconds": 5.046812789980322,
+          "input_tokens": 162,
+          "output_tokens": 29,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "preference-vague-inference-v2",
+      "category": "vague_requirement_analysis",
+      "family": "preference-vague-inference",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "A reversible internal-only diagnostics UI should be made 'cleaner.' Nearby panels establish one strong visual convention; functionality and public behavior remain fixed.",
+      "user_request": "Select whether to infer or ask using my active collaboration preference.",
+      "choices": {
+        "A": "Prepare two small convention-compatible mockups and ask the user to select one.",
+        "B": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+        "C": "Make the smallest convention-aligned cleanup first and invite expansion after feedback.",
+        "D": "Ask which visual outcome matters most before changing the panel."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "B",
+          "selected_action": "Apply the nearest established visual convention, preserve behavior, and show the resulting diff.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"B\"}",
+          "error": null,
+          "latency_seconds": 1.1959080090746284,
+          "input_tokens": 185,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "A",
+          "selected_action": "Prepare two small convention-compatible mockups and ask the user to select one.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"A\"}",
+          "error": null,
+          "latency_seconds": 1.3026919530238956,
+          "input_tokens": 186,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "decision-follow-up-cadence-v2",
+      "category": "decision_support_for_users",
+      "family": "decision-follow-up-cadence",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "A trial can be reconsidered at several natural checkpoints, and no safety threshold mandates one particular review schedule.",
+      "user_request": "Choose the decision review cadence policy that best matches the active user preference profile.",
+      "choices": {
+        "A": "Let the user choose the review schedule from expected information gain and cost.",
+        "B": "Review only at the final month checkpoint unless a failure threshold triggers.",
+        "C": "Review after every evidence checkpoint.",
+        "D": "Review at one week, with automatic escalation on threshold breach."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "D",
+          "selected_action": "Review at one week, with automatic escalation on threshold breach.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"D\"}",
+          "error": null,
+          "latency_seconds": 2.4015182978473604,
+          "input_tokens": 170,
+          "output_tokens": 58,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "A",
+          "selected_action": "Let the user choose the review schedule from expected information gain and cost.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"A\"}",
+          "error": null,
+          "latency_seconds": 1.630900429096073,
+          "input_tokens": 171,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "interaction-uncertainty-style-v1",
+      "category": "user_interaction",
+      "family": "interaction-uncertainty-style",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "Evidence supports safe action, but two low-impact reversible details remain uncertain; all styles stay truthful.",
+      "user_request": "Choose the uncertainty presentation policy that best matches the active user preference profile.",
+      "choices": {
+        "A": "Give the recommendation and one confidence qualifier.",
+        "B": "Name confidence and both unresolved details.",
+        "C": "Give a likelihood-impact-fallback risk table.",
+        "D": "Proceed reversibly and expand only if uncertainty affects results."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "D",
+          "selected_action": "Proceed reversibly and expand only if uncertainty affects results.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"D\"}",
+          "error": null,
+          "latency_seconds": 1.2391579169780016,
+          "input_tokens": 157,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "B",
+          "selected_action": "Name confidence and both unresolved details.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"B\"}",
+          "error": null,
+          "latency_seconds": 2.676865133922547,
+          "input_tokens": 158,
+          "output_tokens": 53,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "interaction-teaching-mode-v1",
+      "category": "user_interaction",
+      "family": "interaction-teaching-mode",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "The user requests a standard implementation but does not say whether they want to learn the technique.",
+      "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+      "choices": {
+        "A": "Implement and report outcome, files, and verification.",
+        "B": "Implement and briefly explain the key technique.",
+        "C": "Explain first, implement, then connect changes to concepts.",
+        "D": "Coach the user to implement it with feedback."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "A",
+          "selected_action": "Implement and report outcome, files, and verification.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"A\"}",
+          "error": null,
+          "latency_seconds": 1.3829873348586261,
+          "input_tokens": 159,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "C",
+          "selected_action": "Explain first, implement, then connect changes to concepts.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"C\"}",
+          "error": null,
+          "latency_seconds": 2.934041239088401,
+          "input_tokens": 160,
+          "output_tokens": 103,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "interaction-explanation-depth-v1",
+      "category": "user_interaction",
+      "family": "interaction-explanation-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "A verified reversible code change is complete; reporting styles can differ without omitting evidence.",
+      "user_request": "Choose the explanation depth policy that best matches the active user preference profile.",
+      "choices": {
+        "A": "Give outcome, evidence, and one concise implication.",
+        "B": "Add why it works and the main trade-off.",
+        "C": "Give a walkthrough, alternatives, and verification interpretation.",
+        "D": "State only outcome and test command."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "A",
+          "selected_action": "Give outcome, evidence, and one concise implication.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"A\"}",
+          "error": null,
+          "latency_seconds": 2.1763023301027715,
+          "input_tokens": 157,
+          "output_tokens": 50,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "C",
+          "selected_action": "Give a walkthrough, alternatives, and verification interpretation.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"C\"}",
+          "error": null,
+          "latency_seconds": 3.656553518027067,
+          "input_tokens": 158,
+          "output_tokens": 33,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "preference-long-context-artifact-v2",
+      "category": "long_context_position",
+      "family": "preference-long-context-artifact",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "Twenty-two final requirements are distributed through a 70k-token thread with superseded drafts. A 3k cited summary captures each decision, while an 18k trace retains richer chronology.",
+      "user_request": "Select how much long-thread context to retain using my active preference.",
+      "choices": {
+        "A": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+        "B": "Use the 3,000-token supersession-aware summary with anchors to every decisive turn.",
+        "C": "Show token cost and omission/audit trade-offs, then let the user choose the artifact.",
+        "D": "Retain the 18,000-token chronological trace with decisions, rejected alternatives, and corrections."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "A",
+          "selected_action": "Use the compact summary plus on-demand expandable chronology grouped by requirement.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"A\"}",
+          "error": null,
+          "latency_seconds": 3.59545803302899,
+          "input_tokens": 208,
+          "output_tokens": 141,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "C",
+          "selected_action": "Show token cost and omission/audit trade-offs, then let the user choose the artifact.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"C\"}",
+          "error": null,
+          "latency_seconds": 1.5457643698900938,
+          "input_tokens": 209,
+          "output_tokens": 27,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "preference-ambiguity-batching-v2",
+      "category": "ambiguity_and_clarification",
+      "family": "preference-ambiguity-batching",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "Four unrelated UI presentation choices remain open. They do not alter architecture or safety, but each must be decided before implementation is complete.",
+      "user_request": "Select the clarification cadence that matches my active preference.",
+      "choices": {
+        "A": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+        "B": "Ask all four concise questions in one structured message with recommended defaults.",
+        "C": "Present a compact comparison table and let the user answer any subset before following up on omissions.",
+        "D": "Ask one question at a time and use each answer to frame the next interaction."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": false,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "A",
+          "selected_action": "Propose local-convention defaults for all four and ask for a single confirmation or corrections.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"A\"}",
+          "error": null,
+          "latency_seconds": 1.7137960139662027,
+          "input_tokens": 190,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "D",
+          "selected_action": "Ask one question at a time and use each answer to frame the next interaction.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"D\"}",
+          "error": null,
+          "latency_seconds": 1.535351573023945,
+          "input_tokens": 191,
+          "output_tokens": 9,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    },
+    {
+      "probe_id": "interaction-teaching-mode-v2",
+      "category": "user_interaction",
+      "family": "interaction-teaching-mode",
+      "evaluation_mode": "preference",
+      "review_status": "draft",
+      "scenario": "A verified bug fix can be a result or teaching example; no learning preference is stated.",
+      "user_request": "Choose the teaching intensity policy that best matches the active user preference profile.",
+      "choices": {
+        "A": "Explain first, implement, then connect changes to concepts.",
+        "B": "Implement and report outcome, files, and verification.",
+        "C": "Coach the user to implement it with feedback.",
+        "D": "Implement and briefly explain the key technique."
+      },
+      "expected_key": null,
+      "expected_action": null,
+      "unanimous": true,
+      "models": {
+        "fast-autonomy": {
+          "selected_key": "B",
+          "selected_action": "Implement and report outcome, files, and verification.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"B\"}",
+          "error": null,
+          "latency_seconds": 2.4818159639835358,
+          "input_tokens": 159,
+          "output_tokens": 73,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "fast-autonomy",
+          "utility_profile_sha256": "74a7b5fc0919a7f92c6abc432a3f25e93c3888bba09a4a5d1584c9c97f7a4cf1"
+        },
+        "quality-control": {
+          "selected_key": "B",
+          "selected_action": "Implement and report outcome, files, and verification.",
+          "correct": null,
+          "raw_response": "{\"answer\":\"B\"}",
+          "error": null,
+          "latency_seconds": 3.308016567956656,
+          "input_tokens": 160,
+          "output_tokens": 108,
+          "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "utility_profile": "quality-control",
+          "utility_profile_sha256": "890d72e2dbbe16a00e0faffa59534a8e6d28f25cfc03f98e641ee2478dc37a94"
+        }
+      }
+    }
+  ],
+  "unanimous_questions": 1,
+  "divergent_questions": 9
+}

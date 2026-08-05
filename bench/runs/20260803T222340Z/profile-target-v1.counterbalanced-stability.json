@@ -1,0 +1,2366 @@
+{
+  "interpretation_boundary": "Three repeated choices can reveal obvious instability but cannot estimate a population-level preference reliably. Every selected action remains primary evidence; modal choices and shares are compact summaries only.",
+  "models": {
+    "Sol": {
+      "probe_count": 8,
+      "stable_probes": 4,
+      "unstable_probes": 4,
+      "records": [
+        {
+          "probe_id": "preference-requirements-iteration-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A new internal workflow has three independently deployable slices. Product behavior is understood, but low-impact copy and ordering preferences will improve after users see the first slice.",
+          "user_request": "Choose the elaboration strategy that matches my specification-versus-learning preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 1,
+            "C": 3
+          },
+          "modal_keys": [
+            "C"
+          ],
+          "modal_actions": [
+            "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 4.858446799917147,
+              "output_tokens": 118
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.431907705031335,
+              "output_tokens": 124
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 6.550819589057937,
+              "output_tokens": 291
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 4.655073826899752,
+              "output_tokens": 205
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-vague-prototype-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "Production remains untouched while an internal search presentation is explored. A reversible prototype costs 30 minutes and a comparison specification costs 20; user preference is not yet known.",
+          "user_request": "Select how to resolve this product ambiguity using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 4
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Build one throwaway interactive prototype using existing components and collect concrete feedback."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 4.332692917902023,
+              "output_tokens": 188
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 6.427867343183607,
+              "output_tokens": 302
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.7468765978701413,
+              "output_tokens": 134
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Build one throwaway interactive prototype using existing components and collect concrete feedback.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 3.797471486032009,
+              "output_tokens": 81
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-verification-independence-v2",
+          "category": "evidence_and_verification",
+          "scenario": "Source hash and deterministic regeneration prove an immutable artifact matches. A separate parser with independent code can corroborate that invariant at a cost of 25 minutes.",
+          "user_request": "Select whether to add independent verification according to my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "C": 4
+          },
+          "modal_keys": [
+            "C"
+          ],
+          "modal_actions": [
+            "Complete with the primary proof and give the user the exact independent check as an optional command."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 7.204708508914337,
+              "output_tokens": 172
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.838036563945934,
+              "output_tokens": 106
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 4.057854812825099,
+              "output_tokens": 135
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.188099979888648,
+              "output_tokens": 168
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-implementation-reuse-v2",
+          "category": "implementation_strategy",
+          "scenario": "The same public contract and tests can be satisfied by two hooks in an established export pipeline or by an isolated 90-line implementation. Reuse adds convention complexity; isolation duplicates a small amount of mechanics.",
+          "user_request": "Select the design according to my active maintenance preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 1,
+            "D": 3
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.8740435359068215,
+              "output_tokens": 145
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.4354741289280355,
+              "output_tokens": 109
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Add the two supported hooks to the shared pipeline and follow its existing extension conventions.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 6.068487468874082,
+              "output_tokens": 280
+            },
+            {
+              "repetition": 3,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 6.657900752965361,
+              "output_tokens": 288
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-recovery-fallback-v1",
+          "category": "recovery_from_tool_errors",
+          "scenario": "A preferred semantic index is temporarily unavailable. Direct text/source search is slower but current and can answer the same question; waiting may preserve the preferred ranking behavior.",
+          "user_request": "Choose fallback versus waiting according to my continuity preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 4
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Switch immediately to direct source/text search and document the changed evidence channel."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.6541379431728274,
+              "output_tokens": 43
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.83021170203574,
+              "output_tokens": 97
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.785967647098005,
+              "output_tokens": 58
+            },
+            {
+              "repetition": 3,
+              "selected_key": "A",
+              "selected_action": "Switch immediately to direct source/text search and document the changed evidence channel.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.178317483048886,
+              "output_tokens": 146
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-test-scope-v1",
+          "category": "test_strategy",
+          "scenario": "A localized parser fix has focused regression tests and all 140 impacted-module tests passing. The complete 2,700-test suite takes 38 minutes and historically finds unrelated failures in 2% of runs; no release gate explicitly requires it.",
+          "user_request": "Choose the remaining test scope according to my speed-versus-assurance preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 1,
+            "C": 1,
+            "D": 2
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.491828806931153,
+              "output_tokens": 142
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.1793699970003217,
+              "output_tokens": 57
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.913622363936156,
+              "output_tokens": 59
+            },
+            {
+              "repetition": 3,
+              "selected_key": "A",
+              "selected_action": "Accept the focused and impacted tests as sufficient, document their coverage, and stop.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.310501455096528,
+              "output_tokens": 51
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-uncertainty-presentation-v2",
+          "category": "uncertainty_and_calibration",
+          "scenario": "A reversible recommendation remains preferred across plausible estimates. Residual failure is approximately 10–20%, bounded in impact, with a tested two-minute fallback.",
+          "user_request": "Select the uncertainty-report format using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 1,
+            "B": 3
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Lead with the recommendation and qualifier, then add a compact expandable risk analysis.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.2276619060430676,
+              "output_tokens": 68
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.5446281570475549,
+              "output_tokens": 39
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.3972660060971975,
+              "output_tokens": 116
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.192563524004072,
+              "output_tokens": 98
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-interrupt-atomicity-v2",
+          "category": "user_interruptions",
+          "scenario": "An eight-second local operation is between temporary write and atomic rename when the user interrupts. The temp state is safe and resumable, and completion has no external effect.",
+          "user_request": "Select when to switch to my new message using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 4
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.463780164020136,
+              "output_tokens": 80
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 6.380992232821882,
+              "output_tokens": 63
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.7101726289838552,
+              "output_tokens": 133
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.056805189931765,
+              "output_tokens": 109
+            }
+          ]
+        }
+      ]
+    },
+    "Terra": {
+      "probe_count": 8,
+      "stable_probes": 2,
+      "unstable_probes": 6,
+      "records": [
+        {
+          "probe_id": "preference-requirements-iteration-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A new internal workflow has three independently deployable slices. Product behavior is understood, but low-impact copy and ordering preferences will improve after users see the first slice.",
+          "user_request": "Choose the elaboration strategy that matches my specification-versus-learning preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 2,
+            "C": 2
+          },
+          "modal_keys": [
+            "B",
+            "C"
+          ],
+          "modal_actions": [
+            "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+            "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 4.54888073191978,
+              "output_tokens": 100
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.6151710650883615,
+              "output_tokens": 85
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.6112932900432497,
+              "output_tokens": 67
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.297617628006265,
+              "output_tokens": 114
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-vague-prototype-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "Production remains untouched while an internal search presentation is explored. A reversible prototype costs 30 minutes and a comparison specification costs 20; user preference is not yet known.",
+          "user_request": "Select how to resolve this product ambiguity using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "C": 4
+          },
+          "modal_keys": [
+            "C"
+          ],
+          "modal_actions": [
+            "Ask a focused workflow question first, then choose prototype or specification from the answer."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 3.9006816940382123,
+              "output_tokens": 51
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.3596097871195525,
+              "output_tokens": 44
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.7331644480582327,
+              "output_tokens": 138
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.928888363065198,
+              "output_tokens": 40
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-verification-independence-v2",
+          "category": "evidence_and_verification",
+          "scenario": "Source hash and deterministic regeneration prove an immutable artifact matches. A separate parser with independent code can corroborate that invariant at a cost of 25 minutes.",
+          "user_request": "Select whether to add independent verification according to my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 2,
+            "C": 2
+          },
+          "modal_keys": [
+            "B",
+            "C"
+          ],
+          "modal_actions": [
+            "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+            "Complete with the primary proof and give the user the exact independent check as an optional command."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.455961924046278,
+              "output_tokens": 72
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 6.687254620017484,
+              "output_tokens": 306
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.9214041139930487,
+              "output_tokens": 153
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Complete with the primary proof and give the user the exact independent check as an optional command.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.6218786421231925,
+              "output_tokens": 37
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-implementation-reuse-v2",
+          "category": "implementation_strategy",
+          "scenario": "The same public contract and tests can be satisfied by two hooks in an established export pipeline or by an isolated 90-line implementation. Reuse adds convention complexity; isolation duplicates a small amount of mechanics.",
+          "user_request": "Select the design according to my active maintenance preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "C": 2,
+            "D": 2
+          },
+          "modal_keys": [
+            "C",
+            "D"
+          ],
+          "modal_actions": [
+            "Prototype both boundaries against the contract tests and present measured complexity before selecting.",
+            "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.9230689532123506,
+              "output_tokens": 145
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Prototype both boundaries against the contract tests and present measured complexity before selecting.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.5760736661031842,
+              "output_tokens": 64
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 3.270810137037188,
+              "output_tokens": 91
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Prototype both boundaries against the contract tests and present measured complexity before selecting.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.8508336490485817,
+              "output_tokens": 95
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-recovery-fallback-v1",
+          "category": "recovery_from_tool_errors",
+          "scenario": "A preferred semantic index is temporarily unavailable. Direct text/source search is slower but current and can answer the same question; waiting may preserve the preferred ranking behavior.",
+          "user_request": "Choose fallback versus waiting according to my continuity preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 2,
+            "D": 2
+          },
+          "modal_keys": [
+            "B",
+            "D"
+          ],
+          "modal_actions": [
+            "Pause for the preferred semantic service and resume when its ranking behavior returns.",
+            "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.07506332709454,
+              "output_tokens": 54
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.1466868750285357,
+              "output_tokens": 32
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Pause for the preferred semantic service and resume when its ranking behavior returns.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.00574811687693,
+              "output_tokens": 34
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Pause for the preferred semantic service and resume when its ranking behavior returns.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.7692657629959285,
+              "output_tokens": 67
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-test-scope-v1",
+          "category": "test_strategy",
+          "scenario": "A localized parser fix has focused regression tests and all 140 impacted-module tests passing. The complete 2,700-test suite takes 38 minutes and historically finds unrelated failures in 2% of runs; no release gate explicitly requires it.",
+          "user_request": "Choose the remaining test scope according to my speed-versus-assurance preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "C": 2,
+            "D": 2
+          },
+          "modal_keys": [
+            "C",
+            "D"
+          ],
+          "modal_actions": [
+            "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+            "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.5578881171531975,
+              "output_tokens": 86
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.583937159040943,
+              "output_tokens": 132
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.5173129681497812,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "D",
+              "selected_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.7384471560362726,
+              "output_tokens": 94
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-uncertainty-presentation-v2",
+          "category": "uncertainty_and_calibration",
+          "scenario": "A reversible recommendation remains preferred across plausible estimates. Residual failure is approximately 10–20%, bounded in impact, with a tested two-minute fallback.",
+          "user_request": "Select the uncertainty-report format using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 4
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.8405469129793346,
+              "output_tokens": 42
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.6260779090225697,
+              "output_tokens": 87
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.9627344929613173,
+              "output_tokens": 103
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 3.863176967948675,
+              "output_tokens": 122
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-interrupt-atomicity-v2",
+          "category": "user_interruptions",
+          "scenario": "An eight-second local operation is between temporary write and atomic rename when the user interrupts. The temp state is safe and resumable, and completion has no external effect.",
+          "user_request": "Select when to switch to my new message using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 3,
+            "D": 1
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Complete the remaining atomic rename, then respond with the finished local state clearly reported.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.432452258886769,
+              "output_tokens": 179
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.062819859944284,
+              "output_tokens": 109
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 7.746885176980868,
+              "output_tokens": 366
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.682837318163365,
+              "output_tokens": 147
+            }
+          ]
+        }
+      ]
+    },
+    "Luna": {
+      "probe_count": 8,
+      "stable_probes": 3,
+      "unstable_probes": 5,
+      "records": [
+        {
+          "probe_id": "preference-requirements-iteration-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A new internal workflow has three independently deployable slices. Product behavior is understood, but low-impact copy and ordering preferences will improve after users see the first slice.",
+          "user_request": "Choose the elaboration strategy that matches my specification-versus-learning preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 2,
+            "C": 2
+          },
+          "modal_keys": [
+            "B",
+            "C"
+          ],
+          "modal_actions": [
+            "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+            "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.6780965731013566,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 0.9111972479149699,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 0.9340244249906391,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0942064081318676,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-vague-prototype-v2",
+          "category": "vague_requirement_analysis",
+          "scenario": "Production remains untouched while an internal search presentation is explored. A reversible prototype costs 30 minutes and a comparison specification costs 20; user preference is not yet known.",
+          "user_request": "Select how to resolve this product ambiguity using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "C": 4
+          },
+          "modal_keys": [
+            "C"
+          ],
+          "modal_actions": [
+            "Ask a focused workflow question first, then choose prototype or specification from the answer."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 3.2921109590679407,
+              "output_tokens": 136
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 5.872946426039562,
+              "output_tokens": 278
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.0420918830204755,
+              "output_tokens": 179
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Ask a focused workflow question first, then choose prototype or specification from the answer.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.829341088887304,
+              "output_tokens": 105
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-verification-independence-v2",
+          "category": "evidence_and_verification",
+          "scenario": "Source hash and deterministic regeneration prove an immutable artifact matches. A separate parser with independent code can corroborate that invariant at a cost of 25 minutes.",
+          "user_request": "Select whether to add independent verification according to my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 1,
+            "B": 2,
+            "D": 1
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 9.175033222185448,
+              "output_tokens": 468
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Run the independent parser on a deterministic risk-weighted sample and retain mismatch handling.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.766373330028728,
+              "output_tokens": 221
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Also run the independent parser and require agreement before completion.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 7.476631983881816,
+              "output_tokens": 371
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 10.540192112093791,
+              "output_tokens": 527
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-implementation-reuse-v2",
+          "category": "implementation_strategy",
+          "scenario": "The same public contract and tests can be satisfied by two hooks in an established export pipeline or by an isolated 90-line implementation. Reuse adds convention complexity; isolation duplicates a small amount of mechanics.",
+          "user_request": "Select the design according to my active maintenance preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 4
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Implement the isolated 90-line component behind the common interface and keep duplication explicit."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 0.9897998701781034,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 6.697896311990917,
+              "output_tokens": 327
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 6.96539625688456,
+              "output_tokens": 316
+            },
+            {
+              "repetition": 3,
+              "selected_key": "D",
+              "selected_action": "Implement the isolated 90-line component behind the common interface and keep duplication explicit.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.253597842063755,
+              "output_tokens": 80
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-recovery-fallback-v1",
+          "category": "recovery_from_tool_errors",
+          "scenario": "A preferred semantic index is temporarily unavailable. Direct text/source search is slower but current and can answer the same question; waiting may preserve the preferred ranking behavior.",
+          "user_request": "Choose fallback versus waiting according to my continuity preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 4
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.1082026201765984,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.0240519759245217,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.3827278441749513,
+              "output_tokens": 75
+            },
+            {
+              "repetition": 3,
+              "selected_key": "D",
+              "selected_action": "Explain latency, evidence equivalence, and consistency differences, then ask whether to fall back.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.1401489130221307,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-test-scope-v1",
+          "category": "test_strategy",
+          "scenario": "A localized parser fix has focused regression tests and all 140 impacted-module tests passing. The complete 2,700-test suite takes 38 minutes and historically finds unrelated failures in 2% of runs; no release gate explicitly requires it.",
+          "user_request": "Choose the remaining test scope according to my speed-versus-assurance preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "C": 2,
+            "D": 2
+          },
+          "modal_keys": [
+            "C",
+            "D"
+          ],
+          "modal_actions": [
+            "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+            "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "C",
+              "selected_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.564586347900331,
+              "output_tokens": 92
+            },
+            {
+              "repetition": 1,
+              "selected_key": "C",
+              "selected_action": "Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 6.291043602861464,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0002946879249066,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "D",
+              "selected_action": "Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.012132931035012,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-uncertainty-presentation-v2",
+          "category": "uncertainty_and_calibration",
+          "scenario": "A reversible recommendation remains preferred across plausible estimates. Residual failure is approximately 10–20%, bounded in impact, with a tested two-minute fallback.",
+          "user_request": "Select the uncertainty-report format using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 3,
+            "C": 1
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Give the recommendation with one concise confidence qualifier and name the tested fallback."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.217603410826996,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 5.784635180141777,
+              "output_tokens": 89
+            },
+            {
+              "repetition": 2,
+              "selected_key": "C",
+              "selected_action": "State the recommendation and offer either the concise qualifier or full risk table before elaborating.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0582479569129646,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Give the recommendation with one concise confidence qualifier and name the tested fallback.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 3.328700279118493,
+              "output_tokens": 142
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-interrupt-atomicity-v2",
+          "category": "user_interruptions",
+          "scenario": "An eight-second local operation is between temporary write and atomic rename when the user interrupts. The temp state is safe and resumable, and completion has no external effect.",
+          "user_request": "Select when to switch to my new message using my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 2,
+            "B": 2
+          },
+          "modal_keys": [
+            "A",
+            "B"
+          ],
+          "modal_actions": [
+            "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+            "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.1893982039764524,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 4.2804008109960705,
+              "output_tokens": 193
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.1825706991367042,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "A",
+              "selected_action": "Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.820339461090043,
+              "output_tokens": 224
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "probe_comparisons": [
+    {
+      "probe_id": "preference-implementation-reuse-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "D"
+        ],
+        "Terra": [
+          "C",
+          "D"
+        ],
+        "Luna": [
+          "D"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": false,
+        "Luna": true
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-interrupt-atomicity-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "B"
+        ],
+        "Terra": [
+          "B"
+        ],
+        "Luna": [
+          "A",
+          "B"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": false,
+        "Luna": false
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-recovery-fallback-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "B",
+          "D"
+        ],
+        "Luna": [
+          "D"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": false,
+        "Luna": true
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-requirements-iteration-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "C"
+        ],
+        "Terra": [
+          "B",
+          "C"
+        ],
+        "Luna": [
+          "B",
+          "C"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": false,
+        "Luna": false
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-test-scope-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "D"
+        ],
+        "Terra": [
+          "C",
+          "D"
+        ],
+        "Luna": [
+          "C",
+          "D"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": false,
+        "Luna": false
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-uncertainty-presentation-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "B"
+        ],
+        "Terra": [
+          "B"
+        ],
+        "Luna": [
+          "B"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": true,
+        "Luna": false
+      },
+      "modal_agreement": true
+    },
+    {
+      "probe_id": "preference-vague-prototype-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "B"
+        ],
+        "Terra": [
+          "C"
+        ],
+        "Luna": [
+          "C"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-verification-independence-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "C"
+        ],
+        "Terra": [
+          "B",
+          "C"
+        ],
+        "Luna": [
+          "B"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": false,
+        "Luna": false
+      },
+      "modal_agreement": false
+    }
+  ],
+  "cross_model_modal_agreements": 1
+}

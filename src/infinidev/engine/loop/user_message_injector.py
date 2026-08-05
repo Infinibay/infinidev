@@ -10,43 +10,59 @@ focused on the loop; behavior is unchanged.
 from __future__ import annotations
 
 import queue
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Any, Callable, TYPE_CHECKING
 
 from infinidev.engine.engine_logging import emit_log as _emit_log
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
+    from infinidev.engine.multimodal import ImageAttachment
+
+
+@dataclass(frozen=True)
+class InjectedUserMessage:
+    """User guidance and images submitted while a task is running."""
+
+    text: str
+    attachments: tuple["ImageAttachment", ...] = ()
 
 
 class UserMessageInjector:
     """Owns the user-message queue and the inject/drain/reject logic."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, on_context_change: Callable[[list[str]], None] | None = None
+    ) -> None:
         # Thread-safe queue for user messages injected mid-task.
-        self._queue: queue.Queue[str] = queue.Queue()
+        self._queue: queue.Queue[InjectedUserMessage] = queue.Queue()
+        self._on_context_change = on_context_change
 
-    def inject(self, message: str) -> None:
-        """Inject a user message into the running loop (thread-safe).
-
-        The message will be included in the next iteration's prompt as
-        a ``<user-message>`` block, giving the LLM live guidance without
-        interrupting the current step.
-        """
-        self._queue.put(message)
+    def inject(
+        self,
+        message: str,
+        attachments: list["ImageAttachment"] | None = None,
+    ) -> None:
+        """Inject user guidance and optional images into the running loop."""
+        self._queue.put(InjectedUserMessage(message, tuple(attachments or ())))
 
     def drain(self) -> list[str]:
-        """Drain all pending user messages from the queue."""
-        messages = []
+        """Drain pending text in FIFO order (backward-compatible API)."""
+        return [item.text for item in self._drain_items()]
+
+    def _drain_items(self) -> list[InjectedUserMessage]:
+        """Drain structured pending messages for internal projection paths."""
+        messages: list[InjectedUserMessage] = []
         while not self._queue.empty():
             try:
                 messages.append(self._queue.get_nowait())
-            except Exception:
+            except queue.Empty:
                 break
         return messages
 
     def inject_mid_step(
         self, ctx: "ExecutionContext", messages: list[dict[str, Any]],
-    ) -> None:
+    ) -> list[str]:
         """Drain any pending user messages and inject them as urgent
         ``user``-role turns before the next LLM call.
 
@@ -54,24 +70,39 @@ class UserMessageInjector:
         so the model always sees the freshest user input even when the
         user speaks while an LLM call is in flight.
         """
-        drained = self.drain()
+        drained = self._drain_items()
         if not drained:
-            return
+            return []
         _emit_log(
             "info",
             f"⚡ mid-step user message drained ({len(drained)} msg(s)) "
             f"— injecting before next LLM call",
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         )
-        for m in drained:
-            messages.append({
-                "role": "user",
-                "content": (
-                    "URGENT — I just sent this while you were working. "
-                    "Acknowledge it with `send_message` as your VERY NEXT "
-                    f"tool call before continuing your current step:\n\n{m}"
-                ),
-            })
+        for item in drained:
+            prefix = (
+                "URGENT — I just sent this while you were working. "
+                "Acknowledge it with `send_message` as your VERY NEXT "
+                "tool call before continuing your current step:\n\n"
+            )
+            text = prefix + item.text
+            content: Any = text
+            if item.attachments:
+                try:
+                    from infinidev.config.model_capabilities import (
+                        get_capability_snapshot,
+                    )
+                    from infinidev.engine.multimodal import build_user_content
+
+                    if get_capability_snapshot().supports_vision:
+                        content = build_user_content(text, item.attachments)
+                except Exception:
+                    content = text
+            messages.append({"role": "user", "content": content})
+        texts = [item.text for item in drained]
+        if self._on_context_change is not None:
+            self._on_context_change(texts)
+        return texts
 
     def reject_step_complete_on_late_message(
         self,
@@ -89,7 +120,7 @@ class UserMessageInjector:
         Returns ``True`` if the rejection fired (caller should
         ``continue`` the loop), ``False`` if the queue was empty.
         """
-        drained = self.drain()
+        drained = self._drain_items()
         if not drained:
             return False
 
@@ -106,8 +137,10 @@ class UserMessageInjector:
             "`send_message` with a brief (1-2 sentence) reply "
             "that addresses what they said, then call "
             "step_complete again. The user's message(s) were:\n\n"
-            + "\n\n---\n\n".join(drained)
+            + "\n\n---\n\n".join(item.text for item in drained)
         )
+        if self._on_context_change is not None:
+            self._on_context_change([item.text for item in drained])
 
         self._overwrite_step_complete_tool_result(
             messages, step_complete_id, rejection_body,

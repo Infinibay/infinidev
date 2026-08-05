@@ -6,11 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
+from infinidev.engine.loop.prompt.text import BEHAVIOR_GUIDELINES
 from infinidev.prompts.variants import (
-    resolve_style,
+    _REGISTRY,
     get_variant,
     registered_names,
-    _REGISTRY,
+    resolve_style,
 )
 
 
@@ -58,6 +59,85 @@ class TestGetVariant:
         result = get_variant("loop.identity", "coding")
         assert result is not None
         assert "class " in result or "def " in result
+
+
+class TestGeneralizedBehaviorContract:
+    def test_identity_distinguishes_interest_from_authority(self):
+        prompt = get_variant("loop.identity", "generalized")
+        assert prompt is not None
+        assert "interest, hypotheticals, examples" in prompt
+        assert "Future or conditional approval is not current permission" in prompt
+
+    def test_identity_does_not_broaden_ambiguous_target(self):
+        prompt = get_variant("loop.identity", "generalized")
+        assert prompt is not None
+        assert "never choose one or broaden the target to all candidates" in prompt
+
+    def test_protocol_separates_requirements_from_defaults(self):
+        prompt = get_variant("loop.protocol", "generalized")
+        assert prompt is not None
+        assert "literal user requirements" in prompt
+        assert "Defaults guide HOW to work" in prompt
+
+    def test_protocol_requires_evidence_driven_bounded_retries(self):
+        prompt = get_variant("loop.protocol", "generalized")
+        assert prompt is not None
+        assert "Retry a failure only when it produced new evidence" in prompt
+        assert "never loop until success or conceal material failures" in prompt
+
+    def test_develop_flow_uses_proportional_defaults(self):
+        prompt = get_variant("flow.develop.identity", "generalized")
+        assert prompt is not None
+        assert "inspect evidence proportional to the change" in prompt
+        assert "After every edit" not in prompt
+        assert "production-ready" not in prompt
+
+    def test_phases_do_not_restore_ritual_verification(self):
+        bug = get_variant("phase.bug.execute", "generalized")
+        feature = get_variant("phase.feature.execute", "generalized")
+        refactor = get_variant("phase.refactor.plan", "generalized")
+        assert bug is not None
+        assert feature is not None
+        assert refactor is not None
+        assert "after 3 attempts" not in bug
+        assert "3 consecutive edits" not in feature
+        assert '"run full test suite" after every step' not in refactor
+
+
+class TestCrossStyleBehaviorContract:
+    def test_shared_behavior_defines_authority_and_retry_invariants(self):
+        assert "Future or conditional approval is not current permission" in BEHAVIOR_GUIDELINES
+        assert "Do not choose one or broaden the target to all" in BEHAVIOR_GUIDELINES
+        assert "Keep literal user requirements separate" in BEHAVIOR_GUIDELINES
+        assert "Retry a failure only when it supplied new evidence" in BEHAVIOR_GUIDELINES
+
+    @pytest.mark.parametrize("style", ["full", "coding", "extra_simple"])
+    def test_develop_flow_does_not_require_verification_after_every_edit(self, style):
+        prompt = get_variant("flow.develop.identity", style)
+        assert prompt is not None
+        assert "After EVERY edit" not in prompt
+        assert "Verify EVERY edit" not in prompt
+        assert "Verify every edit" not in prompt
+
+    @pytest.mark.parametrize("style", ["full", "coding", "extra_simple"])
+    def test_refactor_phase_does_not_require_full_suite_after_every_change(self, style):
+        execute = get_variant("phase.refactor.execute", style)
+        plan = get_variant("phase.refactor.plan", style)
+        assert execute is not None
+        assert plan is not None
+        combined = execute + plan
+        assert "run the full test suite (not just one test)" not in combined
+        assert "Run ALL tests after every change" not in combined
+        assert "run_full_test_suite_after_EVERY_step" not in combined
+        assert "Run tests after every step" not in combined
+
+    def test_coding_and_extra_simple_encode_authority_without_prose_layer(self):
+        coding = get_variant("loop.identity", "coding")
+        minimal = get_variant("loop.identity", "extra_simple")
+        assert coding is not None
+        assert minimal is not None
+        assert "future_or_conditional_permission != current_permission" in coding
+        assert "future permission is not current permission" in minimal
 
 
 # ── Registration completeness ────────────────────────────────────────────

@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "source_report_sha256": "5c4132601e0bee66e141b7d934818b7fc17b4b7114f248231dee7d62dba53273",
+  "packet_sha256": "ace187f119ba9f7361a80c87ad6b1331b3cd362a5dace133e6a9536031333fb7",
+  "records": [
+    {
+      "task_id": "complex-plan",
+      "repetition": 0,
+      "mapping": {
+        "A": "baseline",
+        "B": "candidate"
+      }
+    },
+    {
+      "task_id": "evidence-code-review",
+      "repetition": 0,
+      "mapping": {
+        "A": "baseline",
+        "B": "candidate"
+      }
+    },
+    {
+      "task_id": "reversible-ambiguity",
+      "repetition": 0,
+      "mapping": {
+        "A": "candidate",
+        "B": "baseline"
+      }
+    },
+    {
+      "task_id": "test-selection",
+      "repetition": 0,
+      "mapping": {
+        "A": "baseline",
+        "B": "candidate"
+      }
+    },
+    {
+      "task_id": "tool-failure-recovery",
+      "repetition": 0,
+      "mapping": {
+        "A": "baseline",
+        "B": "candidate"
+      }
+    },
+    {
+      "task_id": "user-owned-tradeoff",
+      "repetition": 0,
+      "mapping": {
+        "A": "candidate",
+        "B": "baseline"
+      }
+    }
+  ]
+}

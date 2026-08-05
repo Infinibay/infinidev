@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "source_brief_sha256": "58ef488335278cf407bfd3cb1ad80a5ade01f03aac0cab45e148620a6e489154",
+  "model": "Luna",
+  "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "utility_profile_sha256": "2fcdfbcc726c06a9bceb7c2046bd76c1b9cd6219029339aa563040c85ba02f95",
+  "calibration_role": "developer",
+  "candidates": [
+    {
+      "name": "quality-control-decision-ownership",
+      "kind": "preference_compensation",
+      "guidance_style": "advisory",
+      "guidance": "For consequential trade-offs whose decisive priorities belong to the user, prefer presenting the feasible frontier and asking for the decisive weight before recommending. Continue autonomously on routine reversible implementation details.",
+      "evidence_probe_ids": [
+        "preference-decision-ownership-v1",
+        "preference-decision-ownership-v2",
+        "decision-recommendation-strength-v1",
+        "decision-recommendation-strength-v2"
+      ],
+      "rationale": "Luna's stable raw prior recommended a leader even when the quality-and-control profile assigns the decisive trade-off to the user.",
+      "expected_effect": "Increase user ownership of consequential Pareto trade-offs without reducing autonomy on routine reversible work.",
+      "regression_risks": [
+        "May defer decisions when the user's existing request already states the decisive priority.",
+        "May add interaction to reversible choices where a provisional recommendation would be more useful."
+      ]
+    }
+  ]
+}

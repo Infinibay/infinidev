@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "campaign_root": "bench/runs/20260804-agent-task-pilot",
+  "all_passed": true,
+  "checks": {
+    "six_approved_held_out_tasks": true,
+    "six_required_categories": true,
+    "dataset_hash_matches_plan": true,
+    "exactly_36_planned": true,
+    "three_routes_planned": true,
+    "sequential_plan": true,
+    "three_distinct_models": true,
+    "exactly_36_observations": true,
+    "exactly_36_run_artifacts": true,
+    "campaign_dossier_exists": true,
+    "decision_maps_exist": true,
+    "interpreted_analysis_exists": true,
+    "human_reviews_exist_for_all_routes": true
+  },
+  "routes": [
+    {
+      "name": "sol",
+      "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "observations": 12,
+      "decision": "inconclusive_rewrite_or_repeat",
+      "checks": {
+        "twelve_observations": true,
+        "six_baseline_candidate_pairs": true,
+        "identity_matches_plan": true,
+        "dataset_hash_matches": true,
+        "condition_manifest_hash_matches": true,
+        "no_runtime_or_provider_errors": true,
+        "all_artifacts_exist": true,
+        "no_duplicate_execution_keys": true,
+        "report_has_six_pairs": true,
+        "blind_packet_is_bound": true,
+        "condition_key_is_bound": true,
+        "complete_human_review": true,
+        "decision_is_preregistered": true,
+        "deployment_remains_unauthorized": true
+      },
+      "passed": true
+    },
+    {
+      "name": "terra",
+      "model_identity": "openai_subscription:gpt-5.6-terra:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "observations": 12,
+      "decision": "discard_no_effect",
+      "checks": {
+        "twelve_observations": true,
+        "six_baseline_candidate_pairs": true,
+        "identity_matches_plan": true,
+        "dataset_hash_matches": true,
+        "condition_manifest_hash_matches": true,
+        "no_runtime_or_provider_errors": true,
+        "all_artifacts_exist": true,
+        "no_duplicate_execution_keys": true,
+        "report_has_six_pairs": true,
+        "blind_packet_is_bound": true,
+        "condition_key_is_bound": true,
+        "complete_human_review": true,
+        "decision_is_preregistered": true,
+        "deployment_remains_unauthorized": true
+      },
+      "passed": true
+    },
+    {
+      "name": "luna",
+      "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "observations": 12,
+      "decision": "discard_no_effect",
+      "checks": {
+        "twelve_observations": true,
+        "six_baseline_candidate_pairs": true,
+        "identity_matches_plan": true,
+        "dataset_hash_matches": true,
+        "condition_manifest_hash_matches": true,
+        "no_runtime_or_provider_errors": true,
+        "all_artifacts_exist": true,
+        "no_duplicate_execution_keys": true,
+        "report_has_six_pairs": true,
+        "blind_packet_is_bound": true,
+        "condition_key_is_bound": true,
+        "complete_human_review": true,
+        "decision_is_preregistered": true,
+        "deployment_remains_unauthorized": true
+      },
+      "passed": true
+    }
+  ],
+  "evidence_counts": {
+    "tasks": 6,
+    "observations": 36,
+    "run_artifacts": 36,
+    "blind_human_review_records": 72
+  },
+  "interpretation_boundary": "Passing proves completion and integrity of this one-run falsification pilot. It does not authorize deployment, establish repeatability, or validate hidden reasoning."
+}

@@ -1,0 +1,11 @@
+{
+  "provider": "openai_subscription",
+  "model": "gpt-5.6-luna",
+  "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "repetitions": 1,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 12,
+  "max_total_tool_calls": 80,
+  "max_tool_calls_per_action": 20,
+  "verify_timeout_seconds": 120.0
+}

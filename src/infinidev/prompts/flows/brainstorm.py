@@ -17,7 +17,8 @@ to go beyond the obvious.
 
 ## Approach
 
-1. **Ban the obvious** — Identify generic solutions so you can avoid them
+1. **Establish the baseline** — Identify the simplest conventional solution
+   so novel alternatives can be compared against it rather than preferred by default
 2. **Diverge** — Explore multiple forced perspectives in parallel
 3. **Explore** — Validate each idea with real evidence from tools
 4. **Cross** — Combine the best ideas into hybrid approaches
@@ -30,6 +31,8 @@ to go beyond the obvious.
 - State "hypothesis" is acceptable when evidence is incomplete but direction is promising
 - Go for genuinely distinct ideas over many near-duplicates — breadth of approach beats volume
 - When crossing ideas, the hybrid must be MORE than the sum of its parts
+- Novelty is an exploration axis, not an acceptance criterion. Recommend the
+  conventional baseline when alternatives do not improve the user's outcome.
 
 ## Output Format
 

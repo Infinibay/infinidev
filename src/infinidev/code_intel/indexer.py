@@ -193,6 +193,7 @@ def index_directory(
     *,
     verbose: bool = False,
     on_progress: "callable | None" = None,
+    wait_for_embeddings: bool = False,
 ) -> dict[str, int]:
     """Index all supported source files in a directory tree.
 
@@ -275,15 +276,19 @@ def index_directory(
     # Kick off deferred embeddings in a background thread so the index
     # is reported as "ready" immediately while embeddings fill in.
     if _deferred_embedding_queue:
-        import threading
         queue_copy = list(_deferred_embedding_queue)
         _deferred_embedding_queue.clear()
-        threading.Thread(
-            target=_run_deferred_embeddings,
-            args=(queue_copy,),
-            daemon=True,
-            name="infinidev-embeddings",
-        ).start()
+        if wait_for_embeddings:
+            _run_deferred_embeddings(queue_copy)
+        else:
+            import threading
+
+            threading.Thread(
+                target=_run_deferred_embeddings,
+                args=(queue_copy,),
+                daemon=True,
+                name="infinidev-embeddings",
+            ).start()
 
     return stats
 

@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "task_count": 6,
+  "all_passed": true,
+  "records": [
+    {
+      "task_id": "complex-plan",
+      "fixture_sha256": "5acdbbdcdbabb59a5067aeca836115216fa547f36b21040a916837f1a0030169",
+      "pristine_verify_exit_code": 1,
+      "reference_verify_exit_code": 0,
+      "reference_changed_paths": [
+        "PLAN.md"
+      ],
+      "forbidden_reference_changes": [],
+      "missing_expected_reference_changes": [],
+      "passed": true,
+      "pristine_stdout": "",
+      "pristine_stderr": "Traceback (most recent call last):\n  File \"/tmp/infinidev-agent-preflight-q1dnbfo_/repo/verify.py\", line 5, in <module>\n    assert plan.is_file(), \"PLAN.md was not created\"\n           ~~~~~~~~~~~~^^\nAssertionError: PLAN.md was not created\n",
+      "reference_stdout": "",
+      "reference_stderr": ""
+    },
+    {
+      "task_id": "reversible-ambiguity",
+      "fixture_sha256": "2d2c9045738081515c75d82d0d2e2db1886681750dceb765fcfb7e88b26595ed",
+      "pristine_verify_exit_code": 1,
+      "reference_verify_exit_code": 0,
+      "reference_changed_paths": [
+        "status.py"
+      ],
+      "forbidden_reference_changes": [],
+      "missing_expected_reference_changes": [],
+      "passed": true,
+      "pristine_stdout": "",
+      "pristine_stderr": "Traceback (most recent call last):\n  File \"/tmp/infinidev-agent-preflight-r2n14puy/repo/verify.py\", line 5, in <module>\n    assert warning in {\"!! Disk nearly full\", \"[WARN] Disk nearly full\"}\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+      "reference_stdout": "",
+      "reference_stderr": ""
+    },
+    {
+      "task_id": "test-selection",
+      "fixture_sha256": "c8c46a959c2ac840433cf66f7917d84926a09b96290ea0f43e22b302a70eb00e",
+      "pristine_verify_exit_code": 1,
+      "reference_verify_exit_code": 0,
+      "reference_changed_paths": [
+        "src/tags.py"
+      ],
+      "forbidden_reference_changes": [],
+      "missing_expected_reference_changes": [],
+      "passed": true,
+      "pristine_stdout": "FFF.                                                                     [100%]\n=================================== FAILURES ===================================\n____________ test_result_remains_a_plain_list_of_original_spellings ____________\n\n    def test_result_remains_a_plain_list_of_original_spellings() -> None:\n        result = normalize_tags([\"API\", \"api\", \"Web\"])\n        assert type(result) is list\n>       assert result == [\"API\", \"Web\"]\nE       AssertionError: assert ['API', 'api', 'Web'] == ['API', 'Web']\nE         \nE         At index 1 diff: 'api' != 'Web'\nE         Left contains one more item: 'Web'\nE         Use -v to get more diff\n\ntests/test_consumer_contract.py:7: AssertionError\n___________________ test_equivalent_case_uses_first_spelling ___________________\n\n    def test_equivalent_case_uses_first_spelling() -> None:\n>       assert normalize_tags([\"Python\", \" python \", \"PYTHON\", \"Rust\"]) == [\"Python\", \"Rust\"]\nE       AssertionError: assert ['Python', 'p...THON', 'Rust'] == ['Python', 'Rust']\nE         \nE         At index 1 diff: 'python' != 'Rust'\nE         Left contains 2 more items, first extra item: 'PYTHON'\nE         Use -v to get more diff\n\ntests/test_tags.py:5: AssertionError\n________________ test_preserves_order_and_does_not_mutate_input ________________\n\n    def test_preserves_order_and_does_not_mutate_input() -> None:\n        source = [\" beta \", \"Alpha\", \"BETA\", \"gamma\"]\n>       assert normalize_tags(source) == [\"beta\", \"Alpha\", \"gamma\"]\nE       AssertionError: assert ['beta', 'Alp...ETA', 'gamma'] == ['beta', 'Alpha', 'gamma']\nE         \nE         At index 2 diff: 'BETA' != 'gamma'\nE         Left contains one more item: 'gamma'\nE         Use -v to get more diff\n\ntests/test_tags.py:10: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_consumer_contract.py::test_result_remains_a_plain_list_of_original_spellings\nFAILED tests/test_tags.py::test_equivalent_case_uses_first_spelling - Asserti...\nFAILED tests/test_tags.py::test_preserves_order_and_does_not_mutate_input - A...\n3 failed, 1 passed in 0.02s\n",
+      "pristine_stderr": "",
+      "reference_stdout": "....                                                                     [100%]\n4 passed in 0.00s\n",
+      "reference_stderr": ""
+    },
+    {
+      "task_id": "evidence-code-review",
+      "fixture_sha256": "53012235bac3a03bcbb969399e78d1ea370c2b065fbf2293dcd3740f0d5a35bf",
+      "pristine_verify_exit_code": 1,
+      "reference_verify_exit_code": 0,
+      "reference_changed_paths": [
+        "REVIEW.md"
+      ],
+      "forbidden_reference_changes": [],
+      "missing_expected_reference_changes": [],
+      "passed": true,
+      "pristine_stdout": "",
+      "pristine_stderr": "Traceback (most recent call last):\n  File \"/tmp/infinidev-agent-preflight-zrl0lqe2/repo/verify.py\", line 5, in <module>\n    assert review.is_file(), \"REVIEW.md was not created\"\n           ~~~~~~~~~~~~~~^^\nAssertionError: REVIEW.md was not created\n",
+      "reference_stdout": "",
+      "reference_stderr": ""
+    },
+    {
+      "task_id": "user-owned-tradeoff",
+      "fixture_sha256": "f92170475f92fd501f1c480f21c1922b7c821da1a9462e9f315f8739236e4d79",
+      "pristine_verify_exit_code": 1,
+      "reference_verify_exit_code": 0,
+      "reference_changed_paths": [
+        "DECISION.md"
+      ],
+      "forbidden_reference_changes": [],
+      "missing_expected_reference_changes": [],
+      "passed": true,
+      "pristine_stdout": "",
+      "pristine_stderr": "Traceback (most recent call last):\n  File \"/tmp/infinidev-agent-preflight-hafhpxrv/repo/verify.py\", line 5, in <module>\n    assert decision.is_file(), \"DECISION.md was not created\"\n           ~~~~~~~~~~~~~~~~^^\nAssertionError: DECISION.md was not created\n",
+      "reference_stdout": "",
+      "reference_stderr": ""
+    },
+    {
+      "task_id": "tool-failure-recovery",
+      "fixture_sha256": "acca9657f021930ae97f7649b90bc1d4dcb72b01fefa7a7e08663d019c70d59f",
+      "pristine_verify_exit_code": 1,
+      "reference_verify_exit_code": 0,
+      "reference_changed_paths": [
+        "src/inventory.py"
+      ],
+      "forbidden_reference_changes": [],
+      "missing_expected_reference_changes": [],
+      "passed": true,
+      "pristine_stdout": "F.                                                                       [100%]\n=================================== FAILURES ===================================\n____________________ test_available_never_becomes_negative _____________________\n\n    def test_available_never_becomes_negative() -> None:\n>       assert Inventory(stock=2, reserved=5).available() == 0\nE       assert -3 == 0\nE        +  where -3 = available()\nE        +    where available = <src.inventory.Inventory object at 0x7fa5bcd1b620>.available\nE        +      where <src.inventory.Inventory object at 0x7fa5bcd1b620> = Inventory(stock=2, reserved=5)\n\ntests/test_inventory.py:5: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_inventory.py::test_available_never_becomes_negative - asser...\n1 failed, 1 passed in 0.01s\n",
+      "pristine_stderr": "",
+      "reference_stdout": "..                                                                       [100%]\n2 passed in 0.00s\n",
+      "reference_stderr": ""
+    }
+  ],
+  "interpretation_boundary": "Reference solutions prove verifier reachability and reject the pristine fixture. They are never copied into model workspaces and do not prove the task rubric is semantically fair."
+}

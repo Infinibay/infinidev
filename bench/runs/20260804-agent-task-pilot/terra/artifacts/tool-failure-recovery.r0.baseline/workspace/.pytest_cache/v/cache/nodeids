@@ -1,0 +1,4 @@
+[
+  "tests/test_inventory.py::test_available_never_becomes_negative",
+  "tests/test_inventory.py::test_available_subtracts_valid_reservations"
+]

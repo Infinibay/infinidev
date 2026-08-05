@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "task": {
+    "id": "rollback-front",
+    "family": "rollback-order",
+    "split": "validation",
+    "repository_fixture": "rollback",
+    "request": "Repair migration rollback behavior without changing the public API.",
+    "verify_command": "{python} -m pytest -q",
+    "required_evidence": [
+      "src/migration.py:Migration.rollback",
+      "tests/test_migration.py:test_failed_step_rolls_back_completed_steps_in_reverse_order"
+    ],
+    "relevant_evidence_position": "front",
+    "review_status": "approved"
+  },
+  "condition": "baseline",
+  "repetition": 0,
+  "model_identity": "openai_subscription:gpt-5.6-sol:catalog-b8eded3672a9885162de431649b73feca167972db8721f55a4047e83571593db",
+  "run_config": {
+    "provider": "openai_subscription",
+    "model": "gpt-5.6-sol",
+    "model_identity": "openai_subscription:gpt-5.6-sol:catalog-b8eded3672a9885162de431649b73feca167972db8721f55a4047e83571593db",
+    "repetitions": 1,
+    "min_task_interval_seconds": 2.0,
+    "max_iterations": 12,
+    "max_total_tool_calls": 80,
+    "max_tool_calls_per_action": 20,
+    "verify_timeout_seconds": 120.0
+  },
+  "final_answer": "",
+  "engine_status": "",
+  "verify_exit_code": null,
+  "verify_stdout": "",
+  "verify_stderr": "",
+  "error": "UnsupportedParamsError: litellm.UnsupportedParamsError: openai does not support parameters: ['tool_choice'], for model=responses/gpt-5.6-sol. To drop these, set `litellm.drop_params=True` or for proxy:\n\n`litellm_settings:\n drop_params: true`\n. \n If you want to use these params dynamically send allowed_openai_params=['tool_choice'] in your request.",
+  "context_items": [],
+  "context_corpus_sha256": "f9ad0d91a20b2c79ae872fd60b44786517716eb3754ffdd11b7550c77530f7ac"
+}

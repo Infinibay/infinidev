@@ -1,0 +1,609 @@
+{
+  "interpretation_boundary": "Repeated isolated choices can reveal obvious instability but cannot estimate a population-level preference reliably without a justified sampling model. Every selected action remains primary evidence; modal choices and shares are compact summaries only.",
+  "models": {
+    "Sol": {
+      "probe_count": 2,
+      "stable_probes": 1,
+      "unstable_probes": 1,
+      "records": [
+        {
+          "probe_id": "preference-review-reporting-v2",
+          "category": "code_review",
+          "scenario": "Every review finding is evidence-linked: two correctness blockers, five maintainability concerns, and twelve optional style observations. The review work itself is complete.",
+          "user_request": "Select the review-report format that best fits my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 4
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 5.472157195908949,
+              "output_tokens": 168
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.398555589839816,
+              "output_tokens": 74
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.8176322949584574,
+              "output_tokens": 76
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.3152046769391745,
+              "output_tokens": 77
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-decision-ownership-v2",
+          "category": "complex_decision_making",
+          "scenario": "Cost, latency, and maintainability evidence leaves three feasible nondominated architectures. Every hard constraint is met and the trade-off weights belong to the user.",
+          "user_request": "Select the decision-ownership style that matches my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "B": 2,
+            "D": 2
+          },
+          "modal_keys": [
+            "B",
+            "D"
+          ],
+          "modal_actions": [
+            "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+            "Present the Pareto frontier without choosing and ask the user to set the decisive weight."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 5.270419903099537,
+              "output_tokens": 212
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.6712731060106307,
+              "output_tokens": 70
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 8.46438891091384,
+              "output_tokens": 252
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 4.852928669890389,
+              "output_tokens": 199
+            }
+          ]
+        }
+      ]
+    },
+    "Terra": {
+      "probe_count": 2,
+      "stable_probes": 1,
+      "unstable_probes": 1,
+      "records": [
+        {
+          "probe_id": "preference-review-reporting-v2",
+          "category": "code_review",
+          "scenario": "Every review finding is evidence-linked: two correctness blockers, five maintainability concerns, and twelve optional style observations. The review work itself is complete.",
+          "user_request": "Select the review-report format that best fits my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 1,
+            "B": 3
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 5.424192739883438,
+              "output_tokens": 187
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.7338980969507247,
+              "output_tokens": 71
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 3.039014623966068,
+              "output_tokens": 109
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.8100704241078347,
+              "output_tokens": 52
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-decision-ownership-v2",
+          "category": "complex_decision_making",
+          "scenario": "Cost, latency, and maintainability evidence leaves three feasible nondominated architectures. Every hard constraint is met and the trade-off weights belong to the user.",
+          "user_request": "Select the decision-ownership style that matches my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 4
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Present the Pareto frontier without choosing and ask the user to set the decisive weight."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.8909786341246217,
+              "output_tokens": 95
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.031859325012192,
+              "output_tokens": 67
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.4371089399792254,
+              "output_tokens": 87
+            },
+            {
+              "repetition": 3,
+              "selected_key": "D",
+              "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.3239569847937673,
+              "output_tokens": 80
+            }
+          ]
+        }
+      ]
+    },
+    "Luna": {
+      "probe_count": 2,
+      "stable_probes": 1,
+      "unstable_probes": 1,
+      "records": [
+        {
+          "probe_id": "preference-review-reporting-v2",
+          "category": "code_review",
+          "scenario": "Every review finding is evidence-linked: two correctness blockers, five maintainability concerns, and twelve optional style observations. The review work itself is complete.",
+          "user_request": "Select the review-report format that best fits my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 3,
+            "B": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 5.456286886939779,
+              "output_tokens": 193
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 6.724585625808686,
+              "output_tokens": 330
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 0.9262266668956727,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 10.268852419918403,
+              "output_tokens": 527
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-decision-ownership-v2",
+          "category": "complex_decision_making",
+          "scenario": "Cost, latency, and maintainability evidence leaves three feasible nondominated architectures. Every hard constraint is met and the trade-off weights belong to the user.",
+          "user_request": "Select the decision-ownership style that matches my active preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "B": 4
+          },
+          "modal_keys": [
+            "B"
+          ],
+          "modal_actions": [
+            "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "B",
+              "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 1.0934967710636556,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 1,
+              "selected_key": "B",
+              "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.1797115779481828,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "B",
+              "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.0024179830215871,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.144254568964243,
+              "output_tokens": 9
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "probe_comparisons": [
+    {
+      "probe_id": "preference-decision-ownership-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "B",
+          "D"
+        ],
+        "Terra": [
+          "D"
+        ],
+        "Luna": [
+          "B"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-review-reporting-v2",
+      "modal_keys_by_model": {
+        "Sol": [
+          "B"
+        ],
+        "Terra": [
+          "B"
+        ],
+        "Luna": [
+          "A"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": true,
+        "Terra": false,
+        "Luna": false
+      },
+      "modal_agreement": false
+    }
+  ],
+  "cross_model_modal_agreements": 0
+}

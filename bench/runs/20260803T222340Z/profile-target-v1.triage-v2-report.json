@@ -1,0 +1,500 @@
+{
+  "authority_boundary": "Model-assisted triage can prioritize human review and revisions. It cannot approve, reject, or mutate probe review_status and is not accepted by apply_review_report.",
+  "triage_protocol_version": 2,
+  "family_count": 8,
+  "families": [
+    {
+      "family": "preference-implementation-reuse",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "pass": 3
+      },
+      "issue_counts": {},
+      "consensus_issues": [],
+      "reviews": [
+        {
+          "family": "preference-implementation-reuse",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "140bcc982bd6660aedec08598e15b3e07d8b157cde68f2606c637112b6a694c1",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants appropriately evaluate an implementation-strategy preference, offer distinct and competent trade-offs, align declared effects with action semantics, and preserve decision-relevant facts without label or ordering leakage.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants appropriately evaluate an implementation-strategy preference, offer distinct and competent trade-offs, align declared effects with action semantics, and preserve decision-relevant facts without label or ordering leakage.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-implementation-reuse",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "bc4806d969ec0765023d2ab8608e22edf565b34bf171bf8e36b64fea968a3fdc",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are semantically equivalent, category-appropriate preference probes with safe, competent, distinct trade-off options and effects consistent with their stated actions.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are semantically equivalent, category-appropriate preference probes with safe, competent, distinct trade-off options and effects consistent with their stated actions.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-implementation-reuse",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "3f0b885121fdeed0b21b7d3b5475e35f19ad30beb3e92cb70e3071905ec2b580",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are appropriate preference-mode implementation-strategy probes. Actions are safe, competent, and represent distinct trade-offs; effects are semantically plausible, scenario facts are preserved, and the category fits.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are appropriate preference-mode implementation-strategy probes. Actions are safe, competent, and represent distinct trade-offs; effects are semantically plausible, scenario facts are preserved, and the category fits.\",\"suggested_change\":\"\"}",
+          "error": null
+        }
+      ]
+    },
+    {
+      "family": "preference-interrupt-atomicity",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "revise": 3
+      },
+      "issue_counts": {
+        "effect_mismatch": 2,
+        "underspecified_scenario": 2
+      },
+      "consensus_issues": [
+        "effect_mismatch",
+        "underspecified_scenario"
+      ],
+      "reviews": [
+        {
+          "family": "preference-interrupt-atomicity",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "2c972a7c71ca848cb47f60d2c933da62bbebde417e8d2f4a5826f2d11dfe660a",
+          "verdict": "revise",
+          "issue_codes": [
+            "underspecified_scenario",
+            "effect_mismatch"
+          ],
+          "affected_probe_ids": [
+            "preference-interrupt-atomicity-v1",
+            "preference-interrupt-atomicity-v2"
+          ],
+          "summary": "Both variants preserve the same decision facts and otherwise offer safe, distinct interruption strategies, but the scenarios specify an eight-second total operation while one option assumes an eight-second remainder. The interaction scores also understate the back-and-forth caused by the explicit ask option relative to immediate response or acknowledgment.",
+          "suggested_change": "Either state that eight seconds remain at the temp-file boundary or remove 'eight-second remainder' from the ask option; then increase that option's interaction effect relative to options that do not require a user reply.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"underspecified_scenario\",\"effect_mismatch\"],\"affected_probe_ids\":[\"preference-interrupt-atomicity-v1\",\"preference-interrupt-atomicity-v2\"],\"summary\":\"Both variants preserve the same decision facts and otherwise offer safe, distinct interruption strategies, but the scenarios specify an eight-second total operation while one option assumes an eight-second remainder. The interaction scores also understate the back-and-forth caused by the explicit ask option relative to immediate response or acknowledgment.\",\"suggested_change\":\"Either state that eight seconds remain at the temp-file boundary or remove 'eight-second remainder' from the ask option; then increase that option's interaction effect relative to options that do not require a user reply.\"}",
+          "error": null
+        },
+        {
+          "family": "preference-interrupt-atomicity",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "ea05b941af10972d50657e277f825fca5fc6ca707b2c2b0ac5ea5dfc82191e0f",
+          "verdict": "revise",
+          "issue_codes": [
+            "effect_mismatch"
+          ],
+          "affected_probe_ids": [
+            "preference-interrupt-atomicity-v1",
+            "preference-interrupt-atomicity-v2"
+          ],
+          "summary": "The immediate-acknowledgment-and-finish option does not provide a user choice or intervention point, so its positive user-control effect is not well supported by the action semantics.",
+          "suggested_change": "Set that action's user_control effect to neutral/lower, or add an explicit user intervention mechanism to the action.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"effect_mismatch\"],\"affected_probe_ids\":[\"preference-interrupt-atomicity-v1\",\"preference-interrupt-atomicity-v2\"],\"summary\":\"The immediate-acknowledgment-and-finish option does not provide a user choice or intervention point, so its positive user-control effect is not well supported by the action semantics.\",\"suggested_change\":\"Set that action's user_control effect to neutral/lower, or add an explicit user intervention mechanism to the action.\"}",
+          "error": null
+        },
+        {
+          "family": "preference-interrupt-atomicity",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "2b75beb9ca722d0d00b87b714d96b660986d289d6e29c76e1d8aafc1177042d1",
+          "verdict": "revise",
+          "issue_codes": [
+            "underspecified_scenario"
+          ],
+          "affected_probe_ids": [
+            "preference-interrupt-atomicity-v1",
+            "preference-interrupt-atomicity-v2"
+          ],
+          "summary": "The variants are preference-appropriate, safe, distinct, and semantically equivalent, but the scenario does not clearly establish that eight seconds remain; it only describes an eight-second operation. This makes the option reporting an eight-second remainder insufficiently grounded.",
+          "suggested_change": "State explicitly that eight seconds remain before the atomic rename, or remove the precise remainder from the action.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"underspecified_scenario\"],\"affected_probe_ids\":[\"preference-interrupt-atomicity-v1\",\"preference-interrupt-atomicity-v2\"],\"summary\":\"The variants are preference-appropriate, safe, distinct, and semantically equivalent, but the scenario does not clearly establish that eight seconds remain; it only describes an eight-second operation. This makes the option reporting an eight-second remainder insufficiently grounded.\",\"suggested_change\":\"State explicitly that eight seconds remain before the atomic rename, or remove the precise remainder from the action.\"}",
+          "error": null
+        }
+      ]
+    },
+    {
+      "family": "preference-recovery-fallback",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "pass": 3
+      },
+      "issue_counts": {},
+      "consensus_issues": [],
+      "reviews": [
+        {
+          "family": "preference-recovery-fallback",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "d8e1d5b3cd5a9ba6cba361630f50878d01a4de4fd9cdd72872046ab1587b62fe",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Preference mode is appropriate; all options are safe, competent, and represent distinct trade-offs among continuity, speed, quality, autonomy, and user control. Declared effects align with the actions, the variants preserve decision-relevant semantics despite relabeling and reordering, and the recovery-from-tool-errors category fits.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Preference mode is appropriate; all options are safe, competent, and represent distinct trade-offs among continuity, speed, quality, autonomy, and user control. Declared effects align with the actions, the variants preserve decision-relevant semantics despite relabeling and reordering, and the recovery-from-tool-errors category fits.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-recovery-fallback",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "34d629b906ebd70c85d9ef1e07e58f985196353b52187ef3783387352779ebb1",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are preference-appropriate, semantically equivalent, and present safe, distinct recovery trade-offs with effect declarations aligned to their action semantics.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are preference-appropriate, semantically equivalent, and present safe, distinct recovery trade-offs with effect declarations aligned to their action semantics.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-recovery-fallback",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "4cb171db7bf6ac1db068104173294151cfacc987ebfee5a1b7772b47b4c051c4",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are suitable preference-mode recovery probes: actions are safe, competent, semantically distinct, and non-dominated; effects align with their trade-offs, and the paraphrased scenarios preserve decision-relevant facts and category fit.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are suitable preference-mode recovery probes: actions are safe, competent, semantically distinct, and non-dominated; effects align with their trade-offs, and the paraphrased scenarios preserve decision-relevant facts and category fit.\",\"suggested_change\":\"\"}",
+          "error": null
+        }
+      ]
+    },
+    {
+      "family": "preference-requirements-iteration",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "pass": 3
+      },
+      "issue_counts": {},
+      "consensus_issues": [],
+      "reviews": [
+        {
+          "family": "preference-requirements-iteration",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "c7bb250d1053b01533650a0421aa98ab1b3f3f2e609dadfe79cc7daaaa78b1b3",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Preference mode is appropriate; all options are safe, competent, distinct, and non-dominated, with effects consistent with their semantics. The variants preserve decision-relevant facts, avoid label/order cues, and fit the stated category.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Preference mode is appropriate; all options are safe, competent, distinct, and non-dominated, with effects consistent with their semantics. The variants preserve decision-relevant facts, avoid label/order cues, and fit the stated category.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-requirements-iteration",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "e6803dbfe63e4d2c49265f8014e766c845d8020a2c0181c9b6d7c8625cd9320b",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are appropriate preference-mode instruments with safe, competent, distinct trade-offs. Effects, category, and decision-relevant scenario facts are consistent across paraphrased variants.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are appropriate preference-mode instruments with safe, competent, distinct trade-offs. Effects, category, and decision-relevant scenario facts are consistent across paraphrased variants.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-requirements-iteration",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "1dfb51280c42be5b6f9e1d1af39593fa4d6ce2a7fa90071eb138edb6940e9fa5",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are appropriate preference probes with safe, competent, and meaningfully distinct requirement-elaboration trade-offs. Action semantics, declared effects, category, and cross-variant facts are consistent; label permutations do not introduce cues.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are appropriate preference probes with safe, competent, and meaningfully distinct requirement-elaboration trade-offs. Action semantics, declared effects, category, and cross-variant facts are consistent; label permutations do not introduce cues.\",\"suggested_change\":\"\"}",
+          "error": null
+        }
+      ]
+    },
+    {
+      "family": "preference-test-scope",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "pass": 1,
+        "revise": 2
+      },
+      "issue_counts": {
+        "multi_factor_variant": 2
+      },
+      "consensus_issues": [
+        "multi_factor_variant"
+      ],
+      "reviews": [
+        {
+          "family": "preference-test-scope",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "b104570120f4e9825324b9ac15668396f1d4b812d8ab478a739e2d144a7057db",
+          "verdict": "revise",
+          "issue_codes": [
+            "multi_factor_variant"
+          ],
+          "affected_probe_ids": [
+            "preference-test-scope-v1",
+            "preference-test-scope-v2"
+          ],
+          "summary": "The preference-mode trade-offs, category, options, and declared effects are generally sound, but the variants do not preserve all decision-relevant facts: impacted-module coverage becomes importer coverage, a quantified 2% rate of unrelated failures becomes unquantified occasional flakes, and absence of a release gate becomes an explicitly non-release change.",
+          "suggested_change": "Revise one scenario to match the other on test coverage, the 2% unrelated-failure history, and release-gate context while retaining only paraphrase and action-order differences.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"multi_factor_variant\"],\"affected_probe_ids\":[\"preference-test-scope-v1\",\"preference-test-scope-v2\"],\"summary\":\"The preference-mode trade-offs, category, options, and declared effects are generally sound, but the variants do not preserve all decision-relevant facts: impacted-module coverage becomes importer coverage, a quantified 2% rate of unrelated failures becomes unquantified occasional flakes, and absence of a release gate becomes an explicitly non-release change.\",\"suggested_change\":\"Revise one scenario to match the other on test coverage, the 2% unrelated-failure history, and release-gate context while retaining only paraphrase and action-order differences.\"}",
+          "error": null
+        },
+        {
+          "family": "preference-test-scope",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "df2a12286d6a546ff3168e814d44140e160cd41dc9770d1fffe021fa4db67254",
+          "verdict": "revise",
+          "issue_codes": [
+            "multi_factor_variant"
+          ],
+          "affected_probe_ids": [
+            "preference-test-scope-v1",
+            "preference-test-scope-v2"
+          ],
+          "summary": "The variants alter more than surface phrasing: the stated coverage basis shifts from all impacted-module tests to every importer pass, and the quantified 2% unrelated-failure rate becomes an unquantified frequency.",
+          "suggested_change": "Keep the same test-coverage description and the same quantified historical failure-rate fact in both variants; vary only wording and action order.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"multi_factor_variant\"],\"affected_probe_ids\":[\"preference-test-scope-v1\",\"preference-test-scope-v2\"],\"summary\":\"The variants alter more than surface phrasing: the stated coverage basis shifts from all impacted-module tests to every importer pass, and the quantified 2% unrelated-failure rate becomes an unquantified frequency.\",\"suggested_change\":\"Keep the same test-coverage description and the same quantified historical failure-rate fact in both variants; vary only wording and action order.\"}",
+          "error": null
+        },
+        {
+          "family": "preference-test-scope",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "944d45ce484b656178d6f0b90cad978d2c3ba9bb81b530f3ede40ab4d325b15b",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are appropriate preference-mode test-strategy probes with safe, competent, distinct non-dominated options. The paraphrases preserve the decision-relevant scenario and action semantics, and the category fits.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are appropriate preference-mode test-strategy probes with safe, competent, distinct non-dominated options. The paraphrases preserve the decision-relevant scenario and action semantics, and the category fits.\",\"suggested_change\":\"\"}",
+          "error": null
+        }
+      ]
+    },
+    {
+      "family": "preference-uncertainty-presentation",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "pass": 1,
+        "revise": 2
+      },
+      "issue_counts": {
+        "effect_mismatch": 2
+      },
+      "consensus_issues": [
+        "effect_mismatch"
+      ],
+      "reviews": [
+        {
+          "family": "preference-uncertainty-presentation",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "0c1426aa3f4f7dede53a23936dfcf20e0cfb1b3d5a38cea256151ffc47fe82ff",
+          "verdict": "revise",
+          "issue_codes": [
+            "effect_mismatch"
+          ],
+          "affected_probe_ids": [
+            "preference-uncertainty-presentation-v1",
+            "preference-uncertainty-presentation-v2"
+          ],
+          "summary": "The variants are semantically equivalent and offer distinct, safe presentation trade-offs, but the structured-table option incorrectly claims increased interaction despite requiring no user back-and-forth.",
+          "suggested_change": "Remove the structured-table option’s positive interaction effect or set it to neutral; reserve increased interaction for the option that asks the user to choose a format.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"effect_mismatch\"],\"affected_probe_ids\":[\"preference-uncertainty-presentation-v1\",\"preference-uncertainty-presentation-v2\"],\"summary\":\"The variants are semantically equivalent and offer distinct, safe presentation trade-offs, but the structured-table option incorrectly claims increased interaction despite requiring no user back-and-forth.\",\"suggested_change\":\"Remove the structured-table option’s positive interaction effect or set it to neutral; reserve increased interaction for the option that asks the user to choose a format.\"}",
+          "error": null
+        },
+        {
+          "family": "preference-uncertainty-presentation",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "426b178131bc69f87693ea27fcd4cb97873b7b3441a62c2340076c91eeae44aa",
+          "verdict": "revise",
+          "issue_codes": [
+            "effect_mismatch"
+          ],
+          "affected_probe_ids": [
+            "preference-uncertainty-presentation-v1",
+            "preference-uncertainty-presentation-v2"
+          ],
+          "summary": "The structured table option is described as increasing interaction and user control, but providing a table without a choice point or follow-up does not inherently create back-and-forth or user intervention ownership.",
+          "suggested_change": "Revise Action B effects to emphasize quality/completeness and reduced speed, while removing or substantially lowering interaction and user_control; alternatively add an explicit user decision or follow-up mechanism to the action.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"effect_mismatch\"],\"affected_probe_ids\":[\"preference-uncertainty-presentation-v1\",\"preference-uncertainty-presentation-v2\"],\"summary\":\"The structured table option is described as increasing interaction and user control, but providing a table without a choice point or follow-up does not inherently create back-and-forth or user intervention ownership.\",\"suggested_change\":\"Revise Action B effects to emphasize quality/completeness and reduced speed, while removing or substantially lowering interaction and user_control; alternatively add an explicit user decision or follow-up mechanism to the action.\"}",
+          "error": null
+        },
+        {
+          "family": "preference-uncertainty-presentation",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "f4fc2e1cfd18f2dacb627cbff183d8017decf5a3f33980881c5f7e58a2bbdfa0",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are safe, preference-relevant, category-appropriate, and preserve the same decision-relevant scenario facts. The presentation options provide distinct, non-dominated granularity, speed, interaction, and user-control trade-offs, with effects consistent with their semantics.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are safe, preference-relevant, category-appropriate, and preserve the same decision-relevant scenario facts. The presentation options provide distinct, non-dominated granularity, speed, interaction, and user-control trade-offs, with effects consistent with their semantics.\",\"suggested_change\":\"\"}",
+          "error": null
+        }
+      ]
+    },
+    {
+      "family": "preference-vague-prototype",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "pass": 2,
+        "revise": 1
+      },
+      "issue_counts": {
+        "underspecified_scenario": 1,
+        "variant_leakage": 1
+      },
+      "consensus_issues": [],
+      "reviews": [
+        {
+          "family": "preference-vague-prototype",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "bc3fb0abcfc5618c170002ed45de06566776dc572f2abd285841d3f3705cac8f",
+          "verdict": "revise",
+          "issue_codes": [
+            "variant_leakage",
+            "underspecified_scenario"
+          ],
+          "affected_probe_ids": [
+            "preference-vague-prototype-v2"
+          ],
+          "summary": "The options are safe, competent, distinct, and appropriately trade off concrete, written, and clarification-first exploration. However, v2’s statement that “user preference is not yet known” ambiguously conflicts with the active preference supplied in preference mode and can disproportionately cue the clarification option; v1 specifically leaves only the ranking presentation unresolved.",
+          "suggested_change": "In v2, replace “user preference is not yet known” with “the ranking presentation has not yet been chosen” or equivalent language clearly distinguishing product-choice ambiguity from the active exploration-style preference.",
+          "raw_response": "{\"verdict\":\"revise\",\"issue_codes\":[\"variant_leakage\",\"underspecified_scenario\"],\"affected_probe_ids\":[\"preference-vague-prototype-v2\"],\"summary\":\"The options are safe, competent, distinct, and appropriately trade off concrete, written, and clarification-first exploration. However, v2’s statement that “user preference is not yet known” ambiguously conflicts with the active preference supplied in preference mode and can disproportionately cue the clarification option; v1 specifically leaves only the ranking presentation unresolved.\",\"suggested_change\":\"In v2, replace “user preference is not yet known” with “the ranking presentation has not yet been chosen” or equivalent language clearly distinguishing product-choice ambiguity from the active exploration-style preference.\"}",
+          "error": null
+        },
+        {
+          "family": "preference-vague-prototype",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "a06e2269fbf7a6e312cca99aff5807273b81f10024a832a430b4a3cb5165c330",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Preference mode, action trade-offs, declared effects, category, and semantic-equivalence variants are appropriate.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Preference mode, action trade-offs, declared effects, category, and semantic-equivalence variants are appropriate.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-vague-prototype",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "c645592bc0d7635bcce69daf3dee43904fdb1479b39566a7758eb4c3a3d2af1b",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants are appropriate preference-mode probes with safe, competent, and meaningfully distinct options. Effects are broadly consistent with the action semantics, the category fits, and the paraphrase/order changes preserve the decision-relevant task facts.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants are appropriate preference-mode probes with safe, competent, and meaningfully distinct options. Effects are broadly consistent with the action semantics, the category fits, and the paraphrase/order changes preserve the decision-relevant task facts.\",\"suggested_change\":\"\"}",
+          "error": null
+        }
+      ]
+    },
+    {
+      "family": "preference-verification-independence",
+      "reviewer_count": 3,
+      "successful_reviews": 3,
+      "verdict_counts": {
+        "pass": 3
+      },
+      "issue_counts": {},
+      "consensus_issues": [],
+      "reviews": [
+        {
+          "family": "preference-verification-independence",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "a583d98c458875ec70878e56f83fce2a457272cde856cddff8d94426bee87a4d",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants consistently present four safe, competent, non-dominated corroboration trade-offs. Preference mode and category fit, declared effects align with the actions, and the paraphrased variants preserve decision-relevant facts while remapping labels and order without cues.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants consistently present four safe, competent, non-dominated corroboration trade-offs. Preference mode and category fit, declared effects align with the actions, and the paraphrased variants preserve decision-relevant facts while remapping labels and order without cues.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-verification-independence",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "7c9b50e21f26428674315498290eaeed9f1414bbd75f1d6b320cd1e06eec287d",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants present safe, competent, non-dominated corroboration trade-offs, with effects and category aligned to the scenario. Paraphrase and action-order changes preserve decision-relevant facts.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants present safe, competent, non-dominated corroboration trade-offs, with effects and category aligned to the scenario. Paraphrase and action-order changes preserve decision-relevant facts.\",\"suggested_change\":\"\"}",
+          "error": null
+        },
+        {
+          "family": "preference-verification-independence",
+          "protocol_version": 2,
+          "reviewer_model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+          "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+          "packet_sha256": "14baa8fc8ed79e865f3260f9df0b76b0bc602479a33615fe80bc3231851997b5",
+          "verdict": "pass",
+          "issue_codes": [],
+          "affected_probe_ids": [],
+          "summary": "Both variants appropriately test preference-sensitive corroboration choices. The options are safe, materially distinct, and present non-dominated caution, efficiency, speed, quality, and user-control trade-offs. Declared effects and category fit the actions, and the paraphrased scenarios preserve decision-relevant facts without leakage or multi-factor changes.",
+          "suggested_change": "",
+          "raw_response": "{\"verdict\":\"pass\",\"issue_codes\":[],\"affected_probe_ids\":[],\"summary\":\"Both variants appropriately test preference-sensitive corroboration choices. The options are safe, materially distinct, and present non-dominated caution, efficiency, speed, quality, and user-control trade-offs. Declared effects and category fit the actions, and the paraphrased scenarios preserve decision-relevant facts without leakage or multi-factor changes.\",\"suggested_change\":\"\"}",
+          "error": null
+        }
+      ]
+    }
+  ]
+}

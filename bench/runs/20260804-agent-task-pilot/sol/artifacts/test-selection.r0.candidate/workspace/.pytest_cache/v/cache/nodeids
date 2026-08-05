@@ -1,0 +1,6 @@
+[
+  "tests/test_consumer_contract.py::test_result_remains_a_plain_list_of_original_spellings",
+  "tests/test_tags.py::test_equivalent_case_uses_first_spelling",
+  "tests/test_tags.py::test_omits_blank_tags",
+  "tests/test_tags.py::test_preserves_order_and_does_not_mutate_input"
+]

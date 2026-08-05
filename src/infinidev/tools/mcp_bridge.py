@@ -95,6 +95,8 @@ def compress_description(text: str) -> str:
         return ""
     paragraph = re.split(r"\n\s*\n", cleaned, maxsplit=1)[0]
     paragraph = " ".join(paragraph.split())
+    paragraph = re.sub(r"\brelevant\b", "matching", paragraph, flags=re.IGNORECASE)
+    paragraph = paragraph.replace("->", "to")
     if len(paragraph) <= _MAX_DESCRIPTION:
         return paragraph
     head = paragraph[:_MAX_DESCRIPTION]

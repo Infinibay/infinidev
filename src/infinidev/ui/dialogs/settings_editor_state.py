@@ -47,6 +47,13 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
         ("LLM_TIMEOUT", "LLM request timeout in seconds", "int"),
     ],
+    "Image Generation": [
+        ("IMAGE_GENERATION_PROVIDER", "Separate image provider (empty = disabled)",
+         _OPTIONAL_PROVIDER_SELECT),
+        ("IMAGE_GENERATION_MODEL", "Exact supported image model", "str"),
+        ("IMAGE_GENERATION_BASE_URL", "Image API base URL", "str"),
+        ("IMAGE_GENERATION_API_KEY", "Image API key", "str"),
+    ],
     "Assistant LLM": [
         ("ASSISTANT_LLM_ENABLED", "Enable pair-programming critic (runs in parallel)", "bool"),
         ("ASSISTANT_LLM_PROVIDER", "Assistant provider (empty = reuse main)",
@@ -109,6 +116,8 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "Prompts": [
         ("PROMPT_STYLE", "Prompt verbosity style (auto=generalized)", "select:auto,full,generalized,coding,extra_simple"),
+        ("USER_PREFERENCE_PROFILE", "Explicit user preference profile JSON path", "str"),
+        ("USER_PREFERENCE_PROFILE_SHA256", "Expected user preference profile SHA-256", "str"),
     ],
     "UI": [
         ("MARKDOWN_MESSAGES", "Render LLM responses with markdown styling", "bool"),
@@ -673,5 +682,4 @@ class SettingsEditorState:
             self._pending_changes.update(updates)
 
         self._behavior_models = None
-
 

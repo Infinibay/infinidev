@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0",
+  "selection": {
+    "method": "campaign_shard",
+    "purpose": "Checkpoint 2: next two unseen decision families with complete option rotations",
+    "parent_manifest_sha256": "878aa4367c9136723df055f20540ff668b6c4d2cb3b7f36899c152f6eb1ce3ad",
+    "parent_probe_count": 26,
+    "start": 2,
+    "count": 2,
+    "end_exclusive": 4
+  },
+  "probe_count": 2,
+  "category_count": 2,
+  "probes": [
+    {
+      "probe_id": "preference-requirements-formality-v1",
+      "category": "complex_requirement_analysis",
+      "family": "preference-requirements-formality",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-context-compactness-v1",
+      "category": "context_selection",
+      "family": "preference-context-compactness",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    }
+  ]
+}

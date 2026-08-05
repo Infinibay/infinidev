@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "target_cases": 672,
+  "target_families": 224,
+  "design": "432 linguistic cases plus 240 execution-policy comprehension cases; every research question is backed by a controlled three-variant family",
+  "problem_map": "docs/INFINIDEV_LLM_PROBLEM_MAP.md",
+  "research_chain": [
+    "observed_infinidev_problem",
+    "information_needed_about_model",
+    "observable_hypothesis",
+    "controlled_questions_or_examples",
+    "evidence_to_collect",
+    "possible_product_intervention",
+    "held_out_confirmation"
+  ],
+  "linguistic_phenomena": [
+    "register_formal_informal_semiformal",
+    "structure_list_paragraph_table",
+    "directness_explicit_indirect",
+    "modal_force_never_always_sometimes_should_default",
+    "negation_and_scope",
+    "quantifiers_all_any_each_most_some",
+    "exceptions_unless_except_only_if",
+    "instruction_conflict_and_precedence",
+    "vagueness_and_underspecification",
+    "missing_context_and_referents",
+    "irrelevant_information_and_noise",
+    "examples_consistent_or_conflicting_with_rules",
+    "instruction_position_and_order",
+    "pragmatics_implication_and_politeness",
+    "typos_grammar_and_code_switching",
+    "output_format_and_schema_language",
+    "temporal_conditionals_and_state_changes",
+    "compound_requests_and_nested_scope"
+  ],
+  "task_domains": [
+    "planning",
+    "implementation",
+    "testing_and_verification",
+    "code_review",
+    "web_research",
+    "user_interaction",
+    "decision_support",
+    "authorization_and_external_state"
+  ],
+  "execution_dimensions": [
+    "planning_before_action",
+    "failure_recovery",
+    "speed_vs_completeness",
+    "safety_and_reversibility",
+    "confidence_and_claims",
+    "priority_resolution",
+    "vagueness_and_clarification",
+    "incremental_execution",
+    "contradictions_and_precedence",
+    "evidence_search_and_escalation"
+  ],
+  "legacy_semantic_categories": [
+    "objective_scope",
+    "deliverable_format",
+    "constraint_precedence",
+    "authorization_boundary",
+    "decision_ownership",
+    "ambiguity_resolution",
+    "verification_and_completion",
+    "interaction_and_stop_conditions",
+    "research_and_source_requirements",
+    "code_review_intent",
+    "implementation_reversibility",
+    "planning_vs_execution"
+  ],
+  "required_fields": [
+    "objective",
+    "deliverables",
+    "constraints",
+    "user_owned_decisions",
+    "authorized_actions",
+    "unauthorized_actions",
+    "verification",
+    "ambiguities",
+    "stop_conditions"
+    ,"conflicts"
+    ,"priority_resolution"
+    ,"interpretation_risks"
+  ],
+  "design_requirements": [
+    "Every case is isolated and has no dependency on another case.",
+    "Calibration and validation families do not paraphrase one another.",
+    "At least half of cases contain a tempting but unauthorized inference.",
+    "At least one quarter contain a genuine user-owned decision.",
+    "At least one quarter are fully actionable despite superficial ambiguity.",
+    "Keys describe meaning; they do not prescribe one universal interaction style.",
+    "Free reconstruction is retained alongside structured fields and any later scores."
+    ,"Equivalent variants preserve the interpretation key while changing one linguistic factor."
+    ,"Contrast variants change one semantic operator and receive a different interpretation key."
+    ,"Format preference is inferred from accuracy and stability, never from self-reported preference alone."
+    ,"Each family records register, structure, modality, ambiguity, conflict, noise, example role, language, and instruction position."
+  ]
+}

@@ -36,6 +36,24 @@ def _local_tools(monkeypatch: pytest.MonkeyPatch):
     for them and this guard does not apply to them.
     """
     monkeypatch.setattr(settings, "COMMAND_OUTPUT_CAPTURE_ENABLED", True)
+    generation_settings = {
+        "IMAGE_GENERATION_PROVIDER": "openai",
+        "IMAGE_GENERATION_MODEL": "gpt-image-1",
+        "IMAGE_GENERATION_BASE_URL": "",
+        "IMAGE_GENERATION_API_KEY": "catalog-test-key",
+        "IMAGE_GENERATION_ACCOUNT_ID": "catalog-test-account",
+        "IMAGE_GENERATION_PROJECT_ID": "catalog-test-project",
+        "IMAGE_GENERATION_TRANSPORT": "https",
+        "IMAGE_GENERATION_ADAPTER": "litellm.image_generation",
+        "IMAGE_GENERATION_MECHANISM": "openai_images_api",
+        "IMAGE_GENERATION_OPERATION": "images.generate",
+        "IMAGE_GENERATION_REVISION": "2025-04-01",
+    }
+    for name, value in generation_settings.items():
+        monkeypatch.setattr(settings, name, value)
+    from infinidev.config.model_capabilities import capability_resolver
+
+    capability_resolver.invalidate()
     return [
         t for t in get_tools_for_role("developer", supports_vision=True)
         if getattr(t, "mcp_server", None) is None

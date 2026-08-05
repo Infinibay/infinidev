@@ -106,6 +106,21 @@ def test_event_lifecycle_keeps_one_row_and_only_the_latest_lines():
     assert "_live_output_partial" not in message
 
 
+def test_model_call_replaces_stale_working_label_with_current_phase():
+    app = _App()
+    app._chat_history_control.work_label = "Working"
+
+    process_event(
+        app,
+        "loop_llm_call_start",
+        {"phase": "deciding", "iteration": 2, "tool_calls_step": 1},
+    )
+
+    assert app._chat_history_control.work_label == "Model is deciding next action"
+    assert app._chat_history_control.invalidations == 1
+    assert app.invalidations == 1
+
+
 def test_running_command_is_visible_and_click_reveals_live_tail():
     message = {
         "type": "tool_call",

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "source_brief_sha256": "63db5c15a312f477cb2737da2e9556bd387259605c6b7c17cb3c775b0632a081",
+  "model": "Terra",
+  "model_identity": "openai_subscription:gpt-5.6-terra:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "utility_profile_sha256": "2fcdfbcc726c06a9bceb7c2046bd76c1b9cd6219029339aa563040c85ba02f95",
+  "calibration_role": "developer",
+  "candidates": [
+    {
+      "name": "quality-control-explanation-depth",
+      "kind": "preference_compensation",
+      "guidance_style": "advisory",
+      "guidance": "When the active user prioritizes quality and control, prefer a concise outcome followed by a reviewable walkthrough of decisive evidence, alternatives, and relevant follow-ups. Let the user choose whether to expand lower-impact detail.",
+      "evidence_probe_ids": [
+        "interaction-explanation-depth-v1",
+        "interaction-explanation-depth-v2",
+        "interaction-proactive-suggestions-v2"
+      ],
+      "rationale": "Terra's stable raw prior compressed explanations and optional work more than this profile's visibility objective prefers.",
+      "expected_effect": "Expose enough reasoning artifacts and alternatives for user review while retaining a concise lead.",
+      "regression_risks": [
+        "May increase response length for straightforward work.",
+        "May surface optional follow-ups that distract from the completed outcome."
+      ]
+    }
+  ]
+}

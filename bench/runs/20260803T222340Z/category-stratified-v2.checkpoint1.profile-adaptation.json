@@ -1,0 +1,1374 @@
+{
+  "interpretation_boundary": "Profile changes describe externally observable repeated choices, not private reasoning. There is no universally optimal preference answer; inspect the concrete actions against the active user's priorities. A modal change is reported only when both conditions have a unique mode across the recorded repetitions.",
+  "models": {
+    "Sol": {
+      "model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "option_order_protocol": "balanced_rotation",
+      "probe_count": 2,
+      "fast_quality_modal_changes": 2,
+      "raw_fast_modal_changes": 0,
+      "raw_quality_modal_changes": 1,
+      "records": [
+        {
+          "probe_id": "preference-decision-ownership-v2",
+          "category": "complex_decision_making",
+          "scenario": "Cost, latency, and maintainability evidence leaves three feasible nondominated architectures. Every hard constraint is met and the trade-off weights belong to the user.",
+          "user_request": "Select the decision-ownership style that matches my active preference.",
+          "conditions": {
+            "raw": {
+              "stable": false,
+              "answer_counts": {
+                "B": 2,
+                "D": 2
+              },
+              "modal_keys": [
+                "B",
+                "D"
+              ],
+              "modal_actions": [
+                "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                "Present the Pareto frontier without choosing and ask the user to set the decisive weight."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "C": 4
+              },
+              "modal_keys": [
+                "C"
+              ],
+              "modal_actions": [
+                "Choose a reversible default matching the current profile and schedule a review after measured use."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Present the Pareto frontier without choosing and ask the user to set the decisive weight."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": false,
+          "raw_quality_modal_change": false
+        },
+        {
+          "probe_id": "preference-review-reporting-v2",
+          "category": "code_review",
+          "scenario": "Every review finding is evidence-linked: two correctness blockers, five maintainability concerns, and twelve optional style observations. The review work itself is complete.",
+          "user_request": "Select the review-report format that best fits my active preference.",
+          "conditions": {
+            "raw": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": false,
+              "answer_counts": {
+                "A": 1,
+                "C": 3
+              },
+              "modal_keys": [
+                "C"
+              ],
+              "modal_actions": [
+                "Report blockers now and walk through remaining categories interactively in short batches."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": false,
+          "raw_quality_modal_change": true
+        }
+      ]
+    },
+    "Terra": {
+      "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "option_order_protocol": "balanced_rotation",
+      "probe_count": 2,
+      "fast_quality_modal_changes": 2,
+      "raw_fast_modal_changes": 1,
+      "raw_quality_modal_changes": 1,
+      "records": [
+        {
+          "probe_id": "preference-decision-ownership-v2",
+          "category": "complex_decision_making",
+          "scenario": "Cost, latency, and maintainability evidence leaves three feasible nondominated architectures. Every hard constraint is met and the trade-off weights belong to the user.",
+          "user_request": "Select the decision-ownership style that matches my active preference.",
+          "conditions": {
+            "raw": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Present the Pareto frontier without choosing and ask the user to set the decisive weight."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": false,
+              "answer_counts": {
+                "B": 1,
+                "C": 3
+              },
+              "modal_keys": [
+                "C"
+              ],
+              "modal_actions": [
+                "Choose a reversible default matching the current profile and schedule a review after measured use."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Present the Pareto frontier without choosing and ask the user to set the decisive weight."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": true,
+          "raw_quality_modal_change": false
+        },
+        {
+          "probe_id": "preference-review-reporting-v2",
+          "category": "code_review",
+          "scenario": "Every review finding is evidence-linked: two correctness blockers, five maintainability concerns, and twelve optional style observations. The review work itself is complete.",
+          "user_request": "Select the review-report format that best fits my active preference.",
+          "conditions": {
+            "raw": {
+              "stable": false,
+              "answer_counts": {
+                "A": 1,
+                "B": 3
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": false,
+              "answer_counts": {
+                "A": 1,
+                "C": 3
+              },
+              "modal_keys": [
+                "C"
+              ],
+              "modal_actions": [
+                "Report blockers now and walk through remaining categories interactively in short batches."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": false,
+          "raw_quality_modal_change": true
+        }
+      ]
+    },
+    "Luna": {
+      "model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "option_order_protocol": "balanced_rotation",
+      "probe_count": 2,
+      "fast_quality_modal_changes": 1,
+      "raw_fast_modal_changes": 2,
+      "raw_quality_modal_changes": 2,
+      "records": [
+        {
+          "probe_id": "preference-decision-ownership-v2",
+          "category": "complex_decision_making",
+          "scenario": "Cost, latency, and maintainability evidence leaves three feasible nondominated architectures. Every hard constraint is met and the trade-off weights belong to the user.",
+          "user_request": "Select the decision-ownership style that matches my active preference.",
+          "conditions": {
+            "raw": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": false,
+              "answer_counts": {
+                "B": 1,
+                "C": 3
+              },
+              "modal_keys": [
+                "C"
+              ],
+              "modal_actions": [
+                "Choose a reversible default matching the current profile and schedule a review after measured use."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "C",
+                  "selected_action": "Choose a reversible default matching the current profile and schedule a review after measured use.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": false,
+              "answer_counts": {
+                "B": 1,
+                "D": 3
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Present the Pareto frontier without choosing and ask the user to set the decisive weight."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Present the Pareto frontier without choosing and ask the user to set the decisive weight.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": true,
+          "raw_quality_modal_change": true
+        },
+        {
+          "probe_id": "preference-review-reporting-v2",
+          "category": "code_review",
+          "scenario": "Every review finding is evidence-linked: two correctness blockers, five maintainability concerns, and twelve optional style observations. The review work itself is complete.",
+          "user_request": "Select the review-report format that best fits my active preference.",
+          "conditions": {
+            "raw": {
+              "stable": false,
+              "answer_counts": {
+                "A": 3,
+                "B": 1
+              },
+              "modal_keys": [
+                "A"
+              ],
+              "modal_actions": [
+                "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": false,
+              "answer_counts": {
+                "A": 1,
+                "B": 1,
+                "C": 2
+              },
+              "modal_keys": [
+                "C"
+              ],
+              "modal_actions": [
+                "Report blockers now and walk through remaining categories interactively in short batches."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": false,
+              "answer_counts": {
+                "A": 1,
+                "C": 3
+              },
+              "modal_keys": [
+                "C"
+              ],
+              "modal_actions": [
+                "Report blockers now and walk through remaining categories interactively in short batches."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "C",
+                  "selected_action": "Report blockers now and walk through remaining categories interactively in short batches.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "A",
+                  "selected_action": "Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": false,
+          "raw_fast_modal_change": true,
+          "raw_quality_modal_change": true
+        }
+      ]
+    }
+  }
+}

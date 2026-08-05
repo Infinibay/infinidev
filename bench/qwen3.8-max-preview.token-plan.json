@@ -1,0 +1,15 @@
+{
+  "provider": "qwen",
+  "model": "qwen3.8-max-preview",
+  "availability": "token_plan_only",
+  "openai_compatible_base_url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+  "context_tokens": 1000000,
+  "reasoning_efforts": [
+    "low",
+    "medium",
+    "xhigh"
+  ],
+  "automated_campaign_allowed": false,
+  "restriction": "Token Plan permits interactive programming and agent tools only; automated scripts and non-interactive batch processing are prohibited.",
+  "safe_next_step": "Use an endpoint and billing route whose terms explicitly authorize automated evaluation campaigns."
+}

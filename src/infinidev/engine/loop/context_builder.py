@@ -120,6 +120,9 @@ def build_execution_context(
         small_model=is_small,
         workspace_path=getattr(agent, "workspace_path", None),
     )
+    from infinidev.engine.prompt_profile import apply_calibrated_guidance
+
+    system_prompt = apply_calibrated_guidance(system_prompt, "developer")
     if manual_tc:
         # No function-calling support: the schemas have to be described in
         # prose, because there is no channel to pass them through.
@@ -168,6 +171,8 @@ def build_execution_context(
         state=state, file_tracker=file_tracker,
         start_iteration=state.iteration_count,
         task=kwargs.get("task"),
+        context_corpus=kwargs.get("context_corpus"),
+        allow_llm_retries=kwargs.get("allow_llm_retries", True),
     )
 
 
@@ -233,6 +238,8 @@ def _restore_or_start(resume_state: dict | None) -> LoopState:
 
 # ── once per iteration ───────────────────────────────────────────────────
 
+_MAX_RANK_QUERY_CHARS = 8_000
+
 
 def build_iteration_messages(
     engine: Any, ctx: ExecutionContext, iteration: int,
@@ -255,6 +262,10 @@ def build_iteration_messages(
             engine._project_knowledge = []
 
     injected = engine._drain_user_messages()
+    pending_rank_guidance = list(getattr(engine, "_cr_pending_user_guidance", ()))
+    if pending_rank_guidance:
+        engine._cr_pending_user_guidance.clear()
+    rank_guidance = [*pending_rank_guidance, *injected]
 
     from infinidev.engine.static_analysis_timer import measure
 
@@ -267,7 +278,10 @@ def build_iteration_messages(
             # here — dropping the block after turn one simply deleted the
             # project's facts from the model's context.
             project_knowledge=engine._project_knowledge,
-            context_rank_result=_rank_at_pivot(engine, ctx, iteration),
+            context_corpus=getattr(ctx, "context_corpus", None),
+            context_rank_result=_rank_at_pivot(
+                engine, ctx, iteration, user_messages=rank_guidance or None
+            ),
             max_context_tokens=ctx.max_context_tokens,
             session_notes=engine.session_notes or None,
             user_messages=injected or None,
@@ -276,13 +290,32 @@ def build_iteration_messages(
             small_model=ctx.is_small,
         )
 
+    from infinidev.engine.prompt_composition import measure_prompt_composition
+
+    composition = measure_prompt_composition(
+        ctx.system_prompt,
+        user_prompt,
+        getattr(ctx, "tool_schemas", None),
+        iteration=iteration,
+    )
+    ctx.state.prompt_composition_history.append(composition)
+    # A runaway loop should not turn diagnostics into another source of bloat.
+    if len(ctx.state.prompt_composition_history) > 100:
+        del ctx.state.prompt_composition_history[:-100]
+
     return [
         {"role": "system", "content": ctx.system_prompt},
         {"role": "user", "content": _with_attachments(engine, ctx, user_prompt, first_turn)},
     ]
 
 
-def _rank_at_pivot(engine: Any, ctx: ExecutionContext, iteration: int) -> Any | None:
+def _rank_at_pivot(
+    engine: Any,
+    ctx: ExecutionContext,
+    iteration: int,
+    *,
+    user_messages: list[str] | None = None,
+) -> Any | None:
     """Recompute the context ranking, but only where it can have changed.
 
     A pivot is the first iteration or a change of active step. Between
@@ -297,13 +330,17 @@ def _rank_at_pivot(engine: Any, ctx: ExecutionContext, iteration: int) -> Any | 
             return None
         active = ctx.state.plan.active_step
         pivot_key = (active.index, active.title) if active else (-1, "")
-        if iteration != ctx.start_iteration and pivot_key == engine._cr_last_pivot_key:
+        if (
+            not user_messages
+            and iteration != ctx.start_iteration
+            and pivot_key == engine._cr_last_pivot_key
+        ):
             return engine._cr_cached_result
 
         from infinidev.engine.context_rank.ranker import rank
 
         result = rank(
-            ctx.desc,
+            _rank_query(ctx.desc, active, user_messages),
             engine._cr_hooks._session_id,
             engine._cr_hooks._task_id,
             iteration,
@@ -313,7 +350,33 @@ def _rank_at_pivot(engine: Any, ctx: ExecutionContext, iteration: int) -> Any | 
         )
         engine._cr_cached_result = result
         engine._cr_last_pivot_key = pivot_key
+        delivered = getattr(engine, "_cr_delivered_targets", None)
+        if delivered is not None:
+            for collection in (result.files, result.symbols, result.findings):
+                delivered.update(str(item.target) for item in collection)
     return result
+
+
+def _rank_query(
+    description: str,
+    active_step: Any | None,
+    user_messages: list[str] | None,
+) -> str:
+    """Build a bounded retrieval query from the task's current decision point."""
+    parts = [description.strip()]
+    if active_step is not None:
+        step_parts = [
+            str(getattr(active_step, field, "")).strip()
+            for field in ("title", "explanation", "detail", "expected_output")
+        ]
+        step_text = "\n".join(value for value in step_parts if value)
+        if step_text:
+            parts.append(f"Current step:\n{step_text}")
+    if user_messages:
+        messages = "\n".join(message.strip() for message in user_messages if message.strip())
+        if messages:
+            parts.append(f"New user guidance:\n{messages}")
+    return "\n\n".join(part for part in parts if part)[:_MAX_RANK_QUERY_CHARS]
 
 
 def _with_attachments(
@@ -333,9 +396,9 @@ def _with_attachments(
 
     if engine._supports_vision_cached is None:
         try:
-            from infinidev.config.model_capabilities import _detect_vision_support
+            from infinidev.config.model_capabilities import get_capability_snapshot
 
-            engine._supports_vision_cached = _detect_vision_support()
+            engine._supports_vision_cached = get_capability_snapshot().supports_vision
         except Exception:
             engine._supports_vision_cached = False
 

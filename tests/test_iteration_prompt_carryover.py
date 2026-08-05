@@ -33,6 +33,7 @@ def engine_and_ctx():
         _cr_hooks=SimpleNamespace(_enabled=False),
         _cr_cached_result=None,
         _cr_last_pivot_key=None,
+        _cr_pending_user_guidance=[],
     )
     ctx = SimpleNamespace(
         state=LoopState(),
@@ -68,6 +69,18 @@ def test_project_knowledge_renders_on_a_later_iteration(engine_and_ctx):
     assert "uv run pytest" in _user_turn(messages)
 
 
+def test_controlled_context_corpus_renders_on_every_iteration(engine_and_ctx):
+    engine, ctx = engine_and_ctx
+    ctx.context_corpus = "FILE src/rule.py\nROLLBACK_REQUIRES_REVERSE_ORDER = True"
+
+    first = _user_turn(build_iteration_messages(engine, ctx, iteration=0))
+    later = _user_turn(build_iteration_messages(engine, ctx, iteration=4))
+
+    assert "<repository-context-corpus>" in first
+    assert "ROLLBACK_REQUIRES_REVERSE_ORDER" in first
+    assert "ROLLBACK_REQUIRES_REVERSE_ORDER" in later
+
+
 def test_project_knowledge_renders_on_the_first_iteration_too(engine_and_ctx, monkeypatch):
     engine, ctx = engine_and_ctx
     import infinidev.db.service as db
@@ -101,3 +114,99 @@ def test_context_rank_block_is_resent_from_cache_between_pivots(engine_and_ctx):
         result = _rank_at_pivot(engine, ctx, iteration=3)
 
     assert result is sentinel, "between pivots the cached ranking must be re-sent"
+
+
+def test_context_rank_query_tracks_active_step_and_new_user_guidance(
+    engine_and_ctx, monkeypatch
+):
+    from infinidev.engine.loop.context_builder import _rank_at_pivot
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    engine, ctx = engine_and_ctx
+    engine._cr_hooks._enabled = True
+    engine._cr_hooks._session_id = "session"
+    engine._cr_hooks._task_id = "task"
+    engine._cr_hooks._task_embedding = None
+    engine._cr_hooks._task_embedding_simplified = None
+    ctx.state.plan.steps = [
+        PlanStep(
+            index=2,
+            title="Verify migration rollback",
+            explanation="Inspect the transaction boundary",
+            expected_output="Rollback test passes",
+            status="active",
+        )
+    ]
+    queries: list[str] = []
+    sentinel = object()
+
+    def fake_rank(query, *args, **kwargs):
+        queries.append(query)
+        return sentinel
+
+    from infinidev.config import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod.settings, "CONTEXT_RANK_ENABLED", True, raising=False)
+    monkeypatch.setattr("infinidev.engine.context_rank.ranker.rank", fake_rank)
+
+    result = _rank_at_pivot(
+        engine,
+        ctx,
+        iteration=3,
+        user_messages=["Use the PostgreSQL adapter, not SQLite."],
+    )
+
+    assert result is sentinel
+    assert "Verify migration rollback" in queries[0]
+    assert "Rollback test passes" in queries[0]
+    assert "PostgreSQL adapter" in queries[0]
+
+
+def test_new_user_guidance_invalidates_same_step_context_rank_cache(
+    engine_and_ctx, monkeypatch
+):
+    from infinidev.engine.loop.context_builder import _rank_at_pivot
+
+    engine, ctx = engine_and_ctx
+    engine._cr_hooks._enabled = True
+    engine._cr_hooks._session_id = "session"
+    engine._cr_hooks._task_id = "task"
+    engine._cr_hooks._task_embedding = None
+    engine._cr_hooks._task_embedding_simplified = None
+    engine._cr_last_pivot_key = (-1, "")
+    engine._cr_cached_result = object()
+    calls = 0
+
+    def fake_rank(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return object()
+
+    from infinidev.config import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod.settings, "CONTEXT_RANK_ENABLED", True, raising=False)
+    monkeypatch.setattr("infinidev.engine.context_rank.ranker.rank", fake_rank)
+
+    _rank_at_pivot(engine, ctx, iteration=3, user_messages=["Change the target module."])
+
+    assert calls == 1
+
+
+def test_mid_step_guidance_feeds_next_rank_once(engine_and_ctx, monkeypatch):
+    engine, ctx = engine_and_ctx
+    engine._cr_pending_user_guidance = ["The user changed the database target."]
+    seen: list[list[str] | None] = []
+
+    def fake_rank_at_pivot(engine, ctx, iteration, *, user_messages=None):
+        seen.append(user_messages)
+        return None
+
+    monkeypatch.setattr(
+        "infinidev.engine.loop.context_builder._rank_at_pivot", fake_rank_at_pivot
+    )
+
+    build_iteration_messages(engine, ctx, iteration=4)
+    build_iteration_messages(engine, ctx, iteration=5)
+
+    assert seen == [["The user changed the database target."], None]
+    assert engine._cr_pending_user_guidance == []

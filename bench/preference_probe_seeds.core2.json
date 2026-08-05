@@ -1,0 +1,189 @@
+{
+  "generator": "manual/codex-preference-core2@2026-08-03",
+  "families": [
+    {
+      "category":"ambiguity_and_clarification","family":"preference-ambiguity-timing","tags":["ambiguity","interaction","reversibility"],
+      "scenarios":["A private helper can use either of two established local names. Both preserve behavior, tests, and public interfaces; renaming later is trivial.","Two repository conventions support different names for a private helper. Either choice passes tests, changes no public API, and is cheaply reversible."],
+      "user_requests":["Choose how to handle this low-impact ambiguity according to my collaboration preference.","Select whether to clarify or infer the name using my active preference."],
+      "actions":[
+        {"id":"ask-first","text":"Ask one focused naming question and wait before editing.","effects":{"interaction":0.9,"user_control":1.0,"caution":0.5,"speed":-0.7,"autonomy":-0.8},"rationale":"Maximizes explicit user ownership but blocks a reversible local change."},
+        {"id":"infer-disclose","text":"Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.","effects":{"autonomy":0.9,"speed":0.9,"cost_efficiency":0.8,"user_control":0.1},"rationale":"Preserves momentum while making the reversible inference visible."},
+        {"id":"prepare-choice","text":"Show both names with their local precedents and recommend one without editing yet.","effects":{"user_control":0.9,"interaction":0.7,"quality":0.6,"speed":-0.3,"autonomy":-0.5},"rationale":"Improves the user's decision evidence with moderate interaction cost."},
+        {"id":"prototype","text":"Use the locally dominant name in a small draft diff and invite correction before broader work.","effects":{"speed":0.6,"interaction":0.5,"autonomy":0.5,"user_control":0.5,"cost_efficiency":0.3},"rationale":"Turns the abstract choice into reversible concrete feedback."}
+      ],
+      "gold_rationale":"Both names are locally supported, private, behavior-preserving, tested, and cheaply reversible; the best policy therefore depends on desired autonomy, speed, interaction, and user control rather than correctness.",
+      "hypothesis":"The model adapts clarification timing to the user's interaction preference when ambiguity is explicitly low-impact and reversible.",
+      "decisive_information":"No public behavior, safety property, or difficult-to-reverse decision differs; only collaboration style resolves the naming choice.",
+      "variant_axis":"Reorder local-convention, privacy, and reversibility facts plus option positions.",
+      "failure_signal":"The model treats asking or inferring as universally mandatory and ignores a profile that clearly prefers another safe policy.",
+      "calibration_use":"Calibrate whether this model needs guidance to ask less, expose assumptions more clearly, or preserve additional user control for reversible ambiguity.",
+      "preference_tradeoff":"Explicit clarification and user ownership versus autonomous reversible inference, speed, and concrete feedback."
+    },
+    {
+      "category":"ambiguity_and_clarification","family":"preference-ambiguity-batching","tags":["ambiguity","questions","cognitive-load"],
+      "scenarios":["A feature request leaves four independent presentation preferences unspecified. None affects safety or architecture, and implementation can start only after all four are selected.","Four unrelated UI presentation choices remain open. They do not alter architecture or safety, but each must be decided before implementation is complete."],
+      "user_requests":["Choose how to ask these questions according to my preferred interaction style.","Select the clarification cadence that matches my active preference."],
+      "actions":[
+        {"id":"batch","text":"Ask all four concise questions in one structured message with recommended defaults.","effects":{"speed":0.8,"cost_efficiency":0.8,"user_control":0.8,"interaction":0.3},"rationale":"Minimizes round trips and exposes the full decision set at once."},
+        {"id":"one-by-one","text":"Ask one question at a time and use each answer to frame the next interaction.","effects":{"interaction":1.0,"user_control":0.9,"quality":0.5,"speed":-0.8,"cost_efficiency":-0.6},"rationale":"Reduces per-turn cognitive load and supports adaptive conversation at more latency."},
+        {"id":"defaults-confirm","text":"Propose local-convention defaults for all four and ask for a single confirmation or corrections.","effects":{"autonomy":0.7,"speed":1.0,"cost_efficiency":0.9,"user_control":0.5,"interaction":-0.1},"rationale":"Compresses interaction while keeping the user able to override every choice."},
+        {"id":"visual-options","text":"Present a compact comparison table and let the user answer any subset before following up on omissions.","effects":{"quality":0.7,"user_control":1.0,"interaction":0.6,"speed":0.2},"rationale":"Improves comparative visibility and flexible response order with moderate setup cost."}
+      ],
+      "gold_rationale":"All four methods obtain every required preference before completion and preserve user choice; they differ only in round trips, cognitive load, recommendation strength, and presentation overhead.",
+      "hypothesis":"The model chooses clarification batching from the user's desired conversational cadence instead of assuming one interaction pattern fits everyone.",
+      "decisive_information":"The ambiguities are independent, non-safety-critical, and all must eventually be answered, leaving only interaction design as the variable.",
+      "variant_axis":"Change fact order and option positions while preserving four independent presentation decisions.",
+      "failure_signal":"The model drops a required question or universalizes batch size without reference to the active interaction preference.",
+      "calibration_use":"Use selections to calibrate question batching, recommended defaults, and progressive disclosure guidance for this model.",
+      "preference_tradeoff":"Fewer round trips and stronger defaults versus lower per-turn cognitive load, adaptive interaction, and explicit control."
+    },
+
+    {
+      "category":"complex_requirement_analysis","family":"preference-requirements-formality","tags":["requirements","traceability","documentation"],
+      "scenarios":["A bounded change has twelve explicit requirements, six non-goals, and five acceptance checks. All fit on one page and no regulated traceability format is required.","Twelve requirements, six exclusions, and five acceptance checks define a non-regulated one-page change. The team accepts either structured or lightweight requirement artifacts."],
+      "user_requests":["Choose the requirement artifact that matches my preferred traceability level.","Select how formally to represent these requirements using my active preference."],
+      "actions":[
+        {"id":"matrix","text":"Create a requirement-to-design-to-test matrix with an identifier and status for every item.","effects":{"quality":0.9,"caution":0.8,"user_control":0.8,"speed":-0.7,"cost_efficiency":-0.5},"rationale":"Maximizes explicit coverage and auditability at documentation cost."},
+        {"id":"checklist","text":"Maintain a compact grouped checklist linking each requirement to its implementation and evidence.","effects":{"quality":0.7,"speed":0.6,"cost_efficiency":0.7,"user_control":0.5},"rationale":"Retains traceability with less ceremony and fewer artifact fields."},
+        {"id":"executable","text":"Encode acceptance checks as executable tests and keep non-goals in a concise design note.","effects":{"quality":0.9,"speed":0.3,"cost_efficiency":0.5,"autonomy":0.5,"user_control":0.2},"rationale":"Prioritizes executable proof while making prose traceability less granular."},
+        {"id":"choose-template","text":"Show matrix and checklist examples with maintenance cost, then let the user select the artifact.","effects":{"user_control":1.0,"interaction":0.8,"quality":0.6,"speed":-0.4,"autonomy":-0.7},"rationale":"Makes documentation overhead and control explicit before authoring."}
+      ],
+      "gold_rationale":"Every artifact preserves all requirements, non-goals, and acceptance checks, and no external regulation mandates a format; users can legitimately trade formal traceability against maintenance cost and executable focus.",
+      "hypothesis":"The model adapts requirement-document formality to the user's traceability preference rather than maximizing documentation by default.",
+      "decisive_information":"Coverage is mandatory but format is unconstrained, the change is bounded, and all options retain explicit requirements and evidence links.",
+      "variant_axis":"Reorder requirement counts, regulation status, and artifact freedom plus options.",
+      "failure_signal":"The model discards constraints or declares a single documentation format universally necessary despite the active profile.",
+      "calibration_use":"Calibrate prompt guidance for matrices, lightweight linked checklists, executable specifications, or explicit template selection.",
+      "preference_tradeoff":"Formal auditability and user visibility versus documentation speed, maintenance efficiency, and executable evidence."
+    },
+    {
+      "category":"complex_requirement_analysis","family":"preference-requirements-iteration","tags":["requirements","iteration","delivery"],
+      "scenarios":["A new internal workflow has three independently deployable slices. Product behavior is understood, but low-impact copy and ordering preferences will improve after users see the first slice.","Three slices of an internal workflow can deploy independently. Core behavior is known; presentation details are safe, reversible, and likely to benefit from feedback on a working first slice."],
+      "user_requests":["Choose the elaboration strategy that matches my specification-versus-learning preference.","Select how to refine the requirements according to my active preference."],
+      "actions":[
+        {"id":"spec-first","text":"Resolve and document every slice and presentation decision before implementing any code.","effects":{"user_control":0.8,"caution":0.8,"quality":0.6,"speed":-0.8,"interaction":0.5},"rationale":"Maximizes advance predictability while delaying executable feedback."},
+        {"id":"slice-first","text":"Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.","effects":{"speed":0.8,"quality":0.8,"interaction":0.6,"autonomy":0.5,"caution":0.2},"rationale":"Uses working evidence early while accepting evolving downstream detail."},
+        {"id":"skeleton","text":"Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.","effects":{"quality":0.8,"speed":0.6,"caution":0.6,"cost_efficiency":0.7},"rationale":"Locks structural invariants while preserving inexpensive learning."},
+        {"id":"parallel-review","text":"Draft all requirements provisionally, implement slice one, and ask the user to review the remaining draft against it.","effects":{"user_control":0.8,"interaction":0.8,"quality":0.8,"speed":0.1},"rationale":"Combines broad visibility with concrete feedback at additional coordination cost."}
+      ],
+      "gold_rationale":"All strategies lock hard behavior before deployment and keep uncertain presentation details reversible; the unresolved choice is how much specification certainty to buy before executable feedback.",
+      "hypothesis":"The model conditions up-front elaboration versus incremental learning on the user's preferred delivery and collaboration style.",
+      "decisive_information":"Slices are independent, hard behavior is understood, and remaining uncertainty is low-impact and feedback-sensitive rather than a safety blocker.",
+      "variant_axis":"Move slice independence, known behavior, and reversible uncertainty facts plus option positions.",
+      "failure_signal":"The model either freezes speculative detail or begins without hard contracts regardless of the profile and stated boundaries.",
+      "calibration_use":"Use results to calibrate model guidance for specification-first, vertical-slice, contract-skeleton, or collaborative hybrid elaboration.",
+      "preference_tradeoff":"Up-front predictability and control versus faster executable learning, adaptability, and lower speculative planning cost."
+    },
+
+    {
+      "category":"vague_requirement_analysis","family":"preference-vague-inference","tags":["vagueness","local-conventions","autonomy"],
+      "scenarios":["The user says 'make this internal diagnostics panel cleaner.' The repository has a consistent spacing and grouping pattern, all changes are visual and reversible, and no feature behavior needs interpretation.","A reversible internal-only diagnostics UI should be made 'cleaner.' Nearby panels establish one strong visual convention; functionality and public behavior remain fixed."],
+      "user_requests":["Choose how to resolve the subjective detail according to my autonomy preference.","Select whether to infer or ask using my active collaboration preference."],
+      "actions":[
+        {"id":"infer-local","text":"Apply the nearest established visual convention, preserve behavior, and show the resulting diff.","effects":{"autonomy":0.9,"speed":1.0,"cost_efficiency":0.9,"user_control":0.2},"rationale":"Uses strong local evidence for a reversible subjective choice with minimal interruption."},
+        {"id":"ask-goal","text":"Ask which visual outcome matters most before changing the panel.","effects":{"interaction":0.9,"user_control":1.0,"caution":0.5,"speed":-0.7,"autonomy":-0.8},"rationale":"Maximizes explicit intent discovery but delays an easily reviewed local edit."},
+        {"id":"two-mockups","text":"Prepare two small convention-compatible mockups and ask the user to select one.","effects":{"user_control":0.9,"interaction":0.8,"quality":0.7,"speed":-0.5,"cost_efficiency":-0.3},"rationale":"Makes subjective choice concrete at extra design and review cost."},
+        {"id":"incremental","text":"Make the smallest convention-aligned cleanup first and invite expansion after feedback.","effects":{"speed":0.8,"autonomy":0.6,"interaction":0.4,"quality":0.5,"cost_efficiency":0.8},"rationale":"Creates fast reversible evidence while limiting commitment."}
+      ],
+      "gold_rationale":"The visual choice is private, reversible, behavior-preserving, and strongly informed by local conventions; clarification depth therefore legitimately depends on desired autonomy, interaction, and design exploration.",
+      "hypothesis":"The model uses the active preference to distinguish safe local inference from optional subjective clarification.",
+      "decisive_information":"No product behavior or irreversible design decision is ambiguous; local evidence supports action and every option preserves correction ability.",
+      "variant_axis":"Reorder internal scope, convention strength, and reversibility facts with option permutation.",
+      "failure_signal":"The model refuses all inference or silently makes broad subjective changes without regard to the user's stated collaboration preference.",
+      "calibration_use":"Calibrate whether this model needs encouragement toward bounded inference, focused questions, concrete mockups, or incremental feedback.",
+      "preference_tradeoff":"Fast convention-based autonomy versus explicit subjective control, exploratory comparison, and interaction cost."
+    },
+    {
+      "category":"vague_requirement_analysis","family":"preference-vague-prototype","tags":["vagueness","prototype","specification"],
+      "scenarios":["A user requests a better internal search experience but has not chosen ranking presentation. A throwaway prototype takes 30 minutes; a written option specification takes 20 minutes. Neither changes production state.","Production remains untouched while an internal search presentation is explored. A reversible prototype costs 30 minutes and a comparison specification costs 20; user preference is not yet known."],
+      "user_requests":["Choose the discovery method that matches my preference for concrete versus written exploration.","Select how to resolve this product ambiguity using my active preference."],
+      "actions":[
+        {"id":"prototype","text":"Build one throwaway interactive prototype using existing components and collect concrete feedback.","effects":{"speed":0.4,"quality":0.8,"interaction":0.7,"cost_efficiency":0.2,"autonomy":0.5},"rationale":"Produces experiential evidence quickly but embodies one initial interpretation."},
+        {"id":"written-options","text":"Write a compact comparison of ranking presentations, trade-offs, and acceptance questions before implementation.","effects":{"user_control":0.9,"cost_efficiency":0.7,"caution":0.6,"speed":0.6,"quality":0.5},"rationale":"Supports broad conceptual choice cheaply without interactive feel."},
+        {"id":"two-sketches","text":"Create two low-fidelity static sketches plus a short trade-off table for user selection.","effects":{"user_control":0.9,"interaction":0.7,"quality":0.7,"speed":0.3},"rationale":"Combines visual comparison and explicit trade-offs with moderate effort."},
+        {"id":"interview-first","text":"Ask a focused workflow question first, then choose prototype or specification from the answer.","effects":{"interaction":1.0,"user_control":0.8,"caution":0.7,"speed":-0.3,"autonomy":-0.5},"rationale":"Reduces exploration mismatch through another turn before creating artifacts."}
+      ],
+      "gold_rationale":"Every method is non-production, reversible, bounded, and capable of resolving the presentation ambiguity; users may reasonably prefer experiential learning, conceptual comparison, visual alternatives, or dialogue first.",
+      "hypothesis":"The model adapts ambiguity-resolution artifacts to the user's preferred learning and interaction mode.",
+      "decisive_information":"Prototype and specification costs are both small, neither mutates production, and no safety or architecture fact selects one discovery method.",
+      "variant_axis":"Move cost, production isolation, and unknown-preference facts plus answer order.",
+      "failure_signal":"The model presents a prototype or specification as universally superior instead of using the active user preference.",
+      "calibration_use":"Use choices to tune whether this model should offer prototypes, written option sets, comparative sketches, or focused discovery questions.",
+      "preference_tradeoff":"Experiential concrete feedback versus conceptual breadth, lower cost, explicit user control, and additional interaction."
+    },
+
+    {
+      "category":"research_on_the_web","family":"preference-web-search-depth","tags":["web","research-depth","cost"],
+      "scenarios":["Two current primary sources independently agree on a non-safety-critical library capability. A broader search may find edge cases but costs another hour; the user needs a recommendation today.","A current specification and maintainer documentation converge on the requested library behavior. More web research could uncover uncommon caveats, costs one hour, and is not required for safety."],
+      "user_requests":["Choose when to stop searching according to my research-depth preference.","Select the remaining web-research breadth using my active preference."],
+      "actions":[
+        {"id":"stop-converged","text":"Stop after the convergent primary sources, answer with citations, and state the bounded evidence scope.","effects":{"speed":1.0,"cost_efficiency":1.0,"quality":0.6,"caution":-0.2},"rationale":"Uses authoritative convergence and meets the deadline with explicit scope."},
+        {"id":"broaden","text":"Spend the additional hour searching issue trackers, release notes, and independent implementations for exceptions.","effects":{"quality":0.9,"caution":0.9,"speed":-0.8,"cost_efficiency":-0.7},"rationale":"Increases edge-case coverage and triangulation at material time cost."},
+        {"id":"targeted-caveats","text":"Run a short targeted search only for known failure modes and version-specific caveats, then stop.","effects":{"quality":0.8,"caution":0.7,"speed":0.5,"cost_efficiency":0.7},"rationale":"Adds high-yield exception evidence without a general search expansion."},
+        {"id":"answer-and-offer","text":"Provide the sourced recommendation now and offer the broader caveat investigation as an explicit follow-up.","effects":{"user_control":0.8,"speed":0.8,"interaction":0.5,"quality":0.6,"autonomy":-0.1},"rationale":"Preserves timely value and lets the user purchase marginal research depth."}
+      ],
+      "gold_rationale":"Current primary sources already support a truthful bounded answer and no safety gate requires exhaustive search; extra breadth has legitimate marginal value whose cost depends on the user's research preference.",
+      "hypothesis":"The model adapts web-search stopping depth to the user's evidence and time preference rather than browsing maximally or minimally by rule.",
+      "decisive_information":"Authoritative current sources converge, the decision is non-safety-critical, and broader search offers uncertain edge-case value at a known deadline cost.",
+      "variant_axis":"Reorder source authority, convergence, deadline, and marginal-search facts with option positions.",
+      "failure_signal":"The model ignores the active preference or treats source convergence as requiring either zero caveat work or unlimited browsing.",
+      "calibration_use":"Calibrate model guidance for convergence stopping, targeted caveat searches, broad triangulation, and user-controlled follow-up.",
+      "preference_tradeoff":"Timely cost-efficient authoritative synthesis versus broader exception coverage, caution, and user control over marginal research."
+    },
+    {
+      "category":"research_on_the_web","family":"preference-web-current-detail","tags":["web","temporal-context","reporting"],
+      "scenarios":["The user asks today's supported versions of a tool. The exact current list is verified from official documentation; a version-change timeline is available but adds substantial explanation and is not necessary to use the answer.","Official current documentation establishes the tool's supported-version list. Historical release notes can explain how it changed, although the request asks only for today's state."],
+      "user_requests":["Choose the temporal detail level that matches my reporting preference.","Select how much version history to include using my active preference."],
+      "actions":[
+        {"id":"current-only","text":"Give the exact current list with retrieval date and direct official citations.","effects":{"speed":1.0,"cost_efficiency":1.0,"quality":0.6,"interaction":-0.1},"rationale":"Answers the stated current question precisely with minimal reading cost."},
+        {"id":"timeline","text":"Add a sourced timeline of additions, removals, and migration implications before the current answer.","effects":{"quality":0.9,"user_control":0.7,"caution":0.6,"speed":-0.7,"cost_efficiency":-0.5},"rationale":"Provides rich temporal context and change awareness at substantial detail cost."},
+        {"id":"current-plus-change","text":"Lead with the current list and add only the most recent material change and its date.","effects":{"quality":0.8,"speed":0.6,"cost_efficiency":0.7,"user_control":0.4},"rationale":"Balances directness with the temporal fact most likely to prevent stale assumptions."},
+        {"id":"expandable","text":"Answer concisely and include an optional expandable history section or follow-up offer.","effects":{"user_control":0.9,"speed":0.8,"interaction":0.4,"quality":0.7},"rationale":"Lets the user control historical depth without obscuring the current result."}
+      ],
+      "gold_rationale":"All formats report the same verified current list and citations; history is optional context, so users can legitimately prefer directness, timeline depth, one salient change, or expandable control.",
+      "hypothesis":"The model adapts temporal research reporting depth while keeping the current answer and source date invariant.",
+      "decisive_information":"The current fact is fully verified and history is informative but unnecessary for correctness, leaving presentation depth as a preference.",
+      "variant_axis":"Move current-list, retrieval-date, and timeline-availability facts plus option order.",
+      "failure_signal":"The model omits the current answer, hides source date, or forces historical detail regardless of the user's stated preference.",
+      "calibration_use":"Use selections to tune concise current-state answers, salient-change notes, complete timelines, or expandable historical context.",
+      "preference_tradeoff":"Immediate current-state clarity and low reading cost versus historical context, migration awareness, and user-controlled expansion."
+    },
+
+    {
+      "category":"research_and_source_quality","family":"preference-source-breadth","tags":["sources","triangulation","primary-evidence"],
+      "scenarios":["An official specification and its conformance tests directly answer a technical question. Three independent expert analyses are available for interpretation but do not add authority and require more synthesis.","Direct primary evidence consists of a specification plus conformance suite. Independent expert commentary can add interpretive perspectives at extra reading and synthesis cost."],
+      "user_requests":["Choose the source mix according to my depth-versus-breadth preference.","Select how broadly to source the answer using my active preference."],
+      "actions":[
+        {"id":"primary-deep","text":"Analyze the specification and conformance evidence deeply and cite the exact supporting sections.","effects":{"quality":0.9,"speed":0.5,"cost_efficiency":0.8,"caution":0.5},"rationale":"Prioritizes direct authority and precise applicability with limited perspective breadth."},
+        {"id":"triangulate-all","text":"Add all three independent analyses, reconcile interpretations, and report disagreements.","effects":{"quality":0.9,"caution":0.8,"user_control":0.6,"speed":-0.8,"cost_efficiency":-0.7},"rationale":"Maximizes interpretive breadth and dissent visibility at synthesis cost."},
+        {"id":"one-secondary","text":"Use primary evidence plus one independent analysis selected for direct relevance.","effects":{"quality":0.8,"caution":0.6,"speed":0.6,"cost_efficiency":0.7},"rationale":"Adds an external interpretation check without broad source overhead."},
+        {"id":"primary-answer-options","text":"Answer from primary evidence and list the secondary analyses as optional further reading.","effects":{"user_control":0.8,"speed":0.8,"quality":0.7,"interaction":0.3},"rationale":"Keeps authority and directness while giving the user control over extra perspectives."}
+      ],
+      "gold_rationale":"Primary evidence is sufficient and authoritative, while secondary analyses can improve interpretation and dissent visibility; their marginal value versus synthesis cost is a legitimate user preference.",
+      "hypothesis":"The model adapts source breadth after securing primary evidence instead of equating source count with quality.",
+      "decisive_information":"Specification and tests directly support the answer; secondary sources affect perspective and explanation, not the underlying authority.",
+      "variant_axis":"Reorder primary sufficiency, secondary availability, and synthesis cost with option positions.",
+      "failure_signal":"The model ignores the preference, replaces primary evidence with commentary, or claims more sources are always intrinsically better.",
+      "calibration_use":"Calibrate model guidance for primary-source depth, selective triangulation, broad dissent analysis, or optional further reading.",
+      "preference_tradeoff":"Deep direct authority and efficiency versus interpretive breadth, dissent visibility, synthesis cost, and user-controlled exploration."
+    },
+    {
+      "category":"research_and_source_quality","family":"preference-source-explanation","tags":["sources","reporting","decision-support"],
+      "scenarios":["Research for a reversible dependency choice is complete. Four directly supporting sources agree, uncertainty is low, and the raw notes can support either a short recommendation or a detailed evidence matrix.","Four relevant sources converge with low uncertainty on a reversible dependency recommendation. The evidence is complete and can be presented compactly or as a full comparison artifact."],
+      "user_requests":["Choose the evidence-report format that matches my decision-making preference.","Select how to present the completed research using my active preference."],
+      "actions":[
+        {"id":"concise","text":"Give the recommendation, two decisive reasons, uncertainty qualifier, and direct citations.","effects":{"speed":1.0,"cost_efficiency":1.0,"quality":0.6,"user_control":0.2},"rationale":"Optimizes decision speed while retaining traceable decisive evidence."},
+        {"id":"matrix","text":"Provide a source-by-criterion evidence matrix, conflicts column, and explicit inference notes.","effects":{"quality":1.0,"user_control":0.9,"caution":0.8,"speed":-0.8,"cost_efficiency":-0.6},"rationale":"Maximizes auditability and independent user evaluation at reading cost."},
+        {"id":"layered","text":"Lead with a concise recommendation and follow with an expandable evidence matrix.","effects":{"quality":0.9,"speed":0.7,"user_control":0.8,"cost_efficiency":0.4},"rationale":"Supports both quick consumption and deeper verification with moderate authoring overhead."},
+        {"id":"interactive","text":"Present the recommendation and ask which criteria the user wants expanded from the raw notes.","effects":{"interaction":1.0,"user_control":0.9,"speed":0.2,"autonomy":-0.5,"quality":0.7},"rationale":"Tailors depth conversationally but adds a round trip before full evidence delivery."}
+      ],
+      "gold_rationale":"Every format retains the same recommendation, uncertainty, sources, and raw evidence accessibility; only reading cost, auditability, layering, and interaction differ according to user preference.",
+      "hypothesis":"The model adapts evidence presentation without collapsing raw source reasoning into a score or one universal report style.",
+      "decisive_information":"Research is complete, sources converge, choice is reversible, and the only unresolved decision is how the user wants to consume evidence.",
+      "variant_axis":"Reorder convergence, reversibility, and raw-note availability facts plus choices.",
+      "failure_signal":"The model hides citations or raw evidence, overwhelms a concise-profile user, or withholds detail from a high-control profile.",
+      "calibration_use":"Use results to calibrate concise, matrix-based, layered, or interactive evidence-report guidance for this model.",
+      "preference_tradeoff":"Fast concise recommendation versus exhaustive auditability, layered access, conversational tailoring, and user control."
+    }
+  ]
+}

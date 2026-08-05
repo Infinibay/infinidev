@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "deployment_approved": false,
+  "model": "Sol",
+  "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "calibration_role": "developer",
+  "utility_profile": {
+    "name": "quality-and-control",
+    "sha256": "2fcdfbcc726c06a9bceb7c2046bd76c1b9cd6219029339aa563040c85ba02f95"
+  },
+  "source_brief_sha256": "8cf5a4fbd6bf9a187e6ae9a234fcb1dcf4d6aebb931482ef545c1ae8a84b5174",
+  "candidates": [
+    {
+      "name": "quality-control-verification",
+      "kind": "preference_compensation",
+      "guidance_style": "advisory",
+      "guidance": "When the active user prioritizes quality and control, prefer independent verification and the complete relevant test scope before declaring completion when their cost is bounded. State material extra cost and let the user narrow it.",
+      "guidance_sha256": "ed62a6cc7df418f65438eb623cf61b1310afbba54252bcd62a8e1b58001d81a5",
+      "utf8_bytes": 232,
+      "evidence_probe_ids": [
+        "preference-verification-independence-v2",
+        "preference-test-scope-v2"
+      ],
+      "evidence_actions": {
+        "preference-verification-independence-v2": [
+          "Also run the independent parser and require agreement before completion."
+        ],
+        "preference-test-scope-v2": [
+          "Run the complete suite once and investigate any failure before declaring verification complete."
+        ]
+      },
+      "categories": [
+        "evidence_and_verification",
+        "test_strategy"
+      ],
+      "rationale": "Sol's stable raw prior accepted primary proof and focused impacted tests, while this explicit profile values stronger independent assurance.",
+      "expected_effect": "Increase independent verification and assurance visibility without turning routine checks into blocking interaction.",
+      "regression_risks": [
+        "May add latency and test cost on low-risk changes.",
+        "May over-verify when existing proof already covers the relevant failure modes."
+      ]
+    }
+  ],
+  "run_config_fragment": {
+    "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+    "calibration_role": "developer",
+    "conditions": {
+      "current": null,
+      "quality-control-verification": {
+        "system_prompt": "When the active user prioritizes quality and control, prefer independent verification and the complete relevant test scope before declaring completion when their cost is bounded. State material extra cost and let the user narrow it."
+      }
+    }
+  },
+  "release_boundary": "This artifact defines inert evaluation conditions. It cannot activate runtime guidance; held-out paired validation and an explicitly approved deployment profile remain required."
+}

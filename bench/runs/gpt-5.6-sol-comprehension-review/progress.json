@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "9f492dc5b5d234d67aae23f3890ba4ae56de9f7dc0d9308ad8c1c4f9a354adf4",
+  "all_complete": true,
+  "counts": {
+    "expected_families": 16,
+    "completed_families": 16,
+    "missing_families": 0,
+    "issues": 0
+  },
+  "completed_family_ids": [
+    "compound_requests_and_nested_scope--code_review--v1",
+    "examples_consistent_or_conflicting_with_rules--implementation--v1",
+    "exceptions_unless_except_only_if--decision_support--v1",
+    "execution--authorization_and_external_state--safety_and_reversibility--v1",
+    "execution--code_review--failure_recovery--v1",
+    "execution--decision_support--incremental_execution--v1",
+    "execution--implementation--planning_before_action--v1",
+    "execution--planning--priority_resolution--v1",
+    "execution--testing_and_verification--contradictions_and_precedence--v1",
+    "execution--user_interaction--confidence_and_claims--v1",
+    "execution--web_research--vagueness_and_clarification--v1",
+    "missing_context_and_referents--planning--v1",
+    "modal_force_never_always_sometimes_should_default--testing_and_verification--v1",
+    "pragmatics_implication_and_politeness--web_research--v1",
+    "quantifiers_all_any_each_most_some--user_interaction--v1",
+    "temporal_conditionals_and_state_changes--authorization_and_external_state--v1"
+  ],
+  "missing_family_ids": [],
+  "issues": [],
+  "boundary": "Completeness validates review evidence shape and provenance only. It does not compare against authored keys or approve any family."
+}

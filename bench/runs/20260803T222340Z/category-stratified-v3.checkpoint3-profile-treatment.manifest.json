@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "7059dea3015c0e6afe0f4b6ec6d58913c47ea47a57a1bdda1c22dece2a2ba885",
+  "selection": {
+    "method": "explicit",
+    "purpose": "Predeclared opposing-profile treatment of checkpoint 3 risk ownership and planning-depth priors"
+  },
+  "probe_count": 2,
+  "category_count": 2,
+  "probes": [
+    {
+      "probe_id": "decision-risk-posture-v1",
+      "category": "decision_support_for_users",
+      "family": "decision-risk-posture",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-planning-depth-v1",
+      "category": "decomposition_and_planning",
+      "family": "preference-planning-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    }
+  ]
+}

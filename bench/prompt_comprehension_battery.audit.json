@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "all_passed": true,
+  "checks": {
+    "exactly_672_cases": true,
+    "exactly_224_families": true,
+    "three_variants_per_family_with_one_anchor": true,
+    "eighteen_linguistic_phenomena_plus_execution": true,
+    "eight_domains": true,
+    "study_kind_counts": true,
+    "ten_execution_dimensions_materialized": true,
+    "balanced_splits": true,
+    "families_are_split_atomic": true,
+    "every_phenomenon_and_domain_has_both_splits": true,
+    "all_requests_unique": true,
+    "equivalent_variants_preserve_keys": true,
+    "semantic_contrasts_change_keys": true,
+    "all_expected_fields_present": true,
+    "all_stimulus_dimensions_recorded": true,
+    "all_cases_trace_to_problem": true,
+    "registry_matches_families": true,
+    "registry_has_research_chain": true,
+    "question_catalog_matches_taxonomy": true,
+    "question_ids_are_unique": true,
+    "every_family_has_questions": true,
+    "all_question_references_exist": true,
+    "no_orphan_questions": true,
+    "family_question_links_match_taxonomy": true,
+    "case_question_links_match_family": true,
+    "family_semantics_match_question": true,
+    "all_cases_remain_drafts": true
+  },
+  "counts": {
+    "cases": 672,
+    "families": 224,
+    "phenomena": {
+      "compound_requests_and_nested_scope": 24,
+      "directness_explicit_indirect": 24,
+      "examples_consistent_or_conflicting_with_rules": 24,
+      "exceptions_unless_except_only_if": 24,
+      "execution_policy_comprehension": 240,
+      "instruction_conflict_and_precedence": 24,
+      "instruction_position_and_order": 24,
+      "irrelevant_information_and_noise": 24,
+      "missing_context_and_referents": 24,
+      "modal_force_never_always_sometimes_should_default": 24,
+      "negation_and_scope": 24,
+      "output_format_and_schema_language": 24,
+      "pragmatics_implication_and_politeness": 24,
+      "quantifiers_all_any_each_most_some": 24,
+      "register_formal_informal_semiformal": 24,
+      "structure_list_paragraph_table": 24,
+      "temporal_conditionals_and_state_changes": 24,
+      "typos_grammar_and_code_switching": 24,
+      "vagueness_and_underspecification": 24
+    },
+    "domains": {
+      "authorization_and_external_state": 84,
+      "code_review": 84,
+      "decision_support": 84,
+      "implementation": 84,
+      "planning": 84,
+      "testing_and_verification": 84,
+      "user_interaction": 84,
+      "web_research": 84
+    },
+    "relations": {
+      "adversarial": 72,
+      "anchor": 224,
+      "contrast": 128,
+      "equivalent": 248
+    },
+    "splits": {
+      "calibration": 336,
+      "validation": 336
+    },
+    "study_kinds": {
+      "execution": 240,
+      "linguistic": 432
+    },
+    "execution_dimensions": {
+      "confidence_and_claims": 24,
+      "contradictions_and_precedence": 24,
+      "evidence_search_and_escalation": 24,
+      "failure_recovery": 24,
+      "incremental_execution": 24,
+      "planning_before_action": 24,
+      "priority_resolution": 24,
+      "safety_and_reversibility": 24,
+      "speed_vs_completeness": 24,
+      "vagueness_and_clarification": 24
+    }
+  },
+  "failures": {
+    "malformed_families": [],
+    "equivalent_key_mismatches": [],
+    "unchanged_semantic_contrasts": [],
+    "duplicate_request_groups": []
+  },
+  "review_boundary": "Passing proves structure, traceability, controlled-key relationships, and coverage. Cases remain drafts until human semantic review; this audit cannot establish that a reviewed interpretation key is substantively correct."
+}

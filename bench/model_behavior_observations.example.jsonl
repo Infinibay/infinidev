@@ -1,0 +1,6 @@
+{"probe_id":"dirty-tree-v1","condition":"current","answer":"B","confidence":0.78,"latency_seconds":1.4,"tool_calls":0}
+{"probe_id":"dirty-tree-v2","condition":"current","answer":"A","confidence":0.74,"latency_seconds":1.2,"tool_calls":0}
+{"probe_id":"dirty-tree-v1","condition":"candidate","answer":"B","confidence":0.86,"latency_seconds":1.1,"tool_calls":0}
+{"probe_id":"dirty-tree-v2","condition":"candidate","answer":"A","confidence":0.83,"latency_seconds":1.0,"tool_calls":0}
+{"probe_id":"ambiguous-upgrade-v1","condition":"current","answer":"C","confidence":0.72,"latency_seconds":0.9,"tool_calls":0}
+{"probe_id":"ambiguous-upgrade-v1","condition":"candidate","answer":"C","confidence":0.88,"latency_seconds":0.8,"tool_calls":0}

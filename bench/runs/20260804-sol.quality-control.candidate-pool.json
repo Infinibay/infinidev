@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source_brief_sha256": "8cf5a4fbd6bf9a187e6ae9a234fcb1dcf4d6aebb931482ef545c1ae8a84b5174",
+  "model": "Sol",
+  "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "utility_profile_sha256": "2fcdfbcc726c06a9bceb7c2046bd76c1b9cd6219029339aa563040c85ba02f95",
+  "calibration_role": "developer",
+  "candidates": [
+    {
+      "name": "quality-control-verification",
+      "kind": "preference_compensation",
+      "guidance_style": "advisory",
+      "guidance": "When the active user prioritizes quality and control, prefer independent verification and the complete relevant test scope before declaring completion when their cost is bounded. State material extra cost and let the user narrow it.",
+      "evidence_probe_ids": [
+        "preference-verification-independence-v2",
+        "preference-test-scope-v2"
+      ],
+      "rationale": "Sol's stable raw prior accepted primary proof and focused impacted tests, while this explicit profile values stronger independent assurance.",
+      "expected_effect": "Increase independent verification and assurance visibility without turning routine checks into blocking interaction.",
+      "regression_risks": [
+        "May add latency and test cost on low-risk changes.",
+        "May over-verify when existing proof already covers the relevant failure modes."
+      ]
+    }
+  ]
+}

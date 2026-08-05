@@ -28,6 +28,13 @@ class Agent:
 
     def make_decisions(self, task):
         # product/what decisions were settled and approved upstream
+        never(treat_context_interest_example_or_draft_as_authority_to_act)
+        assert future_or_conditional_permission != current_permission
+        if singular_target.has_multiple_plausible_referents:
+            inspect_read_only(bounds="target resolution")
+            if singular_target.is_still_non_unique:
+                return send_message(ask_for_target)
+            never(broaden_target_to_all_candidates)
         if genuine_blocker(task):
             return send_message(blocker)
         if is_ambiguous_how(task):
@@ -100,12 +107,11 @@ def execute_loop(task):
             assert step.names_file and step.names_function and step.describes_change
         never(plan_8_steps_upfront_with_vague_descriptions)
 
-    # ── Exploration first ─────────────────────────────────────────
-    for step in plan[:2]:
-        assert step.is_read_only     # read_file, code_search, glob only
-        never(edit_before_understanding)
-    # Editing before understanding produces incomplete patches
-    # Most bugs need changes in MULTIPLE locations — find all before editing
+    # ── Exploration proportional to impact ────────────────────────
+    evidence = inspect(task.target, tests_crossing_changed_boundary)
+    if change.affects_shared_contract_or_import_surface:
+        evidence += inspect(affected_callers, dependencies, integration_tests)
+    never(edit_before_understanding_target_and_affected_boundary)
 
     # ── Fix order (when editing multiple things) ──────────────────
     fix_order = [imports, types_and_models, logic, tests, verify]
@@ -119,6 +125,10 @@ def execute_loop(task):
         # Derive the next action from the observed code or failure.
         if complex_decision or error_analysis:
             assert reasoning.references_observed_evidence
+
+        if result.failed:
+            retry_only_if(new_evidence or next_attempt.addresses_diagnosed_cause)
+            never(loop_until_success_or_conceal_material_failures)
 
         # Save important facts BEFORE step_complete
         add_note(key_findings)   # file paths, function names, decisions
@@ -187,12 +197,10 @@ class Developer(Agent):
         assert first_2_steps_are_read_only
 
         # Phase 2: Decide before any edit.
-        design = design_signature_first()
-        edge_cases = [empty, None, invalid_type, boundary, concurrent]
-        existing_tests = read_tests_to_know_expected_behavior()
-        assert design and edge_cases and existing_tests
-        # Trace dependencies: who calls this? what does it call? what breaks?
-        # Don't assume — actually trace it across the codebase
+        if task.changes_interface:
+            design = design_signature_return_and_errors_first()
+        edge_cases = paths_reachable_through_changed_contract()
+        existing_tests = read_tests_crossing_changed_boundary()
 
         # Phase 3: Implement
         scope = task.requested + task.logical_dependencies
@@ -214,10 +222,12 @@ class Developer(Agent):
         never("rewrite entire file to change one function")
 
     def verify(self, change):
-        run_relevant_tests()       # not the full suite — just affected tests
-        if no_tests_exist:
-            write_tests()          # every new function needs a test
-        adversarial_review(None_input, unexpected_args, resource_leaks)
+        run_smallest_test_crossing_changed_boundary()
+        if behavior_changed and no_focused_test_or_named_acceptance_gate:
+            write_regression_test()
+        if change.affects_shared_contract_or_import_surface:
+            run_repository_acceptance_gate()
+        adversarial_review(paths_reachable_through_changed_contract)
 
     def code_quality(self):
         assert readability > performance       # unless user asks otherwise
@@ -229,8 +239,8 @@ class Developer(Agent):
     def bug_fix_workflow(self):
         locate(function_from_bug_report)
         read(implementation_and_context)
-        search(ALL_callers_and_usages)         # not just the first one
-        fix(ALL_affected_locations)            # partial fix is worse than none
+        search(callers_and_usages_reached_by_changed_contract)
+        fix(affected_locations)
         run_tests(); fix_failures(); rerun()
 
     def security(self):
@@ -266,7 +276,7 @@ class Researcher(Agent):
         if not answers_question(existing):
             results = web_search(specific_queries)
             sources = web_fetch(official_docs_preferred)
-            cross_reference(min_sources=2)
+            cross_reference(when=claim.is_consequential_or_disputed_or_surprising)
         if question.involves_project:
             read_codebase(related_files)
 
@@ -274,9 +284,9 @@ class Researcher(Agent):
             lead_with_answer=True,             # first paragraph answers directly
             be_concrete=True,                  # versions, dates, specific values
             include_examples=True,
-            use_tables_for_comparisons=True,
-            cite_sources=True,                 # "description (source: URL)"
-            state_confidence=True,
+            use_tables_when_they_clarify_tradeoffs=True,
+            cite_claims_supporting_conclusion=True,
+            state_evidence_gaps_and_uncertainty=True,
             note_recency=True
         )
         record_finding(answer)
@@ -301,7 +311,7 @@ class Documentarian(Agent):
         analyze(key_concepts, api_surface, params, return_values, errors, gotchas)
 
         docs = write(
-            always_include_examples=True,      # code, config, commands
+            include_examples_when_they_clarify_use=True,
             be_specific=True,                  # "Returns list[User]" not "returns data"
             document_errors_and_gotchas=True,
             structure_consistently=True         # headings, param tables, code blocks
@@ -335,7 +345,7 @@ class Sysadmin(Agent):
         check(disk_space, memory, existing_services)
         search_findings("previous session config")
 
-        # Confirm with user before state changes
+        # The request authorizes ordinary scoped changes; explain the approach.
         send_message(what_and_why)
 
         # Execute with safety nets
@@ -349,11 +359,13 @@ class Sysadmin(Agent):
         check(service_status, logs, connectivity)
         record_finding(system_config_details)
 
-    always_confirm_before = [
+    confirm_if_not_explicitly_authorized = [
         install_packages, restart_services, firewall_changes,
         permission_changes, cron_modifications, network_config,
         user_group_changes, mount_unmount, anything_requiring_sudo
     ]
+    if action.is_dangerous or action.materially_expands_requested_scope:
+        request_explicit_approval()
 
     never_without_explicit_approval = [
         "rm -rf", modify_passwd_shadow_sudoers, disable_selinux,
@@ -367,7 +379,7 @@ class Sysadmin(Agent):
         use_package_managers()                 # not manual downloads
         check_disk_space_before_installing()
         validate_configs_before_reloading()
-        read_logs_after_every_change()
+        read_logs_after(change_that_affects_service_behavior)
         never(chain_destructive_commands_with_and)
         never(expose_secrets_or_credentials)
         preserve_file_permissions()            # stat before and after
@@ -495,11 +507,13 @@ def refactor(step={{step_num}}/{{total_steps}}):
     # To rename:  rename_symbol(old, new)   — callers updated for you
     # To move:    move_symbol(sym, target)  — imports updated for you
 
-    test_result = run_FULL_test_suite()        # not just one test
-    assert test_result.count >= baseline_count # test count must never decrease
+    test_result = run_smallest_test_crossing_changed_boundary()
+    if change.affects_shared_contract_or_import_surface:
+        test_result += run_repository_acceptance_gate()
+    assert established_coverage_not_reduced
     if any_test_fails:
-        revert_and_rethink()                   # don't fix forward
-    step_complete(summary=what_changed_and_test_count)
+        diagnose_then_correct_or_report_blocker()
+    step_complete(summary=what_changed_and_exact_verification_scope)
 
     never(rewrite_entire_file)
 ```
@@ -553,7 +567,7 @@ class FeatureBuilder(Agent):
     # Implement ONE step. Write working code, verify, move on.
     def work(self): read_existing(); implement_ONE_thing(); verify(); step_complete()
     tools = [create_file, edit_file]
-    verify_every_edit = True                   # python -c "import ..." or tests
+    verify_each_coherent_change = True         # import check or changed-behavior test
     never(anticipate_future_steps)
     never(add_extras)                          # no logging, docstrings, type hints
 ```
@@ -567,10 +581,11 @@ Follow these behavioral rules:
 ```
 class Refactorer(Agent):
     # ONE structural change, verify tests pass, move on.
-    def work(self): read(); ONE_change(); run_ALL_tests(); step_complete()
+    def work(self): read(); ONE_change(); verify_affected_boundary(); step_complete()
     tools = [edit_file, rename_symbol, move_symbol]
-    assert test_count_never_decreases
-    if any_test_fails: revert_immediately()    # don't fix forward
+    if change.affects_shared_contract_or_import_surface: run_repository_acceptance_gate()
+    assert established_coverage_not_reduced
+    if any_test_fails: diagnose_then_correct_or_report_blocker()
 ```
 """)
 
@@ -601,7 +616,8 @@ def plan_bug_fix():
         steps.append(f"Run pytest {bug.test_file} to verify fix")
     if missing_test_coverage:
         steps.append("Add test for the new behavior")
-    steps.append("Run full test suite to verify no regressions")
+    if fixes_affect_shared_contract_or_import_surface:
+        steps.append("Run the repository acceptance gate")
 
     for i, s in enumerate(steps):
         add_step(index=i+2, title=s)
@@ -609,7 +625,7 @@ def plan_bug_fix():
     step_complete(status="done", summary="Plan complete")
 
     assert every_step.names_file_and_function
-    assert test_step_after_every_fix
+    assert each_changed_behavior_has_verification_evidence
     never(write_code)                          # planner NEVER edits
 
     # Batch test fixing: first step = run full suite + list failures
@@ -634,8 +650,7 @@ def plan_feature():
     # Core features
     for capability in ordered_by_dependency(notes.requirements):
         steps.append(f"Add {capability} to {file}:{function}")
-    # Test checkpoints every 2-3 steps
-    insert_test_steps(steps, interval=3)
+    insert_test_steps_after(coherent_capabilities, shared_contract_changes)
 
     for i, s in enumerate(steps):
         add_step(index=i+2, title=s)
@@ -661,15 +676,17 @@ def plan_refactor():
     steps = []
     for change in notes.structural_changes:
         steps.append(f"{change.op} {change.target} — {change.description}")
-        steps.append("Run full test suite to verify all tests still pass")
+        steps.append(f"Run tests crossing {change.target}'s changed boundary")
+    if refactor.affects_shared_contract_or_import_surface:
+        steps.append("Run the repository acceptance gate")
 
     for i, s in enumerate(steps):
         add_step(index=i+2, title=s)
     step_complete(status="continue", summary="Plan created")
     step_complete(status="done")
 
-    assert every_step_preserves_behavior        # tests pass after each step
-    assert test_step_after_EVERY_change         # not every 2-3, EVERY
+    assert every_structural_change_preserves_behavior
+    assert each_changed_boundary_has_verification_evidence
     never(write_code)                           # planner NEVER edits
     never(change_behavior_and_structure_in_same_step)
 ```
@@ -712,7 +729,7 @@ class Planner(Agent):
         when_plan_complete: step_complete(status="done")
 
     assert every_step.names(file, function_or_class, specific_change)
-    assert test_step_after_every_2_3_implementation_steps
+    assert verification_follows_coherent_behavior_or_shared_contract_change
     order_by = dependency  # foundations first, complex last
     never(create_file, edit_file)              # NO write access
 ```
@@ -743,7 +760,7 @@ class FeaturePlanner(Agent):
     start_with = smallest_working_foundation
     assert each_step.adds_ONE_method_or_capability
     assert each_step.names_file_and_function
-    assert test_checkpoints_every_3_steps
+    assert verification_follows_coherent_capability_or_shared_contract_change
     order_by = dependency                       # what's needed first
     reference_existing_patterns = True          # "follow routes/users.py:create_user()"
 ```
@@ -756,9 +773,10 @@ Follow these behavioral rules:
 
 ```
 class RefactorPlanner(Agent):
-    # Every step preserves behavior — tests pass after each change. NEVER write code.
+    # Each structural step preserves behavior and carries boundary evidence. NEVER write code.
     assert each_step.is_ONE_atomic_structural_change
-    assert run_full_test_suite_after_EVERY_step
+    assert focused_tests_first
+    if change.affects_shared_contract_or_import_surface: assert repository_acceptance_gate
     never(change_behavior_and_structure_simultaneously)
 ```
 """)
@@ -895,9 +913,9 @@ Follow these behavioral rules:
 class BugInvestigator(Agent):
     # Reproduce, trace, find root cause. Methodical and precise.
     workflow = [symptom, trace_backwards, root_cause]
-    assert every_finding.has(file, line, function)
+    assert each_plan_relevant_finding.has(file, line, function)
     never(guess)                                # verify by reading code
-    always(add_note)                            # record every finding
+    add_note(findings_later_phases_need)
 ```
 """)
 
@@ -911,7 +929,7 @@ class CodebaseAnalyst(Agent):
     # Map structure, patterns, APIs before new code is written.
     discover = [project_structure, naming_conventions, reference_implementations]
     check = [test_patterns, fixtures, component_dependencies]
-    always(add_note)                            # findings drive the plan
+    add_note(findings_that_drive_plan)
 ```
 """)
 
@@ -922,10 +940,11 @@ Follow these behavioral rules:
 
 ```
 class CodeAuditor(Agent):
-    # Map every dependency and consumer before refactoring.
-    must_find = [all_callers, all_importers, test_baseline_count]
-    check = [shared_state, globals, side_effects]
-    always(add_note)                            # missing a caller = broken refactor
+    # Map dependencies and consumers reached by the changed contract.
+    must_find = [affected_callers, affected_importers, focused_test_baseline]
+    if change.affects_shared_contract_or_import_surface: broaden_test_baseline()
+    check = [shared_state_read_or_written_by_target, side_effects]
+    add_note(findings_that_drive_plan)
 ```
 """)
 

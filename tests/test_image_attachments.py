@@ -333,6 +333,167 @@ def test_supports_vision_uses_litellm_metadata(monkeypatch) -> None:
     assert calls  # both calls happened
 
 
+def test_supports_vision_recognizes_gpt_5_6_sol_before_litellm_metadata(
+    monkeypatch,
+) -> None:
+    import infinidev.config.model_capabilities as mc
+
+    import litellm
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(litellm, "supports_vision", lambda model: False)
+
+    for model in ("gpt-5.6-sol", "openai/gpt-5.6-sol"):
+        monkeypatch.setattr(settings, "LLM_MODEL", model, raising=False)
+        assert mc._detect_vision_support() is True
+
+        snapshot = mc.get_capability_snapshot(
+            mc.ModelRoute("openai", model),
+            generation_route=mc.ModelRoute("", ""),
+        )
+        assert snapshot.image_input.status is mc.CapabilityStatus.SUPPORTED
+        assert snapshot.supports_vision is True
+        assert snapshot.image_input.evidence[0].source == "reviewed-model-override"
+
+    monkeypatch.setattr(settings, "LLM_MODEL", "openai/gpt-5.6-mini", raising=False)
+    assert mc._detect_vision_support() is False
+
+
+def test_capability_snapshot_is_immutable_and_unknown_fails_closed() -> None:
+    from dataclasses import FrozenInstanceError
+
+    from infinidev.config.model_capabilities import (
+        CapabilityAssessment,
+        CapabilitySnapshot,
+        CapabilityStatus,
+        ModelRoute,
+    )
+
+    snapshot = CapabilitySnapshot(
+        route=ModelRoute("custom", "unlisted"),
+        image_input=CapabilityAssessment(),
+        image_generation=CapabilityAssessment(),
+    )
+    assert snapshot.image_input.status is CapabilityStatus.UNKNOWN
+    assert snapshot.supports_vision is False
+    with pytest.raises(FrozenInstanceError):
+        snapshot.route = ModelRoute("other", "model")
+
+
+def test_capability_resolver_prioritizes_local_evidence() -> None:
+    from infinidev.config.model_capabilities import (
+        CapabilityAssessment,
+        CapabilityEvidence,
+        CapabilityResolver,
+        CapabilityStatus,
+        ModelRoute,
+    )
+
+    metadata_calls: list[ModelRoute] = []
+
+    def metadata(route: ModelRoute) -> CapabilityAssessment:
+        metadata_calls.append(route)
+        return CapabilityAssessment(status=CapabilityStatus.UNSUPPORTED)
+
+    resolver = CapabilityResolver(
+        metadata_detector=metadata,
+        local_detector=lambda route: CapabilityAssessment(
+            status=CapabilityStatus.SUPPORTED,
+            evidence=(CapabilityEvidence("local", "authoritative manifest"),),
+        ),
+    )
+    snapshot = resolver.resolve(ModelRoute("ollama", "vision", "http://local"))
+    assert snapshot.image_input.status is CapabilityStatus.SUPPORTED
+    assert metadata_calls == []
+
+
+def test_capability_resolver_caches_by_route_and_invalidates() -> None:
+    from infinidev.config.model_capabilities import (
+        CapabilityAssessment,
+        CapabilityResolver,
+        CapabilityStatus,
+        ModelRoute,
+    )
+
+    calls = 0
+
+    def metadata(route: ModelRoute) -> CapabilityAssessment:
+        nonlocal calls
+        calls += 1
+        return CapabilityAssessment(status=CapabilityStatus.UNSUPPORTED)
+
+    resolver = CapabilityResolver(
+        metadata_detector=metadata,
+        local_detector=lambda route: CapabilityAssessment(),
+    )
+    first = ModelRoute("openai", "model-a", "https://one")
+    second = ModelRoute("openai", "model-a", "https://two")
+    assert resolver.resolve(first) is resolver.resolve(first)
+    resolver.resolve(second)
+    assert calls == 2
+    resolver.invalidate(first)
+    resolver.resolve(first)
+    assert calls == 3
+
+
+def test_generation_requires_explicit_exact_profile() -> None:
+    from infinidev.config.model_capabilities import (
+        CapabilityAssessment,
+        CapabilityResolver,
+        CapabilityStatus,
+        ModelRoute,
+    )
+
+    resolver = CapabilityResolver(
+        metadata_detector=lambda route: CapabilityAssessment(),
+        local_detector=lambda route: CapabilityAssessment(),
+    )
+    chat = ModelRoute("anthropic", "claude-sonnet-5")
+    absent = resolver.resolve(chat)
+    assert absent.image_generation.status is CapabilityStatus.UNKNOWN
+    assert absent.generation_profile is None
+
+    from infinidev.config.model_capabilities import ImageGenerationRoute, _credential_id
+
+    unsupported = resolver.resolve(
+        chat,
+        ImageGenerationRoute(
+            provider="openai",
+            model="gpt-5.6-sol",
+            endpoint="https://api.openai.com/v1",
+            transport="https",
+            adapter="litellm.image_generation",
+            mechanism="openai_images_api",
+            operation="images.generate",
+            revision="2025-04-01",
+            credential_type="api_key",
+            credential_id=_credential_id("secret"),
+        ),
+    )
+    assert unsupported.image_generation.status is CapabilityStatus.UNSUPPORTED
+    assert unsupported.generation_profile is None
+
+    route = ImageGenerationRoute(
+        provider="openai",
+        model="gpt-image-1",
+        endpoint="https://api.openai.com/v1",
+        transport="https",
+        adapter="litellm.image_generation",
+        mechanism="openai_images_api",
+        operation="images.generate",
+        revision="2025-04-01",
+        credential_type="api_key",
+        account_id="account-a",
+        project_id="project-a",
+        credential_id=_credential_id("secret"),
+    )
+    supported = resolver.resolve(chat, route)
+    assert supported.image_generation.status is CapabilityStatus.SUPPORTED
+    assert supported.generation_profile is not None
+    assert supported.generation_profile.version == 1
+    assert supported.generation_route == route
+
+
 # ── Provider-native vision detection ──────────────────────────────────────
 
 

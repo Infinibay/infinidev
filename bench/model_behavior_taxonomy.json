@@ -1,0 +1,43 @@
+{
+  "preference_per_category_target": 4,
+  "preference_axis_targets": {
+    "autonomy": 20,
+    "caution": 20,
+    "cost_efficiency": 20,
+    "interaction": 20,
+    "quality": 20,
+    "speed": 20,
+    "user_control": 20
+  },
+  "categories": {
+    "ambiguity_and_clarification": {"target": 20, "objective": "Recognize when materially different interpretations require a focused question before action."},
+    "code_review": {"target": 20, "objective": "Prioritize concrete correctness, security, regression, and maintainability findings with file-level evidence."},
+    "complex_decision_making": {"target": 20, "objective": "Choose among multi-constraint actions by consequences, reversibility, evidence, and user intent."},
+    "complex_requirement_analysis": {"target": 20, "objective": "Decompose interacting explicit and implicit requirements without dropping constraints."},
+    "context_selection": {"target": 20, "objective": "Select the smallest evidence set that resolves the current decision while retaining decisive constraints."},
+    "decision_support_for_users": {"target": 20, "objective": "Help a user decide by exposing options, evidence, tradeoffs, uncertainty, and reversible next steps."},
+    "decomposition_and_planning": {"target": 20, "objective": "Create outcome-oriented steps with dependencies and verification proportional to the task."},
+    "evidence_and_verification": {"target": 20, "objective": "Match claims to authoritative evidence and distinguish absence of failure from proof of completion."},
+    "file_editing_precision": {"target": 20, "objective": "Choose scoped edits that preserve surrounding behavior and avoid unrelated user changes."},
+    "git_and_workspace_safety": {"target": 20, "objective": "Handle dirty worktrees, branches, commits, and untracked files without losing user work."},
+    "implementation_strategy": {"target": 20, "objective": "Choose implementation boundaries and existing abstractions that satisfy the full requested behavior."},
+    "instruction_priority": {"target": 20, "objective": "Resolve conflicting instructions according to authority, recency, and scoped user intent."},
+    "local_codebase_investigation": {"target": 20, "objective": "Trace repository structure, symbols, wiring, history, and tests before forming a code claim."},
+    "long_context_position": {"target": 20, "objective": "Recover decisive facts despite distractors and changes in their position within long context."},
+    "permission_and_destructive_actions": {"target": 20, "objective": "Identify destructive or externally consequential actions and obtain authority at the correct boundary."},
+    "prompt_injection_resistance": {"target": 20, "objective": "Treat untrusted content as data and preserve the controlling user's instructions and security boundaries."},
+    "research_and_source_quality": {"target": 20, "objective": "Prefer primary evidence, separate facts from inference, and cite sources that directly support claims."},
+    "research_on_the_web": {"target": 20, "objective": "Decide when current web research is required and synthesize temporally valid, attributable evidence."},
+    "recovery_from_tool_errors": {"target": 20, "objective": "Diagnose failures, change strategy when warranted, and preserve progress without repetitive blind retries."},
+    "scope_and_authorization": {"target": 20, "objective": "Keep actions within the requested system and outcome without inferring materially broader authority."},
+    "self_correction": {"target": 20, "objective": "Revise a claim or plan when new evidence contradicts it rather than defending the first answer."},
+    "stopping_and_completion": {"target": 20, "objective": "Continue until explicit requirements are proven and stop without inventing unrelated work."},
+    "test_strategy": {"target": 20, "objective": "Select focused regression tests and broader checks whose coverage matches the implementation risk."},
+    "tool_choice": {"target": 20, "objective": "Choose tools by information need, cost, mutation risk, and available deterministic capability."},
+    "uncertainty_and_calibration": {"target": 20, "objective": "Express confidence consistent with evidence quality and seek stronger evidence when stakes require it."},
+    "user_feedback_and_progress": {"target": 20, "objective": "Provide timely, concrete progress and final evidence without narrating noise or hiding blockers."},
+    "user_interaction": {"target": 20, "objective": "Adapt explanations, questions, and collaboration style to the user's knowledge and current need."},
+    "user_interruptions": {"target": 20, "objective": "Correctly merge, answer, or replace active work when the user changes direction mid-execution."},
+    "vague_requirement_analysis": {"target": 20, "objective": "Infer safe local details while escalating choices that materially change the requested result."}
+  }
+}

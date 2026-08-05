@@ -6,9 +6,10 @@ the loop's own prompt modules:
 1. **Every tool the prompt tells the model to call exists**, and exists *for
    that role*. A prompt naming a tool the model cannot call teaches it to
    hallucinate that call, and the model has no way to discover the mistake.
-2. **No hedging in an instruction.** "prefer X", "you should Y", "generally Z"
-   give the model room to not do the thing. An instruction either applies or
-   it is not an instruction.
+2. **No evasive uncertainty in an instruction.** Words such as "perhaps" or
+   "try to" avoid making a recommendation. Calibrated method guidance such as
+   "prefer X when Y; depart when Z" is allowed: methods are defaults, unlike
+   tool contracts and product bars.
 3. **No arrow glyphs.** ``→`` and ``=>`` carry a meaning ("then", "produces",
    "instead") that words carry better, because words are what the training
    corpus is made of.
@@ -39,7 +40,6 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROMPTS_DIR = REPO_ROOT / "src/infinidev/prompts"
-EXTERNAL_PROMPT_FILES = [REPO_ROOT / ".claude/skills/explore/SKILL.md"]
 
 # Model-facing instructions also live outside ``prompts/``. Keep this list
 # explicit: every entry either builds an LLM message, contributes text to one,
@@ -177,9 +177,8 @@ _DISABLED_TOOL_INVOCATIONS = {
     ),
 }
 
-HEDGE = re.compile(
-    r"\b(?:could|should|might|perhaps|possibly|probably|prefer(?:ably|s|red)?"
-    r"|try to|ideally|generally|typically|usually|sometimes|tends to)\b",
+EVASIVE_HEDGE = re.compile(
+    r"\b(?:might|perhaps|possibly|probably|try to|ideally|sometimes|tends to)\b",
     re.I,
 )
 ARROW = re.compile(r"→|=>|->")
@@ -404,7 +403,7 @@ def _hedged_lines(texts: list[str]) -> list[str]:
         line.strip()
         for text in texts
         for line in text.splitlines()
-        if HEDGE.search(line)
+        if EVASIVE_HEDGE.search(line)
         and not any(s in line for s in HEDGE_ALLOWED_SUBSTRINGS)
     ]
 
@@ -417,6 +416,47 @@ def test_the_surface_is_actually_derivable():
     assert len(_parameter_names()) > 40
     assert "read_file" in _tool_names("developer")
     assert "final_answer" in _parameter_names()
+
+
+def test_primary_loop_prompt_separates_bars_from_adaptable_methods() -> None:
+    """The default executor must not disguise execution heuristics as contracts."""
+    from infinidev.engine.loop.prompt.text import (
+        BEHAVIOR_GUIDELINES,
+        BEHAVIOR_GUIDELINES_SMALL,
+        CLI_AGENT_IDENTITY,
+    )
+
+    assert "## Product bars and working guidance" in BEHAVIOR_GUIDELINES
+    assert "## Product bars and working guidance" in BEHAVIOR_GUIDELINES_SMALL
+    assert "Execution methods are guidance" in BEHAVIOR_GUIDELINES
+    assert "unresolved product\n  choice" in CLI_AGENT_IDENTITY
+    assert "missing authorization" in CLI_AGENT_IDENTITY
+    assert "active preference profile" in CLI_AGENT_IDENTITY
+    assert "The live `record_finding` schema defines" in CLI_AGENT_IDENTITY
+    assert "| `anchor_file=" not in CLI_AGENT_IDENTITY
+    assert "NEVER pause mid-loop" not in CLI_AGENT_IDENTITY
+    assert "NEVER re-open it" not in CLI_AGENT_IDENTITY
+
+
+def test_execute_prompt_does_not_turn_heuristics_into_universal_rules() -> None:
+    from infinidev.prompts.tool_hints import build_execute_prompt
+
+    prompt = build_execute_prompt(
+        available_tools={"read_file", "edit_file", "execute_command"},
+        step_num=1,
+        total_steps=1,
+        step_title="Repair behavior",
+        step_files="src/example.py",
+    )
+
+    assert "## Scope contract" in prompt
+    assert "## Working guidance" in prompt
+    assert "## Failure Patterns and Corrections" in prompt
+    assert "Repeat the same failed action without new evidence" in prompt
+    assert "blocked only when no in-scope action can produce new evidence" in prompt
+    assert "ALWAYS run a test or an import check after every edit" not in prompt
+    assert "Keep trying after 3 consecutive failures" not in prompt
+    assert "Read the same file twice in one step" not in prompt
 
 
 @pytest.mark.parametrize("path", _prompt_files(), ids=_rel)
@@ -445,11 +485,12 @@ def test_no_prompt_names_a_tool_from_another_role(path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize("path", _prompt_files(), ids=_rel)
-def test_no_hedging_in_prompt_text(path: pathlib.Path) -> None:
+def test_no_evasive_hedging_in_prompt_text(path: pathlib.Path) -> None:
     offenders = _hedged_lines(_prompt_strings(path))
     assert not offenders, (
-        "Hedging leaves the model room to skip the instruction. Rewrite as an "
-        "imperative or an IF/THEN:\n  " + "\n  ".join(offenders)
+        "Evasive uncertainty provides no usable recommendation. State a hard "
+        "contract, or give a method default with its decision criterion:\n  "
+        + "\n  ".join(offenders)
     )
 
 
@@ -487,15 +528,6 @@ def test_no_unknown_implying_words_in_prompt_text(path: pathlib.Path) -> None:
 def test_no_prompt_invokes_a_disabled_single_word_tool(path: pathlib.Path) -> None:
     offenders = _disabled_tool_invocations(_prompt_strings(path))
     assert not offenders, f"{_rel(path)} invokes disabled tools: {sorted(offenders)}"
-
-
-@pytest.mark.parametrize("path", EXTERNAL_PROMPT_FILES, ids=lambda path: str(path.name))
-def test_external_prompt_files_follow_language_rules(path: pathlib.Path) -> None:
-    """Repository prompt assets outside the runtime package obey the same rules."""
-    text = path.read_text()
-    assert not _hedged_lines([text]), f"{path} contains hedged instructions"
-    assert not ARROW.search(text), f"{path} uses arrow notation"
-    assert not UNKNOWN.search(text), f"{path} contains threshold-free instructions"
 
 
 # ── The same rules, where nobody was looking ──────────────────────────────
@@ -549,7 +581,7 @@ def test_tool_schemas_follow_the_same_rules() -> None:
     for tool in _every_bound_tool():
         for text in _schema_strings(tool):
             for line in text.splitlines():
-                for label, rx in (("hedge", HEDGE), ("arrow", ARROW),
+                for label, rx in (("hedge", EVASIVE_HEDGE), ("arrow", ARROW),
                                   ("unknown", UNKNOWN)):
                     if not rx.search(line):
                         continue
@@ -581,7 +613,7 @@ def test_engine_pseudo_tool_schemas_follow_the_same_rules() -> None:
                 for key, child in value.items():
                     if key == "description" and isinstance(child, str):
                         for label, pattern in (
-                            ("hedge", HEDGE),
+                            ("hedge", EVASIVE_HEDGE),
                             ("arrow", ARROW),
                             ("unknown", UNKNOWN),
                         ):

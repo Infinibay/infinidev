@@ -1,0 +1,1366 @@
+{
+  "interpretation_boundary": "Profile changes describe externally observable repeated choices, not private reasoning. There is no universally optimal preference answer; inspect the concrete actions against the active user's priorities. A modal change is reported only when both conditions have a unique mode across the recorded repetitions.",
+  "models": {
+    "Sol": {
+      "model_identity": "openai_subscription/gpt-5.6-sol@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "option_order_protocol": "balanced_rotation",
+      "probe_count": 2,
+      "fast_quality_modal_changes": 2,
+      "raw_fast_modal_changes": 1,
+      "raw_quality_modal_changes": 1,
+      "records": [
+        {
+          "probe_id": "preference-context-compactness-v1",
+          "category": "context_selection",
+          "scenario": "A task has 9 decisive code excerpts totaling 7,000 tokens and 30 related files totaling 80,000 tokens. The index is current; related files may provide background but no known unresolved dependency.",
+          "user_request": "Choose the context package that matches my compactness-versus-assurance preference.",
+          "conditions": {
+            "raw": {
+              "stable": false,
+              "answer_counts": {
+                "A": 1,
+                "D": 3
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show estimated token cost and omission risk for compact and full context, then let the user choose."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "A": 4
+              },
+              "modal_keys": [
+                "A"
+              ],
+              "modal_actions": [
+                "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show estimated token cost and omission risk for compact and full context, then let the user choose."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": true,
+          "raw_quality_modal_change": false
+        },
+        {
+          "probe_id": "preference-requirements-formality-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A bounded change has twelve explicit requirements, six non-goals, and five acceptance checks. All fit on one page and no regulated traceability format is required.",
+          "user_request": "Choose the requirement artifact that matches my preferred traceability level.",
+          "conditions": {
+            "raw": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Maintain a compact grouped checklist linking each requirement to its implementation and evidence."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Maintain a compact grouped checklist linking each requirement to its implementation and evidence."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show matrix and checklist examples with maintenance cost, then let the user select the artifact."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": false,
+          "raw_quality_modal_change": true
+        }
+      ]
+    },
+    "Terra": {
+      "model_identity": "openai_subscription/gpt-5.6-terra@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "option_order_protocol": "balanced_rotation",
+      "probe_count": 2,
+      "fast_quality_modal_changes": 2,
+      "raw_fast_modal_changes": 1,
+      "raw_quality_modal_changes": 0,
+      "records": [
+        {
+          "probe_id": "preference-context-compactness-v1",
+          "category": "context_selection",
+          "scenario": "A task has 9 decisive code excerpts totaling 7,000 tokens and 30 related files totaling 80,000 tokens. The index is current; related files may provide background but no known unresolved dependency.",
+          "user_request": "Choose the context package that matches my compactness-versus-assurance preference.",
+          "conditions": {
+            "raw": {
+              "stable": false,
+              "answer_counts": {
+                "A": 2,
+                "D": 2
+              },
+              "modal_keys": [
+                "A",
+                "D"
+              ],
+              "modal_actions": [
+                "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                "Show estimated token cost and omission risk for compact and full context, then let the user choose."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "A": 4
+              },
+              "modal_keys": [
+                "A"
+              ],
+              "modal_actions": [
+                "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show estimated token cost and omission risk for compact and full context, then let the user choose."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": false,
+          "raw_quality_modal_change": false
+        },
+        {
+          "probe_id": "preference-requirements-formality-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A bounded change has twelve explicit requirements, six non-goals, and five acceptance checks. All fit on one page and no regulated traceability format is required.",
+          "user_request": "Choose the requirement artifact that matches my preferred traceability level.",
+          "conditions": {
+            "raw": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show matrix and checklist examples with maintenance cost, then let the user select the artifact."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Maintain a compact grouped checklist linking each requirement to its implementation and evidence."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show matrix and checklist examples with maintenance cost, then let the user select the artifact."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": true,
+          "raw_quality_modal_change": false
+        }
+      ]
+    },
+    "Luna": {
+      "model_identity": "openai_subscription/gpt-5.6-luna@catalog-e811fab79c2af26e14e89f2ded6190ed",
+      "option_order_protocol": "balanced_rotation",
+      "probe_count": 2,
+      "fast_quality_modal_changes": 2,
+      "raw_fast_modal_changes": 2,
+      "raw_quality_modal_changes": 0,
+      "records": [
+        {
+          "probe_id": "preference-context-compactness-v1",
+          "category": "context_selection",
+          "scenario": "A task has 9 decisive code excerpts totaling 7,000 tokens and 30 related files totaling 80,000 tokens. The index is current; related files may provide background but no known unresolved dependency.",
+          "user_request": "Choose the context package that matches my compactness-versus-assurance preference.",
+          "conditions": {
+            "raw": {
+              "stable": false,
+              "answer_counts": {
+                "A": 1,
+                "D": 3
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show estimated token cost and omission risk for compact and full context, then let the user choose."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "A": 4
+              },
+              "modal_keys": [
+                "A"
+              ],
+              "modal_actions": [
+                "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "A",
+                  "selected_action": "Provide the nine decisive excerpts with source anchors and retrieve more only if the model identifies a concrete gap.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show estimated token cost and omission risk for compact and full context, then let the user choose."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show estimated token cost and omission risk for compact and full context, then let the user choose.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": true,
+          "raw_quality_modal_change": false
+        },
+        {
+          "probe_id": "preference-requirements-formality-v1",
+          "category": "complex_requirement_analysis",
+          "scenario": "A bounded change has twelve explicit requirements, six non-goals, and five acceptance checks. All fit on one page and no regulated traceability format is required.",
+          "user_request": "Choose the requirement artifact that matches my preferred traceability level.",
+          "conditions": {
+            "raw": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show matrix and checklist examples with maintenance cost, then let the user select the artifact."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "fast_autonomy": {
+              "stable": true,
+              "answer_counts": {
+                "B": 4
+              },
+              "modal_keys": [
+                "B"
+              ],
+              "modal_actions": [
+                "Maintain a compact grouped checklist linking each requirement to its implementation and evidence."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "B",
+                  "selected_action": "Maintain a compact grouped checklist linking each requirement to its implementation and evidence.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            },
+            "quality_control": {
+              "stable": true,
+              "answer_counts": {
+                "D": 4
+              },
+              "modal_keys": [
+                "D"
+              ],
+              "modal_actions": [
+                "Show matrix and checklist examples with maintenance cost, then let the user select the artifact."
+              ],
+              "repetitions": [
+                {
+                  "repetition": 0,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"B\"}",
+                  "provider_answer": "B",
+                  "choice_mapping": {
+                    "A": "C",
+                    "B": "D",
+                    "C": "A",
+                    "D": "B"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 1,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"A\"}",
+                  "provider_answer": "A",
+                  "choice_mapping": {
+                    "A": "D",
+                    "B": "A",
+                    "C": "B",
+                    "D": "C"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 2,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"D\"}",
+                  "provider_answer": "D",
+                  "choice_mapping": {
+                    "A": "A",
+                    "B": "B",
+                    "C": "C",
+                    "D": "D"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                },
+                {
+                  "repetition": 3,
+                  "selected_key": "D",
+                  "selected_action": "Show matrix and checklist examples with maintenance cost, then let the user select the artifact.",
+                  "raw_response": "{\"answer\":\"C\"}",
+                  "provider_answer": "C",
+                  "choice_mapping": {
+                    "A": "B",
+                    "B": "C",
+                    "C": "D",
+                    "D": "A"
+                  },
+                  "option_order_protocol": "balanced_rotation"
+                }
+              ]
+            }
+          },
+          "fast_quality_modal_change": true,
+          "raw_fast_modal_change": true,
+          "raw_quality_modal_change": false
+        }
+      ]
+    }
+  }
+}

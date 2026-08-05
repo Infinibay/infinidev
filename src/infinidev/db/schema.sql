@@ -164,6 +164,64 @@ CREATE TABLE IF NOT EXISTS session_messages (
 CREATE INDEX IF NOT EXISTS idx_session_messages_session
     ON session_messages(session_id, id);
 
+-- Durable generated-image ledger. Ephemeral provider payloads (base64 and
+-- signed URLs) never enter SQLite; rows refer only to content-addressed assets.
+CREATE TABLE IF NOT EXISTS image_generation_operations (
+    operation_id       TEXT PRIMARY KEY,
+    session_id         TEXT,
+    project_id         INTEGER,
+    request_json       TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    provider           TEXT NOT NULL,
+    model              TEXT NOT NULL,
+    base_url            TEXT NOT NULL DEFAULT '',
+    profile_version    INTEGER NOT NULL,
+    status             TEXT NOT NULL,
+    error_code         TEXT,
+    error_message      TEXT,
+    retry_after_seconds REAL,
+    provider_request_id TEXT,
+    request_accepted   INTEGER,
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- migrated route-identity columns — appended in migration order
+    endpoint            TEXT NOT NULL DEFAULT '',
+    transport           TEXT NOT NULL DEFAULT '',
+    adapter             TEXT NOT NULL DEFAULT '',
+    mechanism           TEXT NOT NULL DEFAULT '',
+    operation           TEXT NOT NULL DEFAULT '',
+    revision            TEXT NOT NULL DEFAULT '',
+    credential_type     TEXT NOT NULL DEFAULT '',
+    account_id          TEXT NOT NULL DEFAULT '',
+    generation_project_id TEXT NOT NULL DEFAULT '',
+    credential_id       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_image_operations_session
+    ON image_generation_operations(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS image_assets (
+    asset_id    TEXT PRIMARY KEY,
+    sha256      TEXT NOT NULL UNIQUE,
+    mime_type   TEXT NOT NULL,
+    byte_count  INTEGER NOT NULL,
+    width       INTEGER NOT NULL,
+    height      INTEGER NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS image_generation_items (
+    operation_id  TEXT NOT NULL REFERENCES image_generation_operations(operation_id),
+    item_index    INTEGER NOT NULL,
+    status        TEXT NOT NULL,
+    asset_id      TEXT REFERENCES image_assets(asset_id),
+    revised_prompt TEXT,
+    error_code    TEXT,
+    error_message TEXT,
+    PRIMARY KEY(operation_id, item_index)
+);
+CREATE INDEX IF NOT EXISTS idx_image_items_asset
+    ON image_generation_items(asset_id);
+
 CREATE TABLE IF NOT EXISTS session_runtime_state (
     session_id          TEXT PRIMARY KEY REFERENCES sessions(session_id),
     task_description    TEXT,

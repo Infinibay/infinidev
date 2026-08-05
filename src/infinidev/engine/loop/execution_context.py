@@ -63,6 +63,13 @@ class ExecutionContext:
     # ``None`` is the legacy path: the engine falls back to ``desc``.
     task: "Task | None" = None
 
+    # Optional, immutable context corpus used by controlled context-delivery
+    # evaluations. Production callers leave this unset. Keeping it separate
+    # from the task and system prompt lets experiments vary only repository
+    # evidence delivery while preserving agent instructions.
+    context_corpus: str | None = None
+    allow_llm_retries: bool = True
+
     # Phase-specific over-budget warning. Used by the analyst (and any
     # future restricted-tools phase) to override the developer-oriented
     # default nudge with phase-appropriate language. Two ``{}``

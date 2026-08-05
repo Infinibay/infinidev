@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "01bcea91220c1fa59cd86c8f19bf761d66aab36d5c835b75efc4472630c735ce",
+  "task_count": 6,
+  "planned_executions": 36,
+  "parallel_requests": false,
+  "routes": [
+    {
+      "name": "sol",
+      "provider": "openai_subscription",
+      "model": "gpt-5.6-sol",
+      "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "conditions_path": "bench/agent_task_pilot.sol.approved.conditions.json",
+      "conditions_sha256": "174521e5a4329f41572769fe3471ac352eea8d2049550793c6815b646cb6277c",
+      "config_path": "bench/agent_task_run.gpt-5.6-sol.json",
+      "config_sha256": "cf8282afa428f9433bcefa4e7e7d62bddd5f521a8e0987f3cad9677112f00a6f",
+      "planned_executions": 12
+    },
+    {
+      "name": "terra",
+      "provider": "openai_subscription",
+      "model": "gpt-5.6-terra",
+      "model_identity": "openai_subscription:gpt-5.6-terra:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "conditions_path": "bench/agent_task_pilot.terra.approved.conditions.json",
+      "conditions_sha256": "6d3155b9ee7bee70935d8f4988d9f6f346f884b9bd67257734fc21e8845ee2e0",
+      "config_path": "bench/agent_task_run.gpt-5.6-terra.json",
+      "config_sha256": "f8508efc9fae2aadd5ac4aef934471bc22e61dfb65c3477ae740f2bce7e0c56f",
+      "planned_executions": 12
+    },
+    {
+      "name": "luna",
+      "provider": "openai_subscription",
+      "model": "gpt-5.6-luna",
+      "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "conditions_path": "bench/agent_task_pilot.luna.approved.conditions.json",
+      "conditions_sha256": "8ef8611bb472db512771b7b5532c7316631c7f6f6206f0ec16bd67a8faf32dbc",
+      "config_path": "bench/agent_task_run.gpt-5.6-luna.json",
+      "config_sha256": "2623b47e5b9fc86bf0f32a01a04c8a902fa26e3dd0e76520db50abe200f70a43",
+      "planned_executions": 12
+    }
+  ]
+}

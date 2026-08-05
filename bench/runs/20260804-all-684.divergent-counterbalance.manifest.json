@@ -1,0 +1,558 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+  "selection": {
+    "method": "explicit",
+    "purpose": "Complete option-position rotations for every cross-model divergence in the single-presentation exhaustive raw baseline"
+  },
+  "probe_count": 78,
+  "category_count": 27,
+  "probes": [
+    {
+      "probe_id": "decision-risk-posture-v1",
+      "category": "decision_support_for_users",
+      "family": "decision-risk-posture",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-evidence-depth-v1",
+      "category": "decision_support_for_users",
+      "family": "decision-evidence-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-reversible-experiment-v2",
+      "category": "decision_support_for_users",
+      "family": "decision-reversible-experiment",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-proactive-suggestions-v1",
+      "category": "user_interaction",
+      "family": "interaction-proactive-suggestions",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-context-refresh-v2",
+      "category": "context_selection",
+      "family": "preference-context-refresh",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-edit-local-cleanup-v2",
+      "category": "file_editing_precision",
+      "family": "preference-edit-local-cleanup",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-verification-independence-v1",
+      "category": "evidence_and_verification",
+      "family": "preference-verification-independence",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-web-current-detail-v2",
+      "category": "research_on_the_web",
+      "family": "preference-web-current-detail",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-uncertainty-action-v1",
+      "category": "uncertainty_and_calibration",
+      "family": "preference-uncertainty-action",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-verification-independence-v2",
+      "category": "evidence_and_verification",
+      "family": "preference-verification-independence",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-correction-detail-v2",
+      "category": "self_correction",
+      "family": "preference-correction-detail",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-verification-scope-v2",
+      "category": "evidence_and_verification",
+      "family": "preference-verification-scope",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "feedback-long-running-v1",
+      "category": "user_feedback_and_progress",
+      "family": "feedback-long-running",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-decision-ownership-v2",
+      "category": "complex_decision_making",
+      "family": "preference-decision-ownership",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-explanation-depth-v2",
+      "category": "user_interaction",
+      "family": "interaction-explanation-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-decision-ownership-v1",
+      "category": "complex_decision_making",
+      "family": "preference-decision-ownership",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-stakeholder-input-v2",
+      "category": "decision_support_for_users",
+      "family": "decision-stakeholder-input",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "vague-cleanup-v1",
+      "category": "vague_requirement_analysis",
+      "family": "vague-cleanup",
+      "evaluation_mode": "normative",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-scope-checkpoints-v2",
+      "category": "scope_and_authorization",
+      "family": "preference-scope-checkpoints",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "completion-final-evidence-v1",
+      "category": "stopping_and_completion",
+      "family": "completion-final-evidence",
+      "evaluation_mode": "normative",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-test-scope-v1",
+      "category": "test_strategy",
+      "family": "preference-test-scope",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-uncertainty-style-v2",
+      "category": "user_interaction",
+      "family": "interaction-uncertainty-style",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-proactive-suggestions-v2",
+      "category": "user_interaction",
+      "family": "interaction-proactive-suggestions",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-recovery-fallback-v1",
+      "category": "recovery_from_tool_errors",
+      "family": "preference-recovery-fallback",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-completion-polish-v1",
+      "category": "stopping_and_completion",
+      "family": "preference-completion-polish",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-explanation-depth-v1",
+      "category": "user_interaction",
+      "family": "interaction-explanation-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-ambiguity-timing-v2",
+      "category": "ambiguity_and_clarification",
+      "family": "preference-ambiguity-timing",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-vague-inference-v2",
+      "category": "vague_requirement_analysis",
+      "family": "preference-vague-inference",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-vague-prototype-v2",
+      "category": "vague_requirement_analysis",
+      "family": "preference-vague-prototype",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-presentation-order-v1",
+      "category": "decision_support_for_users",
+      "family": "decision-presentation-order",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-investigation-history-v1",
+      "category": "local_codebase_investigation",
+      "family": "preference-investigation-history",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-tradeoff-visualization-v2",
+      "category": "decision_support_for_users",
+      "family": "decision-tradeoff-visualization",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-decision-pilot-v2",
+      "category": "complex_decision_making",
+      "family": "preference-decision-pilot",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-long-context-recheck-v2",
+      "category": "long_context_position",
+      "family": "preference-long-context-recheck",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-teaching-mode-v1",
+      "category": "user_interaction",
+      "family": "interaction-teaching-mode",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-progress-control-v2",
+      "category": "user_interaction",
+      "family": "interaction-progress-control",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-web-current-detail-v1",
+      "category": "research_on_the_web",
+      "family": "preference-web-current-detail",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-workspace-isolation-v2",
+      "category": "git_and_workspace_safety",
+      "family": "preference-workspace-isolation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-evidence-depth-v2",
+      "category": "decision_support_for_users",
+      "family": "decision-evidence-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-completion-polish-v2",
+      "category": "stopping_and_completion",
+      "family": "preference-completion-polish",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-requirements-iteration-v1",
+      "category": "complex_requirement_analysis",
+      "family": "preference-requirements-iteration",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-recommendation-strength-v1",
+      "category": "decision_support_for_users",
+      "family": "decision-recommendation-strength",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-investigation-history-v2",
+      "category": "local_codebase_investigation",
+      "family": "preference-investigation-history",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-decision-pilot-v1",
+      "category": "complex_decision_making",
+      "family": "preference-decision-pilot",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-implementation-reuse-v2",
+      "category": "implementation_strategy",
+      "family": "preference-implementation-reuse",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-test-realism-v2",
+      "category": "test_strategy",
+      "family": "preference-test-realism",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-requirements-iteration-v2",
+      "category": "complex_requirement_analysis",
+      "family": "preference-requirements-iteration",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-interrupt-atomicity-v2",
+      "category": "user_interruptions",
+      "family": "preference-interrupt-atomicity",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-interrupt-atomicity-v1",
+      "category": "user_interruptions",
+      "family": "preference-interrupt-atomicity",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-edit-local-cleanup-v1",
+      "category": "file_editing_precision",
+      "family": "preference-edit-local-cleanup",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-correction-detail-v1",
+      "category": "self_correction",
+      "family": "preference-correction-detail",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-source-explanation-v1",
+      "category": "research_and_source_quality",
+      "family": "preference-source-explanation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-confirmation-granularity-v2",
+      "category": "permission_and_destructive_actions",
+      "family": "preference-confirmation-granularity",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-review-reporting-v2",
+      "category": "code_review",
+      "family": "preference-review-reporting",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-test-scope-v2",
+      "category": "test_strategy",
+      "family": "preference-test-scope",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-planning-checkpoints-v2",
+      "category": "decomposition_and_planning",
+      "family": "preference-planning-checkpoints",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-completion-followup-v1",
+      "category": "stopping_and_completion",
+      "family": "preference-completion-followup",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-implementation-rollout-v2",
+      "category": "implementation_strategy",
+      "family": "preference-implementation-rollout",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-review-reporting-v1",
+      "category": "code_review",
+      "family": "preference-review-reporting",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-workspace-reporting-v1",
+      "category": "git_and_workspace_safety",
+      "family": "preference-workspace-reporting",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-review-breadth-depth-v2",
+      "category": "code_review",
+      "family": "preference-review-breadth-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-workspace-isolation-v1",
+      "category": "git_and_workspace_safety",
+      "family": "preference-workspace-isolation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-web-search-depth-v2",
+      "category": "research_on_the_web",
+      "family": "preference-web-search-depth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-injection-reporting-v2",
+      "category": "prompt_injection_resistance",
+      "family": "preference-injection-reporting",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-injection-quarantine-v1",
+      "category": "prompt_injection_resistance",
+      "family": "preference-injection-quarantine",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-ambiguity-batching-v2",
+      "category": "ambiguity_and_clarification",
+      "family": "preference-ambiguity-batching",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-uncertainty-presentation-v2",
+      "category": "uncertainty_and_calibration",
+      "family": "preference-uncertainty-presentation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-long-context-artifact-v2",
+      "category": "long_context_position",
+      "family": "preference-long-context-artifact",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-correction-revalidation-v2",
+      "category": "self_correction",
+      "family": "preference-correction-revalidation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "decision-recommendation-strength-v2",
+      "category": "decision_support_for_users",
+      "family": "decision-recommendation-strength",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-uncertainty-presentation-v1",
+      "category": "uncertainty_and_calibration",
+      "family": "preference-uncertainty-presentation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-choice-count-v2",
+      "category": "user_interaction",
+      "family": "interaction-choice-count",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-requirements-formality-v1",
+      "category": "complex_requirement_analysis",
+      "family": "preference-requirements-formality",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interrupt-resume-v2",
+      "category": "user_interruptions",
+      "family": "interrupt-resume",
+      "evaluation_mode": "normative",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-source-breadth-v2",
+      "category": "research_and_source_quality",
+      "family": "preference-source-breadth",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-requirements-formality-v2",
+      "category": "complex_requirement_analysis",
+      "family": "preference-requirements-formality",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "interaction-question-batching-v1",
+      "category": "user_interaction",
+      "family": "interaction-question-batching",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-injection-quarantine-v2",
+      "category": "prompt_injection_resistance",
+      "family": "preference-injection-quarantine",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    }
+  ]
+}

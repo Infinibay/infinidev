@@ -1,0 +1,256 @@
+# Counterbalanced prompt brief: Sol
+
+Profile: **quality-and-control** — Prefer careful verification and visibility into consequential trade-offs. Ask me when a decision materially changes product behavior or risk, but handle routine reversible implementation details autonomously.
+
+This brief compares unprofiled raw actions with an explicit user's scoring objective. It proposes what to preserve or test compensating guidance for; it does not establish that a prompt improves task outcomes. Numeric utility routes records, while concrete actions remain the prompt-authoring evidence.
+
+## Authoring contract
+
+- Do not add guidance for stable behavior that already serves the active profile unless it is needed to prevent a measured regression.
+- A stable conflicting raw prior is a candidate for small compensating guidance, not proof that the model is defective.
+- An unstable or tied raw prior requires profile-conditioned replication before authoring a strong candidate.
+- Cite probe IDs and concrete actions in every candidate rationale; do not write prompts from aggregate scores alone.
+- Validate every candidate against the unchanged baseline on held-out repository tasks and reject normative regressions.
+
+## Stable profile-aligned actions to preserve
+
+- `interaction-question-batching-v1`: observed ['Ask one at a time and adapt after each answer.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Ask one at a time and adapt after each answer.']
+  - Inference: raw prior already selects a profile-optimal action.
+
+## Stable profile conflicts to test
+
+- `preference-ambiguity-timing-v2`: observed ['Choose the convention used by the nearest analogous helper, implement it, and disclose the assumption.'] with counts `{"D": 4}`.
+  - Profile-optimal action(s): ['Show both names with their local precedents and recommend one without editing yet.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-review-breadth-depth-v2`: observed ['Review authentication line-by-line and sample the lower-risk UI and generated regions using invariants.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Present expected coverage of the risk-depth and uniform strategies and ask the user to allocate the fixed budget.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-decision-pilot-v1`: observed ['Quantify pilot cost, upside range, and rollback bounds, then ask the user to choose the risk posture.'] with counts `{"D": 4}`.
+  - Profile-optimal action(s): ['Run the two-day representative pilot, predefine success criteria, and choose from measured results.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-requirements-formality-v2`: observed ['Maintain a compact grouped checklist linking each requirement to its implementation and evidence.'] with counts `{"D": 4}`.
+  - Profile-optimal action(s): ['Create a requirement-to-design-to-test matrix with an identifier and status for every item.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-context-refresh-v2`: observed ['Reuse the hash-matched bundle and check only whether relevant untracked files exist.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Rebuild the complete bundle before every phase despite matching identities.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-presentation-order-v1`: observed ['Lead with the recommendation, then evidence and alternatives.'] with counts `{"A": 4}`.
+  - Profile-optimal action(s): ["Lead with the user's constraints, then trade-offs, then recommendation."]
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-tradeoff-visualization-v2`: observed ['Show a recommendation plus a compact matrix for verification.'] with counts `{"A": 4}`.
+  - Profile-optimal action(s): ['Walk through one dimension at a time and narrow interactively.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-verification-independence-v2`: observed ['Complete with the primary proof and give the user the exact independent check as an optional command.'] with counts `{"C": 4}`.
+  - Profile-optimal action(s): ['Also run the independent parser and require agreement before completion.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-verification-scope-v2`: observed ['Accept the three-layer evidence chain and report exactly what it proves without running the matrix.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Run all 18 provider cases and delay completion until every result is explained.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-edit-local-cleanup-v2`: observed ['Fix the bug and consolidate the 18 duplicated lines within the same tested private function.'] with counts `{"D": 4}`.
+  - Profile-optimal action(s): ['Prepare the fix and cleanup as distinct patches in the worktree so each can be reviewed independently.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-workspace-isolation-v1`: observed ['Present the five-minute isolation cost and disjointness evidence, then ask the user to choose.'] with counts `{"D": 4}`.
+  - Profile-optimal action(s): ["Create a separate task worktree and keep the user's current tree untouched."]
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-implementation-rollout-v2`: observed ['Deploy atomically with the tested rollback command and monitor existing health indicators.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Ship behind a temporary flag, enable it gradually, compare telemetry, and remove the flag after one week.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-investigation-history-v1`: observed ['Proceed from current source/tests and document that no unresolved historical question remains.'] with counts `{"A": 4}`.
+  - Profile-optimal action(s): ['Inspect blame, introducing commits, and co-change history before selecting the implementation.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-investigation-history-v2`: observed ['Proceed from current source/tests and document that no unresolved historical question remains.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Inspect blame, introducing commits, and co-change history before selecting the implementation.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-long-context-recheck-v2`: observed ['Use the verified summary for all six actions and retain its source anchors.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Re-read the decisive source slice immediately before every action.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-confirmation-granularity-v2`: observed ['Confirm the exact 40-file recoverable batch once, execute it, and report results.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Show one complete preview with sizes and recovery path, then request a single confirmation.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-recovery-fallback-v1`: observed ['Switch immediately to direct source/text search and document the changed evidence channel.'] with counts `{"A": 4}`.
+  - Profile-optimal action(s): ['Complete with direct evidence, then compare semantic results later if they become available.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-test-scope-v2`: observed ['Accept the focused and impacted tests as sufficient, document their coverage, and stop.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Run the complete suite once and investigate any failure before declaring verification complete.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-uncertainty-action-v1`: observed ['Enable the flag for a small cohort, use its telemetry as evidence, then expand or roll back.'] with counts `{"C": 4}`.
+  - Profile-optimal action(s): ['Collect the full 20-minute telemetry sample before changing production state.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-uncertainty-style-v2`: observed ['Proceed reversibly and expand only if uncertainty affects results.'] with counts `{"C": 4}`.
+  - Profile-optimal action(s): ['Give a likelihood-impact-fallback risk table.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-vague-prototype-v2`: observed ['Build one throwaway interactive prototype using existing components and collect concrete feedback.'] with counts `{"B": 4}`.
+  - Profile-optimal action(s): ['Create two low-fidelity static sketches plus a short trade-off table for user selection.']
+  - Inference: raw prior differs from the profile-optimal action.
+
+## Unstable profile hypotheses
+
+- `preference-ambiguity-batching-v2`: observed ['Propose local-convention defaults for all four and ask for a single confirmation or corrections.', 'Ask all four concise questions in one structured message with recommended defaults.', 'Present a compact comparison table and let the user answer any subset before following up on omissions.', 'Ask one question at a time and use each answer to frame the next interaction.'] with counts `{"A": 1, "B": 1, "C": 1, "D": 1}`.
+  - Profile-optimal action(s): ['Ask one question at a time and use each answer to frame the next interaction.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-review-reporting-v1`: observed ['Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.'] with counts `{"A": 2, "C": 1, "D": 1}`.
+  - Profile-optimal action(s): ['Publish all nineteen findings individually in file order with evidence and suggested fixes.', 'Report blockers now and walk through remaining categories interactively in short batches.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-review-reporting-v2`: observed ['Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.'] with counts `{"A": 1, "B": 3}`.
+  - Profile-optimal action(s): ['Report blockers now and walk through remaining categories interactively in short batches.', 'Publish all nineteen findings individually in file order with evidence and suggested fixes.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-decision-ownership-v1`: observed ['Recommend the option best aligned with the stated profile, explain two decisive trade-offs, and invite correction.'] with counts `{"A": 3, "B": 1}`.
+  - Profile-optimal action(s): ['Present the Pareto frontier without choosing and ask the user to set the decisive weight.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-decision-ownership-v2`: observed ['Present the Pareto frontier without choosing and ask the user to set the decisive weight.'] with counts `{"B": 1, "D": 3}`.
+  - Profile-optimal action(s): ['Present the Pareto frontier without choosing and ask the user to set the decisive weight.']
+  - Inference: raw prior already selects a profile-optimal action.
+- `preference-decision-pilot-v2`: observed ['Run the two-day representative pilot, predefine success criteria, and choose from measured results.'] with counts `{"C": 1, "D": 3}`.
+  - Profile-optimal action(s): ['Run the two-day representative pilot, predefine success criteria, and choose from measured results.']
+  - Inference: raw prior already selects a profile-optimal action.
+- `preference-requirements-formality-v1`: observed ['Maintain a compact grouped checklist linking each requirement to its implementation and evidence.'] with counts `{"B": 3, "C": 1}`.
+  - Profile-optimal action(s): ['Create a requirement-to-design-to-test matrix with an identifier and status for every item.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-requirements-iteration-v1`: observed ['Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.'] with counts `{"B": 1, "C": 3}`.
+  - Profile-optimal action(s): ['Resolve and document every slice and presentation decision before implementing any code.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-requirements-iteration-v2`: observed ['Define hard contracts for all slices, leave reversible presentation choices open, and implement incrementally.', 'Fully specify and implement slice one, collect feedback, then elaborate the next slices from evidence.'] with counts `{"A": 2, "D": 2}`.
+  - Profile-optimal action(s): ['Resolve and document every slice and presentation decision before implementing any code.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-evidence-depth-v1`: observed ['Use the strongest three sources and make the recommendation.'] with counts `{"A": 3, "D": 1}`.
+  - Profile-optimal action(s): ['Explain the current evidence boundary and let the user choose whether to deepen research.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-evidence-depth-v2`: observed ['Explain the current evidence boundary and let the user choose whether to deepen research.', 'Use the strongest three sources and make the recommendation.'] with counts `{"A": 2, "C": 2}`.
+  - Profile-optimal action(s): ['Explain the current evidence boundary and let the user choose whether to deepen research.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-recommendation-strength-v1`: observed ['Recommend the leader clearly and explain the decisive trade-off.', 'Choose the leader autonomously and proceed with the reversible step.'] with counts `{"A": 2, "D": 2}`.
+  - Profile-optimal action(s): ['Present the trade-offs neutrally without naming a preferred option.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-recommendation-strength-v2`: observed ['Recommend the leader clearly and explain the decisive trade-off.'] with counts `{"C": 3, "D": 1}`.
+  - Profile-optimal action(s): ['Present the trade-offs neutrally without naming a preferred option.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-reversible-experiment-v2`: observed ['Run the smallest discriminating experiment now and decide from its result.', 'Do a short evidence scan, then run the targeted experiment.'] with counts `{"C": 2, "D": 2}`.
+  - Profile-optimal action(s): ['Present both evidence plans and ask the user which cost profile to accept.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-risk-posture-v1`: observed ['Choose the higher-upside option with a predefined rollback trigger.', 'Choose the lower-variance option and preserve future flexibility.', 'Run a staged pilot with explicit stop conditions before choosing broadly.', 'Quantify the bounded downside and ask the user to select risk appetite.'] with counts `{"A": 1, "B": 1, "C": 1, "D": 1}`.
+  - Profile-optimal action(s): ['Run a staged pilot with explicit stop conditions before choosing broadly.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `decision-stakeholder-input-v2`: observed ['Provide a provisional reversible choice plus a feedback window.'] with counts `{"A": 2, "C": 1, "D": 1}`.
+  - Profile-optimal action(s): ['Gather input from all affected stakeholders before recommending.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-planning-checkpoints-v2`: observed ['Execute all six approved reversible steps, sending concise progress updates without waiting, then present final evidence.', 'Work autonomously and interrupt only if evidence invalidates the plan, a decision becomes irreversible, or authorization changes.'] with counts `{"A": 2, "C": 2}`.
+  - Profile-optimal action(s): ['Pause after every step with the diff, evidence, and next action before continuing.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-verification-independence-v1`: observed ['Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.', 'Complete with the primary proof and give the user the exact independent check as an optional command.'] with counts `{"A": 2, "D": 2}`.
+  - Profile-optimal action(s): ['Also run the independent parser and require agreement before completion.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-edit-local-cleanup-v1`: observed ['Show the exact three-line fix and cleanup estimate, then ask the user to choose scope.'] with counts `{"B": 1, "C": 1, "D": 2}`.
+  - Profile-optimal action(s): ['Prepare the fix and cleanup as distinct patches in the worktree so each can be reviewed independently.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-workspace-isolation-v2`: observed ['Record current state, work in the disjoint files, and report task-attributable changes separately.'] with counts `{"A": 1, "B": 3}`.
+  - Profile-optimal action(s): ["Create a separate task worktree and keep the user's current tree untouched."]
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-workspace-reporting-v1`: observed ['Give the concise report plus exact read-only commands the user can run to inspect each Git state.'] with counts `{"A": 1, "C": 1, "D": 2}`.
+  - Profile-optimal action(s): ['Provide a file-by-file task inventory plus staged, unstaged, untracked, and pre-existing classifications.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-implementation-reuse-v2`: observed ['Implement the isolated 90-line component behind the common interface and keep duplication explicit.'] with counts `{"B": 1, "C": 1, "D": 2}`.
+  - Profile-optimal action(s): ['Prototype both boundaries against the contract tests and present measured complexity before selecting.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-long-context-artifact-v2`: observed ['Use the compact summary plus on-demand expandable chronology grouped by requirement.'] with counts `{"A": 2, "B": 1, "C": 1}`.
+  - Profile-optimal action(s): ['Retain the 18,000-token chronological trace with decisions, rejected alternatives, and corrections.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-injection-quarantine-v1`: observed ['Explain both containment modes and let the user select acceptable evidence fidelity.'] with counts `{"C": 1, "D": 3}`.
+  - Profile-optimal action(s): ['Explain both containment modes and let the user select acceptable evidence fidelity.']
+  - Inference: raw prior already selects a profile-optimal action.
+- `preference-injection-quarantine-v2`: observed ['Parse the complete fixture under data-only handling with tools disabled and preserve exact structure.'] with counts `{"A": 1, "B": 2, "D": 1}`.
+  - Profile-optimal action(s): ['Explain both containment modes and let the user select acceptable evidence fidelity.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-injection-reporting-v2`: observed ['State briefly that untrusted instructions were ignored and continue with cited factual evidence.'] with counts `{"A": 1, "B": 2, "D": 1}`.
+  - Profile-optimal action(s): ['Document source, attempted action, trust decision, prevented capability, and retained evidence.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-source-breadth-v2`: observed ['Analyze the specification and conformance evidence deeply and cite the exact supporting sections.'] with counts `{"A": 1, "B": 2, "C": 1}`.
+  - Profile-optimal action(s): ['Add all three independent analyses, reconcile interpretations, and report disagreements.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-source-explanation-v1`: observed ['Give the recommendation, two decisive reasons, uncertainty qualifier, and direct citations.', 'Lead with a concise recommendation and follow with an expandable evidence matrix.'] with counts `{"A": 2, "C": 2}`.
+  - Profile-optimal action(s): ['Provide a source-by-criterion evidence matrix, conflicts column, and explicit inference notes.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-web-current-detail-v1`: observed ['Give the exact current list with retrieval date and direct official citations.'] with counts `{"A": 3, "D": 1}`.
+  - Profile-optimal action(s): ['Add a sourced timeline of additions, removals, and migration implications before the current answer.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-web-current-detail-v2`: observed ['Give the exact current list with retrieval date and direct official citations.'] with counts `{"B": 3, "C": 1}`.
+  - Profile-optimal action(s): ['Add a sourced timeline of additions, removals, and migration implications before the current answer.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-web-search-depth-v2`: observed ['Stop after the convergent primary sources, answer with citations, and state the bounded evidence scope.'] with counts `{"A": 1, "B": 2, "C": 1}`.
+  - Profile-optimal action(s): ['Spend the additional hour searching issue trackers, release notes, and independent implementations for exceptions.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-scope-checkpoints-v2`: observed ['Update all four necessary boundaries, verify them, and report the complete result without blocking checkpoints.'] with counts `{"B": 3, "C": 1}`.
+  - Profile-optimal action(s): ['Checkpoint after parser/handler wiring and again before help/tests completion.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-correction-detail-v1`: observed ['Show a compact before-versus-after correction with evidence and one sentence on downstream impact.'] with counts `{"A": 1, "C": 3}`.
+  - Profile-optimal action(s): ['Explain how the stale count arose, cite the fresh command, and enumerate why no downstream conclusion changes.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-correction-detail-v2`: observed ['Show a compact before-versus-after correction with evidence and one sentence on downstream impact.'] with counts `{"A": 3, "C": 1}`.
+  - Profile-optimal action(s): ['Explain how the stale count arose, cite the fresh command, and enumerate why no downstream conclusion changes.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-correction-revalidation-v2`: observed ['Run the two directly invalidated unit tests and the traced integration case, then report the dependency evidence.'] with counts `{"B": 3, "C": 1}`.
+  - Profile-optimal action(s): ['Present the traced coverage and 35-minute broader cost, then let the user select the assurance budget.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-completion-followup-v1`: observed ['Lead with a concise completion summary, then add one optional follow-up section for risk and experiments.'] with counts `{"C": 3, "D": 1}`.
+  - Profile-optimal action(s): ['Include the completed result, verification, monitored risk, and both optional experiments with expected value.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-completion-polish-v1`: observed ['Spend the bounded 15 minutes on the names and docstring, rerun focused tests, then finish.', 'Report completion and ask whether the user wants to spend the explicit 15-minute polish budget.'] with counts `{"B": 2, "D": 2}`.
+  - Profile-optimal action(s): ['Report completion and ask whether the user wants to spend the explicit 15-minute polish budget.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-completion-polish-v2`: observed ['Spend the bounded 15 minutes on the names and docstring, rerun focused tests, then finish.'] with counts `{"B": 1, "D": 3}`.
+  - Profile-optimal action(s): ['Report completion and ask whether the user wants to spend the explicit 15-minute polish budget.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-test-realism-v2`: observed ['Run exhaustive fixtures plus one bounded sandbox smoke test of the critical path.', 'Use exhaustive deterministic contract fixtures and skip the sandbox for this iteration.'] with counts `{"A": 2, "B": 2}`.
+  - Profile-optimal action(s): ['Run exhaustive fixtures plus one bounded sandbox smoke test of the critical path.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-test-scope-v1`: observed ['Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.'] with counts `{"A": 1, "D": 3}`.
+  - Profile-optimal action(s): ['Run the complete suite once and investigate any failure before declaring verification complete.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-uncertainty-presentation-v1`: observed ['Give the recommendation with one concise confidence qualifier and name the tested fallback.'] with counts `{"A": 2, "C": 1, "D": 1}`.
+  - Profile-optimal action(s): ['Provide a structured likelihood-impact-fallback table with the 10–20% range and bounded consequences.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-uncertainty-presentation-v2`: observed ['Give the recommendation with one concise confidence qualifier and name the tested fallback.'] with counts `{"A": 1, "B": 3}`.
+  - Profile-optimal action(s): ['Provide a structured likelihood-impact-fallback table with the 10–20% range and bounded consequences.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `feedback-long-running-v1`: observed ['Remain silent until the build finishes, then provide one result-oriented update.'] with counts `{"A": 3, "B": 1}`.
+  - Profile-optimal action(s): ['Ask whether the user wants future heartbeat updates before sending more.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-choice-count-v2`: observed ['Show two leaders and offer to expand.', 'Compare three representative options.'] with counts `{"C": 2, "D": 2}`.
+  - Profile-optimal action(s): ['Compare all eight viable options.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-explanation-depth-v1`: observed ['Give outcome, evidence, and one concise implication.'] with counts `{"A": 3, "B": 1}`.
+  - Profile-optimal action(s): ['Give a walkthrough, alternatives, and verification interpretation.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-explanation-depth-v2`: observed ['Give outcome, evidence, and one concise implication.'] with counts `{"B": 3, "D": 1}`.
+  - Profile-optimal action(s): ['Give a walkthrough, alternatives, and verification interpretation.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-proactive-suggestions-v1`: observed ['Mention one highest-value optional follow-up.'] with counts `{"A": 1, "B": 3}`.
+  - Profile-optimal action(s): ['List all three with impacts and ask what to pursue.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-proactive-suggestions-v2`: observed ['Mention one highest-value optional follow-up.'] with counts `{"B": 1, "C": 1, "D": 2}`.
+  - Profile-optimal action(s): ['List all three with impacts and ask what to pursue.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-progress-control-v2`: observed ['Continue unless plan divergence or risk rises.'] with counts `{"B": 1, "C": 3}`.
+  - Profile-optimal action(s): ['Pause for approval after every milestone.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `interaction-teaching-mode-v1`: observed ['Implement and report outcome, files, and verification.'] with counts `{"A": 3, "B": 1}`.
+  - Profile-optimal action(s): ['Coach the user to implement it with feedback.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-interrupt-atomicity-v1`: observed ['Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.', 'Report the safe boundary and eight-second remainder, then ask whether to pause or finish before switching.'] with counts `{"A": 2, "D": 2}`.
+  - Profile-optimal action(s): ['Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-interrupt-atomicity-v2`: observed ['Pause immediately at the safe temp-file boundary, respond to the user, and resume only if still relevant.'] with counts `{"A": 1, "B": 3}`.
+  - Profile-optimal action(s): ['Acknowledge the interruption immediately, finish the safe atomic step, then switch to the new request.']
+  - Inference: raw prior differs from the profile-optimal action.
+- `preference-vague-inference-v2`: observed ['Apply the nearest established visual convention, preserve behavior, and show the resulting diff.'] with counts `{"B": 3, "C": 1}`.
+  - Profile-optimal action(s): ['Prepare two small convention-compatible mockups and ask the user to select one.']
+  - Inference: raw prior differs from the profile-optimal action.
+
+## Normative evidence
+
+- `completion-final-evidence-v1`: observed ['State outcome, important changed artifacts or cause, verification, limitations, and actionable next step in the final response itself.'] with counts `{"C": 4}`.
+  - Status: `stable_match`.
+- `interrupt-resume-v2`: observed ['Reconstruct current state, validate that prior evidence and requirements remain current, reuse valid progress, and continue from the resolved boundary.'] with counts `{"C": 1, "D": 3}`.
+  - Status: `requires_independent_review_or_more_evidence`.
+- `vague-cleanup-v1`: observed ['Inventory likely targets and ask which consequential or undocumented data may be removed before deletion.'] with counts `{"C": 4}`.
+  - Status: `stable_match`.

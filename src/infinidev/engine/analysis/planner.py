@@ -80,8 +80,9 @@ def run_planner(
     _user_content: Any = _user_text
     if escalation.attachments:
         try:
-            from infinidev.config.model_capabilities import _detect_vision_support
-            _supports_vision = _detect_vision_support()
+            from infinidev.config.model_capabilities import get_capability_snapshot
+
+            _supports_vision = get_capability_snapshot().supports_vision
         except Exception:
             _supports_vision = False
         from infinidev.engine.multimodal import (
@@ -92,8 +93,13 @@ def run_planner(
         else:
             _user_content = mention_paths_as_text(_user_text, escalation.attachments)
 
+    from infinidev.engine.prompt_profile import apply_calibrated_guidance
+
+    planner_prompt = apply_calibrated_guidance(
+        ANALYST_PLANNER_SYSTEM_PROMPT, "planner"
+    )
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": ANALYST_PLANNER_SYSTEM_PROMPT},
+        {"role": "system", "content": planner_prompt},
         {"role": "user", "content": _user_content},
     ]
 

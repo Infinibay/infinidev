@@ -1,0 +1,296 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "id": "helm-2022",
+      "kind": "paper",
+      "title": "Holistic Evaluation of Language Models",
+      "url": "https://arxiv.org/abs/2211.09110",
+      "primary_finding_used": "Standardized multi-scenario, multi-metric evaluation and release of raw prompts and completions improve transparency.",
+      "limits": "HELM evaluates broad model capabilities; it does not validate this project's preference taxonomy or prompt-calibration policy."
+    },
+    {
+      "id": "mcq-selection-bias-2023",
+      "kind": "paper",
+      "title": "Large Language Models Are Not Robust Multiple Choice Selectors",
+      "url": "https://arxiv.org/abs/2309.03882",
+      "primary_finding_used": "Across 20 LLMs and three benchmarks, changing option positions exposed systematic option-ID selection bias.",
+      "limits": "The studied models and benchmarks differ from Sol, Terra, Luna, and behavioral preference probes. Counterbalancing diagnoses a possible confound; it does not guarantee complete debiasing."
+    },
+    {
+      "id": "prompt-order-2021",
+      "kind": "paper",
+      "title": "Fantastically Ordered Prompts and Where to Find Them",
+      "url": "https://arxiv.org/abs/2104.08786",
+      "primary_finding_used": "Few-shot example order can move performance from near state of the art to near random, and good orders need not transfer across models.",
+      "limits": "This concerns few-shot demonstration order, not conversation-history carryover directly. It supports controlling order effects but not any specific isolation implementation."
+    },
+    {
+      "id": "prompt-robust-2023",
+      "kind": "paper",
+      "title": "PromptRobust: Towards Evaluating the Robustness of Large Language Models on Adversarial Prompts",
+      "url": "https://arxiv.org/abs/2306.04528",
+      "primary_finding_used": "Semantics-preserving character, word, sentence, and semantic prompt perturbations reveal substantial robustness failures.",
+      "limits": "Adversarial task prompts are not identical to paired behavioral scenario variants. The paper supports perturbation testing, not the validity of our authored variants."
+    },
+    {
+      "id": "cot-faithfulness-2023",
+      "kind": "paper",
+      "title": "Language Models Don't Always Say What They Think: Unfaithful Explanations in Chain-of-Thought Prompting",
+      "url": "https://arxiv.org/abs/2305.04388",
+      "primary_finding_used": "Generated explanations can rationalize answers while omitting influential biasing features, including answer-order cues.",
+      "limits": "The result concerns chain-of-thought explanations in specific experiments. It does not imply every brief decision criterion is false or useless."
+    },
+    {
+      "id": "opro-2023",
+      "kind": "paper",
+      "title": "Large Language Models as Optimizers",
+      "url": "https://arxiv.org/abs/2309.03409",
+      "primary_finding_used": "LLMs can iteratively propose prompts that improve a measured objective on several benchmark tasks.",
+      "limits": "Reported gains are task and model specific. Optimizing a metric can overfit it and does not establish safety, transfer, or user preference alignment."
+    },
+    {
+      "id": "dspy-2023",
+      "kind": "paper",
+      "title": "DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines",
+      "url": "https://arxiv.org/abs/2310.03714",
+      "primary_finding_used": "Metric-driven compilation improved several LM pipelines over hand-authored few-shot baselines in two case studies.",
+      "limits": "Case-study gains do not establish a universal compiler or justify activating an optimized prompt without held-out and regression evaluation."
+    },
+    {
+      "id": "textgrad-2024",
+      "kind": "paper",
+      "title": "TextGrad: Automatic Differentiation via Text",
+      "url": "https://arxiv.org/abs/2406.07496",
+      "primary_finding_used": "Textual feedback was used as an optimization signal through compound language-model systems and improved several tested tasks.",
+      "limits": "The results do not establish that a model's unsolicited critique of its own harness is correct, independent, or safe to implement."
+    },
+    {
+      "id": "instructgpt-2022",
+      "kind": "paper",
+      "title": "Training Language Models to Follow Instructions with Human Feedback",
+      "url": "https://arxiv.org/abs/2203.02155",
+      "primary_finding_used": "Human-feedback alignment improved held-out human preferences while evaluating public capability and safety regressions; the authors explicitly note labeler intent can diverge from actual user intent.",
+      "limits": "Population-level RLHF and this project's runtime per-user prompting are different interventions."
+    },
+    {
+      "id": "lost-in-the-middle-2023",
+      "kind": "paper",
+      "title": "Lost in the Middle: How Language Models Use Long Contexts",
+      "url": "https://arxiv.org/abs/2307.03172",
+      "primary_finding_used": "Performance on multi-document question answering and key-value retrieval varied with relevant-information position and was often worst when that information appeared in the middle of long inputs.",
+      "limits": "The experiments do not validate Infinidev's ranker, its scoring channels, its prompt ceiling, or automatic context selection for repository work."
+    },
+    {
+      "id": "human-ai-guidelines-2019",
+      "kind": "paper",
+      "title": "Guidelines for Human-AI Interaction",
+      "url": "https://doi.org/10.1145/3290605.3300233",
+      "primary_finding_used": "Eighteen human-AI interaction guidelines were refined through multiple evaluation rounds, including 49 design practitioners assessing 20 AI-infused products.",
+      "limits": "The study validates guideline relevance and coverage, not the effectiveness of Infinidev's exact phase labels, terminal layout, or event cadence."
+    },
+    {
+      "id": "progress-indicators-2010",
+      "kind": "paper",
+      "title": "The impact of progress indicators on task completion",
+      "url": "https://doi.org/10.1016/j.intcom.2010.03.001",
+      "primary_finding_used": "Two experiments found that progress feedback can improve or degrade experience depending on whether displayed progress matches user expectations; intermittent feedback reduced some costs of discouraging feedback.",
+      "limits": "The experiments concern online questionnaires and percent-complete feedback, not coding agents or qualitative phase labels. They warn against fabricated progress and excessive updates rather than proving this UI treatment."
+    },
+    {
+      "id": "internal-stability-20260803",
+      "kind": "internal_experiment",
+      "title": "Category-stratified three-repetition raw-prior study",
+      "path": "bench/runs/20260803T222340Z/category-stratified-v1.stability-report.json",
+      "primary_finding_used": "Thirty of 87 model-by-question series changed action at least once across three isolated repetitions.",
+      "limits": "Only 29 draft probes, three repetitions, one catalog revision, fixed option order, and no population-level estimate."
+    },
+    {
+      "id": "internal-elicitation-20260803",
+      "kind": "internal_experiment",
+      "title": "Choice-only versus self-report elicitation study",
+      "path": "bench/runs/20260803T222340Z/elicitation.comparative-report.json",
+      "primary_finding_used": "Requesting a criterion and missing context changed 11 of 30 choices relative to choice-only calls.",
+      "limits": "Ten draft probes per model, one repetition, and fixed option order."
+    },
+    {
+      "id": "internal-profiles-20260803",
+      "kind": "internal_experiment",
+      "title": "Targeted repeated user-profile adaptation study",
+      "path": "bench/runs/20260803T222340Z/profile-target-v1.adaptation-report.json",
+      "primary_finding_used": "Explicit opposing user profiles changed unique modal actions in 8/8 targeted families for Sol, 8/8 for Terra, and 5/8 for Luna.",
+      "limits": "Eight preselected draft preference probes, two broad profiles, three repetitions, one catalog revision, and fixed option order."
+    },
+    {
+      "id": "internal-option-order-20260803",
+      "kind": "internal_experiment",
+      "title": "Fixed-order versus balanced-rotation targeted study",
+      "path": "bench/runs/20260803T222340Z/profile-target-v1.option-order-report.json",
+      "primary_finding_used": "Across eight probes, fixed and counterbalanced canonical modes remained uniquely equal in 6 for Sol, 3 for Terra, and 4 for Luna; other families changed or became tied.",
+      "limits": "Eight preselected draft probes, three fixed versus four balanced observations, one catalog revision, and no causal decomposition of position from additional sampling variation."
+    },
+    {
+      "id": "internal-balanced-profiles-20260803",
+      "kind": "internal_experiment",
+      "title": "Counterbalanced repeated user-profile adaptation study",
+      "path": "bench/runs/20260803T222340Z/profile-target-v1.counterbalanced-adaptation.json",
+      "primary_finding_used": "Opposing user profiles produced different unique canonical modes in 7/8 targeted families for Sol, 6/8 for Terra, and 5/8 for Luna after complete action-to-letter rotations.",
+      "limits": "Eight preselected draft probes, two broad profiles, four rotations, one catalog revision, and many condition-level series that were not exactly stable."
+    },
+    {
+      "id": "internal-v2-checkpoint1-profiles-20260803",
+      "kind": "internal_experiment",
+      "title": "Family-novel checkpoint 1 counterbalanced profile treatment",
+      "path": "bench/runs/20260803T222340Z/category-stratified-v2.checkpoint1.profile-adaptation.json",
+      "primary_finding_used": "For decision ownership, all three models moved toward a reversible default under speed/autonomy and toward explicit user weight-setting under quality/control; review-report adaptation was less uniform in Luna.",
+      "limits": "Two preselected draft families, two broad profiles, four position rotations, three model routes, one catalog revision, and no held-out task-outcome measurement."
+    },
+    {
+      "id": "internal-v2-checkpoint2-profiles-20260803",
+      "kind": "internal_experiment",
+      "title": "Family-novel checkpoint 2 counterbalanced profile treatment",
+      "path": "bench/runs/20260803T222340Z/category-stratified-v2.checkpoint2.profile-adaptation.json",
+      "primary_finding_used": "All three models separated exactly across four rotations on both families: speed/autonomy selected compact requirements and decisive context, while quality/control exposed artifact or context trade-offs and user choice.",
+      "limits": "Two preselected draft families, two broad profiles, four position rotations, three model routes, one catalog revision, and behavioral choices rather than downstream task-quality outcomes."
+    },
+    {
+      "id": "internal-v3-checkpoint3-profiles-20260803",
+      "kind": "internal_experiment",
+      "title": "Preflight-revised checkpoint 3 counterbalanced profile treatment",
+      "path": "bench/runs/20260803T222340Z/category-stratified-v3.checkpoint3.profile-adaptation.json",
+      "primary_finding_used": "All three models chose higher upside with rollback under speed/autonomy; quality/control shifted toward user-owned risk and deeper advance planning, with residual instability in Sol risk and a tied Luna fast-planning condition.",
+      "limits": "Two preselected draft families, two broad profiles, four position rotations, three model routes, one catalog revision, and forced behavioral choices rather than downstream task-quality outcomes."
+    }
+  ],
+  "decisions": [
+    {
+      "id": "retain_raw_events",
+      "status": "supported",
+      "claim": "Retain raw prompts, replies, identities, and protocol metadata as primary evidence rather than publishing only aggregate scores.",
+      "supported_scope": "Transparent post-hoc analysis and reproducible comparison.",
+      "does_not_establish": "Raw retention does not make an invalid probe valid or reveal private reasoning.",
+      "sources": ["helm-2022"],
+      "controls": ["Observation JSONL remains authoritative", "Reports link each aggregate to concrete actions"]
+    },
+    {
+      "id": "multi_category_multi_metric",
+      "status": "partially_supported",
+      "claim": "Evaluate behavior across a declared taxonomy and preserve multiple outcomes instead of collapsing quality into one score.",
+      "supported_scope": "Broad coverage and visible trade-offs.",
+      "does_not_establish": "HELM does not validate Infinidev's 29 categories or utility axes.",
+      "sources": ["helm-2022"],
+      "controls": ["Category coverage audit", "Qualitative action reports alongside numeric summaries"]
+    },
+    {
+      "id": "isolated_fresh_calls",
+      "status": "partially_supported",
+      "claim": "Use fresh conversations when estimating a per-question raw prior so prior questions cannot become an uncontrolled ordering treatment.",
+      "supported_scope": "Removal of one obvious history and order confound.",
+      "does_not_establish": "The cited few-shot order study does not directly prove that fresh API conversations are optimal for every agent evaluation.",
+      "sources": ["prompt-order-2021"],
+      "controls": ["One question per messages list", "No prior response history", "Separate contextual-sequence studies when history is the variable of interest"]
+    },
+    {
+      "id": "counterbalance_mcq_options",
+      "status": "supported",
+      "implementation_status": "implemented",
+      "claim": "Counterbalance action-to-letter mappings before interpreting repeated MCQ selections as action preferences.",
+      "supported_scope": "Detection and reduction of option-ID or position confounding.",
+      "does_not_establish": "Permutation does not remove all prompt or semantic biases and cannot repair historical fixed-order runs.",
+      "sources": ["mcq-selection-bias-2023", "cot-faithfulness-2023", "internal-option-order-20260803"],
+      "controls": ["Deterministic balanced permutations", "Map provider letter back to canonical action", "Retain presented mapping and provider letter"]
+    },
+    {
+      "id": "paired_perturbation_families",
+      "status": "partially_supported",
+      "claim": "Use controlled variants that change one decision-relevant detail to test behavioral robustness and causal sensitivity.",
+      "supported_scope": "Locating behavior that changes under small prompt variations.",
+      "does_not_establish": "Authored pairs are not automatically semantics-preserving or causally isolated; they require family-atomic review.",
+      "sources": ["prompt-robust-2023"],
+      "controls": ["Two-variant families", "Family-atomic splits", "Independent review before approval"]
+    },
+    {
+      "id": "repeat_behavioral_observations",
+      "status": "internal_evidence",
+      "claim": "Repeat identical isolated conditions before treating one observed action as a model tendency.",
+      "supported_scope": "Detecting obvious within-condition instability in this provider and model setting.",
+      "does_not_establish": "Three repetitions do not estimate a population distribution or prove a stable trait.",
+      "sources": ["internal-stability-20260803"],
+      "controls": ["Retain every repetition", "Report exact stability and ties", "Do not calibrate from a single response"]
+    },
+    {
+      "id": "separate_self_report_protocol",
+      "status": "supported",
+      "claim": "Keep expressed criteria in a separate protocol and never treat them as faithful private chain-of-thought.",
+      "supported_scope": "Avoiding explanation requests as invisible metadata and limiting interpretation of self-explanations.",
+      "does_not_establish": "Brief self-reports have no value; they can still expose stated missing context and user-facing rationale.",
+      "sources": ["cot-faithfulness-2023", "internal-elicitation-20260803"],
+      "controls": ["Choice-only primary baseline", "Separate self-report artifact", "Compare protocol-induced action changes"]
+    },
+    {
+      "id": "condition_on_user_preferences",
+      "status": "internal_evidence",
+      "claim": "Condition preference-sensitive decisions on the active user's natural-language priorities before adding permanent model-specific guidance.",
+      "supported_scope": "Fourteen targeted draft families and two broad profiles measured across four counterbalanced internal studies.",
+      "does_not_establish": "A universal preference representation, automatic inference accuracy, or generalization to all users and tasks.",
+      "sources": ["internal-profiles-20260803", "internal-balanced-profiles-20260803", "internal-v2-checkpoint1-profiles-20260803", "internal-v2-checkpoint2-profiles-20260803", "internal-v3-checkpoint3-profiles-20260803", "instructgpt-2022"],
+      "controls": ["No universal gold key for preference probes", "Preserve concrete actions", "Represent runtime preferences separately from model identity"]
+    },
+    {
+      "id": "automatic_prompt_search",
+      "status": "partially_supported",
+      "claim": "Generate and score prompt candidates automatically, but treat optimization as search rather than proof of general improvement.",
+      "supported_scope": "Automatic discovery of instructions that improve a declared development objective on tested tasks.",
+      "does_not_establish": "Transfer, safety, user alignment, or superiority outside the measured objective and model revision.",
+      "sources": ["opro-2023", "dspy-2023"],
+      "controls": ["Immutable baseline", "Small candidate fragments", "Held-out validation", "Normative and latency regression gates", "Opt-in activation"]
+    },
+    {
+      "id": "bounded_ranked_context",
+      "status": "partially_supported",
+      "claim": "Prioritize a bounded set of task-relevant resources automatically, refresh it at step and user-guidance pivots, and leave explicit retrieval tools available for expansion.",
+      "supported_scope": "Reducing indiscriminate context injection while keeping relevant evidence visible at the current decision point.",
+      "does_not_establish": "That ContextRank improves repository-task outcomes, that its ordering is optimal, or that a 12000-character ceiling is universally appropriate.",
+      "sources": ["lost-in-the-middle-2023", "internal-v2-checkpoint2-profiles-20260803"],
+      "controls": ["Include active-step and new-user-guidance text in the retrieval query", "Invalidate cached rankings on live user corrections", "Bound automatic context to 12000 characters and 4000 for small models", "Expose Ken tools for explicit expansion", "Use the hash-bound family-atomic baseline/ranked/full repository-task evaluator", "Require held-out repository-task comparison before enabling by default"]
+    },
+    {
+      "id": "heldout_regression_gates",
+      "status": "partially_supported",
+      "claim": "Evaluate candidate guidance on held-out prompts and separate capability, safety, preference, and efficiency outcomes before activation.",
+      "supported_scope": "Reducing direct development-set overfitting and exposing regressions across measured outcomes.",
+      "does_not_establish": "Absence of unmeasured regressions or generalization beyond the evaluation distribution.",
+      "sources": ["helm-2022", "instructgpt-2022", "opro-2023"],
+      "controls": ["Family-atomic calibration and validation splits", "Normative non-regression", "Preference objective conditioned on user profile", "Latency ceiling"]
+    },
+    {
+      "id": "truthful_runtime_feedback",
+      "status": "partially_supported",
+      "implementation_status": "implemented",
+      "claim": "Expose truthful coarse runtime phases and announce potentially long tools before they block, without inventing percent-complete estimates.",
+      "supported_scope": "Keeping users aware that an AI-assisted operation is active and which broad phase or tool currently owns the wait.",
+      "does_not_establish": "That the labels improve satisfaction or control in Infinidev, that more feedback is always better, or that elapsed time predicts remaining work.",
+      "sources": ["human-ai-guidelines-2019", "progress-indicators-2010"],
+      "controls": ["Derive labels from actual loop and tool lifecycle events", "Show no fabricated percentage or ETA", "Replace stale phase labels at every model/tool transition", "Keep updates transient instead of adding repetitive chat messages", "Evaluate wording and cadence with user research before claiming an outcome gain"]
+    },
+    {
+      "id": "structured_model_feedback",
+      "status": "partially_supported",
+      "implementation_status": "implemented",
+      "claim": "Collect structured model feedback as artifact-grounded hypotheses that can propose paired experiments, while preventing direct activation of its suggestions.",
+      "supported_scope": "Using textual feedback to generate candidate interventions and falsifiable evaluation ideas.",
+      "does_not_establish": "That self-critique is faithful, that agreement across models implies correctness, or that any proposed harness change improves outcomes.",
+      "sources": ["textgrad-2024", "cot-faithfulness-2023"],
+      "controls": ["No system prompt in raw feedback collection", "Fresh isolated request per case", "Require visible evidence, expected effect, regression risk, and paired experiment", "Preserve raw response and immutable identity", "Never compile or implement feedback automatically", "Apply independent review and held-out outcome gates"]
+    },
+    {
+      "id": "minimal_guidance_fragments",
+      "status": "hypothesis",
+      "claim": "Prefer the smallest model-and-family-specific guidance fragment that fixes a replicated residual mismatch.",
+      "supported_scope": "Current product design hypothesis motivated by avoiding unnecessary prompt interactions.",
+      "does_not_establish": "That shorter prompts are always better or that fragment size causally determines behavior.",
+      "sources": [],
+      "controls": ["Compare unchanged baseline", "Measure prompt tokens and latency", "Reject fragments without held-out gain", "Compile exactly one evaluated role per deployment profile", "Enforce a hash-bound 4 KiB runtime guidance ceiling"]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "model": "ollama_chat/qwen3.5:27b",
+  "model_identity": "ollama_chat/qwen3.5:27b@local-digest-required",
+  "provider": "ollama",
+  "temperature": 0.0,
+  "max_tokens": 300,
+  "seed": 42,
+  "min_request_interval_seconds": 2.0,
+  "elicitation_protocol": "choice_only",
+  "option_order_protocol": "balanced_rotation",
+  "utility_profile": {
+    "name": "high-control-quality",
+    "description": "Prefer visible checkpoints and strong verification over maximum autonomy or speed.",
+    "weights": {
+      "autonomy": -0.3,
+      "caution": 0.6,
+      "cost_efficiency": 0.1,
+      "interaction": 0.7,
+      "quality": 1.0,
+      "speed": -0.2,
+      "user_control": 1.0
+    }
+  },
+  "conditions": {
+    "raw": null
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "source_dataset_sha256": "161bee159a087f349c513ddfb18fff9f7074d7962193ca918be51e09e20ac0d1",
+  "selection": {
+    "selection_version": 1,
+    "seed": "20260803",
+    "domains": [
+      "authorization_and_external_state",
+      "code_review",
+      "decision_support",
+      "implementation",
+      "planning",
+      "testing_and_verification",
+      "user_interaction",
+      "web_research"
+    ],
+    "study_kinds": [
+      "linguistic",
+      "execution"
+    ],
+    "selected_family_ids": [
+      "pragmatics_implication_and_politeness--authorization_and_external_state--v1",
+      "execution--authorization_and_external_state--contradictions_and_precedence--v1",
+      "compound_requests_and_nested_scope--code_review--v1",
+      "execution--code_review--incremental_execution--v1",
+      "quantifiers_all_any_each_most_some--decision_support--v1",
+      "execution--decision_support--failure_recovery--v1",
+      "instruction_position_and_order--implementation--v1",
+      "execution--implementation--planning_before_action--v1",
+      "register_formal_informal_semiformal--planning--v1",
+      "execution--planning--safety_and_reversibility--v1",
+      "instruction_conflict_and_precedence--testing_and_verification--v1",
+      "execution--testing_and_verification--speed_vs_completeness--v1",
+      "irrelevant_information_and_noise--user_interaction--v1",
+      "execution--user_interaction--evidence_search_and_escalation--v1",
+      "output_format_and_schema_language--web_research--v1",
+      "execution--web_research--priority_resolution--v1"
+    ],
+    "selected_question_ids": [
+      "behavior--compound_requests_and_nested_scope",
+      "behavior--instruction_conflict_and_precedence",
+      "behavior--instruction_position_and_order",
+      "behavior--irrelevant_information_and_noise",
+      "behavior--output_format_and_schema_language",
+      "behavior--pragmatics_implication_and_politeness",
+      "behavior--quantifiers_all_any_each_most_some",
+      "behavior--register_formal_informal_semiformal",
+      "execution--authorization_and_external_state--contradictions_and_precedence",
+      "execution--code_review--incremental_execution",
+      "execution--decision_support--failure_recovery",
+      "execution--implementation--planning_before_action",
+      "execution--planning--safety_and_reversibility",
+      "execution--testing_and_verification--speed_vs_completeness",
+      "execution--user_interaction--evidence_search_and_escalation",
+      "execution--web_research--priority_resolution"
+    ],
+    "selected_research_dimensions": [
+      "execution:contradictions_and_precedence",
+      "execution:evidence_search_and_escalation",
+      "execution:failure_recovery",
+      "execution:incremental_execution",
+      "execution:planning_before_action",
+      "execution:priority_resolution",
+      "execution:safety_and_reversibility",
+      "execution:speed_vs_completeness",
+      "linguistic:compound_requests_and_nested_scope",
+      "linguistic:instruction_conflict_and_precedence",
+      "linguistic:instruction_position_and_order",
+      "linguistic:irrelevant_information_and_noise",
+      "linguistic:output_format_and_schema_language",
+      "linguistic:pragmatics_implication_and_politeness",
+      "linguistic:quantifiers_all_any_each_most_some",
+      "linguistic:register_formal_informal_semiformal"
+    ]
+  },
+  "counts": {
+    "families": 16,
+    "cases": 48,
+    "domains": {
+      "authorization_and_external_state": 6,
+      "code_review": 6,
+      "decision_support": 6,
+      "implementation": 6,
+      "planning": 6,
+      "testing_and_verification": 6,
+      "user_interaction": 6,
+      "web_research": 6
+    },
+    "study_kinds": {
+      "execution": 24,
+      "linguistic": 24
+    },
+    "relations": {
+      "adversarial": 6,
+      "anchor": 16,
+      "contrast": 9,
+      "equivalent": 17
+    }
+  },
+  "purpose": "Detect semantic-key, naturalness, isolation, leakage, and template-dependence problems before reviewing all 224 families. This pilot is not a model-execution manifest."
+}

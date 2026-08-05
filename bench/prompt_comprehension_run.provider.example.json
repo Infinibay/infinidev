@@ -1,0 +1,14 @@
+{
+  "provider": "anthropic",
+  "model": "anthropic/YOUR_MODEL",
+  "revision": "YOUR_PINNED_REVISION",
+  "model_identity": "anthropic:YOUR_MODEL:YOUR_PINNED_REVISION",
+  "manifest_id": "YOUR_NEW_BASELINE_MANIFEST_ID",
+  "approved_dataset_sha256": "YOUR_APPROVED_DATASET_SHA256",
+  "temperature": 0.0,
+  "max_tokens": 1800,
+  "min_request_interval_seconds": 1.0,
+  "conditions": {
+    "raw": null
+  }
+}

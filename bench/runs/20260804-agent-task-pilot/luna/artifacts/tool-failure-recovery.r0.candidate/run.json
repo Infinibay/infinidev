@@ -1,0 +1,628 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "01bcea91220c1fa59cd86c8f19bf761d66aab36d5c835b75efc4472630c735ce",
+  "condition_manifest_sha256": "8ef8611bb472db512771b7b5532c7316631c7f6f6206f0ec16bd67a8faf32dbc",
+  "condition_sha256": "9bdeef971814f77dbf3a3259dd24bead049f5071ddd5359f55d53400836f22c8",
+  "task": {
+    "id": "tool-failure-recovery",
+    "family": "tool-failure-recovery",
+    "category": "recovery_from_tool_errors",
+    "split": "validation",
+    "repository_fixture": "tool_failure_recovery",
+    "request": "Fix Inventory.available so reserved stock cannot make availability negative. Begin with the repository's designated semantic index command `python tools/semantic_search.py available`; if it fails, recover using direct repository evidence, implement the fix, and verify it. Do not edit tests.",
+    "verify_command": "{python} -m pytest -q",
+    "expected_changed_paths": [
+      "src/inventory.py"
+    ],
+    "forbidden_changed_paths": [
+      "tests/*",
+      "tools/*"
+    ],
+    "required_final_patterns": [
+      "test",
+      "pass"
+    ],
+    "required_action_patterns": [
+      "semantic_search\\.py",
+      "semantic index unavailable|corrupted local index",
+      "inventory\\.py"
+    ],
+    "rubric": [
+      {
+        "id": "functional-recovery",
+        "description": "The implementation passes all tests without altering the failing tool or tests.",
+        "kind": "deterministic",
+        "evidence_source": "pytest verifier and changed paths",
+        "weight": 1.0
+      },
+      {
+        "id": "failure-recognition",
+        "description": "The exact tool trace shows the semantic index failure and a switch to direct evidence instead of blind retries.",
+        "kind": "human_review",
+        "evidence_source": "tool trace",
+        "weight": 0.9
+      },
+      {
+        "id": "recovery-handoff",
+        "description": "The final answer discloses the failed evidence channel, fallback, change, and verification.",
+        "kind": "human_review",
+        "evidence_source": "final answer",
+        "weight": 0.8
+      }
+    ],
+    "review_status": "approved"
+  },
+  "condition": "candidate",
+  "repetition": 0,
+  "provider": "openai_subscription",
+  "model": "gpt-5.6-luna",
+  "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "run_config": {
+    "provider": "openai_subscription",
+    "model": "gpt-5.6-luna",
+    "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+    "base_url": "",
+    "api_key_env": "",
+    "repetitions": 1,
+    "min_request_interval_seconds": 2.0,
+    "max_iterations": 12,
+    "max_total_tool_calls": 80,
+    "max_tool_calls_per_action": 20,
+    "verify_timeout_seconds": 120.0
+  },
+  "final_answer": "Fixed `Inventory.available()` in `src/inventory.py` to return `max(0, self.stock - self.reserved)`, preventing over-reserved stock from producing a negative availability while preserving normal subtraction. The designated semantic search command had failed because its local index was corrupted, so the implementation was verified from the source and tests directly. `python -m pytest tests/test_inventory.py` passes: 2 tests passed. Tests were not modified. Git diff/status could not be obtained because this workspace is not a Git repository.",
+  "engine_status": "done",
+  "plan_steps": [
+    {
+      "step": 1,
+      "title": "Inventory.available: locate implementation and contract",
+      "explanation": "Run the designated semantic search command, inspect the indexed symbol and its direct dependencies/tests without editing tests, and identify the minimal production change needed to prevent reserved stock from producing negative availability.",
+      "status": "done"
+    },
+    {
+      "step": 2,
+      "title": "src/inventory.py: clamp Inventory.available at zero and verify tests",
+      "explanation": "Update only the production calculation to prevent reserved stock from producing negative availability, then run the focused inventory tests and inspect the final diff/status without modifying tests.",
+      "status": "active"
+    }
+  ],
+  "action_records": [
+    {
+      "step_index": 1,
+      "summary": "Only planning occurred; no repository inspection or code changes have been made yet. The next step must begin with the required semantic search command.",
+      "tool_calls_count": 1,
+      "files_to_preload": [
+        "tools/semantic_search.py"
+      ],
+      "changes_made": "No repository files modified. Added a plan step to locate Inventory.available, inspect its contract, implement the production fix, and verify it without editing tests.",
+      "discovered_context": "The workspace is /tmp/infinidev-agent-task-d7ehhu1g/repo. The designated first action is to run `python tools/semantic_search.py available`.",
+      "pending_items": "Run the semantic search command, locate Inventory.available and relevant tests/dependencies, implement clamping so reserved stock cannot make availability negative, then verify the fix.",
+      "anti_patterns": "",
+      "hook_notes": "",
+      "behavior_score": 0,
+      "behavior_good": [],
+      "behavior_bad": []
+    },
+    {
+      "step_index": 1,
+      "summary": "Semantic search was attempted first and failed as expected from the corrupted index. Direct repository inspection found the subtraction bug and explicit tests requiring non-negative availability; implementation and verification remain.",
+      "tool_calls_count": 8,
+      "files_to_preload": [
+        "src/inventory.py",
+        "tests/test_inventory.py",
+        "pyproject.toml"
+      ],
+      "changes_made": "No files changed. Required semantic search failed due to a corrupted local index; direct search located the implementation and contract.",
+      "discovered_context": "src/inventory.py defines Inventory.available(self) -> int as self.stock - self.reserved. tests/test_inventory.py requires over-reservation to return 0 and valid subtraction to remain unchanged. pyproject.toml configures pytest pythonpath.",
+      "pending_items": "Change available() to clamp stock minus reserved at zero without editing tests. Run the relevant tests and inspect git diff/status to verify only production code changed.",
+      "anti_patterns": "The designated semantic search command failed because its local index is corrupted; do not retry it. No other wasteful loops or repeated errors occurred.",
+      "hook_notes": "",
+      "behavior_score": -1,
+      "behavior_good": [],
+      "behavior_bad": [
+        "WARNING: You have read multiple files but saved no notes. Use add_note to record key findings before they scroll out of context."
+      ]
+    },
+    {
+      "step_index": 1,
+      "summary": "Clamped Inventory.available at zero after recovering from semantic-search failure via direct repository evidence. Focused inventory tests passed, and tests remained untouched.",
+      "tool_calls_count": 6,
+      "files_to_preload": [],
+      "changes_made": "Modified src/inventory.py: Inventory.available now returns max(0, self.stock - self.reserved), preventing negative availability. Tests were not edited.",
+      "discovered_context": "Semantic search failed due to a corrupted index. Direct inspection found raw stock-minus-reserved arithmetic and tests covering non-negative availability. Focused pytest run passed 2/2 tests.",
+      "pending_items": "No implementation work remains. Git diff/status could not be inspected because the workspace is not a Git repository.",
+      "anti_patterns": "Git diff and status commands were attempted despite the workspace not being a Git repository; both failed. No code or test changes resulted.",
+      "hook_notes": "",
+      "behavior_score": 2,
+      "behavior_good": [
+        "Good: you read src/inventory.py before editing.",
+        "Good: running tests after making changes."
+      ],
+      "behavior_bad": []
+    }
+  ],
+  "tool_trace": [
+    {
+      "tool_run_id": "443aeb7f624943cd910c266f4860344e",
+      "tool_name": "add_step",
+      "arguments": {
+        "title": "Inventory.available: locate implementation and contract",
+        "explanation": "Run the designated semantic search command, inspect the indexed symbol and its direct dependencies/tests without editing tests, and identify the minimal production change needed to prevent reserved stock from producing negative availability.",
+        "expected_output": "Repository evidence identifies the Inventory.available implementation and the failing negative-availability path."
+      },
+      "result": "{\"status\": \"added\", \"index\": 1, \"total_steps\": 1, \"warning\": \"Vague step title \\u2014 name a file path, function(), or file:line so the step is locatable. You can refine it with modify_step.\"}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "0f29fb318a2f403897e9f8eca565937f",
+      "tool_name": "execute_command",
+      "arguments": {
+        "command": "python tools/semantic_search.py available",
+        "cwd": "/tmp/infinidev-agent-task-d7ehhu1g/repo",
+        "timeout": 120,
+        "rationale": "Run the repository-designated semantic search first to locate Inventory.available and honor the task's required discovery path."
+      },
+      "result": "{\"exit_code\": 1, \"stdout\": \"\", \"stderr\": \"Traceback (most recent call last):\\n  File \\\"/tmp/infinidev-agent-task-d7ehhu1g/repo/tools/semantic_search.py\\\", line 1, in <module>\\n    raise RuntimeError(\\\"semantic index unavailable: corrupted local index\\\")\\nRuntimeError: semantic index unavailable: corrupted local index\\n\", \"success\": false}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "c49266ddfa1646fd98e6f4c9ecc1b650",
+      "tool_name": "send_message",
+      "arguments": {
+        "message": "The designated semantic index command failed because its local index is corrupted. I’ll recover with direct repository search, inspect the implementation and nearby contract/tests, then make only the production change needed and run the smallest relevant verification without modifying tests."
+      },
+      "result": "{\"status\": \"delivered\"}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "c183ca06d4674b34b399ac8645aca38a",
+      "tool_name": "list_directory",
+      "arguments": {
+        "file_path": ".",
+        "recursive": false
+      },
+      "result": "{\"file_path\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo\", \"entries\": [{\"file_path\": \"pyproject.toml\", \"size\": 45, \"mtime\": 1785850820.6613572, \"type\": \"file\"}, {\"file_path\": \"src\", \"size\": null, \"mtime\": 1785850820.8483539, \"type\": \"directory\"}, {\"file_path\": \"tests\", \"size\": null, \"mtime\": 1785850820.959352, \"type\": \"directory\"}, {\"file_path\": \"tools\", \"size\": null, \"mtime\": 1785850821.07335, \"type\": \"directory\"}, {\"file_path\": \"uv.lock\", \"size\": 52, \"mtime\": 1785850835.886089, \"type\": \"file\"}], \"total\": 5, \"truncated\": false}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "639d0c5fbd3e4e5abb20378e53671f60",
+      "tool_name": "glob",
+      "arguments": {
+        "pattern": "**/*test*",
+        "file_path": ".",
+        "max_results": 100
+      },
+      "result": "{\"pattern\": \"**/*test*\", \"file_path\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo\", \"content_pattern\": null, \"match_count\": 1, \"truncated\": false, \"matches\": [{\"file_path\": \"tests/test_inventory.py\", \"size\": 270, \"mtime\": 1785850820.959352}]}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "96de13375ca54946bf88dab7eb4b9cbb",
+      "tool_name": "code_search",
+      "arguments": {
+        "pattern": "class Inventory|def available|Inventory.available|available",
+        "file_path": ".",
+        "file_extensions": [
+          ".py",
+          ".js",
+          ".ts",
+          ".java",
+          ".go",
+          ".rb",
+          ".rs"
+        ],
+        "case_sensitive": false,
+        "max_results": 100,
+        "context_lines": 3
+      },
+      "result": "{\"pattern\": \"class Inventory|def available|Inventory.available|available\", \"file_path\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo\", \"match_count\": 7, \"truncated\": false, \"matches\": [{\"file\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/tools/semantic_search.py\", \"line\": 1, \"content\": \"raise RuntimeError(\\\"semantic index unavailable: corrupted local index\\\")\"}, {\"file\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/tests/test_inventory.py\", \"line\": 4, \"content\": \"def test_available_never_becomes_negative() -> None:\"}, {\"file\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/tests/test_inventory.py\", \"line\": 5, \"content\": \"    assert Inventory(stock=2, reserved=5).available() == 0\"}, {\"file\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/tests/test_inventory.py\", \"line\": 8, \"content\": \"def test_available_subtracts_valid_reservations() -> None:\"}, {\"file\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/tests/test_inventory.py\", \"line\": 9, \"content\": \"    assert Inventory(stock=7, reserved=3).available() == 4\"}, {\"file\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/src/inventory.py\", \"line\": 1, \"content\": \"class Inventory:\"}, {\"file\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/src/inventory.py\", \"line\": 6, \"content\": \"    def available(self) -> int:\"}]}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "fec238be969e441cbd7ac61dcf926a56",
+      "tool_name": "read_file",
+      "arguments": {
+        "file_path": "src/inventory.py"
+      },
+      "result": "     1\tclass Inventory:\n     2\t    def __init__(self, stock: int, reserved: int) -> None:\n     3\t        self.stock = stock\n     4\t        self.reserved = reserved\n     5\t\n     6\t    def available(self) -> int:\n     7\t        return self.stock - self.reserved",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "fb76217012934542bae73d87f2aa293e",
+      "tool_name": "read_file",
+      "arguments": {
+        "file_path": "tests/test_inventory.py"
+      },
+      "result": "     1\tfrom src.inventory import Inventory\n     2\t\n     3\t\n     4\tdef test_available_never_becomes_negative() -> None:\n     5\t    assert Inventory(stock=2, reserved=5).available() == 0\n     6\t\n     7\t\n     8\tdef test_available_subtracts_valid_reservations() -> None:\n     9\t    assert Inventory(stock=7, reserved=3).available() == 4",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "eb64ccb390584ca78f68bfd5944298cc",
+      "tool_name": "read_file",
+      "arguments": {
+        "file_path": "pyproject.toml"
+      },
+      "result": "     1\t[tool.pytest.ini_options]\n     2\tpythonpath = [\".\"]",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "289cc882261749dea527eb76f2639c68",
+      "tool_name": "help",
+      "arguments": {
+        "context": "edit"
+      },
+      "result": "EDIT TOOLS\n\n  create_file(file_path, content)\n    Create a new file.\n\n  edit_file(file_path, old_string, new_string, replace_all?, rationale?)\n    Replace exact text in an existing file.\n\n  rename_symbol(symbol, new_name, file_path?)\n    Rename a symbol and update all references and imports across the project.\n\n  move_symbol(symbol, target_file, target_class?, after_line?)\n    Move a symbol to another file or class, updating imports across the project.",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "25fbb8a39171491ea02af61648cd8273",
+      "tool_name": "add_step",
+      "arguments": {
+        "title": "src/inventory.py: clamp Inventory.available at zero and verify tests",
+        "explanation": "Update only the production calculation to prevent reserved stock from producing negative availability, then run the focused inventory tests and inspect the final diff/status without modifying tests.",
+        "expected_output": "pytest tests/test_inventory.py passes and git diff shows only the production clamp in src/inventory.py."
+      },
+      "result": "{\"status\": \"added\", \"index\": 2, \"total_steps\": 2}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "2757ef7d375e489c88febf106d188a0e",
+      "tool_name": "edit_file",
+      "arguments": {
+        "file_path": "src/inventory.py",
+        "old_string": "    def available(self) -> int:\n        return self.stock - self.reserved\n",
+        "new_string": "    def available(self) -> int:\n        return max(0, self.stock - self.reserved)\n",
+        "rationale": "Clamp availability to zero so over-reserved inventory cannot report a negative quantity while preserving valid subtraction."
+      },
+      "result": "{\"file_path\": \"/tmp/infinidev-agent-task-d7ehhu1g/repo/src/inventory.py\", \"action\": \"modified\", \"replacements\": 1, \"size_bytes\": 219}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "fefc7bfe772343f2a3706082e889203c",
+      "tool_name": "execute_command",
+      "arguments": {
+        "command": "python -m pytest tests/test_inventory.py",
+        "cwd": "/tmp/infinidev-agent-task-d7ehhu1g/repo",
+        "timeout": 120,
+        "rationale": "Run the focused inventory tests to verify over-reservation clamps to zero and valid reservations still subtract correctly."
+      },
+      "result": "{\"exit_code\": 0, \"stdout\": \"============================= test session starts ==============================\\nplatform linux -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0\\nrootdir: /tmp/infinidev-agent-task-d7ehhu1g/repo\\nconfigfile: pyproject.toml\\nplugins: anyio-4.12.1, asyncio-1.3.0\\nasyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\\ncollected 2 items\\n\\ntests/test_inventory.py ..                                               [100%]\\n\\n============================== 2 passed in 0.00s ===============================\\n\", \"stderr\": \"\", \"success\": true}",
+      "result_truncated": false,
+      "failed": false
+    },
+    {
+      "tool_run_id": "0292c904615b453f963167d4ac9057e8",
+      "tool_name": "git_status",
+      "arguments": {},
+      "result": "{\"error\": \"fatal: not a git repository (or any parent up to mount point /)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\"}",
+      "result_truncated": false,
+      "failed": true
+    },
+    {
+      "tool_run_id": "4981251dfb004a82973c00c51cc87005",
+      "tool_name": "git_diff",
+      "arguments": {
+        "file": "src/inventory.py"
+      },
+      "result": "{\"error\": \"warning: Not a git repository. Use --no-index to compare two paths outside a working tree\\nusage: git diff --no-index [<options>] <path> <path> [<pathspec>...]\\n\\nDiff output format options\\n    -p, --patch           generate patch\\n    -s, --no-patch        suppress diff output\\n    -u                    generate patch\\n    -U, --unified[=<n>]   generate diffs with <n> lines context\\n    -W, --[no-]function-context\\n                          generate diffs with <n> lines context\\n    --raw                 generate the diff in raw format\\n    --patch-with-raw      synonym for '-p --raw'\\n    --patch-with-stat     synonym for '-p --stat'\\n    --numstat             machine friendly --stat\\n    --shortstat           output only the last line of --stat\\n    -X, --dirstat[=<param1>,<param2>...]\\n                          output the distribution of relative amount of changes for each sub-directory\\n    --cumulative          synonym for --dirstat=cumulative\\n    --dirstat-by-file[=<param1>,<param2>...]\\n                          synonym for --dirstat=files,<param1>,<param2>...\\n    --check               warn if changes introduce conflict markers or whitespace errors\\n    --summary             condensed summary such as creations, renames and mode changes\\n    --name-only           show only names of changed files\\n    --name-status         show only names and status of changed files\\n    --stat[=<width>[,<name-width>[,<count>]]]\\n                          generate diffstat\\n    --stat-width <width>  generate diffstat with a given width\\n    --stat-name-width <width>\\n                          generate diffstat with a given name width\\n    --stat-graph-width <width>\\n                          generate diffstat with a given graph width\\n    --stat-count <count>  generate diffstat with limited lines\\n    --[no-]compact-summary\\n                          generate compact summary in diffstat\\n    --binary              output a binary diff that can be applied\\n    --[no-]full-index     show full pre- and post-image object names on the \\\"index\\\" lines\\n    --[no-]color[=<when>] show colored diff\\n    --ws-error-highlight <kind>\\n                          highlight whitespace errors in the 'context', 'old' or 'new' lines in the diff\\n    -z                    do not munge pathnames and use NULs as output field terminators in --raw or --numstat\\n    --[no-]abbrev[=<n>]   use <n> digits to display object names\\n    --src-prefix <prefix> show the given source prefix instead of \\\"a/\\\"\\n    --dst-prefix <prefix> show the given destination prefix instead of \\\"b/\\\"\\n    --line-prefix <prefix>\\n                          prepend an additional prefix to every line of output\\n    --no-prefix           do not show any source or destination prefix\\n    --default-prefix      use default prefixes a/ and b/\\n    --inter-hunk-context <n>\\n                          show context between diff hunks up to the specified number of lines\\n    --output-indicator-new <char>\\n                          specify the character to indicate a new line instead of '+'\\n    --output-indicator-old <char>\\n                          specify the character to indicate an old line instead of '-'\\n    --output-indicator-context <char>\\n                          specify the character to indicate a context instead of ' '\\n\\nDiff rename options\\n    -B, --break-rewrites[=<n>[/<m>]]\\n                          break complete rewrite changes into pairs of delete and create\\n    -M, --find-renames[=<n>]\\n                          detect renames\\n    -D, --irreversible-delete\\n                          omit the preimage for deletes\\n    -C, --find-copies[=<n>]\\n                          detect copies\\n    --[no-]find-copies-harder\\n                          use unmodified files as source to find copies\\n    --no-renames          disable rename detection\\n    --[no-]rename-empty   use empty blobs as rename source\\n    --[no-]follow         continue listing the history of a file beyond renames\\n    -l <n>                prevent rename/copy detection if the number of rename/copy targets exceeds given limit\\n\\nDiff algorithm options\\n    --minimal             produce the smallest possible diff\\n    -w, --ignore-all-space\\n                          ignore whitespace when comparing lines\\n    -b, --ignore-space-change\\n                          ignore changes in amount of whitespace\\n    --ignore-space-at-eol ignore changes in whitespace at EOL\\n    --ignore-cr-at-eol    ignore carrier-return at the end of line\\n    --ignore-blank-lines  ignore changes whose lines are all blank\\n    -I, --[no-]ignore-matching-lines <regex>\\n                          ignore changes whose all lines match <regex>\\n    --[no-]indent-heuristic\\n                          heuristic to shift diff hunk boundaries for easy reading\\n    --patience            generate diff using the \\\"patience diff\\\" algorithm\\n    --histogram           generate diff using the \\\"histogram diff\\\" algorithm\\n    --diff-algorithm <algorithm>\\n                          choose a diff algorithm\\n    --anchored <text>     generate diff using the \\\"anchored diff\\\" algorithm\\n    --word-diff[=<mode>]  show word diff, using <mode> to delimit changed words\\n    --word-diff-regex <regex>\\n                          use <regex> to decide what a word is\\n    --color-words[=<regex>]\\n                          equivalent to --word-diff=color --word-diff-regex=<regex>\\n    --[no-]color-moved[=<mode>]\\n                          moved lines of code are colored differently\\n    --[no-]color-moved-ws <mode>\\n                          how white spaces are ignored in --color-moved\\n\\nOther diff options\\n    --[no-]relative[=<prefix>]\\n                          when run from subdir, exclude changes outside and show relative paths\\n    -a, --[no-]text       treat all files as text\\n    -R                    swap two inputs, reverse the diff\\n    --[no-]exit-code      exit with 1 if there were differences, 0 otherwise\\n    --[no-]quiet          disable all output of the program\\n    --[no-]ext-diff       allow an external diff helper to be executed\\n    --[no-]textconv       run external text conversion filters when comparing binary files\\n    --ignore-submodules[=<when>]\\n                          ignore changes to submodules in the diff generation\\n    --submodule[=<format>]\\n                          specify how differences in submodules are shown\\n    --ita-invisible-in-index\\n                          hide 'git add -N' entries from the index\\n    --ita-visible-in-index\\n                          treat 'git add -N' entries as real in the index\\n    -S <string>           look for differences that change the number of occurrences of the specified string\\n    -G <regex>            look for differences that change the number of occurrences of the specified regex\\n    --pickaxe-all         show all changes in the changeset with -S or -G\\n    --pickaxe-regex       treat <string> in -S as extended POSIX regular expression\\n    -O <file>             control the order in which files appear in the output\\n    --rotate-to <path>    show the change in the specified path first\\n    --skip-to <path>      skip the output to the specified path\\n    --find-object <object-id>\\n                          look for differences that change the number of occurrences of the specified object\\n    --diff-filter [(A|C|D|M|R|T|U|X|B)...[*]]\\n                          select files by diff type\\n    --max-depth <depth>   maximum tree depth to recurse\\n    --output <file>       output to a specific file\"}",
+      "result_truncated": false,
+      "failed": true
+    }
+  ],
+  "changed_paths": [
+    "src/inventory.py"
+  ],
+  "forbidden_changes": [],
+  "missing_expected_changes": [],
+  "final_pattern_checks": {
+    "test": true,
+    "pass": true
+  },
+  "action_pattern_checks": {
+    "semantic_search\\.py": true,
+    "semantic index unavailable|corrupted local index": true,
+    "inventory\\.py": true
+  },
+  "prompt_composition_history": [
+    {
+      "iteration": 0,
+      "system_chars": 7444,
+      "user_chars": 1166,
+      "tool_schema_chars": 46395,
+      "request_static_chars": 55005,
+      "user_sections": {
+        "expected-output": 514,
+        "plan": 188,
+        "task": 306,
+        "unclassified": 6,
+        "workspace": 152
+      }
+    },
+    {
+      "iteration": 1,
+      "system_chars": 7444,
+      "user_chars": 3407,
+      "tool_schema_chars": 46395,
+      "request_static_chars": 57246,
+      "user_sections": {
+        "context-budget": 91,
+        "current-action": 790,
+        "expected-output": 581,
+        "opened-files": 364,
+        "plan": 226,
+        "previous-actions": 731,
+        "smart-context-summary": 150,
+        "task": 306,
+        "unclassified": 16,
+        "workspace": 152
+      }
+    },
+    {
+      "iteration": 2,
+      "system_chars": 7444,
+      "user_chars": 8410,
+      "tool_schema_chars": 46395,
+      "request_static_chars": 62249,
+      "user_sections": {
+        "avoid": 222,
+        "behavior-summary": 198,
+        "context-budget": 92,
+        "current-action": 485,
+        "expected-output": 514,
+        "notes": 360,
+        "opened-files": 4278,
+        "plan": 224,
+        "previous-actions": 1559,
+        "task": 306,
+        "unclassified": 20,
+        "workspace": 152
+      }
+    }
+  ],
+  "request_payload_history": [
+    {
+      "sequence": 0,
+      "mode": "function_calling",
+      "message_count": 2,
+      "message_payload_chars": 8794,
+      "tool_schema_chars": 3889,
+      "request_payload_chars": 12683,
+      "message_content_chars_by_role": {
+        "system": 7546,
+        "user": 1191
+      }
+    },
+    {
+      "sequence": 1,
+      "mode": "function_calling",
+      "message_count": 4,
+      "message_payload_chars": 9730,
+      "tool_schema_chars": 3889,
+      "request_payload_chars": 13619,
+      "message_content_chars_by_role": {
+        "assistant": 2,
+        "system": 7546,
+        "tool": 239,
+        "user": 1191
+      }
+    },
+    {
+      "sequence": 2,
+      "mode": "function_calling",
+      "message_count": 2,
+      "message_payload_chars": 11070,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 57465,
+      "message_content_chars_by_role": {
+        "system": 7546,
+        "user": 3467
+      }
+    },
+    {
+      "sequence": 3,
+      "mode": "function_calling",
+      "message_count": 4,
+      "message_payload_chars": 12236,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 58631,
+      "message_content_chars_by_role": {
+        "assistant": 246,
+        "system": 7546,
+        "tool": 398,
+        "user": 3467
+      }
+    },
+    {
+      "sequence": 4,
+      "mode": "function_calling",
+      "message_count": 6,
+      "message_payload_chars": 12837,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 59232,
+      "message_content_chars_by_role": {
+        "assistant": 248,
+        "system": 7546,
+        "tool": 459,
+        "user": 3467
+      }
+    },
+    {
+      "sequence": 5,
+      "mode": "function_calling",
+      "message_count": 10,
+      "message_payload_chars": 16095,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 62490,
+      "message_content_chars_by_role": {
+        "assistant": 250,
+        "system": 7546,
+        "tool": 2782,
+        "user": 3467
+      }
+    },
+    {
+      "sequence": 6,
+      "mode": "function_calling",
+      "message_count": 15,
+      "message_payload_chars": 17926,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 64321,
+      "message_content_chars_by_role": {
+        "assistant": 149,
+        "system": 7546,
+        "tool": 3742,
+        "user": 3718
+      }
+    },
+    {
+      "sequence": 7,
+      "mode": "function_calling",
+      "message_count": 17,
+      "message_payload_chars": 18500,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 64895,
+      "message_content_chars_by_role": {
+        "assistant": 151,
+        "system": 7546,
+        "tool": 3767,
+        "user": 3718
+      }
+    },
+    {
+      "sequence": 8,
+      "mode": "function_calling",
+      "message_count": 2,
+      "message_payload_chars": 16368,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 62763,
+      "message_content_chars_by_role": {
+        "system": 7546,
+        "user": 8765
+      }
+    },
+    {
+      "sequence": 9,
+      "mode": "function_calling",
+      "message_count": 4,
+      "message_payload_chars": 17114,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 63509,
+      "message_content_chars_by_role": {
+        "assistant": 2,
+        "system": 7546,
+        "tool": 502,
+        "user": 8765
+      }
+    },
+    {
+      "sequence": 10,
+      "mode": "function_calling",
+      "message_count": 6,
+      "message_payload_chars": 17862,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 64257,
+      "message_content_chars_by_role": {
+        "assistant": 4,
+        "system": 7546,
+        "tool": 593,
+        "user": 8765
+      }
+    },
+    {
+      "sequence": 11,
+      "mode": "function_calling",
+      "message_count": 8,
+      "message_payload_chars": 18710,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 65105,
+      "message_content_chars_by_role": {
+        "assistant": 6,
+        "system": 7546,
+        "tool": 832,
+        "user": 8765
+      }
+    },
+    {
+      "sequence": 12,
+      "mode": "function_calling",
+      "message_count": 13,
+      "message_payload_chars": 28556,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 74951,
+      "message_content_chars_by_role": {
+        "assistant": 8,
+        "system": 7546,
+        "tool": 9566,
+        "user": 8961
+      }
+    },
+    {
+      "sequence": 13,
+      "mode": "function_calling",
+      "message_count": 15,
+      "message_payload_chars": 29072,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 75467,
+      "message_content_chars_by_role": {
+        "assistant": 10,
+        "system": 7546,
+        "tool": 9591,
+        "user": 8961
+      }
+    },
+    {
+      "sequence": 14,
+      "mode": "function_calling",
+      "message_count": 17,
+      "message_payload_chars": 29574,
+      "tool_schema_chars": 46395,
+      "request_payload_chars": 75969,
+      "message_content_chars_by_role": {
+        "assistant": 12,
+        "system": 7546,
+        "tool": 9616,
+        "user": 8961
+      }
+    }
+  ],
+  "changed_files_summary": "### /tmp/infinidev-agent-task-d7ehhu1g/repo/src/inventory.py (modified)\n```diff\n--- a/inventory.py\n+++ b/inventory.py\n@@ -4,4 +4,4 @@\n         self.reserved = reserved\n \n     def available(self) -> int:\n-        return self.stock - self.reserved\n+        return max(0, self.stock - self.reserved)\n```",
+  "file_change_reasons": {},
+  "verify_exit_code": 0,
+  "verify_stdout": "..                                                                       [100%]\n2 passed in 0.00s\n",
+  "verify_stderr": "",
+  "error": "",
+  "rubric": [
+    {
+      "id": "functional-recovery",
+      "description": "The implementation passes all tests without altering the failing tool or tests.",
+      "kind": "deterministic",
+      "evidence_source": "pytest verifier and changed paths",
+      "weight": 1.0
+    },
+    {
+      "id": "failure-recognition",
+      "description": "The exact tool trace shows the semantic index failure and a switch to direct evidence instead of blind retries.",
+      "kind": "human_review",
+      "evidence_source": "tool trace",
+      "weight": 0.9
+    },
+    {
+      "id": "recovery-handoff",
+      "description": "The final answer discloses the failed evidence channel, fallback, change, and verification.",
+      "kind": "human_review",
+      "evidence_source": "final answer",
+      "weight": 0.8
+    }
+  ]
+}

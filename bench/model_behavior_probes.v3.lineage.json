@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "revision_id": "model-behavior-probes-v3-campaign-preflight-20260803",
+  "base_dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0",
+  "changed_probe_count": 4,
+  "changes": [
+    {
+      "probe_id": "decision-scenario-analysis-v1",
+      "updated_paths": [
+        "analysis.choice_rationales.A",
+        "choice_effects.A",
+        "choices.A"
+      ],
+      "rationale": "The original called an assumption most likely even though its paired scenario states that reliable probabilities are unavailable; the revised action keeps the speed trade-off without making an unsupported probability claim.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#decision-scenario-analysis"
+      ]
+    },
+    {
+      "probe_id": "decision-scenario-analysis-v2",
+      "updated_paths": [
+        "analysis.choice_rationales.C",
+        "choice_effects.C",
+        "choices.C"
+      ],
+      "rationale": "The original called an assumption most likely even though reliable scenario probabilities are explicitly unavailable; the revised action keeps the speed trade-off without making an unsupported probability claim.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#decision-scenario-analysis"
+      ]
+    },
+    {
+      "probe_id": "preference-planning-depth-v1",
+      "updated_paths": [
+        "analysis.choice_rationales.B",
+        "choices.B"
+      ],
+      "rationale": "A frozen plan is not a legitimate style preference when implementation can reveal new facts; the revised action preserves exhaustive up-front planning without requiring the agent to ignore contradictory evidence.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#planning-depth"
+      ]
+    },
+    {
+      "probe_id": "preference-planning-depth-v2",
+      "updated_paths": [
+        "analysis.choice_rationales.D",
+        "choices.D"
+      ],
+      "rationale": "A frozen plan is not a legitimate style preference when implementation can reveal new facts; the revised action preserves exhaustive up-front planning without requiring the agent to ignore contradictory evidence.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#planning-depth"
+      ]
+    }
+  ],
+  "revised_dataset_sha256": "7059dea3015c0e6afe0f4b6ec6d58913c47ea47a57a1bdda1c22dece2a2ba885"
+}

@@ -44,7 +44,7 @@ BAD: "Update the code" (what code? where?)
   or any tool that modifies files. You have NO write access. Your ONLY job is to
   produce plan steps via add_step().
 - Each step takes a developer 5-10 tool calls
-- Include test/verification steps after every 2-3 implementation steps
+- Place verification after a coherent behavior or shared-contract change
 - Order by dependency: foundations first, complex features last
 - Reference existing functions/patterns to reuse (e.g., "follow the pattern in routes/users.py")
 """
@@ -136,7 +136,7 @@ Use add_step() to ADD steps to the plan, then step_complete when done.
 1. Read your investigation notes to understand the spec and patterns
 2. Call add_step() to add the first batch of steps (foundation)
 3. Add more steps for core features, then edge cases, then polish
-4. Include "run tests" steps after every 2-3 implementation steps
+4. Place test steps after coherent capabilities or shared-contract changes
 5. Call step_complete with status='done' when the plan is complete
 
 ## EXAMPLES OF GOOD PLANNING
@@ -188,7 +188,8 @@ Bad 2 — One giant step:
 
 Bad 3 — No test steps:
   (15 implementation steps with no testing)
-  WHY BAD: Must verify progress. Add "run tests" after every 2-3 steps.
+  WHY BAD: Must verify progress. Add tests after coherent capabilities and
+  shared-contract changes.
 
 Bad 4 — Wrong dependency order:
   Step 2: "Add JOIN support"  Step 3: "Add CREATE TABLE"
@@ -206,7 +207,7 @@ that go from skeleton to complete implementation.
 - Each step names the FILE and FUNCTION to modify
 - Reference existing patterns to reuse (e.g., "follow routes/users.py:create_user()")
 - Order by dependency: what's needed first to make later steps possible
-- Include test checkpoints after every 2-3 implementation steps
+- Include test checkpoints after coherent capabilities or shared-contract changes
 - Use add_step() to build the plan incrementally
 """
 
@@ -214,7 +215,7 @@ that go from skeleton to complete implementation.
 # ── Refactor plan ─────────────────────────────────────────────────────────
 
 REFACTOR_PLAN = """\
-Create an atomic refactoring plan. Each step preserves behavior — tests pass after every step.
+Create an atomic refactoring plan. Each step preserves behavior and leaves evidence for the changed boundary.
 Use add_step() to ADD steps to the plan, then step_complete when done.
 
 ## EXAMPLES OF GOOD PLANNING
@@ -222,11 +223,11 @@ Use add_step() to ADD steps to the plan, then step_complete when done.
 Example — Extracting helpers from a monolith:
   1. Evidence: process() has 130 lines in 3 blocks, callers are main.py and tests, and all 48 tests pass
   2. add_step(index=2, title="Extract _parse_csv() from process() lines 20-55 — move to new function, call from process()")
-     add_step(index=3, title="Run full test suite to verify 48 tests still pass")
+     add_step(index=3, title="Run processor tests covering process() to verify the extraction")
      add_step(index=4, title="Extract _aggregate() from process() lines 56-95")
-     add_step(index=5, title="Run full test suite to verify 48 tests still pass")
+     add_step(index=5, title="Run processor tests covering aggregation to verify the extraction")
      add_step(index=6, title="Extract _sort_and_format() from process() lines 96-130")
-     add_step(index=7, title="Run full test suite to verify all 48 tests still pass")
+     add_step(index=7, title="Run the repository acceptance gate after the public refactor is complete")
      step_complete: status="continue", summary="Planning extraction of 3 helpers"
   3. step_complete: status="done"
 
@@ -240,12 +241,13 @@ Bad — One big refactor step:
 REFACTOR_PLAN_IDENTITY = """\
 ## Identity
 
-You are a refactoring planner. You create plans where EVERY step
-preserves behavior — tests must pass after each and every change.
+You are a refactoring planner. You create plans where each structural change
+preserves behavior and is followed by evidence across its affected boundary.
 
 - Each step is ONE atomic structural change (extract, rename, move)
 - Never change behavior and structure in the same step
-- Include "run full test suite" after EVERY step
+- Start with affected tests; broaden to the repository acceptance gate when a
+  change reaches shared imports or contracts
 - Use add_step() to build the plan incrementally
 """
 

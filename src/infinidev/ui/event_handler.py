@@ -265,11 +265,16 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         app.invalidate()
 
     elif event_type == "loop_llm_call_start":
-        # LLM call starting — clear streaming state but keep _actions_text
-        # so the previous tool result remains visible while waiting.
-        # _actions_text is cleared by loop_step_update on step transitions.
+        # Keep the previous action visible, but make the transcript's live
+        # indicator say what is happening now. Otherwise a completed tool's
+        # stale "Working" label makes a long model turn look hung.
         app._streaming_tool_name = None
         app._streaming_token_count = 0
+        phase = data.get("phase", "deciding")
+        label = "Model is planning" if phase == "planning" else "Model is deciding next action"
+        app._chat_history_control.work_label = label
+        app._chat_history_control.invalidate_cache()
+        app.invalidate()
 
     elif event_type == "loop_stream_status":
         # Streaming progress — show in ACTIONS with token count + tool detection

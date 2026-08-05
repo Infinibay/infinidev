@@ -390,6 +390,26 @@ class TestPromptRendering:
         # No findings section when empty
         assert "Findings:" not in rendered
 
+    def test_render_context_rank_has_a_hard_final_budget(self, monkeypatch):
+        from infinidev.engine.loop.context import _render_context_rank
+        from infinidev.engine.context_rank.models import ContextRankResult, RankedItem
+
+        result = ContextRankResult(
+            files=[
+                RankedItem(target="src/large.py", target_type="file", score=4.2, reason="ranked")
+            ]
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.loop.context._get_file_symbol_outline",
+            lambda _: ["symbol " + ("x" * 200) for _ in range(20)],
+        )
+
+        rendered = _render_context_rank(result, max_chars=700)
+
+        assert len(rendered) <= 700
+        assert rendered.endswith("</context-rank>")
+        assert "automatic context truncated" in rendered
+
 
 # ── Mention detection (inverse lookup) ────────────────────────────────
 

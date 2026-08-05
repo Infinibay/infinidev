@@ -1,0 +1,607 @@
+{
+  "interpretation_boundary": "Repeated isolated choices can reveal obvious instability but cannot estimate a population-level preference reliably without a justified sampling model. Every selected action remains primary evidence; modal choices and shares are compact summaries only.",
+  "models": {
+    "Sol": {
+      "probe_count": 2,
+      "stable_probes": 0,
+      "unstable_probes": 2,
+      "records": [
+        {
+          "probe_id": "decision-risk-posture-v1",
+          "category": "decision_support_for_users",
+          "scenario": "A reversible migration choice has a small known downside and a larger uncertain upside; all options respect safety and rollback requirements.",
+          "user_request": "Choose the risk posture policy that best matches the active user preference profile.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 2,
+            "C": 1,
+            "D": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Choose the higher-upside option with a predefined rollback trigger."
+          ],
+          "modal_share": 0.5,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 9.847350332187489,
+              "output_tokens": 233
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Choose the higher-upside option with a predefined rollback trigger.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 2.6160332639701664,
+              "output_tokens": 84
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Choose the higher-upside option with a predefined rollback trigger.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 3.5556709631346166,
+              "output_tokens": 150
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Run a staged pilot with explicit stop conditions before choosing broadly.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.269554554950446,
+              "output_tokens": 136
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-planning-depth-v1",
+          "category": "decomposition_and_planning",
+          "scenario": "A four-file internal refactor has good regression tests, no public API change, and every edit is reversible. The dependency graph is visible, but implementation may reveal one or two local details.",
+          "user_request": "Choose the planning depth that best matches my stated working preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "A": 3,
+            "B": 1
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.1345745760481805,
+              "output_tokens": 59
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.8200536139775068,
+              "output_tokens": 49
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.5595459030009806,
+              "output_tokens": 68
+            },
+            {
+              "repetition": 3,
+              "selected_key": "B",
+              "selected_action": "Map every file, dependency, invariant, test, and rollback step before editing, then execute while revising any assumption invalidated by evidence.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.0527010429650545,
+              "output_tokens": 121
+            }
+          ]
+        }
+      ]
+    },
+    "Terra": {
+      "probe_count": 2,
+      "stable_probes": 1,
+      "unstable_probes": 1,
+      "records": [
+        {
+          "probe_id": "decision-risk-posture-v1",
+          "category": "decision_support_for_users",
+          "scenario": "A reversible migration choice has a small known downside and a larger uncertain upside; all options respect safety and rollback requirements.",
+          "user_request": "Choose the risk posture policy that best matches the active user preference profile.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": false,
+          "answer_counts": {
+            "C": 1,
+            "D": 3
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Quantify the bounded downside and ask the user to select risk appetite."
+          ],
+          "modal_share": 0.75,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 3.343689273810014,
+              "output_tokens": 69
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 1.9310962159652263,
+              "output_tokens": 40
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 5.819346803007647,
+              "output_tokens": 46
+            },
+            {
+              "repetition": 3,
+              "selected_key": "C",
+              "selected_action": "Run a staged pilot with explicit stop conditions before choosing broadly.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.813532912870869,
+              "output_tokens": 105
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-planning-depth-v1",
+          "category": "decomposition_and_planning",
+          "scenario": "A four-file internal refactor has good regression tests, no public API change, and every edit is reversible. The dependency graph is visible, but implementation may reveal one or two local details.",
+          "user_request": "Choose the planning depth that best matches my stated working preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 4
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 2.492573576979339,
+              "output_tokens": 52
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 2.3961506930645555,
+              "output_tokens": 82
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 1.3055088089313358,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 2.006971172057092,
+              "output_tokens": 56
+            }
+          ]
+        }
+      ]
+    },
+    "Luna": {
+      "probe_count": 2,
+      "stable_probes": 2,
+      "unstable_probes": 0,
+      "records": [
+        {
+          "probe_id": "decision-risk-posture-v1",
+          "category": "decision_support_for_users",
+          "scenario": "A reversible migration choice has a small known downside and a larger uncertain upside; all options respect safety and rollback requirements.",
+          "user_request": "Choose the risk posture policy that best matches the active user preference profile.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "D": 4
+          },
+          "modal_keys": [
+            "D"
+          ],
+          "modal_actions": [
+            "Quantify the bounded downside and ask the user to select risk appetite."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 6.31980660604313,
+              "output_tokens": 231
+            },
+            {
+              "repetition": 1,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 4.302329496014863,
+              "output_tokens": 189
+            },
+            {
+              "repetition": 2,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.182305370923132,
+              "output_tokens": 141
+            },
+            {
+              "repetition": 3,
+              "selected_key": "D",
+              "selected_action": "Quantify the bounded downside and ask the user to select risk appetite.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.0354723760392517,
+              "output_tokens": 9
+            }
+          ]
+        },
+        {
+          "probe_id": "preference-planning-depth-v1",
+          "category": "decomposition_and_planning",
+          "scenario": "A four-file internal refactor has good regression tests, no public API change, and every edit is reversible. The dependency graph is visible, but implementation may reveal one or two local details.",
+          "user_request": "Choose the planning depth that best matches my stated working preference.",
+          "attempts": 4,
+          "errors": 0,
+          "stable": true,
+          "answer_counts": {
+            "A": 4
+          },
+          "modal_keys": [
+            "A"
+          ],
+          "modal_actions": [
+            "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it."
+          ],
+          "modal_share": 1.0,
+          "repetitions": [
+            {
+              "repetition": 0,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "C",
+              "choice_mapping": {
+                "A": "C",
+                "B": "D",
+                "C": "A",
+                "D": "B"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"C\"}",
+              "error": null,
+              "latency_seconds": 4.0060566971078515,
+              "output_tokens": 164
+            },
+            {
+              "repetition": 1,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "B",
+              "choice_mapping": {
+                "A": "D",
+                "B": "A",
+                "C": "B",
+                "D": "C"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"B\"}",
+              "error": null,
+              "latency_seconds": 1.3966889809817076,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 2,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "A",
+              "choice_mapping": {
+                "A": "A",
+                "B": "B",
+                "C": "C",
+                "D": "D"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"A\"}",
+              "error": null,
+              "latency_seconds": 4.328100569080561,
+              "output_tokens": 9
+            },
+            {
+              "repetition": 3,
+              "selected_key": "A",
+              "selected_action": "Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.",
+              "provider_answer": "D",
+              "choice_mapping": {
+                "A": "B",
+                "B": "C",
+                "C": "D",
+                "D": "A"
+              },
+              "option_order_protocol": "balanced_rotation",
+              "raw_response": "{\"answer\":\"D\"}",
+              "error": null,
+              "latency_seconds": 7.587701319018379,
+              "output_tokens": 133
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "probe_comparisons": [
+    {
+      "probe_id": "decision-risk-posture-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "D"
+        ],
+        "Luna": [
+          "D"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": false,
+        "Luna": true
+      },
+      "modal_agreement": false
+    },
+    {
+      "probe_id": "preference-planning-depth-v1",
+      "modal_keys_by_model": {
+        "Sol": [
+          "A"
+        ],
+        "Terra": [
+          "A"
+        ],
+        "Luna": [
+          "A"
+        ]
+      },
+      "stable_by_model": {
+        "Sol": false,
+        "Terra": true,
+        "Luna": true
+      },
+      "modal_agreement": true
+    }
+  ],
+  "cross_model_modal_agreements": 1
+}

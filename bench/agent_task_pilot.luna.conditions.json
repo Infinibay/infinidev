@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "purpose": "Small paired falsification pilot; not calibration or deployment evidence",
+  "dataset_sha256": "09f9653c0576e8d40fddb153ebbda43bad49c85a7dd8e4bc4ad493d1619c4323",
+  "task_split": "validation",
+  "task_ids": [
+    "complex-plan",
+    "reversible-ambiguity",
+    "test-selection",
+    "evidence-code-review",
+    "user-owned-tradeoff",
+    "tool-failure-recovery"
+  ],
+  "task_count": 6,
+  "conditions_per_task": 2,
+  "repetitions": 1,
+  "planned_executions": 12,
+  "model": "Luna",
+  "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+  "calibration_role": "developer",
+  "candidate_name": "quality-control-decision-ownership",
+  "candidate_guidance_sha256": "9bdeef971814f77dbf3a3259dd24bead049f5071ddd5359f55d53400836f22c8",
+  "candidate_evidence_probe_ids": [
+    "preference-decision-ownership-v1",
+    "preference-decision-ownership-v2",
+    "decision-recommendation-strength-v1",
+    "decision-recommendation-strength-v2"
+  ],
+  "utility_profile_sha256": "2fcdfbcc726c06a9bceb7c2046bd76c1b9cd6219029339aa563040c85ba02f95",
+  "utility_profile": {
+    "schema_version": 1,
+    "provenance": "explicit_user",
+    "name": "quality-and-control",
+    "description": "Prefer careful verification and visibility into consequential trade-offs. Ask me when a decision materially changes product behavior or risk, but handle routine reversible implementation details autonomously.",
+    "weights": {
+      "quality": 1.0,
+      "user_control": 0.8,
+      "caution": 0.6,
+      "interaction": 0.3,
+      "speed": -0.2
+    }
+  },
+  "conditions": {
+    "baseline": null,
+    "candidate": {
+      "system_prompt": "For consequential trade-offs whose decisive priorities belong to the user, prefer presenting the feasible frontier and asking for the decisive weight before recommending. Continue autonomously on routine reversible implementation details."
+    }
+  },
+  "execution_contract": {
+    "fresh_workspace_per_execution": true,
+    "fresh_agent_session_per_execution": true,
+    "parallel_requests": false,
+    "minimum_llm_request_interval_seconds": 2.0,
+    "automatic_llm_retries": false,
+    "stop_on_first_runtime_or_provider_error": true
+  },
+  "promotion_boundary": "This manifest can only falsify a candidate cheaply. It cannot authorize a runtime profile or substitute for calibration and independent held-out validation."
+}

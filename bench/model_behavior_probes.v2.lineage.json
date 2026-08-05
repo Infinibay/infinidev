@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "revision_id": "model-behavior-probes-v2-triage-20260803",
+  "base_dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+  "changed_probe_count": 6,
+  "changes": [
+    {
+      "probe_id": "preference-interrupt-atomicity-v1",
+      "updated_paths": [
+        "scenario"
+      ],
+      "rationale": "The original stated an eight-second operation but an action assumed eight seconds remained.",
+      "evidence": [
+        "profile-target-v1.triage-v2-report.md#preference-interrupt-atomicity:sol",
+        "profile-target-v1.triage-v2-report.md#preference-interrupt-atomicity:luna"
+      ]
+    },
+    {
+      "probe_id": "preference-interrupt-atomicity-v2",
+      "updated_paths": [
+        "scenario"
+      ],
+      "rationale": "The original stated an eight-second operation but an action assumed eight seconds remained.",
+      "evidence": [
+        "profile-target-v1.triage-v2-report.md#preference-interrupt-atomicity:sol",
+        "profile-target-v1.triage-v2-report.md#preference-interrupt-atomicity:luna"
+      ]
+    },
+    {
+      "probe_id": "preference-test-scope-v1",
+      "updated_paths": [
+        "analysis.variant_axis"
+      ],
+      "rationale": "The family contract now states that all decision-relevant facts remain fixed.",
+      "evidence": [
+        "profile-target-v1.triage-v2-report.md#preference-test-scope:sol",
+        "profile-target-v1.triage-v2-report.md#preference-test-scope:terra"
+      ]
+    },
+    {
+      "probe_id": "preference-test-scope-v2",
+      "updated_paths": [
+        "analysis.variant_axis",
+        "scenario"
+      ],
+      "rationale": "The original changed coverage, quantified flake rate, and release context across robustness variants.",
+      "evidence": [
+        "profile-target-v1.triage-v2-report.md#preference-test-scope:sol",
+        "profile-target-v1.triage-v2-report.md#preference-test-scope:terra"
+      ]
+    },
+    {
+      "probe_id": "preference-uncertainty-presentation-v1",
+      "updated_paths": [
+        "choice_effects.B"
+      ],
+      "rationale": "A static structured table adds detail but no user exchange or intervention point.",
+      "evidence": [
+        "profile-target-v1.triage-v2-report.md#preference-uncertainty-presentation:sol",
+        "profile-target-v1.triage-v2-report.md#preference-uncertainty-presentation:terra"
+      ]
+    },
+    {
+      "probe_id": "preference-uncertainty-presentation-v2",
+      "updated_paths": [
+        "choice_effects.D"
+      ],
+      "rationale": "A static structured table adds detail but no user exchange or intervention point.",
+      "evidence": [
+        "profile-target-v1.triage-v2-report.md#preference-uncertainty-presentation:sol",
+        "profile-target-v1.triage-v2-report.md#preference-uncertainty-presentation:terra"
+      ]
+    }
+  ],
+  "revised_dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0"
+}

@@ -70,6 +70,12 @@ def test_an_empty_description_is_handled():
     assert compress_description(None) == ""
 
 
+def test_model_facing_description_normalizes_ambiguous_wording():
+    assert compress_description("Find relevant files -> handlers.") == (
+        "Find matching files to handlers."
+    )
+
+
 # ── read-only classification (a security boundary, not a hint) ───────────
 
 

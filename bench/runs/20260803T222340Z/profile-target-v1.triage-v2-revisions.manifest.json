@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0",
+  "selection": {
+    "method": "explicit",
+    "purpose": "Predeclared verification of six evidence-backed probe edits under triage protocol v2"
+  },
+  "probe_count": 3,
+  "category_count": 3,
+  "probes": [
+    {
+      "probe_id": "preference-interrupt-atomicity-v1",
+      "category": "user_interruptions",
+      "family": "preference-interrupt-atomicity",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-test-scope-v1",
+      "category": "test_strategy",
+      "family": "preference-test-scope",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-uncertainty-presentation-v1",
+      "category": "uncertainty_and_calibration",
+      "family": "preference-uncertainty-presentation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    }
+  ]
+}

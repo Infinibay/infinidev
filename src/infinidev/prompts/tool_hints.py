@@ -255,6 +255,10 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Load an image so the next turn can see it (vision models only)",
         "view_image(file_path='docs/architecture.png')",
     ),
+    "generate_image": (
+        "Generate durable images through the separately configured exact route",
+        "generate_image(prompt='A blue robot', operation_id='robot-v1')",
+    ),
     # Engine pseudo-tools (always available)
     "step_complete": (
         "End current step (REQUIRED after each step)",
@@ -410,6 +414,7 @@ def build_tool_usage_section(
                 "project_structure",
                 "analyze_code",
                 "view_image",
+                "generate_image",
             ],
         ),
         (
@@ -595,7 +600,7 @@ def build_editing_examples(
 
 
 def build_anti_patterns(available_tools: set[str]) -> str:
-    """Generate anti-patterns (NEVER do these) based on available tools."""
+    """Generate failure patterns and evidence-based corrections."""
     patterns = []
 
     # Universal anti-patterns
@@ -608,27 +613,32 @@ def build_anti_patterns(available_tools: set[str]) -> str:
         "   INSTEAD: read the file this step; old_string must match it exactly."
     )
     patterns.append(
-        "3. Fix things not in this step:\n"
-        "   INSTEAD: ONE step means ONE change. Other fixes go in their own step."
+        "3. Expand scope without evidence that the requested result requires it:\n"
+        "   DEFAULT: keep adjacent changes separate. Include one only when a test, contract, "
+        "or dependency shows the current step cannot be correct without it."
     )
     patterns.append(
-        "4. Skip verification:\n"
-        "   INSTEAD: ALWAYS run a test or an import check after every edit."
+        "4. Report an edit as complete without evidence:\n"
+        "   INSTEAD: run the smallest check that exercises the changed behavior. Use a "
+        "different check when the repository names another acceptance gate."
     )
     patterns.append(
-        "5. Keep trying after 3 consecutive failures:\n"
-        '   INSTEAD: STOP. Call step_complete(status="blocked"). The design needs rethinking.'
+        "5. Repeat the same failed action without new evidence:\n"
+        "   INSTEAD: inspect the failure and change the hypothesis or action. Mark the step "
+        "blocked only when no in-scope action can produce new evidence."
     )
     patterns.append(
-        "6. Add code that wasn't asked for:\n"
-        "   INSTEAD: add no logging, docstrings, type hints, or error handling unless asked."
+        "6. Add code unrelated to the requested outcome:\n"
+        "   DEFAULT: omit extra logging, documentation, typing, and abstractions. Include "
+        "them when the repository contract or changed behavior requires them."
     )
     patterns.append(
-        "7. Read the same file twice in one step:\n"
-        "   INSTEAD: use what you already read. It is still in your context."
+        "7. Re-read unchanged content without a question the read will answer:\n"
+        "   DEFAULT: use the current context. Re-read after external edits, truncation, or "
+        "when exact current bytes determine the next action."
     )
 
-    return "## NEVER Do These\n\n" + "\n\n".join(patterns)
+    return "## Failure Patterns and Corrections\n\n" + "\n\n".join(patterns)
 
 
 def build_execute_prompt(
@@ -648,11 +658,13 @@ def build_execute_prompt(
         f"STEP {step_num}/{total_steps}: {step_title}",
         f"Files you may modify: {step_files}",
         "",
-        "## RULES",
-        "- ONLY modify the file(s) and function(s) described in this step",
-        '- Do NOT refactor, clean up, or "improve" adjacent code',
-        "- Do NOT add error handling for cases that can't happen",
-        "- Do NOT add abstractions for one-time operations",
+        "## Scope contract",
+        "- The requested step defines the outcome; do not replace it with adjacent cleanup",
+        "- Changes outside the named files require evidence that the outcome depends on them",
+        "",
+        "## Working guidance",
+        "- Prefer a local change over a broader refactor when both satisfy the same contracts",
+        "- Prefer existing error-handling and abstraction patterns over new machinery",
         "- Verify your edit with the smallest test target that executes the changed behavior",
         "- Call step_complete when done",
         "",

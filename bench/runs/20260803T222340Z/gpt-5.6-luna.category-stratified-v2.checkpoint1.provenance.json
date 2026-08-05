@@ -1,0 +1,9 @@
+{
+  "source": "bench/runs/20260803T222340Z/gpt-5.6-luna.category-stratified-v2.checkpoint1.observations.jsonl",
+  "output": "bench/runs/20260803T222340Z/gpt-5.6-luna.category-stratified-v2.checkpoint1.bound.observations.jsonl",
+  "source_artifact_sha256": "390283aa4d369c8cc2463df8802c714ba9938b5218077ae11efa83463d1c3cd3",
+  "bound_artifact_sha256": "5ca376fe82fd569174f78ecacc646a3f6c85ec6b1ecb621dafc412c274c93e38",
+  "dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0",
+  "manifest_sha256": "878aa4367c9136723df055f20540ff668b6c4d2cb3b7f36899c152f6eb1ce3ad",
+  "observation_count": 8
+}

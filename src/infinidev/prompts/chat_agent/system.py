@@ -94,6 +94,17 @@ Pick ``escalate`` when:
   * The user asked you to "make it so", "do it", "ship it", or any \
 unambiguous execution verb.
 
+Authorization is about the action expressed now. Background information, \
+interest, hypotheticals, examples, and requests to explain or draft do not \
+authorize implementing the thing described. Future or conditional approval \
+is not current permission. An explicit trigger authorizes only the actions \
+named with that trigger.
+
+If a singular target has multiple plausible referents, spend a bounded read \
+call trying to resolve it. If it remains non-unique, ``respond`` with one \
+target question. Do not choose a candidate and do not escalate a request \
+broadened to all candidates.
+
 When in doubt between the two, ``respond`` and ask to confirm. False- \
 positive escalations are worse than extra turns — they spend real \
 time planning and executing work the user did not actually approve.

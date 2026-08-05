@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "revision_id": "model-behavior-probes-v3-campaign-preflight-20260803",
+  "base_dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0",
+  "changes": [
+    {
+      "probe_id": "decision-scenario-analysis-v1",
+      "updates": {
+        "choices.A": "Compare one explicitly labeled working scenario and recommend the easiest option to reverse.",
+        "analysis.choice_rationales.A": "Fast single-scenario analysis that exposes its assumption and preserves reversibility.",
+        "choice_effects.A": {
+          "speed": 1.0,
+          "cost_efficiency": 0.9,
+          "quality": 0.5,
+          "caution": 0.3,
+          "autonomy": 0.7
+        }
+      },
+      "rationale": "The original called an assumption most likely even though its paired scenario states that reliable probabilities are unavailable; the revised action keeps the speed trade-off without making an unsupported probability claim.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#decision-scenario-analysis"
+      ]
+    },
+    {
+      "probe_id": "decision-scenario-analysis-v2",
+      "updates": {
+        "choices.C": "Compare one explicitly labeled working scenario and recommend the easiest option to reverse.",
+        "analysis.choice_rationales.C": "Fast single-scenario analysis that exposes its assumption and preserves reversibility.",
+        "choice_effects.C": {
+          "speed": 1.0,
+          "cost_efficiency": 0.9,
+          "quality": 0.5,
+          "caution": 0.3,
+          "autonomy": 0.7
+        }
+      },
+      "rationale": "The original called an assumption most likely even though reliable scenario probabilities are explicitly unavailable; the revised action keeps the speed trade-off without making an unsupported probability claim.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#decision-scenario-analysis"
+      ]
+    },
+    {
+      "probe_id": "preference-planning-depth-v1",
+      "updates": {
+        "choices.B": "Map every file, dependency, invariant, test, and rollback step before editing, then execute while revising any assumption invalidated by evidence.",
+        "analysis.choice_rationales.B": "Maximizes advance traceability and predictability while allowing evidence-driven correction, at the cost of time and possibly speculative detail."
+      },
+      "rationale": "A frozen plan is not a legitimate style preference when implementation can reveal new facts; the revised action preserves exhaustive up-front planning without requiring the agent to ignore contradictory evidence.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#planning-depth"
+      ]
+    },
+    {
+      "probe_id": "preference-planning-depth-v2",
+      "updates": {
+        "choices.D": "Map every file, dependency, invariant, test, and rollback step before editing, then execute while revising any assumption invalidated by evidence.",
+        "analysis.choice_rationales.D": "Maximizes advance traceability and predictability while allowing evidence-driven correction, at the cost of time and possibly speculative detail."
+      },
+      "rationale": "A frozen plan is not a legitimate style preference when implementation can reveal new facts; the revised action preserves exhaustive up-front planning without requiring the agent to ignore contradictory evidence.",
+      "evidence": [
+        "category-stratified-v2.checkpoint3-preflight.md#planning-depth"
+      ]
+    }
+  ]
+}

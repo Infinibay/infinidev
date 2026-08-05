@@ -112,4 +112,7 @@ def build_chat_agent_system_prompt() -> str:
     # to escalate, so the project's own instructions apply to it at least as
     # much as to the developer.
     project = render_project_instructions(None)
-    return f"{prompt}\n\n{project}" if project else prompt
+    rendered = f"{prompt}\n\n{project}" if project else prompt
+    from infinidev.engine.prompt_profile import apply_calibrated_guidance
+
+    return apply_calibrated_guidance(rendered, "chat_agent")

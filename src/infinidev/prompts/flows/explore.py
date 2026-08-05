@@ -17,12 +17,13 @@ and synthesize findings into actionable recommendations.
 
 ## Rules
 
-- Every fact MUST cite evidence from tool output
+- Cite tool evidence for consequential factual claims. Label hypotheses and
+  unresolved gaps instead of presenting them as observed facts.
 - Pivot questions change the tree structure; informational ones don't
 - When something seems impossible, decompose the assumptions behind "impossible"
 - Maximum 4 children per node, maximum 4 levels of depth
 - IF a path turns out unsolvable, THEN branch with OR logic to its alternatives
-- VERIFY with tools before speculating
+- Verify before using a claim to eliminate an option or recommend action
 - Constraints and blockers always propagate upward
 - Discarded branches still carry useful information — note why they were discarded
 

@@ -1,0 +1,9 @@
+{
+  "source": "bench/runs/20260803T222340Z/gpt-5.6-sol.category-stratified-v2.checkpoint1.observations.jsonl",
+  "output": "bench/runs/20260803T222340Z/gpt-5.6-sol.category-stratified-v2.checkpoint1.bound.observations.jsonl",
+  "source_artifact_sha256": "c1073b697772da695b9e1802a080f74b246295b29a933b1c15d31ba00a5d1d63",
+  "bound_artifact_sha256": "24505bf5b98ce131f87d034ff58c37273d1c83ac1fcc03eb276c33aa8b923130",
+  "dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0",
+  "manifest_sha256": "878aa4367c9136723df055f20540ff668b6c4d2cb3b7f36899c152f6eb1ce3ad",
+  "observation_count": 8
+}

@@ -86,6 +86,7 @@ class SessionStatus:
     iteration: int = 0
     step_title: str = ""
     tool_calls_total: int = 0
+    activity: str = "idle"
     last_verdict_action: str = ""
     run_started_at: float | None = None
     git_branch: str = ""
@@ -123,7 +124,7 @@ class ClassicRenderer:
     # Event types we deliberately ignore — too noisy or already covered.
     _IGNORE: frozenset[str] = frozenset({
         "loop_state", "loop_stream_status",
-        "loop_llm_call_start", "loop_file_changed", "loop_behavior_update",
+        "loop_file_changed", "loop_behavior_update",
     })
 
     def __init__(self, status: SessionStatus) -> None:
@@ -187,6 +188,7 @@ class ClassicRenderer:
         self.status.total_tokens = 0
         self.status.cache_read = 0
         self.status.cache_create = 0
+        self.status.activity = "starting"
         prompt = _truncate(data.get("prompt"), 200)
         if prompt:
             self._println(_dim(f"▸ {prompt}"))
@@ -207,9 +209,19 @@ class ClassicRenderer:
         elif status_str == "blocked" and title:
             self._println(_dim(f"step {iteration} ⊘ {title}"))
 
+    def _on_loop_tool_start(self, agent_id: str, data: dict) -> None:
+        name = data.get("tool_name", "?")
+        detail = _truncate(data.get("tool_detail"), 100)
+        self.status.activity = f"running {name}"
+        line = f"  {_dim('running')} {_bold(name)}"
+        if detail:
+            line += f" {_dim(detail)}"
+        self._println(line)
+
     def _on_loop_tool_call(self, agent_id: str, data: dict) -> None:
         self._absorb_tokens(data)
         self.status.tool_calls_total = int(data.get("total_calls", self.status.tool_calls_total) or self.status.tool_calls_total)
+        self.status.activity = "tool completed"
         name = data.get("tool_name", "?")
         detail = _truncate(data.get("tool_detail"), 100)
         err = data.get("tool_error") or ""
@@ -229,6 +241,12 @@ class ClassicRenderer:
         reasoning = (data.get("reasoning") or "").strip()
         if reasoning:
             self._println(f"{_dim('💭 ' + _truncate(reasoning, 320))}")
+
+    def _on_loop_llm_call_start(self, agent_id: str, data: dict) -> None:
+        phase = data.get("phase", "deciding")
+        self.status.activity = (
+            "model planning" if phase == "planning" else "model deciding"
+        )
 
     def _on_loop_thinking_chunk(self, agent_id: str, data: dict) -> None:
         text = data.get("text") or ""
@@ -284,6 +302,7 @@ class ClassicRenderer:
 
     def _on_loop_end(self, agent_id: str, data: dict) -> None:
         self.status.run_started_at = None
+        self.status.activity = "idle"
         summary = _truncate(data.get("summary") or data.get("reason"), 160)
         if summary:
             self._println(f"{_green('✓ done')} {_dim(summary)}")
@@ -401,6 +420,9 @@ def make_status_renderer(status: SessionStatus):
             if status.git_branch:
                 br = status.git_branch + ("✱" if status.git_dirty else "")
                 parts.append(("class:tb.git", f"{br} "))
+            parts.append(("class:tb.sep", "│ "))
+            if status.run_started_at is not None:
+                parts.append(("class:tb.working", f"{status.activity} "))
                 parts.append(("class:tb.sep", "│ "))
             # Elapsed
             if status.run_started_at is not None:
@@ -459,6 +481,7 @@ def render_status_table(status: SessionStatus) -> str:
         f"  iteration         : {status.iteration}",
         f"  step title        : {status.step_title or _dim('(idle)')}",
         f"  total tool calls  : {status.tool_calls_total}",
+        f"  activity          : {status.activity}",
         f"  last prompt tk    : {status.last_prompt_tokens}",
         f"  last completion tk: {status.last_completion_tokens}",
         f"  total tokens      : {status.total_tokens}",

@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "c60609286bb191ee3266d314f10d334c576f63cee1f02e4cbc58075e3769f514",
+  "selection": {
+    "method": "explicit",
+    "purpose": "Predeclared replication of one fully stable and seven partially stable or unstable raw-prior differences under opposing user profiles"
+  },
+  "probe_count": 8,
+  "category_count": 8,
+  "probes": [
+    {
+      "probe_id": "preference-requirements-iteration-v1",
+      "category": "complex_requirement_analysis",
+      "family": "preference-requirements-iteration",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-test-scope-v1",
+      "category": "test_strategy",
+      "family": "preference-test-scope",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-vague-prototype-v2",
+      "category": "vague_requirement_analysis",
+      "family": "preference-vague-prototype",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-recovery-fallback-v1",
+      "category": "recovery_from_tool_errors",
+      "family": "preference-recovery-fallback",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-implementation-reuse-v2",
+      "category": "implementation_strategy",
+      "family": "preference-implementation-reuse",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-interrupt-atomicity-v2",
+      "category": "user_interruptions",
+      "family": "preference-interrupt-atomicity",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-verification-independence-v2",
+      "category": "evidence_and_verification",
+      "family": "preference-verification-independence",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-uncertainty-presentation-v2",
+      "category": "uncertainty_and_calibration",
+      "family": "preference-uncertainty-presentation",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    }
+  ]
+}

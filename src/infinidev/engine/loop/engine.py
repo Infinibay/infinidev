@@ -145,7 +145,9 @@ class LoopEngine(AgentEngine):
         self.session_notes: list[str] = []  # Persist across tasks within a session
         self._session_notes_hydrated: bool = False  # one-shot DB reload on resume
         # User-message injection: thread-safe queue + inject/drain logic.
-        self._user_message_injector = UserMessageInjector()
+        self._user_message_injector = UserMessageInjector(
+            self._queue_context_rank_guidance
+        )
         self._guidance = GuidanceHandler()
         # The pair-programming critic — advisory while tools run, able to
         # veto a step_complete — and the chain of gates a step must clear
@@ -157,13 +159,17 @@ class LoopEngine(AgentEngine):
         self._cr_hooks = ContextRankHooks()
         self._cr_cached_result: Any | None = None
         self._cr_last_pivot_key: tuple[int, str] | None = None
+        self._cr_pending_user_guidance: list[str] = []
+        self._cr_delivered_targets: set[str] = set()
         # Fetched on the first iteration of a run, rendered on all of them.
         self._project_knowledge: list[dict] = []
         self._explore_attempts: dict[int, int] = {}
 
-    def inject_message(self, message: str) -> None:
-        """Inject a user message into the running loop (thread-safe)."""
-        self._user_message_injector.inject(message)
+    def inject_message(
+        self, message: str, attachments: list[Any] | None = None,
+    ) -> None:
+        """Inject user guidance and optional images into the running loop."""
+        self._user_message_injector.inject(message, attachments)
 
     def _drain_user_messages(self) -> list[str]:
         return self._user_message_injector.drain()
@@ -172,6 +178,11 @@ class LoopEngine(AgentEngine):
         self, ctx: "ExecutionContext", messages: list[dict[str, Any]],
     ) -> None:
         self._user_message_injector.inject_mid_step(ctx, messages)
+
+    def _queue_context_rank_guidance(self, messages: list[str]) -> None:
+        """Refresh automatic retrieval after live user guidance changes the task."""
+        self._cr_pending_user_guidance.extend(messages)
+        self._cr_last_pivot_key = None
 
     def _reject_step_complete_on_late_message(
         self,
@@ -329,6 +340,8 @@ class LoopEngine(AgentEngine):
         initial_plan: Any | None = None,
         initial_attachments: list[Any] | None = None,
         task: Any | None = None,
+        context_corpus: str | None = None,
+        allow_llm_retries: bool = True,
         preserve_file_tracker: bool = False,
     ) -> str:
         """Plan-execute-summarize loop.
@@ -359,8 +372,11 @@ class LoopEngine(AgentEngine):
             summarizer_enabled=summarizer_enabled,
             identity_override=identity_override,
             task=task,
+            context_corpus=context_corpus,
+            allow_llm_retries=allow_llm_retries,
             preserve_file_tracker=preserve_file_tracker,
         )
+        self._cr_delivered_targets.clear()
         # On a resumed session the engine is brand-new (lazily created in
         # the TUI) but the session_id is the SAME as yesterday's. Re-load
         # the persisted session notes once so the developer loop starts
@@ -786,7 +802,12 @@ class LoopEngine(AgentEngine):
             self._inject_mid_step_user_messages(ctx, messages)
 
             # Signal UI that LLM call is starting
-            _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {})
+            _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {
+                "iteration": iteration + 1,
+                "phase": "planning" if is_planning else "deciding",
+                "tool_calls_step": action_tool_calls,
+                "tool_calls_total": ctx.state.total_tool_calls,
+            })
 
             result = llm_caller.call(ctx, messages, is_planning, action_tool_calls)
             _last_llm_call_end = _time.perf_counter()

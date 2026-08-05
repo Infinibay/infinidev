@@ -100,7 +100,7 @@ out-of-scope observations in `notes` without turning them into rework.
 
 | Severity | Criteria | Action |
 |----------|----------|--------|
-| **Blocking** | Bugs, security issues, missing plan steps, report discrepancies, automated-check errors | Must fix — REJECT |
+| **Blocking** | Unmet original requirement, introduced bug/security/regression, deterministic blocking check | Must fix — REJECT |
 | **Important** | Missing tests, maintainability concerns, incomplete error handling | Name it in the review, approve anyway |
 | **Suggestion** | Style, minor refactoring, docstrings | Never sole reason to reject |
 

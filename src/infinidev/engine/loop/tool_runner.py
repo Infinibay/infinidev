@@ -548,9 +548,9 @@ class ToolRunner:
         if not attachments:
             return None
         try:
-            from infinidev.config.model_capabilities import _detect_vision_support
+            from infinidev.config.model_capabilities import get_capability_snapshot
 
-            if not _detect_vision_support():
+            if not get_capability_snapshot().supports_vision:
                 return None
         except Exception:
             return None

@@ -12,13 +12,380 @@ to manual (text-based) tool calling without ever sending a slow probe request.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any
+from enum import StrEnum
+from threading import RLock
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+
+class CapabilityStatus(StrEnum):
+    """Conservative support state for a model capability."""
+
+    SUPPORTED = "supported"
+    ADVERTISED_UNVERIFIED = "advertised_unverified"
+    UNSUPPORTED = "unsupported"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class CapabilityEvidence:
+    """A reason for a capability decision, suitable for diagnostics."""
+
+    source: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class CapabilityAssessment:
+    """Immutable status, evidence, and operational restrictions for one capability."""
+
+    status: CapabilityStatus = CapabilityStatus.UNKNOWN
+    evidence: tuple[CapabilityEvidence, ...] = ()
+    restrictions: tuple[str, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        """Return True only for affirmative evidence; unknown fails closed."""
+        return self.status is CapabilityStatus.SUPPORTED
+
+
+@dataclass(frozen=True)
+class ModelRoute:
+    """Stable identity of one configured chat-provider route."""
+
+    provider: str
+    model: str
+    base_url: str = ""
+
+    @classmethod
+    def from_settings(cls) -> ModelRoute:
+        """Build the current chat route without exposing credentials."""
+        from infinidev.config.settings import settings
+
+        return cls(
+            provider=settings.LLM_PROVIDER,
+            model=settings.LLM_MODEL,
+            base_url=(settings.LLM_BASE_URL or "").rstrip("/"),
+        )
+
+
+@dataclass(frozen=True)
+class ImageGenerationRoute:
+    """Complete non-secret identity of one reviewed image-generation route."""
+
+    provider: str
+    model: str
+    endpoint: str
+    transport: str
+    adapter: str
+    mechanism: str
+    operation: str
+    revision: str
+    credential_type: str
+    account_id: str = ""
+    project_id: str = ""
+    credential_id: str = ""
+
+    @property
+    def base_url(self) -> str:
+        """Compatibility alias for provider adapters expecting a base URL."""
+        return self.endpoint
+
+
+_OPENAI_IMAGES_ENDPOINT = "https://api.openai.com/v1"
+_OPENAI_IMAGES_TRANSPORT = "https"
+_OPENAI_IMAGES_ADAPTER = "litellm.image_generation"
+_OPENAI_IMAGES_MECHANISM = "openai_images_api"
+_OPENAI_IMAGES_OPERATION = "images.generate"
+_OPENAI_IMAGES_REVISION = "2025-04-01"
+_OPENAI_IMAGES_CREDENTIAL_TYPE = "api_key"
+
+
+def _credential_id(api_key: str) -> str:
+    """Return a stable non-secret identifier for one credential."""
+    if not api_key:
+        return ""
+    return f"sha256:{hashlib.sha256(api_key.encode('utf-8')).hexdigest()}"
+
+
+@dataclass(frozen=True)
+class ImageGenerationProfile:
+    """Versioned, allow-listed contract for one exact generation route."""
+
+    version: int
+    provider: str
+    model: str
+    adapter: str
+    response_formats: tuple[str, ...]
+    sizes: tuple[str, ...] = ()
+    qualities: tuple[str, ...] = ()
+    styles: tuple[str, ...] = ()
+    max_images: int = 1
+
+
+@dataclass(frozen=True)
+class CapabilitySnapshot:
+    """Immutable multimodal capabilities for one exact route/configuration."""
+
+    route: ModelRoute
+    image_input: CapabilityAssessment
+    image_generation: CapabilityAssessment
+    generation_profile: ImageGenerationProfile | None = None
+    generation_route: ImageGenerationRoute | None = None
+
+    @property
+    def supports_vision(self) -> bool:
+        """Temporary compatibility alias; unknown deliberately maps to False."""
+        return self.image_input.supported
+
+
+# Generation is never inferred from a chat model name. Each entry represents a
+# reviewed API contract and is keyed by the independently configured route.
+def _bare_model(model: str) -> str:
+    """Strip a transport prefix without guessing model families."""
+    return model.rsplit("/", 1)[-1]
+
+
+def _is_reviewed_vision_model(model: str) -> bool:
+    """Return whether an exact model has reviewed image-input support."""
+    return _bare_model(model) == "gpt-5.6-sol"
+
+
+def _generation_route_from_settings() -> ImageGenerationRoute | None:
+    """Return the complete route identity when generation was explicitly configured."""
+    from infinidev.config.settings import settings
+
+    provider = settings.IMAGE_GENERATION_PROVIDER.strip()
+    model = settings.IMAGE_GENERATION_MODEL.strip()
+    api_key = settings.IMAGE_GENERATION_API_KEY.strip()
+    base_url = settings.IMAGE_GENERATION_BASE_URL.strip()
+    account_id = settings.IMAGE_GENERATION_ACCOUNT_ID.strip()
+    project_id = settings.IMAGE_GENERATION_PROJECT_ID.strip()
+    if not any((provider, model, api_key, base_url, account_id, project_id)):
+        return None
+    return ImageGenerationRoute(
+        provider=provider,
+        model=model,
+        endpoint=(base_url or _OPENAI_IMAGES_ENDPOINT).rstrip("/"),
+        transport=settings.IMAGE_GENERATION_TRANSPORT.strip(),
+        adapter=settings.IMAGE_GENERATION_ADAPTER.strip(),
+        mechanism=settings.IMAGE_GENERATION_MECHANISM.strip(),
+        operation=settings.IMAGE_GENERATION_OPERATION.strip(),
+        revision=settings.IMAGE_GENERATION_REVISION.strip(),
+        credential_type=_OPENAI_IMAGES_CREDENTIAL_TYPE if api_key else "",
+        account_id=account_id,
+        project_id=project_id,
+        credential_id=_credential_id(api_key),
+    )
+
+
+def _generation_profile_for_route(
+    route: ImageGenerationRoute,
+) -> ImageGenerationProfile | None:
+    """Match only the reviewed public OpenAI Images API contract."""
+    profile = IMAGE_GENERATION_PROFILES.get((route.provider, _bare_model(route.model)))
+    if profile is None:
+        return None
+    expected = (
+        route.provider == "openai",
+        route.model == profile.model,
+        route.endpoint == _OPENAI_IMAGES_ENDPOINT,
+        route.transport == _OPENAI_IMAGES_TRANSPORT,
+        route.adapter == _OPENAI_IMAGES_ADAPTER == profile.adapter,
+        route.mechanism == _OPENAI_IMAGES_MECHANISM,
+        route.operation == _OPENAI_IMAGES_OPERATION,
+        route.revision == _OPENAI_IMAGES_REVISION,
+        route.credential_type == _OPENAI_IMAGES_CREDENTIAL_TYPE,
+        bool(route.credential_id),
+    )
+    return profile if all(expected) else None
+
+
+def _metadata_image_input_assessment(route: ModelRoute) -> CapabilityAssessment:
+    """Resolve image input from reviewed overrides and LiteLLM static metadata."""
+    if _is_reviewed_vision_model(route.model):
+        return CapabilityAssessment(
+            status=CapabilityStatus.SUPPORTED,
+            evidence=(CapabilityEvidence(
+                "reviewed-model-override",
+                "Exact model review confirms image input support.",
+            ),),
+        )
+
+    try:
+        import litellm
+
+        supported = bool(litellm.supports_vision(model=route.model))
+    except (ImportError, KeyError, TypeError, ValueError) as exc:
+        return CapabilityAssessment(
+            evidence=(CapabilityEvidence("litellm-metadata", type(exc).__name__),)
+        )
+    except Exception as exc:
+        logger.debug("LiteLLM vision metadata unavailable: %s", str(exc)[:120])
+        return CapabilityAssessment(
+            evidence=(CapabilityEvidence("litellm-metadata", type(exc).__name__),)
+        )
+    return CapabilityAssessment(
+        status=(CapabilityStatus.SUPPORTED if supported else CapabilityStatus.UNSUPPORTED),
+        evidence=(CapabilityEvidence(
+            "litellm-metadata",
+            "Static metadata reports image input support."
+            if supported else "Static metadata reports no image input support.",
+        ),),
+    )
+
+
+def _local_image_input_assessment(route: ModelRoute) -> CapabilityAssessment:
+    """Use authoritative local server inspection where an endpoint exposes it."""
+    from infinidev.config.settings import settings
+
+    current = ModelRoute.from_settings()
+    if route != current:
+        return CapabilityAssessment()
+    if route.provider == "ollama":
+        caps = _detect_ollama_capabilities()
+        return CapabilityAssessment(
+            status=(
+                CapabilityStatus.SUPPORTED
+                if caps.supports_vision else CapabilityStatus.UNSUPPORTED
+            ),
+            evidence=(CapabilityEvidence("ollama-api-show", "Local model manifest."),),
+        )
+    if route.provider == "llama_cpp":
+        supported = _detect_llama_cpp_vision()
+        return CapabilityAssessment(
+            status=(CapabilityStatus.SUPPORTED if supported else CapabilityStatus.UNSUPPORTED),
+            evidence=(CapabilityEvidence("llama-cpp-props", "Local server properties."),),
+        )
+    return CapabilityAssessment()
+
+
+IMAGE_GENERATION_PROFILES: dict[tuple[str, str], ImageGenerationProfile] = {
+    ("openai", "gpt-image-1"): ImageGenerationProfile(
+        version=1,
+        provider="openai",
+        model="gpt-image-1",
+        adapter="litellm.image_generation",
+        response_formats=("b64_json", "url"),
+        sizes=("1024x1024", "1024x1536", "1536x1024"),
+        qualities=("low", "medium", "high"),
+        max_images=10,
+    ),
+    ("openai", "gpt-image-1-mini"): ImageGenerationProfile(
+        version=1,
+        provider="openai",
+        model="gpt-image-1-mini",
+        adapter="litellm.image_generation",
+        response_formats=("b64_json", "url"),
+        sizes=("1024x1024", "1024x1536", "1536x1024"),
+        qualities=("low", "medium", "high"),
+        max_images=10,
+    ),
+}
+
+
+class CapabilityResolver:
+    """Resolve and cache conservative multimodal snapshots per exact route."""
+
+    def __init__(
+        self,
+        metadata_detector: Callable[[ModelRoute], CapabilityAssessment] | None = None,
+        local_detector: Callable[[ModelRoute], CapabilityAssessment] | None = None,
+    ) -> None:
+        self._metadata_detector = metadata_detector or _metadata_image_input_assessment
+        self._local_detector = local_detector or _local_image_input_assessment
+        self._cache: dict[
+            tuple[ModelRoute, ImageGenerationRoute | None], CapabilitySnapshot
+        ] = {}
+        self._lock = RLock()
+
+    def resolve(
+        self,
+        route: ModelRoute | None = None,
+        generation_route: ImageGenerationRoute | None = None,
+    ) -> CapabilitySnapshot:
+        """Return a snapshot keyed by the complete non-secret route identity."""
+        chat_route = route or ModelRoute.from_settings()
+        if generation_route is None:
+            generation_route = _generation_route_from_settings()
+        key = (chat_route, generation_route)
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached
+
+        local = self._local_detector(chat_route)
+        image_input = local
+        if local.status is CapabilityStatus.UNKNOWN:
+            image_input = self._metadata_detector(chat_route)
+
+        profile = None
+        generation = CapabilityAssessment()
+        if generation_route is not None:
+            profile = _generation_profile_for_route(generation_route)
+            if profile is None:
+                generation = CapabilityAssessment(
+                    status=CapabilityStatus.UNSUPPORTED,
+                    evidence=(CapabilityEvidence(
+                        "exact-profile-registry",
+                        "The configured route does not exactly match the reviewed "
+                        "OpenAI Images API contract with an API key.",
+                    ),),
+                )
+            else:
+                generation = CapabilityAssessment(
+                    status=CapabilityStatus.SUPPORTED,
+                    evidence=(CapabilityEvidence(
+                        "exact-profile-registry",
+                        f"Matched generation profile v{profile.version}.",
+                    ),),
+                    restrictions=(
+                        f"adapter={generation_route.adapter}",
+                        f"mechanism={generation_route.mechanism}",
+                        f"operation={generation_route.operation}",
+                        f"revision={generation_route.revision}",
+                    ),
+                )
+        elif chat_route.provider == "openai_subscription":
+            generation = CapabilityAssessment(
+                status=CapabilityStatus.UNSUPPORTED,
+                evidence=(CapabilityEvidence(
+                    "codex-product-boundary",
+                    "Codex catalog metadata is not authorization for the public "
+                    "OpenAI Images API.",
+                ),),
+            )
+
+        snapshot = CapabilitySnapshot(
+            route=chat_route,
+            image_input=image_input,
+            image_generation=generation,
+            generation_profile=profile,
+            generation_route=generation_route,
+        )
+        with self._lock:
+            self._cache[key] = snapshot
+        return snapshot
+
+    def invalidate(
+        self,
+        route: ModelRoute | ImageGenerationRoute | None = None,
+    ) -> None:
+        """Invalidate every snapshot, or snapshots involving one exact identity."""
+        with self._lock:
+            if route is None:
+                self._cache.clear()
+                return
+            self._cache = {
+                key: value for key, value in self._cache.items() if route not in key
+            }
+
 
 # Timeout (seconds) for probe calls — much shorter than the general LLM
 # timeout so a failing probe doesn't block the session for minutes.
@@ -39,8 +406,17 @@ class ModelCapabilities:
     probe_duration: float = 0.0
 
 
-# Module-level singleton
+# Module-level singletons: legacy probe capabilities and public multimodal resolver.
 _capabilities = ModelCapabilities()
+capability_resolver = CapabilityResolver()
+
+
+def get_capability_snapshot(
+    route: ModelRoute | None = None,
+    generation_route: ModelRoute | None = None,
+) -> CapabilitySnapshot:
+    """Return the public immutable capability snapshot for configured routes."""
+    return capability_resolver.resolve(route, generation_route)
 
 # Tiny tool used for probing — minimal tokens, clear expected behavior
 _PROBE_TOOL = {
@@ -215,7 +591,8 @@ def _detect_vision_support() -> bool:
     """Check whether the configured model supports image inputs.
 
     Uses LiteLLM's static metadata table (``litellm.supports_vision``) — no
-    live request. Returns False for any model LiteLLM doesn't know about.
+    live request. Includes a reviewed fallback for models whose metadata has
+    not reached LiteLLM yet.
     """
     try:
         import litellm
@@ -224,22 +601,26 @@ def _detect_vision_support() -> bool:
         model = settings.LLM_MODEL or ""
         if not model:
             return False
+        known_vision_model = _is_reviewed_vision_model(model)
         try:
-            return bool(litellm.supports_vision(model=model))
+            return bool(litellm.supports_vision(model=model)) or known_vision_model
         except Exception:
             # Some provider prefixes (ollama_chat/) aren't in the table;
             # retry with common rewrites.
             for prefix_from, prefix_to in (("ollama_chat/", "ollama/"),):
                 if model.startswith(prefix_from):
                     try:
-                        return bool(
-                            litellm.supports_vision(
-                                model=prefix_to + model[len(prefix_from):]
+                        return (
+                            bool(
+                                litellm.supports_vision(
+                                    model=prefix_to + model[len(prefix_from):]
+                                )
                             )
+                            or known_vision_model
                         )
                     except Exception:
                         pass
-            return False
+            return known_vision_model
     except Exception:
         return False
 
@@ -589,6 +970,7 @@ def _check_thinking(caps: ModelCapabilities, content: str) -> None:
 
 
 def _reset_capabilities() -> None:
-    """Reset to defaults. For tests only."""
+    """Reset legacy probes and route-aware snapshots after configuration changes."""
     global _capabilities
     _capabilities = ModelCapabilities()
+    capability_resolver.invalidate()

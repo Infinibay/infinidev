@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "ba8aa4640012638590ea190325dfc7f07d7a20a5cc0e7abe0c3fd0f8dfb6eea0",
+  "selection": {
+    "method": "explicit",
+    "purpose": "Predeclared opposing-profile treatment of two counterbalanced raw-prior differences"
+  },
+  "probe_count": 2,
+  "category_count": 2,
+  "probes": [
+    {
+      "probe_id": "preference-review-reporting-v2",
+      "category": "code_review",
+      "family": "preference-review-reporting",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    },
+    {
+      "probe_id": "preference-decision-ownership-v2",
+      "category": "complex_decision_making",
+      "family": "preference-decision-ownership",
+      "evaluation_mode": "preference",
+      "review_status": "draft"
+    }
+  ]
+}

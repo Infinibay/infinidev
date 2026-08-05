@@ -1,0 +1,17 @@
+{
+  "provider": "glm",
+  "model": "glm-5.2",
+  "revision": "coding-plan-api-observed-2026-08-04",
+  "model_identity": "glm:glm-5.2:coding-plan-api-observed-2026-08-04",
+  "manifest_id": "prompt-comprehension-glm-5.2-exploratory-2026-08-04-v1",
+  "dataset_sha256": "161bee159a087f349c513ddfb18fff9f7074d7962193ca918be51e09e20ac0d1",
+  "dataset_stage": "exploratory_draft",
+  "api_base": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+  "temperature": 0.0,
+  "max_tokens": 8000,
+  "reasoning_effort": "high",
+  "min_request_interval_seconds": 1.0,
+  "conditions": {
+    "raw": null
+  }
+}

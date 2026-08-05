@@ -36,6 +36,12 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
         ("LLM_TIMEOUT", "LLM request timeout in seconds", "int"),
     ],
+    "Image Generation": [
+        ("IMAGE_GENERATION_PROVIDER", "Separate image provider (empty = disabled)", "str"),
+        ("IMAGE_GENERATION_MODEL", "Exact supported image model", "str"),
+        ("IMAGE_GENERATION_BASE_URL", "Image API base URL", "str"),
+        ("IMAGE_GENERATION_API_KEY", "Image API key", "str"),
+    ],
     "Embedding": [
         ("EMBEDDING_PROVIDER", "Embedding provider", "select:ollama,openai,huggingface"),
         ("EMBEDDING_MODEL", "Embedding model name", "str"),

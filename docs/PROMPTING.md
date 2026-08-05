@@ -11,9 +11,9 @@ the observed behavior and record the reason for the departure.
 
 ## Core standard
 
-Write a prompt as an ordered procedure with one governing rule, not as a
-catalog of capabilities. A reader must be able to perform the work in document
-order and identify the evidence that proves each stage complete.
+Write a prompt as a compact decision aid, not as a catalog of capabilities.
+A reader must be able to distinguish facts and non-negotiable product bars
+from methods that are useful defaults rather than universal obligations.
 
 The governing rule is:
 
@@ -23,9 +23,9 @@ The governing rule is:
 A remembered path, API, tool, or behavior is a hypothesis until current
 evidence confirms it.
 
-## Required structure
+## Recommended structure
 
-Order instructions by execution sequence:
+For procedural work, this is the default order:
 
 1. State the input and its authority.
 2. Turn unknowns into concrete observations.
@@ -34,8 +34,8 @@ Order instructions by execution sequence:
 5. Define completion and failure conditions.
 6. End with one complete example when the format is not self-evident.
 
-If two sections can trade places without changing the procedure, the prompt is
-probably organized by topic instead of work order.
+Depart from this order when another structure makes the task easier to verify;
+record the reason in the prompt review.
 
 ## Rule design
 
@@ -49,9 +49,10 @@ interpretation:
 - Good: `Run the smallest test target that executes the changed behavior, then
   run the subsystem suite before reporting completion.`
 
-Keep model-directed verbs imperative. Put limitation statements on the page,
-packet, repository, tool, or runtime rather than softening an instruction to
-the model.
+Keep contracts and product bars imperative. Express methods as a default plus
+the evidence that justifies departing from it. For example: `Prefer a focused
+test first because it gives fast fault localization; run the broader suite
+first when repository instructions make it the acceptance gate.`
 
 ## Machine facts, product bars, and methods
 
@@ -71,8 +72,10 @@ Do not present machine facts as advice or methods as immutable runtime facts.
 
 The prompt-style tests reject three classes of wording:
 
-- Hedges such as `could`, `should`, `might`, `prefer`, `generally`,
-  `typically`, and `try to`. A hedge grants permission to skip an instruction.
+- Evasive uncertainty such as `perhaps`, `might`, `possibly`, and `try to`.
+  It supplies neither a contract nor a usable recommendation. Words such as
+  `prefer`, `generally`, and `usually` are valid for methods when the prompt
+  also gives the decision criterion or departure condition.
 - Threshold-free words such as `appropriate`, `relevant`, `as needed`,
   `reasonable`, `sufficient`, `proper`, and `significant`. Replace the word
   with the criterion it hides.
@@ -106,7 +109,8 @@ Review every new or changed prompt in this order:
 3. Confirm that every action traces to packet or repository evidence.
 4. Confirm that every state-changing action has a verification condition.
 5. Separate machine facts, product bars, and methods.
-6. Replace hedges and threshold-free words with explicit criteria.
+6. Replace evasive uncertainty and threshold-free words with explicit criteria;
+   for a method, state its default and when evidence warrants departure.
 7. Confirm all tool names and parameters against live schemas.
 8. Include a complete example when the output format needs one.
 9. Run `uv run pytest tests/test_prompt_style_rules.py`.

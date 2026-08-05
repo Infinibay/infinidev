@@ -91,6 +91,30 @@ def test_loop_tool_call_updates_total_calls_and_prints(renderer, fresh_bus, stat
     assert "src/main.py" in out
 
 
+def test_loop_tool_start_is_visible_before_long_tool_finishes(
+    renderer, fresh_bus, status, capsys
+):
+    fresh_bus.emit("loop_tool_start", 1, "agent-a", {
+        "tool_name": "execute_command",
+        "tool_detail": "python -m pytest",
+    })
+
+    assert status.activity == "running execute_command"
+    out = capsys.readouterr().out
+    assert "running" in out
+    assert "execute_command" in out
+    assert "python -m pytest" in out
+
+
+def test_loop_llm_call_updates_activity_without_noisy_output(
+    renderer, fresh_bus, status, capsys
+):
+    fresh_bus.emit("loop_llm_call_start", 1, "agent-a", {"phase": "planning"})
+
+    assert status.activity == "model planning"
+    assert capsys.readouterr().out == ""
+
+
 def test_loop_tool_call_with_error_renders_red_marker(renderer, fresh_bus, capsys):
     fresh_bus.emit("loop_tool_call", 1, "agent-a", {
         "tool_name": "execute_command",

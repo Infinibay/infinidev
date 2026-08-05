@@ -434,6 +434,129 @@ def test_reasoning_levels_are_read_from_the_catalog(codex_home):
     assert codex_catalog.reasoning_levels("m") == ["low", "xhigh"]
 
 
+@pytest.mark.parametrize(
+    ("capability_fields", "expected"),
+    [
+        ({"supports_image_generation": True}, True),
+        ({"supports_image_generation": False}, False),
+        ({}, None),
+        ({"supports_image_generation": "yes"}, None),
+    ],
+)
+def test_image_generation_announcement_is_strictly_tristate(
+    codex_home, capability_fields, expected
+):
+    _write_catalog(
+        codex_home,
+        [{"slug": "gpt-5.6-sol", **capability_fields}],
+    )
+
+    assert codex_catalog.supports_image_generation("gpt-5.6-sol") is expected
+
+
+def test_announced_gpt_56_sol_without_a_generation_route_does_not_register_tool(
+    codex_home, monkeypatch
+):
+    import infinidev.config.model_capabilities as capabilities
+    import infinidev.tools as tools
+
+    _write_catalog(
+        codex_home,
+        [{"slug": "gpt-5.6-sol", "supports_image_generation": True}],
+    )
+    monkeypatch.setattr(capabilities, "_generation_route_from_settings", lambda: None)
+    resolver = capabilities.CapabilityResolver(
+        metadata_detector=lambda route: capabilities.CapabilityAssessment(
+            status=capabilities.CapabilityStatus.SUPPORTED
+        ),
+        local_detector=lambda route: capabilities.CapabilityAssessment(),
+    )
+    snapshot = resolver.resolve(
+        capabilities.ModelRoute(
+            "openai_subscription", "openai/responses/gpt-5.6-sol"
+        )
+    )
+
+    assert snapshot.image_generation.status is capabilities.CapabilityStatus.UNSUPPORTED
+    assert snapshot.generation_profile is None
+    assert snapshot.generation_route is None
+    assert snapshot.image_input.status is capabilities.CapabilityStatus.SUPPORTED
+
+    monkeypatch.setattr(capabilities, "get_capability_snapshot", lambda: snapshot)
+    monkeypatch.setattr(tools, "discover_mcp_tool_classes", lambda: [])
+    names = {tool.name for tool in tools.get_tools_for_role("developer")}
+    assert "generate_image" not in names
+
+
+@pytest.mark.parametrize(
+    "capability_fields",
+    [
+        {"supports_image_generation": False},
+        {},
+        {"supports_image_generation": "yes"},
+    ],
+)
+def test_gpt_56_sol_generation_is_not_registered_without_affirmative_announcement(
+    codex_home, monkeypatch, capability_fields
+):
+    import infinidev.config.model_capabilities as capabilities
+    import infinidev.tools as tools
+
+    _write_catalog(
+        codex_home,
+        [{"slug": "gpt-5.6-sol", **capability_fields}],
+    )
+    monkeypatch.setattr(capabilities, "_generation_route_from_settings", lambda: None)
+    snapshot = capabilities.CapabilityResolver(
+        metadata_detector=lambda route: capabilities.CapabilityAssessment(),
+        local_detector=lambda route: capabilities.CapabilityAssessment(),
+    ).resolve(
+        capabilities.ModelRoute(
+            "openai_subscription", "openai/responses/gpt-5.6-sol"
+        )
+    )
+
+    assert snapshot.image_generation.supported is False
+    assert snapshot.generation_profile is None
+
+    monkeypatch.setattr(capabilities, "get_capability_snapshot", lambda: snapshot)
+    monkeypatch.setattr(tools, "discover_mcp_tool_classes", lambda: [])
+    names = {tool.name for tool in tools.get_tools_for_role("developer")}
+    assert "generate_image" not in names
+
+
+def test_gpt_56_sol_announcement_does_not_enable_other_routes(codex_home, monkeypatch):
+    import infinidev.config.model_capabilities as capabilities
+
+    _write_catalog(
+        codex_home,
+        [{"slug": "gpt-5.6-sol", "supports_image_generation": True}],
+    )
+    monkeypatch.setattr(capabilities, "_generation_route_from_settings", lambda: None)
+    resolver = capabilities.CapabilityResolver(
+        metadata_detector=lambda route: capabilities.CapabilityAssessment(),
+        local_detector=lambda route: capabilities.CapabilityAssessment(),
+    )
+
+    routes = (
+        (
+            capabilities.ModelRoute("openai", "openai/responses/gpt-5.6-sol"),
+            capabilities.CapabilityStatus.UNKNOWN,
+        ),
+        (
+            capabilities.ModelRoute(
+                "openai_subscription", "openai/responses/gpt-5.6-terra"
+            ),
+            capabilities.CapabilityStatus.UNSUPPORTED,
+        ),
+    )
+    for route, expected_status in routes:
+        snapshot = resolver.resolve(route)
+        assert snapshot.image_generation.status is expected_status
+        assert snapshot.generation_profile is None
+        assert snapshot.generation_route is None
+
+
 # ── Wiring into LiteLLM params ───────────────────────────────────────
 
 
@@ -685,6 +808,27 @@ def test_capabilities_preset_exists():
     caps = _PROVIDER_PRESETS["openai_subscription"]
     assert caps.supports_function_calling is True
     assert caps.probed is True
+
+
+def test_subscription_tool_request_omits_unsupported_tool_choice(monkeypatch):
+    from infinidev.config.settings import settings
+    from infinidev.engine.llm_client import call_llm
+
+    seen = {}
+    response = object()
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai_subscription")
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: seen.update(kwargs) or response)
+
+    assert call_llm(
+        {"model": "openai/responses/gpt-5.6-sol"},
+        [{"role": "user", "content": "x"}],
+        [{"type": "function", "function": {"name": "done", "parameters": {}}}],
+        tool_choice="required",
+        retry_attempts=1,
+    ) is response
+
+    assert "tools" in seen
+    assert "tool_choice" not in seen
 
 
 # ── The backend answers streams only ─────────────────────────────────

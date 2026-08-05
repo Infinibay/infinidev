@@ -48,7 +48,11 @@ finetune/__pycache__/
 unsloth_compiled_cache/
 
 # Benchmark and example output
-bench/runs/
+bench/runs/*
+!bench/runs/prompt-comprehension-closure/
+bench/runs/prompt-comprehension-closure/*
+!bench/runs/prompt-comprehension-closure/closure.json
+!bench/runs/prompt-comprehension-closure/terminal-tuples.jsonl
 bench/predictions*.jsonl
 examples/**/build.log
 examples/**/*.db

@@ -867,15 +867,7 @@ class InfinidevApp:
             if self._engine_running:
                 # Inject message into the running loop — will appear in next iteration
                 if self.engine is not None:
-                    self.engine.inject_message(cleaned_text)
-                    if attachments:
-                        self.add_message(
-                            "System",
-                            "Note: images attached mid-task aren't forwarded "
-                            "to the running agent — send them at the start "
-                            "of a new turn.",
-                            "system",
-                        )
+                    self.engine.inject_message(cleaned_text, attachments)
                     # No "injected" confirmation — the user already
                     # expects this behaviour; the line was just noise.
                 else:
@@ -978,8 +970,9 @@ class InfinidevApp:
         if all_attachments:
             # Mention vision gating when the configured model can't see them.
             try:
-                from infinidev.config.model_capabilities import _detect_vision_support
-                if not _detect_vision_support():
+                from infinidev.config.model_capabilities import get_capability_snapshot
+
+                if not get_capability_snapshot().supports_vision:
                     self.add_message(
                         "System",
                         f"Note: {len(all_attachments)} image(s) attached, "

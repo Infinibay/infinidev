@@ -17,6 +17,20 @@ def _ctx():
 
 
 class TestUserMessageInjector:
+    def test_notifies_context_change_for_mid_step_and_late_messages(self):
+        notifications: list[list[str]] = []
+        inj = UserMessageInjector(notifications.append)
+        inj.inject("change target")
+        inj.inject_mid_step(_ctx(), [])
+        inj.inject("also change tests")
+        messages = [
+            {"role": "assistant", "tool_calls": [{}]},
+            {"role": "tool", "tool_call_id": "sc1", "content": "acknowledged"},
+        ]
+        inj.reject_step_complete_on_late_message(_ctx(), messages, "sc1")
+
+        assert notifications == [["change target"], ["also change tests"]]
+
     def test_inject_and_drain_fifo(self):
         inj = UserMessageInjector()
         inj.inject("first")
@@ -28,7 +42,8 @@ class TestUserMessageInjector:
         inj = UserMessageInjector()
         inj.inject("please stop")
         messages: list[dict] = []
-        inj.inject_mid_step(_ctx(), messages)
+        drained = inj.inject_mid_step(_ctx(), messages)
+        assert drained == ["please stop"]
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
         assert "please stop" in messages[0]["content"]
@@ -37,7 +52,7 @@ class TestUserMessageInjector:
     def test_inject_mid_step_noop_when_empty(self):
         inj = UserMessageInjector()
         messages: list[dict] = [{"role": "user", "content": "x"}]
-        inj.inject_mid_step(_ctx(), messages)
+        assert inj.inject_mid_step(_ctx(), messages) == []
         assert messages == [{"role": "user", "content": "x"}]  # untouched
 
     def test_reject_returns_false_when_queue_empty(self):

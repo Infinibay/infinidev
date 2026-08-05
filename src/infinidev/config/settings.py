@@ -121,6 +121,41 @@ class Settings(BaseSettings):
     LLM_NUM_RETRIES: int = 3  # Retry transient provider errors (OpenRouter mid-stream drops, 5xx, timeouts)
     LLM_TEMPERATURE: float = 0.2  # Default temp for the developer loop. Low values favour reliable tool-calling and deterministic edits. Set < 0 to defer to the model/provider default.
     OLLAMA_NUM_CTX: int = 16384  # Context window for Ollama models (0 = use model default)
+    # Opt-in, release-gated guidance selected by the behavioral calibration lab.
+    # The profile must match provider/model, immutable model identity, and the
+    # active utility profile exactly, and carry an approved guidance hash.
+    PROMPT_CALIBRATION_PROFILE: str = ""
+    PROMPT_CALIBRATION_MODEL_IDENTITY: str = ""
+    PROMPT_CALIBRATION_UTILITY_PROFILE: str = ""
+    PROMPT_CALIBRATION_UTILITY_PROFILE_SHA256: str = ""
+    # Explicit user-authored preference objective. The hash binds the active
+    # profile and also selects only calibration guidance built for that exact
+    # objective. Numeric weights are never rendered into model prompts.
+    USER_PREFERENCE_PROFILE: str = ""
+    USER_PREFERENCE_PROFILE_SHA256: str = ""
+
+    # Image generation is an independent, explicit route. Empty values disable
+    # it; the chat provider/model are never silently reused or combined.
+    IMAGE_GENERATION_PROVIDER: str = ""
+    IMAGE_GENERATION_MODEL: str = ""
+    IMAGE_GENERATION_BASE_URL: str = ""
+    IMAGE_GENERATION_API_KEY: str = ""
+    IMAGE_GENERATION_ACCOUNT_ID: str = ""
+    IMAGE_GENERATION_PROJECT_ID: str = ""
+    IMAGE_GENERATION_TRANSPORT: str = "https"
+    IMAGE_GENERATION_ADAPTER: str = "litellm.image_generation"
+    IMAGE_GENERATION_MECHANISM: str = "openai_images_api"
+    IMAGE_GENERATION_OPERATION: str = "images.generate"
+    IMAGE_GENERATION_REVISION: str = "2025-04-01"
+
+    # Durable generated-image storage. Assets are private files below
+    # `.infinidev/private/image_assets`; finite bounds are required fail-closed.
+    IMAGE_ASSET_MAX_BYTES: int = 20 * 1024 * 1024
+    IMAGE_ASSET_MAX_OPERATION_BYTES: int = 80 * 1024 * 1024
+    IMAGE_ASSET_MAX_PIXELS: int = 40_000_000
+    IMAGE_ASSET_DOWNLOAD_TIMEOUT_SECONDS: int = 30
+    IMAGE_ASSET_MAX_REDIRECTS: int = 3
+    IMAGE_ASSET_STAGING_GRACE_SECONDS: int = 60 * 60
 
     # Thinking / Reasoning
     # NOTE: Anthropic, OpenAI, and Gemini enforce thinking budgets server-side.
@@ -407,6 +442,9 @@ class Settings(BaseSettings):
     CONTEXT_RANK_TOP_K_FILES: int = 5
     CONTEXT_RANK_TOP_K_SYMBOLS: int = 5
     CONTEXT_RANK_TOP_K_FINDINGS: int = 3
+    # Final rendered XML ceiling. Retrieval may retain more candidates, but
+    # automatic injection stays bounded; the model can inspect more via Ken.
+    CONTEXT_RANK_MAX_PROMPT_CHARS: int = 12_000
     # Exponential decay λ applied per iteration to reactive (in-session)
     # interactions.  At Δ=10 iterations a score drops to exp(-0.35*10)≈3%,
     # so actions from 10+ iterations ago effectively vanish.  Bumped from

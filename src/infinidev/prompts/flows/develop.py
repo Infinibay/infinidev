@@ -85,18 +85,15 @@ not written on stone, but a guideline to guide you if you are lost.
 - After writing code, run the smallest test target that executes the changed
   behavior before broadening to the subsystem suite.
 - If tests fail, read the failure output carefully, fix your code, and
-  run the tests again. Repeat until they pass.
-- If NO tests exist for the code you wrote or changed, WRITE THEM. Every
-  new function and every behavior change carries at least one test.
+  run the tests again when the next attempt addresses what the failure taught
+  you. Stop and report when repeated attempts no longer produce information.
+- If behavior changed and no focused test proves it, add a regression test
+  unless the repository verifies that contract through another named gate.
   Write isolated unit tests: one function at a time, external dependencies
   mocked (files, network, databases), and a name that states the behaviour.
   Example: `test_verify_token_rejects_expired`.
-- **After tests pass, attack your own code with four questions:**
-  questions that catch what the tests missed:
-  - What happens when the input is None or empty?
-  - What happens when a caller passes the wrong type?
-  - Does the runtime error message name the actual problem?
-  - Is every file and connection released?
+- After tests pass, examine the failure paths and boundary cases reachable
+  through the contract you changed, including owned resources and error messages.
 
 ### 5. Readability over performance
 - Write code that is easy to read and understand.

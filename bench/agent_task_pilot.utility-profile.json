@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "provenance": "explicit_user",
+  "name": "quality-and-control",
+  "description": "Prefer careful verification and visibility into consequential trade-offs. Ask me when a decision materially changes product behavior or risk, but handle routine reversible implementation details autonomously.",
+  "weights": {
+    "quality": 1.0,
+    "user_control": 0.8,
+    "caution": 0.6,
+    "interaction": 0.3,
+    "speed": -0.2
+  }
+}

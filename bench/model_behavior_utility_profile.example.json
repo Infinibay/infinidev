@@ -1,0 +1,13 @@
+{
+  "name": "high-control-quality",
+  "description": "Prefer visible checkpoints and strong verification over maximum autonomy or speed.",
+  "weights": {
+    "autonomy": -0.3,
+    "caution": 0.6,
+    "cost_efficiency": 0.1,
+    "interaction": 0.7,
+    "quality": 1.0,
+    "speed": -0.2,
+    "user_control": 1.0
+  }
+}

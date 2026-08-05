@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": "09f9653c0576e8d40fddb153ebbda43bad49c85a7dd8e4bc4ad493d1619c4323",
+  "task_count": 6,
+  "route_count": 3,
+  "planned_executions": 36,
+  "all_passed": true,
+  "records": [
+    {
+      "provider": "openai_subscription",
+      "model": "gpt-5.6-sol",
+      "model_identity": "openai_subscription:gpt-5.6-sol:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "conditions_path": "bench/agent_task_pilot.sol.conditions.json",
+      "config_path": "bench/agent_task_run.gpt-5.6-sol.json",
+      "planned_executions": 12,
+      "checks": {
+        "model_identity_matches": true,
+        "task_ids_match": true,
+        "two_conditions": true,
+        "one_repetition": true,
+        "sequential": true,
+        "isolated_workspace": true,
+        "isolated_session": true,
+        "paced_at_least_two_seconds": true,
+        "no_retries": true,
+        "stop_on_error": true,
+        "planned_count_matches": true
+      },
+      "passed": true
+    },
+    {
+      "provider": "openai_subscription",
+      "model": "gpt-5.6-terra",
+      "model_identity": "openai_subscription:gpt-5.6-terra:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "conditions_path": "bench/agent_task_pilot.terra.conditions.json",
+      "config_path": "bench/agent_task_run.gpt-5.6-terra.json",
+      "planned_executions": 12,
+      "checks": {
+        "model_identity_matches": true,
+        "task_ids_match": true,
+        "two_conditions": true,
+        "one_repetition": true,
+        "sequential": true,
+        "isolated_workspace": true,
+        "isolated_session": true,
+        "paced_at_least_two_seconds": true,
+        "no_retries": true,
+        "stop_on_error": true,
+        "planned_count_matches": true
+      },
+      "passed": true
+    },
+    {
+      "provider": "openai_subscription",
+      "model": "gpt-5.6-luna",
+      "model_identity": "openai_subscription:gpt-5.6-luna:catalog-7a752fbfe4d5a2b9702cb649999e730cfd32d89a8f043a7177b2abc520152cfe",
+      "conditions_path": "bench/agent_task_pilot.luna.conditions.json",
+      "config_path": "bench/agent_task_run.gpt-5.6-luna.json",
+      "planned_executions": 12,
+      "checks": {
+        "model_identity_matches": true,
+        "task_ids_match": true,
+        "two_conditions": true,
+        "one_repetition": true,
+        "sequential": true,
+        "isolated_workspace": true,
+        "isolated_session": true,
+        "paced_at_least_two_seconds": true,
+        "no_retries": true,
+        "stop_on_error": true,
+        "planned_count_matches": true
+      },
+      "passed": true
+    }
+  ],
+  "execution_authorized": false,
+  "remaining_gates": [
+    "Independent candidate-blind approval of all six tasks and human rubrics.",
+    "Regenerate manifests against the approved dataset bytes.",
+    "Explicit authorization immediately before provider-backed execution."
+  ]
+}

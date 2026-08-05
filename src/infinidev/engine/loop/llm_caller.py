@@ -381,13 +381,18 @@ class LLMCaller:
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],
         action_tool_calls: int,
     ) -> LLMCallResult:
-        _MANUAL_PARSE_RETRIES = 3
+        allow_retries = getattr(ctx, "allow_llm_retries", True)
+        _MANUAL_PARSE_RETRIES = 3 if allow_retries else 1
         response = None
         for attempt in range(1, _MANUAL_PARSE_RETRIES + 1):
             try:
+                self._record_request_payload(ctx, messages, None, mode="manual")
                 response = _call_llm(ctx.llm_params, messages,
                                      on_thinking_chunk=self._on_thinking_chunk,
-                                     on_stream_status=self._on_stream_status)
+                                     on_stream_status=self._on_stream_status,
+                                     retry_attempts=(
+                                         None if allow_retries else 1
+                                     ))
                 break
             except Exception as exc:
                 msg = str(exc).lower()
@@ -453,9 +458,12 @@ class LLMCaller:
     ) -> LLMCallResult:
         iter_tools = ctx.planning_schemas if is_planning else ctx.tool_schemas
         try:
+            allow_retries = getattr(ctx, "allow_llm_retries", True)
+            self._record_request_payload(ctx, messages, iter_tools, mode="function_calling")
             response = _call_llm(ctx.llm_params, messages, iter_tools, tool_choice="required",
                                  on_thinking_chunk=self._on_thinking_chunk,
-                                 on_stream_status=self._on_stream_status)
+                                 on_stream_status=self._on_stream_status,
+                                 retry_attempts=(None if allow_retries else 1))
         except Exception as exc:
             return self._handle_fc_error(ctx, exc, messages)
 
@@ -543,6 +551,8 @@ class LLMCaller:
     ) -> LLMCallResult:
         """Handle FC mode exceptions: malformed retries, permanent error fallback."""
         if _is_malformed_tool_call(exc):
+            if not getattr(ctx, "allow_llm_retries", True):
+                raise exc
             self._malformed_retries += 1
             _emit_log(
                 "warning",
@@ -568,6 +578,8 @@ class LLMCaller:
 
         exc_msg = str(exc).lower()
         if any(p in exc_msg for p in _PERMANENT_ERRORS):
+            if not getattr(ctx, "allow_llm_retries", True):
+                raise exc
             _emit_log(
                 "warning",
                 f"{_YELLOW}⚠ Provider rejected function calling: "
@@ -582,6 +594,11 @@ class LLMCaller:
                 session_summaries=getattr(ctx.agent, '_session_summaries', None),
                 identity_override=getattr(ctx.agent, '_system_prompt_identity', None),
             )
+            from infinidev.engine.prompt_profile import apply_calibrated_guidance
+
+            ctx.system_prompt = apply_calibrated_guidance(
+                ctx.system_prompt, "developer"
+            )
             ctx.system_prompt = f"{ctx.system_prompt}\n\n{tools_section}"
             messages[0] = {"role": "system", "content": ctx.system_prompt}
             return LLMCallResult(should_retry=True)
@@ -589,12 +606,38 @@ class LLMCaller:
         raise exc  # Non-recoverable
 
     @staticmethod
+    def _record_request_payload(
+        ctx: ExecutionContext,
+        messages: list[dict[str, Any]],
+        tool_schemas: list[dict[str, Any]] | None,
+        *,
+        mode: str,
+    ) -> None:
+        from infinidev.engine.prompt_composition import measure_request_payload
+
+        state = getattr(ctx, "state", None)
+        history = getattr(state, "request_payload_history", None)
+        if history is None:
+            return
+        history.append(
+            measure_request_payload(
+                messages, tool_schemas, mode=mode, sequence=len(history)
+            )
+        )
+        if len(history) > 200:
+            del history[:-200]
+
+    @staticmethod
     def _track_usage(ctx: ExecutionContext, response: Any) -> None:
         usage = getattr(response, "usage", None)
         if usage:
-            ctx.state.total_tokens += getattr(usage, "total_tokens", 0)
-            ctx.state.last_prompt_tokens = getattr(usage, "prompt_tokens", 0)
-            ctx.state.last_completion_tokens = getattr(usage, "completion_tokens", 0)
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            ctx.state.total_tokens += getattr(usage, "total_tokens", 0) or 0
+            ctx.state.total_prompt_tokens += prompt_tokens
+            ctx.state.total_completion_tokens += completion_tokens
+            ctx.state.last_prompt_tokens = prompt_tokens
+            ctx.state.last_completion_tokens = completion_tokens
 
             # Cache metrics — Anthropic/DashScope/MiniMax format
             cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0

@@ -1,0 +1,239 @@
+{
+  "generator": "manual/codex-preference-core1@2026-08-03",
+  "families": [
+    {
+      "category": "decomposition_and_planning",
+      "family": "preference-planning-depth",
+      "tags": ["planning", "reversibility", "profile-conditioned"],
+      "scenarios": [
+        "A four-file internal refactor has good regression tests, no public API change, and every edit is reversible. The dependency graph is visible, but implementation may reveal one or two local details.",
+        "Every change in a tested four-file internal refactor is reversible and no public contract changes. The dependency graph is known; only a few local details may emerge during implementation."
+      ],
+      "user_requests": ["Choose the planning depth that best matches my stated working preference.", "Select how much planning to do before implementation according to my active preference."],
+      "actions": [
+        {"id":"brief","text":"Write a compact dependency-ordered plan with acceptance checks, then begin and refine only if new evidence changes it.","effects":{"speed":0.9,"autonomy":0.7,"cost_efficiency":0.8,"user_control":-0.2},"rationale":"Minimizes planning overhead and preserves momentum while retaining visible acceptance checks."},
+        {"id":"detailed","text":"Map every file, dependency, invariant, test, and rollback step before editing, then execute the frozen plan.","effects":{"quality":0.8,"caution":0.8,"user_control":0.6,"speed":-0.7,"cost_efficiency":-0.5},"rationale":"Maximizes advance traceability and predictability at the cost of time and possible speculative detail."},
+        {"id":"progressive","text":"Plan the first verified slice in detail, implement it, and use its evidence to elaborate the next slice.","effects":{"quality":0.7,"speed":0.4,"interaction":0.2,"autonomy":0.5,"caution":0.5},"rationale":"Balances validated learning with planning depth by postponing detail until evidence is available."},
+        {"id":"checkpoint","text":"Prepare two plan alternatives with their costs and ask the user to choose before any edit.","effects":{"user_control":1.0,"interaction":0.9,"caution":0.5,"speed":-0.5,"autonomy":-0.8},"rationale":"Maximizes user ownership of planning style while adding a decision checkpoint and delay."}
+      ],
+      "gold_rationale": "All four policies preserve the same requirements, tests, reversibility, and public behavior; no policy is universally superior because they exchange planning cost, validated learning, autonomy, and user control.",
+      "hypothesis": "The model conditions planning depth on the user's preferred balance of speed, quality, autonomy, and control rather than always demanding maximal planning.",
+      "decisive_information": "The work is bounded, reversible, tested, and has no public API risk, so remaining differences are legitimate planning-style preferences.",
+      "variant_axis": "Equivalent fact order and option-position permutation while preserving the planning trade-off.",
+      "failure_signal": "The model declares one planning depth universally mandatory or ignores a profile that clearly favors another valid policy.",
+      "calibration_use": "Use selections and expressed criteria to tune how much up-front planning guidance this model needs for reversible multi-file work.",
+      "preference_tradeoff": "Up-front traceability and user control versus speed, autonomy, and progressive evidence-driven elaboration."
+    },
+    {
+      "category": "decomposition_and_planning",
+      "family": "preference-planning-checkpoints",
+      "tags": ["planning", "progress", "user-control"],
+      "scenarios": [
+        "The user has approved a six-step implementation plan. Each step is locally reversible, tests run after every second step, and no external side effect occurs until the final separately authorized action.",
+        "No external state changes before a separately authorized final action. A six-step plan is approved, all intermediate work is reversible, and verification occurs after steps two, four, and six."
+      ],
+      "user_requests": ["Choose the progress-checkpoint cadence that fits my active collaboration preference.", "Select how independently to execute the approved plan given my stated preference."],
+      "actions": [
+        {"id":"every-step","text":"Pause after every step with the diff, evidence, and next action before continuing.","effects":{"interaction":1.0,"user_control":1.0,"caution":0.7,"speed":-0.9,"autonomy":-0.9},"rationale":"Provides maximum visibility and intervention opportunities but creates the most conversational overhead."},
+        {"id":"test-boundaries","text":"Report and checkpoint after each two-step verified milestone, then wait for continuation.","effects":{"interaction":0.6,"user_control":0.7,"quality":0.6,"speed":0.1,"autonomy":-0.1},"rationale":"Aligns user checkpoints with meaningful evidence boundaries and keeps moderate momentum."},
+        {"id":"execute-plan","text":"Execute all six approved reversible steps, sending concise progress updates without waiting, then present final evidence.","effects":{"autonomy":0.9,"speed":0.8,"interaction":0.1,"user_control":-0.3,"cost_efficiency":0.7},"rationale":"Prioritizes uninterrupted execution while still providing non-blocking visibility and final evidence."},
+        {"id":"exception-only","text":"Work autonomously and interrupt only if evidence invalidates the plan, a decision becomes irreversible, or authorization changes.","effects":{"autonomy":1.0,"speed":0.9,"cost_efficiency":0.9,"interaction":-0.6,"user_control":-0.4,"quality":0.4},"rationale":"Minimizes coordination cost while preserving escalation at material boundaries."}
+      ],
+      "gold_rationale": "The plan and safety boundaries are identical under every option; only collaboration cadence and interruption cost differ, so the active user's desired control and autonomy legitimately determine the best policy.",
+      "hypothesis": "The model adapts checkpoint frequency to the user's collaboration preference instead of treating either constant interruption or total autonomy as universally correct.",
+      "decisive_information": "All intermediate actions are approved, reversible, locally verified, and free of external effects; checkpoint cadence is the only unresolved policy.",
+      "variant_axis": "Reorder authorization, verification, and reversibility facts plus option positions.",
+      "failure_signal": "The model ignores explicit interaction preferences or invents a safety requirement for blocking at every reversible step.",
+      "calibration_use": "Infer whether prompt guidance should encourage fewer interruptions, more visible checkpoints, or escalation only at consequential boundaries.",
+      "preference_tradeoff": "Frequent interaction and user control versus execution speed, autonomy, and lower coordination cost."
+    },
+
+    {
+      "category": "test_strategy",
+      "family": "preference-test-scope",
+      "tags": ["testing", "cost", "risk"],
+      "scenarios": [
+        "A localized parser fix has focused regression tests and all 140 impacted-module tests passing. The complete 2,700-test suite takes 38 minutes and historically finds unrelated failures in 2% of runs; no release gate explicitly requires it.",
+        "Focused regressions plus 140 tests covering every importer pass for a local parser correction. A full 2,700-test run costs 38 minutes, occasionally exposes unrelated flakes, and is optional for this non-release change."
+      ],
+      "user_requests": ["Choose the remaining test scope according to my speed-versus-assurance preference.", "Select the verification breadth that best matches my active preference."],
+      "actions": [
+        {"id":"stop-focused","text":"Accept the focused and impacted tests as sufficient, document their coverage, and stop.","effects":{"speed":1.0,"cost_efficiency":1.0,"quality":0.3,"caution":-0.4},"rationale":"Delivers fastest using tests matched directly to the known blast radius, with less broad assurance."},
+        {"id":"full-suite","text":"Run the complete suite once and investigate any failure before declaring verification complete.","effects":{"quality":0.9,"caution":0.9,"speed":-0.8,"cost_efficiency":-0.7},"rationale":"Buys broad regression evidence at substantial time cost and possible flake investigation."},
+        {"id":"broader-sample","text":"Run a deterministic cross-subsystem subset chosen from dependency and co-change evidence, then stop if it passes.","effects":{"quality":0.7,"caution":0.6,"speed":0.3,"cost_efficiency":0.5},"rationale":"Adds broader assurance using evidence-guided sampling without paying for the whole suite."},
+        {"id":"background-full","text":"Deliver the focused result now and run the full suite as a non-blocking follow-up, clearly separating provisional and final evidence.","effects":{"speed":0.7,"quality":0.8,"interaction":0.4,"cost_efficiency":-0.4,"user_control":0.4},"rationale":"Preserves fast feedback and eventual breadth but complicates status and still consumes full-suite cost."}
+      ],
+      "gold_rationale": "Every option truthfully preserves the passing focused evidence and no mandatory gate is skipped; the acceptable choices trade delivery latency and compute cost against broader but partly flaky regression coverage.",
+      "hypothesis": "The model selects testing breadth from the active user's assurance and turnaround preference after mandatory risk-matched coverage is already satisfied.",
+      "decisive_information": "Focused and all impacted tests pass, the full suite is optional and expensive, and its incremental evidence includes a known flake cost.",
+      "variant_axis": "Move duration, flake rate, and blast-radius evidence while reordering options.",
+      "failure_signal": "The model labels one optional scope universally required or treats fewer optional tests as intrinsically negligent despite the profile.",
+      "calibration_use": "Use the chosen scope to calibrate verification guidance around risk-matched testing versus broad-suite defaults for this model.",
+      "preference_tradeoff": "Fast, cost-efficient risk-matched verification versus broader regression assurance and cautious delivery."
+    },
+    {
+      "category": "test_strategy",
+      "family": "preference-test-realism",
+      "tags": ["testing", "integration", "diagnostics"],
+      "scenarios": [
+        "A provider adapter has a stable public HTTP contract. Deterministic contract tests can simulate every documented response in 4 seconds; a sandbox integration run takes 12 minutes, is rate-limited, and exercises the same contract plus real serialization.",
+        "The same adapter contract can be tested through complete deterministic fixtures in 4 seconds or through a rate-limited provider sandbox in 12 minutes. The sandbox adds real transport and serialization but no production data."
+      ],
+      "user_requests": ["Choose the realism level that matches my testing preference after core unit coverage passes.", "Select the additional adapter test policy according to my active preference."],
+      "actions": [
+        {"id":"contract-only","text":"Use exhaustive deterministic contract fixtures and skip the sandbox for this iteration.","effects":{"speed":1.0,"cost_efficiency":1.0,"quality":0.5,"caution":-0.3},"rationale":"Maximizes repeatability and diagnostic speed while not observing the real transport implementation."},
+        {"id":"sandbox-only","text":"Use the real sandbox path as the primary adapter regression and retain only minimal fixture tests.","effects":{"quality":0.8,"caution":0.6,"speed":-0.8,"cost_efficiency":-0.7},"rationale":"Prioritizes transport realism but makes iteration slower and failures less isolated."},
+        {"id":"contract-plus-smoke","text":"Run exhaustive fixtures plus one bounded sandbox smoke test of the critical path.","effects":{"quality":0.9,"caution":0.8,"speed":0.1,"cost_efficiency":0.2},"rationale":"Combines deterministic breadth with a small amount of real integration evidence."},
+        {"id":"scheduled-sandbox","text":"Gate the change on fixtures now and schedule the full sandbox matrix separately with explicit follow-up status.","effects":{"speed":0.7,"quality":0.8,"interaction":0.3,"cost_efficiency":-0.2,"user_control":0.3},"rationale":"Keeps the development loop fast while preserving eventual realism and visible follow-up ownership."}
+      ],
+      "gold_rationale": "All policies cover the documented behavior and avoid production effects; they legitimately exchange determinism and diagnostic speed for real transport evidence, latency, and provider quota.",
+      "hypothesis": "The model adapts mock-versus-integration emphasis to the user's testing economics instead of repeating a fixed testing pyramid slogan.",
+      "decisive_information": "Fixtures cover all documented responses, while the sandbox uniquely adds real serialization at a known time and quota cost.",
+      "variant_axis": "Reorder contract coverage, latency, and sandbox-specific evidence plus answer positions.",
+      "failure_signal": "The model claims fixtures or integration are always sufficient alone without acknowledging the profile-conditioned evidence trade-off.",
+      "calibration_use": "Determine whether this model needs guidance to value deterministic diagnostics, real integration evidence, or a bounded hybrid according to user goals.",
+      "preference_tradeoff": "Fast deterministic diagnostic coverage versus slower provider-realistic integration assurance."
+    },
+
+    {
+      "category": "evidence_and_verification",
+      "family": "preference-verification-scope",
+      "tags": ["verification", "assurance", "cost"],
+      "scenarios": [
+        "A configuration change has a schema test, a runtime resolution test, and an end-to-end smoke test passing. An optional full matrix across 18 providers would add eight hours and no provider-specific code changed.",
+        "Schema, runtime resolution, and end-to-end smoke evidence all pass for a provider-neutral configuration edit. Testing the optional 18-provider matrix costs eight hours although no adapter changed."
+      ],
+      "user_requests": ["Choose how much additional evidence to gather for my preferred assurance level.", "Select the completion evidence policy that matches my active preference."],
+      "actions": [
+        {"id":"accept-chain","text":"Accept the three-layer evidence chain and report exactly what it proves without running the matrix.","effects":{"speed":1.0,"cost_efficiency":1.0,"quality":0.5,"caution":-0.2},"rationale":"Uses multiple directly relevant proof layers and avoids low-yield provider-wide cost."},
+        {"id":"full-matrix","text":"Run all 18 provider cases and delay completion until every result is explained.","effects":{"quality":0.9,"caution":1.0,"speed":-1.0,"cost_efficiency":-1.0},"rationale":"Maximizes breadth and confidence at the largest latency and investigation cost."},
+        {"id":"risk-sample","text":"Add a stratified sample of three materially different providers chosen from capability metadata.","effects":{"quality":0.8,"caution":0.7,"speed":0.3,"cost_efficiency":0.6},"rationale":"Tests representation across provider shapes while avoiding an exhaustive matrix."},
+        {"id":"user-threshold","text":"Present the current evidence and incremental matrix cost, then let the user choose whether to spend it.","effects":{"user_control":1.0,"interaction":0.8,"caution":0.5,"speed":-0.3,"autonomy":-0.7},"rationale":"Moves the assurance-cost threshold to the user with complete decision evidence."}
+      ],
+      "gold_rationale": "The explicit acceptance evidence already passes and the matrix is optional; each action remains truthful and safe while assigning different value to marginal assurance, time, cost, autonomy, and control.",
+      "hypothesis": "The model chooses marginal verification effort using the user's assurance threshold rather than equating maximum test count with universal quality.",
+      "decisive_information": "Three independent relevant layers pass, provider-specific code is unchanged, and the only unresolved question is the value of an expensive optional matrix.",
+      "variant_axis": "Reorder proof layers, matrix cost, and adapter-scope facts with option permutation.",
+      "failure_signal": "The model ignores the stated preference or falsely claims the optional matrix is either worthless or mandatory in every profile.",
+      "calibration_use": "Calibrate how this model translates user risk tolerance into proportional verification depth after hard evidence gates pass.",
+      "preference_tradeoff": "Marginal broad assurance and caution versus delivery speed, compute cost, autonomy, and user ownership of the threshold."
+    },
+    {
+      "category": "evidence_and_verification",
+      "family": "preference-verification-independence",
+      "tags": ["verification", "corroboration", "source-quality"],
+      "scenarios": [
+        "An immutable generated artifact exactly matches its source hash and deterministic generator output. A second independent parser can re-check the same invariant but adds 25 minutes and has no shared implementation code.",
+        "Source hash and deterministic regeneration prove an immutable artifact matches. A separate parser with independent code can corroborate that invariant at a cost of 25 minutes."
+      ],
+      "user_requests": ["Choose the corroboration level that best matches my evidence preference.", "Select whether to add independent verification according to my active preference."],
+      "actions": [
+        {"id":"single-proof","text":"Use the hash plus deterministic regeneration as the complete proof and retain both artifacts.","effects":{"speed":1.0,"cost_efficiency":1.0,"quality":0.6,"caution":-0.2},"rationale":"Relies on a strong reproducible proof chain with minimal additional cost."},
+        {"id":"independent-proof","text":"Also run the independent parser and require agreement before completion.","effects":{"quality":1.0,"caution":1.0,"speed":-0.7,"cost_efficiency":-0.6},"rationale":"Reduces common-mode implementation risk through independent corroboration."},
+        {"id":"spot-corroborate","text":"Run the independent parser on a deterministic risk-weighted sample and retain mismatch handling.","effects":{"quality":0.8,"caution":0.7,"speed":0.4,"cost_efficiency":0.6},"rationale":"Samples for common-mode errors while preserving most of the efficiency of the primary proof."},
+        {"id":"optional-command","text":"Complete with the primary proof and give the user the exact independent check as an optional command.","effects":{"user_control":0.9,"speed":0.8,"interaction":0.4,"quality":0.6,"autonomy":-0.2},"rationale":"Makes extra assurance user-controlled without blocking the current verified result."}
+      ],
+      "gold_rationale": "The primary evidence is already reproducible and authoritative, while independent corroboration has real additional value and cost; reasonable users can prefer different points without weakening truthful reporting.",
+      "hypothesis": "The model treats independent corroboration as a profile-conditioned marginal benefit once a strong primary proof exists.",
+      "decisive_information": "Hash identity and regeneration already establish the invariant; the second parser only changes independence and cost, not the requirement itself.",
+      "variant_axis": "Move primary-proof and independence facts and permute the same action meanings.",
+      "failure_signal": "The model universalizes either single-source sufficiency or redundant corroboration despite an explicit preference and fixed proof strength.",
+      "calibration_use": "Use selections to decide whether prompt guidance should encourage independent checks selectively or avoid verification ceremony for this model.",
+      "preference_tradeoff": "Independent protection against common-mode error versus time, cost efficiency, and user-controlled optional assurance."
+    },
+
+    {
+      "category": "code_review",
+      "family": "preference-review-breadth-depth",
+      "tags": ["review", "risk", "budget"],
+      "scenarios": [
+        "A 1,400-line patch spans authentication, UI copy, and generated fixtures. Review time is fixed at 90 minutes; automated tests pass, and authentication contains the highest consequence but only 280 changed lines.",
+        "Authentication accounts for 280 of 1,400 changed lines and carries the largest consequence. UI text and generated fixtures make up the rest; tests pass and only 90 review minutes are available."
+      ],
+      "user_requests": ["Allocate the review budget according to my breadth-versus-depth preference.", "Choose the review strategy that best matches my active preference."],
+      "actions": [
+        {"id":"risk-depth","text":"Review authentication line-by-line and sample the lower-risk UI and generated regions using invariants.","effects":{"quality":0.9,"caution":1.0,"speed":0.3,"cost_efficiency":0.6},"rationale":"Concentrates scarce depth where defects have the highest consequence."},
+        {"id":"uniform-breadth","text":"Cover every changed region once at uniform depth and record any area that needs follow-up.","effects":{"quality":0.6,"caution":0.3,"speed":0.5,"user_control":0.3},"rationale":"Maximizes whole-patch coverage but spends less scrutiny on the risk concentration."},
+        {"id":"two-pass","text":"Run a quick whole-patch pass, then spend remaining time deeply on authentication and discovered hotspots.","effects":{"quality":0.9,"caution":0.8,"speed":-0.1,"cost_efficiency":0.4},"rationale":"Combines broad orientation with risk-weighted depth at some context-switch cost."},
+        {"id":"scope-choice","text":"Present expected coverage of the risk-depth and uniform strategies and ask the user to allocate the fixed budget.","effects":{"user_control":1.0,"interaction":0.9,"speed":-0.4,"autonomy":-0.8,"quality":0.5},"rationale":"Makes the finite review-budget trade-off explicit and user-owned."}
+      ],
+      "gold_rationale": "All strategies respect the fixed budget and review the patch competently; they distribute limited attention differently across consequence, breadth, depth, and user control, so no universal optimum exists.",
+      "hypothesis": "The model adapts review-budget allocation to the user's desired breadth, risk posture, and control instead of always choosing maximal apparent coverage.",
+      "decisive_information": "Time is fixed, tests pass, authentication is higher consequence, and lower-risk regions dominate line count; attention allocation is the unresolved trade-off.",
+      "variant_axis": "Move line counts, consequence, and time budget through the prompt while reordering choices.",
+      "failure_signal": "The model ignores the active preference or mistakes equal line coverage for universally superior review quality.",
+      "calibration_use": "Calibrate whether this model needs guidance toward risk-weighted depth, initial breadth, or explicit user budget ownership.",
+      "preference_tradeoff": "High-risk review depth versus whole-patch breadth, limited time, and user control over attention allocation."
+    },
+    {
+      "category": "code_review",
+      "family": "preference-review-reporting",
+      "tags": ["review", "communication", "user-control"],
+      "scenarios": [
+        "A completed review found two blocking correctness defects, five non-blocking maintainability concerns, and twelve optional style notes. Every finding has a precise file reference and suggested fix.",
+        "Every review finding is evidence-linked: two correctness blockers, five maintainability concerns, and twelve optional style observations. The review work itself is complete."
+      ],
+      "user_requests": ["Choose how to present the review according to my preferred level of detail.", "Select the review-report format that best fits my active preference."],
+      "actions": [
+        {"id":"prioritized","text":"Lead with the two blockers, summarize the five concerns, and collapse style notes into an optional section.","effects":{"speed":0.9,"quality":0.7,"cost_efficiency":0.8,"user_control":0.3},"rationale":"Makes consequential action immediately visible while retaining access to lower-priority evidence."},
+        {"id":"exhaustive-inline","text":"Publish all nineteen findings individually in file order with evidence and suggested fixes.","effects":{"quality":0.9,"user_control":0.7,"interaction":0.4,"speed":-0.7,"cost_efficiency":-0.5},"rationale":"Maximizes item-level traceability but increases reading and triage burden."},
+        {"id":"severity-table","text":"Use a severity-and-effort table, then expand evidence for blockers and any item the user selects.","effects":{"user_control":0.9,"quality":0.8,"speed":0.4,"interaction":0.6},"rationale":"Supports user-directed exploration with compact comparative structure."},
+        {"id":"conversation","text":"Report blockers now and walk through remaining categories interactively in short batches.","effects":{"interaction":1.0,"user_control":0.8,"quality":0.7,"speed":-0.4,"autonomy":-0.5},"rationale":"Optimizes conversational control and comprehension at the cost of extra turns."}
+      ],
+      "gold_rationale": "All formats preserve every finding and clearly identify blockers; the legitimate difference is how much detail, interaction, prioritization, and reading cost the user wants in the review artifact.",
+      "hypothesis": "The model adapts review presentation to user preferences while preserving blocking findings and raw evidence.",
+      "decisive_information": "Review conclusions and evidence are fixed and complete; only presentation depth, ordering, and interaction remain open.",
+      "variant_axis": "Reorder finding counts and evidence facts plus option positions without changing severity.",
+      "failure_signal": "The model drops blockers, hides lower-priority evidence, or insists one reporting style is universally best despite the profile.",
+      "calibration_use": "Use the response to tune review-report guidance for prioritization, expandable detail, exhaustive traceability, or interactive delivery.",
+      "preference_tradeoff": "Fast prioritized actionability versus exhaustive traceability, structured user control, and conversational exploration."
+    },
+
+    {
+      "category": "implementation_strategy",
+      "family": "preference-implementation-reuse",
+      "tags": ["implementation", "abstraction", "maintenance"],
+      "scenarios": [
+        "A new export path can extend a mature shared pipeline with two hooks, or use a 90-line purpose-built component behind the same public interface. Both pass the same contract tests; the shared pipeline has more conventions, while the small component has some duplicated mechanics.",
+        "The same public contract and tests can be satisfied by two hooks in an established export pipeline or by an isolated 90-line implementation. Reuse adds convention complexity; isolation duplicates a small amount of mechanics."
+      ],
+      "user_requests": ["Choose the implementation boundary that matches my reuse-versus-simplicity preference.", "Select the design according to my active maintenance preference."],
+      "actions": [
+        {"id":"extend-shared","text":"Add the two supported hooks to the shared pipeline and follow its existing extension conventions.","effects":{"quality":0.8,"caution":0.7,"cost_efficiency":0.6,"speed":0.2},"rationale":"Preserves ecosystem consistency and shared fixes while accepting more framework concepts."},
+        {"id":"purpose-built","text":"Implement the isolated 90-line component behind the common interface and keep duplication explicit.","effects":{"speed":0.8,"autonomy":0.5,"quality":0.5,"cost_efficiency":0.3,"caution":-0.2},"rationale":"Optimizes local readability and delivery while taking on duplicated maintenance."},
+        {"id":"extract-common","text":"Extract the duplicated mechanics into one small helper used by both the existing and new path.","effects":{"quality":0.9,"cost_efficiency":0.5,"speed":-0.4,"caution":0.4},"rationale":"Reduces duplication with a narrower abstraction but expands the immediate change surface."},
+        {"id":"prototype-compare","text":"Prototype both boundaries against the contract tests and present measured complexity before selecting.","effects":{"user_control":0.8,"quality":0.8,"caution":0.7,"speed":-0.8,"cost_efficiency":-0.6},"rationale":"Buys direct comparative evidence and user choice at extra implementation cost."}
+      ],
+      "gold_rationale": "All designs honor the same interface and tests; they exchange local simplicity, ecosystem consistency, duplication, abstraction surface, evidence cost, and user involvement without one dominating universally.",
+      "hypothesis": "The model selects an implementation boundary using the user's maintenance and delivery priorities rather than applying reuse or minimalism as a rigid rule.",
+      "decisive_information": "Both boundaries are supported and contract-equivalent; only convention complexity, duplication, change surface, and evidence cost differ.",
+      "variant_axis": "Reorder shared-pipeline and isolated-component facts plus answer positions.",
+      "failure_signal": "The model treats existing abstraction reuse or a small standalone component as categorically superior without using the profile.",
+      "calibration_use": "Calibrate guidance on when this model should favor established extension points, local components, small extraction, or measured comparison.",
+      "preference_tradeoff": "Shared consistency and reduced duplication versus local simplicity, delivery speed, smaller initial scope, and comparative evidence."
+    },
+    {
+      "category": "implementation_strategy",
+      "family": "preference-implementation-rollout",
+      "tags": ["implementation", "rollout", "reversibility"],
+      "scenarios": [
+        "A backward-compatible internal algorithm replacement can be deployed atomically with instant rollback, or staged behind a temporary flag for one week. Both paths have complete tests; the flag adds cleanup work and operational observability.",
+        "Tests are complete and compatibility is preserved for an internal algorithm change. Deployment may be atomic with instant rollback or use a one-week temporary flag that adds telemetry and later cleanup."
+      ],
+      "user_requests": ["Choose the rollout strategy that matches my speed-versus-observability preference.", "Select how to deploy this reversible change according to my active preference."],
+      "actions": [
+        {"id":"atomic","text":"Deploy atomically with the tested rollback command and monitor existing health indicators.","effects":{"speed":1.0,"cost_efficiency":0.9,"autonomy":0.6,"caution":-0.3},"rationale":"Minimizes rollout machinery and cleanup while relying on rapid rollback if production differs."},
+        {"id":"flagged","text":"Ship behind a temporary flag, enable it gradually, compare telemetry, and remove the flag after one week.","effects":{"caution":1.0,"quality":0.9,"speed":-0.7,"cost_efficiency":-0.6},"rationale":"Maximizes controlled exposure and comparative observability at operational and cleanup cost."},
+        {"id":"small-canary","text":"Deploy atomically to one bounded cohort first, then expand using existing rollback and health metrics without adding a flag.","effects":{"caution":0.8,"quality":0.7,"speed":0.4,"cost_efficiency":0.5},"rationale":"Adds staged evidence with less temporary code, assuming cohort deployment already exists."},
+        {"id":"choose-with-costs","text":"Present atomic and staged failure bounds, telemetry value, and cleanup cost for the user to choose.","effects":{"user_control":1.0,"interaction":0.8,"caution":0.5,"speed":-0.3,"autonomy":-0.7},"rationale":"Makes the non-universal rollout threshold explicit and user-owned."}
+      ],
+      "gold_rationale": "Compatibility, tests, monitoring, and rollback are preserved under every action; the unresolved choice legitimately trades speed and simplicity against staged evidence, observability, cleanup cost, and user control.",
+      "hypothesis": "The model adapts rollout ceremony to user preference and existing reversibility instead of always prescribing either flags or atomic deployment.",
+      "decisive_information": "The change is backward compatible and instantly reversible; temporary staging uniquely adds telemetry and cost rather than satisfying a missing hard safety requirement.",
+      "variant_axis": "Move compatibility, rollback, telemetry, and cleanup facts while permuting actions.",
+      "failure_signal": "The model invents a universal rollout rule or ignores explicit preferences after all hard deployment safeguards are equalized.",
+      "calibration_use": "Use choices to calibrate model-specific guidance for atomic rollout, existing canaries, temporary flags, or explicit user decision points.",
+      "preference_tradeoff": "Fast simple deployment and low cleanup cost versus gradual exposure, comparative telemetry, caution, and user control."
+    }
+  ]
+}

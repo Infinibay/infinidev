@@ -185,6 +185,17 @@ def supports_parallel_tool_calls(slug: str) -> bool:
     return bool(entry.get("supports_parallel_tool_calls", True))
 
 
+def supports_image_generation(slug: str) -> bool | None:
+    """Return the backend's explicit image-generation announcement.
+
+    Missing fields and non-boolean values are unknown rather than truthy. This
+    capability controls a write-like provider operation, so callers must only
+    enable it from an affirmative boolean supplied by the Codex catalog.
+    """
+    value = (_load().get(slug) or {}).get("supports_image_generation")
+    return value if isinstance(value, bool) else None
+
+
 def reasoning_levels(slug: str) -> list[str]:
     """Reasoning efforts the model accepts, e.g. ``["low","medium","high"]``.
 

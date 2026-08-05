@@ -81,19 +81,19 @@ FEATURE_FALLBACK = [
 
 
 REFACTOR_QUESTIONS = """\
-Before refactoring, you must understand the code AND all its consumers.
-Generate questions that map dependencies and establish a safety baseline.
+Before refactoring, understand the changed contract and the consumers it can
+reach. Generate questions that map that impact and establish a safety baseline.
 
 ## EXAMPLES OF GOOD QUESTIONS
 
 For "Split the monolithic process() function into smaller helpers":
 1. What does process() do and what are its logical sections?
-2. Who calls process()? (all importers and callers across the project)
-3. What is the current test baseline? All tests must keep passing.
+2. Who calls process() through the contract being changed?
+3. Which tests cross that contract, and what is their current baseline?
 4. Are there internal variables shared across the sections that complicate extraction?
 
 For "Move UserService from services/ to a new domain/ directory":
-1. What files import UserService? (all references across the project)
+1. What files import or call the public UserService contract being moved?
 2. Does UserService depend on other services that would also need to move?
 3. What is the current test baseline?
 
@@ -104,9 +104,9 @@ For "Move UserService from services/ to a new domain/ directory":
 """
 
 REFACTOR_FALLBACK = [
-    "What is the full test baseline? (must not regress after refactoring)",
+    "Which tests cross the changed boundary, and what is their baseline?",
     "What files and functions need to change?",
-    "Who calls/imports the code being refactored? (all dependents)",
+    "Who calls or imports the contract being refactored?",
 ]
 
 
