@@ -52,6 +52,8 @@ class ToolContext:
     event_id: Optional[int] = None
     resume_state: Optional[dict] = None
     loop_state: Optional[Any] = None  # LoopState reference for plan tools
+    file_tracker: Optional[Any] = None  # task-start baseline + changed files
+    capability_requester: Optional[Any] = None  # dynamic toolset expansion callback
 
 
 # ── Setting context ──────────────────────────────────────────────────────────
@@ -118,6 +120,8 @@ def set_context(
                 event_id=event_id if event_id is not None else existing.event_id,
                 resume_state=resume_state if resume_state is not None else existing.resume_state,
                 loop_state=existing.loop_state,  # ← preserved across set_context
+                file_tracker=existing.file_tracker,
+                capability_requester=existing.capability_requester,
             )
 
     if agent_id or project_id or session_id:
@@ -151,6 +155,28 @@ def set_loop_state(agent_id: str, loop_state: Any) -> None:
             ctx = ToolContext(agent_id=agent_id)
             _agent_contexts[agent_id] = ctx
         ctx.loop_state = loop_state
+
+
+def set_file_tracker(agent_id: str, file_tracker: Any) -> None:
+    """Attach the current task's tracker for preview/rollback file tools."""
+
+    with _agent_contexts_lock:
+        ctx = _agent_contexts.get(agent_id)
+        if ctx is None:
+            ctx = ToolContext(agent_id=agent_id)
+            _agent_contexts[agent_id] = ctx
+        ctx.file_tracker = file_tracker
+
+
+def set_capability_requester(agent_id: str, requester: Any) -> None:
+    """Attach the current run's controlled dynamic-tool expansion callback."""
+
+    with _agent_contexts_lock:
+        ctx = _agent_contexts.get(agent_id)
+        if ctx is None:
+            ctx = ToolContext(agent_id=agent_id)
+            _agent_contexts[agent_id] = ctx
+        ctx.capability_requester = requester
 
 
 def clear_agent_context(agent_id: str) -> None:

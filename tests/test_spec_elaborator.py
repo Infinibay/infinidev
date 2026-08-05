@@ -78,6 +78,7 @@ class TestGroundedSpec:
                     question="per-user or global?",
                     options=["per-user", "global"],
                     default="per-user",
+                    risk="local_reversible",
                 )
             ],
             design_direction="token bucket middleware",
@@ -166,6 +167,18 @@ class TestAdmissibleClarifications:
         kept, demoted = se._admissible_clarifications([self._q("per-user or global?")], 2)
         assert len(kept) == 1 and demoted == []
         assert kept[0].default == "a"
+        assert kept[0].risk == "costly_to_reverse"
+
+    def test_only_explicit_local_decisions_can_default(self):
+        kept, _ = se._admissible_clarifications(
+            [self._q("format compact or expanded?", risk="local_reversible")],
+            2,
+        )
+        assert kept[0].can_use_default_without_confirmation is True
+
+    def test_missing_risk_fails_safe_to_confirmation(self):
+        kept, _ = se._admissible_clarifications([self._q("public API shape?")], 2)
+        assert kept[0].can_use_default_without_confirmation is False
 
     def test_question_without_default_is_demoted_not_asked(self):
         # "What compute budget is available?" — no default to commit to, so it
@@ -254,6 +267,7 @@ class TestElaborateEndToEnd:
                     "options": ["per-user", "global"],
                     "default": "per-user",
                     "impact": "changes the bucket key",
+                    "risk": "local_reversible",
                 }
             ],
         })

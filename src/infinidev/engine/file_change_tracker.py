@@ -10,17 +10,68 @@ from __future__ import annotations
 import difflib
 import os
 
+from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
 
 class FileChangeTracker:
     """Buffer that accumulates file changes within one task run."""
 
-    def __init__(self) -> None:
+    def __init__(self, baseline: WorkspaceBaseline | None = None) -> None:
         self._originals: dict[str, str] = {}   # path → content before first edit
         self._current: dict[str, str] = {}      # path → content after latest edit
         self._change_counts: dict[str, int] = {}
         self._reasons: dict[str, list[str]] = {}  # path → list of reasons for changes
         self._deleted_symbols: dict[str, set[str]] = {}  # path → set of removed symbol names
         self._active: bool = True
+        self._baseline = baseline
+
+    @property
+    def baseline(self) -> WorkspaceBaseline | None:
+        return self._baseline
+
+    def reconcile_workspace(self) -> None:
+        """Merge final on-disk changes that bypassed known edit tools."""
+
+        if self._baseline is None:
+            return
+        current = self._baseline.current_states()
+        recorded = {
+            os.path.relpath(path, self._baseline.root)
+            for path in self._current
+            if os.path.commonpath([self._baseline.root, os.path.realpath(path)])
+            == self._baseline.root
+        }
+        for relative in sorted(set(self._baseline.files) | set(current) | recorded):
+            before_state = self._baseline.files.get(relative)
+            after_state = current.get(relative)
+            path = os.path.join(self._baseline.root, relative)
+            if before_state == after_state:
+                # Disk truth wins over an earlier tool record: a later shell
+                # command may have restored the original content, or removed
+                # a file that was newly created during this task. Drop the
+                # stale event entirely so rollback and review reflect final
+                # workspace truth rather than historical tool activity.
+                self._originals.pop(path, None)
+                self._current.pop(path, None)
+                self._change_counts.pop(path, None)
+                self._reasons.pop(path, None)
+                self._deleted_symbols.pop(path, None)
+                continue
+            before = before_state.text if before_state is not None else ""
+            after = after_state.text if after_state is not None else ""
+            # Oversized files are still detected, but their full text is not
+            # retained in memory. Record an honest marker for review.
+            if before is None:
+                before = "[content omitted: file exceeded baseline capture limit]\n"
+            if after is None:
+                after = "[content omitted: file exceeded baseline capture limit]\n"
+            if path not in self._originals:
+                self._originals[path] = before
+            self._current[path] = after
+            self._change_counts[path] = max(1, self._change_counts.get(path, 0))
+            reason = "Detected from task-start workspace baseline"
+            if reason not in self._reasons.get(path, []):
+                self._reasons.setdefault(path, []).append(reason)
 
     @property
     def active(self) -> bool:
@@ -50,6 +101,7 @@ class FileChangeTracker:
 
     def get_diff(self, path: str) -> str | None:
         """Generate unified diff for a file (original → current)."""
+        self.reconcile_workspace()
         path = os.path.abspath(path)
         if path not in self._current:
             return None
@@ -100,7 +152,12 @@ class FileChangeTracker:
         return self._reasons.get(os.path.abspath(path), [])
 
     def get_all_paths(self) -> list[str]:
-        return list(self._current.keys())
+        self.reconcile_workspace()
+        return [
+            path
+            for path, current in self._current.items()
+            if self._originals.get(path, "") != current
+        ]
 
     def record_deleted_symbols(self, path: str, symbols: list[str]) -> None:
         """Record symbol names that were removed from a file.
@@ -166,3 +223,5 @@ class FileChangeTracker:
             self._reasons[path] = list(reasons) + self._reasons.get(path, [])
         for path, symbols in other._deleted_symbols.items():
             self._deleted_symbols.setdefault(path, set()).update(symbols)
+        if self._baseline is None:
+            self._baseline = other._baseline

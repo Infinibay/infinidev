@@ -1,9 +1,8 @@
-"""Tests for Phase 4: real planner-authored task acceptance criteria.
+"""Tests for planner-derived verification versus user acceptance criteria.
 
-The planner now emits task-level, falsifiable acceptance_criteria. They
-replace the synthesised placeholder in the Task and are fed to the
-post-loop reviewer as the accept gate (previously the reviewer only saw
-the raw task string).
+The planner emits falsifiable checks, but those checks are not user-authored
+requirements. They remain derived verification criteria throughout the
+Task and reviewer handoff.
 
 Covers:
   - is_falsifiable filter
@@ -48,13 +47,25 @@ class TestTaskFromFreeText:
         t = task_from_free_text("Fix the JWT validation bug in the auth module please")
         assert is_synthesised(t) is True
 
-    def test_real_criteria_flip_synthesised_false(self):
+    def test_user_criteria_flip_synthesised_false(self):
         t = task_from_free_text(
             "Fix the JWT validation bug in the auth module please",
             acceptance_criteria=["expired tokens are rejected by validate_token"],
         )
         assert is_synthesised(t) is False
         assert t.acceptance_criteria == ["expired tokens are rejected by validate_token"]
+
+    def test_planner_criteria_remain_derived(self):
+        t = task_from_free_text(
+            "Fix the JWT validation bug in the auth module please",
+            derived_verification_criteria=[
+                "expired tokens are rejected by validate_token"
+            ],
+        )
+        assert is_synthesised(t) is True
+        assert t.derived_verification_criteria == [
+            "expired tokens are rejected by validate_token"
+        ]
 
     def test_empty_criteria_falls_back_to_placeholder(self):
         t = task_from_free_text(
@@ -141,7 +152,7 @@ class _FakeEngine:
 
 
 class TestReviewEnrichment:
-    def _run(self, monkeypatch, reviewer, criteria):
+    def _run(self, monkeypatch, reviewer, criteria, derived=None):
         monkeypatch.setattr(re_mod, "collect_automated_checks", lambda **kw: {"verification_passed": True})
         import tempfile
         with tempfile.TemporaryDirectory() as ws:
@@ -149,6 +160,7 @@ class TestReviewEnrichment:
                 engine=_FakeEngine(ws), agent=_FakeAgent(), session_id="s1",
                 task_prompt=("Fix the bug", "expected"), initial_result="r",
                 reviewer=reviewer, on_status=None, acceptance_criteria=criteria,
+                derived_verification_criteria=derived,
             )
 
     def test_criteria_injected_into_review(self, monkeypatch):
@@ -161,3 +173,15 @@ class TestReviewEnrichment:
         rv = _CapturingReviewer()
         self._run(monkeypatch, rv, None)
         assert rv.seen_description == "Fix the bug"
+
+    def test_derived_criteria_are_labeled_non_authoritative(self, monkeypatch):
+        rv = _CapturingReviewer()
+        self._run(
+            monkeypatch,
+            rv,
+            None,
+            ["expired tokens are rejected by validate_token"],
+        )
+        assert "Derived verification criteria" in rv.seen_description
+        assert "NOT user-authored requirements" in rv.seen_description
+        assert "expired tokens are rejected" in rv.seen_description

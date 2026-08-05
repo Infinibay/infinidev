@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 READ_ONLY_TOOL_NAMES = {
     "read_file", "list_directory", "code_search", "glob",
     "execute_command",
-    "search_findings", "search_knowledge",
+    "search_knowledge",
     "web_search", "web_fetch", "code_search_web",
     "find_documentation",
     "find_references", "list_symbols",

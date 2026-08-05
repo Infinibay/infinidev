@@ -73,8 +73,8 @@ _WINSORIZE_K = 2.0             # cap appended distances at μ + K·σ (robust up
 _READ_ONLY_TOOLS: frozenset[str] = frozenset({
     "read_file", "partial_read", "list_directory", "glob", "code_search",
     "get_symbol_code", "list_symbols", "search_symbols", "find_references",
-    "project_structure", "help", "git_status", "git_diff", "git_log",
-    "search_knowledge", "search_findings",
+    "project_structure", "describe_tool", "git_status", "git_diff", "git_log",
+    "search_knowledge",
 })
 
 

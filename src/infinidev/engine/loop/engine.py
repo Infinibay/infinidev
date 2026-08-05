@@ -22,6 +22,7 @@ state carried forward is the plan and the summaries — never the transcript.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -69,7 +70,12 @@ from infinidev.engine.engine_logging import (
     RED as _RED,
     RESET as _RESET,
 )
-from infinidev.tools.base.context import set_loop_state
+from infinidev.tools.base.context import (
+    bind_tools_to_agent,
+    set_capability_requester,
+    set_file_tracker,
+    set_loop_state,
+)
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.trace_log import (
     trace_run_start as _trace_run_start,
@@ -90,15 +96,18 @@ _MAX_EXPLORE_PER_STEP = 2
 def _seed_state_from_plan(state, plan) -> None:
     """Populate ``state.plan`` from an analyst-emitted Plan.
 
-    Each step becomes a user-approved PlanStep (LLM cannot remove or
-    modify them via step_complete operations). The first step is set
-    active so the developer has somewhere to start.
+    Each step preserves the authority declared at the handoff boundary.
+    Planner-authored steps default to ``model_inferred`` and remain editable;
+    only direct or confirmed user instructions receive ``user_approved``
+    protections. The first step is set active so the developer has somewhere
+    to start.
 
     Plans with an overview but no steps (analyst fallback path) seed
     only the overview so the developer still has context, and then
     drop into the LoopEngine bootstrap branch where the model is
     instructed to call ``add_step`` to build its own decomposition.
     """
+    from infinidev.engine.authority import is_user_authorized
     from infinidev.engine.loop.plan_step import PlanStep
 
     state.plan.overview = plan.overview or ""
@@ -109,7 +118,8 @@ def _seed_state_from_plan(state, plan) -> None:
             detail=spec.detail,
             expected_output=spec.expected_output,
             verify=getattr(spec, "verify", None),
-            user_approved=True,
+            authority=(authority := getattr(spec, "authority", "model_inferred")),
+            user_approved=is_user_authorized(authority),
             status="active" if idx == 0 else "pending",
         )
         for idx, spec in enumerate(plan.steps)
@@ -371,6 +381,7 @@ class LoopEngine(AgentEngine):
             nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
             identity_override=identity_override,
+            initial_plan=initial_plan,
             task=task,
             context_corpus=context_corpus,
             allow_llm_retries=allow_llm_retries,
@@ -513,6 +524,58 @@ class LoopEngine(AgentEngine):
         self._last_state = ctx.state
 
         set_loop_state(ctx.agent_id, ctx.state)
+        set_file_tracker(ctx.agent_id, ctx.file_tracker)
+
+        def _request_capability(capability: str, rationale: str) -> str:
+            if not settings.DYNAMIC_TOOL_ROUTING_ENABLED:
+                return json.dumps({"error": "Dynamic tool routing is disabled"})
+            from infinidev.engine.schema_sanitizer import build_tool_schemas
+            from infinidev.engine.tool_dispatch import build_tool_dispatch
+            from infinidev.engine.tool_routing import expand_capability_tools
+
+            before = {tool.name for tool in ctx.tools}
+            expanded = expand_capability_tools(
+                ctx.tools,
+                list(getattr(ctx.agent, "tools", []) or []),
+                capability,
+            )
+            added = [tool for tool in expanded if tool.name not in before]
+            if not added:
+                return json.dumps({
+                    "capability": capability,
+                    "added_tools": [],
+                    "message": "Capability already available or unsupported by this model/config.",
+                })
+            bind_tools_to_agent(added, ctx.agent_id)
+            ctx.tools[:] = expanded
+            ctx.tool_dispatch.clear()
+            ctx.tool_dispatch.update(build_tool_dispatch(ctx.tools))
+            ctx.tool_schemas[:] = build_tool_schemas(ctx.tools, small_model=ctx.is_small)
+            if ctx.manual_tc:
+                from infinidev.engine.loop.context import build_tools_prompt_section
+
+                ctx.system_prompt += (
+                    "\n\n## Newly granted capability\n"
+                    + build_tools_prompt_section(
+                        build_tool_schemas(added, small_model=ctx.is_small),
+                        small_model=ctx.is_small,
+                    )
+                )
+            logger.info(
+                "Capability %s added tools %s; rationale=%s",
+                capability, [tool.name for tool in added], rationale[:200],
+            )
+            return json.dumps({
+                "capability": capability,
+                "added_tools": [tool.name for tool in added],
+                "permission_granted": False,
+                "message": (
+                    "Tools are available on the next model turn. Their effect permissions "
+                    "and user-authority requirements still apply."
+                ),
+            })
+
+        set_capability_requester(ctx.agent_id, _request_capability)
         _hook_manager.dispatch(_HookContext(
             event=_HookEvent.LOOP_START,
             metadata={"task_prompt": task_prompt, "tools": ctx.tools, "state": ctx.state},

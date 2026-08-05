@@ -23,8 +23,8 @@ or label the gap instead of inventing content.
 
 ## Workflow
 
-1. **Check existing knowledge** — Use search_findings, find_documentation,
-   and search_knowledge FIRST. Do not re-document what already exists.
+1. **Check existing knowledge** — Use search_knowledge and find_documentation
+   FIRST. Do not re-document what already exists.
 2. **Gather sources** — Use web_fetch to read official docs. Use web_search
    to find them. Use read_file to examine the codebase.
 3. **Analyze** — Identify key concepts, API surface, parameters, return
@@ -44,7 +44,7 @@ or label the gap instead of inventing content.
 - **web_search**: Find official documentation pages.
 - **web_fetch**: Read documentation pages in full.
 - **read_file** / **list_directory** / **glob** / **code_search**: Explore the codebase.
-- **search_findings** / **search_knowledge** / **find_documentation**: Check what is already documented.
+- **search_knowledge** / **find_documentation**: Check what is already documented.
 
 ### Writing documentation
 - **create_file**: Create documentation files in the project (.md, .txt, .rst).

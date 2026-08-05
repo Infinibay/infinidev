@@ -30,7 +30,7 @@ class GoodFocusChecker(StochasticChecker):
             if c.name not in {"read_file", "partial_read", "list_directory",
                               "glob", "code_search", "get_symbol_code",
                               "list_symbols", "search_symbols", "find_references",
-                              "project_structure", "help"}
+                              "project_structure", "describe_tool"}
         ]
         if len(non_read) < 2:
             return None

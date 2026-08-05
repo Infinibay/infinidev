@@ -620,7 +620,7 @@ def get_project_knowledge(project_id: int = 1, limit: int = 15) -> list[dict]:
         # 1. All project_context findings (structural knowledge)
         ctx_rows = conn.execute(
             """\
-            SELECT topic, content, finding_type, confidence
+            SELECT id, topic, content, finding_type, confidence, status, created_at
             FROM findings
             WHERE project_id = ? AND finding_type = 'project_context'
               AND status IN ('active', 'provisional')
@@ -636,7 +636,7 @@ def get_project_knowledge(project_id: int = 1, limit: int = 15) -> list[dict]:
             # 2. Recent high-confidence findings of other types
             other_rows = conn.execute(
                 """\
-                SELECT topic, content, finding_type, confidence
+                SELECT id, topic, content, finding_type, confidence, status, created_at
                 FROM findings
                 WHERE project_id = ? AND finding_type != 'project_context'
                   AND status IN ('active', 'provisional')
@@ -650,10 +650,13 @@ def get_project_knowledge(project_id: int = 1, limit: int = 15) -> list[dict]:
         results = []
         for row in list(ctx_rows) + list(other_rows):
             results.append({
+                "id": row["id"],
                 "topic": row["topic"],
                 "content": row["content"],
                 "finding_type": row["finding_type"],
                 "confidence": row["confidence"],
+                "status": row["status"],
+                "created_at": row["created_at"],
             })
         return results
 

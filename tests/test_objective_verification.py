@@ -258,7 +258,8 @@ class TestVerifyThreading:
         _seed_state_from_plan(state, plan)
         step = state.plan.steps[0]
         assert step.verify is not None and step.verify.spec == "pytest -q"
-        assert step.user_approved is True
+        assert step.authority == "model_inferred"
+        assert step.user_approved is False
 
     def test_no_verify_leaves_step_none(self):
         plan = Plan(overview="x" * 10, steps=[PlanStepSpec(title="t")])

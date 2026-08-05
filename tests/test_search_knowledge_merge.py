@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import pytest
 
 from infinidev.tools.base.context import (
@@ -136,3 +137,31 @@ def test_read_findings_still_resolves():
     from infinidev.engine.tool_dispatch import _TOOL_ALIASES
 
     assert _TOOL_ALIASES["read_findings"] == "search_knowledge"
+
+
+def test_semantic_mode_is_part_of_the_canonical_tool(findings, monkeypatch):
+    vectors = {
+        "authentication": np.array([1.0, 0.0]),
+        "auth uses JWT RS256 the signing key lives in vault": np.array([1.0, 0.0]),
+        "tests live in tests/ pytest, not unittest": np.array([0.0, 1.0]),
+    }
+
+    def embed(texts):
+        return [vectors.get(text, np.array([0.2, 0.2])) for text in texts]
+
+    monkeypatch.setattr("infinidev.tools.base.dedup._get_embed_fn", lambda: embed)
+    out = _run(query="authentication", mode="semantic", threshold=0.8)
+
+    assert out["mode"] == "semantic"
+    assert _titles(out) == {"auth uses JWT RS256"}
+    assert "content" not in out["results"][0]
+
+
+def test_old_semantic_name_is_alias_not_a_second_schema():
+    from infinidev.engine.tool_dispatch import _TOOL_ALIASES
+    from infinidev.tools import get_tools_for_role
+
+    names = {tool.name for tool in get_tools_for_role("developer", supports_vision=False)}
+    assert _TOOL_ALIASES["search_findings"] == "search_knowledge"
+    assert "search_knowledge" in names
+    assert "search_findings" not in names

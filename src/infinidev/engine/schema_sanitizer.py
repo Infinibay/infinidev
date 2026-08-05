@@ -164,11 +164,25 @@ def tool_to_openai_schema(tool: Any) -> dict[str, Any]:
     # never what the OpenAI tool schema contract expects.
     parameters.pop("description", None)
 
+    description = (tool.description or "").strip()
+    metadata: list[str] = []
+    effects = getattr(tool, "effects", None)
+    if effects is not None and (effect_summary := effects.summary()):
+        metadata.append(f"Effects: {effect_summary}.")
+    constraints = getattr(tool, "use_constraints", None)
+    if constraints is not None and (constraint_summary := constraints.summary()):
+        metadata.append(constraint_summary)
+    suffix = (" " + " ".join(metadata)) if metadata else ""
+    if len(suffix) >= 1024:
+        description = suffix[-1024:]
+    else:
+        description = description[: 1024 - len(suffix)].rstrip() + suffix
+
     return {
         "type": "function",
         "function": {
             "name": tool.name,
-            "description": (tool.description or "")[:1024],
+            "description": description,
             "parameters": parameters,
         },
     }
@@ -447,7 +461,7 @@ _SMALL_MODEL_DESCRIPTIONS: dict[str, str] = {
     # the budget; everything else moves to `help`.
     "code_interpreter": (
         "Run Python in sandbox. 13 code-intel helpers pre-imported "
-        "(iter_symbols, find_references, ...). help('code_interpreter')."
+        "(iter_symbols, find_references, ...). describe_tool(context='code_interpreter')."
     ),
 }
 

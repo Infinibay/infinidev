@@ -72,18 +72,19 @@ _TOOL_ALIASES: dict[str, str] = {
     # backward compatibility, while the public read_file schema exposes
     # offset/limit as the canonical parameters.
     "partial_read": "read_file",
-    # ``help`` collides with Python's builtin ``help()`` which confuses
+    # ``help`` collided with Python's builtin ``help()`` and confused
     # the model — in the bridge experiment, qwen tried to run
     # ``python3 -c "help('code_interpreter')"`` three times instead of
-    # calling the help tool. ``explain_tool`` is the unambiguous name
-    # we recommend in the new system prompt; the alias keeps the old
-    # name working so existing prompts don't break.
-    "explain_tool": "help",
+    # calling the tool. The public name is now ``describe_tool``; both old
+    # spellings remain compatibility aliases for persisted/manual calls.
+    "help": "describe_tool",
+    "explain_tool": "describe_tool",
     # read_findings and search_knowledge were the same algorithm (FTS over
     # findings) behind two names. search_knowledge took over, including the
     # no-query browse mode and the session/type filters, so the old name is
     # a pure rename — every read_findings parameter exists there unchanged.
     "read_findings": "search_knowledge",
+    "search_findings": "search_knowledge",
 }
 
 
@@ -229,7 +230,7 @@ def _unknown_tool_message(dispatch: dict[str, Any], name: str) -> str:
     ranked = close or [n for _, n in scored[:_MIN_SUGGESTIONS]]
     return (
         f"Unknown tool: {name}. Did you mean one of: {', '.join(ranked)}? "
-        f"Call help() to list every tool you have."
+        f"Call describe_tool() to list every tool you have."
     )
 
 
@@ -250,6 +251,7 @@ def execute_tool_call(
     are appended to it. The returned string is always plain text, safe to
     embed in a ``role=tool`` message.
     """
+    requested_name = name
     tool, name = _resolve_tool(dispatch, name)
 
     if tool is None:
@@ -266,6 +268,9 @@ def execute_tool_call(
 
     if not isinstance(args, dict):
         return json.dumps({"error": f"Expected dict arguments, got {type(args).__name__}"})
+
+    if requested_name == "search_findings":
+        args.setdefault("mode", "semantic")
 
     # Auto-correct common parameter name aliases that LLMs frequently use.
     # Maps wrong_param -> correct_param. Applied globally to all tools
@@ -491,6 +496,44 @@ def execute_tool_call(
     if ctx.skip:
         return ctx.result or json.dumps({"skipped": True, "tool": name})
     args = ctx.arguments
+
+    # Provider-side JSON Schema improves generation but is not an execution
+    # boundary: manual tool mode and permissive providers can still produce
+    # values that violate Pydantic constraints. Validate the final arguments
+    # after aliases, coercion, and PRE_TOOL hooks so every local and bridged
+    # tool gets the same runtime contract before `_run` sees anything.
+    try:
+        validator = getattr(tool, "_validate_kwargs", None)
+        if callable(validator):
+            args = validator(args)
+    except Exception as exc:
+        try:
+            from pydantic import ValidationError
+
+            if isinstance(exc, ValidationError):
+                problems = exc.errors()
+                first = problems[0] if problems else {}
+                location = ".".join(str(part) for part in first.get("loc", ()))
+                message = first.get("msg", "is invalid")
+                detail = f"{location}: {message}" if location else str(message)
+                return json.dumps({
+                    "error": (
+                        f"Tool '{name}' argument validation failed: {detail}. "
+                        "Correct the arguments and call the same tool again."
+                    )
+                })
+        except ImportError:
+            pass
+        logger.exception("Tool %s argument validation raised unexpectedly", name)
+        return json.dumps({"error": f"Tool '{name}' argument validation failed: {exc}"})
+
+    effects = getattr(tool, "effects", None)
+    if effects is not None:
+        from infinidev.tools.base.tool_effects import check_effect_permission
+
+        permission_error = check_effect_permission(name, effects, args)
+        if permission_error:
+            return json.dumps({"error": permission_error})
 
     # Execute
     cancelled_by_user = False

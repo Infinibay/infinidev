@@ -8,6 +8,13 @@ from infinidev.tools.knowledge.finding_types import FindingType
 
 
 class SearchKnowledgeInput(BaseModel):
+    mode: Literal["text", "semantic"] = Field(
+        default="text",
+        description=(
+            "text = exact/full-text operators and browse; semantic = conceptual "
+            "similarity over findings. Semantic mode requires query."
+        ),
+    )
     query: str = Field(
         default="",
         description=(
@@ -35,5 +42,14 @@ class SearchKnowledgeInput(BaseModel):
     finding_type: FindingType | None = Field(
         default=None, description="Keep only findings of this type."
     )
-
+    threshold: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity in semantic mode.",
+    )
+    include_content: bool = Field(
+        default=False,
+        description="Include full finding content in semantic results.",
+    )
 

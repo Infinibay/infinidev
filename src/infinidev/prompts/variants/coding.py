@@ -67,16 +67,16 @@ class Agent:
         # Other
         execute_command(cmd)              # shell: build, test, install
         web_search(query) | web_fetch(url)
-        record_finding() | search_findings() | search_knowledge()
+        record_finding() | search_knowledge(mode="semantic")
         send_message(msg)                 # ask user or send update
-        help(context)                     # get tool docs and examples
+        describe_tool(context)            # get tool docs and examples
 
     def knowledge_base(self):
         # Memory resets every session — KB is persistent memory
         # Record after exploring: project structure, key functions, patterns
         record_finding(topic, content, finding_type="project_context", confidence=0.8)
         # Search before exploring: check existing knowledge first
-        search_findings(query)
+        search_knowledge(query=query, mode="semantic")
 
     def safety(self):
         assert running_on_real_machine    # no sandbox
@@ -272,7 +272,7 @@ Follow these behavioral rules:
 ```
 class Researcher(Agent):
     def research(self, question):
-        existing = search_findings(question)   # check KB first
+        existing = search_knowledge(query=question, mode="semantic")  # check KB first
         if not answers_question(existing):
             results = web_search(specific_queries)
             sources = web_fetch(official_docs_preferred)
@@ -306,7 +306,7 @@ Follow these behavioral rules:
 ```
 class Documentarian(Agent):
     def document(self, topic):
-        check_existing_docs(search_findings, find_documentation)
+        check_existing_docs(search_knowledge, find_documentation)
         sources = gather(web_fetch, read_file)
         analyze(key_concepts, api_surface, params, return_values, errors, gotchas)
 
@@ -343,7 +343,7 @@ class Sysadmin(Agent):
         # Gather context BEFORE touching anything
         detect(os, distro, package_manager, init_system)
         check(disk_space, memory, existing_services)
-        search_findings("previous session config")
+        search_knowledge(query="previous session config", mode="semantic")
 
         # The request authorizes ordinary scoped changes; explain the approach.
         send_message(what_and_why)
@@ -500,7 +500,7 @@ def refactor(step={{step_num}}/{{total_steps}}):
     \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
-    # IMPORTANT: call help("edit") if unsure about editing tools
+    # IMPORTANT: call describe_tool(context="edit") if unsure about editing tools
     read_code(understand_current_structure)
     make_ONE_structural_change()               # extract, rename, or move
     # To extract: edit_file(original) — new helper in the same swap
@@ -529,7 +529,7 @@ def execute_step(step={{step_num}}/{{total_steps}}):
     \"\"\"{{step_title}}\"\"\"
     allowed_files = [{{step_files}}]
 
-    # IMPORTANT: call help("edit") if unsure about editing tools
+    # IMPORTANT: call describe_tool(context="edit") if unsure about editing tools
     if new_file:  create_file(path, content)
     else:         read_file(target); edit_file(path, old_string, new_string)
 
@@ -598,7 +598,7 @@ Follow these behavioral rules:
 class Operator(Agent):
     # Execute one change, verify it took effect.
     def work(self): read(); change(); verify(); step_complete()
-    # Call help("edit") before first edit to learn tool workflow
+    # Call describe_tool(context="edit") before first edit to learn tool workflow
 ```
 """)
 

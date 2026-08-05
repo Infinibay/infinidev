@@ -65,7 +65,7 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "code_interpreter": (
         "Run Python code in a sandbox. Great for analyzing, parsing, "
         "or querying the codebase (count methods, measure spans, aggregate "
-        "symbols). 13 code-intel helpers pre-imported — use `help` tool for details.",
+        "symbols). 13 code-intel helpers pre-imported — use `describe_tool` for details.",
         'code_interpreter(code=\'rows = iter_symbols(kind="method", parent="Foo")\\nprint(len(rows))\')',
     ),
     "run_in_background": (
@@ -114,14 +114,10 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Save a finding to the knowledge base",
         "record_finding(title='auth module', content='uses JWT with HS256')",
     ),
-    "search_findings": (
-        "Search saved findings",
-        "search_findings(query='auth')",
-    ),
     "search_knowledge": (
-        "Full-text search across saved knowledge (findings + reports); "
-        "omit the query to browse findings by filter",
+        "Search findings/reports by text, browse findings, or use semantic similarity",
         "search_knowledge(query='auth & token*') | "
+        "search_knowledge(query='authentication design', mode='semantic') | "
         "search_knowledge(finding_type='project_context')",
     ),
     "update_finding": (
@@ -243,9 +239,33 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "send_message(message='Found the bug in auth.py:42 — fixing now')",
     ),
     # Meta
-    "help": (
+    "describe_tool": (
         "Get detailed help and examples for any tool",
-        "help(context='edit')",
+        "describe_tool(context='edit')",
+    ),
+    "request_capability": (
+        "Expose an optional tool group omitted by dynamic routing; this grants no effect permission",
+        "request_capability(capability='web', rationale='The requested version is time-sensitive')",
+    ),
+    "delete_file": (
+        "Remove one file recoverably and return its trash recovery path",
+        "delete_file(file_path='src/obsolete.py', rationale='Replaced by src/current.py')",
+    ),
+    "move_file": (
+        "Move or rename one file without silently overwriting the destination",
+        "move_file(source_path='old.py', destination_path='src/new.py')",
+    ),
+    "apply_file_patch": (
+        "Apply several exact replacements to one file in a single atomic write",
+        "apply_file_patch(file_path='src/app.py', replacements=[{'old_string': 'x = 1', 'new_string': 'x = 2'}])",
+    ),
+    "preview_changes": (
+        "Preview the exact diff of a multi-replacement patch without writing",
+        "preview_changes(file_path='src/app.py', replacements=[{'old_string': 'x = 1', 'new_string': 'x = 2'}])",
+    ),
+    "rollback_task_changes": (
+        "Restore task-created changes to the exact task-start baseline",
+        "rollback_task_changes(file_paths=['src/app.py'])",
     ),
     "recall_context": (
         "Retrieve tool output from earlier steps that left your context",
@@ -422,6 +442,11 @@ def build_tool_usage_section(
             [
                 "create_file",
                 "edit_file",
+                "apply_file_patch",
+                "preview_changes",
+                "move_file",
+                "delete_file",
+                "rollback_task_changes",
                 "rename_symbol",
                 "move_symbol",
             ],
@@ -443,7 +468,6 @@ def build_tool_usage_section(
             "Knowledge",
             [
                 "record_finding",
-                "search_findings",
                 "search_knowledge",
                 "update_finding",
                 "validate_finding",
@@ -471,7 +495,7 @@ def build_tool_usage_section(
             ],
         ),
         ("Communication", ["send_message"]),
-        ("Meta", ["help", "recall_context"]),
+        ("Meta", ["describe_tool", "recall_context", "request_capability"]),
     ]
 
     lines = ["## Tool Usage", ""]
@@ -523,8 +547,10 @@ def build_editing_rules(available_tools: set[str]) -> str:
     match is not unique, add surrounding lines" is something it can check.
     """
     rules = []
-    if "help" in available_tools:
-        rules.append('- Unsure how the editing tools work? Call help("edit").')
+    if "describe_tool" in available_tools:
+        rules.append(
+            '- Unsure how the editing tools work? Call describe_tool(context="edit").'
+        )
     if "edit_file" in available_tools:
         rules.extend([
             "- Change an existing file with edit_file(file_path, old_string, "

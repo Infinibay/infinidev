@@ -227,9 +227,29 @@ class ToolRunner:
         attachments_by_tc: dict[str, list] = {}
 
         for batch in batch_tool_calls(classified.regular):
-            # Writes stay serial: two edits to the same file racing would
-            # make the second one's line numbers meaningless.
-            is_parallel = len(batch) > 1 and batch[0].function.name not in WRITE_TOOLS
+            # Effectful calls stay serial. The legacy name set remains a
+            # compatibility fallback, while ToolEffects covers dynamically
+            # discovered MCP writers that the static list cannot know about.
+            def _writes_or_mutates(tc: Any) -> bool:
+                if tc.function.name in WRITE_TOOLS:
+                    return True
+                bound = ctx.tool_dispatch.get(tc.function.name)
+                effects = getattr(bound, "effects", None)
+                return bool(
+                    effects
+                    and (
+                        effects.writes_workspace
+                        or effects.mutates_git
+                        or effects.mutates_internal_state
+                        or effects.mutates_external_state
+                        or effects.runs_process
+                        or effects.destructive
+                    )
+                )
+
+            is_parallel = len(batch) > 1 and not any(
+                _writes_or_mutates(tc) for tc in batch
+            )
 
             self._engine._begin_tool_batch()
             try:

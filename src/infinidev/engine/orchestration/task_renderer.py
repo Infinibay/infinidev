@@ -91,6 +91,14 @@ def render_task_xml(task: Task) -> str:
     if crit:
         parts.append(f"  {crit}")
 
+    derived = _render_list(
+        "derived-verification-criteria",
+        task.derived_verification_criteria,
+        indent="    ",
+    )
+    if derived:
+        parts.append(f"  {derived}")
+
     oos = _render_list("out-of-scope", task.out_of_scope, indent="    ")
     if oos:
         parts.append(f"  {oos}")

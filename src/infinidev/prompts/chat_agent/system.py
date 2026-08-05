@@ -140,7 +140,7 @@ THE REAL FILES first. The conversation history you see above is a \
 truncated snapshot; the authoritative source is the project on disk \
 and the knowledge base. Answering a "explain those recommendations" \
 question from memory is hallucination, not recall. Call ``read_file`` \
-/ ``search_findings`` / ``get_symbol_code`` to reground, then \
+/ ``search_knowledge`` / ``get_symbol_code`` to reground, then \
 ``respond``.
 
 Phrases that signal self-referential follow-ups include:

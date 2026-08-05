@@ -1,7 +1,7 @@
 """Plan — the structured artifact produced by the analyst planner.
 
 Consumed by LoopEngine.execute(initial_plan=plan) to seed the
-developer's LoopState with a pre-approved execution plan. Replaces
+developer's LoopState with a provenance-labelled execution plan. Replaces
 the legacy AnalysisResult.specification dict as the single handoff
 shape between analyst and developer.
 """
@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from infinidev.engine.analysis.step_verification import StepVerification
+from infinidev.engine.authority import AuthorityLevel
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,11 @@ class PlanStepSpec:
     PlanStep) makes the handoff boundary explicit: the planner does not
     produce mutable LoopState objects.
 
+    ``authority`` records who actually authorized the step. Planner-created
+    steps default to ``model_inferred``; merely showing the plan overview is
+    not user confirmation. Callers may use ``user_explicit`` or
+    ``user_confirmed`` only when they have corresponding evidence.
+
     ``verify`` is the planner-authored, machine-checkable success
     condition. Authoring it here — read-only, before any code exists —
     keeps the success bar adversarial (the developer cannot back-rationalise
@@ -35,6 +41,7 @@ class PlanStepSpec:
     detail: str = ""
     expected_output: str = ""
     verify: StepVerification | None = None
+    authority: AuthorityLevel = "model_inferred"
 
 
 @dataclass(frozen=True)
@@ -47,9 +54,9 @@ class Plan:
             ``notify("Planner", plan.overview)`` before execution
             begins, and rendered every iteration as ``<plan-overview>``
             so the developer always has the big picture.
-        steps: Ordered list of step specs. Each becomes a user-approved
-            PlanStep in LoopState; the LLM cannot remove or modify
-            them.
+        steps: Ordered list of provenance-labelled step specs. Only steps
+            carrying direct or confirmed user authority receive the loop's
+            user-approved scope protections.
     """
 
     overview: str
@@ -59,3 +66,4 @@ class Plan:
     # the real Task.acceptance_criteria (replacing the synthesised
     # placeholder) and are fed to the post-loop reviewer as the accept gate.
     acceptance_criteria: list[str] = field(default_factory=list)
+    acceptance_criteria_authority: AuthorityLevel = "model_inferred"

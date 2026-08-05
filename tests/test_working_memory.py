@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from infinidev.engine.working_memory import (
@@ -166,6 +168,8 @@ def test_render_truncates_but_reports_the_remainder(memory):
     record = memory.search("big", limit=1)[0]
     rendered = record.render(max_chars=100)
     assert "more chars" in rendered
+    assert "source=working-memory" in rendered
+    assert "authority=advisory" in rendered
     assert len(rendered) < 400
 
 
@@ -345,9 +349,30 @@ def test_traceable_note_json_round_trip_is_versioned_and_validated():
     )
     restored = TraceableNoteEnvelope.from_json(note.to_json())
     assert restored == note
-    assert restored.to_dict()["version"] == 1
+    payload = restored.to_dict()
+    assert payload["version"] == 2
+    assert payload["claim"]["text"] == "safe summary"
+    assert payload["claim"]["classification"] == "observation"
+    assert payload["claim"]["evidence"]
+    assert payload["claim"]["provenance"]["occurrence_id"] == "analysis-source"
+    assert payload["claim"]["still_valid"] is None
     with pytest.raises(TraceableNoteError, match="unsupported traceable note version"):
-        TraceableNoteEnvelope.from_json(note.to_json().replace('"version":1', '"version":2'))
+        TraceableNoteEnvelope.from_json(note.to_json().replace('"version":2', '"version":99'))
+
+
+def test_version_one_traceable_notes_remain_readable():
+    note = create_traceable_note(
+        "auto_note", "legacy fact", step_index=1, occurrence_id="legacy-source",
+    )
+    payload = note.to_dict()
+    payload["version"] = 1
+    payload.pop("claim")
+
+    restored = TraceableNoteEnvelope.from_json(json.dumps(payload))
+
+    assert restored.summary == "legacy fact"
+    assert restored.claim_classification == "observation"
+    assert restored.confidence is None
 
 
 # ── prompt retention policy ───────────────────────────────────────────────

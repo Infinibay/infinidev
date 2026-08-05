@@ -28,7 +28,7 @@ class TestGitCommit:
     def test_commit_no_changes(self, bound_tool, git_repo):
         """Clean repo returns error."""
         tool = bound_tool(GitCommitTool)
-        result = tool._run(message="empty commit")
+        result = tool._run(message="empty commit", include_all=True)
         data = json.loads(result)
         assert "error" in data
         assert "no changes" in data["error"].lower() or "nothing" in data["error"].lower()
@@ -38,7 +38,7 @@ class TestGitCommit:
         new_file = git_repo / "new.txt"
         new_file.write_text("new content")
         tool = bound_tool(GitCommitTool)
-        result = tool._run(message="add new file")
+        result = tool._run(message="add new file", include_all=True)
         data = json.loads(result)
         assert "error" not in data
         assert "commit_hash" in data or "hash" in data or "commit" in str(data).lower()
@@ -62,7 +62,7 @@ class TestGitCommit:
         """Commit message appears in git log."""
         (git_repo / "msg_test.txt").write_text("data")
         tool = bound_tool(GitCommitTool)
-        tool._run(message="test message 12345")
+        tool._run(message="test message 12345", include_all=True)
         log = subprocess.run(
             ["git", "log", "--oneline", "-1"], cwd=str(git_repo),
             capture_output=True, text=True,
@@ -73,7 +73,22 @@ class TestGitCommit:
         """Result includes branch name."""
         (git_repo / "branch_test.txt").write_text("data")
         tool = bound_tool(GitCommitTool)
-        result = tool._run(message="branch check")
+        result = tool._run(message="branch check", include_all=True)
         # Should mention "main" or "master" somewhere
         result_lower = result.lower()
         assert "main" in result_lower or "master" in result_lower or "branch" in result_lower
+
+    def test_omitted_files_never_implicitly_stages_everything(
+        self, bound_tool, git_repo, auto_approve_permissions,
+    ):
+        (git_repo / "user-change.txt").write_text("do not capture implicitly")
+        tool = bound_tool(GitCommitTool)
+
+        result = json.loads(tool._run(message="ambiguous commit"))
+
+        assert "error" in result
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=str(git_repo), capture_output=True, text=True,
+        )
+        assert staged.stdout.strip() == ""

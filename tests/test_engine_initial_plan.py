@@ -1,10 +1,10 @@
 """Tests for LoopEngine's initial_plan parameter.
 
 Commit 5 of the pipeline redesign. The developer's LoopState starts
-pre-seeded with the analyst's plan: overview renders every iteration
-as <plan-overview>, steps are marked user_approved so the LLM can't
-remove them, and the first step is active so execution has a
-starting point.
+pre-seeded with the analyst's plan: overview renders every iteration,
+steps preserve their authority provenance, and the first step is active
+so execution has a starting point. Planner-inferred steps are deliberately
+not projected as user-approved.
 
 The full loop is not exercised here (it makes LLM calls). We verify
 the seeding helper and that the seeded state produces the right
@@ -51,11 +51,29 @@ class TestSeedStateFromPlan:
         _seed_state_from_plan(state, _sample_plan())
         assert len(state.plan.steps) == 3
 
-    def test_all_steps_user_approved(self):
+    def test_planner_steps_are_model_inferred(self):
         state = LoopState()
         _seed_state_from_plan(state, _sample_plan())
         for step in state.plan.steps:
-            assert step.user_approved is True
+            assert step.authority == "model_inferred"
+            assert step.user_approved is False
+
+    def test_explicit_user_step_receives_scope_protection(self):
+        state = LoopState()
+        plan = Plan(
+            overview="User explicitly requested this exact operation.",
+            steps=[
+                PlanStepSpec(
+                    title="Update the requested file",
+                    authority="user_explicit",
+                )
+            ],
+        )
+
+        _seed_state_from_plan(state, plan)
+
+        assert state.plan.steps[0].authority == "user_explicit"
+        assert state.plan.steps[0].user_approved is True
 
     def test_first_step_active_rest_pending(self):
         state = LoopState()

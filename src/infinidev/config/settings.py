@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     EXECUTE_COMMANDS_PERMISSION: str = "auto"  # "auto", "auto_approve", "ask", "allowed_list"
     ALLOWED_COMMANDS_LIST: list[str] = []  # Allowed commands when permission is "allowed_list"
     FILE_OPERATIONS_PERMISSION: str = "auto"  # "auto", "ask", "auto_approve", "allowed_paths"
+    TOOL_EFFECTS_PERMISSION: str = "auto"  # "auto", "ask", "auto_approve"
     ALLOWED_FILE_PATHS: list[str] = []  # Allowed paths when permission is "allowed_paths"
 
     # File limits
@@ -175,6 +176,7 @@ class Settings(BaseSettings):
     LOOP_MAX_ITERATIONS: int = 50
     LOOP_MAX_TOOL_CALLS_PER_ACTION: int = 0  # 0 = unlimited (only global limit applies)
     LOOP_MAX_TOTAL_TOOL_CALLS: int = 1000
+    DYNAMIC_TOOL_ROUTING_ENABLED: bool = True
     LOOP_HISTORY_WINDOW: int = 0  # 0 = keep all
     LOOP_STEP_NUDGE_THRESHOLD: int = 6  # Nudge agent to call step_complete after N tool calls
     LOOP_SUMMARIZER_ENABLED: bool = True  # Use dedicated LLM call for step summaries
@@ -264,6 +266,8 @@ class Settings(BaseSettings):
     # Phases
     ANALYSIS_ENABLED: bool = True
     REVIEW_ENABLED: bool = True
+    EVIDENCE_REVIEW_ENABLED: bool = True
+    EVIDENCE_REVIEW_MAX_ROUNDS: int = 2
     # Post-loop objective re-verification: at task end, re-run every
     # planner-authored step verification together (a backstop for the
     # cross-objective regression the per-step gate cannot see) and feed any

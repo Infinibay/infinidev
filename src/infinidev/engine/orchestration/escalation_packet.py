@@ -69,3 +69,6 @@ class EscalationPacket:
     # Typed loosely (``engine.analysis.grounded_spec.GroundedSpec``) to
     # avoid an import at packet-definition time.
     grounded_spec: Any | None = None
+    # Set by an enrichment phase when execution must stop until the user
+    # supplies authority for a costly, external, or destructive decision.
+    execution_blocked_reason: str = ""

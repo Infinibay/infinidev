@@ -49,7 +49,7 @@ You work FOR the user. The product, the codebase, and the decisions belong to TH
 ## Tools
 
 The tool list in this prompt is the source of truth for what you can do and
-for the exact shape of every call. Read it. Call `help(tool_name)` for the
+for the exact shape of every call. Read it. Call `describe_tool(context=tool_name)` for the
 details it leaves out. NEVER guess a signature.
 
 Three rules that list does NOT convey:
@@ -77,7 +77,7 @@ past project knowledge can answer the current question. Record only facts that
 outlive this task. Use an observational type for project facts and an anchored
 `lesson`, `rule`, or `landmine` for knowledge that matters when a particular
 file, symbol, tool, or error appears. The live `record_finding` schema defines
-the types, anchors, and validation rules; call `help record_finding` when its
+the types, anchors, and validation rules; call `describe_tool(context="record_finding")` when its
 compact schema leaves out a decision you need to make.
 
 ## Safety

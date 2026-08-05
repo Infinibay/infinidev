@@ -36,7 +36,7 @@ Alphabet (one letter per tool, ~15 letters cover everything):
 ``N``             add_note, add_session_note
 ``F``             record_finding, search_findings, read_findings, knowledge ops
 ``W``             web_search, web_fetch
-``H``             help, explain_tool
+``H``             describe_tool, help, explain_tool
 ``I``             code_interpreter
 ``V``             git_branch, git_commit, git_diff, git_status, git_push
 ``U``             send_message (user-facing chat)
@@ -131,6 +131,7 @@ _TOOL_LETTER_MAP: dict[str, str] = {
     "web_fetch": "W",
     "code_search_web": "W",
     # Meta / help
+    "describe_tool": "H",
     "help": "H",
     "explain_tool": "H",
     "tail_test_output": "X",

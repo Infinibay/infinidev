@@ -12,7 +12,11 @@ _CATEGORY_INDEX = {
     "file": [
         "read_file", "list_directory", "glob", "code_search", "view_image",
     ],
-    "edit": ["create_file", "edit_file", "rename_symbol", "move_symbol"],
+    "edit": [
+        "create_file", "edit_file", "delete_file", "move_file",
+        "apply_file_patch", "preview_changes", "rollback_task_changes",
+        "rename_symbol", "move_symbol",
+    ],
     "code_intel": [
         "get_symbol_code", "list_symbols", "search_symbols", "find_references",
         "project_structure", "analyze_code", "find_similar_methods",
@@ -24,7 +28,7 @@ _CATEGORY_INDEX = {
         "background_status", "stop_background_task", "wait_for_background_task",
     ],
     "knowledge": [
-        "record_finding", "search_findings", "search_knowledge", "update_finding",
+        "record_finding", "search_knowledge", "update_finding",
         "validate_finding", "reject_finding", "delete_finding",
         "summarize_findings", "write_report", "read_report",
         "read_command_output", "delete_report",
@@ -38,7 +42,7 @@ _CATEGORY_INDEX = {
         "tail_test_output",
     ],
     "communication": ["send_message"],
-    "meta": ["help", "recall_context"],
+    "meta": ["describe_tool", "recall_context", "request_capability"],
     "protocol": ["step_complete", "add_note", "add_session_note"],
 }
 
@@ -78,7 +82,7 @@ def _bridge_overview(functions: dict[str, Callable[..., Any]]) -> str:
     lines.extend(f"  {_call_signature(name, function)}" for name, function in functions.items())
     lines.extend([
         "",
-        "Call help(context=\"code_interpreter.<function_name>\") for the live "
+        "Call describe_tool(context=\"code_interpreter.<function_name>\") for the live "
         "summary and return type.",
     ])
     return "\n".join(lines)

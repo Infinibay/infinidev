@@ -6,10 +6,15 @@ from infinidev.tools.file import (
     GlobTool,
     CreateFileTool,
     ViewImageTool,
+    ApplyFilePatchTool,
+    DeleteFileTool,
+    MoveFileTool,
+    PreviewChangesTool,
+    RollbackTaskChangesTool,
 )
 from infinidev.tools.image_generation import GenerateImageTool
 from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
-from infinidev.tools.meta import HelpTool
+from infinidev.tools.meta import HelpTool, RequestCapabilityTool
 from infinidev.tools.meta.recall_context_tool import RecallContextTool
 from infinidev.tools.meta.plan_tools import (
     AddStepTool,
@@ -82,6 +87,11 @@ FILE_TOOLS = [
     CodeSearchTool,
     GlobTool,
     ViewImageTool,
+    DeleteFileTool,
+    MoveFileTool,
+    ApplyFilePatchTool,
+    PreviewChangesTool,
+    RollbackTaskChangesTool,
 ]
 # Tools that only make sense when the model can see images.
 # Filtered out in get_tools_for_role when supports_vision is False so they
@@ -95,6 +105,7 @@ META_TOOLS = [
     RemoveStepTool,
     DeclareTestCommandTool,
     TailTestOutputTool,
+    RequestCapabilityTool,
 ]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [
@@ -108,7 +119,6 @@ SHELL_TOOLS = [
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
 KNOWLEDGE_TOOLS = [
     RecordFindingTool,
-    SearchFindingsTool,
     ValidateFindingTool,
     RejectFindingTool,
     UpdateFindingTool,
@@ -173,7 +183,7 @@ SMALL_MODEL_TOOLS = [
     WaitForBackgroundTaskTool,
     # Knowledge (2)
     RecordFindingTool,
-    SearchFindingsTool,
+    SearchKnowledgeTool,
     # Code intelligence (8)
     SearchSymbolsTool,
     GetSymbolCodeTool,
@@ -219,6 +229,11 @@ def get_tools_for_role(
             supports_vision = get_capability_snapshot().supports_vision
         except Exception:
             supports_vision = False
+
+    from infinidev.tools.base.tool_effects import apply_local_effect_defaults
+
+    def _instances(classes: list) -> list:
+        return [apply_local_effect_defaults(cls()) for cls in classes]
 
     def _vision_filter(classes: list) -> list:
         if supports_vision:
@@ -279,15 +294,15 @@ def get_tools_for_role(
         # moves class-level field defaults into model_fields so getattr on
         # the class returns the descriptor rather than the default value —
         # instantiating is the reliable way to read is_read_only.
-        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
-        return read_only + [cls() for cls in CHAT_AGENT_TOOLS]
+        read_only = [t for t in _instances(all_tool_classes) if t.is_read_only]
+        return read_only + _instances(CHAT_AGENT_TOOLS)
     if role == "planner":
         # Planner gets the same read-only exploration tools as the chat
         # agent, plus EmitPlanTool as its terminator. Tight budget
         # (~4 tool calls) enforced by the orchestrator, not the tool
         # list.
-        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
-        return read_only + [cls() for cls in PLANNER_TOOLS]
+        read_only = [t for t in _instances(all_tool_classes) if t.is_read_only]
+        return read_only + _instances(PLANNER_TOOLS)
     if role == "assistant_critic":
         # The pair-programming critic gets read-only exploration tools
         # so it can verify the principal's claims (read the file the
@@ -297,21 +312,21 @@ def get_tools_for_role(
         # ``critic.py``), so we don't add chat_agent terminators here.
         # Tight budget enforced by the critic's own sub-loop, not the
         # tool list.
-        return [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
+        return [t for t in _instances(all_tool_classes) if t.is_read_only]
     if role == "council_member":
         # A council subagent: read-only exploration (codebase + web — the
         # web tools are now is_read_only, so they flow in here) plus the
         # channel terminators (channel_post, conclude). It can NEVER
         # write — the council is a design/research phase, enforced at the
         # schema level.
-        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
-        return read_only + [cls() for cls in COUNCIL_MEMBER_TOOLS]
+        read_only = [t for t in _instances(all_tool_classes) if t.is_read_only]
+        return read_only + _instances(COUNCIL_MEMBER_TOOLS)
     if role == "council_moderator":
         # The orchestrator of the council: same read-only exploration
         # plus its three terminators (seed_council, council_verdict,
         # synthesize_brief).
-        read_only = [t for t in (cls() for cls in all_tool_classes) if t.is_read_only]
-        return read_only + [cls() for cls in COUNCIL_MODERATOR_TOOLS]
+        read_only = [t for t in _instances(all_tool_classes) if t.is_read_only]
+        return read_only + _instances(COUNCIL_MODERATOR_TOOLS)
     if small_model:
         # A small model's problem is choosing, not capability: the curated
         # list exists because a 90-tool schema wrecks its selection. MCP
@@ -322,5 +337,5 @@ def get_tools_for_role(
         small_classes = _vision_filter(SMALL_MODEL_TOOLS)
         if settings.COMMAND_OUTPUT_CAPTURE_ENABLED:
             small_classes.append(ReadCommandOutputTool)
-        return [cls() for cls in small_classes + extra]
-    return [cls() for cls in all_tool_classes]
+        return _instances(small_classes + extra)
+    return _instances(all_tool_classes)

@@ -29,7 +29,7 @@ their own explicit approval.
 - Check memory: `free -h` (before starting services)
 - Check what is already installed/running that relates to the task
 - Read existing config files before modifying them
-- Use search_findings and search_knowledge to check if this system was
+- Use search_knowledge (text or semantic mode) to check if this system was
   configured in a previous session
 
 ### 2. Plan and establish authorization
@@ -72,7 +72,7 @@ their own explicit approval.
   changes cannot clobber the rest of the config.
 - **record_finding**: Record system state, installed versions, config paths,
   and decisions for future sessions. Always include the hostname/context.
-- **search_findings** / **search_knowledge**: Check if previous sessions left
+- **search_knowledge**: Check if previous sessions left
   notes about this system's configuration.
 - **web_search** / **web_fetch**: Look up documentation for specific config
   syntax, error messages, or compatibility information.

@@ -345,3 +345,27 @@ def test_permission_defaults_are_auto():
     # the code default (independent of any user settings file / env override)
     assert Settings.model_fields["EXECUTE_COMMANDS_PERMISSION"].default == "auto"
     assert Settings.model_fields["FILE_OPERATIONS_PERMISSION"].default == "auto"
+    assert Settings.model_fields["TOOL_EFFECTS_PERMISSION"].default == "auto"
+
+
+def test_unknown_command_permission_mode_fails_closed(monkeypatch):
+    monkeypatch.setattr(settings, "EXECUTE_COMMANDS_PERMISSION", "typo")
+    assert "invalid EXECUTE_COMMANDS_PERMISSION" in (
+        check_command_permission("git status") or ""
+    )
+
+
+def test_unknown_file_permission_mode_fails_closed(monkeypatch):
+    monkeypatch.setattr(settings, "FILE_OPERATIONS_PERMISSION", "typo")
+    assert "invalid FILE_OPERATIONS_PERMISSION" in (
+        check_file_permission("edit_file", "/tmp/example") or ""
+    )
+
+
+def test_unknown_code_interpreter_permission_mode_fails_closed(monkeypatch):
+    from infinidev.tools.shell.code_interpreter_tool import CodeInterpreterTool
+
+    monkeypatch.setattr(settings, "EXECUTE_COMMANDS_PERMISSION", "typo")
+    assert "invalid EXECUTE_COMMANDS_PERMISSION" in (
+        CodeInterpreterTool()._check_permission("1 + 1") or ""
+    )

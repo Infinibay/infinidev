@@ -196,7 +196,7 @@ _DEVELOP_TOOL_USAGE_FULL = """\
   each step — notes are the ONLY way to remember details like file paths,
   function signatures, or decisions.
 - **send_message**: Ask the user questions or send progress updates.
-- **help**(context): Get detailed help and examples for any tool."""
+- **describe_tool**(context): Get detailed help and examples for any tool."""
 
 _DEVELOP_SAFETY = """\
 ## Safety

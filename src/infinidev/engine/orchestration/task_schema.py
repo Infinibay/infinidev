@@ -125,6 +125,15 @@ class Task(BaseModel):
         ),
     )
 
+    derived_verification_criteria: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Falsifiable checks proposed by the planner or another model. "
+            "They guide verification but are not user-authored acceptance "
+            "requirements and must never silently expand task scope."
+        ),
+    )
+
     out_of_scope: list[str] = Field(
         default_factory=list,
         description=(
@@ -203,7 +212,9 @@ class Task(BaseModel):
             cleaned.append(s)
         return cleaned
 
-    @field_validator("out_of_scope", "constraints", "references")
+    @field_validator(
+        "derived_verification_criteria", "out_of_scope", "constraints", "references"
+    )
     @classmethod
     def _strip_string_lists(cls, v: list[str]) -> list[str]:
         return [s.strip() for s in v if isinstance(s, str) and s.strip()]
@@ -215,6 +226,7 @@ def task_from_free_text(
     title: str | None = None,
     kind: str = "feature",
     acceptance_criteria: list[str] | None = None,
+    derived_verification_criteria: list[str] | None = None,
 ) -> Task:
     """Build a :class:`Task` from raw user text.
 
@@ -222,12 +234,10 @@ def task_from_free_text(
     the title is either explicit or derived as the first sentence
     (truncated to 120 chars).
 
-    ``acceptance_criteria``: when the planner authored real, falsifiable
-    criteria, pass them here and they become the task's contract (so
-    :func:`is_synthesised` returns False and the critic/reviewer treat them
-    as ground truth). When omitted/empty, a single synthesised placeholder
-    is used and the critic is told (via prompt) that it was synthesised,
-    not authored — so it can probe it rather than trust it.
+    ``acceptance_criteria`` is reserved for user-authored or user-confirmed
+    conditions. Planner-authored checks belong in
+    ``derived_verification_criteria``: they can be verified, but do not become
+    user authority merely because they are falsifiable.
     """
     text = user_request.strip()
     if len(text) < 20:
@@ -262,6 +272,11 @@ def task_from_free_text(
         description=text,
         kind=kind,
         acceptance_criteria=criteria,
+        derived_verification_criteria=[
+            c.strip()
+            for c in (derived_verification_criteria or [])
+            if c and c.strip()
+        ],
     )
 
 

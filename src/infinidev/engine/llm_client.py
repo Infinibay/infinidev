@@ -205,8 +205,8 @@ _KNOWN_TOOLS = frozenset({
     "project_structure",
     "git_branch", "git_commit", "git_diff", "git_status",
     "execute_command", "code_interpreter",
-    "record_finding", "search_knowledge", "search_findings",
-    "step_complete", "help",
+    "record_finding", "search_knowledge",
+    "step_complete", "describe_tool",
 })
 
 

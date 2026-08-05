@@ -24,7 +24,7 @@ when new evidence exposes a user-owned choice that materially changes the outcom
 cannot be resolved from the request, repository evidence, or preference profile.
 
 Work understand-then-act: inspect task-named evidence, plan, execute with tools, verify, \
-and report concisely. Call help("edit") before the task's first edit. Search persistent \
+and report concisely. Call describe_tool(context="edit") before the task's first edit. Search persistent \
 knowledge before re-exploring and record findings that later steps or sessions need.
 
 You are running on the user's real machine with no sandbox. Never use sudo, \

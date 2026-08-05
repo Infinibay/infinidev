@@ -21,7 +21,7 @@ class CodeInterpreterTool(InfinibayBaseTool):
         "Run Python code in a sandbox. Great for analyzing, parsing, "
         "or querying the codebase (e.g. count methods, measure line "
         "spans, aggregate symbols, custom set arithmetic). Comes with "
-        "13 pre-imported code-intelligence helpers — use `help` tool "
+        "13 pre-imported code-intelligence helpers — use `describe_tool` "
         "with context='code_interpreter' for the full list and examples."
     )
     args_schema: Type[BaseModel] = CodeInterpreterInput
@@ -78,7 +78,7 @@ class CodeInterpreterTool(InfinibayBaseTool):
                 return "Code execution denied by user"
             return None
 
-        return None  # Unknown mode — allow
+        return f"Code execution denied: invalid EXECUTE_COMMANDS_PERMISSION={mode!r}"
 
     def _run(
         self,
@@ -198,7 +198,7 @@ class CodeInterpreterTool(InfinibayBaseTool):
                 "iter_symbols, find_symbols, find_definitions, find_references, "
                 "list_file_symbols, get_source, find_similar, search_by_intent, "
                 "extract_skeleton, list_files, find_files, code_search. "
-                "Use `help` tool with context='code_interpreter' for signatures and examples."
+                "Use `describe_tool` with context='code_interpreter' for signatures and examples."
             )
 
             return self._success({
@@ -277,4 +277,3 @@ class CodeInterpreterTool(InfinibayBaseTool):
             "stdout": result.stdout or "",
             "stderr": result.stderr or "",
         }
-

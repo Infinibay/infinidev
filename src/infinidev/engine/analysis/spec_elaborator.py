@@ -163,6 +163,19 @@ _ANALYZE_TOOL = {
                                 "type": "string",
                                 "description": "product_intent only: what changes in the code depending on the answer.",
                             },
+                            "risk": {
+                                "type": "string",
+                                "enum": [
+                                    "local_reversible",
+                                    "costly_to_reverse",
+                                    "external_or_destructive",
+                                ],
+                                "description": (
+                                    "local_reversible only when the default can be "
+                                    "undone cheaply without changing public contracts; "
+                                    "otherwise confirmation is required"
+                                ),
+                            },
                         },
                         "required": ["question", "kind"],
                     },
@@ -265,6 +278,10 @@ _GROUNDING_TOOL = {
                             "options": {"type": "array", "items": {"type": "string"}, "description": "The 2-4 concrete alternatives."},
                             "default": {"type": "string", "description": "The option that WILL be implemented if the user stays silent."},
                             "impact": {"type": "string", "description": "What changes in the code depending on the answer."},
+                            "risk": {
+                                "type": "string",
+                                "enum": ["local_reversible", "costly_to_reverse", "external_or_destructive"],
+                            },
                         },
                         "required": ["question", "options", "default"],
                     },
@@ -331,6 +348,7 @@ def _pass_ground(
                 "options": g.get("options", []) or [],
                 "default": g.get("default", "") or "",
                 "impact": g.get("impact", "") or "",
+                "risk": g.get("risk", "costly_to_reverse") or "costly_to_reverse",
             }
             for g in gaps if g.get("kind") == "product_intent"
         ]
@@ -488,6 +506,11 @@ def _admissible_clarifications(
         if default and default not in options:
             options.insert(0, default)
         impact = (entry.get("impact") or "").strip()
+        risk = (entry.get("risk") or "costly_to_reverse").strip()
+        if risk not in {
+            "local_reversible", "costly_to_reverse", "external_or_destructive"
+        }:
+            risk = "costly_to_reverse"
 
         if not default:
             demoted.append(Assumption(
@@ -509,7 +532,11 @@ def _admissible_clarifications(
             continue
 
         kept.append(Clarification(
-            question=question, options=options, default=default, impact=impact
+            question=question,
+            options=options,
+            default=default,
+            impact=impact,
+            risk=risk,
         ))
 
     return kept, demoted

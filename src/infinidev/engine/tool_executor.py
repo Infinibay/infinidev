@@ -28,12 +28,14 @@ from infinidev.engine.tool_dispatch import execute_tool_call
 # even on the unresolved name.
 FILE_CHANGE_TOOLS = {
     "edit_file", "create_file", "rename_symbol", "move_symbol",
+    "delete_file", "move_file", "apply_file_patch", "rollback_task_changes",
     "write_file", "multi_edit_file", "apply_patch",
 }
 
 # Tools with side effects — act as barriers in parallel execution.
 WRITE_TOOLS = {
     "edit_file", "create_file", "rename_symbol", "move_symbol",
+    "delete_file", "move_file", "apply_file_patch", "rollback_task_changes",
     "write_file", "multi_edit_file", "apply_patch",
     "git_commit", "git_branch", "git_push",
     "execute_command",  # Commands can have side effects

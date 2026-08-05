@@ -64,8 +64,12 @@ MIN_RECALL_SCORE = 0.12
 # Keeping the envelope in the existing private archive avoids a canonical DB
 # migration while still giving every occurrence a stable identity.
 TRACEABLE_NOTE_SCHEMA = "infinidev.traceable_note"
-TRACEABLE_NOTE_VERSION = 1
+TRACEABLE_NOTE_VERSION = 2
+_SUPPORTED_TRACEABLE_NOTE_VERSIONS = frozenset({1, TRACEABLE_NOTE_VERSION})
 TRACEABLE_NOTE_TYPES = frozenset({"auto_note", "artifact_analysis"})
+CLAIM_CLASSIFICATIONS = frozenset({
+    "observation", "inference", "recommendation", "requirement", "analysis",
+})
 MAX_NOTE_PARENTS = 16
 MAX_NOTE_CITATIONS = 64
 MAX_NOTE_GENERATION = 4
@@ -106,7 +110,7 @@ class NoteCitation:
 
 @dataclass(frozen=True, slots=True)
 class TraceableNoteEnvelope:
-    """Immutable, versioned note with complete occurrence provenance."""
+    """Immutable claim with source, evidence, confidence, and validity state."""
 
     note_type: str
     occurrence_id: str
@@ -117,10 +121,23 @@ class TraceableNoteEnvelope:
     parent_ids: tuple[str, ...]
     summary: str
     citations: tuple[NoteCitation, ...]
+    claim_classification: str = "observation"
+    source: str = "working_memory"
+    confidence: float | None = None
+    still_valid: bool | None = None
     schema: str = TRACEABLE_NOTE_SCHEMA
     version: int = TRACEABLE_NOTE_VERSION
 
     def to_dict(self) -> dict[str, Any]:
+        citations = [citation.to_dict() for citation in self.citations]
+        provenance = {
+            "occurrence_id": self.occurrence_id,
+            "source_artifact_id": self.source_artifact_id,
+            "step_index": self.step_index,
+            "tool_call_id": self.tool_call_id,
+            "generation": self.generation,
+            "parent_ids": list(self.parent_ids),
+        }
         return {
             "schema": self.schema,
             "version": self.version,
@@ -132,7 +149,16 @@ class TraceableNoteEnvelope:
             "generation": self.generation,
             "parent_ids": list(self.parent_ids),
             "summary": self.summary,
-            "citations": [citation.to_dict() for citation in self.citations],
+            "citations": citations,
+            "claim": {
+                "text": self.summary,
+                "classification": self.claim_classification,
+                "source": self.source,
+                "evidence": citations,
+                "confidence": self.confidence,
+                "provenance": provenance,
+                "still_valid": self.still_valid,
+            },
         }
 
     def to_json(self) -> str:
@@ -151,7 +177,8 @@ class TraceableNoteEnvelope:
             raise TraceableNoteError("traceable note must be a JSON object")
         if value.get("schema") != TRACEABLE_NOTE_SCHEMA:
             raise TraceableNoteError("unknown traceable note schema")
-        if value.get("version") != TRACEABLE_NOTE_VERSION:
+        version = value.get("version")
+        if version not in _SUPPORTED_TRACEABLE_NOTE_VERSIONS:
             raise TraceableNoteError("unsupported traceable note version")
         note_type = value.get("type")
         if note_type not in TRACEABLE_NOTE_TYPES:
@@ -175,6 +202,15 @@ class TraceableNoteEnvelope:
             raise TraceableNoteError("traceable note citation must be an object")
         generation = _validate_generation(value.get("generation"))
         summary = _redact_note_summary(value.get("summary"))
+        claim = value.get("claim") if version >= 2 else {}
+        if not isinstance(claim, dict):
+            raise TraceableNoteError("traceable note claim must be an object")
+        classification = _validate_claim_classification(
+            claim.get("classification", "observation")
+        )
+        source = _validate_claim_source(claim.get("source", "working_memory"))
+        confidence = _validate_claim_confidence(claim.get("confidence"))
+        still_valid = _validate_still_valid(claim.get("still_valid"))
         return cls(
             note_type=note_type,
             occurrence_id=_validate_note_id(value.get("occurrence_id")),
@@ -185,6 +221,10 @@ class TraceableNoteEnvelope:
             parent_ids=tuple(_validate_note_id(item) for item in parent_values),
             summary=summary,
             citations=citations,
+            claim_classification=classification,
+            source=source,
+            confidence=confidence,
+            still_valid=still_valid,
         )
 
 
@@ -230,6 +270,35 @@ def _validate_generation(value: Any) -> int:
     return value
 
 
+def _validate_claim_classification(value: Any) -> str:
+    if value not in CLAIM_CLASSIFICATIONS:
+        raise TraceableNoteError("unsupported claim classification")
+    return str(value)
+
+
+def _validate_claim_source(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise TraceableNoteError("claim source must be non-empty")
+    return value.strip()[:200]
+
+
+def _validate_claim_confidence(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TraceableNoteError("claim confidence must be numeric or null")
+    confidence = float(value)
+    if not 0.0 <= confidence <= 1.0:
+        raise TraceableNoteError("claim confidence must be between 0 and 1")
+    return confidence
+
+
+def _validate_still_valid(value: Any) -> bool | None:
+    if value is not None and not isinstance(value, bool):
+        raise TraceableNoteError("still_valid must be boolean or null")
+    return value
+
+
 def _redact_note_summary(summary: str) -> str:
     if not isinstance(summary, str) or not summary.strip():
         raise TraceableNoteError("traceable note summary must be non-empty")
@@ -250,6 +319,10 @@ def create_traceable_note(
     tool_call_id: str | None = None,
     occurrence_id: str | None = None,
     citations: tuple[NoteCitation, ...] | list[NoteCitation] | None = None,
+    claim_classification: str = "observation",
+    source: str = "working_memory",
+    confidence: float | None = None,
+    still_valid: bool | None = None,
 ) -> TraceableNoteEnvelope:
     """Create one source occurrence without conflating equal summaries."""
     if note_type not in TRACEABLE_NOTE_TYPES:
@@ -277,6 +350,10 @@ def create_traceable_note(
         parent_ids=(),
         summary=_redact_note_summary(summary),
         citations=note_citations,
+        claim_classification=_validate_claim_classification(claim_classification),
+        source=_validate_claim_source(source),
+        confidence=_validate_claim_confidence(confidence),
+        still_valid=_validate_still_valid(still_valid),
     )
     if len(envelope.to_json()) > MAX_ARCHIVE_CHARS:
         raise TraceableNoteError("traceable note envelope is too large")
@@ -297,10 +374,17 @@ class MemoryRecord:
     score: float = 0.0
 
     def render(self, max_chars: int = 1500) -> str:
+        """Render content with enough provenance to judge its authority and age."""
+
         body = self.content
         if len(body) > max_chars:
             body = body[:max_chars] + f"\n…[{len(self.content) - max_chars} more chars]"
-        return f"[step {self.step_index} · {self.kind}] {self.title}\n{body}"
+        provenance = (
+            f"source=working-memory record={self.id} session={self.session_id} "
+            f"step={self.step_index} kind={self.kind} "
+            f"created={self.created_at or 'unknown'} authority=advisory"
+        )
+        return f"[{provenance}]\n{self.title}\n{body}"
 
 
 @dataclass(slots=True)
@@ -587,6 +671,18 @@ class WorkingMemory:
             parent_ids=parent_ids,
             summary=redacted_summary,
             citations=citations,
+            claim_classification="analysis",
+            source="derived_compaction",
+            confidence=(
+                min(item.confidence for item in validated if item.confidence is not None)
+                if any(item.confidence is not None for item in validated)
+                else None
+            ),
+            still_valid=(
+                False if any(item.still_valid is False for item in validated)
+                else True if all(item.still_valid is True for item in validated)
+                else None
+            ),
         )
         if len(note.to_json()) > MAX_ARCHIVE_CHARS:
             raise TraceableNoteError("compacted note envelope is too large")
@@ -853,6 +949,20 @@ class WorkingMemory:
         except Exception:
             logger.debug("working_memory select failed", exc_info=True)
             return []
+
+    def recent_records(
+        self,
+        *,
+        limit: int = 20,
+        kinds: set[str] | None = None,
+    ) -> list[MemoryRecord]:
+        """Return recent records with archive provenance, newest first."""
+
+        bounded = max(1, min(int(limit), 200))
+        records = [_row_to_record(row, 0.0) for row in self._load_rows(all_sessions=False)]
+        if kinds is not None:
+            records = [record for record in records if record.kind in kinds]
+        return records[:bounded]
 
     def _score_semantic(self, query: str, rows: list[tuple]) -> list[MemoryRecord] | None:
         """Cosine-rank rows that have embeddings. ``None`` = not possible.

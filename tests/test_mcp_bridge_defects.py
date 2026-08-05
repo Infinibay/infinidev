@@ -134,7 +134,9 @@ def test_unknown_tool_suggests_by_similarity_not_alphabetically():
 def test_unknown_tool_message_points_at_help():
     from infinidev.engine.tool_dispatch import _unknown_tool_message
 
-    assert "help()" in _unknown_tool_message({"read_file": None}, "raed_file")
+    assert "describe_tool()" in _unknown_tool_message(
+        {"read_file": None}, "raed_file"
+    )
 
 
 # ── an agent built before warmup must not stay blind for its whole life ──

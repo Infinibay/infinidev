@@ -133,4 +133,4 @@ def check_file_permission(action: str, path: str) -> str | None:
             return f"File operation denied by user: {path}"
         return None
 
-    return None  # Unknown mode — allow
+    return f"File operation denied: invalid FILE_OPERATIONS_PERMISSION={mode!r}"

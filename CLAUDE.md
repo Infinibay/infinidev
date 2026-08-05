@@ -141,7 +141,7 @@ Categories:
 - **git**: `git_branch`, `git_commit`, `git_diff`, `git_status`
 - **shell**: `execute_command`, `code_interpreter`, and background-process lifecycle tools
 - **knowledge**: `record_finding`, `search_findings`, `search_knowledge`, validation/update/delete tools, and reports
-- **meta**: `help`, `recall_context`, execution-plan mutation, and test-output tools
+- **meta**: `describe_tool`, `recall_context`, execution-plan mutation, and test-output tools
 - **mcp** (`tools/mcp_bridge.py`): every tool a configured MCP server publishes, under the server's own name — `ken_rank`, `ken_recall`, `ken_callgraph`, … Discovered at runtime from `tools/list`, never hand-written.
 - **chat_agent** (tier-exclusive): `respond`, `escalate` — terminators for the chat agent's loop; never bound to the developer.
 - **planner** (tier-exclusive): `emit_plan` — the planner's single-shot terminator that produces the `Plan` artifact.

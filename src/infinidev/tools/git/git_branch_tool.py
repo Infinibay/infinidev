@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
+from infinidev.tools.base.tool_effects import ToolEffects
 from infinidev.tools.git._helpers import run_git, GitToolError
 from infinidev.tools.git.git_branch_input import GitBranchInput
 
@@ -22,6 +23,11 @@ class GitBranchTool(InfinibayBaseTool):
         "When creating, it branches from the specified base branch."
     )
     args_schema: Type[BaseModel] = GitBranchInput
+    effects: ToolEffects = ToolEffects(
+        writes_workspace=True,
+        mutates_git=True,
+        accesses_network=True,
+    )
 
     def _run(
         self, branch_name: str, create: bool = True, base_branch: str = "main"
@@ -242,4 +248,3 @@ class GitBranchTool(InfinibayBaseTool):
             "action": action,
             "base": base_branch if action == "created" else None,
         })
-

@@ -13,7 +13,7 @@ from infinidev.tools.mcp_bridge import discover_mcp_tool_classes
 
 
 class HelpTool(InfinibayBaseTool):
-    name: str = "help"
+    name: str = "describe_tool"
     description: str = "Get schema-backed help and examples for any available tool."
     args_schema: Type[BaseModel] = HelpInput
 
@@ -90,7 +90,9 @@ def _registered_tools() -> dict[str, Any]:
     try:
         for tool_class in discover_mcp_tool_classes():
             tool = tool_class()
-            registered.setdefault(tool.name, tool)
+            # Direct discovery is the newest cache view and must replace a
+            # stale same-name role instance built before MCP warmup landed.
+            registered[tool.name] = tool
     except Exception:
         pass
     return registered
@@ -125,8 +127,8 @@ def _render_overview(
         lines.append("  mcp           — Tools published by configured MCP servers")
     lines.extend([
         "",
-        'Call help(context="<category>") for a tool list, or '
-        'help(context="<tool_name>") for its exact parameters.',
+        'Call describe_tool(context="<category>") for a tool list, or '
+        'describe_tool(context="<tool_name>") for its exact parameters.',
     ])
     return "\n".join(lines)
 

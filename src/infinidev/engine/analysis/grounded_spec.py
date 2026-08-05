@@ -18,7 +18,14 @@ depends on.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+
+DecisionRisk = Literal[
+    "local_reversible",
+    "costly_to_reverse",
+    "external_or_destructive",
+]
 
 
 @dataclass(frozen=True)
@@ -66,6 +73,13 @@ class Clarification:
     options: list[str] = field(default_factory=list)
     default: str = ""
     impact: str = ""  # what changes in the code depending on the answer
+    risk: DecisionRisk = "costly_to_reverse"
+
+    @property
+    def can_use_default_without_confirmation(self) -> bool:
+        """Whether executing the default is cheap and safely reversible."""
+
+        return self.risk == "local_reversible"
 
     def render(self) -> str:
         """One line: the decision, what we build now, what else was possible."""
@@ -94,12 +108,33 @@ class GroundedSpec:
     # default that IS implemented this turn, so the user corrects course
     # instead of being interrogated before any work happens.
     clarifications_needed: list[Clarification] = field(default_factory=list)
+    confirmed_decisions: list[str] = field(default_factory=list)
     design_direction: str = ""
     alternatives_rejected: list[RejectedAlternative] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
     # Rich retrieval key for the Recipe Bank — much better than the raw request.
     signature_text: str = ""
+
+    @property
+    def blocking_clarifications(self) -> list[Clarification]:
+        """Product decisions that require user authority before execution."""
+
+        return [
+            decision
+            for decision in self.clarifications_needed
+            if not decision.can_use_default_without_confirmation
+        ]
+
+    @property
+    def defaultable_clarifications(self) -> list[Clarification]:
+        """Local reversible decisions for which a declared default is safe."""
+
+        return [
+            decision
+            for decision in self.clarifications_needed
+            if decision.can_use_default_without_confirmation
+        ]
 
     @property
     def evidence_count(self) -> int:
@@ -131,7 +166,7 @@ class GroundedSpec:
         if self.assumptions:
             lines.append("  ASSUMPTIONS (unverified — flag if any is wrong):")
             lines += [f"    - {a.statement}" for a in self.assumptions]
-        if self.clarifications_needed:
+        if self.defaultable_clarifications:
             # The planner is told to BUILD the default, not to stall on the
             # question: the user was shown the same default and can correct
             # it. What the planner must not do is silently pick a third
@@ -140,7 +175,15 @@ class GroundedSpec:
                 "  PRODUCT DECISIONS (implement the stated default; do NOT invent a "
                 "different answer and do NOT block on these):"
             )
-            lines += [f"    - {c.render()}" for c in self.clarifications_needed]
+            lines += [f"    - {c.render()}" for c in self.defaultable_clarifications]
+        if self.confirmed_decisions:
+            lines.append("  USER-CONFIRMED PRODUCT DECISIONS (authoritative):")
+            lines += [f"    - {decision}" for decision in self.confirmed_decisions]
+        if self.blocking_clarifications:
+            lines.append(
+                "  BLOCKING PRODUCT DECISIONS (do not plan or execute until confirmed):"
+            )
+            lines += [f"    - {c.render()} [risk={c.risk}]" for c in self.blocking_clarifications]
         if self.design_direction:
             lines.append(f"  Design direction: {self.design_direction}")
         if self.alternatives_rejected:
@@ -160,6 +203,7 @@ class GroundedSpec:
             "resolved_facts": [vars(f) for f in self.resolved_facts],
             "assumptions": [vars(a) for a in self.assumptions],
             "clarifications_needed": [vars(c) for c in self.clarifications_needed],
+            "confirmed_decisions": self.confirmed_decisions,
             "design_direction": self.design_direction,
             "alternatives_rejected": [vars(r) for r in self.alternatives_rejected],
             "risks": self.risks,

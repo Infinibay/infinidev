@@ -84,13 +84,24 @@ def build_execution_context(
     engine._nudge_threshold_override = kwargs.get("nudge_threshold")
     engine._summarizer_override = kwargs.get("summarizer_enabled")
 
-    file_tracker = FileChangeTracker()
+    previous = getattr(engine, "_last_file_tracker", None)
+    if kwargs.get("preserve_file_tracker") and previous is not None:
+        baseline = previous.baseline
+    else:
+        workspace = getattr(agent, "workspace_path", None)
+        if not workspace:
+            from infinidev.tools.base.context import get_current_workspace_path
+
+            workspace = get_current_workspace_path()
+        from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+        baseline = WorkspaceBaseline.capture(workspace)
+    file_tracker = FileChangeTracker(baseline=baseline)
     # Opt-in carry-forward, for callers that re-enter execute() inside one
     # user turn (the review's rework loop). Never automatic: the engine is
     # reused across turns, so an unconditional merge would report last
     # turn's files as changed in this one.
     if kwargs.get("preserve_file_tracker"):
-        previous = getattr(engine, "_last_file_tracker", None)
         if previous is not None:
             file_tracker.merge_from(previous)
     engine._last_file_tracker = file_tracker
@@ -100,7 +111,13 @@ def build_execution_context(
     manual_tc = not caps.supports_function_calling
     is_small = _is_small_model()
 
-    tools = _resolve_tools(agent, kwargs.get("task_tools"), is_small)
+    tools = _resolve_tools(
+        agent,
+        kwargs.get("task_tools"),
+        is_small,
+        description=task_prompt[0],
+        initial_plan=kwargs.get("initial_plan"),
+    )
     tool_schemas = (
         build_tool_schemas(tools, small_model=is_small)
         if tools
@@ -176,7 +193,14 @@ def build_execution_context(
     )
 
 
-def _resolve_tools(agent: Any, task_tools: list | None, is_small: bool) -> list:
+def _resolve_tools(
+    agent: Any,
+    task_tools: list | None,
+    is_small: bool,
+    *,
+    description: str = "",
+    initial_plan: Any | None = None,
+) -> list:
     """Pick the toolset and make sure it is bound to this agent.
 
     Binding matters more than it looks: without it a tool falls back to a
@@ -199,7 +223,13 @@ def _resolve_tools(agent: Any, task_tools: list | None, is_small: bool) -> list:
         bind_tools_to_agent(tools, agent.agent_id)
         return tools
 
-    return getattr(agent, "tools", [])
+    tools = getattr(agent, "tools", [])
+    if settings.DYNAMIC_TOOL_ROUTING_ENABLED:
+        from infinidev.engine.tool_routing import select_developer_tools
+
+        tools = select_developer_tools(tools, description, initial_plan)
+        bind_tools_to_agent(tools, agent.agent_id)
+    return tools
 
 
 def _resolve_resume(agent: Any, kwargs: dict[str, Any]) -> tuple[Any, Any]:

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.db import execute_with_retry
+from infinidev.tools.base.tool_effects import ToolEffects
 from infinidev.tools.git._helpers import run_git, GitToolError
 from infinidev.tools.git.git_commit_input import GitCommitInput
 
@@ -14,14 +15,28 @@ from infinidev.tools.git.git_commit_input import GitCommitInput
 class GitCommitTool(InfinibayBaseTool):
     name: str = "git_commit"
     description: str = (
-        "Stage and commit changes to Git. "
-        "Optionally specify files to stage, otherwise stages all changes."
+        "Stage and commit explicitly selected changes to Git. Pass files=[...] by "
+        "default. Staging the entire worktree requires include_all=true so omission "
+        "cannot capture pre-existing user edits accidentally."
     )
     args_schema: Type[BaseModel] = GitCommitInput
+    effects: ToolEffects = ToolEffects(writes_workspace=True, mutates_git=True)
 
-    def _run(self, message: str, files: list[str] | None = None) -> str:
+    def _run(
+        self,
+        message: str,
+        files: list[str] | None = None,
+        include_all: bool = False,
+    ) -> str:
+        if files and include_all:
+            return self._error("Pass files or include_all=true, not both")
+        if not files and not include_all:
+            return self._error(
+                "No files selected. Pass files=[...] or explicitly set include_all=true "
+                "after reviewing every current worktree change."
+            )
         if self._is_pod_mode():
-            return self._run_in_pod(message, files)
+            return self._run_in_pod(message, files, include_all)
 
         cwd = self._git_cwd
         try:
@@ -34,7 +49,7 @@ class GitCommitTool(InfinibayBaseTool):
             if files:
                 for f in files:
                     run_git(["git", "add", f], cwd=cwd, check=True)
-            else:
+            elif include_all:
                 run_git(["git", "add", "-A"], cwd=cwd, check=True)
 
             # Commit
@@ -90,7 +105,12 @@ class GitCommitTool(InfinibayBaseTool):
             "message": message,
         })
 
-    def _run_in_pod(self, message: str, files: list[str] | None = None) -> str:
+    def _run_in_pod(
+        self,
+        message: str,
+        files: list[str] | None = None,
+        include_all: bool = False,
+    ) -> str:
         """Execute git commit operations inside the agent's pod."""
         try:
             # Check status
@@ -104,7 +124,7 @@ class GitCommitTool(InfinibayBaseTool):
                     r = self._exec_in_pod(["git", "add", f], timeout=15)
                     if r.exit_code != 0:
                         return self._error(f"Failed to stage {f}: {r.stderr.strip()}")
-            else:
+            elif include_all:
                 r = self._exec_in_pod(["git", "add", "-A"], timeout=15)
                 if r.exit_code != 0:
                     return self._error(f"Failed to stage changes: {r.stderr.strip()}")
@@ -165,4 +185,3 @@ class GitCommitTool(InfinibayBaseTool):
             "branch": branch_name,
             "message": message,
         })
-

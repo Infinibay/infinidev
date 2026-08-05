@@ -43,6 +43,11 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
+from infinidev.tools.base.tool_effects import (
+    ToolEffects,
+    ToolUseConstraints,
+    constraints_for_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +267,15 @@ def build_tool_class(tool: Any) -> type[InfinibayBaseTool]:
     description = compress_description(tool.description) or (
         f"Tool {remote_name!r} provided by the {server!r} MCP server."
     )
+    read_only = is_read_only(tool)
+    annotations = getattr(tool, "annotations", None) or {}
+    effects = ToolEffects(
+        accesses_network=bool(annotations.get("openWorldHint", False)),
+        reads_external_state=read_only,
+        mutates_external_state=not read_only,
+        destructive=bool(annotations.get("destructiveHint", False)),
+    )
+    use_constraints = constraints_for_tool(remote_name, effects, remote=True)
 
     def _run(self, **kwargs: Any) -> str:
         from infinidev.engine.mcp_client import (
@@ -312,6 +326,8 @@ def build_tool_class(tool: Any) -> type[InfinibayBaseTool]:
             "description": str,
             "args_schema": type[BaseModel],
             "is_read_only": bool,
+            "effects": ToolEffects,
+            "use_constraints": ToolUseConstraints,
             "mcp_server": ClassVar[str],
         },
         "__doc__": tool.description or description,
@@ -319,7 +335,9 @@ def build_tool_class(tool: Any) -> type[InfinibayBaseTool]:
         "name": remote_name,
         "description": description,
         "args_schema": args_model,
-        "is_read_only": is_read_only(tool),
+        "is_read_only": read_only,
+        "effects": effects,
+        "use_constraints": use_constraints,
         "mcp_server": server,
         "_run": _run,
     }

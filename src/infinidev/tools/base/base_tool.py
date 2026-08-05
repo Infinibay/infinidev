@@ -26,6 +26,7 @@ from infinidev.tools.base.context import (
     get_current_workspace_path,
 )
 from infinidev.tools.base.db import DBConnection, execute_with_retry, get_db_path
+from infinidev.tools.base.tool_effects import ToolEffects, ToolUseConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,14 @@ class BaseTool(BaseModel, ABC):
         default=_ArgsSchemaPlaceholder,
         validate_default=True,
         description="Pydantic schema for the tool's arguments.",
+    )
+    effects: ToolEffects = Field(
+        default_factory=ToolEffects,
+        description="Machine-readable side effects used by the host permission broker.",
+    )
+    use_constraints: ToolUseConstraints = Field(
+        default_factory=ToolUseConstraints,
+        description="Machine-readable use, non-use, precondition, and failure guidance.",
     )
 
     @field_validator("args_schema", mode="before")

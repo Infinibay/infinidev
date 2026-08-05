@@ -1037,6 +1037,7 @@ def run_review_rework_loop(
     recent_messages: list[str] | None = None,
     on_status: Any | None = None,
     acceptance_criteria: list[str] | None = None,
+    derived_verification_criteria: list[str] | None = None,
 ) -> tuple[str, ReviewResult | None]:
     """Run verification + review-rework cycle.
 
@@ -1266,15 +1267,25 @@ def run_review_rework_loop(
     # Re-verify objectives together (cross-objective regression backstop).
     result = _run_objective_reverification_and_fix(result, objective_checks)
 
-    # Enrich the description the reviewer judges against with the planner's
-    # real acceptance criteria — the actual accept gate, previously never
-    # passed to the reviewer (it only saw the raw task string).
+    # User criteria define acceptance. Planner-derived criteria are useful
+    # verification leads, but cannot expand scope or become user authority.
     review_task_description = task_prompt[0]
     _criteria = [c.strip() for c in (acceptance_criteria or []) if c and c.strip()]
     if _criteria:
         review_task_description += (
             "\n\n## Acceptance criteria (ALL must be satisfied for approval)\n"
             + "\n".join(f"- {c}" for c in _criteria)
+        )
+    _derived = [
+        c.strip()
+        for c in (derived_verification_criteria or [])
+        if c and c.strip()
+    ]
+    if _derived:
+        review_task_description += (
+            "\n\n## Derived verification criteria (verify when in scope; these are "
+            "NOT user-authored requirements and must not expand scope)\n"
+            + "\n".join(f"- {c}" for c in _derived)
         )
 
     previous_feedback = ""

@@ -1,12 +1,17 @@
-"""Tool for unified cross-source knowledge search using FTS5."""
+"""One interface for textual, browsing, and semantic knowledge retrieval."""
 
 import sqlite3
 from typing import Type
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.base.db import execute_with_retry, sanitize_fts5_query
+from infinidev.tools.base.db import (
+    execute_with_retry,
+    parse_query_or_terms,
+    sanitize_fts5_query,
+)
 from infinidev.tools.knowledge.search_knowledge_input import SearchKnowledgeInput
 
 
@@ -14,10 +19,10 @@ class SearchKnowledgeTool(InfinibayBaseTool):
     name: str = "search_knowledge"
     is_read_only: bool = True
     description: str = (
-        "Search or browse saved knowledge (findings, reports). With a query "
-        "this is full-text search — operators: | OR, & AND, * prefix, "
-        "\"exact phrase\" — and results come back as snippets. Without one it "
-        "lists findings by filter, with their full content."
+        "Search or browse saved knowledge through one interface. mode='text' uses "
+        "full-text operators (|, &, *, exact phrases) across findings/reports, or "
+        "browses findings when query is empty. mode='semantic' finds conceptually "
+        "similar findings and requires a query."
     )
     args_schema: Type[BaseModel] = SearchKnowledgeInput
 
@@ -29,6 +34,9 @@ class SearchKnowledgeTool(InfinibayBaseTool):
         min_confidence: float = 0.0,
         session_id: str | None = None,
         finding_type: str | None = None,
+        mode: str = "text",
+        threshold: float = 0.65,
+        include_content: bool = False,
     ) -> str:
         if sources is None:
             sources = ["findings", "reports"]
@@ -44,6 +52,20 @@ class SearchKnowledgeTool(InfinibayBaseTool):
             effective_session_id = None
         else:
             effective_session_id = session_id
+
+        if mode == "semantic":
+            if not query:
+                return self._error("semantic mode requires a non-empty query")
+            return self._semantic_findings(
+                query=query,
+                project_id=project_id,
+                session_id=effective_session_id,
+                finding_type=finding_type,
+                min_confidence=min_confidence,
+                threshold=threshold,
+                include_content=include_content,
+                limit=limit,
+            )
 
         def _search(conn: sqlite3.Connection) -> list[dict]:
             results = []
@@ -100,10 +122,99 @@ class SearchKnowledgeTool(InfinibayBaseTool):
         what = f"Searched '{query}'" if query else "Browsed"
         self._log_tool_usage(f"{what} across {sources} — {len(all_results)} results")
         return self._success({
+            "mode": "text",
             "query": query,
             "results": all_results,
             "count": len(all_results),
         })
+
+    def _semantic_findings(
+        self,
+        *,
+        query: str,
+        project_id,
+        session_id: str | None,
+        finding_type: str | None,
+        min_confidence: float,
+        threshold: float,
+        include_content: bool,
+        limit: int,
+    ) -> str:
+        """Conceptual finding search behind the same public tool contract."""
+
+        def _fetch(conn: sqlite3.Connection) -> list[dict]:
+            conditions = ["status != 'rejected'", "confidence >= ?"]
+            params: list = [min_confidence]
+            if project_id:
+                conditions.append("(project_id = ? OR project_id IS NULL)")
+                params.append(project_id)
+            if session_id:
+                conditions.append("session_id = ?")
+                params.append(session_id)
+            if finding_type:
+                conditions.append("finding_type = ?")
+                params.append(finding_type)
+            rows = conn.execute(
+                "SELECT id, topic, content, sources_json, session_id, confidence, "
+                "finding_type, status, created_at, embedding FROM findings WHERE "
+                + " AND ".join(conditions)
+                + " ORDER BY created_at DESC LIMIT 500",
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+        try:
+            candidates = execute_with_retry(_fetch)
+            if not candidates:
+                return self._success({
+                    "mode": "semantic", "query": query, "results": [], "count": 0,
+                })
+
+            from infinidev.tools.base.dedup import _cosine_similarity, _get_embed_fn
+            from infinidev.tools.base.embeddings import embedding_from_blob
+
+            embed = _get_embed_fn()
+            query_vectors = [np.asarray(item) for item in embed(parse_query_or_terms(query))]
+            missing = [item for item in candidates if not item.get("embedding")]
+            generated = iter(embed([
+                f"{item['topic']} {(item.get('content') or '')[:500]}" for item in missing
+            ])) if missing else iter(())
+
+            results: list[dict] = []
+            for item in candidates:
+                vector = (
+                    embedding_from_blob(item["embedding"])
+                    if item.get("embedding")
+                    else np.asarray(next(generated))
+                )
+                similarity = max(
+                    _cosine_similarity(query_vector, vector)
+                    for query_vector in query_vectors
+                )
+                if similarity < threshold:
+                    continue
+                result = dict(item)
+                result.pop("embedding", None)
+                if not include_content:
+                    result.pop("content", None)
+                    result.pop("sources_json", None)
+                result["source_type"] = "findings"
+                result["title"] = result.pop("topic")
+                result["similarity"] = round(similarity, 4)
+                results.append(result)
+
+            results.sort(key=lambda item: item["similarity"], reverse=True)
+            results = results[:limit]
+            return self._success({
+                "mode": "semantic",
+                "query": query,
+                "results": results,
+                "count": len(results),
+                "total_candidates": len(candidates),
+                "threshold": threshold,
+            })
+        except Exception as exc:
+            return self._error(f"Semantic knowledge search failed: {exc}")
 
     @staticmethod
     def _findings_rows(
@@ -162,4 +273,3 @@ class SearchKnowledgeTool(InfinibayBaseTool):
             ).fetchall()
 
         return [{"source_type": "findings", **dict(r)} for r in rows]
-

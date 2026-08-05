@@ -380,8 +380,11 @@ class TestPromptRendering:
         )
 
         rendered = _render_context_rank(result)
-        assert "<context-rank>" in rendered
+        assert '<context-rank source="infinidev.context-rank"' in rendered
         assert "</context-rank>" in rendered
+        assert 'authority="advisory"' in rendered
+        assert 'scope-effect="none"' in rendered
+        assert "not user requirements" in rendered
         assert "src/auth.py" in rendered
         assert "4.2" in rendered
         assert "Auth.verify" in rendered

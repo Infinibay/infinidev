@@ -196,7 +196,7 @@ def check_command_permission(
             return f"Command denied by user: {command}"
         return None
 
-    return None  # Unknown mode — allow
+    return f"Command denied: invalid EXECUTE_COMMANDS_PERMISSION={mode!r}"
 
 
 def _effective_command_timeout(requested: int | None) -> int:

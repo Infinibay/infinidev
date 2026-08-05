@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from infinidev.engine.analysis.step_verification import StepVerification
+from infinidev.engine.authority import AuthorityLevel
 
 
 class PlanStep(BaseModel):
@@ -24,12 +25,10 @@ class PlanStep(BaseModel):
     # verification approach. Rendered ONLY while the step is active to keep
     # the iteration prompt small — pending steps show their title only.
     detail: str = ""
-    # True when this step came from an analyst-emitted plan. The user is shown
-    # the plan's prose overview, not the step list, so this marks "part of the
-    # scope the run committed to", not "the user read this line". It is what
-    # StepCompleteGate counts to refuse a close that would abandon scope, and
-    # what apply_operations checks before allowing a removal. Refinement of the
-    # wording is allowed — see loop_plan.APPROVED_MUTABLE_FIELDS.
+    # Provenance is the authoritative source. ``user_approved`` remains as a
+    # persisted compatibility projection for older LoopState objects and
+    # existing scope-gate code; newly seeded steps derive it from authority.
+    authority: AuthorityLevel = "model_inferred"
     user_approved: bool = False
     # What the step established, written when it closes. Distinct from the
     # summary in ActionRecord: that one narrates the work, this one states the
@@ -52,5 +51,4 @@ class PlanStep(BaseModel):
     # False once every step is blocked — the scope gate in the engine's
     # idle-completion branch is what keeps that from closing the run quietly.
     status: Literal["pending", "active", "done", "skipped", "blocked"] = "pending"
-
 
