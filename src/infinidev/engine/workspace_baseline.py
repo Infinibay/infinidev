@@ -9,11 +9,37 @@ from dataclasses import dataclass
 
 
 _MAX_CAPTURE_BYTES = 2 * 1024 * 1024
-_EXCLUDED_DIRS = {".git", ".infinidev", ".venv", "node_modules", "__pycache__"}
+_MAX_TOTAL_CAPTURE_BYTES = 64 * 1024 * 1024
+_MAX_HASH_BYTES_PER_FILE = 8 * 1024 * 1024
+_MAX_TOTAL_HASH_BYTES = 512 * 1024 * 1024
+_HASH_CHUNK_BYTES = 1024 * 1024
+_MAX_FILES = 100_000
+_EXCLUDED_DIRS = {
+    ".cache",
+    ".git",
+    ".infinidev",
+    ".ken",
+    ".mypy_cache",
+    ".nox",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+}
 
 
-def _digest(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _metadata_digest(stat_result: os.stat_result) -> str:
+    """Bounded identity for files that are unsafe or too expensive to read."""
+
+    return (
+        f"stat-v1:{stat_result.st_mode}:{stat_result.st_size}:"
+        f"{stat_result.st_mtime_ns}:{stat_result.st_ctime_ns}"
+    )
 
 
 @dataclass(frozen=True)
@@ -78,17 +104,17 @@ def _workspace_paths(root: str, *, prefer_git: bool = True) -> tuple[list[str], 
                     check=False,
                 )
                 if listed.returncode == 0:
-                    git_paths = {
+                    git_paths = sorted({
                         item.decode(errors="surrogateescape")
                         for item in listed.stdout.split(b"\0")
                         if item
-                    }
+                    })
                     # Git's exclude rules intentionally hide generated and
                     # ignored files. They still belong to the task's observed
                     # workspace state: a build script can create or mutate one,
                     # and review/rollback must see it. Preserve Git's accurate
-                    # tracked set while unioning a bounded filesystem walk.
-                    return sorted(git_paths | set(_walk_workspace(root))), True
+                    # tracked set first, then add a bounded filesystem walk.
+                    return _merge_paths(git_paths, _walk_workspace(root)), True
         except (OSError, subprocess.SubprocessError):
             pass
 
@@ -100,30 +126,114 @@ def _walk_workspace(root: str) -> list[str]:
 
     paths: list[str] = []
     for current_root, dirs, files in os.walk(root):
-        dirs[:] = [directory for directory in dirs if directory not in _EXCLUDED_DIRS]
-        for filename in files:
+        dirs[:] = sorted(directory for directory in dirs if directory not in _EXCLUDED_DIRS)
+        for filename in sorted(files):
             absolute = os.path.join(current_root, filename)
             paths.append(os.path.relpath(absolute, root))
+            if len(paths) >= _MAX_FILES:
+                return paths
     return paths
+
+
+def _merge_paths(primary: list[str], secondary: list[str]) -> list[str]:
+    """Return a stable, bounded union while prioritising Git-visible files."""
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for paths in (primary, secondary):
+        for path in paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            merged.append(path)
+            if len(merged) >= _MAX_FILES:
+                return merged
+    return merged
+
+
+def _read_content_state(
+    path: str,
+    *,
+    max_hash_bytes: int,
+    max_text_bytes: int,
+) -> tuple[WorkspaceFileState | None, int, int]:
+    """Hash one bounded file in chunks and optionally retain its text."""
+
+    hasher = hashlib.sha256()
+    text_buffer = bytearray() if max_text_bytes >= 0 else None
+    bytes_read = 0
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(min(_HASH_CHUNK_BYTES, max_hash_bytes - bytes_read + 1))
+            if not chunk:
+                break
+            bytes_read += len(chunk)
+            if bytes_read > max_hash_bytes:
+                return None, bytes_read, 0
+            hasher.update(chunk)
+            if text_buffer is not None:
+                if len(text_buffer) + len(chunk) <= max_text_bytes:
+                    text_buffer.extend(chunk)
+                else:
+                    text_buffer = None
+
+    text = (
+        bytes(text_buffer).decode("utf-8", errors="replace")
+        if text_buffer is not None
+        else None
+    )
+    text_bytes = len(text_buffer) if text_buffer is not None else 0
+    return WorkspaceFileState(digest=hasher.hexdigest(), text=text), bytes_read, text_bytes
 
 
 def _read_states(root: str, paths: list[str]) -> dict[str, WorkspaceFileState]:
     states: dict[str, WorkspaceFileState] = {}
-    for relative in paths:
+    remaining_hash_bytes = _MAX_TOTAL_HASH_BYTES
+    remaining_text_bytes = _MAX_TOTAL_CAPTURE_BYTES
+    for relative in paths[:_MAX_FILES]:
         absolute = os.path.realpath(os.path.join(root, relative))
         if not (absolute == root or absolute.startswith(root + os.sep)):
             continue
         try:
             if not os.path.isfile(absolute):
                 continue
-            with open(absolute, "rb") as handle:
-                data = handle.read()
+            stat_result = os.stat(absolute)
         except OSError:
             continue
-        text = (
-            data.decode("utf-8", errors="replace")
-            if len(data) <= _MAX_CAPTURE_BYTES
-            else None
+
+        size = max(0, stat_result.st_size)
+        if size > _MAX_HASH_BYTES_PER_FILE or size > remaining_hash_bytes:
+            states[relative] = WorkspaceFileState(
+                digest=_metadata_digest(stat_result),
+                text=None,
+            )
+            continue
+
+        max_text_bytes = (
+            min(_MAX_CAPTURE_BYTES, remaining_text_bytes)
+            if size <= _MAX_CAPTURE_BYTES and size <= remaining_text_bytes
+            else -1
         )
-        states[relative] = WorkspaceFileState(digest=_digest(data), text=text)
+        try:
+            state, bytes_read, text_bytes = _read_content_state(
+                absolute,
+                max_hash_bytes=min(_MAX_HASH_BYTES_PER_FILE, remaining_hash_bytes),
+                max_text_bytes=max_text_bytes,
+            )
+        except OSError:
+            continue
+        if state is None:
+            try:
+                stat_result = os.stat(absolute)
+            except OSError:
+                continue
+            states[relative] = WorkspaceFileState(
+                digest=_metadata_digest(stat_result),
+                text=None,
+            )
+            continue
+
+        states[relative] = state
+        remaining_hash_bytes = max(0, remaining_hash_bytes - bytes_read)
+        remaining_text_bytes = max(0, remaining_text_bytes - text_bytes)
     return states

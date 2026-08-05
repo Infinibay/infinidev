@@ -62,9 +62,15 @@ class FileChangeTracker:
             # Oversized files are still detected, but their full text is not
             # retained in memory. Record an honest marker for review.
             if before is None:
-                before = "[content omitted: file exceeded baseline capture limit]\n"
+                before = (
+                    "[content omitted: file exceeded baseline capture limit; "
+                    f"identity={before_state.digest}]\n"
+                )
             if after is None:
-                after = "[content omitted: file exceeded baseline capture limit]\n"
+                after = (
+                    "[content omitted: file exceeded baseline capture limit; "
+                    f"identity={after_state.digest}]\n"
+                )
             if path not in self._originals:
                 self._originals[path] = before
             self._current[path] = after
@@ -97,12 +103,18 @@ class FileChangeTracker:
         self._current[path] = after
         self._change_counts[path] = self._change_counts.get(path, 0) + 1
 
-        return self.get_diff(path)
+        return self._render_diff(path)
 
     def get_diff(self, path: str) -> str | None:
         """Generate unified diff for a file (original → current)."""
-        self.reconcile_workspace()
         path = os.path.abspath(path)
+        if self._active and path not in self._current:
+            self.reconcile_workspace()
+        return self._render_diff(path)
+
+    def _render_diff(self, path: str) -> str | None:
+        """Generate a diff from already-recorded state without scanning disk."""
+
         if path not in self._current:
             return None
 
@@ -152,7 +164,8 @@ class FileChangeTracker:
         return self._reasons.get(os.path.abspath(path), [])
 
     def get_all_paths(self) -> list[str]:
-        self.reconcile_workspace()
+        if self._active:
+            self.reconcile_workspace()
         return [
             path
             for path, current in self._current.items()
@@ -184,6 +197,8 @@ class FileChangeTracker:
         return dict(self._deleted_symbols)
 
     def deactivate(self) -> None:
+        if self._active:
+            self.reconcile_workspace()
         self._active = False
 
     def reset(self) -> None:
