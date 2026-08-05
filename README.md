@@ -23,7 +23,7 @@ The primary target is a single configured SOTA reasoning or coding model with a 
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.11+
 - A LiteLLM-compatible model provider
 - [Ollama](https://ollama.com) when using a local open-weight model
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip

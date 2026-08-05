@@ -1,9 +1,9 @@
 [project]
 name = "infinidev"
-version = "0.14.1"
+version = "0.14.2"
 description = "A terminal-based AI programming tool using agent loops."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE.md"]
 authors = [{ name = "Infinibay LLC", email = "andres@infinibay.net" }]
@@ -13,6 +13,8 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development",
 ]
