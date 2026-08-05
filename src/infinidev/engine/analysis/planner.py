@@ -17,6 +17,7 @@ from typing import Any, Optional
 from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
 from infinidev.engine.analysis.step_verification import StepVerification
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
 from infinidev.engine.token_usage import report_prompt_tokens
@@ -394,11 +395,7 @@ def _tool_call_to_dict(tc: Any) -> dict[str, Any]:
         "type": "function",
         "function": {
             "name": tc.function.name,
-            "arguments": (
-                tc.function.arguments
-                if isinstance(tc.function.arguments, str)
-                else json.dumps(tc.function.arguments)
-            ),
+            "arguments": normalize_tool_arguments_json(tc.function.arguments),
         },
     }
 

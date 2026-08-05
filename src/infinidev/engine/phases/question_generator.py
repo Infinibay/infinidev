@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from infinidev.engine.llm_client import call_llm
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.engine_logging import emit_loop_event, log as _log, DIM, RESET, YELLOW
 from infinidev.prompts.phases import PhaseStrategy
 
@@ -198,7 +199,12 @@ def _generate_questions(agent: Any,
                 messages.append({"role": "assistant", "tool_calls": [
                     {"id": getattr(tc, "id", f"q_{round_num}"),
                      "type": "function",
-                     "function": {"name": "generate_question", "arguments": tc.function.arguments}}
+                     "function": {
+                         "name": "generate_question",
+                         "arguments": normalize_tool_arguments_json(
+                             tc.function.arguments
+                         ),
+                     }}
                 ]})
                 messages.append({
                     "role": "tool",
@@ -212,7 +218,12 @@ def _generate_questions(agent: Any,
                 messages.append({"role": "assistant", "tool_calls": [
                     {"id": getattr(tc, "id", f"sc_{round_num}"),
                      "type": "function",
-                     "function": {"name": "step_complete", "arguments": tc.function.arguments}}
+                     "function": {
+                         "name": "step_complete",
+                         "arguments": normalize_tool_arguments_json(
+                             tc.function.arguments
+                         ),
+                     }}
                 ]})
                 messages.append({
                     "role": "tool",
@@ -321,7 +332,12 @@ def _generate_followups(agent: Any,
                 messages.append({"role": "assistant", "tool_calls": [
                     {"id": getattr(tc, "id", f"fu_{round_num}"),
                      "type": "function",
-                     "function": {"name": "generate_question", "arguments": tc.function.arguments}}
+                     "function": {
+                         "name": "generate_question",
+                         "arguments": normalize_tool_arguments_json(
+                             tc.function.arguments
+                         ),
+                     }}
                 ]})
                 messages.append({
                     "role": "tool",

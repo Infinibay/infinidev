@@ -26,6 +26,7 @@ from typing import Any
 
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.engine_logging import extract_tool_error
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.llm_caller import ClassifiedCalls, LLMCallResult
@@ -140,7 +141,9 @@ class ToolRunner:
                     "type": "function",
                     "function": {
                         "name": tc.function.name,
-                        "arguments": tc.function.arguments,
+                        "arguments": normalize_tool_arguments_json(
+                            tc.function.arguments
+                        ),
                     },
                 }
                 for tc in all_calls

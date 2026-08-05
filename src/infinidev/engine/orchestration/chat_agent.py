@@ -550,32 +550,9 @@ def _sanitize_tool_arguments(raw: Any) -> str:
       4. anything else → ``"{}"`` so downstream code sees a well-formed
          empty args blob instead of crashing.
     """
-    if isinstance(raw, (dict, list)):
-        try:
-            return json.dumps(raw)
-        except (TypeError, ValueError):
-            return "{}"
-    if not isinstance(raw, str):
-        return "{}"
-    s = raw.strip()
-    if not s:
-        return "{}"
-    try:
-        return json.dumps(json.loads(s))
-    except json.JSONDecodeError:
-        try:
-            parsed, _end = json.JSONDecoder().raw_decode(s)
-            logger.warning(
-                "Truncated malformed tool arguments (extra data after valid "
-                "JSON prefix): %r → %r", s[:80], parsed,
-            )
-            return json.dumps(parsed)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning(
-                "Dropped unparseable tool arguments, falling back to '{}': %r",
-                s[:80],
-            )
-            return "{}"
+    from infinidev.engine.formats._normalize import normalize_tool_arguments_json
+
+    return normalize_tool_arguments_json(raw)
 
 
 def _tool_call_to_dict(tc: Any) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from typing import Any
 
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.llm_client import call_llm
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.engine_logging import emit_loop_event, log as _log, DIM, BOLD, RESET, YELLOW, RED
 from infinidev.engine.phases.plan_validator import validate_questions, format_rejection
 from infinidev.prompts.phases import PhaseStrategy
@@ -248,7 +249,12 @@ def _generate_plan(agent: Any,
             tc_id = tc.id if hasattr(tc, "id") else f"plan_{round_num}_{len(assistant_tool_calls)}"
             assistant_tool_calls.append({
                 "id": tc_id, "type": "function",
-                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": normalize_tool_arguments_json(
+                        tc.function.arguments
+                    ),
+                },
             })
         messages.append({"role": "assistant", "tool_calls": assistant_tool_calls})
 

@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Literal
 
 from infinidev.config.llm import get_litellm_params_for_assistant
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.formats.tool_call_parser import (
     _preprocess as _strip_noise,
     safe_json_loads as _safe_json_loads,
@@ -546,7 +547,9 @@ class AssistantCritic:
                     "type": "function",
                     "function": {
                         "name": tc.function.name,
-                        "arguments": tc.function.arguments or "{}",
+                        "arguments": normalize_tool_arguments_json(
+                            tc.function.arguments
+                        ),
                     },
                 })
             except Exception:

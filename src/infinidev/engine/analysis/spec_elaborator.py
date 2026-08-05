@@ -35,6 +35,7 @@ from infinidev.engine.analysis.grounded_spec import (
     RejectedAlternative,
     ResolvedFact,
 )
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
 from infinidev.engine.oversized_result import (
@@ -759,7 +760,10 @@ def _tool_call_to_dict(tc: Any) -> dict[str, Any]:
     return {
         "id": tc.id,
         "type": "function",
-        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+        "function": {
+            "name": tc.function.name,
+            "arguments": normalize_tool_arguments_json(tc.function.arguments),
+        },
     }
 
 

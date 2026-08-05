@@ -39,6 +39,35 @@ def safe_json_loads(text: str) -> Any:
         raise
 
 
+def normalize_tool_arguments_json(raw: Any) -> str:
+    """Return provider-safe tool arguments as one valid JSON string.
+
+    Provider SDKs disagree on whether response objects expose ``arguments``
+    as a string or an already-decoded mapping. The conversation history sent
+    on the next turn has only one portable representation: a JSON string.
+    Strip trailing model markup when a valid JSON prefix exists and fall back
+    to an empty object when the value cannot be recovered.
+    """
+    if isinstance(raw, (dict, list)):
+        try:
+            return json.dumps(raw)
+        except (TypeError, ValueError):
+            return "{}"
+    if not isinstance(raw, str):
+        return "{}"
+    text = raw.strip()
+    if not text:
+        return "{}"
+    try:
+        return json.dumps(json.loads(text))
+    except (json.JSONDecodeError, TypeError):
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(text)
+            return json.dumps(parsed)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return "{}"
+
+
 def _fix_jslike_json(args_str: str) -> dict[str, Any]:
     """Convert JS-like object syntax to a Python dict.
 

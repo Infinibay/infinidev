@@ -194,6 +194,27 @@ def test_no_nudge_no_trailing_user_turn():
     assert messages[-1]["role"] == "tool"
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ({"path": "a.py"}, {"path": "a.py"}),
+        ('{"path":"a.py"}', {"path": "a.py"}),
+        ('{"path":"a.py"}</tool_call>', {"path": "a.py"}),
+        ("not json", {}),
+    ],
+)
+def test_assistant_tool_arguments_are_provider_safe_json_strings(raw, expected):
+    """MiniMax rejects decoded dicts and malformed strings on the next turn."""
+    messages = _run(
+        ClassifiedCalls(regular=[_call("c1", "read_file", raw)]),
+        nudge_at=99,
+    )
+
+    arguments = messages[2]["tool_calls"][0]["function"]["arguments"]
+    assert isinstance(arguments, str)
+    assert json.loads(arguments) == expected
+
+
 def test_nudge_fires_once_across_batches():
     """Equality on the counter, so a multi-batch turn still warns once."""
     messages = _run(ClassifiedCalls(regular=[

@@ -21,6 +21,7 @@ from infinidev.config.model_capabilities import get_model_capabilities
 from infinidev.db.service import store_exploration_tree
 from infinidev.engine.base import AgentEngine
 from infinidev.engine.engine_logging import log as _engine_log
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.tree.context import (
     INIT_TREE_SCHEMA,
     RESOLVE_NODE_SCHEMA,
@@ -465,7 +466,9 @@ class TreeEngine(AgentEngine):
                                 "type": "function",
                                 "function": {
                                     "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
+                                    "arguments": normalize_tool_arguments_json(
+                                        tc.function.arguments
+                                    ),
                                 },
                             }
                             for tc in all_tcs

@@ -14,6 +14,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from infinidev.engine.llm_client import call_llm as _call_llm
+from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.formats.tool_call_parser import (
     parse_step_complete_args as _parse_step_complete_args,
 )
@@ -96,7 +97,9 @@ def apply_guardrail(
                                 "type": "function",
                                 "function": {
                                     "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
+                                    "arguments": normalize_tool_arguments_json(
+                                        tc.function.arguments
+                                    ),
                                 },
                             }
                             for tc in tc_list
