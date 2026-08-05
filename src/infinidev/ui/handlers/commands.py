@@ -64,6 +64,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "  Alt+.  ·  F4  ·  /sidebar    Session panel (steps, files, context)\n"
         "  Ctrl+E        ·  /files      File tree\n"
         "  Ctrl+B        ·  /tasks      Background tasks\n"
+        "  Ctrl+A        ·  /agents     Council and subagent chats\n"
         "\n"
         "KEYS\n"
         "  ?                            This help (on an empty prompt)\n"
@@ -117,6 +118,11 @@ def _cmd_findings(app: InfinidevApp, parts: list[str]) -> None:
 def _cmd_tasks(app: InfinidevApp, parts: list[str]) -> None:
     """Open the background-tasks explorer (same as Ctrl+B)."""
     app.dialog_manager.open_background_tasks()
+
+
+def _cmd_agents(app: InfinidevApp, parts: list[str]) -> None:
+    """Open the council and subagent chat selector."""
+    app.dialog_manager.open_agents()
 
 
 def _cmd_knowledge(app: InfinidevApp, parts: list[str]) -> None:
@@ -384,6 +390,7 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/notes": _cmd_notes,
     "/findings": _cmd_findings,
     "/tasks": _cmd_tasks,
+    "/agents": _cmd_agents,
     "/knowledge": _cmd_knowledge,
     "/documentation": _cmd_docs,
     "/docs": _cmd_docs,

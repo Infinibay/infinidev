@@ -29,6 +29,7 @@ COMMANDS = [
     ("/refactor", "Refactor code: modularize, clean, order, restructure"),
     ("/init", "Explore and document the current project"),
     ("/debug", "Inspect agent internals: notes, history, plan, state"),
+    ("/agents", "Inspect council debates and individual agent chats"),
     ("/notes", "Show agent notes (alias for /debug)"),
     ("/findings", "Browse all findings"),
     ("/knowledge", "Browse project knowledge"),

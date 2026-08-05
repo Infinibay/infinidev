@@ -137,12 +137,17 @@ def handle_command(cmd_text: str):
         click.echo("  /refactor [scope]  - Refactor code (modularize, clean, restructure)")
         click.echo("  /init              - Explore and document the current project")
         click.echo("  /tasks [id]        - List background tasks (or show one task's output)")
+        click.echo("  /agents [council] [agent] - Inspect council and agent transcripts")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
         return True
 
     elif cmd == "/tasks":
         _render_background_tasks_classic(parts[1] if len(parts) > 1 else None)
+        return True
+
+    elif cmd == "/agents":
+        _render_agents_classic(parts[1:])
         return True
 
     elif cmd == "/settings":
@@ -230,6 +235,53 @@ def _render_background_tasks_classic(task_id: str | None = None) -> None:
             f"{t.description} — {t.status_line()}"
         )
     click.echo(click.style("  Use /tasks <id> to see a task's output.", dim=True))
+
+
+def _render_agents_classic(parts: list[str]) -> None:
+    """List councils or print one debate/member transcript."""
+    from infinidev.engine.council.observer import get_council, list_councils
+
+    councils = list_councils()
+    if not councils:
+        click.echo(click.style("No councils have run in this process.", dim=True))
+        return
+    if not parts:
+        click.echo(click.style("Councils and agents", bold=True))
+        for council in councils:
+            click.echo(
+                f"  {council['id']}  [{council['status']}]  {council['question']}"
+            )
+            for member in council.get("members", {}).values():
+                click.echo(
+                    f"    {member['member_id']} · {member.get('persona', '')} "
+                    f"[{member.get('status', 'waiting')}]"
+                )
+        click.echo("\nUse /agents <council-id> [member-id] to inspect a transcript.")
+        return
+
+    council = get_council(parts[0])
+    if council is None:
+        click.echo(click.style(f"Unknown council: {parts[0]}", fg="red"))
+        return
+    member_id = parts[1] if len(parts) > 1 else None
+    if member_id:
+        member = council.get("members", {}).get(member_id)
+        if member is None:
+            click.echo(click.style(f"Unknown agent: {member_id}", fg="red"))
+            return
+        messages = member.get("messages", [])
+        title = f"{member_id} · {member.get('persona', '')}"
+    else:
+        messages = council.get("messages", [])
+        title = f"{council['id']} debate"
+    click.echo(click.style(title, bold=True))
+    click.echo(click.style(council.get("question", ""), dim=True))
+    for message in messages:
+        speaker = message.get("member_id", "agent")
+        persona = message.get("persona", "")
+        round_num = message.get("round", "?")
+        click.echo(click.style(f"\n{speaker} · {persona}  [round {round_num}]", bold=True))
+        click.echo(message.get("text", ""))
 
 
 def handle_settings_command(parts: list[str]):

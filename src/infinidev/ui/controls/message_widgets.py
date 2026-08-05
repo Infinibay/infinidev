@@ -436,14 +436,14 @@ class BorderedWidget:
             return False
         return bool((msg.get("text") or "").strip())
 
-    def _wants_header(self, sender: str) -> bool:
+    def _wants_header(self, sender: str, msg: dict[str, Any] | None = None) -> bool:
         """Headers only where the sender carries information.
 
         A named speaker (Reviewer, Verifier, "Assistant · REJECT") is worth
         a line; "Infinidev:" above every reply, or "System:" above a line
         that already reads as a system notice, is not.
         """
-        if self._show_header:
+        if self._show_header or (msg and msg.get("show_sender")):
             return True
         if sender in _GENERIC_SENDERS.get(self.msg_type, frozenset()):
             return False
@@ -469,7 +469,7 @@ class BorderedWidget:
         fill_style = bg_part
 
         # Header style
-        header_style = NAME_COLORS.get(sender, "")
+        header_style = str(msg.get("sender_style") or NAME_COLORS.get(sender, ""))
         if not header_style:
             header_style = self._header_style_default
         else:
@@ -497,7 +497,7 @@ class BorderedWidget:
         # Header line (with copy button on the right) — only when the
         # sender is worth naming. Headerless messages still expose copy:
         # the body's first line stays clickable (offset 0 either way).
-        if self._wants_header(sender):
+        if self._wants_header(sender, msg):
             suffix = " (pending):" if self.msg_type == "pending" else ":"
             header_text = f"{sender}{suffix}"
             header_used = 2 + _cell_len(header_text) + _cell_len(copy_label) + 1

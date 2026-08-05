@@ -307,6 +307,22 @@ class ClassicRenderer:
         if summary:
             self._println(f"{_green('✓ done')} {_dim(summary)}")
 
+    def _on_council_started(self, agent_id: str, data: dict) -> None:
+        council = data.get("council") or {}
+        count = len(council.get("members", {}))
+        noun = "agent" if count == 1 else "agents"
+        self._println(_dim(
+            f"Running {count} {noun} in {council.get('id', 'council')} "
+            "— use /agents to inspect the debate"
+        ))
+
+    def _on_council_finished(self, agent_id: str, data: dict) -> None:
+        council = data.get("council") or {}
+        status = council.get("status", "completed")
+        self._println(_dim(
+            f"Council {council.get('id', '')} {status} — transcript kept in /agents"
+        ))
+
     # ── Internals ─────────────────────────────────────────────────────
 
     def _absorb_tokens(self, data: dict) -> None:

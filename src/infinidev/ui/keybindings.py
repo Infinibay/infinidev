@@ -143,6 +143,11 @@ def create_global_keybindings(app_state) -> KeyBindings:
         """Open the background-tasks explorer."""
         app_state.show_background_tasks()
 
+    @kb.add("c-a")  # A for Agents
+    def show_agents(event):
+        """Open the council and subagent inspector."""
+        app_state.show_agents()
+
     @kb.add("c-l", eager=True)
     @kb.add("f6")
     def toggle_line_numbers(event):

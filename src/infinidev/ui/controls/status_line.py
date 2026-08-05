@@ -19,6 +19,7 @@ from pathlib import Path
 
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.mouse_events import MouseEventType
 from prompt_toolkit.utils import get_cwidth
 
 from infinidev.ui.controls._widthutil import terminal_cols, truncate_cells
@@ -151,9 +152,27 @@ class StatusLineControl(FormattedTextControl):
         }.get(self._status_kind, PRIMARY)
         return (colour, self._status)
 
-    def _left_segments(self) -> list[tuple[str, str]]:
+    def _left_segments(self) -> list[tuple]:
         """Segments in *drop-last-first* priority order."""
-        segments: list[tuple[str, str]] = []
+        segments: list[tuple] = []
+        try:
+            from infinidev.engine.council.observer import list_councils
+
+            running = sum(
+                member.get("status") == "running"
+                for council in list_councils()
+                if council.get("status") == "running"
+                for member in council.get("members", {}).values()
+            )
+        except Exception:
+            running = 0
+        if running:
+            def _open_agents(mouse_event):
+                if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                    self._app_state.show_agents()
+
+            noun = "agent" if running == 1 else "agents"
+            segments.append((ACCENT, f"Running {running} {noun}", _open_agents))
         status = self._status_fragment()
         if status:
             segments.append(status)
@@ -191,16 +210,17 @@ class StatusLineControl(FormattedTextControl):
             hint_width = _width(hint_fragments)
 
         budget = cols - hint_width - 2
-        shown: list[tuple[str, str]] = []
+        shown: list[tuple] = []
         used = 0
-        for style, text in segments:
+        for segment in segments:
+            text = segment[1]
             width = get_cwidth(text) + (get_cwidth(SEPARATOR) if shown else 0)
             if used + width > budget:
                 if not shown:  # never render an entirely empty status
-                    shown.append((style, truncate_cells(text, max(0, budget))))
+                    shown.append((segment[0], truncate_cells(text, max(0, budget))))
                     used = budget
                 break
-            shown.append((style, text))
+            shown.append(segment)
             used += width
 
         left = _join(shown)
@@ -208,12 +228,12 @@ class StatusLineControl(FormattedTextControl):
         return FormattedText(left + [(TEXT_DIM, " " * pad)] + hint_fragments)
 
 
-def _join(segments: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    fragments: list[tuple[str, str]] = []
-    for index, (style, text) in enumerate(segments):
+def _join(segments: list[tuple]) -> list[tuple]:
+    fragments: list[tuple] = []
+    for index, segment in enumerate(segments):
         if index:
             fragments.append((TEXT_DIM, SEPARATOR))
-        fragments.append((style, text))
+        fragments.append(segment)
     return fragments
 
 
@@ -227,5 +247,5 @@ def _render_hints(hints: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return fragments
 
 
-def _width(fragments: list[tuple[str, str]]) -> int:
-    return sum(get_cwidth(text) for _, text in fragments)
+def _width(fragments: list[tuple]) -> int:
+    return sum(get_cwidth(fragment[1]) for fragment in fragments)

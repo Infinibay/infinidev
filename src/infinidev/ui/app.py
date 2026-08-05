@@ -81,6 +81,10 @@ class InfinidevApp:
 
     def _init_chat_subsystem(self) -> None:
         self.chat_messages: list[dict[str, Any]] = []
+        self._agent_tab_names: dict[str, str] = {}
+        self._agent_tab_messages: dict[str, list[dict[str, Any]]] = {}
+        self._agent_tab_controls: dict[str, ChatHistoryControl] = {}
+        self._agent_tab_windows: dict[str, Any] = {}
         # Attachment tray: images queued for the next submit via /attach or
         # drag-drop auto-detect. Drained when the user submits the message
         # that actually carries them.
@@ -1059,6 +1063,15 @@ class InfinidevApp:
         return self.file_manager.get_explorer_content()
 
     def close_active_tab(self) -> None:
+        if self.active_tab in self._agent_tab_names:
+            tab_id = self.active_tab
+            self._agent_tab_names.pop(tab_id, None)
+            self._agent_tab_messages.pop(tab_id, None)
+            self._agent_tab_controls.pop(tab_id, None)
+            self._agent_tab_windows.pop(tab_id, None)
+            self.active_tab = "chat"
+            self.focus_chat()
+            return
         self.file_manager.close_active_tab()
 
     def save_active_file(self) -> None:
@@ -1073,6 +1086,10 @@ class InfinidevApp:
     def show_background_tasks(self) -> None:
         """Open the background-tasks explorer (Ctrl+B / /tasks)."""
         self.dialog_manager.open_background_tasks()
+
+    def show_agents(self) -> None:
+        """Open the council/agent inspector."""
+        self.dialog_manager.open_agents()
 
     def toggle_line_numbers(self) -> None:
         self.file_manager.toggle_line_numbers()
@@ -1242,11 +1259,89 @@ class InfinidevApp:
         self.dialog_manager.open_findings(filter_type=filter_type)
 
     def _switch_tab(self, tab_id: str) -> None:
+        if tab_id in self._agent_tab_names:
+            self.active_tab = tab_id
+            self.invalidate()
+            return
         self.file_manager.switch_tab(tab_id)
+
+    def open_agent_tab(self, council_id: str, member_id: str | None = None) -> None:
+        """Open a combined council debate or one member's filtered transcript."""
+        from infinidev.engine.council.observer import get_council
+
+        council = get_council(council_id)
+        if council is None:
+            self.flash_status("Council is no longer available")
+            return
+        tab_id = f"agent:{council_id}:{member_id or 'debate'}"
+        if tab_id not in self._agent_tab_names:
+            label = member_id or f"Council {council_id.removeprefix('council-')[:4]}"
+            self._agent_tab_names[tab_id] = label
+            messages = self._build_agent_transcript(council, member_id)
+            control = ChatHistoryControl(messages)
+            control.show_thinking = False
+            self._agent_tab_messages[tab_id] = messages
+            self._agent_tab_controls[tab_id] = control
+            self._agent_tab_windows[tab_id] = Window(
+                content=control,
+                wrap_lines=False,
+                style=f"bg:{SURFACE}",
+                get_vertical_scroll=control.get_vertical_scroll,
+            )
+        self.active_tab = tab_id
+        self.active_dialog = None
+        self.invalidate()
+
+    def _build_agent_transcript(
+        self, council: dict[str, Any], member_id: str | None,
+    ) -> list[dict[str, Any]]:
+        members = council.get("members", {})
+        rows: list[dict[str, Any]] = [{
+            "sender": "Council",
+            "text": council.get("question", ""),
+            "type": "system",
+        }]
+        messages = (
+            members.get(member_id, {}).get("messages", [])
+            if member_id else council.get("messages", [])
+        )
+        palette = ("#61afef", "#c678dd", "#98c379", "#e5c07b", "#56b6c2")
+        member_ids = list(members)
+        for message in messages:
+            mid = message.get("member_id", "agent")
+            persona = message.get("persona", "")
+            colour = palette[member_ids.index(mid) % len(palette)] if mid in member_ids else palette[0]
+            rows.append({
+                "sender": f"{mid} · {persona}" if persona else mid,
+                "text": message.get("text", ""),
+                "type": "agent",
+                "show_sender": True,
+                "sender_style": colour,
+                "round": message.get("round"),
+            })
+        return rows
+
+    def refresh_agent_tabs(self, council_id: str) -> None:
+        """Refresh every open view backed by one council snapshot."""
+        from infinidev.engine.council.observer import get_council
+
+        council = get_council(council_id)
+        if council is None:
+            return
+        prefix = f"agent:{council_id}:"
+        for tab_id in [tid for tid in self._agent_tab_names if tid.startswith(prefix)]:
+            suffix = tab_id[len(prefix):]
+            member_id = None if suffix == "debate" else suffix
+            messages = self._agent_tab_messages[tab_id]
+            messages[:] = self._build_agent_transcript(council, member_id)
+            self._agent_tab_controls[tab_id].invalidate_cache()
 
     def get_tab_bar_fragments(self) -> FormattedText:
         # Cache key: (active_tab, tab_names tuple, dirty_files frozenset)
-        cache_key = (self.active_tab, tuple(self._tab_names.items()), frozenset(self._dirty_files))
+        cache_key = (
+            self.active_tab, tuple(self._tab_names.items()),
+            tuple(self._agent_tab_names.items()), frozenset(self._dirty_files),
+        )
         cached = getattr(self, "_tab_bar_cache", None)
         cached_key = getattr(self, "_tab_bar_cache_key", None)
         if cached is not None and cached_key == cache_key:
@@ -1265,6 +1360,18 @@ class InfinidevApp:
             fragments.append((f"{TEXT_MUTED} bg:{SURFACE_LIGHT}", " Chat ", _click_chat))
 
         # File tabs
+        for tab_id, name in self._agent_tab_names.items():
+            def _click_agent_tab(mouse_event, tid=tab_id):
+                if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                    self._switch_tab(tid)
+
+            style = (
+                f"bg:{PRIMARY} #ffffff bold" if self.active_tab == tab_id
+                else f"{TEXT_MUTED} bg:{SURFACE_LIGHT}"
+            )
+            fragments.append((style, f" {name} ", _click_agent_tab))
+            fragments.append(("", " "))
+
         for tab_id, name in self._tab_names.items():
             dirty = "* " if tab_id in self._dirty_files else ""
 
@@ -1289,6 +1396,9 @@ class InfinidevApp:
         """Return the stable Window/container for the currently active tab."""
         if self.active_tab == "chat":
             return self._chat_content_window
+        agent_window = self._agent_tab_windows.get(self.active_tab)
+        if agent_window is not None:
+            return agent_window
         editor_win = self._editor_windows.get(self.active_tab)
         if editor_win is not None:
             return editor_win

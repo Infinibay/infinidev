@@ -51,6 +51,10 @@ class DialogManager:
         self._bgtasks_ctrl: Any = None
         self._bgtasks_window: Any = None
 
+        # Council/subagent explorer state
+        self._agents_ctrl: Any = None
+        self._agents_window: Any = None
+
     # ── Settings dialog ─────────────────────────────────────────────
 
     def open_settings(self) -> None:
@@ -333,6 +337,72 @@ class DialogManager:
             content=ConditionalContainer(
                 content=frame,
                 filter=Condition(lambda: app.active_dialog == "notes_browser"),
+            ),
+            transparent=False,
+        )
+        if app._float_container:
+            app._float_container.floats.append(dialog_float)
+
+    # ── Background-tasks explorer ──────────────────────────────────
+
+    def open_agents(self) -> None:
+        """Open the live council/subagent picker."""
+        if self._agents_ctrl is None:
+            self._init_agents_dialog()
+        self._agents_ctrl.cursor = 0
+        self._app.active_dialog = "agents"
+        try:
+            self._app.app.layout.focus(self._agents_window)
+        except Exception:
+            pass
+        self._app.invalidate()
+
+    def _init_agents_dialog(self) -> None:
+        """Create the council/subagent picker and register its Float."""
+        from prompt_toolkit.filters import Condition
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout.containers import ConditionalContainer, Float, Window
+
+        from infinidev.ui.dialogs.agents_browser import AgentsBrowserControl
+        from infinidev.ui.dialogs.base import dialog_frame
+        from infinidev.ui.theme import ACCENT
+
+        app = self._app
+        ctrl = AgentsBrowserControl(app.open_agent_tab)
+        self._agents_ctrl = ctrl
+        self._agents_window = Window(content=ctrl, wrap_lines=False)
+        kb = KeyBindings()
+
+        @kb.add("up")
+        @kb.add("k")
+        def _up(event):
+            ctrl.move(-1)
+            app.invalidate()
+
+        @kb.add("down")
+        @kb.add("j")
+        def _down(event):
+            ctrl.move(1)
+            app.invalidate()
+
+        @kb.add("enter")
+        def _open(event):
+            ctrl.open_selected()
+
+        @kb.add("escape")
+        @kb.add("q")
+        def _close(event):
+            app.active_dialog = None
+            app.focus_chat()
+
+        ctrl.get_key_bindings = lambda: kb
+        frame = dialog_frame(
+            "Agents", self._agents_window, width=92, height=28, border_color=ACCENT,
+        )
+        dialog_float = Float(
+            content=ConditionalContainer(
+                content=frame,
+                filter=Condition(lambda: app.active_dialog == "agents"),
             ),
             transparent=False,
         )

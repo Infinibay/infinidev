@@ -80,6 +80,16 @@ def process_event(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> N
 def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
     """Inner dispatch — all state mutations happen here."""
 
+    if event_type.startswith("council_"):
+        council_id = data.get("council_id", "")
+        if event_type == "council_started" and council_id:
+            app.open_agent_tab(council_id)
+            app.active_tab = "chat"
+            app.focus_chat()
+        elif council_id:
+            app.refresh_agent_tabs(council_id)
+        return
+
     # ── Loop engine events ───────────────────────────────────────────
 
     if event_type == "loop_step_update":

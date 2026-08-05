@@ -96,7 +96,10 @@ def build_layout(app_state: InfinidevApp) -> Layout:
             height=1,
             style=f"bg:{SURFACE_LIGHT}",
         ),
-        filter=Condition(lambda: bool(getattr(app_state, "_tab_names", None))),
+        filter=Condition(lambda: bool(
+            getattr(app_state, "_tab_names", None)
+            or getattr(app_state, "_agent_tab_names", None)
+        )),
     )
 
     content_body = DynamicContainer(lambda: app_state.get_active_content())

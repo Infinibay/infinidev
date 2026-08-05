@@ -39,7 +39,7 @@ from infinidev.engine.command_output_store import (
     CommandOutputHandle,
     CommandOutputStore,
 )
-from infinidev.engine.council import moderator as MOD
+from infinidev.engine.council import moderator as MOD, observer
 from infinidev.engine.council.agent_loop import LoopResult, run_terminating_loop
 from infinidev.engine.council.brief import DesignBrief
 from infinidev.engine.council.channel import Channel
@@ -463,9 +463,9 @@ def run_council(
     """Deliberate on ``handoff`` and return a synthesised DesignBrief.
 
     ``handoff`` is free text describing the escalated request (the
-    pipeline builds it from the EscalationPacket). ``hooks`` is an
-    optional :class:`OrchestrationHooks` used purely to surface the
-    debate to the user (each post → ``notify('Council:<id>', ...)``).
+    pipeline builds it from the EscalationPacket). Detailed member turns
+    are published through the council observer so UIs can keep them out
+    of the main transcript while still making them inspectable.
     """
     if not settings.COUNCIL_ENABLED:
         return None
@@ -479,11 +479,7 @@ def run_council(
             with best_effort("council on_status hook failed"):
                 hooks.on_status(level, msg)
 
-    def _say(speaker: str, msg: str) -> None:
-        if hooks is not None and msg:
-            with best_effort("council notify hook failed"):
-                hooks.notify(speaker, msg, "agent")
-
+    council_id: str | None = None
     try:
         # ── Seed ─────────────────────────────────────────────────────────
         _status("info", "Convening council — assigning roles...")
@@ -492,15 +488,26 @@ def run_council(
             logger.warning("Council seeded with no members; skipping")
             return None
 
-        _say(
-            "Council",
-            "Convening a council of "
-            f"{len(roster.members)} agents to debate:\n"
-            f"  {roster.question}\n\n"
-            + "\n".join(
-                f"  - {m.member_id}: {m.objective}" for m in roster.members
-            ),
+        council_id = observer.start_council(
+            question=roster.question,
+            members=[
+                {
+                    "member_id": member.member_id,
+                    "persona": member.persona,
+                    "objective": member.objective,
+                }
+                for member in roster.members
+            ],
+            project_id=project_id,
         )
+        if hooks is not None:
+            with best_effort("council notify hook failed"):
+                hooks.notify(
+                    "Council",
+                    f"Council started with {len(roster.members)} agents. "
+                    "Open Agents to inspect the debate.",
+                    "system",
+                )
 
         channel = Channel(roster.question)
         for ot in roster.opening_threads:
@@ -519,6 +526,11 @@ def run_council(
             if not active:
                 break
             _status("info", f"Council round {round_num}/{max_rounds}...")
+            for member in active:
+                observer.set_member_status(
+                    council_id, member.member_id, "running",
+                    project_id=project_id, round_num=round_num,
+                )
 
             snapshot = channel.snapshot()
             turns = _run_round_parallel(
@@ -529,7 +541,10 @@ def run_council(
             # Commit in deterministic order (by member_id) so the channel
             # is reproducible regardless of thread completion order.
             for turn in sorted(turns, key=lambda t: t.member_id):
-                _commit_turn(turn, channel, round_num, concluded, final_positions, _say)
+                _commit_turn(
+                    turn, channel, round_num, concluded, final_positions,
+                    council_id=council_id, project_id=project_id,
+                )
 
             if len(concluded) >= len(roster.members):
                 _status("info", "All members concluded — closing council.")
@@ -555,9 +570,12 @@ def run_council(
                 f"  - {mid}: {pos}" for mid, pos in sorted(final_positions.items())
             )
         brief = MOD.synthesize(full_digest, roster.question, **ctx)
+        observer.finish_council(council_id, "completed", project_id=project_id)
         return brief
     except Exception:
         logger.exception("Council failed; proceeding without a design brief")
+        if council_id is not None:
+            observer.finish_council(council_id, "failed", project_id=project_id)
         _status("warn", "Council failed — proceeding without a design brief.")
         return None
 
@@ -591,7 +609,8 @@ def _run_round_parallel(
 
 def _commit_turn(
     turn: MemberTurn, channel: Channel, round_num: int,
-    concluded: set[str], final_positions: dict[str, str], say,
+    concluded: set[str], final_positions: dict[str, str], *,
+    council_id: str, project_id: int | None,
 ) -> None:
     """Apply one member's decided action to the live channel."""
     if turn.action == "post":
@@ -615,15 +634,28 @@ def _commit_turn(
                     author=turn.member_id, thread_id=_first_thread_id(channel),
                     text=turn.message, round=round_num, refs=list(turn.refs),
                 )
-        say(f"Council:{turn.member_id}", turn.message)
+        observer.add_message(
+            council_id, turn.member_id, turn.message,
+            project_id=project_id, round_num=round_num, action="post",
+        )
     elif turn.action == "conclude":
         concluded.add(turn.member_id)
         if turn.final_position:
             final_positions[turn.member_id] = turn.final_position
-            say(
-                f"Council:{turn.member_id}",
-                f"[concluye] {turn.final_position}",
+            observer.add_message(
+                council_id, turn.member_id, turn.final_position,
+                project_id=project_id, round_num=round_num, action="conclude",
             )
+        else:
+            observer.set_member_status(
+                council_id, turn.member_id, "completed", project_id=project_id,
+                round_num=round_num,
+            )
+    else:
+        observer.set_member_status(
+            council_id, turn.member_id, "failed", project_id=project_id,
+            round_num=round_num,
+        )
 
 
 def _first_thread_id(channel: Channel) -> str:
