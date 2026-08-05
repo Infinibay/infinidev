@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,26 @@ def test_response_is_matched_by_id_not_line_order(manager):
     result = manager.call("ken", "ken_recall", {"query": "jwt"})
     assert result.is_error is False
     assert result.rows()[0]["topic"] == "jwt-clock-skew"
+
+
+def test_parallel_calls_share_one_process_without_stranding_responses():
+    events: list[dict] = []
+    mgr = McpManager(
+        {"ken": server_config(timeout=2)},
+        on_event=events.append,
+    )
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [
+                pool.submit(mgr.call, "ken", "ken_recall", {"query": str(i)})
+                for i in range(24)
+            ]
+            results = [future.result(timeout=5) for future in futures]
+
+        assert all(result.rows()[0]["topic"] == "jwt-clock-skew" for result in results)
+        assert sum(event["event"] == "started" for event in events) == 1
+    finally:
+        mgr.close()
 
 
 def test_structured_and_text_content_agree(manager):

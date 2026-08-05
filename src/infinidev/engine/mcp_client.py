@@ -32,12 +32,14 @@ so callers never parse MCP envelopes by hand.
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -154,6 +156,12 @@ class McpServerClient:
         self._server_info: dict[str, Any] = {}
 
         self._lock = threading.RLock()
+        # stdio is one ordered byte stream, not a multiplexed transport.
+        # Keep one complete request/response exchange in flight per server.
+        # Without this, parallel tool execution can consume another caller's
+        # response, strand both callers until timeout, and trigger a restart
+        # storm that leaves the TUI on "Working...".
+        self._request_lock = threading.Lock()
         self._tools: list[McpTool] | None = None
         self._tools_loaded_at: float | None = None
         self._failure_count = 0
@@ -234,11 +242,17 @@ class McpServerClient:
             pass
         if proc.poll() is None:
             try:
-                proc.terminate()
+                if os.name == "posix":
+                    os.killpg(proc.pid, signal.SIGTERM)
+                else:
+                    proc.terminate()
                 proc.wait(timeout=2)
             except Exception:
                 try:
-                    proc.kill()
+                    if os.name == "posix":
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
                 except Exception:
                     logger.debug("Failed to kill MCP server %s", self.name)
 
@@ -300,6 +314,7 @@ class McpServerClient:
                 bufsize=1,
                 cwd=self.cwd,
                 env=env,
+                start_new_session=(os.name == "posix"),
             )
         except OSError as exc:
             logger.warning("Failed to start MCP server %s: %s", self.name, exc)
@@ -461,23 +476,28 @@ class McpServerClient:
 
     def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Public request path: ensures the session, then round-trips."""
-        proc = self._ensure_process()
-        if proc is None:
-            raise McpUnavailable(
-                f"MCP server {self.name!r} is not available"
-                + (f": {self._unavailable_reason}" if self._unavailable_reason else "")
-            )
-        timeout = self._timeout
-        if timeout is None:
-            timeout = float(getattr(settings, "MCP_REQUEST_TIMEOUT", 30) or 30)
-        try:
-            return self._rpc(method, params, timeout=float(timeout))
-        except McpUnavailable:
-            # A dead session must not poison every later call: tear it down
-            # so the next request re-spawns (subject to backoff).
-            if not self.running:
-                self._record_failure(f"{method} lost the session")
-            raise
+        with self._request_lock:
+            proc = self._ensure_process()
+            if proc is None:
+                raise McpUnavailable(
+                    f"MCP server {self.name!r} is not available"
+                    + (
+                        f": {self._unavailable_reason}"
+                        if self._unavailable_reason
+                        else ""
+                    )
+                )
+            timeout = self._timeout
+            if timeout is None:
+                timeout = float(getattr(settings, "MCP_REQUEST_TIMEOUT", 30) or 30)
+            try:
+                return self._rpc(method, params, timeout=float(timeout))
+            except McpUnavailable:
+                # A dead session must not poison every later call: tear it down
+                # so the next request re-spawns (subject to backoff).
+                if not self.running:
+                    self._record_failure(f"{method} lost the session")
+                raise
 
     # ── high-level API ───────────────────────────────────────────────
 
@@ -790,6 +810,13 @@ def reset_default_mcp_manager() -> None:
         if _default_manager is not None:
             _default_manager.close()
         _default_manager = None
+
+
+# The TUI normally owns the process for its full lifetime, but MCP children
+# still need an explicit EOF/termination boundary on Ctrl+C, embedded CLI
+# use, and interpreter shutdown. Daemon reader threads do not own or reap the
+# server process themselves.
+atexit.register(reset_default_mcp_manager)
 
 
 # ── Keyword fallback used when no MCP server can answer ───────────────────
