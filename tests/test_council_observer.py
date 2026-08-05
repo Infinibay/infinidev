@@ -103,3 +103,24 @@ def test_tui_transcript_assigns_stable_role_headers_and_colours() -> None:
     assert messages[2]["sender"] == "b · reviewer"
     assert messages[1]["show_sender"] is True
     assert messages[1]["sender_style"] != messages[2]["sender_style"]
+
+
+def test_summary_and_running_count_do_not_copy_transcripts() -> None:
+    council_id = observer.start_council(
+        question="Q",
+        members=[{"member_id": "a", "persona": "p", "objective": "o"}],
+        project_id=1,
+    )
+    observer.set_member_status(council_id, "a", "running", project_id=1)
+    observer.add_message(
+        council_id, "a", "large" * 10_000,
+        project_id=1, round_num=1, action="post",
+    )
+    observer.set_member_status(council_id, "a", "running", project_id=1)
+
+    summaries = observer.list_councils(include_messages=False)
+
+    assert observer.running_agent_count() == 1
+    assert "messages" not in summaries[0]
+    assert "messages" not in summaries[0]["members"]["a"]
+    assert summaries[0]["message_count"] == 1

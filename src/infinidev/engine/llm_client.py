@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 LLM_RETRIES = 5
 LLM_RETRY_DELAY = 3.0  # seconds (base; exponential backoff applied)
 
+# A provider bug or an accidentally unbounded local endpoint must not be
+# allowed to turn one streamed completion into an OOM event. These limits are
+# far above normal coding-agent responses while keeping failure recoverable.
+_MAX_STREAM_CHUNKS = 100_000
+_MAX_STREAM_TEXT_BYTES = 32 * 1024 * 1024
+_TOOL_DETECTION_WINDOW = 64 * 1024
+
 # ── Error classification ─────────────────────────────────────────────────
 
 # Transient LLM errors that should be retried
@@ -115,17 +122,35 @@ def _stream_and_assemble(
     chunks = []
     content_buffer = ""
     token_count = 0
+    stream_text_bytes = 0
     detected_tool: str | None = None
 
     try:
         for chunk in stream:
             chunks.append(chunk)
+            if len(chunks) > _MAX_STREAM_CHUNKS:
+                raise RuntimeError(
+                    f"LLM stream exceeded safety limit of {_MAX_STREAM_CHUNKS:,} chunks"
+                )
             try:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta:
                     continue
                 reasoning = getattr(delta, "reasoning_content", None) or ""
                 content = getattr(delta, "content", None) or ""
+                stream_text_bytes += len(reasoning.encode("utf-8"))
+                stream_text_bytes += len(content.encode("utf-8"))
+
+                tc_deltas = getattr(delta, "tool_calls", None)
+                for tc_delta in tc_deltas or []:
+                    fn = getattr(tc_delta, "function", None)
+                    arguments = getattr(fn, "arguments", None) if fn else None
+                    if arguments:
+                        stream_text_bytes += len(str(arguments).encode("utf-8"))
+                if stream_text_bytes > _MAX_STREAM_TEXT_BYTES:
+                    raise RuntimeError(
+                        "LLM stream exceeded the 32 MiB in-memory safety limit"
+                    )
 
                 if reasoning:
                     token_count += 1
@@ -134,7 +159,7 @@ def _stream_and_assemble(
                         on_stream_status("thinking", token_count, None)
                 elif content:
                     token_count += 1
-                    content_buffer += content
+                    content_buffer = (content_buffer + content)[-_TOOL_DETECTION_WINDOW:]
                     # Do NOT send content to on_thinking_chunk — it contains
                     # tool call JSON which would pollute the THINKING panel.
 
@@ -148,7 +173,6 @@ def _stream_and_assemble(
                         on_stream_status("content", token_count, detected_tool)
 
                 # FC mode: tool call deltas arrive as delta.tool_calls
-                tc_deltas = getattr(delta, "tool_calls", None)
                 if tc_deltas and not detected_tool:
                     for tc_delta in tc_deltas:
                         fn = getattr(tc_delta, "function", None)
@@ -165,6 +189,12 @@ def _stream_and_assemble(
         # even if the stream raised an exception (timeout, connection reset, etc.)
         if on_stream_status:
             on_stream_status("done", token_count, detected_tool)
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
 
     # Assemble chunks into a complete response object
     try:

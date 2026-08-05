@@ -45,6 +45,22 @@ _PROMPT_PATTERNS: tuple[re.Pattern[bytes], ...] = (
 _PROMPT_SCAN_WINDOW = 512  # bytes from the end of stderr to scan
 
 
+def _capture_buffer_limit() -> int:
+    """Maximum bytes retained per foreground output stream in memory."""
+    artifact_limit = int(getattr(settings, "COMMAND_OUTPUT_MAX_ARTIFACT_BYTES", 0) or 0)
+    return max(64 * 1024, artifact_limit)
+
+
+def _extend_bounded(buffer: bytearray, data: bytes, limit: int) -> int:
+    """Append bytes, retain only the tail, and return the discarded byte count."""
+    buffer.extend(data)
+    overflow = len(buffer) - limit
+    if overflow > 0:
+        del buffer[:overflow]
+        return overflow
+    return 0
+
+
 def _detect_prompt(recent: bytes, already_seen: set[str]) -> str | None:
     """Return the prompt text if stderr looks like an input prompt."""
     for r in _PROMPT_PATTERNS:
@@ -363,6 +379,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
         # Only scan stderr bytes emitted AFTER the last handled prompt,
         # so overlapping regexes on the same prompt text don't re-fire.
         stderr_scan_from = 0
+        buffer_limit = _capture_buffer_limit()
         start = time.monotonic()
         killed_reason: str | None = None
 
@@ -385,9 +402,11 @@ class ExecuteCommandTool(InfinibayBaseTool):
                         continue
                     emit_tool_output(data.decode(errors="replace"))
                     if r is proc.stdout:
-                        stdout_buf.extend(data)
+                        _extend_bounded(stdout_buf, data, buffer_limit)
                     else:
-                        stderr_buf.extend(data)
+                        discarded = _extend_bounded(stderr_buf, data, buffer_limit)
+                        if discarded:
+                            stderr_scan_from = max(0, stderr_scan_from - discarded)
 
                 if is_tool_cancelled():
                     killed_reason = "Command interrupted by user"
@@ -448,10 +467,10 @@ class ExecuteCommandTool(InfinibayBaseTool):
                 rest_out, rest_err = proc.communicate(timeout=2)
                 if rest_out:
                     emit_tool_output(rest_out.decode(errors="replace"))
-                    stdout_buf.extend(rest_out)
+                    _extend_bounded(stdout_buf, rest_out, buffer_limit)
                 if rest_err:
                     emit_tool_output(rest_err.decode(errors="replace"))
-                    stderr_buf.extend(rest_err)
+                    _extend_bounded(stderr_buf, rest_err, buffer_limit)
             except subprocess.TimeoutExpired:
                 self._terminate(proc)
 

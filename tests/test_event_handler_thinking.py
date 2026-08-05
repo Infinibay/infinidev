@@ -93,6 +93,20 @@ def test_two_calls_each_flush_their_own_full_text():
     ]
 
 
+def test_runaway_reasoning_stream_is_bounded() -> None:
+    from infinidev.ui.event_handler import _MAX_THINKING_TRANSCRIPT_CHARS
+
+    app = _FakeApp()
+    process_event(
+        app,
+        "loop_thinking_chunk",
+        {"text": "x" * (_MAX_THINKING_TRANSCRIPT_CHARS + 100)},
+    )
+
+    assert len(app._thinking_full) == _MAX_THINKING_TRANSCRIPT_CHARS
+    assert app._thinking_full.startswith("[Earlier streamed reasoning truncated")
+
+
 def test_loop_think_pseudo_tool_not_reflushed_on_next_done():
     app = _FakeApp()
     # An explicit `think` writes straight to chat and updates the sidebar

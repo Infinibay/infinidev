@@ -119,10 +119,23 @@ def get_council(council_id: str) -> dict[str, Any] | None:
         return deepcopy(state) if state is not None else None
 
 
-def list_councils() -> list[dict[str, Any]]:
-    """Return all council snapshots, newest first."""
+def list_councils(*, include_messages: bool = True) -> list[dict[str, Any]]:
+    """Return council snapshots, optionally omitting potentially large transcripts."""
     with _lock:
-        return [deepcopy(state) for state in reversed(_sessions.values())]
+        if include_messages:
+            return [deepcopy(state) for state in reversed(_sessions.values())]
+        return [_summary(state) for state in reversed(_sessions.values())]
+
+
+def running_agent_count() -> int:
+    """Return the live agent count without allocating transcript snapshots."""
+    with _lock:
+        return sum(
+            member.get("status") == "running"
+            for state in _sessions.values()
+            if state.get("status") == "running"
+            for member in state.get("members", {}).values()
+        )
 
 
 def clear_councils() -> None:
@@ -138,9 +151,11 @@ def _emit(
     agent_id: str,
     **extra: Any,
 ) -> None:
-    state = get_council(council_id)
-    if state is None:
-        return
+    with _lock:
+        raw_state = _sessions.get(council_id)
+        if raw_state is None:
+            return
+        state = _summary(raw_state)
     event_bus.emit(
         event_type,
         project_id or 1,
@@ -149,12 +164,31 @@ def _emit(
     )
 
 
+def _summary(state: dict[str, Any]) -> dict[str, Any]:
+    """Copy only bounded metadata needed by status lines and selectors."""
+    return {
+        "id": state["id"],
+        "question": state.get("question", ""),
+        "status": state.get("status", ""),
+        "members": {
+            member_id: {
+                key: value
+                for key, value in member.items()
+                if key != "messages"
+            }
+            for member_id, member in state.get("members", {}).items()
+        },
+        "message_count": len(state.get("messages", [])),
+    }
+
+
 __all__ = [
     "add_message",
     "clear_councils",
     "finish_council",
     "get_council",
     "list_councils",
+    "running_agent_count",
     "set_member_status",
     "start_council",
 ]

@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 LIVE_TOOL_OUTPUT_LINES = 20
 _LIVE_TOOL_LINE_CHARS = 1000
+_MAX_THINKING_TRANSCRIPT_CHARS = 2 * 1024 * 1024
+_THINKING_TRUNCATED = "[Earlier streamed reasoning truncated for memory safety]\n"
 _RUNTIME_STATE_EVENTS = {
     "loop_step_update",
     "loop_tool_start",
@@ -86,7 +88,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
             app.open_agent_tab(council_id)
             app.active_tab = "chat"
             app.focus_chat()
-        elif council_id:
+        elif council_id and event_type in {"council_agent_message", "council_finished"}:
             app.refresh_agent_tabs(council_id)
         return
 
@@ -322,7 +324,12 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         # truncated VIEW of it in the THINKING sidebar panel.
         chunk = data.get("text", "")
         if chunk:
-            app._thinking_full += chunk
+            combined = app._thinking_full + chunk
+            if len(combined) > _MAX_THINKING_TRANSCRIPT_CHARS:
+                tail_size = _MAX_THINKING_TRANSCRIPT_CHARS - len(_THINKING_TRUNCATED)
+                app._thinking_full = _THINKING_TRUNCATED + combined[-tail_size:]
+            else:
+                app._thinking_full = combined
             # Sidebar view: keep only last ~500 chars to prevent overflow.
             if len(app._thinking_full) > 500:
                 app._thinking_text = "..." + app._thinking_full[-450:]

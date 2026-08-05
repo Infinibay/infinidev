@@ -21,7 +21,7 @@ class AgentsBrowserControl(FormattedTextControl):
 
     def entries(self) -> list[tuple[str, str | None, dict[str, Any]]]:
         entries: list[tuple[str, str | None, dict[str, Any]]] = []
-        for council in list_councils():
+        for council in list_councils(include_messages=False):
             entries.append((council["id"], None, council))
             for member in council.get("members", {}).values():
                 entries.append((council["id"], member.get("member_id"), member))

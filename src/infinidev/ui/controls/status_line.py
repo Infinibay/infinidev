@@ -156,14 +156,9 @@ class StatusLineControl(FormattedTextControl):
         """Segments in *drop-last-first* priority order."""
         segments: list[tuple] = []
         try:
-            from infinidev.engine.council.observer import list_councils
+            from infinidev.engine.council.observer import running_agent_count
 
-            running = sum(
-                member.get("status") == "running"
-                for council in list_councils()
-                if council.get("status") == "running"
-                for member in council.get("members", {}).values()
-            )
+            running = running_agent_count()
         except Exception:
             running = 0
         if running:
