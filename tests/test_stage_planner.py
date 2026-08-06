@@ -242,6 +242,18 @@ def test_stage_planner_role_has_only_its_terminal_tools(scripted):
     assert "create_file" not in names
 
 
+def test_qwen_subscription_requires_a_tool_call(scripted, monkeypatch):
+    monkeypatch.setattr(
+        "infinidev.engine.llm_client.settings.LLM_PROVIDER",
+        "qwen_subscription",
+    )
+    runner = scripted([_response([_call("emit_stage", _stage_args())])])
+
+    run_stage_planner(_state())
+
+    assert runner.calls[0]["tool_choice"] == "required"
+
+
 def test_bounded_stall_returns_failure_decision_after_max_stall_nudges(scripted):
     """Repeated stalls (no tool_calls, no embedded decision) must early-return
     via _failure_decision once _MAX_STALL_NUDGES nudges have been emitted,

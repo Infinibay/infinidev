@@ -18,6 +18,7 @@ from infinidev.engine.analysis.staged_planning import (
     StagedPlanningState,
 )
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
+from infinidev.engine.llm_client import call_llm
 from infinidev.engine.oversized_result import DuplicateCallGuard, handle_oversized_result
 from infinidev.engine.prompt_profile import apply_calibrated_guidance
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
@@ -107,8 +108,6 @@ def _run_llm_loop(
     max_iterations: int,
     hooks: Any | None,
 ) -> StageDecision:
-    import litellm
-
     base_kwargs = get_litellm_params_for_behavior()
     exploration_calls = 0
     budget_nudged = False
@@ -117,15 +116,16 @@ def _run_llm_loop(
 
     for _iteration in range(max_iterations):
         call_kwargs = dict(base_kwargs)
-        call_kwargs.update({
-            "messages": messages,
-            "tools": tool_schemas,
-        })
         call_kwargs.setdefault("temperature", 0.1)
         call_kwargs.setdefault("stream", False)
         call_kwargs.setdefault("max_tokens", 3500)
 
-        response = litellm.completion(**call_kwargs)
+        response = call_llm(
+            call_kwargs,
+            messages,
+            tools=tool_schemas,
+            tool_choice="required",
+        )
         report_prompt_tokens(
             hooks,
             response,
