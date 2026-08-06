@@ -87,6 +87,9 @@ class NoOpHooks:
     def on_file_change(self, path: str) -> None:
         return None
 
+    def on_stage_update(self, snapshot: dict[str, Any]) -> None:
+        return None
+
 
 class ClickHooks(NoOpHooks):
     """Terminal-friendly hooks built on ``click.echo``.

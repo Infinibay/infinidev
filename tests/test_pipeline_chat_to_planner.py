@@ -24,6 +24,40 @@ from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.engine.orchestration.pipeline import run_task
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+from infinidev.engine.analysis.staged_planning import (
+    CompleteGoalDecision,
+    EmitStageDecision,
+    StageSpec,
+    StageTaskSpec,
+)
+
+
+@pytest.fixture(autouse=True)
+def _single_stage_planner(monkeypatch):
+    """Keep pipeline tests focused while exercising the real staged wiring."""
+    def decide(state, **_kwargs):
+        if state.stages:
+            return CompleteGoalDecision(
+                evidence=[
+                    f"{state.evidence[-1].id}: The Stage Task result is present "
+                    "in the evidence ledger"
+                ]
+            )
+        return EmitStageDecision(stage=StageSpec(
+            title="Execute the requested change",
+            outcome="The requested change is implemented and reviewed",
+            exit_criteria=["The Task execution and review produce evidence"],
+            tasks=[StageTaskSpec(
+                id="request",
+                title="Implement the request",
+                outcome="The requested behavior is implemented",
+                acceptance_criteria=["The requested behavior is checked"],
+            )],
+        ))
+
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.stage_planner.run_stage_planner", decide
+    )
 
 
 class _RecordingHooks:
@@ -203,9 +237,10 @@ class TestEscalateRunsFullPipeline:
 
         assert result == "All done, bug fixed."
         # The plan reached the LoopEngine.
-        assert engine.captured_initial_plan is expected_plan
+        assert engine.captured_initial_plan.steps == expected_plan.steps
+        assert expected_plan.overview in engine.captured_initial_plan.overview
         # task_prompt first element is the user's original request.
-        assert engine.captured_task_prompt[0] == escalation.user_request
+        assert escalation.user_request in engine.captured_task_prompt[0]
         # The user saw the preview AND the plan overview, in order.
         previews = [
             (speaker, msg)

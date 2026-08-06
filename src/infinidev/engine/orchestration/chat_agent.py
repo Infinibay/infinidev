@@ -670,6 +670,7 @@ def _get_resumed_state_snapshot(session_id: str) -> str:
     snapshot = {
         "task_description": runtime.get("task_description", ""),
         "plan_steps": runtime.get("plan_steps", []),
+        "staged_planning": runtime.get("staged_planning", {}),
         "intermediate_events": events,
     }
     if not any(snapshot.values()):

@@ -29,3 +29,15 @@ def test_runtime_cancel_marks_active_task() -> None:
     runtime.cancel()
     assert runtime.state.cancelled is True
     assert task.status == TaskStatus.CANCELLED
+
+
+def test_runtime_block_is_terminal_but_not_complete() -> None:
+    runtime = TaskRuntime(task_id="session")
+    task = runtime.add_task("Need user authority")
+    runtime.start_next_task()
+
+    runtime.block_current_task("Choose the deployment target")
+
+    assert task.status == TaskStatus.BLOCKED
+    assert task.result == "Choose the deployment target"
+    assert runtime.state.is_finished() is True

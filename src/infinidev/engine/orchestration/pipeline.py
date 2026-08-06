@@ -5,7 +5,10 @@ This module owns the entire task lifecycle as a single function
 
   user turn  →  ChatAgent  →  (respond?)  done.
                     │
-                    └ (escalate)  AnalystPlanner  →  Gather  →  LoopEngine.execute(initial_plan=plan)  →  Review  →  done.
+                    └ (escalate)  Stage Planner
+                                      ├─ complete / block
+                                      └─ Stage → Task Planner → LoopEngine → Review
+                                                   ↑___________________________|
 
 Every side effect that needs to reach a human (showing the chat reply,
 showing the plan, status updates) goes through the
@@ -154,6 +157,9 @@ class OrchestrationHooks(Protocol):
     def on_file_change(self, path: str) -> None:
         """A file was modified by a tool. UIs that show diffs refresh
         here. Default impls may ignore this."""
+
+    def on_stage_update(self, snapshot: dict[str, Any]) -> None:
+        """The durable Goal/Stage/Task hierarchy changed."""
 
 
 def _runtime_event_bridge(hooks: OrchestrationHooks):
@@ -440,13 +446,13 @@ def _run_execution_phase(
     hooks: OrchestrationHooks,
     initial_attachments: list[Any] | None = None,
     task: Any | None = None,
+    preserve_file_tracker: bool = False,
 ) -> tuple[str, Any]:
     """Execution: dispatch to LoopEngine (or PhaseEngine for ``--think``).
 
-    ``plan`` is the :class:`infinidev.engine.analysis.plan.Plan` produced
-    by the analyst planner. It is passed to LoopEngine via
-    ``initial_plan=`` so the developer starts with a pre-approved plan
-    (steps marked ``user_approved=True``).
+    ``plan`` is the model-inferred Task Plan produced for one active Stage
+    Task. It seeds LoopEngine via ``initial_plan=``; its Steps remain editable
+    tactics unless their individual authority says otherwise.
 
     Tree-engine flows (``/explore``, ``/brainstorm``) no longer enter
     here — they go through :func:`run_flow_task` instead.
@@ -477,6 +483,9 @@ def _run_execution_phase(
             )
             used_engine: Any = phase_eng
         else:
+            execute_kwargs: dict[str, Any] = {}
+            if preserve_file_tracker:
+                execute_kwargs["preserve_file_tracker"] = True
             result = engine.execute(
                 agent=agent,
                 task_prompt=task_prompt,
@@ -484,6 +493,7 @@ def _run_execution_phase(
                 initial_plan=plan,
                 initial_attachments=initial_attachments,
                 task=task,
+                **execute_kwargs,
             )
             used_engine = engine
         if not result or not result.strip():
@@ -730,7 +740,7 @@ def run_task(
     this turn, not something the next turn should read back as if the user
     had typed it.
 
-    NOTE: ``run_chat_agent`` and ``run_planner`` are imported lazily to
+    NOTE: ``run_chat_agent`` is imported lazily to
     avoid a circular import: ``engine.orchestration.__init__`` eagerly
     imports this module (to expose ``run_task``), and the chat agent's
     module transitively triggers that ``__init__`` through
@@ -739,7 +749,6 @@ def run_task(
     them and crashed the CLI on cold start; see the revert commit.
     """
     from infinidev.engine.orchestration.chat_agent import run_chat_agent
-    from infinidev.engine.analysis.planner import run_planner
     from infinidev.tools.base.context import (
         get_context_for_agent,
         get_current_project_id,
@@ -950,8 +959,8 @@ def run_task(
     escalation = _run_elaboration_phase(
         escalation=escalation,
         session_id=session_id,
-        project_id=(ctx.project_id if ctx else get_current_project_id()),
-        workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
+        project_id=agent_project_id,
+        workspace_path=agent_workspace,
         hooks=hooks,
     )
 
@@ -962,7 +971,7 @@ def run_task(
         if callable(mark_shown):
             mark_shown()
         hooks.on_phase("idle")
-        runtime.complete_current_task(blocked_reply)
+        runtime.block_current_task(blocked_reply)
         runtime.append_chat("assistant", blocked_reply)
         _report_turn_end_to_ken(blocked_reply, session_id)
         return blocked_reply
@@ -974,23 +983,13 @@ def run_task(
     escalation = _run_council_phase(
         escalation=escalation,
         session_id=session_id,
-        project_id=(ctx.project_id if ctx else get_current_project_id()),
-        workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
+        project_id=agent_project_id,
+        workspace_path=agent_workspace,
         hooks=hooks,
     )
 
-    hooks.on_phase("analysis")
-    hooks.on_status("info", "Planning...")
-    plan = run_planner(
-        escalation,
-        session_id=session_id,
-        project_id=(ctx.project_id if ctx else get_current_project_id()),
-        workspace_path=(ctx.workspace_path if ctx else get_current_workspace_path()),
-        hooks=hooks,
-    )
-    hooks.notify("Planner", plan.overview, "agent")
-
-    # Configure agent identity for the develop flow before gather/execute.
+    # Configure agent identity once; each Stage Task receives its own Task
+    # Plan and LoopEngine execution under this develop contract.
     from infinidev.engine.flows import get_flow_config
     from infinidev.prompts.flows import get_flow_identity
 
@@ -1000,100 +999,31 @@ def run_task(
     if hasattr(agent, "backstory"):
         agent.backstory = flow_config.backstory
 
-    # Build the developer's task prompt from the planner output. The
-    # overview is the description; the flow config supplies the
-    # canonical expected_output.
-    # The turn context — Ken's ranked block plus the task_start hook's
-    # output — rides on the description, not on the expected_output: the
-    # latter is the flow's contract and the reviewer judges against it, so
-    # anything added there would change what "done" means.
-    task_prompt: tuple[str, str] = (
-        f"{escalation.user_request}\n\n{turn_context}"
-        if turn_context
-        else escalation.user_request,
-        flow_config.expected_output,
-    )
+    from infinidev.engine.orchestration.staged_pipeline import run_staged_goal
 
-    # Wrap the user free-text into a structured ``Task`` artefact so
-    # the developer prompt and the assistant critic both see the same
-    # XML-rendered spec. Planner-authored criteria remain explicitly derived:
-    # they guide verification without becoming user-authored scope. If
-    # construction fails
-    # (e.g. user_request too short), we fall back to ``None`` and the legacy
-    # plain ``<task>`` block is used — the pipeline never breaks because of
-    # an enrichment failure.
-    structured_task: Any | None = None
-    try:
-        from infinidev.engine.orchestration.task_schema import task_from_free_text
-
-        structured_task = task_from_free_text(
-            escalation.user_request,
-            derived_verification_criteria=list(
-                getattr(plan, "acceptance_criteria", []) or []
-            ),
-        )
-    except Exception:
-        logger.debug(
-            "structured Task synthesis failed; using legacy <task>", exc_info=True
-        )
-
-    # ── Gather ──────────────────────────────────────────────────────────
-    task_prompt = _run_gather_phase(
-        user_input=user_input,
-        agent=agent,
-        task_prompt=task_prompt,
-        session_id=session_id,
-        force_gather=force_gather,
-        hooks=hooks,
-    )
-
-    # ── Execute ─────────────────────────────────────────────────────────
-    result, used_engine = _run_execution_phase(
+    staged_run = run_staged_goal(
+        escalation=escalation,
         agent=agent,
         engine=engine,
-        task_prompt=task_prompt,
-        plan=plan,
-        session_id=session_id,
-        use_phase_engine=use_phase_engine,
-        hooks=hooks,
-        initial_attachments=list(escalation.attachments)
-        if escalation.attachments
-        else None,
-        task=structured_task,
-    )
-
-    # ── Review ──────────────────────────────────────────────────────────
-    # Keep user acceptance criteria separate from planner-derived checks.
-    review_criteria: list[str] | None = None
-    derived_review_criteria: list[str] | None = None
-    if structured_task is not None:
-        from infinidev.engine.orchestration.task_schema import is_synthesised
-
-        if not is_synthesised(structured_task):
-            review_criteria = list(structured_task.acceptance_criteria)
-        derived_review_criteria = list(structured_task.derived_verification_criteria)
-
-    # Review re-enters engine.execute() up to three times through the
-    # rework loop, and a cancelled run is exactly the one whose tests fail
-    # — it stopped half-way. Reviewing it restarted the developer on the
-    # user's repository minutes after they asked it to stop.
-    if getattr(used_engine, "is_cancelled", False):
-        logger.info("run_task: cancelled — skipping review and end-of-task hooks")
-        runtime.record_step(result, step_id=root_task.id)
-        runtime.complete_current_task(result)
-        return result
-
-    result = _run_review_phase(
-        engine=used_engine,
-        agent=agent,
-        session_id=session_id,
-        task_prompt=task_prompt,
-        result=result,
         reviewer=reviewer,
         hooks=hooks,
-        acceptance_criteria=review_criteria,
-        derived_verification_criteria=derived_review_criteria,
+        session_id=session_id,
+        project_id=agent_project_id,
+        workspace_path=agent_workspace,
+        turn_context=turn_context,
+        use_phase_engine=use_phase_engine,
+        force_gather=force_gather,
     )
+    result = staged_run.text
+    used_engine = staged_run.engine
+
+    # Review happens per Task inside the staged orchestrator. A cancelled
+    # Stage remains incomplete and resumable; do not restart it here.
+    if getattr(used_engine, "is_cancelled", False):
+        logger.info("run_task: cancelled — skipping end-of-task hooks")
+        runtime.record_step(result, step_id=root_task.id)
+        runtime.cancel()
+        return result
 
     # ── task_end_instruction hook ───────────────────────────────────────
     # Last chance to add work, after the reviewer has had its say. If the
@@ -1111,7 +1041,10 @@ def run_task(
     )
     if followup:
         runtime.record_step(result, step_id=root_task.id)
-        runtime.complete_current_task(result)
+        if staged_run.state.status == "complete":
+            runtime.complete_current_task(result)
+        else:
+            runtime.block_current_task(result)
         return _reenter(followup)
 
     # ── Hidden work summary ─────────────────────────────────────────────
@@ -1127,7 +1060,12 @@ def run_task(
 
     hooks.on_phase("idle")
     runtime.record_step(result, step_id=root_task.id)
-    runtime.complete_current_task(result)
+    if staged_run.state.status == "complete":
+        runtime.complete_current_task(result)
+    elif staged_run.state.status == "blocked":
+        runtime.block_current_task(result)
+    else:
+        runtime.fail_current_task(result)
     runtime.append_chat("assistant", result)
     _report_turn_end_to_ken(result, session_id)
     return result

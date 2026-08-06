@@ -360,11 +360,11 @@ class LoopEngine(AgentEngine):
         LoopGuard, StepManager. See class docstrings for details.
 
         When ``initial_plan`` (an ``infinidev.engine.analysis.plan.Plan``
-        instance) is provided, the loop starts with a pre-approved plan
-        populated from the analyst: plan.overview seeds
+        instance) is provided, the loop starts with a planner-authored plan:
+        plan.overview seeds
         ``state.plan.overview`` (rendered every iteration as
-        ``<plan-overview>``), and each step becomes a ``user_approved``
-        PlanStep that the LLM cannot remove or modify. The bootstrap
+        ``<plan-overview>``), and each Step preserves its explicit authority.
+        Model-inferred Steps remain adaptable as evidence changes. The bootstrap
         branch that asks "No plan yet — call add_step" is naturally
         suppressed because state.plan.steps is non-empty.
         """

@@ -15,6 +15,7 @@ from infinidev.db.service import (
     list_recent_sessions,
     persist_session_note,
     persist_session_runtime_state,
+    persist_staged_planning_state,
     register_session,
     store_conversation_turn,
     store_session_message,
@@ -191,6 +192,26 @@ class TestStructuredSessionState:
         assert state["task_description"] == "Restore the complete session"
         assert state["plan_steps"] == steps
         assert state["ui_state"]["touched_files"] == {"src/app.py": 2}
+
+    def test_sidebar_updates_preserve_staged_planning_snapshot(self, temp_db):
+        register_session("s", "/work")
+        staged = {
+            "status": "active",
+            "goal": {"title": "Long Goal"},
+            "stages": [{"number": 1, "status": "active"}],
+        }
+        persist_staged_planning_state("s", staged, task_description="Long Goal")
+
+        persist_session_runtime_state(
+            "s",
+            task_description="Long Goal",
+            plan_steps=[{"title": "Current Step"}],
+            ui_state={"steps_text": "> Current Step"},
+        )
+
+        state = get_session_runtime_state("s")
+        assert state["staged_planning"] == staged
+        assert state["ui_state"]["staged_planning"] == staged
 
     def test_resume_bundle_includes_messages_and_runtime_state(self, temp_db):
         from infinidev.cli.session_resume import resumed_session_state

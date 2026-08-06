@@ -415,9 +415,21 @@ def persist_session_runtime_state(
         return
 
     plan_json = json.dumps(plan_steps or [], ensure_ascii=False, default=str)
-    ui_json = json.dumps(ui_state or {}, ensure_ascii=False, default=str)
+    requested_ui_state = dict(ui_state or {})
 
     def _upsert(conn):
+        existing = conn.execute(
+            "SELECT ui_state_json FROM session_runtime_state WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if existing and "staged_planning" not in requested_ui_state:
+            try:
+                prior_ui = json.loads(existing["ui_state_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                prior_ui = {}
+            if isinstance(prior_ui, dict) and "staged_planning" in prior_ui:
+                requested_ui_state["staged_planning"] = prior_ui["staged_planning"]
+        ui_json = json.dumps(requested_ui_state, ensure_ascii=False, default=str)
         conn.execute(
             """
             INSERT INTO session_runtime_state
@@ -462,9 +474,32 @@ def get_session_runtime_state(session_id: str) -> dict[str, Any]:
             "task_description": row["task_description"] or "",
             "plan_steps": plan_steps if isinstance(plan_steps, list) else [],
             "ui_state": ui_state if isinstance(ui_state, dict) else {},
+            "staged_planning": (
+                ui_state.get("staged_planning", {})
+                if isinstance(ui_state, dict)
+                else {}
+            ),
         }
 
     return execute_with_retry(_query) or {}
+
+
+def persist_staged_planning_state(
+    session_id: str,
+    state: dict[str, Any],
+    *,
+    task_description: str = "",
+) -> None:
+    """Merge a durable staged-planning snapshot into the session state."""
+    current = get_session_runtime_state(session_id)
+    ui_state = dict(current.get("ui_state") or {})
+    ui_state["staged_planning"] = state
+    persist_session_runtime_state(
+        session_id,
+        task_description=str(current.get("task_description") or task_description),
+        plan_steps=list(current.get("plan_steps") or []),
+        ui_state=ui_state,
+    )
 
 
 def get_all_turns(

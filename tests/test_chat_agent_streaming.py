@@ -28,6 +28,38 @@ from infinidev.engine.orchestration.chat_agent import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _single_stage_planner(monkeypatch):
+    """Develop-path streaming tests use the real staged pipeline deterministically."""
+    from infinidev.engine.analysis.staged_planning import (
+        CompleteGoalDecision,
+        EmitStageDecision,
+        StageSpec,
+        StageTaskSpec,
+    )
+
+    def decide(state, **_kwargs):
+        if state.stages:
+            return CompleteGoalDecision(evidence=[
+                f"{state.evidence[-1].id}: The Task result was observed"
+            ])
+        return EmitStageDecision(stage=StageSpec(
+            title="Execute request",
+            outcome="The requested behavior is produced",
+            exit_criteria=["The Task result is observed"],
+            tasks=[StageTaskSpec(
+                id="request",
+                title="Execute request",
+                outcome="The requested behavior is produced",
+                acceptance_criteria=["The requested behavior is checked"],
+            )],
+        ))
+
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.stage_planner.run_stage_planner", decide
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Minimal shapes mirroring LiteLLM's streaming response
 # ─────────────────────────────────────────────────────────────────────────

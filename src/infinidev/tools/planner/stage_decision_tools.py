@@ -94,7 +94,7 @@ class CompleteGoalInput(BaseModel):
         min_length=1,
         description=(
             "One entry per Goal acceptance condition naming the observation "
-            "that establishes it."
+            "that establishes it and citing that observation's evidence-ledger ID."
         ),
     )
 
@@ -148,7 +148,7 @@ class CompleteGoalTool(InfinibayBaseTool):
     description: str = (
         "Declare the Goal complete and end the Stage Planner turn. Use this "
         "only when each Goal acceptance condition has named evidence and no "
-        "observed contradiction remains unresolved."
+        "observed contradiction remains unresolved. Cite evidence-ledger IDs."
     )
     args_schema: Type[BaseModel] = CompleteGoalInput
 

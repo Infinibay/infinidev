@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+from infinidev.engine.analysis.staged_planning import TaskPlanningHandoff
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
@@ -45,6 +46,7 @@ _MAX_RESULT_CHARS = 8000
 def run_planner(
     escalation: EscalationPacket,
     *,
+    task_handoff: TaskPlanningHandoff | None = None,
     session_id: Optional[str] = None,
     project_id: Optional[int] = None,
     workspace_path: Optional[str] = None,
@@ -77,7 +79,11 @@ def run_planner(
     # them, make them visible to the planner too (it may need to decide
     # scope based on what the image actually shows). Text-only fallback
     # for non-vision models so the paths are at least mentioned.
-    _user_text = _render_handoff(escalation, max_exploration_calls)
+    _user_text = _render_handoff(
+        escalation,
+        max_exploration_calls,
+        task_handoff=task_handoff,
+    )
     _user_content: Any = _user_text
     if escalation.attachments:
         try:
@@ -110,13 +116,18 @@ def run_planner(
             tool_schemas=tool_schemas,
             dispatch=dispatch,
             escalation=escalation,
+            task_handoff=task_handoff,
             max_exploration_calls=max_exploration_calls,
             max_iterations=max_iterations,
             hooks=hooks,
         )
     except Exception as exc:
         logger.exception("Task Planner loop failed")
-        return _fallback_plan(escalation, f"Task Planner error: {exc}")
+        return _fallback_plan(
+            escalation,
+            f"Task Planner error: {exc}",
+            task_handoff=task_handoff,
+        )
     finally:
         clear_agent_context(agent_id)
 
@@ -132,6 +143,7 @@ def _run_llm_loop(
     tool_schemas: list[dict[str, Any]],
     dispatch: dict[str, Any],
     escalation: EscalationPacket,
+    task_handoff: TaskPlanningHandoff | None,
     max_exploration_calls: int,
     max_iterations: int,
     hooks: Any | None = None,
@@ -176,6 +188,7 @@ def _run_llm_loop(
             return _fallback_plan(
                 escalation,
                 "Task Planner did not emit via tool call.",
+                task_handoff=task_handoff,
             )
 
         messages.append({
@@ -186,7 +199,7 @@ def _run_llm_loop(
 
         for tc in tool_calls:
             if tc.function.name == "emit_task_plan":
-                return _parse_emitted_plan(tc, escalation)
+                return _parse_emitted_plan(tc, escalation, task_handoff)
 
         # Non-terminator calls — count toward exploration budget.
         for tc in tool_calls:
@@ -226,6 +239,7 @@ def _run_llm_loop(
     return _fallback_plan(
         escalation,
         "Task Planner exhausted iterations without emitting.",
+        task_handoff=task_handoff,
     )
 
 
@@ -237,7 +251,11 @@ def _run_llm_loop(
 def _render_handoff(
     escalation: EscalationPacket,
     max_exploration_calls: int = _DEFAULT_MAX_EXPLORATION_CALLS,
+    *,
+    task_handoff: TaskPlanningHandoff | None = None,
 ) -> str:
+    if task_handoff is not None:
+        return task_handoff.render(max_exploration_calls)
     lines = [
         "HANDOFF FROM CHAT AGENT",
         "",
@@ -330,7 +348,11 @@ def _build_plan_from_args(args: dict) -> Plan | None:
     return Plan(overview=overview, steps=steps, acceptance_criteria=criteria)
 
 
-def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
+def _parse_emitted_plan(
+    tc: Any,
+    escalation: EscalationPacket,
+    task_handoff: TaskPlanningHandoff | None = None,
+) -> Plan:
     raw = getattr(tc.function, "arguments", None) or "{}"
     args = raw if isinstance(raw, dict) else _safe_json(raw)
     if not isinstance(args, dict):
@@ -338,7 +360,11 @@ def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
     plan = _build_plan_from_args(args)
     if plan is None:
         logger.warning("Task Planner emitted incomplete plan, falling back")
-        return _fallback_plan(escalation, "emit_task_plan produced empty fields")
+        return _fallback_plan(
+            escalation,
+            "emit_task_plan produced empty fields",
+            task_handoff=task_handoff,
+        )
     return plan
 
 
@@ -364,7 +390,12 @@ def _plan_from_text(content: str) -> Plan | None:
     return plan
 
 
-def _fallback_plan(escalation: EscalationPacket, reason: str) -> Plan:
+def _fallback_plan(
+    escalation: EscalationPacket,
+    reason: str,
+    *,
+    task_handoff: TaskPlanningHandoff | None = None,
+) -> Plan:
     """Last-resort plan: hand the request over to the developer with
     context, and let it bootstrap its own plan via ``add_step``.
 
@@ -382,15 +413,23 @@ def _fallback_plan(escalation: EscalationPacket, reason: str) -> Plan:
     as context would confuse the model.
     """
     logger.warning("task planner falling back: reason=%s", reason)
-    return Plan(
-        overview=(
+    if task_handoff is not None:
+        overview = (
+            f"Goal: {task_handoff.goal.user_request}\n\n"
+            f"Active Stage: {task_handoff.stage.title}\n\n"
+            f"Current Task: {task_handoff.task.title}\n"
+            f"Outcome: {task_handoff.task.outcome}\n\n"
+            "No structured Task plan was produced upstream. Decompose only "
+            "this Task into steps via add_step before executing."
+        )
+    else:
+        overview = (
             f"User request: {escalation.user_request}\n\n"
             f"Chat agent's understanding: {escalation.understanding}\n\n"
             "No structured plan was produced upstream. Decompose the "
             "request into steps via add_step before executing."
-        ),
-        steps=[],
-    )
+        )
+    return Plan(overview=overview, steps=[])
 
 
 def _tool_call_to_dict(tc: Any) -> dict[str, Any]:

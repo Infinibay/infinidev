@@ -94,6 +94,7 @@ def resumed_session_state(session_id: str) -> dict:
         "task_description": runtime.get("task_description", ""),
         "plan_steps": runtime.get("plan_steps", []),
         "ui_state": runtime.get("ui_state", {}),
+        "staged_planning": runtime.get("staged_planning", {}),
     }
 
 

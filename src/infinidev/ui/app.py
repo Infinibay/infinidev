@@ -108,6 +108,7 @@ class InfinidevApp:
         self._context_status: dict[str, Any] = {}
         self._context_flow: str = ""
         self._plan_text: str = ""
+        self._staged_planning: dict[str, Any] = {}
         # _thinking_text is the truncated sidebar VIEW; _thinking_full is
         # the untruncated accumulator for the current LLM call that gets
         # flushed verbatim into the chat as a permanent "Thinking" message
@@ -337,6 +338,8 @@ class InfinidevApp:
             if isinstance(ui_state, dict):
                 self._plan_text = str(ui_state.get("plan_text") or "")
                 self._steps_text = str(ui_state.get("steps_text") or "")
+                staged = ui_state.get("staged_planning") or {}
+                self._staged_planning = staged if isinstance(staged, dict) else {}
                 touched = ui_state.get("touched_files") or {}
                 if isinstance(touched, dict):
                     self._touched_files = {
@@ -496,6 +499,7 @@ class InfinidevApp:
                     "actions_text": getattr(self, "_actions_text", ""),
                     "context_flow": getattr(self, "_context_flow", ""),
                     "touched_files": getattr(self, "_touched_files", {}),
+                    "staged_planning": getattr(self, "_staged_planning", {}),
                 },
             )
         except Exception:

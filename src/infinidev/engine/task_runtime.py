@@ -110,6 +110,37 @@ class TaskRuntime:
         self.state.compact_memory()
         self._emit("task_completed", task_id=task_id, result=result)
 
+    def block_current_task(self, reason: str = "") -> None:
+        """Close the active task as blocked without presenting it as complete."""
+        self._finish_current_task(TaskStatus.BLOCKED, reason, "task_blocked")
+
+    def fail_current_task(self, error: str = "") -> None:
+        """Close the active task as failed."""
+        self._finish_current_task(TaskStatus.FAILED, error, "task_failed")
+
+    def _finish_current_task(
+        self,
+        status: TaskStatus,
+        detail: str,
+        event: str,
+    ) -> None:
+        task_id = self.state.current_task_id
+        if task_id is None:
+            return
+        for task in self.state.tasks:
+            if task.id == task_id:
+                task.status = status
+                if status == TaskStatus.FAILED:
+                    task.error = detail
+                else:
+                    task.result = detail
+                break
+        self.state.current_task_id = None
+        if detail:
+            self.remember(detail, kind=event, importance=0.9)
+        self.state.compact_memory()
+        self._emit(event, task_id=task_id, detail=detail)
+
     def cancel(self) -> None:
         """Cancel the runtime and its active task."""
         self.state.cancelled = True

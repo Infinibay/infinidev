@@ -160,6 +160,17 @@ class BackgroundTask:
 
     def output(self) -> tuple[str, str]:
         """Return decoded (stdout, stderr) snapshots."""
+        # ``Popen.poll()`` can observe process exit a few scheduler ticks
+        # before the pump thread drains the final pipe bytes. Status callers
+        # expect an exited task's snapshot to include output written before
+        # exit, so close that small handoff window here. The join is bounded
+        # for commands whose descendants inherited a pipe and keep it open.
+        if (
+            self.proc.poll() is not None
+            and self._reader.is_alive()
+            and threading.current_thread() is not self._reader
+        ):
+            self._reader.join(timeout=0.5)
         with self._lock:
             out = bytes(self._stdout)
             err = bytes(self._stderr)

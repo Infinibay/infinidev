@@ -101,6 +101,11 @@ class RuntimeState:
         """Whether all tasks reached a terminal state."""
         return all(
             task.status
-            in {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+            in {
+                TaskStatus.BLOCKED,
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            }
             for task in self.tasks
         )

@@ -6,7 +6,7 @@ from infinidev.prompts.analyst.task_planner_prompt import TASK_PLANNER_SYSTEM_PR
 
 
 # ``run_planner`` keeps the historical import while the stage orchestrator is
-# introduced. The active legacy planner now performs the Task Planner role.
+# introduced. Compatibility imports of this module resolve to the Task Planner.
 ANALYST_PLANNER_SYSTEM_PROMPT = TASK_PLANNER_SYSTEM_PROMPT
 
 

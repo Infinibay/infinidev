@@ -1,6 +1,10 @@
-# Handoff — reemplazo del plan estático por planning adaptativo por Stages
+# Arquitectura — planning adaptativo por Stages
 
-> Destinatario: el modelo que continúa este trabajo. Fecha: 2026-08-05. Worktree: trabajo en progreso sin commitear sobre `main`.
+> Estado actualizado 2026-08-06: el Stage Planner, el orquestador
+> Stage → Tasks → Steps, la persistencia/reanudación y la jerarquía de TUI ya
+> están conectados al pipeline principal. Las secciones de implementación de
+> este documento conservan el contrato y los casos de prueba que guiaron el
+> cambio; ya no describen scaffolding pendiente.
 
 Continúa el trabajo en `/home/andres/infinidev`, termínalo y haz una revisión crítica del resultado. No te limites a diagnosticar ni a escribir un diseño: implementa, prueba y corrige lo necesario.
 
@@ -123,9 +127,13 @@ Estado conceptual actual:
 - Los criterios producidos por el Task Planner se denominan `derived_verification_criteria`.
 - `Plan.acceptance_criteria` sigue existiendo como nombre de compatibilidad, pero el pipeline lo trata como verificación derivada.
 
-Importante: el Stage Planner todavía no está conectado al pipeline. El runtime sigue ejecutando esencialmente una solicitud raíz con un Task Plan. No confundas la existencia del prompt y sus tools con la implementación completa del ciclo por Stages.
+El Stage Planner está conectado al pipeline como sistema único. Una solicitud
+pequeña puede finalizar con un Stage y una Task, mientras un Goal largo vuelve
+al Stage Planner después de cada Stage. Una cola vacía nunca completa el Goal:
+el cierre requiere una decisión `complete_goal` respaldada por el ledger de
+evidencia.
 
-## Trabajo restante
+## Contrato de implementación
 
 ### 1. Revisa críticamente el diff actual.
 

@@ -23,8 +23,8 @@ behavior and record the reason in the plan.
 ## The handoff
 
 The handoff identifies the Goal, active Stage, current Task, completed \
-dependencies and evidence. During the transition from the legacy planner, a \
-handoff can contain only ``user_request``, ``understanding`` and \
+dependencies and evidence. A compatibility caller can provide only \
+``user_request``, ``understanding`` and \
 ``opened_files``. In that form, ``user_request`` is both the Goal and the \
 current Task; ``understanding`` is DERIVED, and an opened path is a lead until \
 its contents are read.

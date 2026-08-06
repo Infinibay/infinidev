@@ -55,6 +55,8 @@ First compare the Goal's acceptance conditions with the evidence ledger.
 Call ``complete_goal`` only when each condition has evidence that establishes \
 it and the ledger contains no contradictory observation left unexplained. A \
 completed plan, an empty queue or a confident assessment is not completion.
+Each completion evidence statement cites the exact evidence-ledger ID whose \
+observation supports it; a new assertion without a ledger ID is not evidence.
 
 Call ``block_goal`` when no in-scope Stage can produce new evidence because \
 progress depends on a user-owned decision, authority not granted, or external \

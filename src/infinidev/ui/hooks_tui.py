@@ -18,7 +18,7 @@ Why a separate file instead of methods on :class:`InfinidevApp`:
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from infinidev.ui.app import InfinidevApp
@@ -263,4 +263,34 @@ class TUIHooks:
         if touched is None:
             return
         touched[path] = touched.get(path, 0) + 1
+        self._app.invalidate()
+
+    def on_stage_update(self, snapshot: dict[str, Any]) -> None:
+        """Render Goal, Stage and Tasks separately from the active Step list."""
+        self._app._staged_planning = snapshot
+        goal = snapshot.get("goal") if isinstance(snapshot, dict) else {}
+        stages = snapshot.get("stages") if isinstance(snapshot, dict) else []
+        lines = [f"Goal: {str((goal or {}).get('title') or 'Active goal')}"]
+        if isinstance(stages, list) and stages:
+            stage = stages[-1] if isinstance(stages[-1], dict) else {}
+            spec = stage.get("spec") if isinstance(stage, dict) else {}
+            lines.append(
+                f"Stage {stage.get('number', len(stages))}: "
+                f"{str((spec or {}).get('title') or '')} [{stage.get('status', '')}]"
+            )
+            tasks = stage.get("tasks") if isinstance(stage, dict) else []
+            for task in tasks if isinstance(tasks, list) else []:
+                if not isinstance(task, dict):
+                    continue
+                task_spec = task.get("spec") if isinstance(task.get("spec"), dict) else {}
+                icon = {
+                    "completed": "v",
+                    "active": ">",
+                    "blocked": "!",
+                    "failed": "x",
+                    "cancelled": "x",
+                }.get(str(task.get("status") or ""), "o")
+                lines.append(f"  {icon} {task_spec.get('title', '')}")
+        self._app._plan_text = "\n".join(lines)
+        self._persist_runtime_state()
         self._app.invalidate()
