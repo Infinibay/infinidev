@@ -54,7 +54,13 @@ from infinidev.tools.knowledge import (
 )
 from infinidev.tools.chat import SendMessageTool
 from infinidev.tools.chat_agent import RespondTool, EscalateTool
-from infinidev.tools.planner import EmitPlanTool
+from infinidev.tools.planner import (
+    BlockGoalTool,
+    CompleteGoalTool,
+    EmitPlanTool,
+    EmitStageTool,
+    EmitTaskPlanTool,
+)
 from infinidev.tools.council import (
     COUNCIL_MEMBER_TOOLS as _COUNCIL_MEMBER_TOOLS,
     COUNCIL_MODERATOR_TOOLS as _COUNCIL_MODERATOR_TOOLS,
@@ -140,6 +146,11 @@ CHAT_AGENT_TOOLS = [RespondTool, EscalateTool]
 # developer. The planner orchestrator reads its args directly as the
 # final artifact of the planning turn.
 PLANNER_TOOLS = [EmitPlanTool]
+# The staged planner uses separate roles so a Task Planner cannot close the
+# Goal and a Stage Planner cannot emit execution Steps. The schemas enforce the
+# role boundary even when prompt text is ignored.
+TASK_PLANNER_TOOLS = [EmitTaskPlanTool]
+STAGE_PLANNER_TOOLS = [EmitStageTool, CompleteGoalTool, BlockGoalTool]
 # Exclusive to the council tiers — schema-level terminators read
 # directly by the council orchestrator (see engine/council/). Members
 # get post/conclude; the moderator gets seed/verdict/synthesize.
@@ -296,13 +307,17 @@ def get_tools_for_role(
         # instantiating is the reliable way to read is_read_only.
         read_only = [t for t in _instances(all_tool_classes) if t.is_read_only]
         return read_only + _instances(CHAT_AGENT_TOOLS)
-    if role == "planner":
+    if role in {"planner", "task_planner", "stage_planner"}:
         # Planner gets the same read-only exploration tools as the chat
-        # agent, plus EmitPlanTool as its terminator. Tight budget
-        # (~4 tool calls) enforced by the orchestrator, not the tool
-        # list.
+        # agent plus only the terminal decisions for its role. Exploration
+        # budgets are enforced by each orchestrator, not by the tool list.
         read_only = [t for t in _instances(all_tool_classes) if t.is_read_only]
-        return read_only + _instances(PLANNER_TOOLS)
+        terminators = {
+            "planner": PLANNER_TOOLS,
+            "task_planner": TASK_PLANNER_TOOLS,
+            "stage_planner": STAGE_PLANNER_TOOLS,
+        }[role]
+        return read_only + _instances(terminators)
     if role == "assistant_critic":
         # The pair-programming critic gets read-only exploration tools
         # so it can verify the principal's claims (read the file the

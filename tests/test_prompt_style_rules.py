@@ -104,7 +104,7 @@ RUNTIME_PROMPT_MODULES = [
 ]
 
 RUNTIME_PROMPT_ROLES = {
-    "infinidev.engine.analysis.planner": {"planner"},
+    "infinidev.engine.analysis.planner": {"task_planner"},
     "infinidev.engine.council.agent_loop": {
         "council_member",
         "council_moderator",
@@ -157,6 +157,10 @@ UNSCHEMA_TOOLS = frozenset({
 
 # Which directory under prompts/ belongs to which tool tier.
 ROLE_BY_DIR = {"chat_agent": "chat_agent", "analyst": "planner"}
+ROLE_BY_PROMPT = {
+    "analyst/stage_planner_prompt.py": "stage_planner",
+    "analyst/task_planner_prompt.py": "task_planner",
+}
 
 _NAME = r"([a-z][a-z0-9]*(?:_[a-z0-9]+)*)"
 _COMPOUND_NAME = r"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"
@@ -255,7 +259,13 @@ def _parameter_names() -> set[str]:
     from infinidev.tools import get_tools_for_role
 
     params: set[str] = set()
-    for role in ("developer", "chat_agent", "planner"):
+    for role in (
+        "developer",
+        "chat_agent",
+        "planner",
+        "stage_planner",
+        "task_planner",
+    ):
         for tool in get_tools_for_role(role):
             schema = getattr(tool, "args_schema", None)
             params |= set(getattr(schema, "model_fields", {}) or {})
@@ -375,6 +385,9 @@ def _rel(path: pathlib.Path) -> str:
 
 
 def _role_for(path: pathlib.Path) -> str:
+    prompt_role = ROLE_BY_PROMPT.get(_rel(path))
+    if prompt_role is not None:
+        return prompt_role
     for part in path.parts:
         if part in ROLE_BY_DIR:
             return ROLE_BY_DIR[part]
@@ -474,7 +487,16 @@ def test_no_prompt_names_a_tool_from_another_role(path: pathlib.Path) -> None:
     """A chat-agent prompt naming a write tool teaches it to try one."""
     role = _role_for(path)
     everywhere = set().union(
-        *(_tool_names(r) for r in ("developer", "chat_agent", "planner"))
+        *(
+            _tool_names(r)
+            for r in (
+                "developer",
+                "chat_agent",
+                "planner",
+                "stage_planner",
+                "task_planner",
+            )
+        )
     )
     named = _named_tools(_prompt_strings(path))
     offenders = (named - _tool_names(role)) & everywhere

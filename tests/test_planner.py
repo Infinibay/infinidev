@@ -1,7 +1,7 @@
 """Tests for the analyst planner (Commit 6).
 
 The planner takes an EscalationPacket and produces a Plan via a
-short LLM loop that terminates on emit_plan. These tests mock out
+short LLM loop that terminates on emit_task_plan. These tests mock out
 litellm.completion entirely; they verify the contract without making
 real calls.
 """
@@ -101,8 +101,11 @@ def _sample_escalation() -> EscalationPacket:
 class TestBasicEmit:
     def test_single_emit_call_returns_plan(self, patch_litellm):
         patch_litellm([
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "Fix the exp-claim check in validate_token.",
+                "derived_verification_criteria": [
+                    "validate_token rejects tokens whose exp value is in the past",
+                ],
                 "steps": [
                     {
                         "title": "Patch exp-claim",
@@ -123,13 +126,16 @@ class TestBasicEmit:
         assert len(plan.steps) == 2
         assert plan.steps[0].title == "Patch exp-claim"
         assert "expired tokens" in plan.steps[0].detail
+        assert plan.acceptance_criteria == [
+            "validate_token rejects tokens whose exp value is in the past"
+        ]
 
 
 class TestExplorationBudget:
     def test_exploration_then_emit(self, patch_litellm):
         patch_litellm([
             _resp([_tc("read_file", {"file_path": "src/auth.py"})]),
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "Fix the validate_token exp check.",
                 "steps": [{"title": "Patch", "detail": "x", "expected_output": "y"}],
             })]),
@@ -144,7 +150,7 @@ class TestExplorationBudget:
             _resp([_tc("list_directory", {"file_path": "."}, f"tc-{i}")])
             for i in range(4)
         ] + [
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "Budget-limited plan.",
                 "steps": [{"title": "Do it", "detail": "d", "expected_output": "e"}],
             })]),
@@ -156,7 +162,7 @@ class TestExplorationBudget:
 class TestDefensiveFallbacks:
     def test_empty_overview_falls_back(self, patch_litellm):
         patch_litellm([
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "",
                 "steps": [{"title": "x", "detail": "y", "expected_output": "z"}],
             })]),
@@ -172,7 +178,7 @@ class TestDefensiveFallbacks:
 
     def test_zero_steps_falls_back(self, patch_litellm):
         patch_litellm([
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "Plan text but no steps.",
                 "steps": [],
             })]),
@@ -200,9 +206,9 @@ class TestDefensiveFallbacks:
 
 
 class TestToolboxIntegrity:
-    def test_planner_schema_has_emit_plan_and_no_write_tools(self, patch_litellm):
+    def test_planner_schema_has_emit_task_plan_and_no_write_tools(self, patch_litellm):
         scripted = patch_litellm([
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "ok",
                 "steps": [{"title": "x", "detail": "y", "expected_output": "z"}],
             })]),
@@ -211,7 +217,8 @@ class TestToolboxIntegrity:
         assert len(scripted.calls) == 1
         tools = scripted.calls[0]["tools"]
         names = {t["function"]["name"] for t in tools}
-        assert "emit_plan" in names
+        assert "emit_task_plan" in names
+        assert "emit_plan" not in names
         # Planner must not have terminators from other tiers.
         assert "respond" not in names
         assert "escalate" not in names
@@ -227,7 +234,7 @@ class TestToolboxIntegrity:
 class TestHandoffRendering:
     def test_opened_files_included_in_handoff_prompt(self, patch_litellm):
         scripted = patch_litellm([
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "ok", "steps": [{"title": "x"}],
             })]),
         ])
@@ -250,7 +257,7 @@ class TestHandoffRendering:
         counts CALLS — two units for one budget, and a number that ignored
         the argument claiming to express it."""
         scripted = patch_litellm([
-            _resp([_tc("emit_plan", {
+            _resp([_tc("emit_task_plan", {
                 "overview": "ok", "steps": [{"title": "x"}],
             })]),
         ])

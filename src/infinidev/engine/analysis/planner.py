@@ -1,9 +1,9 @@
-"""Analyst planner — turns an EscalationPacket into an executable Plan.
+"""Task planner — turns an EscalationPacket into an executable Plan.
 
 Mirrors the self-contained loop shape of chat_agent.py (not a
 LoopEngine invocation). Receives the chat agent's handoff packet,
 runs up to N read-only exploration calls, and terminates when the
-model calls ``emit_plan``. The parsed Plan is returned to the
+model calls ``emit_task_plan``. The parsed Plan is returned to the
 pipeline which feeds it to LoopEngine via ``initial_plan=``.
 """
 
@@ -26,7 +26,7 @@ from infinidev.engine.oversized_result import (
     handle_oversized_result,
 )
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
-from infinidev.prompts.analyst.planner_prompt import ANALYST_PLANNER_SYSTEM_PROMPT
+from infinidev.prompts.analyst.task_planner_prompt import TASK_PLANNER_SYSTEM_PROMPT
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
@@ -61,7 +61,7 @@ def run_planner(
     plan, because there is no recovery path downstream.
     """
     agent_id = f"planner-{uuid.uuid4().hex[:8]}"
-    tools = get_tools_for_role("planner")
+    tools = get_tools_for_role("task_planner")
     bind_tools_to_agent(tools, agent_id)
     set_context(
         agent_id=agent_id,
@@ -97,7 +97,7 @@ def run_planner(
     from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
     planner_prompt = apply_calibrated_guidance(
-        ANALYST_PLANNER_SYSTEM_PROMPT, "planner"
+        TASK_PLANNER_SYSTEM_PROMPT, "planner"
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": planner_prompt},
@@ -115,8 +115,8 @@ def run_planner(
             hooks=hooks,
         )
     except Exception as exc:
-        logger.exception("Planner loop failed")
-        return _fallback_plan(escalation, f"Planner error: {exc}")
+        logger.exception("Task Planner loop failed")
+        return _fallback_plan(escalation, f"Task Planner error: {exc}")
     finally:
         clear_agent_context(agent_id)
 
@@ -165,17 +165,17 @@ def _run_llm_loop(
         if not tool_calls:
             content = (getattr(message, "content", None) or "").strip()
             # Small / non-FC models often emit the plan as prose JSON instead
-            # of a native emit_plan call. Recover it before dropping to the
+            # of a native emit_task_plan call. Recover it before dropping to the
             # bootstrap fallback (the 7B default is exactly this tier).
             recovered = _plan_from_text(content)
             if recovered is not None:
                 return recovered
             logger.warning(
-                "Planner returned text without tool call: %s", content[:200]
+                "Task Planner returned text without tool call: %s", content[:200]
             )
             return _fallback_plan(
                 escalation,
-                "Planner did not emit via tool call.",
+                "Task Planner did not emit via tool call.",
             )
 
         messages.append({
@@ -185,7 +185,7 @@ def _run_llm_loop(
         })
 
         for tc in tool_calls:
-            if tc.function.name == "emit_plan":
+            if tc.function.name == "emit_task_plan":
                 return _parse_emitted_plan(tc, escalation)
 
         # Non-terminator calls — count toward exploration budget.
@@ -213,19 +213,19 @@ def _run_llm_loop(
                 "role": "user",
                 "content": (
                     "You have used your exploration budget "
-                    f"({exploration_calls} calls). Emit the plan NOW via "
-                    "emit_plan with whatever you have. Do not make more "
-                    "read calls."
+                    f"({exploration_calls} calls). Emit the Task plan now via "
+                    "emit_task_plan with the evidence already collected. "
+                    "Do not make more read calls."
                 ),
             })
             budget_nudged = True
 
     logger.warning(
-        "Planner hit max_iterations=%d without emit_plan", max_iterations
+        "Task Planner hit max_iterations=%d without emit_task_plan", max_iterations
     )
     return _fallback_plan(
         escalation,
-        "Planner exhausted iterations without emitting.",
+        "Task Planner exhausted iterations without emitting.",
     )
 
 
@@ -282,13 +282,13 @@ def _render_handoff(
     lines.append("")
     lines.append(
         f"Your turn. At most {max_exploration_calls} exploration calls, "
-        "then emit the plan via emit_plan."
+        "then emit the Task plan via emit_task_plan."
     )
     return "\n".join(lines)
 
 
 def _build_plan_from_args(args: dict) -> Plan | None:
-    """Build a validated Plan from emit_plan-style args.
+    """Build a validated Plan from Task Planner tool arguments.
 
     Returns None (rather than a fallback) when the overview or steps are
     empty/malformed, so callers can choose how to recover. Shared by the
@@ -315,10 +315,14 @@ def _build_plan_from_args(args: dict) -> Plan | None:
     if not overview or not steps:
         return None
 
-    # Task-level acceptance criteria: keep only falsifiable ones (drop vague
+    # Planner-derived Task checks: keep only falsifiable ones (drop vague
     # quality phrases at the authoring boundary instead of trusting them).
     from infinidev.engine.orchestration.task_schema import is_falsifiable
-    raw_criteria = args.get("acceptance_criteria") or []
+    raw_criteria = (
+        args.get("derived_verification_criteria")
+        or args.get("acceptance_criteria")
+        or []
+    )
     if not isinstance(raw_criteria, list):
         raw_criteria = []
     criteria = [c.strip() for c in raw_criteria if isinstance(c, str) and is_falsifiable(c)]
@@ -333,8 +337,8 @@ def _parse_emitted_plan(tc: Any, escalation: EscalationPacket) -> Plan:
         args = {}
     plan = _build_plan_from_args(args)
     if plan is None:
-        logger.warning("Planner emitted incomplete plan, falling back")
-        return _fallback_plan(escalation, "emit_plan produced empty fields")
+        logger.warning("Task Planner emitted incomplete plan, falling back")
+        return _fallback_plan(escalation, "emit_task_plan produced empty fields")
     return plan
 
 
@@ -342,7 +346,7 @@ def _plan_from_text(content: str) -> Plan | None:
     """Recover a plan from a prose JSON response (no native tool call).
 
     Small / non-FC models frequently emit ``{"overview": ..., "steps": [...]}``
-    as text instead of calling emit_plan. Returns a validated Plan when the
+    as text instead of calling emit_task_plan. Returns a validated Plan when the
     content yields complete fields, else None so the caller falls back.
     """
     if not content or "{" not in content:
@@ -356,7 +360,7 @@ def _plan_from_text(content: str) -> Plan | None:
         return None
     plan = _build_plan_from_args(args)
     if plan is not None:
-        logger.info("Planner recovered a plan from prose JSON (no tool call)")
+        logger.info("Task Planner recovered a plan from prose JSON (no tool call)")
     return plan
 
 
@@ -377,7 +381,7 @@ def _fallback_plan(escalation: EscalationPacket, reason: str) -> Plan:
     overview is rendered every iteration and repeating a debug string
     as context would confuse the model.
     """
-    logger.warning("planner falling back: reason=%s", reason)
+    logger.warning("task planner falling back: reason=%s", reason)
     return Plan(
         overview=(
             f"User request: {escalation.user_request}\n\n"

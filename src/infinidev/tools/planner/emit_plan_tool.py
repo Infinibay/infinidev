@@ -1,9 +1,8 @@
-"""EmitPlanTool — terminator used by the analyst planner.
+"""Task-plan terminators used by the legacy and staged planners.
 
-Called exactly once per planner turn. The orchestrator parses the
-tool_call args into a ``Plan`` and returns it to the pipeline. This
-tool is NOT part of the developer's toolbox — it is exclusive to the
-planner tier (registered under PLANNER_TOOLS in tools/__init__.py).
+The orchestrator parses the tool-call arguments into a ``Plan``. The legacy
+``emit_plan`` name remains available during the staged-planner migration;
+``emit_task_plan`` is the canonical Task Planner terminator.
 """
 
 import json
@@ -17,15 +16,14 @@ from infinidev.tools.base.base_tool import InfinibayBaseTool
 class PlanStepArg(BaseModel):
     title: str = Field(
         ...,
-        description="Short, action-oriented step title (5-10 words).",
+        description="Action-oriented Step title naming the observed target and change.",
     )
     detail: str = Field(
         "",
         description=(
             "Concrete execution guidance for this step: files to "
             "touch, changes to make, how to verify. Rendered ONLY "
-            "when the step is active, not for pending or done steps, "
-            "so context stays compact. Aim for 2-5 sentences."
+            "when the Step is active, not for pending or done Steps."
         ),
     )
     expected_output: str = Field(
@@ -86,20 +84,19 @@ class EmitPlanInput(BaseModel):
     overview: str = Field(
         ...,
         description=(
-            "1-2 paragraph prose narrative: what will be done, why, "
-            "which files are involved, how success will be verified. "
-            "Shown to the user and rendered every iteration of the "
-            "developer loop as <plan-overview>, so keep it compact — "
-            "around 150-300 tokens."
+            "Account of what will be done, why, which observed files are "
+            "involved and how success will be verified. Shown to the user "
+            "and rendered during the developer loop; keep Step-local detail "
+            "inside each Step."
         ),
     )
     steps: list[PlanStepArg] = Field(
         ...,
         description=(
-            "Ordered list of execution steps. Each step becomes a "
-            "user-approved PlanStep that the developer executes. The "
-            "developer can add new steps mid-execution but cannot "
-            "remove or modify these."
+            "Initial execution route proposed by the planner. These steps "
+            "carry model-inferred authority: the developer can add, revise, "
+            "reorder or remove them when new evidence changes the tactic "
+            "without changing the requested outcome."
         ),
     )
     # Required, not optional-with-a-default: these become the accept gate the
@@ -108,14 +105,40 @@ class EmitPlanInput(BaseModel):
     acceptance_criteria: list[str] = Field(
         ...,
         description=(
-            "Task-level 'done' conditions for the WHOLE task — each a "
-            "short, FALSIFIABLE statement whose truth can be checked by "
-            "running a command, reading a file, or inspecting behaviour "
-            "(e.g. 'expired JWTs are rejected by validate_token', 'no "
-            "references to legacy_verify() remain'). These are the accept "
-            "gate the post-loop reviewer checks against — distinct from "
-            "each step's own verify check. Avoid vague quality words "
-            "('looks good', 'is clean'); they are dropped. 1-5 items."
+            "Planner-derived checks for the task outcome. Each statement can "
+            "be checked by running a command, reading a file or inspecting "
+            "behavior. They guide review but cannot add requirements or "
+            "authority to the user request. Avoid quality claims without an "
+            "observable test; those claims are dropped at the parse boundary."
+        ),
+    )
+
+
+class EmitTaskPlanInput(BaseModel):
+    overview: str = Field(
+        ...,
+        description=(
+            "Account of the Task outcome, the observed targets and the "
+            "verification route. Shown to the user and rendered during "
+            "execution; keep Step-local detail inside each Step."
+        ),
+    )
+    derived_verification_criteria: list[str] = Field(
+        ...,
+        description=(
+            "Falsifiable checks proposed by the Task Planner. They guide "
+            "verification and remain model-derived; they cannot expand the "
+            "Goal, Stage or Task."
+        ),
+    )
+    steps: list[PlanStepArg] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Initial execution route for this Task. Split Steps where checks "
+            "distinguish outcomes or one result feeds another Step. The "
+            "developer can revise model-inferred tactics when new evidence "
+            "changes the route while preserving the Task outcome."
         ),
     )
 
@@ -124,14 +147,11 @@ class EmitPlanTool(InfinibayBaseTool):
     is_read_only: bool = True
     name: str = "emit_plan"
     description: str = (
-        "Emit the final execution plan and end the planning turn. "
+        "Emit the legacy execution plan and end the planning turn. "
         "Call this EXACTLY once: the turn ends on the first call and a "
-        "second is never read. Emit once every step you are about to write "
-        "names a file you have observed, or once your exploration budget is "
-        "spent, whichever comes first. A plan with zero steps is rejected. "
-        "A one-step plan is right when one file changes and one check "
-        "settles it. The developer executes your steps in order and cannot "
-        "edit or delete them."
+        "second is never read. A plan with zero steps is rejected. Steps "
+        "are model-inferred tactics and do not acquire user authority from "
+        "this call."
     )
     args_schema: Type[BaseModel] = EmitPlanInput
 
@@ -148,6 +168,36 @@ class EmitPlanTool(InfinibayBaseTool):
                 "overview": overview,
                 "steps": steps,
                 "acceptance_criteria": acceptance_criteria or [],
+            },
+            default=lambda o: o.model_dump() if hasattr(o, "model_dump") else str(o),
+        )
+
+
+class EmitTaskPlanTool(InfinibayBaseTool):
+    """Canonical Task Planner terminator."""
+
+    is_read_only: bool = True
+    name: str = "emit_task_plan"
+    description: str = (
+        "Emit the execution plan for the current Task and end the planning "
+        "turn. Call this exactly once after each Step is grounded in the "
+        "handoff, current evidence or an earlier Step's output. The first "
+        "call ends the turn."
+    )
+    args_schema: Type[BaseModel] = EmitTaskPlanInput
+
+    def _run(
+        self,
+        overview: str,
+        derived_verification_criteria: list,
+        steps: list,
+    ) -> str:
+        return json.dumps(
+            {
+                "kind": "task_plan",
+                "overview": overview,
+                "steps": steps,
+                "derived_verification_criteria": derived_verification_criteria,
             },
             default=lambda o: o.model_dump() if hasattr(o, "model_dump") else str(o),
         )

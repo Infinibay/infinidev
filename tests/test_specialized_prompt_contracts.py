@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from infinidev.prompts.analyst.planner_prompt import ANALYST_PLANNER_SYSTEM_PROMPT
+from infinidev.prompts.analyst.stage_planner_prompt import STAGE_PLANNER_SYSTEM_PROMPT
+from infinidev.prompts.analyst.task_planner_prompt import TASK_PLANNER_SYSTEM_PROMPT
 from infinidev.prompts.chat_agent.system import CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE
 from infinidev.prompts.flows.brainstorm import BRAINSTORM_IDENTITY
 from infinidev.prompts.flows.document import DOCUMENT_IDENTITY
@@ -24,8 +26,40 @@ def test_planner_does_not_promote_defaults_to_requirements() -> None:
     prompt = ANALYST_PLANNER_SYSTEM_PROMPT
 
     assert "Keep literal requirements separate from defaults" in prompt
-    assert "A default cannot become an acceptance" in prompt
-    assert "replace the singular target with all candidates" in prompt
+    assert "cannot become a Goal or Task acceptance condition" in prompt
+    assert "replace the singular target with every candidate" in prompt
+
+
+def test_stage_and_task_planners_share_authority_vocabulary() -> None:
+    for prompt in (STAGE_PLANNER_SYSTEM_PROMPT, TASK_PLANNER_SYSTEM_PROMPT):
+        assert "A **Goal** is the user-owned outcome" in prompt
+        assert "``USER_LITERAL``" in prompt
+        assert "``DERIVED``" in prompt
+        assert "``OBSERVED_EVIDENCE``" in prompt
+        assert "Derived material" in prompt
+        assert "cannot expand the Goal" in prompt
+
+
+def test_stage_planner_separates_goal_closure_from_next_horizon() -> None:
+    prompt = STAGE_PLANNER_SYSTEM_PROMPT
+
+    assert "Judge the Goal's finish separately from the distance to it" in prompt
+    assert "A Goal with a decidable finish can still require many Stages" in prompt
+    assert "A completed plan, an empty queue or a confident assessment" in prompt
+    assert "one Stage can cover it" in prompt
+    assert "leave that later work out of the current Stage" in prompt
+    assert "do not pre-plan Tasks for a later Stage" in prompt
+    assert "Do not create ceremonial Tasks to fill a count" in prompt
+
+
+def test_task_planner_treats_steps_as_adaptable_tactics() -> None:
+    prompt = TASK_PLANNER_SYSTEM_PROMPT
+
+    assert "Steps are model-inferred tactics" in prompt
+    assert "add, revise, reorder or remove them" in prompt
+    assert "Step count follows those evidence boundaries" in prompt
+    assert "A planner-authored command is untrusted model output" in prompt
+    assert "Its paths, test names and behavior are not evidence" in prompt
 
 
 def test_document_prompt_uses_examples_for_reader_tasks() -> None:

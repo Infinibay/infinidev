@@ -30,11 +30,10 @@ class PlanStepSpec:
     not user confirmation. Callers may use ``user_explicit`` or
     ``user_confirmed`` only when they have corresponding evidence.
 
-    ``verify`` is the planner-authored, machine-checkable success
-    condition. Authoring it here — read-only, before any code exists —
-    keeps the success bar adversarial (the developer cannot back-rationalise
-    a check against its own diff) and frozen (planner steps are
-    user_approved, so the developer cannot relax it mid-run).
+    ``verify`` is the planner-authored success check. Authoring it before code
+    exists gives review an independent proposal, but it remains untrusted
+    model output and carries the step's authority. Runtime permission policy
+    still governs executable checks.
     """
 
     title: str
@@ -61,9 +60,10 @@ class Plan:
 
     overview: str
     steps: list[PlanStepSpec] = field(default_factory=list)
-    # Task-level, falsifiable "done" conditions for the WHOLE task (distinct
-    # from per-step ``verify`` checks). Authored by the planner, they become
-    # the real Task.acceptance_criteria (replacing the synthesised
-    # placeholder) and are fed to the post-loop reviewer as the accept gate.
+    # Compatibility name for planner-derived Task checks (distinct from each
+    # Step's ``verify``). The pipeline places them in
+    # Task.derived_verification_criteria; they never become user-authored
+    # acceptance requirements merely because the legacy field says
+    # ``acceptance_criteria``.
     acceptance_criteria: list[str] = field(default_factory=list)
     acceptance_criteria_authority: AuthorityLevel = "model_inferred"
