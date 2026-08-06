@@ -60,6 +60,20 @@ def _single_stage_planner(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _pin_staged_engine(monkeypatch):
+    """These tests verify the staged plan→loop handoff, so pin the engine.
+
+    The default ``TASK_ENGINE_MODE`` is ``auto``, which may route short
+    requests to the react adapter and bypass the planner. These tests assert
+    the staged contract (EscalationPacket → planner → ``initial_plan=``), so
+    they select the staged engine explicitly.
+    """
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "staged")
+
+
 class _RecordingHooks:
     def __init__(self) -> None:
         self.phases: list[str] = []

@@ -344,6 +344,119 @@ CREATE INDEX IF NOT EXISTS idx_objective_verdicts_session
     ON objective_verdicts(session_id, created_at);
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Engine runs & execution event log (docs/GRAPH_ENGINE_BETA_DESIGN.md §10)
+--
+-- ``execution_events`` is the append-only canonical record of what each task
+-- engine did; ``engine_runs`` is one row per orchestrated task run, holding
+-- the engine-selection decision and the closing RunDigest. Future graph_nodes
+-- / graph_edges projections update FROM the event log, never the reverse.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS engine_runs (
+    run_id         TEXT PRIMARY KEY,
+    session_id     TEXT NOT NULL,
+    project_id     INTEGER,
+    parent_run_id  TEXT,
+    engine         TEXT NOT NULL,
+    mode           TEXT NOT NULL DEFAULT '',
+    goal_title     TEXT,
+    goal_request   TEXT,
+    status         TEXT NOT NULL DEFAULT 'running',  -- running|completed|blocked|cancelled|failed
+    selection_json TEXT NOT NULL DEFAULT '{}',
+    digest_json    TEXT,
+    metrics_json   TEXT NOT NULL DEFAULT '{}',
+    started_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at    DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_engine_runs_session
+    ON engine_runs(session_id, started_at);
+
+CREATE TABLE IF NOT EXISTS execution_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id        TEXT NOT NULL UNIQUE,
+    run_id          TEXT NOT NULL REFERENCES engine_runs(run_id),
+    session_id      TEXT NOT NULL,
+    sequence        INTEGER NOT NULL,
+    timestamp       REAL NOT NULL,
+    actor           TEXT NOT NULL DEFAULT 'system',
+    event_type      TEXT NOT NULL,
+    parent_event_id TEXT,
+    goal_revision   INTEGER,
+    node_id         TEXT,
+    visibility      TEXT NOT NULL DEFAULT 'public',  -- public|archive_only
+    payload_json    TEXT NOT NULL DEFAULT '{}',
+    schema_version  INTEGER NOT NULL DEFAULT 1,
+    content_hash    TEXT,
+    UNIQUE(run_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_execution_events_run
+    ON execution_events(run_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_execution_events_session
+    ON execution_events(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_execution_events_type
+    ON execution_events(event_type);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS execution_events_fts USING fts5(
+    payload_json, content=execution_events, content_rowid=id
+);
+CREATE TRIGGER IF NOT EXISTS execution_events_ai AFTER INSERT ON execution_events BEGIN
+    INSERT INTO execution_events_fts(rowid, payload_json)
+    VALUES (new.id, new.payload_json);
+END;
+CREATE TRIGGER IF NOT EXISTS execution_events_ad AFTER DELETE ON execution_events BEGIN
+    INSERT INTO execution_events_fts(execution_events_fts, rowid, payload_json)
+    VALUES ('delete', old.id, old.payload_json);
+END;
+
+-- Graph projection (docs/GRAPH_ENGINE_BETA_DESIGN.md §4, §10). These tables
+-- are a CURRENT-STATE projection maintained by the graph reducer; the canonical
+-- record remains ``execution_events``. A graph can always be rebuilt by
+-- replaying a run's graph_* events through the reducer, so these rows are
+-- disposable cache, never the source of truth.
+CREATE TABLE IF NOT EXISTS graph_nodes (
+    node_id          TEXT NOT NULL,
+    run_id           TEXT NOT NULL REFERENCES engine_runs(run_id),
+    session_id       TEXT NOT NULL DEFAULT '',
+    node_type        TEXT NOT NULL,
+    title            TEXT NOT NULL DEFAULT '',
+    objective        TEXT NOT NULL DEFAULT '',
+    expected_outcome TEXT NOT NULL DEFAULT '',
+    lifecycle        TEXT NOT NULL DEFAULT 'proposed',
+    verdict          TEXT NOT NULL DEFAULT 'unknown',
+    freshness        TEXT NOT NULL DEFAULT 'current',
+    goal_revision    INTEGER,
+    priority         REAL NOT NULL DEFAULT 0.0,
+    budget_json      TEXT NOT NULL DEFAULT '{}',
+    author           TEXT NOT NULL DEFAULT 'model',
+    version          INTEGER NOT NULL DEFAULT 1,
+    checkpoint       TEXT NOT NULL DEFAULT '',
+    evidence_json    TEXT NOT NULL DEFAULT '[]',
+    payload_json     TEXT NOT NULL DEFAULT '{}',
+    created_at       REAL NOT NULL,
+    updated_at       REAL NOT NULL,
+    PRIMARY KEY(run_id, node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_run
+    ON graph_nodes(run_id, lifecycle);
+
+CREATE TABLE IF NOT EXISTS graph_edges (
+    edge_id      TEXT NOT NULL,
+    run_id       TEXT NOT NULL REFERENCES engine_runs(run_id),
+    source       TEXT NOT NULL,
+    target       TEXT NOT NULL,
+    edge_type    TEXT NOT NULL,
+    confidence   REAL NOT NULL DEFAULT 1.0,
+    author       TEXT NOT NULL DEFAULT 'model',
+    version      INTEGER NOT NULL DEFAULT 1,
+    evidence_ref TEXT,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at   REAL NOT NULL,
+    PRIMARY KEY(run_id, edge_id)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_run
+    ON graph_edges(run_id, source, target);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Code intelligence cache
 -- ─────────────────────────────────────────────────────────────────────────────
 

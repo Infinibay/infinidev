@@ -20,6 +20,8 @@ COMMANDS = [
     ("/models manage", "Pick a model interactively"),
     ("/effort", "Reasoning depth: show the levels this model accepts"),
     ("/effort high", "Set reasoning effort (levels vary per model)"),
+    ("/engine", "Task engine: show or set auto|react|staged|graph_beta"),
+    ("/engine react", "Set the task engine (auto|react|staged|graph_beta)"),
     ("/settings", "Show or edit settings configuration"),
     ("/settings browse", "Open settings editor modal"),
     ("/think", "Gather context deeply before next task (enables gather phase)"),

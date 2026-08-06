@@ -54,6 +54,17 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("IMAGE_GENERATION_BASE_URL", "Image API base URL", "str"),
         ("IMAGE_GENERATION_API_KEY", "Image API key", "str"),
     ],
+    "Engine": [
+        ("TASK_ENGINE_MODE",
+         "Task engine: auto picks per task; explicit modes stay pinned",
+         "select:auto,react,staged,graph_beta"),
+        ("AUTO_ENGINE_ALLOW_GRAPH",
+         "Let auto pick graph_beta for branching work", "bool"),
+        ("ENGINE_SHOW_SELECTION_REASON",
+         "Show why an engine was chosen for each task", "bool"),
+        ("REACT_MAX_ITERATIONS", "ReAct budget: max loop iterations", "int"),
+        ("REACT_MAX_TOOL_CALLS", "ReAct budget: max total tool calls", "int"),
+    ],
     "Assistant LLM": [
         ("ASSISTANT_LLM_ENABLED", "Enable pair-programming critic (runs in parallel)", "bool"),
         ("ASSISTANT_LLM_PROVIDER", "Assistant provider (empty = reuse main)",

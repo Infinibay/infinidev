@@ -224,6 +224,30 @@ class Settings(BaseSettings):
     # runner list (pytest/jest/cargo/etc.) used by the guidance detector.
     LOOP_CUSTOM_TEST_COMMANDS: str = ""
 
+    # ── Task engine selection (docs/GRAPH_ENGINE_BETA_DESIGN.md §9) ────
+    # Which engine executes an escalated task: staged (Goal/Stage/Task
+    # planning), react (single budgeted loop without a plan), auto
+    # (coordinator picks and explains), or graph_beta (work graph beta).
+    # Unknown values resolve to staged. Changing the default does not alter a
+    # running turn; explicit modes never fall back to another adapter.
+    TASK_ENGINE_MODE: str = "auto"  # auto | react | staged | graph_beta
+    # Whether the Auto coordinator may pick graph_beta for non-linear,
+    # branching work. Explicit `graph_beta` always runs the Graph engine
+    # regardless of this flag.
+    AUTO_ENGINE_ALLOW_GRAPH: bool = True
+    # Surface a short "engine X chosen because …" status line per task.
+    ENGINE_SHOW_SELECTION_REASON: bool = True
+    # ReAct budget fuses — resource ceilings, never success conditions.
+    # Hitting them closes the run as blocked with an escalation request.
+    REACT_MAX_ITERATIONS: int = 12
+    REACT_MAX_TOOL_CALLS: int = 40
+    # Graph beta operational limits (§5.4), applied by the live scheduler
+    # and its bounded LoopEngine leaf executions.
+    GRAPH_MAX_OPEN_BRANCHES: int = 8
+    GRAPH_MAX_NODE_REVISITS: int = 4
+    GRAPH_NODE_TOKEN_BUDGET: int = 200_000
+    GRAPH_RUN_TOOL_BUDGET: int = 500
+
     # Gather phase (pre-implementation info collection)
     GATHER_ENABLED: bool = False
     GATHER_MAX_TOOL_CALLS_PER_QUESTION: int = 30

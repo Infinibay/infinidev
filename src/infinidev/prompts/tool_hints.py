@@ -120,6 +120,22 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "search_knowledge(query='authentication design', mode='semantic') | "
         "search_knowledge(finding_type='project_context')",
     ),
+    "history_search": (
+        "Search the execution event log (engine runs, stages, tasks, digests) "
+        "by full text plus filters like run_id or event_type",
+        "history_search(query='JWT middleware') | "
+        "history_search(event_type='engine_selected') | "
+        "history_search(run_id='run_ab12')",
+    ),
+    "history_read": (
+        "Read execution events by id (full payload) or a whole run timeline",
+        "history_read(event_ids=['evt_ab12'], window_after=2) | "
+        "history_read(run_id='run_ab12')",
+    ),
+    "history_trace": (
+        "Reconstruct the causal chain behind an event, or a run's ordered timeline",
+        "history_trace(event_id='evt_ab12') | history_trace(run_id='run_ab12')",
+    ),
     "update_finding": (
         "Edit the content/topic of an existing finding by id",
         "update_finding(finding_id=12, content='uses JWT RS256, not HS256')",

@@ -999,9 +999,14 @@ def run_task(
     if hasattr(agent, "backstory"):
         agent.backstory = flow_config.backstory
 
-    from infinidev.engine.orchestration.staged_pipeline import run_staged_goal
+    # Engine selection — the coordinator resolves TASK_ENGINE_MODE
+    # (auto|react|staged|graph_beta), records the decision in the execution
+    # event log, and dispatches to exactly one matching adapter. Staged
+    # preserves Goal/Stage/Task planning, ReAct is plan-free, and Graph owns
+    # its work graph while executing bounded leaves. See the beta design §16.
+    from infinidev.engine.engines import run_selected_engine
 
-    staged_run = run_staged_goal(
+    engine_run = run_selected_engine(
         escalation=escalation,
         agent=agent,
         engine=engine,
@@ -1014,11 +1019,12 @@ def run_task(
         use_phase_engine=use_phase_engine,
         force_gather=force_gather,
     )
-    result = staged_run.text
-    used_engine = staged_run.engine
+    result = engine_run.user_message
+    used_engine = engine_run.engine
 
-    # Review happens per Task inside the staged orchestrator. A cancelled
-    # Stage remains incomplete and resumable; do not restart it here.
+    # Review happens inside the selected adapter: per Task for Staged, once
+    # for ReAct, and per executed leaf for Graph. A cancelled run is resumable;
+    # do not restart it here.
     if getattr(used_engine, "is_cancelled", False):
         logger.info("run_task: cancelled — skipping end-of-task hooks")
         runtime.record_step(result, step_id=root_task.id)
@@ -1041,7 +1047,7 @@ def run_task(
     )
     if followup:
         runtime.record_step(result, step_id=root_task.id)
-        if staged_run.state.status == "complete":
+        if engine_run.status == "completed":
             runtime.complete_current_task(result)
         else:
             runtime.block_current_task(result)
@@ -1060,9 +1066,9 @@ def run_task(
 
     hooks.on_phase("idle")
     runtime.record_step(result, step_id=root_task.id)
-    if staged_run.state.status == "complete":
+    if engine_run.status == "completed":
         runtime.complete_current_task(result)
-    elif staged_run.state.status == "blocked":
+    elif engine_run.status == "blocked":
         runtime.block_current_task(result)
     else:
         runtime.fail_current_task(result)

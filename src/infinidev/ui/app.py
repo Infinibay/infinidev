@@ -1614,6 +1614,13 @@ class InfinidevApp:
                 self.status_bar_control.set_model(model or "no model set")
             except Exception:
                 self.status_bar_control.set_model("unknown")
+            try:
+                from infinidev.config.settings import settings
+                self.status_bar_control.set_engine(
+                    settings.TASK_ENGINE_MODE or "auto"
+                )
+            except Exception:
+                self.status_bar_control.set_engine("auto")
             self.invalidate()
 
     # ── Event bus integration ────────────────────────────────────────

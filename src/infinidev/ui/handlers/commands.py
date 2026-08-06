@@ -83,6 +83,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "COMMANDS\n"
         "  /models [list|set|manage]    Show or change the model\n"
         "  /effort [level]              Reasoning depth this model accepts\n"
+        "  /engine [mode]               Task engine: auto|react|staged|graph_beta\n"
         "  /settings [key] [value]      Show or change settings\n"
         "  /mcp [restart <name>]        Index server health (Ken and others)\n"
         "  /plan <task>                 Plan, review, then execute\n"
@@ -101,6 +102,10 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
 
 def _cmd_settings(app: InfinidevApp, parts: list[str]) -> None:
     handle_settings(app, parts)
+
+
+def _cmd_engine(app: InfinidevApp, parts: list[str]) -> None:
+    handle_engine(app, parts)
 
 
 def _cmd_models(app: InfinidevApp, parts: list[str]) -> None:
@@ -384,6 +389,7 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/clear": _cmd_clear,
     "/help": _cmd_help,
     "/settings": _cmd_settings,
+    "/engine": _cmd_engine,
     "/models": _cmd_models,
     "/effort": _cmd_effort,
     "/debug": _cmd_debug,
@@ -456,6 +462,58 @@ def handle_settings(app: InfinidevApp, parts: list[str]) -> None:
             app._update_status_bar()
         except Exception as e:
             app.add_message("System", f"Error setting {key}: {e}", "system")
+
+
+# ── Engine subcommand handler ───────────────────────────────────────────
+
+
+def handle_engine(app: InfinidevApp, parts: list[str]) -> None:
+    """Show or set the task engine.
+
+    Usage: ``/engine`` · ``/engine auto`` · ``/engine staged`` ·
+    ``/engine react`` · ``/engine graph_beta``
+    """
+    from infinidev.config.settings import settings, reload_all
+    from infinidev.engine.engines.routing import VALID_MODES, normalize_mode
+
+    current = settings.TASK_ENGINE_MODE or "auto"
+
+    if len(parts) == 1:
+        listed = "\n".join(
+            f"  {'>' if mode == current else ' '} {mode}" for mode in VALID_MODES
+        )
+        app.add_message(
+            "System",
+            "Task engine — how an escalated task is executed\n"
+            f"{listed}\n\n"
+            "  auto        coordinator picks per task and explains why\n"
+            "  react       fast budgeted loop, no plan (small tasks)\n"
+            "  staged      Goal/Stage/Task planning (predictable work)\n"
+            "  graph_beta  beta work graph for non-linear tasks\n\n"
+            f"Change it with /engine <mode>. Applies from the next task.",
+            "system",
+        )
+        return
+
+    raw = parts[1].strip().lower()
+    if raw not in VALID_MODES:
+        app.add_message(
+            "System",
+            f"'{raw}' is not a valid engine mode.\n"
+            f"Choose one of: {', '.join(VALID_MODES)}",
+            "system",
+        )
+        return
+
+    wanted = normalize_mode(raw)
+    settings.save_user_settings({"TASK_ENGINE_MODE": wanted})
+    reload_all()
+    note = " (beta)" if wanted == "graph_beta" else ""
+    app.add_message(
+        "System", f"Task engine set to {wanted}{note}. Applies from the next task.",
+        "system",
+    )
+    app._update_status_bar()
 
 
 # ── Models subcommand handler ───────────────────────────────────────────

@@ -61,6 +61,11 @@ from infinidev.tools.planner import (
     EmitStageTool,
     EmitTaskPlanTool,
 )
+from infinidev.tools.history import (
+    HistoryReadTool,
+    HistorySearchTool,
+    HistoryTraceTool,
+)
 from infinidev.tools.council import (
     COUNCIL_MEMBER_TOOLS as _COUNCIL_MEMBER_TOOLS,
     COUNCIL_MODERATOR_TOOLS as _COUNCIL_MODERATOR_TOOLS,
@@ -151,6 +156,9 @@ PLANNER_TOOLS = [EmitPlanTool]
 # role boundary even when prompt text is ignored.
 TASK_PLANNER_TOOLS = [EmitTaskPlanTool]
 STAGE_PLANNER_TOOLS = [EmitStageTool, CompleteGoalTool, BlockGoalTool]
+# Read-only access to the execution event log. is_read_only=True makes these
+# flow into the chat-agent whitelist automatically.
+HISTORY_TOOLS = [HistorySearchTool, HistoryReadTool, HistoryTraceTool]
 # Exclusive to the council tiers — schema-level terminators read
 # directly by the council orchestrator (see engine/council/). Members
 # get post/conclude; the moderator gets seed/verdict/synthesize.
@@ -272,6 +280,7 @@ def get_tools_for_role(
         + DOCS_TOOLS
         + CODE_INTEL_TOOLS
         + META_TOOLS
+        + HISTORY_TOOLS
     )
     # Generation has a separate route and capability. It must never be inferred
     # from vision support or the chat model, and unknown/unsupported stays absent.

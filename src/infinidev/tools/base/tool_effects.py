@@ -158,6 +158,7 @@ _READS_INTERNAL = frozenset({
     "background_status", "wait_for_background_task", "search_findings",
     "read_report", "search_knowledge", "summarize_findings", "find_documentation",
     "describe_tool", "recall_context", "tail_test_output",
+    "history_search", "history_read", "history_trace",
 })
 _NETWORK = frozenset({
     "web_search", "web_fetch", "code_search_web", "generate_image",

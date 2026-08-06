@@ -130,6 +130,7 @@ def handle_command(cmd_text: str):
         click.echo("  /settings reset    - Reset to defaults")
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
+        click.echo("  /engine [mode]     - Show or set task engine (auto|react|staged|graph_beta)")
         click.echo("  /reindex [--full]  - Re-index the workspace (--full clears DB first)")
         click.echo("  /think             - Enable deep analysis for the next task")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
@@ -152,6 +153,10 @@ def handle_command(cmd_text: str):
 
     elif cmd == "/settings":
         handle_settings_command(parts)
+        return True
+
+    elif cmd == "/engine":
+        handle_engine_command(parts)
         return True
 
     elif cmd == "/think":
@@ -284,6 +289,44 @@ def _render_agents_classic(parts: list[str]) -> None:
         click.echo(message.get("text", ""))
 
 
+def handle_engine_command(parts: list[str]):
+    """Show or set the task engine in classic CLI mode."""
+    from infinidev.config.settings import settings, reload_all
+    from infinidev.engine.engines.routing import VALID_MODES, normalize_mode
+
+    current = settings.TASK_ENGINE_MODE or "auto"
+
+    if len(parts) == 1:
+        click.echo(click.style("Task engine — how an escalated task runs", bold=True))
+        for mode in VALID_MODES:
+            marker = "*" if mode == current else " "
+            click.echo(f"  {marker} {mode}")
+        click.echo("")
+        click.echo("  auto        coordinator picks per task and explains why")
+        click.echo("  react       fast budgeted loop, no plan (small tasks)")
+        click.echo("  staged      Goal/Stage/Task planning (predictable work)")
+        click.echo("  graph_beta  beta work graph for non-linear tasks")
+        click.echo("")
+        click.echo("Change it with /engine <mode>. Applies from the next task.")
+        return
+
+    raw = parts[1].strip().lower()
+    if raw not in VALID_MODES:
+        click.echo(click.style(
+            f"'{raw}' is not a valid engine mode. Choose one of: {', '.join(VALID_MODES)}",
+            fg="red",
+        ))
+        return
+
+    wanted = normalize_mode(raw)
+    settings.save_user_settings({"TASK_ENGINE_MODE": wanted})
+    reload_all()
+    note = " (beta)" if wanted == "graph_beta" else ""
+    click.echo(click.style(
+        f"Task engine set to {wanted}{note}. Applies from the next task.", fg="green",
+    ))
+
+
 def handle_settings_command(parts: list[str]):
     """Handle /settings command in classic CLI mode."""
     from infinidev.config.settings import settings, get_settings_file, reload_all
@@ -330,6 +373,13 @@ def handle_settings_command(parts: list[str]):
         click.echo(click.style("Loop Engine", bold=True))
         click.echo(f"  {settings.LOOP_MAX_ITERATIONS:<50} (LOOP_MAX_ITERATIONS)")
         click.echo(f"  {settings.LOOP_MAX_TOTAL_TOOL_CALLS:<50} (LOOP_MAX_TOTAL_TOOL_CALLS)")
+        click.echo("")
+        click.echo(click.style("Task Engine", bold=True))
+        click.echo(f"  {settings.TASK_ENGINE_MODE:<50} (TASK_ENGINE_MODE)")
+        click.echo(f"  {str(settings.AUTO_ENGINE_ALLOW_GRAPH):<50} (AUTO_ENGINE_ALLOW_GRAPH)")
+        click.echo(f"  {str(settings.ENGINE_SHOW_SELECTION_REASON):<50} (ENGINE_SHOW_SELECTION_REASON)")
+        click.echo(f"  {settings.REACT_MAX_ITERATIONS:<50} (REACT_MAX_ITERATIONS)")
+        click.echo(f"  {settings.REACT_MAX_TOOL_CALLS:<50} (REACT_MAX_TOOL_CALLS)")
         click.echo("")
         click.echo(click.style("Code Interpreter", bold=True))
         click.echo(f"  {settings.CODE_INTERPRETER_TIMEOUT:<50} (CODE_INTERPRETER_TIMEOUT)")
@@ -378,6 +428,11 @@ def handle_settings_command(parts: list[str]):
             "ALLOWED_COMMANDS_LIST": list,
             "FILE_OPERATIONS_PERMISSION": str,
             "ALLOWED_FILE_PATHS": list,
+            "TASK_ENGINE_MODE": str,
+            "AUTO_ENGINE_ALLOW_GRAPH": bool,
+            "ENGINE_SHOW_SELECTION_REASON": bool,
+            "REACT_MAX_ITERATIONS": int,
+            "REACT_MAX_TOOL_CALLS": int,
         }
 
         if value_to_set:

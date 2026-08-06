@@ -102,6 +102,7 @@ class StatusLineControl(FormattedTextControl):
         self._app_state = app_state
         self._model = ""
         self._project = ""
+        self._engine = ""
         self._status = ""
         self._status_kind = "idle"
         super().__init__(self._get_text)
@@ -113,6 +114,9 @@ class StatusLineControl(FormattedTextControl):
 
     def set_project(self, project: str) -> None:
         self._project = project
+
+    def set_engine(self, engine: str) -> None:
+        self._engine = engine
 
     def set_status(self, status: str, kind: str = "info") -> None:
         self._status = status
@@ -173,6 +177,12 @@ class StatusLineControl(FormattedTextControl):
             segments.append(status)
         if self._model:
             segments.append((TEXT, self._model))
+        if self._engine:
+            def _open_settings(mouse_event):
+                if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                    self._app_state.dialog_manager.open_settings()
+
+            segments.append((TEXT_MUTED, f"engine:{self._engine}", _open_settings))
         cwd = os.getcwd()
         branch = _branch_cache.get(cwd)
         if branch:
