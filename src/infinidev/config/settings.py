@@ -361,6 +361,9 @@ class Settings(BaseSettings):
     # UI
     MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling
     DIFF_DISPLAY_MODE: str = "unified"  # "unified" (git diff) | "side_by_side"
+    # Keep reasoning in the durable transcript, but hide its chat cards unless
+    # the user explicitly opts in to seeing them.
+    UI_SHOW_THINKING_IN_CHAT: bool = False
     # Transcript-first by default: the sidebar's panels (context, thinking,
     # steps, actions, logs) are all still there, one Alt+. away, but they
     # no longer take a third of the terminal before the user asks for them.

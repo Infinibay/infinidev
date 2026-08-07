@@ -17,6 +17,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import UIControl, UIContent
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 
+from infinidev.config.settings import settings
 from infinidev.ui.theme import TEXT_DIM, TEXT_MUTED, PRIMARY
 
 
@@ -30,48 +31,8 @@ _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _SPINNER_FPS = 8
 
 
-# ── Momentum / inertial scroll (mac-style) ───────────────────────────────
-# A mouse-wheel notch injects an impulse into ``_velocity`` (measured in
-# lines/frame). Notches that arrive close together accumulate → higher
-# velocity → a longer glide ("more force, the faster you spin"). Each
-# animation frame applies the velocity to the scroll offset and decays it
-# by ``_FRICTION`` until it falls below ``_MIN_VELOCITY`` and stops.
-#
-# Tuning these constants shapes the entire feel:
-#   _FRICTION      ↑ = longer, floatier glide     ↓ = snappier stop
-#   _BASE_IMPULSE  ↑ = a single notch travels farther
-#   _MAX_ACCEL     ↑ = fast flicks fling much farther than slow ticks
-#   _ACCEL_WINDOW  the max gap (s) still treated as part of one "flick"
-#
-# The numbers below were picked from the *overshoot* — how far the viewport
-# keeps travelling after the wheel stops — because that is what the hand
-# actually feels:
-#
-#   one isolated notch     3.5 lines   (a terminal's default is 3)
-#   steady scroll, 50 ms   10 lines    (a quarter viewport: reads as inertia)
-#   brisk spin,    30 ms   26 lines
-#   full flick             63 lines in 0.23 s
-#
-# The previous values (F=0.86, accel window 130 ms, cap 30) overshot 30
-# lines on an *ordinary* scroll and 213 on a flick — three quarters of a
-# screen after simply letting go, which reads as "there is no friction".
-# Two things caused it: the glide kept 86 % of its speed per frame, and the
-# accel window was so wide that ordinary scrolling was scored as a flick.
-_ANIM_INTERVAL = 1 / 60     # animation frame period (~16 ms → ~60 fps)
-_FRICTION      = 0.75       # fraction of velocity retained each frame
-_BASE_IMPULSE  = 0.9        # velocity added by a single slow notch
-_ACCEL_WINDOW  = 0.09       # notches within this gap (s) count as a flick
-_MAX_ACCEL     = 6.0        # max flick multiplier (fast wheel = more force)
-_MAX_VELOCITY  = 16.0       # hard cap on velocity (lines/frame)
-_MIN_VELOCITY  = 0.35       # glide stops once velocity drops below this
-# Each callback advances exactly one physics frame. A long transcript can
-# delay call_later callbacks; converting that delay into catch-up frames
-# makes one visible tick jump farther as the chat grows. Per-tick integration
-# keeps the line distance independent of transcript size and render cost.
-# A gap this long is not a slow frame, it is a suspended process. The
-# gesture is over; resume to a stopped viewport rather than flinging it
-# the whole remaining distance at once.
-_STALL_SECONDS = 2.0
+# Exact number of transcript lines moved by each mouse-wheel event.
+_MOUSE_WHEEL_LINES = 5
 
 
 class ChatHistoryControl(UIControl):
@@ -86,6 +47,7 @@ class ChatHistoryControl(UIControl):
         self._line_cache: list[list[tuple[str, str]]] | None = None
         self._cache_len = 0
         self._cache_width = 0
+        self._cache_show_thinking_messages = False
         self._show_thinking = False
         # Working-indicator state: when the current piece of work started
         # (for the elapsed counter) and a short label for what it is.
@@ -112,13 +74,6 @@ class ChatHistoryControl(UIControl):
         # One-shot guard: a trailing rebuild has been scheduled for after
         # the current throttle window (see _schedule_trailing_rebuild).
         self._trailing_scheduled: bool = False
-        # ── Momentum scroll state (mac-style inertial wheel) ──────────
-        self._velocity: float = 0.0      # lines/frame; + = up into history
-        self._frac: float = 0.0          # sub-line residual carried between frames
-        self._last_wheel_t: float = 0.0  # monotonic time of last wheel notch
-        self._last_tick_t: float = 0.0   # monotonic time of last animation frame
-        self._anim_handle = None         # pending animation-frame timer handle
-        self._hit_bound: bool = False    # set when a scroll step clamps at an edge
         # ── Compact tool-group state ──────────────────────────────────
         # A group reads "Running" only while one of its tool messages is
         # active; otherwise it reads "Ran". Collapse/expand state is keyed
@@ -161,22 +116,20 @@ class ChatHistoryControl(UIControl):
         return True
 
     def mouse_handler(self, mouse_event: MouseEvent):
-        """Handle wheel scroll (momentum) + clicks on registered lines.
+        """Handle fixed-distance wheel scroll and clicks on registered lines.
 
         We consume SCROLL_UP/DOWN here rather than letting the hosting
-        Window handle them: Window._scroll_up/_scroll_down only feed an
-        impulse (via move_cursor_up/down) when the phantom cursor sits at a
-        viewport edge, which — combined with a multi-line momentum glide —
-        creates dead zones where notches do nothing. Handling the wheel
-        directly feeds exactly one impulse per notch, in both directions,
-        regardless of cursor position.
+        Window handle them: Window._scroll_up/_scroll_down only invoke the
+        control's scroll hooks when the phantom cursor sits at a viewport
+        edge, creating dead zones where notches do nothing. Handling the
+        wheel directly applies one fixed step regardless of cursor position.
         """
         et = mouse_event.event_type
         if et == MouseEventType.SCROLL_UP:
-            self._add_impulse(+1)
+            self.move_cursor_up()
             return None
         if et == MouseEventType.SCROLL_DOWN:
-            self._add_impulse(-1)
+            self.move_cursor_down()
             return None
         if et == MouseEventType.MOUSE_UP:
             # prompt_toolkit hands us a row in the *content*, which includes
@@ -196,13 +149,12 @@ class ChatHistoryControl(UIControl):
         return NotImplemented
 
     def get_vertical_scroll(self, window) -> int:
-        """Authoritative viewport scroll, derived from the momentum state.
+        """Authoritative viewport scroll, derived from the line offset.
 
         Passed to the chat ``Window`` as ``get_vertical_scroll``. Without
         it, prompt_toolkit derives ``vertical_scroll`` from the phantom
         cursor via ``do_scroll``, which only moves once the cursor reaches a
-        viewport edge — so a momentum glide floats the (hidden) cursor
-        across a *static* viewport instead of scrolling the content.
+        viewport edge, leaving the viewport static across several notches.
 
         By pinning ``vertical_scroll`` to ``cursor_y - height + 1`` (cursor
         at the bottom edge), every line of ``_scroll_offset`` maps 1:1 to a
@@ -222,181 +174,24 @@ class ChatHistoryControl(UIControl):
         cursor_y = max(0, line_count - 1 - self._scroll_offset)
         return max(0, min(max_scroll, cursor_y - height + 1))
 
-    # ── Mouse wheel → momentum (mac-style inertial scroll) ────────────
-    # The wheel is consumed in mouse_handler() above (not by the Window),
-    # so each notch feeds exactly one impulse into the velocity model; an
-    # animation loop then glides the viewport and decays the velocity by
-    # friction. Rapid notches stack → more force → longer glide. The
-    # move_cursor_up/down hooks remain as a fallback for any code path that
-    # still routes wheel events through the Window.
+    # Mouse wheel uses fixed-distance steps in both directions.
+    # The wheel is consumed in mouse_handler() above to avoid Window cursor
+    # dead zones. These hooks remain for paths that delegate to Window.
 
     def move_cursor_down(self) -> None:
-        """Mouse wheel down — feed a downward momentum impulse."""
-        self._add_impulse(-1)
+        """Move toward the newest messages by one fixed wheel step."""
+        self.page_down(_MOUSE_WHEEL_LINES)
 
     def move_cursor_up(self) -> None:
-        """Mouse wheel up — feed an upward momentum impulse."""
-        self._add_impulse(+1)
-
-    def _add_impulse(self, direction: int) -> None:
-        """Inject one wheel notch into the momentum model.
-
-        ``direction``: +1 = scroll up (into history), -1 = toward the
-        bottom. The closer this notch arrives to the previous one, the
-        larger the impulse (a fast flick = more force); same-direction
-        impulses accumulate, an opposite one cancels the residual glide.
-        """
-        try:
-            now = time.monotonic()
-        except Exception:
-            now = 0.0
-        dt = now - self._last_wheel_t
-        self._last_wheel_t = now
-
-        if dt <= 0:
-            factor = _MAX_ACCEL
-        else:
-            factor = max(1.0, min(_MAX_ACCEL, _ACCEL_WINDOW / dt))
-        impulse = _BASE_IMPULSE * factor
-
-        # Reverse direction → drop the leftover glide first (feels crisp).
-        if self._velocity != 0.0 and (self._velocity > 0) != (direction > 0):
-            self._velocity = 0.0
-            self._frac = 0.0
-
-        self._velocity += direction * impulse
-        self._velocity = max(-_MAX_VELOCITY, min(_MAX_VELOCITY, self._velocity))
-        if direction > 0:
-            self._follow_tail = False
-
-        # Immediate 1-line step for instant tactile feedback — the glide
-        # adds the momentum tail on top. Without it the first frame lands a
-        # frame late and a single slow notch feels laggy (and, importantly,
-        # it guarantees the first notch from the tail produces visible
-        # movement even before the animation timer fires).
-        self._apply_scroll_step(direction)
-
-        # Arm the glide. In the running app there is always an event loop,
-        # so subsequent frames land every ~16 ms. Without a loop (unit
-        # tests) the velocity simply stays set for the caller to drive
-        # frames manually via _tick().
-        self._schedule_anim()
-
-    def _apply_scroll_step(self, step: int) -> None:
-        """Move the offset by ``step`` lines (+ = up), clamping at the edges.
-
-        Sets ``_hit_bound`` when a boundary is reached and re-engages
-        tail-follow when it lands at the very bottom (offset 0).
-        """
-        if step == 0:
-            return
-        max_off = max(0, self._line_count - 1)
-        new = self._scroll_offset + step
-        if new <= 0:
-            self._scroll_offset = 0
-            self._follow_tail = True
-            self._hit_bound = True
-        elif new >= max_off:
-            self._scroll_offset = max_off
-            self._follow_tail = False
-            self._hit_bound = True
-        else:
-            self._scroll_offset = new
-            self._follow_tail = False
-
-    def _tick_went_stale(self) -> bool:
-        """Return whether the pending gesture expired while the app was suspended."""
-        try:
-            now = time.monotonic()
-        except Exception:
-            return False
-        last, self._last_tick_t = self._last_tick_t, now
-        if last <= 0.0:
-            return False
-        return now - last >= _STALL_SECONDS
-
-    def _tick(self) -> None:
-        """Advance the glide by one fixed physics frame."""
-        self._anim_handle = None
-        v = self._velocity
-        if abs(v) < _MIN_VELOCITY:
-            self._stop_glide()
-            return
-        if self._tick_went_stale():
-            self._stop_glide()
-            return
-
-        self._hit_bound = False
-        self._frac += v
-        step = int(self._frac)
-        self._frac -= step
-        self._apply_scroll_step(step)
-        self._velocity = v * _FRICTION
-        try:
-            from prompt_toolkit.application import get_app
-            get_app().invalidate()
-        except Exception:
-            pass
-        if self._hit_bound:
-            self._stop_glide()
-            return
-        self._schedule_anim()
-
-    def _stop_glide(self) -> None:
-        """Spend the remaining momentum without touching the pending timer.
-
-        ``_stop_momentum`` is the *external* brake (a page/home/end jump) and
-        also cancels the armed frame; this is the glide reaching its own end,
-        called from inside ``_tick`` where that frame has already fired.
-        """
-        self._velocity = 0.0
-        self._frac = 0.0
-        self._last_tick_t = 0.0
-
-    def _schedule_anim(self) -> bool:
-        """Arm the next animation frame. Returns False if no loop is available."""
-        if self._anim_handle is not None:
-            return True
-        try:
-            from prompt_toolkit.application import get_app
-            loop = get_app().loop
-        except Exception:
-            return False
-        if loop is None:
-            return False
-        try:
-            self._anim_handle = loop.call_later(_ANIM_INTERVAL, self._tick)
-        except Exception:
-            return False
-        # Start the clock when the glide is armed from rest, so the first
-        # frame measures from *now* and not from a stale previous glide.
-        if self._last_tick_t <= 0.0:
-            try:
-                self._last_tick_t = time.monotonic()
-            except Exception:
-                pass
-        return True
-
-    def _stop_momentum(self) -> None:
-        """Cancel any in-flight glide (deterministic jumps kill momentum)."""
-        self._velocity = 0.0
-        self._frac = 0.0
-        self._last_tick_t = 0.0
-        if self._anim_handle is not None:
-            try:
-                self._anim_handle.cancel()
-            except Exception:
-                pass
-            self._anim_handle = None
+        """Move into older messages by one fixed wheel step."""
+        self.page_up(_MOUSE_WHEEL_LINES)
 
     # ── Public scroll API (callable from global keybindings) ──────────
     # These mirror the per-control bindings below but can be invoked
     # regardless of which widget has focus — see
-    # ``ui/keybindings.py:create_global_keybindings``. All are deterministic
-    # jumps, so each cancels any in-flight momentum glide first.
+    # ``ui/keybindings.py:create_global_keybindings``.
 
     def page_up(self, lines: int = 15) -> None:
-        self._stop_momentum()
         self._follow_tail = False
         self._scroll_offset = min(
             self._scroll_offset + lines,
@@ -404,18 +199,15 @@ class ChatHistoryControl(UIControl):
         )
 
     def page_down(self, lines: int = 15) -> None:
-        self._stop_momentum()
         self._scroll_offset = max(0, self._scroll_offset - lines)
         if self._scroll_offset == 0:
             self._follow_tail = True
 
     def scroll_home(self) -> None:
-        self._stop_momentum()
         self._follow_tail = False
         self._scroll_offset = max(0, self._line_count - 1)
 
     def scroll_end(self) -> None:
-        self._stop_momentum()
         self._follow_tail = True
         self._scroll_offset = 0
 
@@ -552,12 +344,14 @@ class ChatHistoryControl(UIControl):
         from infinidev.ui.controls.message_widgets import get_widget
 
         msg_count = len(self._messages)
+        show_thinking_messages = bool(settings.UI_SHOW_THINKING_IN_CHAT)
 
         # ── Cache check ──────────────────────────────────────────────
         cache_valid = (
             self._line_cache is not None
             and self._cache_len == msg_count
             and self._cache_width == width
+            and self._cache_show_thinking_messages == show_thinking_messages
         )
 
         if cache_valid:
@@ -579,6 +373,7 @@ class ChatHistoryControl(UIControl):
                 self._last_lines is not None
                 and self._cache_len == msg_count
                 and self._cache_width == width
+                and self._cache_show_thinking_messages == show_thinking_messages
                 and now - self._last_rebuild < _REBUILD_MIN_INTERVAL
             )
             if throttled:
@@ -656,8 +451,11 @@ class ChatHistoryControl(UIControl):
         lines: list[list[tuple[str, str]]] = []
         self._clickable_lines = {}
         groups = identify_groups(self._messages)
+        show_thinking_messages = bool(settings.UI_SHOW_THINKING_IN_CHAT)
 
         for group in groups:
+            if group.msg_type == "think" and not show_thinking_messages:
+                continue
             # Compact, collapsible tool groups (claude-code style) take a
             # dedicated render path instead of the generic header+messages.
             if group.msg_type == "tool_call":
@@ -731,6 +529,7 @@ class ChatHistoryControl(UIControl):
         self._last_lines = lines
         self._cache_len = msg_count
         self._cache_width = width
+        self._cache_show_thinking_messages = show_thinking_messages
         return lines
 
     def _render_tool_group(self, group, width: int,

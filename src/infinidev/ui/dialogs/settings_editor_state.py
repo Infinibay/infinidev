@@ -82,6 +82,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "Thinking": [
         ("THINKING_ENABLED", "Enable reasoning (best-effort for local models)", "bool"),
+        ("UI_SHOW_THINKING_IN_CHAT", "Show model reasoning messages in chat", "bool"),
         ("THINKING_BUDGET", "Thinking budget (local models may ignore)", "select:low,medium,high,ultra,custom"),
         ("THINKING_BUDGET_TOKENS", "Custom token budget (when preset=custom)", "int"),
     ],

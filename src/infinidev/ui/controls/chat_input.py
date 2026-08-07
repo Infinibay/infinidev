@@ -144,10 +144,8 @@ def create_chat_input(
     def page_up(event):
         """Scroll chat history up (deterministic page jump)."""
         if chat_history_control:
-            # A single deterministic jump — NOT 15 wheel impulses. The
-            # wheel handlers (move_cursor_up/down) now feed the momentum
-            # model, so looping them here would inject 15 impulses and
-            # fling the viewport. page_up() moves a fixed page instantly.
+            # Keep keyboard page navigation distinct from the smaller,
+            # fixed-distance mouse-wheel steps.
             chat_history_control.page_up()
 
     @kb.add("pagedown")
