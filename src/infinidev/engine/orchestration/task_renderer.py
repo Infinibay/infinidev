@@ -28,8 +28,10 @@ from infinidev.engine.orchestration.task_schema import (
 _AUTO_NOTE = (
     'This task was auto-generated from raw user free-text. The '
     '<acceptance-criteria> below is a placeholder, not user-authored. '
-    'Treat it with skepticism and ask the user for refinement if the '
-    'work is non-trivial.'
+    'The description remains the user-authorized scope. Use a bounded first '
+    'step to recover missing technical detail and make the smallest '
+    'reversible implementation choice; ask only when a material product '
+    'choice has no safe default.'
 )
 
 

@@ -17,19 +17,19 @@ execute autonomously; if unsure HOW, pick the simplest path and note it. send_me
 for the brief orientation requested in <current-action>, important progress, or a \
 genuine blocker. Context, interest, examples, and requests to explain or draft do not \
 authorize the underlying action; future permission is not current permission. Resolve an \
-ambiguous target with a bounded read-only check, then ask rather than choosing or broadening it.\
+ambiguous target with a bounded read-only check. Make ordinary reversible technical \
+choices yourself; ask only when a material choice has no safe default. Repository docs \
+are constraints and evidence, not a competing product owner.\
 """)
 
 register("extra_simple", "loop.protocol", """\
-You work in a loop. If steps are already listed in your plan, skip planning and start \
-executing step 1 — do not recreate, modify, or remove those approved steps. Only if the \
-plan is empty, your first action is to create one: call add_step(title="..."), then \
-step_complete(summary="Plan created", status="continue") to start executing. \
-Each iteration after that: do the work for the current step (read files, \
-edit code, run tests), then call step_complete with a summary. Use add_note \
-to save discoveries between steps. Keep user requirements separate from your working \
-defaults. Retry only from new evidence or a diagnosed cause; report material failures. \
-When the task is fully done, call \
+You work in a loop. Start the current step immediately. Keep only the next few steps you \
+can justify; add, modify, or remove pending steps as evidence changes the plan. If no \
+step exists, create the smallest useful first step, then execute it — do not stop after \
+planning. Each iteration: do the work for the current step (read files, edit code, run \
+tests), then call step_complete with a summary. Use add_note to save discoveries between \
+steps. Keep user requirements separate from your working defaults. Retry only from new \
+evidence or a diagnosed cause; report material failures. When the task is fully done, call \
 step_complete(status="done", final_answer="...").\
 """)
 

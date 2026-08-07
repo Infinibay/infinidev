@@ -111,6 +111,11 @@ class TestCrossStyleBehaviorContract:
         assert "Keep literal user requirements separate" in BEHAVIOR_GUIDELINES
         assert "Retry a failure only when it supplied new evidence" in BEHAVIOR_GUIDELINES
 
+    def test_shared_behavior_keeps_the_literal_task_authoritative(self):
+        assert "The literal active task is authoritative" in BEHAVIOR_GUIDELINES
+        assert "not a competing product owner" in BEHAVIOR_GUIDELINES
+        assert "then stop" not in BEHAVIOR_GUIDELINES
+
     @pytest.mark.parametrize("style", ["full", "coding", "extra_simple"])
     def test_develop_flow_does_not_require_verification_after_every_edit(self, style):
         prompt = get_variant("flow.develop.identity", style)
@@ -138,6 +143,12 @@ class TestCrossStyleBehaviorContract:
         assert minimal is not None
         assert "future_or_conditional_permission != current_permission" in coding
         assert "future permission is not current permission" in minimal
+
+    def test_extra_simple_keeps_pending_steps_mutable(self):
+        protocol = get_variant("loop.protocol", "extra_simple")
+        assert protocol is not None
+        assert "add, modify, or remove pending steps" in protocol
+        assert "do not stop after planning" in protocol
 
 
 # ── Registration completeness ────────────────────────────────────────────

@@ -58,8 +58,8 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     # Shell
     "execute_command": (
-        "Run a shell command",
-        "execute_command(command='python -m pytest tests/ -x -q', "
+        "Run a shell command; use cwd for a repo/subdirectory because calls do not share shell state",
+        "execute_command(command='python -m pytest tests/ -x -q', cwd='.', "
         "rationale='Run the project tests and stop at the first failure')",
     ),
     "code_interpreter": (

@@ -8,6 +8,7 @@ import pytest
 
 from infinidev.config.settings import settings
 from infinidev.tools.shell.execute_command import ExecuteCommandTool
+from infinidev.tools.shell.execute_command_input import ExecuteCommandInput
 from infinidev.tools.shell.execute_command_tool import _effective_command_timeout
 
 
@@ -21,6 +22,15 @@ class TestExecuteCommand:
         data = json.loads(result)
         assert data["success"] is True
         assert "hello" in data["stdout"]
+
+    def test_schema_explains_that_cwd_is_per_command(self):
+        description = ExecuteCommandInput.model_fields["cwd"].description
+        assert description is not None
+        assert "prior shell `cd` does not persist" in description
+
+    def test_description_explains_that_shell_state_does_not_persist(self):
+        description = ExecuteCommandTool.model_fields["description"].default
+        assert "cd from an earlier call does not persist" in description
 
     def test_execute_empty_command(self, bound_tool, auto_approve_permissions):
         """Empty string returns error."""

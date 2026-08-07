@@ -131,11 +131,17 @@ class LoopGuard:
                 "role": "user",
                 "content": (
                     f"WARNING: Your last {_MAX} tool calls all failed. "
-                    "You are stuck in a failing pattern. Change your approach:\n"
+                    "Do not repeat the failed call unchanged. Diagnose the returned "
+                    "error and make the next call differ in command, path, working "
+                    "directory, arguments, or strategy. A known local correction must "
+                    "be tried before you call the step blocked. Examples:\n"
                     "- If edit_file keeps failing, read the file again — old_string must match "
                     "the current bytes exactly, and it must be unique.\n"
                     "- If read_file keeps failing on a path, use glob or list_directory to find the correct path.\n"
-                    "- If nothing works, call step_complete(status='blocked') to move on."
+                    "- If a shell command ran in the wrong directory, call execute_command "
+                    "again with its cwd argument set to the intended directory.\n"
+                    "Call step_complete(status='blocked') only when the changed approach also "
+                    "cannot proceed, or the remaining blocker needs user action."
                 ),
             })
 

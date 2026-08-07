@@ -123,6 +123,20 @@ def test_a_real_tool_call_clears_the_pseudo_only_streak():
     assert guard.handle_pseudo_only(ctx, messages) is None
 
 
+def test_error_circuit_requires_a_diagnosed_alternative_before_blocking():
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), []
+    guard.consecutive_tool_errors = 4
+
+    guard.check_error_circuit_breaker(ctx, messages)
+
+    assert len(messages) == 1
+    guidance = messages[0]["content"]
+    assert "working directory" in guidance
+    assert "known local correction must be tried" in guidance
+    assert "only when the changed approach also cannot proceed" in guidance
+
+
 # ── the critic's veto is bounded too ─────────────────────────────────
 
 

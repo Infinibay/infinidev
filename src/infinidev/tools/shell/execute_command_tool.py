@@ -230,7 +230,8 @@ def _effective_command_timeout(requested: int | None) -> int:
 class ExecuteCommandTool(InfinibayBaseTool):
     name: str = "execute_command"
     description: str = (
-        "Execute a shell command in the current environment. "
+        "Execute a shell command. Each call starts independently in the workspace "
+        "unless you pass cwd; a shell cd from an earlier call does not persist. "
         "Returns stdout, stderr, and exit code."
     )
     args_schema: Type[BaseModel] = ExecuteCommandInput
