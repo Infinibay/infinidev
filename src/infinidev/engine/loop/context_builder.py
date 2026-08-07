@@ -225,11 +225,45 @@ def _resolve_tools(
         bind_tools_to_agent(tools, agent.agent_id)
         return tools
 
-    tools = getattr(agent, "tools", [])
+    tools = list(getattr(agent, "tools", []) or [])
+    if not tools:
+        # A cold/unavailable MCP index must never turn a developer Task into a
+        # no-tool conversation. ``agent.tools`` is normally populated with the
+        # local toolbox, but lightweight hosts and partially initialized agents
+        # can expose an empty list. Rebuild the local developer set here; MCP
+        # remains optional and joins normally when it becomes available.
+        logger.warning(
+            "LoopEngine received an empty developer toolbox; restoring local tools"
+        )
+        from infinidev.tools import get_tools_for_role
+
+        tools = get_tools_for_role("developer", small_model=False)
+
     if settings.DYNAMIC_TOOL_ROUTING_ENABLED:
         from infinidev.engine.tool_routing import select_developer_tools
 
         tools = select_developer_tools(tools, description, initial_plan)
+
+        # Dynamic routing may be handed a partial external toolbox containing
+        # only MCP tools. The developer loop cannot inspect or verify a Task
+        # in that state, and the request_capability escape hatch is absent too.
+        # Merge the local core back in, preserving any configured MCP tools.
+        required = {"read_file", "list_directory", "code_search", "execute_command"}
+        if not required.issubset({getattr(tool, "name", "") for tool in tools}):
+            logger.warning(
+                "Developer toolbox has no local inspection tools; restoring core fallback"
+            )
+            from infinidev.tools import get_tools_for_role
+
+            fallback = select_developer_tools(
+                get_tools_for_role("developer", small_model=False),
+                description,
+                initial_plan,
+            )
+            known = {getattr(tool, "name", "") for tool in tools}
+            tools.extend(
+                tool for tool in fallback if getattr(tool, "name", "") not in known
+            )
         bind_tools_to_agent(tools, agent.agent_id)
     return tools
 

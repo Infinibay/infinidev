@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from infinidev.engine.tool_routing import select_developer_tools, task_capabilities
+from infinidev.engine.loop.context_builder import _resolve_tools
 from infinidev.tools import get_tools_for_role
 
 
@@ -93,3 +94,22 @@ def test_request_capability_does_not_claim_effect_permission(bound_tool) -> None
 
     assert result["capability"] == "web"
     assert result["permission_granted"] is False
+
+
+def test_empty_agent_toolbox_restores_local_developer_core() -> None:
+    agent = SimpleNamespace(agent_id="empty-toolbox", tools=[])
+
+    names = {tool.name for tool in _resolve_tools(agent, None, False)}
+
+    assert {"read_file", "list_directory", "code_search", "execute_command"} <= names
+
+
+def test_mcp_only_agent_toolbox_keeps_mcp_and_restores_local_core() -> None:
+    mcp = SimpleNamespace(name="remote_lookup", mcp_server="remote")
+    agent = SimpleNamespace(agent_id="mcp-only", tools=[mcp])
+
+    tools = _resolve_tools(agent, None, False)
+    names = {tool.name for tool in tools}
+
+    assert "remote_lookup" in names
+    assert {"read_file", "list_directory", "code_search", "execute_command"} <= names
