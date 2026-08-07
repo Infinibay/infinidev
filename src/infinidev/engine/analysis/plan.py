@@ -67,3 +67,6 @@ class Plan:
     # ``acceptance_criteria``.
     acceptance_criteria: list[str] = field(default_factory=list)
     acceptance_criteria_authority: AuthorityLevel = "model_inferred"
+    # Zero preserves the legacy unlimited plan. The durable Task adapter sets
+    # this to a small frontier so the developer plans only near-term work.
+    rolling_horizon_limit: int = 0

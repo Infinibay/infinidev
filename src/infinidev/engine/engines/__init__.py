@@ -14,6 +14,7 @@ from infinidev.engine.engines.coordinator import run_selected_engine
 from infinidev.engine.engines.react import ReactAdapter
 from infinidev.engine.engines.routing import EngineSelection, select_engine
 from infinidev.engine.engines.staged_adapter import StagedAdapter
+from infinidev.engine.engines.task import TaskAdapter
 
 __all__ = [
     "EngineAdapter",
@@ -21,6 +22,7 @@ __all__ = [
     "EngineSelection",
     "ReactAdapter",
     "StagedAdapter",
+    "TaskAdapter",
     "TransitionRequest",
     "run_selected_engine",
     "select_engine",

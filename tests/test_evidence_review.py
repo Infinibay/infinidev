@@ -111,6 +111,65 @@ def test_rework_loop_is_bounded_and_preserves_original_scope(monkeypatch) -> Non
     assert "Do not add new scope" in engine.prompts[0]
 
 
+def test_task_rework_preserves_the_durable_task_and_budget(monkeypatch) -> None:
+    from infinidev.config.settings import settings
+    from infinidev.engine.orchestration.task_schema import task_from_free_text
+
+    monkeypatch.setattr(settings, "EVIDENCE_REVIEW_MAX_ROUNDS", 2)
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.evidence_review._recent_tool_evidence",
+        lambda _session_id: "evidence",
+    )
+
+    class Reviewer:
+        calls = 0
+
+        def review(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return EvidenceReviewResult(
+                    "REJECTED", "Qualify this.", [{
+                        "severity": "blocking",
+                        "claim_excerpt": "certain",
+                        "problem": "too strong",
+                    }],
+                )
+            return EvidenceReviewResult("APPROVED", "ok")
+
+    class Agent:
+        def activate_context(self, **_kwargs):
+            pass
+
+        def deactivate(self):
+            pass
+
+    class Engine:
+        kwargs = None
+
+        def execute(self, **kwargs):
+            self.kwargs = kwargs
+            return "qualified"
+
+    task = task_from_free_text("Investigate the behavior and report the evidence.")
+    engine = Engine()
+    run_evidence_review_rework_loop(
+        engine=engine,
+        agent=Agent(),
+        session_id="s1",
+        task_prompt=("Investigate.", "Report."),
+        initial_result="certain",
+        evidence_reviewer=Reviewer(),
+        task=task,
+        max_iterations=50,
+        max_total_tool_calls=160,
+    )
+
+    assert engine.kwargs["task"] is task
+    assert engine.kwargs["preserve_task_state"] is True
+    assert engine.kwargs["max_iterations"] == 50
+    assert engine.kwargs["max_total_tool_calls"] == 160
+
+
 def test_pipeline_uses_evidence_review_when_workspace_is_unchanged(monkeypatch) -> None:
     from infinidev.engine.orchestration.pipeline import _run_review_phase
 

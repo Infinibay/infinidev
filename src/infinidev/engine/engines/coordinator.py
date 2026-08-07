@@ -33,10 +33,12 @@ from infinidev.engine.engines.routing import (
     ENGINE_GRAPH_BETA,
     ENGINE_REACT,
     ENGINE_STAGED,
+    ENGINE_TASK,
     EngineSelection,
     select_engine,
 )
 from infinidev.engine.engines.staged_adapter import StagedAdapter
+from infinidev.engine.engines.task import TaskAdapter
 from infinidev.engine.history import events as ev
 from infinidev.engine.history import store
 from infinidev.engine.history.digest import (
@@ -127,25 +129,6 @@ def run_selected_engine(
 
     selection = select_engine(escalation, mode_override)
 
-    # Auto may treat --think as a Staged signal. Explicit selections stay
-    # pinned: choosing react, staged or graph_beta never dispatches another
-    # adapter behind the user's back.
-    if (
-        use_phase_engine
-        and selection.requested_mode == "auto"
-        and selection.engine == ENGINE_REACT
-    ):
-        selection = EngineSelection(
-            engine=ENGINE_STAGED,
-            requested_mode=selection.requested_mode,
-            confidence=selection.confidence,
-            reasons=[*selection.reasons, "phase_engine_requires_staged"],
-            risks=list(selection.risks),
-            reconsider_if=list(selection.reconsider_if),
-            estimated_overhead="medium",
-            fallback_note="use_phase_engine forced the staged adapter.",
-        )
-
     _show_selection(selection, hooks)
 
     dispatch: dict[str, Any] = {
@@ -199,6 +182,8 @@ def run_selected_engine(
         from infinidev.engine.engines.react import ReactAdapter
 
         adapter = ReactAdapter()
+    elif selection.engine == ENGINE_TASK:
+        adapter = TaskAdapter()
     elif selection.engine == ENGINE_GRAPH_BETA:
         from infinidev.engine.engines.graph import (
             GraphEngineAdapter,

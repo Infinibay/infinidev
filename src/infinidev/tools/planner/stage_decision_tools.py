@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Type
+from typing import Literal, Type
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -54,6 +54,13 @@ class EmitStageInput(BaseModel):
             "reached. These are derived checks, not user requirements."
         ),
     )
+    purpose: Literal["discovery", "delivery"] = Field(
+        "delivery",
+        description=(
+            "discovery resolves one named uncertainty before delivery; delivery "
+            "advances the requested result. A discovery Stage has exactly one Task."
+        ),
+    )
     tasks: list[StageTaskArg] = Field(
         ...,
         min_length=1,
@@ -62,6 +69,10 @@ class EmitStageInput(BaseModel):
 
     @model_validator(mode="after")
     def _validate_task_graph(self) -> "EmitStageInput":
+        if self.purpose == "discovery" and len(self.tasks) != 1:
+            raise ValueError(
+                "A discovery Stage must contain exactly one focused Task."
+            )
         ids = [task.id for task in self.tasks]
         if len(ids) != len(set(ids)):
             raise ValueError("Stage Task ids must be unique")
@@ -132,6 +143,7 @@ class EmitStageTool(InfinibayBaseTool):
         outcome: str,
         exit_criteria: list,
         tasks: list,
+        purpose: str = "delivery",
     ) -> str:
         return _json_result(
             "stage",
@@ -139,6 +151,7 @@ class EmitStageTool(InfinibayBaseTool):
             outcome=outcome,
             exit_criteria=exit_criteria,
             tasks=tasks,
+            purpose=purpose,
         )
 
 

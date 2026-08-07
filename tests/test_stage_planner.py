@@ -18,6 +18,8 @@ from infinidev.engine.analysis.staged_planning import (
     EmitStageDecision,
     EvidenceEntry,
     GoalSpec,
+    StageSpec,
+    StageTaskSpec,
     StagedPlanningState,
 )
 
@@ -294,3 +296,60 @@ def test_stall_counter_resets_on_resumed_tool_calls(scripted):
         "calls; the second response carries tool_calls so the stall counter "
         "resets before any bounded-stall early-return can fire."
     )
+
+
+def test_exploration_budget_refuses_extra_calls_in_a_single_batch(scripted, monkeypatch):
+    calls: list[str] = []
+
+    def execute(_dispatch, name, _arguments):
+        calls.append(name)
+        return "observed"
+
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.stage_planner.execute_tool_call", execute
+    )
+    scripted([
+        _response([
+            _call("read_file", {"file_path": "a.py"}, "one"),
+            _call("read_file", {"file_path": "b.py"}, "two"),
+        ]),
+        _response([_call("emit_stage", _stage_args())]),
+    ])
+
+    decision = run_stage_planner(_state(), max_exploration_calls=1)
+
+    assert isinstance(decision, EmitStageDecision)
+    assert calls == ["read_file"]
+
+
+def test_implementation_goal_rejects_consecutive_discovery_stages(scripted):
+    state = _state()
+    state.goal = state.goal.model_copy(update={"intent": "implementation"})
+    first = EmitStageDecision(stage=StageSpec(
+        title="Resolve one uncertainty",
+        purpose="discovery",
+        outcome="The integration point is known",
+        exit_criteria=["The integration point is observed"],
+        tasks=[StageTaskSpec(
+            id="discover",
+            title="Inspect the integration point",
+            outcome="One deciding fact is observed",
+            acceptance_criteria=["The deciding fact is recorded"],
+        )],
+    ))
+    state.add_stage(first.stage).status = "evaluating"
+    discovery_args = _stage_args("Try another discovery")
+    discovery_args["purpose"] = "discovery"
+    scripted([
+        _response([_call("emit_stage", discovery_args)]),
+        _response([_call("block_goal", {
+            "reason": "Delivery needs user authority",
+            "missing": "The user's approval",
+            "evidence": [],
+        })]),
+    ])
+
+    decision = run_stage_planner(state)
+
+    assert isinstance(decision, BlockGoalDecision)
+    assert decision.reason == "Delivery needs user authority"

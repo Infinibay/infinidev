@@ -19,7 +19,10 @@ from infinidev.engine.analysis.staged_planning import (
     StagedPlanningState,
 )
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
-from infinidev.engine.orchestration.staged_pipeline import run_staged_goal
+from infinidev.engine.orchestration.staged_pipeline import (
+    _goal_from_escalation,
+    run_staged_goal,
+)
 
 
 @dataclass
@@ -33,9 +36,13 @@ class _Engine:
         self._last_status = "completed"
         self.is_cancelled = False
         self.steps: list[dict[str, Any]] = []
+        self.has_changes = True
 
     def get_plan_steps(self) -> list[dict[str, Any]]:
         return list(self.steps)
+
+    def has_file_changes(self) -> bool:
+        return self.has_changes
 
 
 class _Hooks:
@@ -168,12 +175,16 @@ def test_small_goal_uses_one_stage_one_task_then_evidence_completion(
     assert result.state.stages[0].tasks[0].status == "completed"
     assert len(runtime["executions"]) == 1
     structured = runtime["executions"][0]["task"]
-    assert structured.description == _escalation().user_request
-    assert "One slice" not in structured.description
+    assert "User-authorized Goal" in structured.description
+    assert "Current derived execution scope" in structured.description
+    assert "Task: Task only" in structured.description
+    assert structured.title == "Task only"
+    assert structured.kind == "feature"
     assert structured.acceptance_criteria == [
         "The user's request as written in <description> is satisfied to the user's confirmation."
     ]
     assert "Outcome only is observed" in structured.derived_verification_criteria
+    assert runtime["executions"][0]["max_total_tool_calls"] == 40
     assert seen[1].evidence
     assert result.text.startswith("executed Task only")
 
@@ -380,3 +391,50 @@ def test_stage_resource_limit_is_incomplete_not_success(
     assert result.state.status == "blocked"
     assert result.state.terminal is not None
     assert "resource stop" in result.state.terminal.summary
+
+
+def test_implementation_goal_cannot_complete_from_read_only_evidence(
+    temp_db, monkeypatch, runtime,
+):
+    _install_stage_planner(monkeypatch, [
+        _stage("Inspect", [_task("inspect")]),
+        _complete("The inspection result is observed"),
+    ])
+    engine = _Engine()
+    engine.has_changes = False
+
+    result = run_staged_goal(
+        escalation=_escalation("Implement a new feedback tool."), agent=_Agent(),
+        engine=engine, reviewer=object(), hooks=_Hooks(), session_id="read-only-impl",
+        project_id=1, workspace_path="/workspace",
+    )
+
+    assert result.state.status == "blocked"
+    assert "no observed workspace change" in result.text
+
+
+def test_informational_goal_can_complete_from_read_only_evidence(
+    temp_db, monkeypatch, runtime,
+):
+    _install_stage_planner(monkeypatch, [
+        _stage("Inspect", [_task("inspect")]),
+        _complete("The inspection result is observed"),
+    ])
+    engine = _Engine()
+    engine.has_changes = False
+
+    result = run_staged_goal(
+        escalation=_escalation("Analiza la arquitectura actual y explica el flujo."),
+        agent=_Agent(), engine=engine, reviewer=object(), hooks=_Hooks(),
+        session_id="read-only-info", project_id=1, workspace_path="/workspace",
+    )
+
+    assert result.state.status == "complete"
+
+
+def test_reviewing_an_existing_implementation_stays_informational():
+    goal = _goal_from_escalation(_escalation(
+        "Revisa la implementación actual y explica los riesgos."
+    ))
+
+    assert goal.intent == "informational"

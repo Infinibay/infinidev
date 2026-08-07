@@ -1038,6 +1038,9 @@ def run_review_rework_loop(
     on_status: Any | None = None,
     acceptance_criteria: list[str] | None = None,
     derived_verification_criteria: list[str] | None = None,
+    task: Any | None = None,
+    max_iterations: int | None = None,
+    max_total_tool_calls: int | None = None,
 ) -> tuple[str, ReviewResult | None]:
     """Run verification + review-rework cycle.
 
@@ -1066,6 +1069,15 @@ def run_review_rework_loop(
     def _notify(level: str, msg: str) -> None:
         if on_status:
             on_status(level, msg)
+
+    rework_kwargs: dict[str, Any] = {}
+    if task is not None:
+        rework_kwargs.update(
+            task=task,
+            preserve_task_state=True,
+            max_iterations=max_iterations,
+            max_total_tool_calls=max_total_tool_calls,
+        )
 
     def _run_verification_and_fix(current_result: str) -> str:
         """Run tests; if they fail, re-execute developer with failure context."""
@@ -1109,6 +1121,7 @@ def run_review_rework_loop(
                 task_prompt=fix_prompt,
                 verbose=True,
                 preserve_file_tracker=True,
+                **rework_kwargs,
             )
             return new_result if new_result and new_result.strip() else current_result
         finally:
@@ -1248,6 +1261,7 @@ def run_review_rework_loop(
                 new_result = engine.execute(
                     agent=agent, task_prompt=fix_prompt, verbose=True,
                     preserve_file_tracker=True,
+                    **rework_kwargs,
                 )
                 if new_result and new_result.strip():
                     current_result = new_result
@@ -1373,6 +1387,7 @@ def run_review_rework_loop(
                 task_prompt=fix_prompt,
                 verbose=True,
                 preserve_file_tracker=True,
+                **rework_kwargs,
             )
             if not result or not result.strip():
                 result = "Done. (no additional output)"

@@ -204,12 +204,18 @@ def _run_llm_loop(
             continue
 
         for call in tool_calls:
-            exploration_calls += 1
-            result = duplicate_guard.refusal_for(
-                call.function.name, call.function.arguments
-            ) or execute_tool_call(
-                dispatch, call.function.name, call.function.arguments
-            )
+            if exploration_calls >= max_exploration_calls:
+                result = (
+                    "Exploration budget exhausted. Do not make more read calls; "
+                    "call emit_stage, complete_goal, or block_goal now."
+                )
+            else:
+                exploration_calls += 1
+                result = duplicate_guard.refusal_for(
+                    call.function.name, call.function.arguments
+                ) or execute_tool_call(
+                    dispatch, call.function.name, call.function.arguments
+                )
             trimmed = handle_oversized_result(
                 result,
                 max_chars=_MAX_RESULT_CHARS,
@@ -333,6 +339,19 @@ def _decision_error(
 ) -> str:
     if decision is None:
         return "The Stage decision did not match a terminal tool schema."
+    if isinstance(decision, EmitStageDecision):
+        prior = state.active_stage
+        if (
+            state.goal.intent == "implementation"
+            and decision.stage.purpose == "discovery"
+            and prior is not None
+            and prior.spec.purpose == "discovery"
+        ):
+            return (
+                "emit_stage was rejected: an implementation Goal cannot run "
+                "consecutive discovery Stages. Emit a delivery Stage using the "
+                "observed evidence, or block on the concrete obstacle."
+            )
     if isinstance(decision, CompleteGoalDecision):
         if not state.evidence:
             return (

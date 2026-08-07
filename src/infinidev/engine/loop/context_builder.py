@@ -154,6 +154,7 @@ def build_execution_context(
     desc, expected = task_prompt
     event_id, resume_state = _resolve_resume(agent, kwargs)
     state = _restore_or_start(resume_state)
+    resumed = bool(resume_state)
 
     if kwargs.get("verbose", True):
         log_start(
@@ -187,6 +188,7 @@ def build_execution_context(
         nudge_message_template=kwargs.get("nudge_message_template"),
         state=state, file_tracker=file_tracker,
         start_iteration=state.iteration_count,
+        resumed=resumed,
         task=kwargs.get("task"),
         context_corpus=kwargs.get("context_corpus"),
         allow_llm_retries=kwargs.get("allow_llm_retries", True),

@@ -11,11 +11,10 @@ Graph beta is a live engine. An explicit ``graph_beta`` selection is pinned
 to it; ``AUTO_ENGINE_ALLOW_GRAPH`` controls only whether ``auto`` may select
 Graph for exploratory or branching work.
 
-The classifier is a deliberately small, deterministic heuristic. It exists
-to (a) end the "everything escalates to Staged" monotony for trivial tasks
-and (b) produce labeled decisions we can measure regret against, not to be
-clever. When in doubt it prefers Staged, the engine with the strongest
-completion gate.
+The classifier is deliberately small: normal work uses one durable Task with
+a rolling Step horizon, while Graph remains available for explicitly
+branching work. It exists to produce labeled decisions we can measure, not to
+invent a planning hierarchy.
 """
 
 from __future__ import annotations
@@ -26,10 +25,11 @@ from typing import Any
 from infinidev.config.settings import settings
 
 ENGINE_REACT = "react"
+ENGINE_TASK = "task"
 ENGINE_STAGED = "staged"
 ENGINE_GRAPH_BETA = "graph_beta"
 
-VALID_MODES = ("auto", ENGINE_REACT, ENGINE_STAGED, ENGINE_GRAPH_BETA)
+VALID_MODES = ("auto", ENGINE_TASK, ENGINE_REACT, ENGINE_STAGED, ENGINE_GRAPH_BETA)
 
 # Feature tokens that tilt the auto classifier. Kept bilingual-light: the
 # product surface is Spanish, code/requests are often English.
@@ -90,7 +90,7 @@ def normalize_mode(raw: str | None) -> str:
     mode = (raw or "").strip().lower()
     if mode in VALID_MODES:
         return mode
-    return ENGINE_STAGED
+    return ENGINE_TASK
 
 
 def _extract_features(escalation: Any) -> dict[str, Any]:
@@ -122,7 +122,7 @@ def _extract_features(escalation: Any) -> dict[str, Any]:
 
 
 def _classify_auto(escalation: Any) -> EngineSelection:
-    """Heuristic split between Graph, ReAct and Staged for ``auto`` mode."""
+    """Choose Graph only for branching work; otherwise use the Task loop."""
     feats = _extract_features(escalation)
     reasons: list[str] = []
     risks: list[str] = []
@@ -151,55 +151,15 @@ def _classify_auto(escalation: Any) -> EngineSelection:
                 estimated_overhead="high",
             )
 
-    staged_score = 0
-    react_score = 0
-
-    if feats["request_len"] <= 120:
-        react_score += 2
-        reasons.append("short_local_request")
-    elif feats["request_len"] >= 600:
-        staged_score += 2
-        reasons.append("long_request")
-
-    if feats["line_count"] >= 3:
-        staged_score += 1
-        reasons.append("multiline_request")
-
-    if feats["staged_hits"]:
-        staged_score += feats["staged_hits"]
-        reasons.append("explicit_sequence_or_migration")
-
-    if feats["react_hits"]:
-        react_score += feats["react_hits"]
-        reasons.append("informational_or_trivial_change")
-
-    if feats["has_grounded_spec"]:
-        staged_score += 1
-        reasons.append("grounded_spec_present")
-    if feats["has_design_brief"] or feats["council_requested"]:
-        staged_score += 2
-        reasons.append("design_deliberation_present")
-    if feats["in_scope_count"] >= 3:
-        staged_score += 1
-        reasons.append("multiple_deliverables")
-    if feats["blocking_clarifications"]:
-        staged_score += 1
-        reasons.append("open_product_decisions")
-
-    if not reasons:
-        reasons.append("no_strong_signal")
-
-    if react_score > staged_score:
-        engine = ENGINE_REACT
-        confidence = min(0.5 + 0.1 * (react_score - staged_score), 0.9)
-        overhead = "low"
-        risks.append("scope_may_expand_after_repository_inspection")
-    else:
-        engine = ENGINE_STAGED
-        confidence = min(0.5 + 0.1 * max(staged_score - react_score, 0), 0.9)
-        overhead = "medium"
-        if feats["request_len"] <= 120:
-            risks.append("planning_overhead_may_exceed_task_cost")
+    # A developer-owned rolling plan handles both small edits and longer work
+    # without promoting orientation into a separate planner phase. Auto only
+    # branches away when Graph's explicitly non-linear shape applies above.
+    engine = ENGINE_TASK
+    confidence = 0.9
+    overhead = "low"
+    reasons.append("durable_task_with_rolling_steps")
+    if feats["staged_hits"] or feats["in_scope_count"] >= 3:
+        risks.append("task_may_need_more_step_horizons")
 
     return EngineSelection(
         engine=engine,
@@ -216,7 +176,7 @@ def _classify_auto(escalation: Any) -> EngineSelection:
 def select_engine(escalation: Any, mode: str | None = None) -> EngineSelection:
     """Resolve *mode* (or the configured default) into a selection.
 
-    Explicit ``react``/``staged``/``graph_beta`` are honoured verbatim.
+    Explicit ``task``/``react``/``staged``/``graph_beta`` modes are honoured verbatim.
     ``auto`` runs the classifier, which may pick Graph only when
     ``AUTO_ENGINE_ALLOW_GRAPH`` permits it.
     """
@@ -228,6 +188,15 @@ def select_engine(escalation: Any, mode: str | None = None) -> EngineSelection:
             requested_mode=resolved_mode,
             confidence=1.0,
             reasons=["user_selected_react"],
+            estimated_overhead="low",
+        )
+
+    if resolved_mode == ENGINE_TASK:
+        return EngineSelection(
+            engine=ENGINE_TASK,
+            requested_mode=resolved_mode,
+            confidence=1.0,
+            reasons=["user_selected_task"],
             estimated_overhead="low",
         )
 
@@ -256,6 +225,7 @@ def select_engine(escalation: Any, mode: str | None = None) -> EngineSelection:
 __all__ = [
     "ENGINE_GRAPH_BETA",
     "ENGINE_REACT",
+    "ENGINE_TASK",
     "ENGINE_STAGED",
     "EngineSelection",
     "VALID_MODES",

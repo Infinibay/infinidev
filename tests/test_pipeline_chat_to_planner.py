@@ -33,7 +33,7 @@ from infinidev.engine.analysis.staged_planning import (
 
 
 @pytest.fixture(autouse=True)
-def _single_stage_planner(monkeypatch):
+def _single_stage_planner(temp_db, monkeypatch):
     """Keep pipeline tests focused while exercising the real staged wiring."""
     def decide(state, **_kwargs):
         if state.stages:
@@ -64,8 +64,8 @@ def _single_stage_planner(monkeypatch):
 def _pin_staged_engine(monkeypatch):
     """These tests verify the staged plan→loop handoff, so pin the engine.
 
-    The default ``TASK_ENGINE_MODE`` is ``auto``, which may route short
-    requests to the react adapter and bypass the planner. These tests assert
+    The normal ``TASK_ENGINE_MODE`` is ``task`` and deliberately bypasses the
+    planner. These tests assert
     the staged contract (EscalationPacket → planner → ``initial_plan=``), so
     they select the staged engine explicitly.
     """
@@ -130,11 +130,13 @@ class _FakeEngine:
         initial_plan: Plan | None = None,
         initial_attachments: list[Any] | None = None,
         task: Any | None = None,
+        max_total_tool_calls: int | None = None,
     ) -> str:
         self.captured_initial_plan = initial_plan
         self.captured_task_prompt = task_prompt
         self.captured_initial_attachments = initial_attachments
         self.captured_task = task
+        self.captured_max_total_tool_calls = max_total_tool_calls
         return self.result_text
 
     def has_file_changes(self) -> bool:
@@ -239,6 +241,7 @@ class TestEscalateRunsFullPipeline:
         hooks = _RecordingHooks()
         agent = _FakeAgent()
         engine = _FakeEngine(result_text="All done, bug fixed.")
+        engine._files_changed = True
 
         result = run_task(
             agent=agent,
@@ -422,6 +425,7 @@ class TestKenSeesTheTurn:
         )
 
         engine = _FakeEngine(result_text="Fixed src/auth.py.")
+        engine._files_changed = True
         run_task(
             agent=_FakeAgent(), user_input="fix the JWT bug", session_id="s",
             engine=engine, reviewer=_FakeReviewer(), hooks=_RecordingHooks(),

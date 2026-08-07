@@ -41,7 +41,8 @@ class EngineResult:
     """Normalized outcome of one engine run.
 
     Attributes:
-        engine_name: Adapter that produced the result (``staged``/``react``).
+        engine_name: Adapter that produced the result (normally ``task``;
+            compatibility adapters include ``staged`` and ``react``).
         status: One of the normalized terminal statuses.
         user_message: The text shown to the user as the turn's reply.
         summary: Short internal description for events and digests.

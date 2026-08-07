@@ -28,6 +28,7 @@ class GoalSpec(BaseModel):
     out_of_scope: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     planning_context: str = ""
+    intent: Literal["informational", "implementation", "mixed"] = "mixed"
 
 
 class StageTaskSpec(BaseModel):
@@ -56,9 +57,15 @@ class StageSpec(BaseModel):
     outcome: str = Field(..., min_length=1)
     exit_criteria: list[str] = Field(..., min_length=1)
     tasks: list[StageTaskSpec] = Field(..., min_length=1)
+    purpose: Literal["discovery", "delivery"] = "delivery"
 
     @model_validator(mode="after")
     def _validate_task_graph(self) -> "StageSpec":
+        if self.purpose == "discovery" and len(self.tasks) != 1:
+            raise ValueError(
+                "A discovery Stage must contain one focused Task; split only after "
+                "that Task produces evidence."
+            )
         ids = [task.id for task in self.tasks]
         if len(ids) != len(set(ids)):
             raise ValueError("Stage Task ids must be unique")

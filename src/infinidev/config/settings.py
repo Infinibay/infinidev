@@ -177,6 +177,10 @@ class Settings(BaseSettings):
     LOOP_MAX_ITERATIONS: int = 50
     LOOP_MAX_TOOL_CALLS_PER_ACTION: int = 0  # 0 = unlimited (only global limit applies)
     LOOP_MAX_TOTAL_TOOL_CALLS: int = 1000
+    # Staged execution starts a new developer loop for every Task. A bounded
+    # per-Task fuse prevents one small Task from inheriting the legacy
+    # whole-request limit.
+    STAGED_MAX_EXECUTION_TOOL_CALLS_PER_TASK: int = 40
     DYNAMIC_TOOL_ROUTING_ENABLED: bool = True
     LOOP_HISTORY_WINDOW: int = 0  # 0 = keep all
     LOOP_STEP_NUDGE_THRESHOLD: int = 6  # Nudge agent to call step_complete after N tool calls
@@ -225,12 +229,10 @@ class Settings(BaseSettings):
     LOOP_CUSTOM_TEST_COMMANDS: str = ""
 
     # ── Task engine selection (docs/GRAPH_ENGINE_BETA_DESIGN.md §9) ────
-    # Which engine executes an escalated task: staged (Goal/Stage/Task
-    # planning), react (single budgeted loop without a plan), auto
-    # (coordinator picks and explains), or graph_beta (work graph beta).
-    # Unknown values resolve to staged. Changing the default does not alter a
-    # running turn; explicit modes never fall back to another adapter.
-    TASK_ENGINE_MODE: str = "auto"  # auto | react | staged | graph_beta
+    # ``task`` is the normal path: one durable user Task with a developer-owned
+    # rolling Step plan. ``staged`` and ``react`` remain explicit compatibility
+    # modes; graph_beta remains an experimental branching mode.
+    TASK_ENGINE_MODE: str = "task"  # auto | task | react | staged | graph_beta
     # Whether the Auto coordinator may pick graph_beta for non-linear,
     # branching work. Explicit `graph_beta` always runs the Graph engine
     # regardless of this flag.
@@ -241,6 +243,8 @@ class Settings(BaseSettings):
     # Hitting them closes the run as blocked with an escalation request.
     REACT_MAX_ITERATIONS: int = 12
     REACT_MAX_TOOL_CALLS: int = 40
+    TASK_MAX_ITERATIONS: int = 50
+    TASK_MAX_TOOL_CALLS: int = 160
     # Graph beta operational limits (§5.4), applied by the live scheduler
     # and its bounded LoopEngine leaf executions.
     GRAPH_MAX_OPEN_BRANCHES: int = 8

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +53,7 @@ def run_staged_goal(
     use_phase_engine: bool = False,
     force_gather: bool = False,
     max_stage_transitions: int = _DEFAULT_MAX_STAGE_TRANSITIONS,
+    max_execution_tool_calls_per_task: int | None = None,
 ) -> StagedRunResult:
     """Run as many evidence-dependent Stages as the Goal requires.
 
@@ -86,6 +88,7 @@ def run_staged_goal(
                 turn_context=turn_context,
                 use_phase_engine=use_phase_engine,
                 force_gather=force_gather,
+                max_execution_tool_calls_per_task=max_execution_tool_calls_per_task,
             )
             _publish_state(state, session_id, hooks)
             if getattr(used_engine, "is_cancelled", False):
@@ -210,6 +213,7 @@ def _execute_stage(
     turn_context: str,
     use_phase_engine: bool,
     force_gather: bool,
+    max_execution_tool_calls_per_task: int | None,
 ) -> tuple[str, Any]:
     from infinidev.engine.analysis.planner import run_planner
     from infinidev.engine.orchestration import pipeline as pipeline_mod
@@ -269,12 +273,10 @@ def _execute_stage(
             flow_config.expected_output,
         )
         task_checks = _task_checks(task, plan)
-        literal_description = state.goal.user_request
-        if len(literal_description.strip()) < 20:
-            literal_description = f"User request (verbatim): {literal_description}"
         structured_task = task_from_free_text(
-            literal_description,
-            title=_schema_safe_title(state.goal.title),
+            _render_structured_task_description(state, stage, task),
+            title=_schema_safe_title(task.spec.title),
+            kind=_task_kind(state.goal.intent, stage.spec.purpose),
             acceptance_criteria=list(state.goal.acceptance_criteria) or None,
             derived_verification_criteria=task_checks,
         )
@@ -306,6 +308,9 @@ def _execute_stage(
                         for candidate in stage.tasks
                     )
                     or task.attempts > 1
+                ),
+                max_total_tool_calls=_staged_execution_tool_budget(
+                    max_execution_tool_calls_per_task
                 ),
             )
         except Exception as exc:
@@ -441,7 +446,28 @@ def _goal_from_escalation(escalation: EscalationPacket) -> GoalSpec:
         derived_verification_criteria=derived_checks,
         constraints=confirmed_constraints,
         planning_context="\n\n".join(planning_context),
+        intent=_infer_goal_intent(escalation),
     )
+
+
+def _infer_goal_intent(escalation: EscalationPacket) -> str:
+    """Classify the requested result without making discovery an error."""
+    parts = [escalation.user_request, escalation.understanding]
+    text = "\n".join(parts).lower()
+    implementation_pattern = re.compile(
+        r"\b(implement|build|create|add|update|change|fix|write|modify|"
+        r"crear|agregar|añadir|implementar|programar|modificar|corregir|"
+        r"construir)\b|quiero arrancar|arranca con",
+    )
+    informational_pattern = re.compile(
+        r"what do you think|qué te parece|\b(opinion|opinión|explain|explica|"
+        r"investig\w*|analiz\w*|research|review|revisa)\b",
+    )
+    if implementation_pattern.search(text):
+        return "implementation"
+    if informational_pattern.search(text):
+        return "informational"
+    return "mixed"
 
 
 def _add_guidance(state: StagedPlanningState, guidance: str) -> None:
@@ -522,6 +548,7 @@ def _record_task_evidence(
             ])),
             "plan_steps": plan_steps,
             "error": task.error,
+            "workspace_changed": _engine_has_file_changes(engine),
         },
     )
     if state.add_evidence(entry):
@@ -536,6 +563,16 @@ def _engine_plan_steps(engine: Any) -> list[dict[str, Any]]:
         return [dict(item) for item in getter() if isinstance(item, dict)]
     except Exception:
         return []
+
+
+def _engine_has_file_changes(engine: Any) -> bool | None:
+    getter = getattr(engine, "has_file_changes", None)
+    if not callable(getter):
+        return None
+    try:
+        return bool(getter())
+    except Exception:
+        return None
 
 
 def _has_blocked_steps(engine: Any) -> bool:
@@ -556,9 +593,11 @@ def _render_developer_task(
     return (
         "<goal authority=\"USER_LITERAL\">\n"
         f"{state.goal.user_request}\n"
+        f"Requested result kind: {state.goal.intent}\n"
         "</goal>\n\n"
         "<active-stage authority=\"DERIVED\">\n"
-        f"Title: {stage.spec.title}\nOutcome: {stage.spec.outcome}\n"
+        f"Title: {stage.spec.title}\nPurpose: {stage.spec.purpose}\n"
+        f"Outcome: {stage.spec.outcome}\n"
         "</active-stage>\n\n"
         "<current-task authority=\"DERIVED\">\n"
         f"Title: {task.spec.title}\nOutcome: {task.spec.outcome}\n"
@@ -568,6 +607,37 @@ def _render_developer_task(
         "the Goal.\n</current-task>"
         f"{context}"
     )
+
+
+def _render_structured_task_description(
+    state: StagedPlanningState,
+    stage: StageExecutionRecord,
+    task: TaskExecutionRecord,
+) -> str:
+    """Keep Goal authority while making the executable Task unambiguous."""
+    return (
+        f"User-authorized Goal:\n{state.goal.user_request}\n\n"
+        "Current derived execution scope:\n"
+        f"Stage ({stage.spec.purpose}): {stage.spec.title}\n"
+        f"Task: {task.spec.title}\n"
+        f"Required outcome: {task.spec.outcome}"
+    )
+
+
+def _task_kind(goal_intent: str, stage_purpose: str) -> str:
+    if stage_purpose == "discovery":
+        return "investigation"
+    if goal_intent == "implementation":
+        return "feature"
+    return "investigation" if goal_intent == "informational" else "chore"
+
+
+def _staged_execution_tool_budget(override: int | None) -> int:
+    if override is not None:
+        return override
+    from infinidev.config.settings import settings
+
+    return settings.STAGED_MAX_EXECUTION_TOOL_CALLS_PER_TASK
 
 
 def _schema_safe_title(title: str) -> str:
@@ -623,6 +693,19 @@ def _completion_error(
 ) -> str:
     if not state.evidence:
         return "Goal completion was rejected because the evidence ledger is empty."
+    task_evidence = [
+        entry for entry in state.evidence if entry.kind == "task_result"
+    ]
+    if (
+        state.goal.intent == "implementation"
+        and task_evidence
+        and all(entry.details.get("workspace_changed") is False for entry in task_evidence)
+    ):
+        return (
+            "Goal completion was rejected because this implementation Goal has "
+            "no observed workspace change. Continue with a delivery Stage or "
+            "block on the concrete obstacle."
+        )
     if prior is not None and any(task.status != "completed" for task in prior.tasks):
         return (
             "Goal completion was rejected because the latest Stage contains "

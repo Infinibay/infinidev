@@ -111,6 +111,9 @@ def _seed_state_from_plan(state, plan) -> None:
     from infinidev.engine.loop.plan_step import PlanStep
 
     state.plan.overview = plan.overview or ""
+    state.plan.rolling_horizon_limit = max(
+        0, int(getattr(plan, "rolling_horizon_limit", 0) or 0)
+    )
     state.plan.steps = [
         PlanStep(
             index=idx + 1,
@@ -124,6 +127,12 @@ def _seed_state_from_plan(state, plan) -> None:
         )
         for idx, spec in enumerate(plan.steps)
     ]
+
+
+def _seed_initial_plan_if_fresh(ctx, plan) -> None:
+    """Seed an external plan only for a new run, never over resumed state."""
+    if plan is not None and not ctx.resumed:
+        _seed_state_from_plan(ctx.state, plan)
 
 
 class LoopEngine(AgentEngine):
@@ -353,6 +362,7 @@ class LoopEngine(AgentEngine):
         context_corpus: str | None = None,
         allow_llm_retries: bool = True,
         preserve_file_tracker: bool = False,
+        preserve_task_state: bool = False,
     ) -> str:
         """Plan-execute-summarize loop.
 
@@ -368,6 +378,9 @@ class LoopEngine(AgentEngine):
         branch that asks "No plan yet — call add_step" is naturally
         suppressed because state.plan.steps is non-empty.
         """
+        if preserve_task_state and resume_state is None and self._last_state is not None:
+            resume_state = self._last_state.model_dump(mode="json")
+
         ctx = self._build_context(
             agent, task_prompt,
             verbose=verbose, guardrail=guardrail,
@@ -404,8 +417,7 @@ class LoopEngine(AgentEngine):
             except Exception:
                 pass
 
-        if initial_plan is not None:
-            _seed_state_from_plan(ctx.state, initial_plan)
+        _seed_initial_plan_if_fresh(ctx, initial_plan)
         # Stash attachments on the engine instance for the first
         # iteration only — subsequent turns rebuild the prompt from
         # compact summaries and don't need the raw payload.

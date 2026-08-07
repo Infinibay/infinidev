@@ -218,6 +218,9 @@ def run_evidence_review_rework_loop(
     acceptance_criteria: list[str] | None = None,
     derived_verification_criteria: list[str] | None = None,
     evidence_reviewer: EvidenceReviewEngine | None = None,
+    task: Any | None = None,
+    max_iterations: int | None = None,
+    max_total_tool_calls: int | None = None,
 ) -> tuple[str, EvidenceReviewResult | None]:
     """Review and minimally rework informational output within a bounded loop."""
 
@@ -260,11 +263,20 @@ def run_evidence_review_rework_loop(
         )
         agent.activate_context(session_id=session_id)
         try:
+            rework_kwargs: dict[str, Any] = {}
+            if task is not None:
+                rework_kwargs.update(
+                    task=task,
+                    preserve_task_state=True,
+                    max_iterations=max_iterations,
+                    max_total_tool_calls=max_total_tool_calls,
+                )
             updated = engine.execute(
                 agent=agent,
                 task_prompt=(rework_description, task_prompt[1]),
                 verbose=True,
                 preserve_file_tracker=True,
+                **rework_kwargs,
             )
         finally:
             agent.deactivate()

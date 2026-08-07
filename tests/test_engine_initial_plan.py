@@ -12,7 +12,12 @@ iteration prompt — that's the entire contract of the feature.
 """
 
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
-from infinidev.engine.loop.engine import _seed_state_from_plan
+from types import SimpleNamespace
+
+from infinidev.engine.loop.engine import (
+    _seed_initial_plan_if_fresh,
+    _seed_state_from_plan,
+)
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.context import build_iteration_prompt
 
@@ -100,6 +105,20 @@ class TestSeedStateFromPlan:
         _seed_state_from_plan(state, Plan(overview="", steps=[]))
         assert state.plan.overview == ""
         assert state.plan.steps == []
+
+    def test_resumed_state_is_not_replaced_by_the_task_bootstrap_plan(self):
+        state = LoopState()
+        _seed_state_from_plan(state, _sample_plan())
+        state.plan.steps[0].status = "done"
+
+        _seed_initial_plan_if_fresh(
+            SimpleNamespace(state=state, resumed=True),
+            Plan(overview="new bootstrap", steps=[], rolling_horizon_limit=3),
+        )
+
+        assert state.plan.overview.startswith("Fix the JWT")
+        assert len(state.plan.steps) == 3
+        assert state.plan.steps[0].status == "done"
 
 
 class TestSeededStateRendersCorrectly:

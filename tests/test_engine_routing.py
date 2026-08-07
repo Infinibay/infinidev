@@ -9,6 +9,7 @@ from infinidev.engine.engines.routing import (
     ENGINE_GRAPH_BETA,
     ENGINE_REACT,
     ENGINE_STAGED,
+    ENGINE_TASK,
     normalize_mode,
     select_engine,
 )
@@ -20,17 +21,17 @@ def _packet(text: str) -> EscalationPacket:
 
 
 class TestNormalizeMode:
-    @pytest.mark.parametrize("mode", ["auto", "react", "staged", "graph_beta"])
+    @pytest.mark.parametrize("mode", ["auto", "task", "react", "staged", "graph_beta"])
     def test_valid_modes_pass_through(self, mode):
         assert normalize_mode(mode) == mode
 
     @pytest.mark.parametrize("mode", ["", None, "bogus", "graph", "REACT "])
-    def test_invalid_modes_resolve_to_staged(self, mode):
+    def test_invalid_modes_resolve_to_task(self, mode):
         # "REACT " has trailing space + wrong case; normalize lower/strips.
         if mode == "REACT ":
             assert normalize_mode(mode) == "react"
         else:
-            assert normalize_mode(mode) == ENGINE_STAGED
+            assert normalize_mode(mode) == ENGINE_TASK
 
 
 class TestExplicitModes:
@@ -39,6 +40,11 @@ class TestExplicitModes:
         assert selection.engine == ENGINE_REACT
         assert selection.requested_mode == "react"
         assert "user_selected_react" in selection.reasons
+
+    def test_explicit_task(self):
+        selection = select_engine(_packet("do a thing"), mode="task")
+        assert selection.engine == ENGINE_TASK
+        assert "user_selected_task" in selection.reasons
 
     def test_explicit_staged(self):
         selection = select_engine(_packet("do a thing"), mode="staged")
@@ -59,20 +65,20 @@ class TestExplicitModes:
 
 
 class TestAutoClassifier:
-    def test_trivial_request_prefers_react(self):
+    def test_trivial_request_prefers_task(self):
         selection = select_engine(_packet("What is the capital of France?"), mode="auto")
-        assert selection.engine == ENGINE_REACT
+        assert selection.engine == ENGINE_TASK
         assert selection.requested_mode == "auto"
         assert 0.0 <= selection.confidence <= 1.0
 
-    def test_long_multistep_request_prefers_staged(self):
+    def test_long_multistep_request_prefers_task(self):
         text = (
             "Migrate the authentication layer to JWT. "
             "1. Add middleware to all endpoints. 2. Update every route. "
             "3. And then write tests. " + ("Extra context. " * 60)
         )
         selection = select_engine(_packet(text), mode="auto")
-        assert selection.engine == ENGINE_STAGED
+        assert selection.engine == ENGINE_TASK
 
     def test_branching_request_prefers_graph_when_enabled(self, monkeypatch):
         monkeypatch.setattr(settings, "AUTO_ENGINE_ALLOW_GRAPH", True)

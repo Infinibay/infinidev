@@ -38,6 +38,9 @@ class LoopPlan(BaseModel):
     # apply_operations never mutates this field — it is immutable after
     # the LoopEngine populates it from an external Plan.
     overview: str = ""
+    # ``0`` means unrestricted (legacy plans). A rolling Task keeps at most
+    # this many active/pending Steps; completed history remains intact.
+    rolling_horizon_limit: int = 0
 
     @property
     def active_step(self) -> PlanStep | None:
@@ -247,5 +250,4 @@ class LoopPlan(BaseModel):
                 line += f" [evidence, recall_context these: {shown}{more}]"
             lines.append(line)
         return "\n".join(lines)
-
 

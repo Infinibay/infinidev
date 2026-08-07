@@ -201,14 +201,22 @@ def _run_llm_loop(
             if tc.function.name == "emit_task_plan":
                 return _parse_emitted_plan(tc, escalation, task_handoff)
 
-        # Non-terminator calls — count toward exploration budget.
+        # Non-terminator calls — count toward exploration budget. The budget is
+        # a real execution ceiling: models may still *propose* more calls in a
+        # batch, but those calls receive a refusal rather than performing I/O.
         for tc in tool_calls:
-            exploration_calls += 1
-            result = dup_guard.refusal_for(
-                tc.function.name, tc.function.arguments,
-            ) or execute_tool_call(
-                dispatch, tc.function.name, tc.function.arguments,
-            )
+            if exploration_calls >= max_exploration_calls:
+                result = (
+                    "Exploration budget exhausted. Do not make more read calls; "
+                    "emit_task_plan using the evidence already collected."
+                )
+            else:
+                exploration_calls += 1
+                result = dup_guard.refusal_for(
+                    tc.function.name, tc.function.arguments,
+                ) or execute_tool_call(
+                    dispatch, tc.function.name, tc.function.arguments,
+                )
             trimmed = handle_oversized_result(
                 result,
                 max_chars=_MAX_RESULT_CHARS,

@@ -280,6 +280,22 @@ class TestPublicPlanTools:
         assert "cannot be removed" in result["error"]
         assert state.plan.steps[1].status == "pending"
 
+    def test_rolling_horizon_refuses_a_fourth_open_step(self, bound_tool):
+        state = LoopState()
+        state.plan = LoopPlan(rolling_horizon_limit=3)
+        state.plan.steps = [
+            PlanStep(index=1, title="Read auth.py", status="active"),
+            PlanStep(index=2, title="Edit auth.py"),
+            PlanStep(index=3, title="Test auth.py"),
+        ]
+        self._bind(state)
+        tool = bound_tool(AddStepTool)
+
+        result = json.loads(tool._run(title="Document auth.py"))
+
+        assert "Rolling horizon" in result["error"]
+        assert len(state.plan.steps) == 3
+
 
 class TestOverviewImmutability:
     def test_apply_operations_does_not_touch_overview(self):

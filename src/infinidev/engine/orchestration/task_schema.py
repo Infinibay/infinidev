@@ -227,6 +227,9 @@ def task_from_free_text(
     kind: str = "feature",
     acceptance_criteria: list[str] | None = None,
     derived_verification_criteria: list[str] | None = None,
+    out_of_scope: list[str] | None = None,
+    constraints: list[str] | None = None,
+    references: list[str] | None = None,
 ) -> Task:
     """Build a :class:`Task` from raw user text.
 
@@ -277,6 +280,9 @@ def task_from_free_text(
             for c in (derived_verification_criteria or [])
             if c and c.strip()
         ],
+        out_of_scope=[item.strip() for item in (out_of_scope or []) if item and item.strip()],
+        constraints=[item.strip() for item in (constraints or []) if item and item.strip()],
+        references=[item.strip() for item in (references or []) if item and item.strip()],
     )
 
 

@@ -1617,10 +1617,10 @@ class InfinidevApp:
             try:
                 from infinidev.config.settings import settings
                 self.status_bar_control.set_engine(
-                    settings.TASK_ENGINE_MODE or "auto"
+                    settings.TASK_ENGINE_MODE or "task"
                 )
             except Exception:
-                self.status_bar_control.set_engine("auto")
+                self.status_bar_control.set_engine("task")
             self.invalidate()
 
     # ── Event bus integration ────────────────────────────────────────

@@ -52,6 +52,7 @@ class ExecutionContext:
     state: LoopState
     file_tracker: FileChangeTracker
     start_iteration: int
+    resumed: bool = False
 
     # Behavior flags
     skip_plan: bool = False  # True for agents that don't use plan management (e.g. analyst)

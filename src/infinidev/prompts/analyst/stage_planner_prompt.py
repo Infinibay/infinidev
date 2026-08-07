@@ -86,6 +86,15 @@ ceremonial Tasks to fill a count, and do not pre-plan Tasks for a later Stage. \
 Task acceptance criteria are DERIVED checks for the Task outcome; they do not \
 alter the Goal.
 
+Set ``purpose="discovery"`` only when one focused read-only Task must resolve \
+a named uncertainty that prevents delivery. A discovery Stage has exactly one \
+Task. For an implementation Goal, do not turn repository orientation, prompt \
+reading, or subsystem mapping into several independent Tasks: gather the one \
+fact that changes the delivery route, then emit a ``purpose="delivery"`` Stage. \
+After a discovery Stage for an implementation Goal, the next Stage must advance \
+the requested deliverable or block on a real obstacle. Informational Goals may \
+finish through observed read-only evidence.
+
 Compare the proposed Stage with the history. Repeating an action is a new route \
 only when changed inputs or a changed method can produce a new observation. \
 When another in-scope route can produce one, choose it. When none can, report \

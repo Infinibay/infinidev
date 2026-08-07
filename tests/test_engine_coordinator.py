@@ -16,6 +16,7 @@ from infinidev.engine.analysis.staged_planning import (
 from infinidev.engine.engines import run_selected_engine
 from infinidev.engine.engines.base import STATUS_BLOCKED, STATUS_COMPLETED
 from infinidev.engine.engines.react import ReactAdapter
+from infinidev.engine.engines.task import TaskAdapter
 from infinidev.engine.history import store
 from infinidev.engine.orchestration import staged_pipeline as staged_pipeline_mod
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
@@ -291,6 +292,26 @@ class TestReactAdapter:
         assert result.status == STATUS_BLOCKED
 
 
+class TestTaskAdapter:
+    def test_task_uses_one_rolling_plan_without_an_analyst(self, temp_db, patched_pipeline):
+        engine = _LoopEngine("Implemented the fix.", "done")
+        adapter = TaskAdapter()
+
+        result = adapter.run(
+            escalation=_packet("Implement the feedback tool"), agent=_Agent(),
+            engine=engine, reviewer=None, hooks=_Hooks(), session_id="task-1",
+            project_id=1, workspace_path="/workspace",
+        )
+
+        assert result.status == STATUS_COMPLETED
+        assert result.engine_name == "task"
+        assert engine.execute_kwargs["initial_plan"].steps == []
+        assert "rolling" in engine.execute_kwargs["initial_plan"].overview.lower()
+        assert engine.execute_kwargs["initial_plan"].rolling_horizon_limit == 3
+        assert engine.execute_kwargs["max_iterations"] == settings.TASK_MAX_ITERATIONS
+        assert engine.execute_kwargs["max_total_tool_calls"] == settings.TASK_MAX_TOOL_CALLS
+
+
 class TestCoordinatorReactRoute:
     def test_react_mode_dispatches_to_react(self, temp_db, monkeypatch, mode,
                                             patched_pipeline):
@@ -328,19 +349,11 @@ class TestCoordinatorReactRoute:
         assert result.engine_name == "react"
         assert result.user_message == "react done"
 
-    def test_phase_engine_may_influence_auto_react(
+    def test_phase_flag_does_not_bypass_auto_task(
         self, temp_db, monkeypatch, mode, patched_pipeline
     ):
         mode("auto")
         engine = _LoopEngine("ok", "done")
-        monkeypatch.setattr(
-            staged_pipeline_mod, "run_staged_goal",
-            lambda **kwargs: staged_pipeline_mod.StagedRunResult(
-                text="staged done",
-                engine=engine,
-                state=_completed_staged_state(),
-            ),
-        )
         result = run_selected_engine(
             escalation=_packet("Rename helper"),
             agent=_Agent(), engine=engine, reviewer=None, hooks=_Hooks(),
@@ -348,5 +361,5 @@ class TestCoordinatorReactRoute:
             workspace_path="/workspace", use_phase_engine=True,
         )
 
-        assert result.engine_name == "staged"
-        assert result.user_message == "staged done"
+        assert result.engine_name == "task"
+        assert result.user_message == "ok"

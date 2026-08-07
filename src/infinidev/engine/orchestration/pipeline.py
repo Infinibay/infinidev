@@ -447,6 +447,8 @@ def _run_execution_phase(
     initial_attachments: list[Any] | None = None,
     task: Any | None = None,
     preserve_file_tracker: bool = False,
+    max_iterations: int | None = None,
+    max_total_tool_calls: int | None = None,
 ) -> tuple[str, Any]:
     """Execution: dispatch to LoopEngine (or PhaseEngine for ``--think``).
 
@@ -486,6 +488,10 @@ def _run_execution_phase(
             execute_kwargs: dict[str, Any] = {}
             if preserve_file_tracker:
                 execute_kwargs["preserve_file_tracker"] = True
+            if max_iterations is not None:
+                execute_kwargs["max_iterations"] = max_iterations
+            if max_total_tool_calls is not None:
+                execute_kwargs["max_total_tool_calls"] = max_total_tool_calls
             result = engine.execute(
                 agent=agent,
                 task_prompt=task_prompt,
@@ -515,6 +521,9 @@ def _run_review_phase(
     hooks: OrchestrationHooks,
     acceptance_criteria: list[str] | None = None,
     derived_verification_criteria: list[str] | None = None,
+    task: Any | None = None,
+    max_iterations: int | None = None,
+    max_total_tool_calls: int | None = None,
 ) -> str:
     """Review code changes or evidence-ground an informational outcome.
 
@@ -558,6 +567,9 @@ def _run_review_phase(
                 on_status=_on_evidence_status,
                 acceptance_criteria=acceptance_criteria,
                 derived_verification_criteria=derived_verification_criteria,
+                task=task,
+                max_iterations=max_iterations,
+                max_total_tool_calls=max_total_tool_calls,
             )
         except Exception as exc:
             logger.error("Evidence review phase failed: %s", exc, exc_info=True)
@@ -617,6 +629,9 @@ def _run_review_phase(
             on_status=_on_review_status,
             acceptance_criteria=acceptance_criteria,
             derived_verification_criteria=derived_verification_criteria,
+            task=task,
+            max_iterations=max_iterations,
+            max_total_tool_calls=max_total_tool_calls,
         )
     except Exception as exc:
         logger.error("Review phase failed: %s", exc, exc_info=True)
@@ -988,8 +1003,8 @@ def run_task(
         hooks=hooks,
     )
 
-    # Configure agent identity once; each Stage Task receives its own Task
-    # Plan and LoopEngine execution under this develop contract.
+    # Configure agent identity once before the selected engine executes the
+    # durable Task under the develop contract.
     from infinidev.engine.flows import get_flow_config
     from infinidev.prompts.flows import get_flow_identity
 
@@ -1000,10 +1015,10 @@ def run_task(
         agent.backstory = flow_config.backstory
 
     # Engine selection — the coordinator resolves TASK_ENGINE_MODE
-    # (auto|react|staged|graph_beta), records the decision in the execution
-    # event log, and dispatches to exactly one matching adapter. Staged
-    # preserves Goal/Stage/Task planning, ReAct is plan-free, and Graph owns
-    # its work graph while executing bounded leaves. See the beta design §16.
+    # (auto|task|react|staged|graph_beta), records the decision in the
+    # execution event log, and dispatches to exactly one matching adapter.
+    # Task is the normal durable-Task/rolling-Step loop; compatibility and
+    # experimental engines remain explicit alternatives. See beta design §16.
     from infinidev.engine.engines import run_selected_engine
 
     engine_run = run_selected_engine(

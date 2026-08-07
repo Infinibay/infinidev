@@ -158,6 +158,34 @@ class TestExplorationBudget:
         plan = run_planner(_sample_escalation())
         assert plan.overview == "Budget-limited plan."
 
+    def test_budget_refuses_extra_calls_in_a_single_model_batch(
+        self, patch_litellm, monkeypatch,
+    ):
+        calls: list[str] = []
+
+        def execute(_dispatch, name, _arguments):
+            calls.append(name)
+            return "observed"
+
+        monkeypatch.setattr(
+            "infinidev.engine.analysis.planner.execute_tool_call", execute
+        )
+        patch_litellm([
+            _resp([
+                _tc("read_file", {"file_path": "a.py"}, "one"),
+                _tc("read_file", {"file_path": "b.py"}, "two"),
+            ]),
+            _resp([_tc("emit_task_plan", {
+                "overview": "Use the first observation.",
+                "derived_verification_criteria": [],
+                "steps": [{"title": "Implement", "detail": "x", "expected_output": "y"}],
+            })]),
+        ])
+
+        run_planner(_sample_escalation(), max_exploration_calls=1)
+
+        assert calls == ["read_file"]
+
 
 class TestDefensiveFallbacks:
     def test_empty_overview_falls_back(self, patch_litellm):

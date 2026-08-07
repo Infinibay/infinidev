@@ -104,6 +104,16 @@ class AddStepTool(InfinibayBaseTool):
         plan = ctx.loop_state.plan
         from infinidev.engine.loop.step_operation import StepOperation
 
+        horizon_limit = max(0, int(getattr(plan, "rolling_horizon_limit", 0) or 0))
+        open_steps = sum(
+            step.status in ("pending", "active") for step in plan.steps
+        )
+        if horizon_limit and open_steps >= horizon_limit:
+            return self._error(
+                f"Rolling horizon already has {open_steps}/{horizon_limit} open steps. "
+                "Execute, remove, or complete one before planning further ahead."
+            )
+
         # ``before`` and ``index`` name the same slot — the step lands there and
         # whatever was pending at that number shifts down. They differ only in
         # what the model means by it, so the intent is kept for the error text.

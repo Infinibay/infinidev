@@ -311,9 +311,11 @@ def build_iteration_prompt(
             parts.append(f"<plan>\n{state.plan.render()}\n</plan>")
         else:
             parts.append(
-                "<plan>\nNo plan yet. Your FIRST action must be to call add_step(title=\"...\") "
-                "to lay out the steps the task needs, then call "
-                "step_complete(status=\"continue\") to begin executing them.\n</plan>"
+                "<plan>\nNo plan yet. Add only the next 1-3 Steps you can justify "
+                "from current evidence; do not plan the whole task. Start with a "
+                "focused discovery Step only when one fact changes the route. After "
+                "those Steps complete, reassess the Task and add the next small "
+                "horizon only if needed.\n</plan>"
             )
 
     # Previous action summaries (rich format if available)

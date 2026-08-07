@@ -90,15 +90,15 @@ class TestItRefusesToAbandonScope:
         assert "Run the auth tests" in tool_msg["content"]
         assert "attempt 1/" in tool_msg["content"]
 
-    def test_the_models_own_steps_are_not_user_scope(self):
-        """Tactics stay flexible; only approved steps carry user scope."""
+    def test_developer_steps_must_be_explicitly_discharged(self):
+        """A rolling horizon cannot be abandoned by declaring Task done."""
         eng = LoopEngine()
         state = _plan_state(
             PlanStep(index=1, title="Explore", status="active"),
             PlanStep(index=2, title="Write the fix"),
         )
         ctx, messages = _ctx(state), _messages()
-        assert eng._step_gate._scope_open(ctx, _call(), messages) is False
+        assert eng._step_gate._scope_open(ctx, _call(), messages) is True
 
 
 
@@ -155,15 +155,15 @@ class TestItLetsCorrectRunsClose:
         ctx, messages = _ctx(_plan_state()), _messages()
         assert eng._step_gate._scope_open(ctx, _call(), messages) is False
 
-    def test_unapproved_steps_do_not_consume_the_scope_budget(self):
+    def test_unapproved_steps_consume_the_task_completion_budget(self):
         eng = LoopEngine()
         state = _plan_state(
             PlanStep(index=1, title="Explore", status="active"),
             PlanStep(index=2, title="Optional follow-up"),
         )
         ctx, messages = _ctx(state), _messages()
-        assert eng._step_gate._scope_open(ctx, _call(), messages) is False
-        assert eng._step_gate._scope_attempts == 0
+        assert eng._step_gate._scope_open(ctx, _call(), messages) is True
+        assert eng._step_gate._scope_attempts == 1
 
 
 class TestItGivesUpRatherThanSpin:

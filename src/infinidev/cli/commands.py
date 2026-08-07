@@ -130,7 +130,7 @@ def handle_command(cmd_text: str):
         click.echo("  /settings reset    - Reset to defaults")
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
-        click.echo("  /engine [mode]     - Show or set task engine (auto|react|staged|graph_beta)")
+        click.echo("  /engine [mode]     - Show or set task engine (auto|task|react|staged|graph_beta)")
         click.echo("  /reindex [--full]  - Re-index the workspace (--full clears DB first)")
         click.echo("  /think             - Enable deep analysis for the next task")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
@@ -294,7 +294,7 @@ def handle_engine_command(parts: list[str]):
     from infinidev.config.settings import settings, reload_all
     from infinidev.engine.engines.routing import VALID_MODES, normalize_mode
 
-    current = settings.TASK_ENGINE_MODE or "auto"
+    current = settings.TASK_ENGINE_MODE or "task"
 
     if len(parts) == 1:
         click.echo(click.style("Task engine — how an escalated task runs", bold=True))
@@ -303,8 +303,9 @@ def handle_engine_command(parts: list[str]):
             click.echo(f"  {marker} {mode}")
         click.echo("")
         click.echo("  auto        coordinator picks per task and explains why")
+        click.echo("  task        durable task with a rolling developer-owned plan")
         click.echo("  react       fast budgeted loop, no plan (small tasks)")
-        click.echo("  staged      Goal/Stage/Task planning (predictable work)")
+        click.echo("  staged      legacy Goal/Stage/Task planning")
         click.echo("  graph_beta  beta work graph for non-linear tasks")
         click.echo("")
         click.echo("Change it with /engine <mode>. Applies from the next task.")

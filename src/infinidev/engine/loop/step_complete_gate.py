@@ -11,10 +11,10 @@ back for one more turn, and the order is deliberate — cheapest and most
 mechanical first, LLM-backed last, so a step that fails the note-discipline
 check never pays for a critic call:
 
-0. **Scope** — ``status="done"`` while approved steps are still pending.
-   This is the counterweight to letting the model reword an approved step: the
-   wording is its business, the scope is the user's. A list comprehension over
-   the plan, so an attempt to end the run early costs nothing to refuse.
+0. **Task completion** — ``status="done"`` while any planned Step remains
+   open. A rolling horizon is a commitment until its Steps are completed,
+   blocked, or removed with evidence. A list comprehension over the plan makes
+   an attempt to end the run early cheap to refuse.
 1. **Notes** — a small model that never called ``add_note`` is about to
    throw away everything it learned, since raw tool output does not survive
    the step boundary. Fires at most once per step: a second attempt is
@@ -176,13 +176,13 @@ class StepCompleteGate:
         step_complete_call: Any,
         messages: list[dict[str, Any]],
     ) -> bool:
-        """Refuse a ``done`` that would leave approved plan steps unstarted.
+        """Refuse a ``done`` that would leave planned work unstarted.
 
-        The plan is the only durable statement of what the user asked for, and
-        this is what makes it safe to let the model rewrite the *wording* of an
-        approved step: it can say what a step means, it cannot decide the step
-        no longer needs doing. Ending the run is where that difference becomes
-        visible, so this is where it is checked.
+        User-approved Steps are scope records; developer-authored Steps are
+        the current execution commitment. Either must be explicitly completed,
+        blocked, or removed before the Task may close. Otherwise a model can
+        create a rolling horizon, perform its first item, and silently skip the
+        rest by declaring the whole Task done.
 
         Ordered first in the chain because it is a comprehension over at most a
         handful of steps: an attempt to finish early is refused before it can
@@ -201,7 +201,7 @@ class StepCompleteGate:
 
         undischarged = plan.undischarged(
             exclude_index=self._step_key(ctx),
-            approved_only=True,
+            approved_only=False,
         )
         if not undischarged:
             return False
@@ -225,17 +225,17 @@ class StepCompleteGate:
             return False
 
         exits = (
-            "These steps carry the scope committed to for the user. Finish "
-            "them, or close each one you cannot do with status=\"blocked\" and "
-            "say why. Rewording a step does not discharge it."
+            "Finish these steps, remove work you now know is unnecessary, or "
+            "close each one you cannot do with status=\"blocked\" and say why. "
+            "Rewording a step does not discharge it."
         )
         self._engine._overwrite_step_complete_tool_result(
             messages,
             step_complete_call.id,
             (
                 f"step_complete BLOCKED — you set status=\"done\", but "
-                f"{len(undischarged)} step(s) from the plan have not been "
-                f"started:\n" + "\n".join(titles) + "\n\n" + exits + " Then set "
+                f"{len(undischarged)} open step(s) remain in the plan:\n"
+                + "\n".join(titles) + "\n\n" + exits + " Then set "
                 f"status=\"done\" (attempt {self._scope_attempts}/"
                 f"{_SCOPE_GATE_MAX_ATTEMPTS})."
             ),
@@ -251,7 +251,7 @@ class StepCompleteGate:
             )
         emit_log(
             "info",
-            f"⚠ step_complete blocked — {len(undischarged)} approved step(s) "
+            f"⚠ step_complete blocked — {len(undischarged)} open step(s) "
             f"still pending, attempt {self._scope_attempts}/"
             f"{_SCOPE_GATE_MAX_ATTEMPTS}",
             project_id=ctx.project_id, agent_id=ctx.agent_id,

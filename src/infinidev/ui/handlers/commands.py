@@ -83,7 +83,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "COMMANDS\n"
         "  /models [list|set|manage]    Show or change the model\n"
         "  /effort [level]              Reasoning depth this model accepts\n"
-        "  /engine [mode]               Task engine: auto|react|staged|graph_beta\n"
+        "  /engine [mode]               Task engine: auto|task|react|staged|graph_beta\n"
         "  /settings [key] [value]      Show or change settings\n"
         "  /mcp [restart <name>]        Index server health (Ken and others)\n"
         "  /plan <task>                 Plan, review, then execute\n"
@@ -471,12 +471,12 @@ def handle_engine(app: InfinidevApp, parts: list[str]) -> None:
     """Show or set the task engine.
 
     Usage: ``/engine`` · ``/engine auto`` · ``/engine staged`` ·
-    ``/engine react`` · ``/engine graph_beta``
+    ``/engine task`` · ``/engine react`` · ``/engine graph_beta``
     """
     from infinidev.config.settings import settings, reload_all
     from infinidev.engine.engines.routing import VALID_MODES, normalize_mode
 
-    current = settings.TASK_ENGINE_MODE or "auto"
+    current = settings.TASK_ENGINE_MODE or "task"
 
     if len(parts) == 1:
         listed = "\n".join(
@@ -487,8 +487,9 @@ def handle_engine(app: InfinidevApp, parts: list[str]) -> None:
             "Task engine — how an escalated task is executed\n"
             f"{listed}\n\n"
             "  auto        coordinator picks per task and explains why\n"
+            "  task        durable task with a rolling developer-owned plan\n"
             "  react       fast budgeted loop, no plan (small tasks)\n"
-            "  staged      Goal/Stage/Task planning (predictable work)\n"
+            "  staged      legacy Goal/Stage/Task planning\n"
             "  graph_beta  beta work graph for non-linear tasks\n\n"
             f"Change it with /engine <mode>. Applies from the next task.",
             "system",
