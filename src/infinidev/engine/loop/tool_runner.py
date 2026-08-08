@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 _MAX_STRUCTURED_FAILURES = 8
 
 _CANCELLED_RESULT = '{"error": "cancelled"}'
+_BUDGET_EXHAUSTED_RESULT = (
+    '{"error": "not_run: tool budget exhausted; inspect completed tool results '
+    'and continue in the next step"}'
+)
 
 
 class ToolRunner:
@@ -75,10 +79,17 @@ class ToolRunner:
 
         tool_results_text: list[str] = []
         deferred: list[dict[str, Any]] = []
+        remaining = min(
+            max(0, ctx.max_per_action - action_tool_calls),
+            max(0, ctx.max_total_calls - ctx.state.total_tool_calls),
+        )
+        executable = classified.regular[:remaining]
+        skipped = classified.regular[remaining:]
         action_tool_calls = self._run_batches(
-            ctx, classified, messages, action_tool_calls, iteration,
+            ctx, executable, messages, action_tool_calls, iteration,
             guard, tracker, tool_results_text, deferred,
         )
+        self._answer_budget_limited(ctx, messages, skipped, tool_results_text)
 
         if ctx.is_small:
             ContextManager.compact_for_small(messages)
@@ -197,7 +208,7 @@ class ToolRunner:
     def _run_batches(
         self,
         ctx: ExecutionContext,
-        classified: ClassifiedCalls,
+        calls: list[Any],
         messages: list[dict[str, Any]],
         action_tool_calls: int,
         iteration: int,
@@ -229,7 +240,7 @@ class ToolRunner:
         # turn later; see ``_append_results``.
         attachments_by_tc: dict[str, list] = {}
 
-        for batch in batch_tool_calls(classified.regular):
+        for batch in batch_tool_calls(calls):
             # Effectful calls stay serial. The legacy name set remains a
             # compatibility fallback, while ToolEffects covers dynamically
             # discovered MCP writers that the static list cannot know about.
@@ -289,9 +300,35 @@ class ToolRunner:
                 for msg in messages
                 if msg.get("role") == "tool" and "tool_call_id" in msg
             }
-            self._answer_unreached(ctx, messages, classified.regular, answered)
+            self._answer_unreached(ctx, messages, calls, answered)
 
         return action_tool_calls
+
+    @staticmethod
+    def _answer_budget_limited(
+        ctx: ExecutionContext,
+        messages: list[dict[str, Any]],
+        calls: list[Any],
+        tool_results_text: list[str],
+    ) -> None:
+        """Acknowledge calls refused by a hard execution budget.
+
+        Function-calling providers require one result for every call in the
+        assistant message.  Refusing the overflow explicitly preserves that
+        protocol while ensuring a parallel batch cannot silently spend more
+        than either the per-step or global budget.
+        """
+        for tc in calls:
+            if ctx.manual_tc:
+                tool_results_text.append(
+                    f"[Tool: {tc.function.name}] Result:\n{_BUDGET_EXHAUSTED_RESULT}"
+                )
+            else:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": _BUDGET_EXHAUSTED_RESULT,
+                })
 
     def _run_serial(
         self,

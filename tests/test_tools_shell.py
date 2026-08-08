@@ -28,6 +28,11 @@ class TestExecuteCommand:
         assert description is not None
         assert "prior shell `cd` does not persist" in description
 
+    def test_short_specific_rationale_is_valid(self):
+        parsed = ExecuteCommandInput(command="pytest -q", rationale="Verify focused regression")
+
+        assert parsed.rationale == "Verify focused regression"
+
     def test_description_explains_that_shell_state_does_not_persist(self):
         description = ExecuteCommandTool.model_fields["description"].default
         assert "cd from an earlier call does not persist" in description

@@ -30,8 +30,13 @@ class VerificationEngine:
     import-checking changed Python files if no test runner is found.
     """
 
-    def __init__(self, workspace: str | None = None) -> None:
+    def __init__(
+        self,
+        workspace: str | None = None,
+        preferred_test_command: str | None = None,
+    ) -> None:
         self._workspace = workspace or os.getcwd()
+        self._preferred_test_command = (preferred_test_command or "").strip()
 
     def verify(
         self,
@@ -157,9 +162,16 @@ class VerificationEngine:
                 lines.append(f"    Fix: {item['fix']}")
         return "\n".join(lines)
 
-    def _detect_test_command(self) -> list[str] | None:
+    def _detect_test_command(self) -> str | list[str] | None:
         """Detect the project's test runner."""
         ws = self._workspace
+
+        # The developer already ran this exact command through the ordinary
+        # permission boundary. Reusing it preserves project-specific env,
+        # targets, wrappers, and flags; replacing it with a guessed full-suite
+        # command can manufacture unrelated failures during review.
+        if self._preferred_test_command:
+            return self._preferred_test_command
 
         # pytest (Python)
         if os.path.isfile(os.path.join(ws, "pyproject.toml")) or \
@@ -190,10 +202,15 @@ class VerificationEngine:
 
         return None
 
-    def _run(self, command: list[str], timeout: int | None = None) -> dict[str, Any]:
+    def _run(
+        self,
+        command: str | list[str],
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
         """Execute an approved argv sequence and capture output."""
         timeout = timeout or _TIMEOUT
-        display_command = shlex.join(command)
+        is_shell_command = isinstance(command, str)
+        display_command = command if is_shell_command else shlex.join(command)
 
         from infinidev.tools.shell.execute_command_tool import check_command_permission
 
@@ -213,6 +230,7 @@ class VerificationEngine:
                 command,
                 cwd=self._workspace,
                 timeout=timeout,
+                shell=is_shell_command,
             )
             output = (proc.stdout + proc.stderr).strip()
             # Truncate very long output

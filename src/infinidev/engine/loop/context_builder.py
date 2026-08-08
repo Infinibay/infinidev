@@ -51,6 +51,8 @@ from infinidev.tools.base.context import bind_tools_to_agent, get_context_for_ag
 
 logger = logging.getLogger(__name__)
 
+_PLAN_MUTATION_TOOLS = {"add_step", "modify_step", "remove_step"}
+
 
 # ── once per run ─────────────────────────────────────────────────────────
 
@@ -118,6 +120,12 @@ def build_execution_context(
         description=task_prompt[0],
         initial_plan=kwargs.get("initial_plan"),
     )
+    if kwargs.get("skip_plan", False):
+        # ReAct and graph leaf runs have no execution plan to mutate. Exposing
+        # these tools lets a model create a pending step that the plan-free
+        # loop can neither activate nor close, producing a false scope-gate
+        # failure after the requested work and tests already succeeded.
+        tools = _filter_plan_free_tools(tools)
     tool_schemas = (
         build_tool_schemas(tools, small_model=is_small)
         if tools
@@ -171,7 +179,7 @@ def build_execution_context(
         tool_dispatch=tool_dispatch,
         planning_schemas=[
             ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA,
-            ADD_NOTE_SCHEMA, STEP_COMPLETE_SCHEMA,
+            ADD_NOTE_SCHEMA,
         ],
         tools=tools, max_iterations=max_iterations,
         max_per_action=max_per_action, max_total_calls=max_total_calls,
@@ -184,7 +192,7 @@ def build_execution_context(
         agent=agent, agent_name=getattr(agent, "name", agent.agent_id),
         agent_role=getattr(agent, "role", "agent"),
         desc=desc, expected=expected, event_id=event_id,
-        skip_plan=False,
+        skip_plan=kwargs.get("skip_plan", False),
         nudge_message_template=kwargs.get("nudge_message_template"),
         state=state, file_tracker=file_tracker,
         start_iteration=state.iteration_count,
@@ -266,6 +274,11 @@ def _resolve_tools(
             )
         bind_tools_to_agent(tools, agent.agent_id)
     return tools
+
+
+def _filter_plan_free_tools(tools: list) -> list:
+    """Remove tools whose state machine only exists in planned runs."""
+    return [tool for tool in tools if tool.name not in _PLAN_MUTATION_TOOLS]
 
 
 def _resolve_resume(agent: Any, kwargs: dict[str, Any]) -> tuple[Any, Any]:

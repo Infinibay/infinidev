@@ -26,14 +26,21 @@ class CodeSearchTool(InfinibayBaseTool):
 
     @staticmethod
     def _has_git(path: str) -> bool:
-        """Return True if *path* is inside a git repository."""
+        """Return True when Git can search the requested directory faithfully."""
         try:
             result = run_captured(
                 ["git", "rev-parse", "--show-toplevel"],
                 cwd=path,
                 timeout=5,
             )
-            return not result.timed_out and result.exit_code == 0
+            if result.timed_out or result.exit_code != 0:
+                return False
+            ignored = run_captured(
+                ["git", "check-ignore", "-q", "."],
+                cwd=path,
+                timeout=5,
+            )
+            return ignored.timed_out or ignored.exit_code != 0
         except OSError:
             return False
 
@@ -68,7 +75,9 @@ class CodeSearchTool(InfinibayBaseTool):
         use_git_grep = self._has_git(file_path)
 
         if use_git_grep:
-            cmd = ["git", "grep", "-n", "-E"]
+            # Include non-ignored untracked files: an editor or coding agent
+            # must be able to find a file before its first git add.
+            cmd = ["git", "grep", "--untracked", "-n", "-E"]
             if not case_sensitive:
                 cmd.append("-i")
             if context_lines > 0:

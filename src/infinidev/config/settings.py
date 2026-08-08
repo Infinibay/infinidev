@@ -175,7 +175,10 @@ class Settings(BaseSettings):
 
     # Loop Engine (plan-execute-summarize)
     LOOP_MAX_ITERATIONS: int = 50
-    LOOP_MAX_TOOL_CALLS_PER_ACTION: int = 0  # 0 = unlimited (only global limit applies)
+    # A hard per-step fuse applies to every execution engine. Individual
+    # adapters may choose a tighter value, but no model can consume an entire
+    # task/node budget in one unbounded inner loop.
+    LOOP_MAX_TOOL_CALLS_PER_ACTION: int = 12  # 0 = unlimited (legacy opt-out)
     LOOP_MAX_TOTAL_TOOL_CALLS: int = 1000
     # Staged execution starts a new developer loop for every Task. A bounded
     # per-Task fuse prevents one small Task from inheriting the legacy
@@ -245,6 +248,16 @@ class Settings(BaseSettings):
     REACT_MAX_TOOL_CALLS: int = 40
     TASK_MAX_ITERATIONS: int = 50
     TASK_MAX_TOOL_CALLS: int = 160
+    # A rolling Task must return to its plan after a bounded amount of work.
+    # ``LOOP_MAX_TOOL_CALLS_PER_ACTION=0`` intentionally means unlimited for
+    # the legacy loop, but inheriting the full Task budget here lets one
+    # exploratory step consume all 160 calls before its nudge is honoured.
+    TASK_MAX_TOOL_CALLS_PER_STEP: int = 12
+    # The chat agent is a router, not a second developer loop. Its prompt
+    # allows 0-3 grounding reads before a required respond/escalate decision;
+    # keep a short hard ceiling so it cannot delay every engine behind a long
+    # read-only investigation.
+    CHAT_AGENT_MAX_ITERATIONS: int = 5
     # Graph beta operational limits (§5.4), applied by the live scheduler
     # and its bounded LoopEngine leaf executions.
     GRAPH_MAX_OPEN_BRANCHES: int = 8

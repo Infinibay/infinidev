@@ -81,6 +81,7 @@ def _ctx(manual_tc: bool = False):
         agent_id="agent-1",
         nudge_message_template=None,
         max_per_action=4,
+        max_total_calls=40,
     )
 
 
@@ -146,6 +147,32 @@ def test_budget_nudge_does_not_split_a_multi_batch_turn():
     ]))
     assert_tool_block_contiguous(messages)
     assert [m["role"] for m in messages].count("tool") == 2
+
+
+def test_budget_refuses_overflow_without_executing_or_breaking_transcript():
+    ctx = _ctx()
+    ctx.max_per_action = 1
+    ctx.max_total_calls = 1
+    runner = ToolRunner(_engine(nudge_at=None))
+    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "task"}]
+    classified = ClassifiedCalls(regular=[
+        _call("c1", "read_file", '{"file_path": "a.py"}'),
+        _call("c2", "read_file", '{"file_path": "b.py"}'),
+    ])
+    result = SimpleNamespace(
+        message=SimpleNamespace(content="", tool_calls=[]), raw_content="",
+    )
+
+    used = runner.run_regular(
+        ctx, classified, messages, result, action_tool_calls=0, iteration=0,
+        guard=LoopGuard(is_small=False), tracker=BehaviorTracker(set()),
+    )
+
+    assert used == 1
+    assert ctx.state.total_tool_calls == 1
+    overflow = next(message for message in messages if message.get("tool_call_id") == "c2")
+    assert "not_run: tool budget exhausted" in overflow["content"]
+    assert_tool_block_contiguous(messages)
 
 
 def test_step_complete_ack_stays_inside_the_block():

@@ -34,6 +34,15 @@ _DEFAULT_MODEL_PATH = Path.home() / ".infinidev" / "models" / "minilm.mnn"
 _CHROMADB_ONNX_PATH = (
     Path.home() / ".cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx/model.onnx"
 )
+_TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "config.json")
+
+
+def _tokenizer_source() -> str:
+    """Prefer ChromaDB's matching cached tokenizer without network access."""
+    cached_dir = _CHROMADB_ONNX_PATH.parent
+    if all((cached_dir / name).is_file() for name in _TOKENIZER_FILES):
+        return str(cached_dir)
+    return _TOKENIZER_ID
 
 
 class MNNEmbedder:
@@ -45,7 +54,10 @@ class MNNEmbedder:
 
         self._MNN = MNN
         self._max_seq = max_seq
-        self._tokenizer = AutoTokenizer.from_pretrained(_TOKENIZER_ID)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            _tokenizer_source(),
+            local_files_only=True,
+        )
 
         model_path = str(Path(model_path).expanduser())
         if not os.path.isfile(model_path):
@@ -308,5 +320,8 @@ def get_mnn_embedder() -> MNNEmbedder | None:
             _singleton = MNNEmbedder(str(model_path))
             logger.info("MNN embedder ready: %s", model_path)
         except Exception:
-            logger.warning("MNN init failed; falling back", exc_info=True)
+            # This probe can run in a background ContextRank worker during
+            # interpreter or pytest teardown. Keep fallback silent at normal
+            # log levels so a closed capture stream cannot emit a late error.
+            logger.debug("MNN init failed; falling back", exc_info=True)
     return _singleton

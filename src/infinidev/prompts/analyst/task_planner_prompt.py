@@ -78,6 +78,17 @@ check that executes the changed behavior because its failure identifies the \
 broken action. Use a broader check when repository instructions or the Task \
 acceptance condition make that broader check the actual gate.
 
+For an implementation Step, the expected command/test exit is normally 0. For \
+a read-only diagnosis Step whose requested outcome is to reproduce a known \
+failure, set ``verify_exit_code`` to the observed non-zero code and set \
+``verify_observable`` to a short, case-sensitive, contiguous fragment copied \
+verbatim from the observed output, such as ``FAILED tests/x.py::test_name``. \
+Never write a paraphrase ("AssertionError showing ..."), a regex, or \
+alternatives ("X or Y"): the verifier performs literal substring matching. \
+Never combine an \
+expected failure fragment with exit 0: that creates an impossible check and \
+forces the developer to alternate between fixing and reintroducing the bug.
+
 Do not name a test identifier that has not been observed in this workspace. A \
 test the Step itself creates is the exception because the Step establishes the \
 identifier before the check runs.

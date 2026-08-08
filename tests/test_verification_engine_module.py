@@ -7,6 +7,7 @@ check failed spuriously and triggered an unnecessary developer re-run.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from infinidev.engine.analysis.verification_engine import VerificationEngine
@@ -64,3 +65,33 @@ def test_permission_denial_prevents_verification_command(tmp_path):
     assert result["exit_code"] == -1
     assert "denied" in result["output"].lower()
     assert not marker.exists()
+
+
+def test_preferred_test_command_preserves_environment_and_target(tmp_path):
+    command = "PYTHONPATH=src /venv/bin/pytest tests/test_feature.py -q"
+    engine = VerificationEngine(
+        workspace=str(tmp_path),
+        preferred_test_command=command,
+    )
+
+    with (
+        patch(
+            "infinidev.tools.shell.execute_command_tool.check_command_permission",
+            return_value=None,
+        ),
+        patch(
+            "infinidev.engine.analysis.verification_engine.run_captured",
+            return_value=SimpleNamespace(
+                exit_code=0, stdout="1 passed", stderr="", timed_out=False,
+            ),
+        ) as run,
+    ):
+        result = engine.verify()
+
+    assert result.passed is True
+    run.assert_called_once_with(
+        command,
+        cwd=str(tmp_path),
+        timeout=120,
+        shell=True,
+    )

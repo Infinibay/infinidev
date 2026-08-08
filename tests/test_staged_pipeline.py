@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -21,6 +22,7 @@ from infinidev.engine.analysis.staged_planning import (
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.engine.orchestration.staged_pipeline import (
     _goal_from_escalation,
+    _scope_task_plan,
     run_staged_goal,
 )
 
@@ -189,6 +191,57 @@ def test_small_goal_uses_one_stage_one_task_then_evidence_completion(
     assert result.text.startswith("executed Task only")
 
 
+def test_completed_stage_recovers_when_only_terminal_planner_protocol_fails(
+    temp_db, monkeypatch, runtime,
+):
+    protocol_failure = BlockGoalDecision(
+        reason="Stage Planner exhausted its iteration budget without a valid decision.",
+        missing="A valid Stage Planner decision on a later retry.",
+        evidence=[],
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("One slice", [_task("only")]),
+        protocol_failure,
+    ])
+    engine = _Engine()
+    engine._last_state = SimpleNamespace(last_test_command="pytest focused.py -q")
+    engine.get_file_contents = lambda: {"src/fixed.py": "fixed"}
+    engine.get_file_tracker = lambda: None
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.verification_engine.VerificationEngine.verify",
+        lambda self, **kwargs: SimpleNamespace(
+            passed=True,
+            summary="All 1 verification command(s) passed",
+        ),
+    )
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=engine, reviewer=object(),
+        hooks=_Hooks(), session_id="planner-protocol-recovery", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "complete"
+    assert result.engine._last_status == "completed"
+
+
+def test_empty_task_plan_gets_one_step_from_structured_task() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Fix widget",
+        user_request="Fix the widget and verify it.",
+        intent="implementation",
+    ))
+    stage = state.add_stage(_stage("Delivery", [_task("only")]).stage)
+    task = stage.tasks[0]
+
+    scoped = _scope_task_plan(Plan(overview="No structured plan", steps=[]), stage, task)
+
+    assert len(scoped.steps) == 1
+    assert scoped.steps[0].title == task.spec.title
+    assert scoped.steps[0].expected_output == task.spec.outcome
+    assert "fallback" in scoped.overview.lower()
+
+
 def test_task_dag_executes_only_dependency_ready_tasks(
     temp_db, monkeypatch, runtime,
 ):
@@ -256,6 +309,36 @@ def test_blocked_task_prevents_false_goal_completion(
     result = run_staged_goal(
         escalation=_escalation(), agent=_Agent(), engine=_Engine(), reviewer=object(),
         hooks=_Hooks(), session_id="blocked-task", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "blocked"
+    assert result.state.stages[0].tasks[0].status == "blocked"
+    assert "rejected" in result.text
+
+
+def test_exhausted_task_prevents_false_goal_completion(
+    temp_db, monkeypatch, runtime,
+):
+    def exhausted_execute(**kwargs):
+        runtime["executions"].append(kwargs)
+        engine = kwargs["engine"]
+        engine._last_status = "exhausted"
+        engine.steps = [{"title": "budget exhausted", "status": "active"}]
+        return "global tool call limit reached", engine
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._run_execution_phase",
+        exhausted_execute,
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Attempt", [_task("attempt")]),
+        _complete("The queue is empty"),
+    ])
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=_Engine(), reviewer=object(),
+        hooks=_Hooks(), session_id="exhausted-task", project_id=1,
         workspace_path="/workspace",
     )
 

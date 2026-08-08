@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Observation channels, ordered roughly by how deterministic they are:
 #   command       → run ``spec`` as a shell command; PASS when exit code == 0
@@ -54,6 +54,11 @@ class StepVerification(BaseModel):
     # fragment that must also appear for a PASS (empty = exit code alone
     # decides). Ignored for ``none``.
     observable: str = ""
+    # Diagnostic steps sometimes prove that a regression reproduces. Their
+    # successful observation is a non-zero process exit plus a known failure
+    # fragment, not exit 0. Keep the ordinary implementation/test default at
+    # zero while allowing the planner to express that distinction explicitly.
+    expected_exit_code: int = Field(default=0, ge=0, le=255)
 
     @property
     def is_executable(self) -> bool:
@@ -97,11 +102,15 @@ class StepVerification(BaseModel):
         kind = obj.get("kind", obj.get("verify_kind", "none"))
         spec = obj.get("spec", obj.get("verify_spec", ""))
         observable = obj.get("observable", obj.get("verify_observable", ""))
+        expected_exit_code = obj.get(
+            "expected_exit_code", obj.get("verify_exit_code", 0)
+        )
         try:
             check = cls(
                 kind=(kind or "none"),
                 spec=(spec or "").strip(),
                 observable=(observable or "").strip(),
+                expected_exit_code=expected_exit_code,
             )
         except Exception:
             return None

@@ -52,12 +52,10 @@ from infinidev.tools.base.context import (
 logger = logging.getLogger(__name__)
 
 
-# Generous cap — the chat agent is encouraged to use its read-only
-# tools freely, so we don't punish "needed 8 reads to answer a deep
-# question" with a rephrase-yourself fallback. The cap is a runaway
-# guard, not a quality gate. Two iterations before the cap we inject
-# a nudge telling the model to wrap up; see _run_llm_loop.
-_DEFAULT_MAX_ITERATIONS = 20
+# The chat prompt allows 0-3 grounding reads before a mandatory routing
+# decision. This ceiling permits one recovery turn after the wrap-up nudge
+# without turning every user message into a second, read-only agent loop.
+_DEFAULT_MAX_ITERATIONS = 5
 _MAX_RESULT_CHARS = 8000  # trim overly long tool outputs before re-prompting
 
 
@@ -67,7 +65,7 @@ def run_chat_agent(
     session_id: Optional[str] = None,
     project_id: Optional[int] = None,
     workspace_path: Optional[str] = None,
-    max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+    max_iterations: int | None = None,
     hooks: Any | None = None,
     attachments: list[Any] | None = None,
 ) -> ChatAgentResult:
@@ -93,6 +91,11 @@ def run_chat_agent(
             kind="respond",
             reply="(empty message)",
         )
+
+    if max_iterations is None:
+        from infinidev.config.settings import settings
+
+        max_iterations = max(1, int(settings.CHAT_AGENT_MAX_ITERATIONS))
 
     # Ephemeral agent_id isolates this turn's tool-context binding from the
     # developer agent's context. set_context writes into a process-global
@@ -317,8 +320,24 @@ def _run_llm_loop(
 
         if not tool_calls:
             # The model chatted in plain text instead of calling a tool.
-            # Treat it as a respond — we still terminate cleanly and the
-            # user sees the text.
+            # Most plain text is a conversational response. Some models,
+            # notably MiniMax M3, instead narrate the required terminal call
+            # ("I'm escalating to the developer") without emitting it. Do not
+            # turn that explicit handoff into a final answer that silently
+            # skips the selected execution engine.
+            if _plain_text_declares_escalation(content):
+                packet = EscalationPacket(
+                    user_request=user_input.strip(),
+                    understanding=content.strip(),
+                    user_visible_preview="" if streamed else content.strip(),
+                    user_signal="(auto-escalate: narrated handoff)",
+                    suggested_flow="develop",
+                )
+                return ChatAgentResult(
+                    kind="escalate",
+                    escalation=packet,
+                    streamed=streamed,
+                )
             return ChatAgentResult(
                 kind="respond",
                 reply=content.strip() or "(no reply)",
@@ -390,6 +409,23 @@ def _run_llm_loop(
 # ─────────────────────────────────────────────────────────────────────────
 # Terminator parsing
 # ─────────────────────────────────────────────────────────────────────────
+
+
+_NARRATED_ESCALATION_RE = re.compile(
+    r"\b(?:"
+    r"i(?:'m| am|'ll| will)\s+escalat(?:e|ing)"
+    r"|escalating\s+(?:this\s+)?to\s+(?:the\s+)?(?:developer|planner)"
+    r"|hand(?:ing|off)\b[^.\n]{0,80}\b(?:developer|planner)"
+    r"|voy\s+a\s+escalar"
+    r"|escalando\b[^.\n]{0,80}\b(?:desarrollador|planner)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _plain_text_declares_escalation(content: str) -> bool:
+    """Whether prose explicitly claims the tool handoff it failed to emit."""
+    return bool(_NARRATED_ESCALATION_RE.search(content or ""))
 
 
 def _build_respond(

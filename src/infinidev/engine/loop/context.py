@@ -462,6 +462,10 @@ def build_iteration_prompt(
             f"  must show: {active_verify.observable}\n"
             if active_verify.observable else ""
         )
+        exit_line = (
+            f"  expected exit: {active_verify.expected_exit_code}\n"
+            if active_verify.kind in {"command", "test_id"} else ""
+        )
         parts.append(
             "<verification-method>\n"
             "An EXTERNAL, automated check runs the moment you call step_complete. "
@@ -469,6 +473,7 @@ def build_iteration_prompt(
             "it pass for real, not to declare it passed.\n\n"
             f"  kind:  {active_verify.kind}\n"
             f"  check: {active_verify.spec}\n"
+            f"{exit_line}"
             f"{observable_line}"
             "\nDo the step's work, then confirm this check passes (run it yourself "
             "to be sure). If it fails when you call step_complete, the closure is "

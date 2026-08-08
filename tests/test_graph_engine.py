@@ -3,6 +3,8 @@ persistence/replay."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from infinidev.engine.engines.base import STATUS_BLOCKED, STATUS_COMPLETED
@@ -61,6 +63,58 @@ class TestAdapterCompleted:
         result = adapter.run(escalation=_escalation(), session_id="s1")
         assert result.state is not None
         assert completion.is_goal_complete(result.state)
+
+    def test_live_leaf_skips_loop_plan_management(self, monkeypatch):
+        from infinidev.engine.orchestration import pipeline as pipeline_mod
+
+        monkeypatch.setattr(
+            pipeline_mod, "_run_gather_phase", lambda **kwargs: kwargs["task_prompt"]
+        )
+        monkeypatch.setattr(
+            pipeline_mod, "_run_review_phase", lambda **kwargs: kwargs["result"]
+        )
+
+        class Agent:
+            def activate_context(self, **kwargs):
+                pass
+
+            def deactivate(self):
+                pass
+
+        class Engine:
+            _last_status = "done"
+            is_cancelled = False
+
+            def execute(self, **kwargs):
+                self.execute_kwargs = kwargs
+                return "done"
+
+        class Hooks:
+            def on_phase(self, phase):
+                pass
+
+            def on_status(self, level, message):
+                pass
+
+        engine = Engine()
+        adapter = GraphEngineAdapter()
+        result, status = adapter._run_live_leaf(
+            capsule_text="active graph node",
+            budget={"max_tool_calls": 1},
+            node=SimpleNamespace(title="Do the thing"),
+            kwargs={
+                "escalation": _escalation("Do the thing"),
+                "agent": Agent(),
+                "engine": engine,
+                "hooks": Hooks(),
+                "session_id": "s1",
+                "reviewer": None,
+            },
+            preserve_file_tracker=False,
+        )
+
+        assert (result, status) == ("done", STATUS_COMPLETED)
+        assert engine.execute_kwargs["skip_plan"] is True
 
 
 # ── Adapter: blocked / budget paths ─────────────────────────────────────────

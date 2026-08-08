@@ -15,17 +15,20 @@ check never pays for a critic call:
    open. A rolling horizon is a commitment until its Steps are completed,
    blocked, or removed with evidence. A list comprehension over the plan makes
    an attempt to end the run early cheap to refuse.
-1. **Notes** — a small model that never called ``add_note`` is about to
+1. **Recoverable tool error** — ``status="blocked"`` immediately after an
+   unknown-tool result that names available alternatives. The model gets one
+   correction turn instead of converting a naming miss into a blocked Task.
+2. **Notes** — a small model that never called ``add_note`` is about to
    throw away everything it learned, since raw tool output does not survive
    the step boundary. Fires at most once per step: a second attempt is
    always honoured, or the model would deadlock between "add a note" and
    "that note was not good enough".
-2. **Late user message** — the user typed while the model was generating.
+3. **Late user message** — the user typed while the model was generating.
    They are owed an acknowledgement before a step boundary, not after it.
-3. **Critic** — a ``reject`` verdict from the pair-programming critic.
-4. **Objective** — the step's own deterministic verification. The model does
+4. **Critic** — a ``reject`` verdict from the pair-programming critic.
+5. **Objective** — the step's own deterministic verification. The model does
    not get to decide this one; a check does.
-5. **User hook** — a ``step_end_instruction`` command from the user's
+6. **User hook** — a ``step_end_instruction`` command from the user's
    ``.infinidev/hooks.json``, holding the step for one more pass of work.
 
 Every gate refuses the same way: by overwriting the ``step_complete`` tool
@@ -110,6 +113,10 @@ class StepCompleteGate:
         # hand the model a fresh pair of attempts at every step it tries to end
         # the run from.
         self._scope_attempts = 0
+        # Step indices that have already received the recoverable-error
+        # correction turn. The second blocked claim is honoured so a broken
+        # suggestion cannot deadlock the Task.
+        self._recoverable_error_fired: set[int] = set()
 
     @staticmethod
     def _step_key(ctx: Any) -> int:
@@ -132,6 +139,7 @@ class StepCompleteGate:
         self._note_fired = set()
         self._hook_fired = set()
         self._scope_attempts = 0
+        self._recoverable_error_fired = set()
 
     # ── the chain ────────────────────────────────────────────────────
 
@@ -146,6 +154,9 @@ class StepCompleteGate:
     ) -> bool:
         """``True`` when the step must stay open for one more turn."""
         if self._scope_open(ctx, step_complete_call, messages):
+            return True
+
+        if self._recoverable_tool_error(ctx, step_complete_call, messages):
             return True
 
         if self._notes_missing(ctx, step_complete_call, messages, action_tool_calls):
@@ -258,7 +269,64 @@ class StepCompleteGate:
         )
         return True
 
-    # ── gate 1: notes ────────────────────────────────────────────────
+    # ── gate 1: recoverable tool errors ─────────────────────────────
+
+    def _recoverable_tool_error(
+        self,
+        ctx: Any,
+        step_complete_call: Any,
+        messages: list[dict[str, Any]],
+    ) -> bool:
+        """Refuse one premature ``blocked`` after a correctable tool-name miss."""
+        if step_complete_status(step_complete_call) != "blocked":
+            return False
+
+        step_key = self._step_key(ctx)
+        if step_key in self._recoverable_error_fired:
+            return False
+
+        last_result = ""
+        for message in reversed(messages):
+            if message.get("role") != "tool":
+                continue
+            if message.get("tool_call_id") == step_complete_call.id:
+                continue
+            last_result = str(message.get("content") or "")
+            break
+
+        if (
+            "Unknown tool:" not in last_result
+            or "Did you mean one of:" not in last_result
+        ):
+            return False
+
+        self._recoverable_error_fired.add(step_key)
+        feedback = (
+            "step_complete BLOCKED — the previous tool result describes a "
+            "recoverable naming error and lists available alternatives. Retry "
+            "the intended operation once using the closest listed tool name. "
+            "Only report status=\"blocked\" if that corrected call also cannot "
+            "proceed or requires user action."
+        )
+        self._engine._overwrite_step_complete_tool_result(
+            messages, step_complete_call.id, feedback,
+        )
+        emit_log(
+            "info",
+            "⚠ step_complete blocked — unknown tool has a suggested correction",
+            project_id=ctx.project_id,
+            agent_id=ctx.agent_id,
+        )
+        with best_effort("recoverable-tool-error loop event failed"):
+            emit_loop_event(
+                "loop_recoverable_tool_error_gate",
+                ctx.project_id,
+                ctx.agent_id,
+                {"step_index": step_key, "blocked": True},
+            )
+        return True
+
+    # ── gate 2: notes ────────────────────────────────────────────────
 
     def _notes_missing(
         self,

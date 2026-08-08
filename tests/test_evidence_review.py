@@ -170,6 +170,55 @@ def test_task_rework_preserves_the_durable_task_and_budget(monkeypatch) -> None:
     assert engine.kwargs["max_total_tool_calls"] == 160
 
 
+def test_task_rework_does_not_restart_with_an_exhausted_budget(monkeypatch) -> None:
+    from infinidev.config.settings import settings
+    from infinidev.engine.orchestration.task_schema import task_from_free_text
+
+    monkeypatch.setattr(settings, "EVIDENCE_REVIEW_MAX_ROUNDS", 2)
+
+    class Reviewer:
+        def review(self, **_kwargs):
+            return EvidenceReviewResult("REJECTED", "Qualify this.", [{
+                "severity": "blocking",
+                "claim_excerpt": "certain",
+                "problem": "too strong",
+            }])
+
+    class Agent:
+        def activate_context(self, **_kwargs):
+            raise AssertionError("exhausted rework must not activate the developer")
+
+        def deactivate(self):
+            raise AssertionError("exhausted rework must not deactivate the developer")
+
+    class Engine:
+        _last_state = SimpleNamespace(total_tool_calls=160)
+
+        def execute(self, **_kwargs):
+            raise AssertionError("exhausted rework must not execute")
+
+    statuses: list[tuple[str, str]] = []
+    final, review = run_evidence_review_rework_loop(
+        engine=Engine(),
+        agent=Agent(),
+        session_id="s1",
+        task_prompt=("Investigate.", "Report."),
+        initial_result="certain",
+        evidence_reviewer=Reviewer(),
+        task=task_from_free_text("Investigate the behavior and report the evidence."),
+        max_total_tool_calls=160,
+        on_status=lambda level, message: statuses.append((level, message)),
+    )
+
+    assert final == "certain"
+    assert review is not None and review.verdict == "REJECTED"
+    assert statuses == [("rejected", "Qualify this."), (
+        "rework_skipped",
+        "Evidence-review rework skipped: the task tool-call budget is exhausted "
+        "(160/160).",
+    )]
+
+
 def test_pipeline_uses_evidence_review_when_workspace_is_unchanged(monkeypatch) -> None:
     from infinidev.engine.orchestration.pipeline import _run_review_phase
 

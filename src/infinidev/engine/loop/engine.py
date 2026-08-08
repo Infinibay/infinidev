@@ -135,6 +135,11 @@ def _seed_initial_plan_if_fresh(ctx, plan) -> None:
         _seed_state_from_plan(ctx.state, plan)
 
 
+def _is_planning_mode(ctx: ExecutionContext) -> bool:
+    """Whether the next model call must use the plan-management protocol."""
+    return not ctx.skip_plan and not ctx.state.plan.steps
+
+
 class LoopEngine(AgentEngine):
     """Plan-execute-summarize loop engine.
 
@@ -363,6 +368,7 @@ class LoopEngine(AgentEngine):
         allow_llm_retries: bool = True,
         preserve_file_tracker: bool = False,
         preserve_task_state: bool = False,
+        skip_plan: bool = False,
     ) -> str:
         """Plan-execute-summarize loop.
 
@@ -399,6 +405,7 @@ class LoopEngine(AgentEngine):
             context_corpus=context_corpus,
             allow_llm_retries=allow_llm_retries,
             preserve_file_tracker=preserve_file_tracker,
+            skip_plan=skip_plan,
         )
         self._cr_delivered_targets.clear()
         # On a resumed session the engine is brand-new (lazily created in
@@ -480,6 +487,14 @@ class LoopEngine(AgentEngine):
             term = self._check_termination(ctx, step_result, step_mgr, iteration, consecutive_all_done)
             if term is not None:
                 return term
+
+            # A global budget is a terminal safety fuse, not an implicit
+            # successful continuation.  The interrupted step was recorded
+            # above, but its active plan item remains open for a later run.
+            if ctx.state.total_tool_calls >= ctx.max_total_calls:
+                return step_mgr.finish(
+                    ctx, "exhausted", iteration, step_result.summary,
+                )
 
             # Update consecutive all-done counter
             if step_result.status == "explore":
@@ -678,7 +693,7 @@ class LoopEngine(AgentEngine):
         # nothing reactivates a step — ``apply_operations`` will not even
         # re-add it when it is user_approved. The step stays active and the
         # exploration's findings land on it.
-        if step_result.status != "explore":
+        if step_result.status in {"done", "blocked"}:
             step_mgr.advance_plan(ctx, step_result)
 
         with best_effort("ContextRank step activation failed"):
@@ -837,7 +852,6 @@ class LoopEngine(AgentEngine):
         step_result: StepResult | None = None
         action_tool_calls = 0
         saw_tool_calls = False
-        is_planning = not ctx.state.plan.steps
 
         llm_caller.reset()
         guard.reset()
@@ -852,6 +866,12 @@ class LoopEngine(AgentEngine):
         _last_llm_call_end: float | None = None
 
         while action_tool_calls < ctx.max_per_action and ctx.state.total_tool_calls < ctx.max_total_calls:
+            # Plan pseudo-tools mutate the state in this same inner loop.
+            # Recompute the mode for every model turn so an ``add_step`` is
+            # followed by execution tools, rather than leaving the model in
+            # planning mode until the step budget happens to expire.
+            # Plan-free adapters are always in execution mode.
+            is_planning = _is_planning_mode(ctx)
             # If a previous LLM call ran in this step, record how much
             # wall-clock elapsed between its return and now (the moment
             # right before we dispatch the next one). This is the
@@ -977,11 +997,10 @@ class LoopEngine(AgentEngine):
                     guard.pseudo_only_rounds = 0
 
                 if classified.step_complete:
-                    # Four things can override the model's claim that this
-                    # step is finished — missing notes, a user message that
-                    # arrived mid-generation, the critic, and the step's own
-                    # verification. Each sends it back for one more turn; see
-                    # ``step_complete_gate`` for the chain and its order.
+                    # Several cheap-to-expensive gates can override the
+                    # model's claim that this step is finished. Each sends it
+                    # back for one more turn; see ``step_complete_gate`` for
+                    # the complete chain and its order.
                     if self._step_gate.blocks(
                         ctx, classified.step_complete, messages,
                         action_tool_calls=action_tool_calls,

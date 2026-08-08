@@ -99,6 +99,12 @@ _HALLUCINATION_MAP: dict[str, str] = {
     "search": "code_search",
     "run": "execute_command",
     "run_command": "execute_command",
+    # MiniMax M3 used these conventional names in live Task runs even though
+    # the advertised schema was ``execute_command``. The arguments are
+    # compatible, so resolving them here avoids turning one naming miss into
+    # a false blocked task.
+    "shell_command": "execute_command",
+    "shell_exec": "execute_command",
     "ls": "list_directory",
     "find": "glob",
     "grep": "code_search",
@@ -312,6 +318,12 @@ def execute_tool_call(
             "script": "code",
             "python": "code",
             "source": "code",
+        },
+        # M-series models often describe the desired memory rather than its
+        # search key. Keep the correction local: ``context`` is meaningful to
+        # other tools and must not become a global alias for ``query``.
+        "recall_context": {
+            "context": "query",
         },
     }
 

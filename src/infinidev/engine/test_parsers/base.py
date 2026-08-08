@@ -13,6 +13,7 @@ needs to change.
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 
@@ -115,6 +116,26 @@ class TestParser(ABC):
             for i in range(len(haystack) - n + 1):
                 if haystack[i:i + n] == needle:
                     return True
+            # Agents commonly invoke a runner through an absolute virtualenv
+            # path (``/repo/.venv/bin/pytest``).  Treat the basename of a
+            # path-like command token as the executable for single-token
+            # runner names.  Without this, the test output is parsed but the
+            # exact passing command is not remembered for post-run review.
+            if len(needle) == 1:
+                expected = needle[0]
+                for index, item in enumerate(haystack):
+                    candidate = item.strip("\"'{}[](),:")
+                    command_position = (
+                        index == 0
+                        or all("=" in prior for prior in haystack[:index])
+                        or haystack[index - 1] in {"&&", ";", "|"}
+                    )
+                    if (
+                        command_position
+                        and "/" in candidate
+                        and os.path.basename(candidate) == expected
+                    ):
+                        return True
         return False
 
     def normalize_command(self, cmd: str) -> str:

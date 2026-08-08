@@ -16,6 +16,21 @@ import pytest
 pytest.importorskip("MNN")
 
 
+def test_tokenizer_source_prefers_chromadb_cache(monkeypatch, tmp_path):
+    from infinidev.tools.base import mnn_embedder
+
+    onnx_dir = tmp_path / "onnx"
+    onnx_dir.mkdir()
+    monkeypatch.setattr(mnn_embedder, "_CHROMADB_ONNX_PATH", onnx_dir / "model.onnx")
+
+    assert mnn_embedder._tokenizer_source() == mnn_embedder._TOKENIZER_ID
+
+    for name in mnn_embedder._TOKENIZER_FILES:
+        (onnx_dir / name).touch()
+
+    assert mnn_embedder._tokenizer_source() == str(onnx_dir)
+
+
 @pytest.fixture
 def model_path() -> str:
     override = os.environ.get("INFINIDEV_MNN_MODEL_PATH")

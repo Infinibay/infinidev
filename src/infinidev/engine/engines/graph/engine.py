@@ -238,6 +238,7 @@ class GraphEngineAdapter:
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=max_tool_calls,
                 preserve_file_tracker=preserve_file_tracker,
+                skip_plan=True,
             )
         finally:
             agent.deactivate()
@@ -266,6 +267,10 @@ class GraphEngineAdapter:
             hooks=hooks,
             acceptance_criteria=list(goal.acceptance_criteria) or None,
             derived_verification_criteria=list(goal.derived_verification_criteria),
+            task=structured_task,
+            max_iterations=settings.REACT_MAX_ITERATIONS,
+            max_total_tool_calls=max_tool_calls,
+            rework_execute_kwargs={"skip_plan": True},
         )
         review_status = getattr(engine, "_last_status", "") or "completed"
         if getattr(engine, "is_cancelled", False):

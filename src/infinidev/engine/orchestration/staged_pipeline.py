@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from infinidev.engine.analysis.plan import Plan
+from infinidev.engine.analysis.plan import Plan, PlanStepSpec
 from infinidev.engine.analysis.staged_planning import (
     BlockGoalDecision,
     CompleteGoalDecision,
@@ -104,6 +104,21 @@ def run_staged_goal(
             hooks=hooks,
         )
         _publish_state(state, session_id, hooks)
+
+        recovered = _recover_completion_after_planner_protocol_failure(
+            decision=decision,
+            state=state,
+            engine=used_engine,
+            workspace_path=workspace_path,
+        )
+        if recovered is not None:
+            hooks.on_status(
+                "warn",
+                "Stage Planner did not return a valid terminal decision; "
+                "closing from completed Task evidence and a passing exact "
+                "verification command.",
+            )
+            decision = recovered
 
         if isinstance(decision, EmitStageDecision):
             prior = state.active_stage
@@ -330,7 +345,7 @@ def _execute_stage(
             return result, used_engine
 
         loop_status = getattr(used_engine, "_last_status", "") or "completed"
-        if loop_status == "blocked" or _has_blocked_steps(used_engine):
+        if loop_status in {"blocked", "failed", "exhausted"} or _has_blocked_steps(used_engine):
             task.status = "blocked"
             task.result = result
             task.error = "The Task execution closed with blocked work."
@@ -357,7 +372,7 @@ def _execute_stage(
             _record_task_evidence(state, stage, task, result, used_engine)
             return result, used_engine
         review_status = getattr(used_engine, "_last_status", "") or "completed"
-        if review_status == "blocked" or _has_blocked_steps(used_engine):
+        if review_status in {"blocked", "failed", "exhausted"} or _has_blocked_steps(used_engine):
             task.status = "blocked"
             task.result = result
             task.error = "Review/rework closed with blocked work."
@@ -658,9 +673,30 @@ def _scope_task_plan(
         f"Task outcome: {task.spec.outcome}\n\n"
         f"{plan.overview}"
     )
+    steps = list(plan.steps)
+    if not steps:
+        # A provider may exhaust the Task Planner turn without its terminal
+        # tool call. The Stage already supplies a bounded, structured Task;
+        # sending an empty plan to the developer makes it spend an entire
+        # action budget recreating that same scope through add_step. Seed one
+        # conservative Step from the Task instead and let execution refine it
+        # if evidence changes the tactic.
+        checks = "\n".join(f"- {item}" for item in task.spec.acceptance_criteria)
+        detail = f"Required outcome: {task.spec.outcome}"
+        if checks:
+            detail += f"\nChecks proposed by the Stage Planner:\n{checks}"
+        steps = [PlanStepSpec(
+            title=task.spec.title,
+            detail=detail,
+            expected_output=task.spec.outcome,
+        )]
+        overview += (
+            "\n\nTask Planner fallback: one execution Step was synthesized "
+            "from the active structured Task because no Steps were emitted."
+        )
     return Plan(
         overview=overview,
-        steps=list(plan.steps),
+        steps=steps,
         acceptance_criteria=list(plan.acceptance_criteria),
         acceptance_criteria_authority=plan.acceptance_criteria_authority,
     )
@@ -727,6 +763,66 @@ def _completion_error(
             "not cite an exact observed evidence-ledger ID."
         )
     return ""
+
+
+def _recover_completion_after_planner_protocol_failure(
+    *,
+    decision: Any,
+    state: StagedPlanningState,
+    engine: Any,
+    workspace_path: str | None,
+) -> CompleteGoalDecision | None:
+    """Recover a completed implementation when only the planner protocol failed.
+
+    This is deliberately narrow. It does not reinterpret a semantic
+    ``block_goal`` decision, and it does not guess through user-authored
+    acceptance criteria. Recovery requires a fully completed Stage, a real
+    workspace change, and re-running the exact test command captured by the
+    developer successfully.
+    """
+    if not isinstance(decision, BlockGoalDecision):
+        return None
+    if decision.missing != "A valid Stage Planner decision on a later retry.":
+        return None
+    if state.goal.intent != "implementation" or state.goal.acceptance_criteria:
+        return None
+    stage = state.active_stage
+    if stage is None or stage.status != "evaluating":
+        return None
+    if not stage.tasks or any(task.status != "completed" for task in stage.tasks):
+        return None
+    if not _engine_has_file_changes(engine):
+        return None
+    loop_state = getattr(engine, "_last_state", None)
+    test_command = str(getattr(loop_state, "last_test_command", "") or "").strip()
+    if not test_command or not workspace_path:
+        return None
+
+    from infinidev.engine.analysis.verification_engine import VerificationEngine
+
+    changed_getter = getattr(engine, "get_file_contents", None)
+    changed = list((changed_getter() or {}).keys()) if callable(changed_getter) else []
+    tracker_getter = getattr(engine, "get_file_tracker", None)
+    tracker = tracker_getter() if callable(tracker_getter) else None
+    verified = VerificationEngine(
+        workspace=workspace_path,
+        preferred_test_command=test_command,
+    ).verify(changed_files=changed, file_tracker=tracker)
+    if not verified.passed:
+        return None
+
+    evidence = [
+        entry for entry in state.evidence
+        if entry.kind == "task_result"
+        and entry.stage_id == stage.id
+        and entry.details.get("task_status") == "completed"
+    ]
+    if not evidence:
+        return None
+    return CompleteGoalDecision(evidence=[
+        f"{entry.id}: completed Task evidence; {verified.summary}"
+        for entry in evidence
+    ])
 
 
 def _stage_preview(stage: StageExecutionRecord) -> str:

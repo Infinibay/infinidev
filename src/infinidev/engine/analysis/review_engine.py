@@ -1041,6 +1041,7 @@ def run_review_rework_loop(
     task: Any | None = None,
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
+    rework_execute_kwargs: dict[str, Any] | None = None,
 ) -> tuple[str, ReviewResult | None]:
     """Run verification + review-rework cycle.
 
@@ -1070,7 +1071,7 @@ def run_review_rework_loop(
         if on_status:
             on_status(level, msg)
 
-    rework_kwargs: dict[str, Any] = {}
+    rework_kwargs: dict[str, Any] = dict(rework_execute_kwargs or {})
     if task is not None:
         rework_kwargs.update(
             task=task,
@@ -1091,7 +1092,12 @@ def run_review_rework_loop(
         if not workspace:
             return current_result
 
-        verifier = VerificationEngine(workspace=workspace)
+        state = getattr(engine, "_last_state", None)
+        preferred_test_command = getattr(state, "last_test_command", "")
+        verifier = VerificationEngine(
+            workspace=workspace,
+            preferred_test_command=preferred_test_command,
+        )
         changed = list((engine.get_file_contents() or {}).keys())
         tracker = getattr(engine, 'get_file_tracker', lambda: None)()
         vresult = verifier.verify(changed_files=changed, file_tracker=tracker)

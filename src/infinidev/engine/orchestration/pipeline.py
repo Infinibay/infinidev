@@ -449,6 +449,7 @@ def _run_execution_phase(
     preserve_file_tracker: bool = False,
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
+    max_tool_calls_per_action: int | None = None,
 ) -> tuple[str, Any]:
     """Execution: dispatch to LoopEngine (or PhaseEngine for ``--think``).
 
@@ -492,6 +493,8 @@ def _run_execution_phase(
                 execute_kwargs["max_iterations"] = max_iterations
             if max_total_tool_calls is not None:
                 execute_kwargs["max_total_tool_calls"] = max_total_tool_calls
+            if max_tool_calls_per_action is not None:
+                execute_kwargs["max_tool_calls_per_action"] = max_tool_calls_per_action
             result = engine.execute(
                 agent=agent,
                 task_prompt=task_prompt,
@@ -524,6 +527,7 @@ def _run_review_phase(
     task: Any | None = None,
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
+    rework_execute_kwargs: dict[str, Any] | None = None,
 ) -> str:
     """Review code changes or evidence-ground an informational outcome.
 
@@ -570,6 +574,7 @@ def _run_review_phase(
                 task=task,
                 max_iterations=max_iterations,
                 max_total_tool_calls=max_total_tool_calls,
+                rework_execute_kwargs=rework_execute_kwargs,
             )
         except Exception as exc:
             logger.error("Evidence review phase failed: %s", exc, exc_info=True)
@@ -580,6 +585,14 @@ def _run_review_phase(
         # receives the ordinary code/content review below.
         if not engine.has_file_changes():
             return result
+
+    # CLI/TUI callers normally construct a reviewer, but adapters are also a
+    # public programmatic boundary.  A completed write must not degrade into
+    # an AttributeError merely because that optional collaborator was omitted.
+    if reviewer is None:
+        from infinidev.engine.analysis.review_engine import ReviewEngine
+
+        reviewer = ReviewEngine()
 
     hooks.on_phase("review")
     hooks.on_status("info", "Running code review...")
@@ -632,6 +645,7 @@ def _run_review_phase(
             task=task,
             max_iterations=max_iterations,
             max_total_tool_calls=max_total_tool_calls,
+            rework_execute_kwargs=rework_execute_kwargs,
         )
     except Exception as exc:
         logger.error("Review phase failed: %s", exc, exc_info=True)

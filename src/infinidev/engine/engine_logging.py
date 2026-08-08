@@ -354,9 +354,16 @@ def log_prompt(user_prompt: str, max_section: int = 300) -> None:
 
 
 def log_finish(agent_name: str, status: str, iterations: int, total_tools: int, total_tokens: int) -> None:
-    icon = "✅" if status == "done" else "🏁"
+    labels = {
+        "done": ("✅", "Completed"),
+        "blocked": ("⛔", "Blocked"),
+        "exhausted": ("⚠", "Exhausted"),
+        "failed": ("❌", "Failed"),
+        "cancelled": ("⏹", "Cancelled"),
+    }
+    icon, label = labels.get(status, ("🏁", "Finished"))
     log(f"\n{DIM}{'─' * 60}{RESET}")
     log(
-        f"{icon} {BOLD}Completed{RESET}  "
+        f"{icon} {BOLD}{label}{RESET}  "
         f"{DIM}{iterations} steps · {total_tools} tools · {total_tokens} tokens{RESET}\n"
     )

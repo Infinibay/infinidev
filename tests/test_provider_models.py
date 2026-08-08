@@ -20,6 +20,14 @@ def test_minimax_catalog_includes_m3() -> None:
     assert "minimax/MiniMax-M3" in models
 
 
+def test_minimax_m3_litellm_metadata_uses_its_documented_context() -> None:
+    import litellm
+
+    from infinidev.config import llm  # noqa: F401 - registers custom model metadata
+
+    assert litellm.model_cost["minimax/MiniMax-M3"]["max_input_tokens"] == 1_000_000
+
+
 def test_catalog_models_use_provider_prefixes() -> None:
     assert get_provider("kimi").prefix == "moonshot/"
     assert get_provider("zai").prefix == "zai/"

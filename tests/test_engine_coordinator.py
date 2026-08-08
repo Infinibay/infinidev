@@ -240,7 +240,37 @@ class TestReactAdapter:
         assert result.transition_request is None
         # The loop ran plan-free with the react budget.
         assert engine.execute_kwargs["initial_plan"] is None
+        assert engine.execute_kwargs["skip_plan"] is True
         assert engine.execute_kwargs["max_iterations"] == settings.REACT_MAX_ITERATIONS
+
+    def test_review_rework_preserves_plan_free_mode_and_budget(
+        self, temp_db, monkeypatch
+    ):
+        from infinidev.engine.orchestration import pipeline as pipeline_mod
+
+        monkeypatch.setattr(
+            pipeline_mod, "_run_gather_phase",
+            lambda **kwargs: kwargs["task_prompt"],
+        )
+        captured = {}
+
+        def review(**kwargs):
+            captured.update(kwargs)
+            return kwargs["result"]
+
+        monkeypatch.setattr(pipeline_mod, "_run_review_phase", review)
+        engine = _LoopEngine("Implemented the fix.", "done")
+
+        ReactAdapter().run(
+            escalation=_packet("Rename the helper function"),
+            agent=_Agent(), engine=engine, reviewer=None, hooks=_Hooks(),
+            session_id="sess-review", project_id=1, workspace_path="/workspace",
+        )
+
+        assert captured["task"] is not None
+        assert captured["max_iterations"] == settings.REACT_MAX_ITERATIONS
+        assert captured["max_total_tool_calls"] == settings.REACT_MAX_TOOL_CALLS
+        assert captured["rework_execute_kwargs"] == {"skip_plan": True}
 
     def test_exhausted_maps_to_blocked_with_escalation(self, temp_db, patched_pipeline):
         engine = _LoopEngine("still working", "exhausted")
@@ -310,6 +340,10 @@ class TestTaskAdapter:
         assert engine.execute_kwargs["initial_plan"].rolling_horizon_limit == 3
         assert engine.execute_kwargs["max_iterations"] == settings.TASK_MAX_ITERATIONS
         assert engine.execute_kwargs["max_total_tool_calls"] == settings.TASK_MAX_TOOL_CALLS
+        assert (
+            engine.execute_kwargs["max_tool_calls_per_action"]
+            == settings.TASK_MAX_TOOL_CALLS_PER_STEP
+        )
 
 
 class TestCoordinatorReactRoute:

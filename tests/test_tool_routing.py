@@ -5,7 +5,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from infinidev.engine.tool_routing import select_developer_tools, task_capabilities
-from infinidev.engine.loop.context_builder import _resolve_tools
+from infinidev.engine.loop.context_builder import (
+    _filter_plan_free_tools,
+    _resolve_tools,
+)
 from infinidev.tools import get_tools_for_role
 
 
@@ -27,6 +30,16 @@ def test_routine_code_task_gets_core_not_every_specialist_tool() -> None:
     assert "write_report" not in names
     assert "run_in_background" not in names
     assert "request_capability" in names
+
+
+def test_read_only_task_avoids_unrelated_destructive_and_specialist_tools() -> None:
+    names = _names("Read pyproject.toml and report the project name. Do not edit files.")
+
+    assert {"read_file", "code_search", "execute_command"} <= names
+    assert "delete_file" not in names
+    assert "move_file" not in names
+    assert "view_image" not in names
+    assert "code_interpreter" not in names
 
 
 def test_explicit_capabilities_restore_their_tools() -> None:
@@ -113,3 +126,18 @@ def test_mcp_only_agent_toolbox_keeps_mcp_and_restores_local_core() -> None:
 
     assert "remote_lookup" in names
     assert {"read_file", "list_directory", "code_search", "execute_command"} <= names
+
+
+def test_plan_free_toolbox_hides_plan_mutation_tools() -> None:
+    tools = [
+        SimpleNamespace(name="read_file"),
+        SimpleNamespace(name="add_step"),
+        SimpleNamespace(name="modify_step"),
+        SimpleNamespace(name="remove_step"),
+        SimpleNamespace(name="step_complete"),
+    ]
+
+    assert [tool.name for tool in _filter_plan_free_tools(tools)] == [
+        "read_file",
+        "step_complete",
+    ]

@@ -15,6 +15,7 @@ from infinidev.engine.analysis.plan import Plan, PlanStepSpec
 from types import SimpleNamespace
 
 from infinidev.engine.loop.engine import (
+    _is_planning_mode,
     _seed_initial_plan_if_fresh,
     _seed_state_from_plan,
 )
@@ -119,6 +120,20 @@ class TestSeedStateFromPlan:
         assert state.plan.overview.startswith("Fix the JWT")
         assert len(state.plan.steps) == 3
         assert state.plan.steps[0].status == "done"
+
+
+class TestPlanningMode:
+    def test_switches_to_execution_as_soon_as_a_step_is_added(self):
+        state = LoopState()
+        ctx = SimpleNamespace(state=state, skip_plan=False)
+
+        assert _is_planning_mode(ctx) is True
+        _seed_state_from_plan(state, _sample_plan())
+        assert _is_planning_mode(ctx) is False
+
+    def test_plan_free_adapter_never_enters_planning(self):
+        ctx = SimpleNamespace(state=LoopState(), skip_plan=True)
+        assert _is_planning_mode(ctx) is False
 
 
 class TestSeededStateRendersCorrectly:

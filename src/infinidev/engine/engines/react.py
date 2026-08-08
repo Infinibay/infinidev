@@ -123,6 +123,7 @@ class ReactAdapter:
                 task=structured_task,
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=settings.REACT_MAX_TOOL_CALLS,
+                skip_plan=True,
             )
         finally:
             agent.deactivate()
@@ -179,6 +180,10 @@ class ReactAdapter:
                 derived_verification_criteria=list(
                     goal.derived_verification_criteria
                 ),
+                task=structured_task,
+                max_iterations=settings.REACT_MAX_ITERATIONS,
+                max_total_tool_calls=settings.REACT_MAX_TOOL_CALLS,
+                rework_execute_kwargs={"skip_plan": True},
             )
             if getattr(engine, "is_cancelled", False):
                 return EngineResult(
@@ -192,7 +197,7 @@ class ReactAdapter:
             # The rework loop re-runs the engine; a blocked close there must
             # surface as blocked, mirroring the staged per-task handling.
             review_status = getattr(engine, "_last_status", "") or "completed"
-            if review_status == "blocked":
+            if review_status in {"blocked", "failed", "exhausted"}:
                 status = STATUS_BLOCKED
 
         return EngineResult(

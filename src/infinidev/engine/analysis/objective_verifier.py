@@ -49,9 +49,13 @@ class ObjectiveVerifier:
             )
 
         if check.kind == "command":
-            return self._verify_command(check.spec, check.observable)
+            return self._verify_command(
+                check.spec, check.observable, check.expected_exit_code
+            )
         if check.kind == "test_id":
-            return self._verify_test_id(check.spec, check.observable)
+            return self._verify_test_id(
+                check.spec, check.observable, check.expected_exit_code
+            )
         if check.kind == "file_contains":
             return self._verify_file_contains(check.spec, check.observable)
         if check.kind == "symbol_exists":
@@ -67,10 +71,15 @@ class ObjectiveVerifier:
 
     # ── per-kind handlers ────────────────────────────────────────────────
 
-    def _verify_command(self, command: str, observable: str) -> VerificationResult:
+    def _verify_command(
+        self, command: str, observable: str, expected_exit_code: int = 0,
+    ) -> VerificationResult:
         run = self._run(command)
-        passed = run["exit_code"] == 0 and self._observable_ok(observable, run["output"])
-        return self._result_from_run(run, passed, observable)
+        passed = (
+            run["exit_code"] == expected_exit_code
+            and self._observable_ok(observable, run["output"])
+        )
+        return self._result_from_run(run, passed, observable, expected_exit_code)
 
     def _interpreter(self) -> str:
         """The python that can import this workspace's test dependencies.
@@ -87,13 +96,18 @@ class ObjectiveVerifier:
                 return path
         return sys.executable
 
-    def _verify_test_id(self, node_id: str, observable: str) -> VerificationResult:
+    def _verify_test_id(
+        self, node_id: str, observable: str, expected_exit_code: int = 0,
+    ) -> VerificationResult:
         # A node id is data, not shell syntax. Passing an argv sequence keeps a
         # crafted filename from becoming another command.
         command = [self._interpreter(), "-m", "pytest", node_id, "-q"]
         run = self._run(command)
-        passed = run["exit_code"] == 0 and self._observable_ok(observable, run["output"])
-        return self._result_from_run(run, passed, observable)
+        passed = (
+            run["exit_code"] == expected_exit_code
+            and self._observable_ok(observable, run["output"])
+        )
+        return self._result_from_run(run, passed, observable, expected_exit_code)
 
     def _verify_file_contains(self, path: str, needle: str) -> VerificationResult:
         workspace = os.path.realpath(self._workspace)
@@ -162,11 +176,20 @@ class ObjectiveVerifier:
         observable = (observable or "").strip()
         return (not observable) or (observable in output)
 
-    def _result_from_run(self, run: dict, passed: bool, observable: str) -> VerificationResult:
+    def _result_from_run(
+        self,
+        run: dict,
+        passed: bool,
+        observable: str,
+        expected_exit_code: int = 0,
+    ) -> VerificationResult:
         if passed:
             summary = "verification passed"
-        elif run["exit_code"] != 0:
-            summary = f"command exited {run['exit_code']}"
+        elif run["exit_code"] != expected_exit_code:
+            summary = (
+                f"command exited {run['exit_code']}; expected "
+                f"{expected_exit_code}"
+            )
         else:
             summary = f"required output not found: {observable!r}"
         return VerificationResult(passed=passed, summary=summary, commands_run=[run])

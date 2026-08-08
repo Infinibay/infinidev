@@ -16,10 +16,10 @@ class ExecuteCommandInput(BaseModel):
     command: str = Field(..., description="Command to execute")
     rationale: str = Field(
         ...,
-        min_length=30,
+        min_length=1,
         description=(
             "REQUIRED. Explain WHAT you expect this command to do and "
-            "WHY you need to run it (≥30 chars). The assistant critic "
+            "WHY you need to run it. The assistant critic "
             "reads this before the command runs. Do NOT use vague "
             "phrases like 'running tests' — say which tests, what "
             "outcome you expect, and why the outcome matters."

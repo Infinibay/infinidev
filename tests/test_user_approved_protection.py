@@ -253,6 +253,27 @@ class TestPublicPlanTools:
             "Reading", "Add auth.py helper", "Implement api.py",
         ]
 
+    def test_first_public_step_becomes_active(self, bound_tool):
+        state = LoopState()
+        self._bind(state)
+
+        result = json.loads(bound_tool(AddStepTool)._run(
+            title="Inspect src/widget.py",
+        ))
+
+        assert result["status"] == "added"
+        assert state.plan.active_step is not None
+        assert state.plan.active_step.title == "Inspect src/widget.py"
+
+    def test_later_public_step_stays_pending(self, bound_tool):
+        state = LoopState()
+        state.plan.steps = [PlanStep(index=1, title="Current", status="active")]
+        self._bind(state)
+
+        bound_tool(AddStepTool)._run(title="Inspect src/later.py")
+
+        assert state.plan.steps[1].status == "pending"
+
     def test_modify_step_reports_fields_applied_to_approved_scope(self, bound_tool):
         state = LoopState()
         state.plan = _approved_plan()

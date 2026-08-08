@@ -127,7 +127,13 @@ class GlobTool(InfinibayBaseTool):
                 return self._error(f"Invalid content_pattern regex: {e}")
 
         use_git = (
-            not include_ignored and self._find_git_root(file_path) is not None
+            not include_ignored
+            and self._find_git_root(file_path) is not None
+            # An explicitly requested base may itself live below an ignored
+            # parent (temporary worktrees are a common example). In that case
+            # Git would report every child as ignored, so use the bounded
+            # filesystem fallback and apply its normal junk-directory filter.
+            and not self._git_is_ignored(".", file_path)
         )
 
         # Batch git check-ignore for performance: collect all glob results

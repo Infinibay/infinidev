@@ -23,6 +23,22 @@ class _ConstrainedTool(InfinibayBaseTool):
         return value
 
 
+class _RecallLikeTool(InfinibayBaseTool):
+    name: str = "recall_context"
+    description: str = "Test recall query aliases."
+
+    def _run(self, query: str) -> str:
+        return query
+
+
+class _ShellLikeTool(InfinibayBaseTool):
+    name: str = "execute_command"
+    description: str = "Record a shell command without running it."
+
+    def _run(self, command: str, cwd: str | None = None) -> str:
+        return json.dumps({"command": command, "cwd": cwd})
+
+
 def test_dispatch_enforces_pydantic_constraints() -> None:
     tool = _ConstrainedTool()
 
@@ -42,3 +58,27 @@ def test_dispatch_runs_after_successful_validation() -> None:
     )
 
     assert result == "valid value"
+
+
+def test_dispatch_maps_recall_context_to_query() -> None:
+    tool = _RecallLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool}, tool.name, {"context": "package metadata"}
+    )
+
+    assert result == "package metadata"
+
+
+def test_dispatch_maps_minimax_shell_aliases_to_execute_command() -> None:
+    """Live M3 naming misses must execute instead of becoming false blockers."""
+    tool = _ShellLikeTool()
+
+    for alias in ("shell_command", "shell_exec"):
+        result = execute_tool_call(
+            {tool.name: tool},
+            alias,
+            {"command": "pwd", "cwd": "/tmp/project"},
+        )
+
+        assert json.loads(result) == {"command": "pwd", "cwd": "/tmp/project"}

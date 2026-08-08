@@ -71,11 +71,25 @@ class PlanStepArg(BaseModel):
     verify_observable: str = Field(
         "",
         description=(
-            "The proof that means PASS. For file_contains: the REQUIRED "
-            "substring (mandatory). For command/test_id: an optional stdout "
-            "fragment that must also appear (empty means the exit code alone "
-            "decides). For llm_judge: an optional hint of where to look "
+            "The proof that means PASS. This is a case-sensitive LITERAL "
+            "contiguous substring, not a description, paraphrase, regex, or "
+            "list of alternatives. For file_contains: copy the REQUIRED "
+            "substring (mandatory). For command/test_id: copy a short exact "
+            "stdout fragment that must also appear (empty means the exit code "
+            "alone decides). For llm_judge: an optional hint of where to look "
             "(file or area). Ignored for symbol_exists and none."
+        ),
+    )
+    verify_exit_code: int = Field(
+        0,
+        ge=0,
+        le=255,
+        description=(
+            "Expected process exit code for command/test_id. Keep 0 for a "
+            "passing implementation check. For a read-only reproduction "
+            "step whose success is observing a known failure, set the "
+            "observed non-zero exit code and pair it with a specific "
+            "verify_observable failure fragment."
         ),
     )
 

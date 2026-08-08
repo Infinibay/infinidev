@@ -41,13 +41,21 @@ def _register_custom_models() -> None:
             "cache_read_input_token_cost": 3e-08,
             "cache_creation_input_token_cost": 3.75e-07,
         }
+        _M3_BASE = {
+            **_M27_BASE,
+            # M3 is not part of the M2 API family's 204.8k window. Keeping
+            # this metadata in sync with the loop's documented override
+            # prevents any LiteLLM caller outside LoopEngine from silently
+            # treating a 1M-context agent as a 204.8k one.
+            "max_input_tokens": 1_000_000,
+        }
 
         # The highspeed variants are the ones litellm's map keeps missing —
         # it indexes MiniMax's fast tier under a different suffix, so every
         # `-highspeed` id the provider actually serves needs registering here
         # or the request is rejected as an unknown model.
         custom = {
-            "minimax/MiniMax-M3": {**_M27_BASE},
+            "minimax/MiniMax-M3": _M3_BASE,
             "minimax/MiniMax-M2.7": {**_M27_BASE},
             "minimax/MiniMax-M2.7-highspeed": {**_M27_BASE},
             "minimax/MiniMax-M2.5-highspeed": {**_M27_BASE},

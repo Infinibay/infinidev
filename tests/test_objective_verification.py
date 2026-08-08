@@ -59,6 +59,18 @@ class TestStepVerification:
         })
         assert v is not None
         assert v.kind == "command" and v.spec == "pytest -q" and v.observable == "passed"
+        assert v.expected_exit_code == 0
+
+    def test_from_loose_maps_expected_nonzero_exit(self):
+        v = StepVerification.from_loose({
+            "verify_kind": "command",
+            "verify_spec": "pytest -q",
+            "verify_observable": "FAILED",
+            "verify_exit_code": 1,
+        })
+
+        assert v is not None
+        assert v.expected_exit_code == 1
 
     def test_from_loose_nested_shape(self):
         v = StepVerification.from_loose({"kind": "command", "spec": "make test"})
@@ -90,6 +102,20 @@ class TestObjectiveVerifierCommand:
         )
         assert r.passed is False
         assert "exited" in r.summary
+
+    def test_expected_nonzero_exit_with_observable_passes(
+        self, tmp_path, auto_approve_permissions,
+    ):
+        r = ObjectiveVerifier(str(tmp_path)).verify(
+            StepVerification(
+                kind="command",
+                spec="sh -c 'echo EXPECTED_FAILURE; exit 1'",
+                observable="EXPECTED_FAILURE",
+                expected_exit_code=1,
+            )
+        )
+
+        assert r.passed is True
 
     def test_command_observable_required_and_present(self, tmp_path):
         r = ObjectiveVerifier(str(tmp_path)).verify(
@@ -283,6 +309,7 @@ class TestVerificationMethodPrompt:
         prompt = build_iteration_prompt("task", "expected", state)
         assert "<verification-method>" in prompt
         assert "tests/test_auth.py::test_expired" in prompt
+        assert "expected exit: 0" in prompt
         assert "EXTERNAL, automated check" in prompt
 
     def test_block_absent_without_verify(self):

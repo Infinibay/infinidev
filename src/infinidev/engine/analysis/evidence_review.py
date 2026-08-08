@@ -221,6 +221,7 @@ def run_evidence_review_rework_loop(
     task: Any | None = None,
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
+    rework_execute_kwargs: dict[str, Any] | None = None,
 ) -> tuple[str, EvidenceReviewResult | None]:
     """Review and minimally rework informational output within a bounded loop."""
 
@@ -251,6 +252,25 @@ def run_evidence_review_rework_loop(
                 on_status("max_reviews", "Evidence review reached its retry limit.")
             break
 
+        # Rework preserves the Task's state so it shares the original global
+        # budget. Starting a developer loop with no calls left performs no LLM
+        # work, then falsely reports that the model could not make tool calls.
+        # Keep the reviewer verdict, but do not run that impossible loop.
+        state = getattr(engine, "_last_state", None)
+        used_calls = getattr(state, "total_tool_calls", 0)
+        if (
+            max_total_tool_calls is not None
+            and isinstance(used_calls, int)
+            and used_calls >= max_total_tool_calls
+        ):
+            if on_status:
+                on_status(
+                    "rework_skipped",
+                    "Evidence-review rework skipped: the task tool-call budget is "
+                    f"exhausted ({used_calls}/{max_total_tool_calls}).",
+                )
+            break
+
         feedback = last.format_feedback_for_developer()
         rework_description = (
             f"{task_prompt[0]}\n\n"
@@ -263,7 +283,7 @@ def run_evidence_review_rework_loop(
         )
         agent.activate_context(session_id=session_id)
         try:
-            rework_kwargs: dict[str, Any] = {}
+            rework_kwargs: dict[str, Any] = dict(rework_execute_kwargs or {})
             if task is not None:
                 rework_kwargs.update(
                     task=task,

@@ -133,6 +133,7 @@ class TaskAdapter:
             task=structured_task,
             max_iterations=settings.TASK_MAX_ITERATIONS,
             max_total_tool_calls=settings.TASK_MAX_TOOL_CALLS,
+            max_tool_calls_per_action=settings.TASK_MAX_TOOL_CALLS_PER_STEP,
         )
         if getattr(used_engine, "is_cancelled", False):
             return EngineResult(

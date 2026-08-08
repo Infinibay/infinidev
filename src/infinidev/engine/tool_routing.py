@@ -7,12 +7,12 @@ from typing import Any
 
 
 _CORE = frozenset({
-    "read_file", "create_file", "edit_file", "delete_file", "move_file",
-    "apply_file_patch", "preview_changes", "rollback_task_changes",
+    # A compact developer baseline.  It supports ordinary inspect-edit-test
+    # work, while less common/destructive operations arrive through an
+    # explicit capability request instead of occupying every model turn.
+    "read_file", "create_file", "edit_file", "apply_file_patch",
     "list_directory", "code_search", "glob",
-    "view_image", "git_diff", "git_status", "execute_command", "code_interpreter",
-    "send_message", "find_references", "list_symbols", "search_symbols",
-    "get_symbol_code", "project_structure", "analyze_code", "describe_tool",
+    "git_diff", "git_status", "execute_command",
     "recall_context", "add_step", "modify_step", "remove_step",
     "declare_test_command", "tail_test_output", "request_capability",
 })
@@ -36,6 +36,11 @@ _CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
         "rename_symbol", "move_symbol", "find_similar_methods",
         "search_by_docstring", "iter_symbols", "project_stats",
     }),
+    "file_management": frozenset({
+        "delete_file", "move_file", "preview_changes", "rollback_task_changes",
+    }),
+    "vision": frozenset({"view_image"}),
+    "code_interpreter": frozenset({"code_interpreter"}),
     "image_generation": frozenset({"generate_image"}),
 }
 
@@ -62,6 +67,18 @@ _CAPABILITY_PATTERNS: dict[str, re.Pattern[str]] = {
     ),
     "advanced_refactor": re.compile(
         r"\b(refactor|rename (?:the )?(?:symbol|class|function|method)|move (?:the )?(?:symbol|class|function|method)|call graph|similar methods?)\b",
+        re.IGNORECASE,
+    ),
+    "file_management": re.compile(
+        r"\b(delete|remove|move|rename|rollback|revert)\b",
+        re.IGNORECASE,
+    ),
+    "vision": re.compile(
+        r"\b(image|screenshot|png|jpe?g|visual|photo)\b",
+        re.IGNORECASE,
+    ),
+    "code_interpreter": re.compile(
+        r"\b(dataframe|notebook|python analysis|plot|chart|visuali[sz]e)\b",
         re.IGNORECASE,
     ),
     "image_generation": re.compile(

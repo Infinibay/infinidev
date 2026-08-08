@@ -30,6 +30,7 @@ before they fire.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING
 
@@ -76,10 +77,17 @@ def is_test_command(args_str: str, state: "LoopState | None" = None) -> bool:
     """
     if not args_str:
         return False
-    s = args_str.lower()
+    command = args_str
+    try:
+        parsed = json.loads(args_str)
+        if isinstance(parsed, dict) and isinstance(parsed.get("command"), str):
+            command = parsed["command"]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    s = command.lower()
     # 1. Built-in runners — each TestParser subclass owns its tokens.
     for parser in _PARSERS:
-        if parser.matches_command(args_str):
+        if parser.matches_command(command):
             return True
     # 2. User-declared via setting.
     for token in _user_test_command_tokens():

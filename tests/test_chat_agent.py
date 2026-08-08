@@ -201,6 +201,23 @@ class TestGracefulFailureModes:
         assert result.kind == "respond"
         assert "Hola" in result.reply
 
+    def test_narrated_escalation_cannot_silently_end_execution(self, patch_litellm):
+        patch_litellm([
+            _response(
+                content=(
+                    "I found src/click/utils.py. I'm escalating to the developer "
+                    "to implement and verify the fix."
+                ),
+                tool_calls=None,
+            ),
+        ])
+
+        result = run_chat_agent("Fix the Click regression and run its test")
+
+        assert result.kind == "escalate"
+        assert result.escalation is not None
+        assert "narrated handoff" in result.escalation.user_signal
+
     def test_max_iterations_without_terminator_auto_escalates(self, patch_litellm):
         # Every response is a read call; none ever terminates.
         # Budget exhaustion is a feature: instead of apologising to the
