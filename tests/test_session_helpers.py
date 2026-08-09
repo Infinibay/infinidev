@@ -173,6 +173,49 @@ class TestContextManagerCompact:
         ContextManager.compact_for_small(msgs)
         assert len(msgs[2]["content"]) == 500
 
+    def test_long_context_compacts_only_tool_results_already_consumed(self):
+        from infinidev.engine.loop.context_manager import ContextManager
+
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "u"},
+            {"role": "assistant", "content": "A1"},
+            {"role": "tool", "content": "old-head" + "x" * 4_000 + "old-tail"},
+            {"role": "assistant", "content": "A2"},
+            {"role": "tool", "content": "recent" + "y" * 4_000},
+            {"role": "assistant", "content": "A3"},
+        ]
+
+        ContextManager.compact_old_tool_results(
+            msgs, keep_assistant_rounds=2, max_chars=200,
+        )
+
+        assert "chars compacted after prior delivery" in msgs[3]["content"]
+        assert msgs[3]["content"].startswith("old-head")
+        assert msgs[3]["content"].endswith("old-tail")
+        assert msgs[5]["content"] == "recent" + "y" * 4_000
+
+
+def test_opened_files_prompt_prefers_the_active_step_with_a_finite_budget():
+    from infinidev.engine.loop.context import _render_opened_files
+    from infinidev.engine.loop.models import LoopState
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    state = LoopState()
+    state.cache_file("src/unrelated_a.py", "a" * 30_000)
+    state.cache_file("src/unrelated_b.py", "b" * 30_000)
+    state.cache_file("tests/test_target.py", "t" * 30_000)
+    state.plan.steps = [
+        PlanStep(index=1, title="Fix tests/test_target.py", status="active"),
+    ]
+
+    rendered = _render_opened_files(state)
+
+    assert "### tests/test_target.py" in rendered
+    assert rendered.count("a" * 1_000) == 0
+    assert rendered.count("b" * 1_000) == 0
+    assert "Cached but omitted from this prompt" in rendered
+
 
 # ── _is_error_result ─────────────────────────────────────────────────────
 

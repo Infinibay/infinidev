@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import os
 import time
 from pathlib import Path
@@ -43,7 +44,12 @@ def _file_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()[:16]
 
 
-def index_file(project_id: int, file_path: str) -> int:
+def index_file(
+    project_id: int,
+    file_path: str,
+    *,
+    notify_integrity: bool = True,
+) -> int:
     """Index a single file. Returns number of symbols extracted.
 
     Skips if the file content hash hasn't changed.
@@ -160,7 +166,7 @@ def index_file(project_id: int, file_path: str) -> int:
             text = content.decode("utf-8", errors="replace")
         except Exception:
             text = ""
-        if text:
+        if text and notify_integrity:
             issues = check_syntax(text, file_path=file_path)
             push_notification(file_path, language, issues)
     except Exception as exc:
@@ -243,9 +249,13 @@ def index_directory(
 
     total_files = len(file_list)
 
+    progress_interval = max(10, math.ceil(total_files / 50))
     for fpath in file_list:
         try:
-            count = index_file(project_id, fpath)
+            # A baseline index discovers pre-existing parser limitations and
+            # repository syntax; it is not evidence that this agent broke a
+            # file. Incremental reindex paths keep notifications enabled.
+            count = index_file(project_id, fpath, notify_integrity=False)
             if count > 0:
                 files_indexed += 1
                 symbols_total += count
@@ -258,7 +268,9 @@ def index_directory(
             files_skipped += 1
 
         processed += 1
-        if on_progress and processed % 10 == 0:
+        if on_progress and (
+            processed % progress_interval == 0 or processed == total_files
+        ):
             on_progress(processed, total_files, files_indexed, symbols_total)
 
     elapsed = int((time.time() - start) * 1000)

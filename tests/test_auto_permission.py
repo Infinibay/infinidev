@@ -317,6 +317,37 @@ class TestNonInteractiveTaskAuthority:
             "python tests/runtests.py backends.base.test_creation -v 2 2>&1 | tail -40",
         ) is True
 
+    def test_explicit_verification_authorizes_discovered_pytest(self):
+        handler = make_noninteractive_permission_handler(
+            "Implement the fix and verify it. Do not edit tests."
+        )
+
+        assert handler(
+            "execute_command", "", "python -m pytest tests/test_inventory.py -v",
+        ) is True
+
+    def test_literal_designated_python_command_is_authorized(self):
+        request = (
+            "Begin with the designated semantic index command "
+            "python tools/semantic_search.py available; if it fails, recover."
+        )
+        handler = make_noninteractive_permission_handler(request)
+
+        assert handler(
+            "execute_command",
+            "",
+            "python tools/semantic_search.py available 2>&1; echo done",
+        ) is True
+
+    def test_negative_literal_python_command_is_not_authorized(self):
+        handler = make_noninteractive_permission_handler(
+            "Do not run python tools/destructive.py now; inspect it only."
+        )
+
+        assert handler(
+            "execute_command", "", "python tools/destructive.py",
+        ) is False
+
     @pytest.mark.parametrize(
         "command",
         [

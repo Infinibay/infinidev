@@ -48,6 +48,25 @@ def test_note_under_the_cap_is_stored_and_acknowledged():
     assert json.loads(classified.note_results["n1"])["status"] == "noted"
 
 
+def test_note_body_is_bounded_before_it_enters_every_future_prompt():
+    ctx = _ctx([])
+
+    classified = _process(ctx, _note_call("n1", "x" * 2_000))
+
+    assert len(ctx.state.notes[0]) == 800
+    result = json.loads(classified.note_results["n1"])
+    assert result == {"status": "noted", "clipped": True}
+
+
+def test_exact_duplicate_note_does_not_consume_another_slot():
+    ctx = _ctx(["Bug is in auth.py:412"])
+
+    classified = _process(ctx, _note_call("n1", "  bug IS in auth.py:412  "))
+
+    assert ctx.state.notes == ["Bug is in auth.py:412"]
+    assert json.loads(classified.note_results["n1"])["status"] == "duplicate"
+
+
 def test_saving_a_note_always_resets_the_nudge_counter():
     ctx = _ctx([f"note {i}" for i in range(20)], since=9)
     _process(ctx, _note_call("n1", "the bug is in auth.py:412"))

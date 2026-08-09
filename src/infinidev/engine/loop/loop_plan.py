@@ -31,6 +31,19 @@ _STEP_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _PATH_RE = re.compile(r"(?:[a-zA-Z0-9_.-]+/)+[a-zA-Z0-9_.-]+")
 _IDENTIFIER_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+_LEADING_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("discover", re.compile(
+        r"^(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|trace|understand)\b"
+    )),
+    ("verify", re.compile(
+        r"^(?:check|run|test|validate|verification|verify)\b"
+    )),
+    ("change", re.compile(
+        r"^(?:add|change|create|edit|fix|implement|refactor|rewrite|update)\b"
+    )),
+    ("document", re.compile(r"^(?:document|documentation|explain|write docs?)\b")),
+    ("design", re.compile(r"^(?:design|plan|prototype)\b")),
+)
 
 
 def _normalized_step_title(title: str) -> str:
@@ -41,6 +54,12 @@ def _normalized_step_title(title: str) -> str:
 def _step_phase(title: str) -> str:
     """Classify the action without asking another model."""
     normalized = title.casefold()
+    # Step titles commonly include the object of work ("Verify the parser
+    # fix"). The leading action owns the phase; a later noun must not turn a
+    # verification Step into an implementation Step.
+    for phase, pattern in _LEADING_PHASE_PATTERNS:
+        if pattern.search(normalized):
+            return phase
     for phase, pattern in _STEP_PHASE_PATTERNS:
         if pattern.search(normalized):
             return phase

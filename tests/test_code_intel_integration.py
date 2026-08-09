@@ -84,6 +84,50 @@ class TestIndexer:
         assert stats["files_indexed"] == 3  # auth.py, api.py, test_auth.py
         assert stats["symbols_total"] > 5
 
+    def test_directory_baseline_does_not_emit_integrity_notifications(
+        self, tmp_path, temp_db,
+    ):
+        from infinidev.code_intel.file_change_notifications import (
+            drain_pending_notifications,
+            reset_notifications,
+        )
+
+        reset_notifications()
+        (tmp_path / "broken.py").write_text("def broken(:\n")
+
+        index_directory(1, str(tmp_path))
+
+        assert drain_pending_notifications() == []
+
+    def test_incremental_file_index_still_reports_new_broken_content(
+        self, tmp_path, temp_db,
+    ):
+        from infinidev.code_intel.file_change_notifications import (
+            drain_pending_notifications,
+            reset_notifications,
+        )
+
+        reset_notifications()
+        path = tmp_path / "broken.py"
+        path.write_text("def broken(:\n")
+
+        index_file(1, str(path))
+
+        notifications = drain_pending_notifications()
+        assert [item.file_path for item in notifications] == [str(path)]
+
+    def test_large_directory_progress_is_bounded_to_about_fifty_updates(
+        self, tmp_path, temp_db,
+    ):
+        for index in range(123):
+            (tmp_path / f"module_{index}.py").write_text(f"VALUE = {index}\n")
+        progress = []
+
+        index_directory(1, str(tmp_path), on_progress=lambda *args: progress.append(args))
+
+        assert progress[-1][0] == 123
+        assert len(progress) <= 50
+
     def test_index_skips_unchanged(self, py_project):
         # First index
         stats1 = index_directory(1, str(py_project))

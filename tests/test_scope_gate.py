@@ -134,3 +134,23 @@ class TestStepTransition:
 
         assert state.plan.steps[0].status == "blocked"
         assert state.plan.steps[1].status == "active"
+
+    def test_blocked_step_with_planned_recovery_does_not_end_the_task(self) -> None:
+        from infinidev.engine.loop.engine import LoopEngine
+
+        state = _state(
+            PlanStep(index=1, title="Broken approach", status="active"),
+            PlanStep(index=2, title="Try the diagnosed recovery"),
+        )
+        context = _ctx(state)
+        manager = StepManager(SimpleNamespace(_hooks=None))
+        result = StepResult(summary="Approach failed", status="blocked")
+        manager.advance_plan(context, result)
+
+        terminal = LoopEngine()._check_termination(
+            context, result, manager, iteration=0, consecutive_all_done=0,
+        )
+
+        assert terminal is None
+        assert state.plan.steps[0].status == "blocked"
+        assert state.plan.steps[1].status == "active"

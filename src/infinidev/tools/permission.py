@@ -33,6 +33,51 @@ _TEST_DENIAL_RE = re.compile(
     r"prueb(?:es|ar))\s+(?:las?\s+)?pruebas?\b",
     re.IGNORECASE,
 )
+_VERIFICATION_AUTHORIZATION_RE = re.compile(
+    r"\b(?:verify|validate|verific(?:a|ar|á)|valid(?:a|ar))\b|"
+    r"\bverification\b[^.\n]{0,60}\b(?:complete|passing|required)\b|"
+    r"\bverificaci[oó]n\b[^.\n]{0,60}\b(?:completa|requerida)\b",
+    re.IGNORECASE,
+)
+_VERIFICATION_DENIAL_RE = re.compile(
+    r"\b(?:do\s+not|don't|never)\s+(?:verify|validate)\b|"
+    r"\b(?:no|nunca)\s+(?:verific(?:ar|a|á)|valid(?:ar|a|á))\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PYTHON_SCRIPT_RE = re.compile(
+    r"\bpython(?:3(?:\.\d+)?)?\s+(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.py"
+    r"(?:\s+[A-Za-z0-9_./:=+-]+)*",
+    re.IGNORECASE,
+)
+
+
+def _explicit_python_command_is_authorized(command: str, request: str) -> bool:
+    """Recognize a Python script command the user literally asked to run."""
+    command_without_redirects = re.sub(r"\s+\d*[<>].*$", "", command).strip()
+    command_match = _EXPLICIT_PYTHON_SCRIPT_RE.search(command_without_redirects)
+    if command_match is None:
+        return False
+    normalized = " ".join(command_match.group(0).casefold().split())
+    for match in _EXPLICIT_PYTHON_SCRIPT_RE.finditer(request):
+        candidate = " ".join(match.group(0).casefold().split())
+        if candidate != normalized:
+            continue
+        prefix = request[max(0, match.start() - 160):match.start()]
+        if re.search(
+            r"\b(?:do\s+not|don't|never|no|nunca)\b[^.\n]{0,80}$",
+            prefix,
+            re.IGNORECASE,
+        ):
+            return False
+        return bool(re.search(
+            r"\b(?:begin|start|run|execute|use|empieza|comienza|ejecuta|usa)\b"
+            r"[^.\n]{0,140}$",
+            prefix,
+            re.IGNORECASE,
+        ))
+    return False
+
+
 def make_noninteractive_permission_handler(
     user_request: str,
 ) -> Callable[[str, str, str], bool]:
@@ -46,14 +91,16 @@ def make_noninteractive_permission_handler(
     read-only, so test authority cannot be widened into a mutation.
     """
     request = (user_request or "").strip()
-    tests_authorized = bool(
-        request
-        and _TEST_AUTHORIZATION_RE.search(request)
-        and not _TEST_DENIAL_RE.search(request)
+    tests_authorized = bool(request) and bool(
+        _TEST_AUTHORIZATION_RE.search(request)
+        or _VERIFICATION_AUTHORIZATION_RE.search(request)
+    ) and not bool(
+        _TEST_DENIAL_RE.search(request)
+        or _VERIFICATION_DENIAL_RE.search(request)
     )
 
     def decide(tool_name: str, _description: str, details: str) -> bool:
-        if tool_name != "execute_command" or not tests_authorized:
+        if tool_name != "execute_command":
             return False
         command = (details or "").strip()
         if not command:
@@ -64,7 +111,12 @@ def make_noninteractive_permission_handler(
             split_shell_segments,
         )
 
-        segments, _ = split_shell_segments(command)
+        # Merging stderr into stdout does not create a file and is commonly
+        # appended to diagnostic commands. Remove only that exact shell form;
+        # ordinary output redirections remain visible to the risk parser and
+        # fail closed.
+        risk_command = re.sub(r"(?<!\S)2>&1(?=\s|$|;|\|)", "", command)
+        segments, _ = split_shell_segments(risk_command)
         if segments is None:
             return False
         saw_test = False
@@ -72,7 +124,10 @@ def make_noninteractive_permission_handler(
             segment = segment.strip()
             if not segment:
                 continue
-            if is_test_command(segment):
+            if is_test_command(segment) and tests_authorized:
+                saw_test = True
+                continue
+            if _explicit_python_command_is_authorized(segment, request):
                 saw_test = True
                 continue
             if not classify_command(segment)[0]:

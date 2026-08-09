@@ -20,6 +20,17 @@ if TYPE_CHECKING:
 # is full and a real finding needs the slot. The prefix is how the two
 # are told apart, so both writer and evictor read it from here.
 AUTO_NOTE_PREFIX = "Read "
+MAX_TASK_NOTES = 20
+MAX_SESSION_NOTES = 10
+MAX_NOTE_CHARS = 800
+
+
+def _bounded_note(note: str) -> tuple[str, bool]:
+    """Return a finite note body and whether provider output was clipped."""
+    stripped = note.strip()
+    if len(stripped) <= MAX_NOTE_CHARS:
+        return stripped, False
+    return stripped[:MAX_NOTE_CHARS - 1].rstrip() + "…", True
 
 
 class ToolProcessor:
@@ -49,9 +60,6 @@ class ToolProcessor:
         engine: "LoopEngine",
     ) -> None:
         """Handle think, add_note, add_session_note calls."""
-        _MAX_NOTES = 20
-        _MAX_SESSION_NOTES = 10
-
         for tk in classified.thinks:
             try:
                 tk_args = _safe_json_loads(tk.function.arguments) if isinstance(tk.function.arguments, str) else (tk.function.arguments or {})
@@ -71,10 +79,10 @@ class ToolProcessor:
         for nc in classified.notes:
             try:
                 nc_args = _safe_json_loads(nc.function.arguments) if isinstance(nc.function.arguments, str) else (nc.function.arguments or {})
-                note_text = nc_args.get("note", "").strip()
+                note_text, clipped = _bounded_note(nc_args.get("note", ""))
                 if note_text:
                     classified.note_results[nc.id] = ToolProcessor._save_note(
-                        ctx, note_text, _MAX_NOTES,
+                        ctx, note_text, MAX_TASK_NOTES, clipped=clipped,
                     )
             except (json.JSONDecodeError, AttributeError):
                 pass
@@ -82,8 +90,8 @@ class ToolProcessor:
         for snc in classified.session_notes:
             try:
                 snc_args = _safe_json_loads(snc.function.arguments) if isinstance(snc.function.arguments, str) else (snc.function.arguments or {})
-                note_text = snc_args.get("note", "").strip()
-                if note_text and len(engine.session_notes) < _MAX_SESSION_NOTES:
+                note_text, _ = _bounded_note(snc_args.get("note", ""))
+                if note_text and len(engine.session_notes) < MAX_SESSION_NOTES:
                     engine.session_notes.append(note_text)
                     # Persist so a resumed session (`-c`) can re-load it.
                     # Soft-fails: an in-memory note is still useful this run.
@@ -98,7 +106,13 @@ class ToolProcessor:
         # handled via execute_tool_call — no pseudo-tool processing needed.
 
     @staticmethod
-    def _save_note(ctx: ExecutionContext, note_text: str, max_notes: int) -> str:
+    def _save_note(
+        ctx: ExecutionContext,
+        note_text: str,
+        max_notes: int,
+        *,
+        clipped: bool = False,
+    ) -> str:
         """Store one model-written note, and say honestly what happened.
 
         The cap is task-wide and nothing rotates it, so a long task used to
@@ -119,9 +133,14 @@ class ToolProcessor:
         """
         ctx.state.tool_calls_since_last_note = 0
 
+        normalized = " ".join(note_text.casefold().split())
+        for existing in ctx.state.notes:
+            if " ".join(existing.casefold().split()) == normalized:
+                return json.dumps({"status": "duplicate", "clipped": clipped})
+
         if len(ctx.state.notes) < max_notes:
             ctx.state.notes.append(note_text)
-            return '{"status": "noted"}'
+            return json.dumps({"status": "noted", "clipped": clipped})
 
         for i, existing in enumerate(ctx.state.notes):
             if existing.startswith(AUTO_NOTE_PREFIX):
@@ -163,7 +182,6 @@ class ToolProcessor:
         losing critical context between steps.  This automatically records
         the file path (and optionally key symbols) as a note.
         """
-        _MAX_NOTES = 20
         if not ctx.is_small:
             return
 
@@ -176,7 +194,7 @@ class ToolProcessor:
 
         if tool_name in ("read_file", "partial_read"):
             path = tool_args.get("file_path", tool_args.get("path", ""))
-            if path and len(ctx.state.notes) < _MAX_NOTES:
+            if path and len(ctx.state.notes) < MAX_TASK_NOTES:
                 # Check if we already have a note about this file
                 path_short = path.split("/")[-1] if "/" in path else path
                 already_noted = any(path_short in n for n in ctx.state.notes)

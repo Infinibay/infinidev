@@ -252,6 +252,7 @@ ADD_NOTE_SCHEMA: dict[str, Any] = {
                 "note": {
                     "type": "string",
                     "description": "The note to save (1-2 sentences)",
+                    "maxLength": 800,
                 },
             },
             "required": ["note"],
@@ -277,6 +278,7 @@ ADD_SESSION_NOTE_SCHEMA: dict[str, Any] = {
                 "note": {
                     "type": "string",
                     "description": "The session note to save (1-2 sentences)",
+                    "maxLength": 800,
                 },
             },
             "required": ["note"],

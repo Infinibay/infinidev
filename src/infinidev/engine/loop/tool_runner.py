@@ -94,6 +94,8 @@ class ToolRunner:
 
         if ctx.is_small:
             ContextManager.compact_for_small(messages)
+        else:
+            ContextManager.compact_old_tool_results(messages)
 
         self.append_pseudo_results(ctx, classified, messages, tool_results_text)
         # Only now is the assistant→tool block closed. Everything the model

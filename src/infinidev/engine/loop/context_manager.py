@@ -18,6 +18,8 @@ class ContextManager:
 
     # How many tool call rounds before assistant thinking is truncated.
     THINKING_TTL = 3
+    TOOL_RESULT_TTL = 4
+    TOOL_RESULT_COMPACT_CHARS = 1_200
 
     @staticmethod
     def expire_thinking(messages: list[dict[str, Any]], ttl: int = THINKING_TTL) -> None:
@@ -86,3 +88,48 @@ class ContextManager:
                 if content and len(content) > 100:
                     first_line = content.split("\n", 1)[0][:100]
                     msg["content"] = f"[compacted] {first_line}"
+
+    @staticmethod
+    def compact_old_tool_results(
+        messages: list[dict[str, Any]],
+        *,
+        keep_assistant_rounds: int = TOOL_RESULT_TTL,
+        max_chars: int = TOOL_RESULT_COMPACT_CHARS,
+    ) -> None:
+        """Bound old tool-result bodies while preserving recent evidence.
+
+        A long-context model still pays for every old file body and command
+        output on every subsequent request in the same Step. The model has
+        already consumed results older than ``keep_assistant_rounds``; retain
+        a deterministic head/tail excerpt for error identity and protocol
+        continuity instead of repeatedly resending the full body.
+        """
+        if keep_assistant_rounds < 1 or max_chars < 80:
+            return
+
+        assistant_count = 0
+        cutoff_idx = 0
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") != "assistant":
+                continue
+            assistant_count += 1
+            if assistant_count >= keep_assistant_rounds:
+                cutoff_idx = i
+                break
+        else:
+            return
+
+        head_chars = max_chars // 2
+        tail_chars = max_chars - head_chars
+        for message in messages[:cutoff_idx]:
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content", "")
+            if not isinstance(content, str) or len(content) <= max_chars:
+                continue
+            omitted = len(content) - max_chars
+            message["content"] = (
+                content[:head_chars]
+                + f"\n[... {omitted} chars compacted after prior delivery ...]\n"
+                + content[-tail_chars:]
+            )

@@ -398,6 +398,12 @@ class TestPublicPlanTools:
         assert result["status"] == "duplicate"
         assert len(state.plan.steps) == 1
 
+    def test_verify_fix_title_is_not_classified_as_an_implementation_step(self):
+        from infinidev.engine.loop.loop_plan import _step_phase
+
+        assert _step_phase("Verify fix by running pytest") == "verify"
+        assert _step_phase("Fix parser and run tests") == "change"
+
 
 def test_step_result_operations_cannot_add_duplicate_open_work():
     plan = LoopPlan()

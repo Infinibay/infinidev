@@ -920,6 +920,16 @@ class LoopEngine(AgentEngine):
             )
 
         if step_result.status == "blocked":
+            if ctx.state.plan.has_pending:
+                active = ctx.state.plan.active_step
+                _emit_log(
+                    "info",
+                    "↪ Blocked Step recorded; continuing with the recovery "
+                    f"Step already in the plan: {getattr(active, 'title', 'next Step')}",
+                    project_id=ctx.project_id,
+                    agent_id=ctx.agent_id,
+                )
+                return None
             return step_mgr.finish(ctx, "blocked", iteration, step_result.summary)
 
         if consecutive_all_done >= 2 and ctx.state.plan.steps and not ctx.state.plan.has_pending:

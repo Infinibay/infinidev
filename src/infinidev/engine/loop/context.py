@@ -849,19 +849,62 @@ def _render_opened_files(state: LoopState) -> str:
     """
     if not state.opened_files:
         return ""
+
+    from infinidev.engine.loop.loop_state import OPENED_FILES_PROMPT_MAX_CHARS
+
+    active = state.plan.active_step
+    active_text = " ".join(
+        part for part in (
+            getattr(active, "title", ""),
+            getattr(active, "explanation", ""),
+        ) if part
+    ).casefold()
+
+    def relevance(item: tuple[str, Any]) -> tuple[int, int, int, int]:
+        path, opened = item
+        normalized = path.casefold()
+        basename = normalized.rsplit("/", 1)[-1]
+        mentioned = int(
+            bool(active_text)
+            and (normalized in active_text or basename in active_text)
+        )
+        return mentioned, int(opened.pinned), int(opened.ttl), -len(opened.content)
+
+    ranked = sorted(state.opened_files.items(), key=relevance, reverse=True)
+    selected: list[tuple[str, Any]] = []
+    omitted: list[str] = []
+    used_chars = 0
+    for path, opened in ranked:
+        size = len(opened.content)
+        if selected and used_chars + size > OPENED_FILES_PROMPT_MAX_CHARS:
+            omitted.append(path)
+            continue
+        selected.append((path, opened))
+        used_chars += size
+
     file_sections: list[str] = []
-    for path, of in state.opened_files.items():
+    for path, of in selected:
         if of.pinned:
             label = f"### {path} (written by you — pinned)\n```\n{of.content}\n```"
         else:
             label = f"### {path} (expires in {of.ttl} tool calls)\n```\n{of.content}\n```"
         file_sections.append(label)
+    omitted_block = ""
+    if omitted:
+        visible = ", ".join(omitted[:8])
+        if len(omitted) > 8:
+            visible += f", and {len(omitted) - 8} more"
+        omitted_block = (
+            "\n\nCached but omitted from this prompt by the context budget: "
+            f"{visible}. Read one explicitly only if the active Step needs it."
+        )
     return (
         "<opened-files>\n"
         "IMPORTANT: These files are already loaded and up-to-date. "
         "Do NOT call read_file on them — the content below IS the current file content. "
         "After you edit a file, it is automatically refreshed here.\n\n"
         + "\n\n".join(file_sections)
+        + omitted_block
         + "\n</opened-files>"
     )
 

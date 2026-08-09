@@ -19,6 +19,10 @@ OPENED_FILE_TTL = 20
 MAX_OPENED_FILES = 10
 # Max file content size to cache (larger files are not cached)
 MAX_CACHE_CONTENT_SIZE = 32000  # ~8K tokens — enough for most source files
+# Maximum aggregate source body injected at a Step boundary. The cache may
+# retain more files for dedup/recall, but repeatedly sending all ten files can
+# cost ~80K input tokens per model turn without adding current-step evidence.
+OPENED_FILES_PROMPT_MAX_CHARS = 48_000
 
 
 class LoopState(BaseModel):
