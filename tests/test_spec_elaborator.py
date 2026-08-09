@@ -105,6 +105,24 @@ class TestGating:
     def test_elaborates_substantial_request(self, long_escalation):
         assert se.should_elaborate(long_escalation) is True
 
+    def test_skips_grounding_when_request_already_has_an_execution_contract(self):
+        request = (
+            "Update src/auth.py so validate_token must reject expired tokens "
+            "without changing valid-token behavior, and run pytest tests/test_auth.py."
+        )
+        escalation = EscalationPacket(user_request=request, understanding=request)
+
+        assert se.should_elaborate(escalation) is False
+
+    def test_elaborates_ambiguous_request_despite_file_and_test_names(self):
+        request = (
+            "Fix the bug in src/auth.py and run pytest tests/test_auth.py because "
+            "users have reported intermittent failures in production recently."
+        )
+        escalation = EscalationPacket(user_request=request, understanding=request)
+
+        assert se.should_elaborate(escalation) is True
+
     def test_disabled_flag_skips(self, long_escalation):
         orig = settings.SPEC_ELABORATION_ENABLED
         settings.SPEC_ELABORATION_ENABLED = False

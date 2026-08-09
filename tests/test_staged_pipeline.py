@@ -364,7 +364,14 @@ def test_exhausted_task_prevents_false_goal_completion(
 
     assert result.state.status == "blocked"
     assert result.state.stages[0].tasks[0].status == "blocked"
+    assert len(runtime["task_plans"]) == 1
     assert len(runtime["executions"]) == 2
+    assert runtime["executions"][1]["plan"].overview == (
+        runtime["executions"][0]["plan"].overview
+    )
+    assert runtime["executions"][1]["plan"].steps == (
+        runtime["executions"][0]["plan"].steps
+    )
     assert runtime["executions"][1]["preserve_task_state"] is True
     assert runtime["executions"][1]["max_total_tool_calls"] == 80
     assert "Task attempt" in result.text

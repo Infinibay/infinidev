@@ -41,6 +41,9 @@ from infinidev.engine.oversized_result import (
 )
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+from infinidev.engine.orchestration.request_signals import (
+    explicit_execution_score as _explicit_execution_score,
+)
 from infinidev.prompts.chat_agent import build_chat_agent_system_prompt
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
@@ -57,54 +60,6 @@ logger = logging.getLogger(__name__)
 # without turning every user message into a second, read-only agent loop.
 _DEFAULT_MAX_ITERATIONS = 5
 _MAX_RESULT_CHARS = 8000  # trim overly long tool outputs before re-prompting
-
-_EXECUTION_ACTION_RE = re.compile(
-    r"\b(?:add|implement|fix|change|update|remove|delete|refactor|create|write|"
-    r"build|run|execute|agreg(?:a|ar)|implement(?:a|ar)|arregl(?:a|ar|á)|"
-    r"cambi(?:a|ar)|actualiz(?:a|ar)|elimin(?:a|ar)|cre(?:a|ar)|ejecut(?:a|ar))\b",
-    re.IGNORECASE,
-)
-_EXECUTION_TARGET_RE = re.compile(
-    r"\b(?:repo(?:sitory)?|codebase|code|bug|function|helper|class|module|"
-    r"archivo|repositorio|c[oó]digo|funci[oó]n|clase|m[oó]dulo)\b|"
-    r"(?:^|\s)(?:src|tests?)/\S+|\b\w+\.(?:py|js|ts|rs|go|java|c|cpp|h)\b",
-    re.IGNORECASE,
-)
-_EXECUTION_VERIFY_RE = re.compile(
-    r"\b(?:tests?|pytest|verify|validate|pruebas?|probar|verificar|validar)\b",
-    re.IGNORECASE,
-)
-_INFORMATIONAL_RE = re.compile(
-    r"^\s*(?:how\s+(?:do|can|would|should)|what\s+(?:is|does|would|should)|why\b|"
-    r"explain\b|c[oó]mo\s+(?:puedo|se|har[ií]a)|qu[eé]\s+(?:es|hace)|por\s+qu[eé]\b|"
-    r"explic(?:a|ame|ar)\b)",
-    re.IGNORECASE,
-)
-_NO_EXECUTION_RE = re.compile(
-    r"\b(?:do not|don't)\s+(?:change|edit|modify|implement)\s+"
-    r"(?:anything|the\s+code|code|files?)\b|"
-    r"\bwithout\s+(?:making\s+)?(?:changes?|edits?|modifying)\b|"
-    r"\bno\s+(?:cambies|edites|modifiques|implementes)\s+"
-    r"(?:nada|el\s+c[oó]digo|archivos?)\b|"
-    r"\bsin\s+(?:hacer\s+)?(?:cambios|editar|modificar)\b|"
-    r"\b(?:just|only|solo|solamente)\s+(?:explain|describe|explica|describe)\b",
-    re.IGNORECASE,
-)
-
-
-def _explicit_execution_score(user_input: str) -> int:
-    """Score high-confidence work requests without spending an LLM call."""
-    text = (user_input or "").strip()
-    if not text or _INFORMATIONAL_RE.search(text) or _NO_EXECUTION_RE.search(text):
-        return 0
-    score = 0
-    if _EXECUTION_ACTION_RE.search(text):
-        score += 2
-    if _EXECUTION_TARGET_RE.search(text):
-        score += 1
-    if _EXECUTION_VERIFY_RE.search(text):
-        score += 1
-    return score
 
 
 def _direct_execution_route(

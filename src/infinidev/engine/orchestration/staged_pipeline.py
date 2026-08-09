@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.staged_planning import (
     BlockGoalDecision,
     CompleteGoalDecision,
@@ -260,30 +261,38 @@ def _execute_stage(
         hooks.on_status("info", f"Stage {stage.number} / Task: {task.spec.title}")
         _publish_state(state, session_id, hooks)
 
-        handoff = TaskPlanningHandoff(
-            goal=state.goal,
-            stage_id=stage.id,
-            stage_number=stage.number,
-            stage=stage.spec,
-            task=task.spec,
-            dependency_results=_dependency_results(stage, task),
-            evidence=list(state.evidence),
-        )
-        hooks.on_phase("analysis")
-        hooks.on_status("info", f"Planning Task: {task.spec.title}")
-        plan = run_planner(
-            escalation,
-            task_handoff=handoff,
-            session_id=session_id,
-            project_id=project_id,
-            workspace_path=workspace_path,
-            hooks=hooks,
-        )
-        plan = _scope_task_plan(plan, stage, task)
-        task.plan = plan_snapshot(plan)
-        state.revision += 1
+        plan = _plan_from_snapshot(task)
+        planned_now = plan is None
+        if plan is None:
+            handoff = TaskPlanningHandoff(
+                goal=state.goal,
+                stage_id=stage.id,
+                stage_number=stage.number,
+                stage=stage.spec,
+                task=task.spec,
+                dependency_results=_dependency_results(stage, task),
+                evidence=list(state.evidence),
+            )
+            hooks.on_phase("analysis")
+            hooks.on_status("info", f"Planning Task: {task.spec.title}")
+            plan = run_planner(
+                escalation,
+                task_handoff=handoff,
+                session_id=session_id,
+                project_id=project_id,
+                workspace_path=workspace_path,
+                hooks=hooks,
+            )
+            plan = _scope_task_plan(plan, stage, task)
+            task.plan = plan_snapshot(plan)
+            state.revision += 1
+        else:
+            hooks.on_status(
+                "info",
+                f"Resuming persisted plan for Task: {task.spec.title}",
+            )
         notify = getattr(hooks, "notify", None)
-        if callable(notify):
+        if planned_now and callable(notify):
             notify("Planner", plan.overview, "agent")
         _publish_state(state, session_id, hooks)
 
@@ -807,6 +816,42 @@ def _scope_task_plan(
         # reserved for sibling Tasks while the current Task is still active.
         # It may still continue incrementally: after closing the frontier it
         # can add the next evidence-backed Step.
+        rolling_horizon_limit=1,
+    )
+
+
+def _plan_from_snapshot(task: TaskExecutionRecord) -> Plan | None:
+    """Restore a retry's immutable Task plan without another planner call."""
+    snapshot = task.plan
+    if task.attempts <= 1 or not isinstance(snapshot, dict):
+        return None
+
+    steps: list[PlanStepSpec] = []
+    for raw in snapshot.get("steps", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title", "")).strip()
+        if not title:
+            continue
+        steps.append(PlanStepSpec(
+            title=title,
+            detail=str(raw.get("detail", "") or ""),
+            expected_output=str(raw.get("expected_output", "") or ""),
+            verify=StepVerification.from_loose(raw.get("verify")),
+            authority=raw.get("authority", "model_inferred"),
+        ))
+
+    if not steps:
+        return None
+    return Plan(
+        overview=str(snapshot.get("overview", "") or ""),
+        steps=steps,
+        acceptance_criteria=[
+            str(item) for item in (
+                snapshot.get("derived_verification_criteria", []) or []
+            )
+            if str(item).strip()
+        ],
         rolling_horizon_limit=1,
     )
 

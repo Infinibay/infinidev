@@ -43,6 +43,9 @@ from infinidev.engine.oversized_result import (
     handle_oversized_result,
 )
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+from infinidev.engine.orchestration.request_signals import (
+    is_grounded_execution_request,
+)
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
@@ -69,6 +72,8 @@ def should_elaborate(escalation: EscalationPacket) -> bool:
         return False
     request = (escalation.user_request or "").strip()
     if len(request) < settings.SPEC_ELABORATION_MIN_CHARS:
+        return False
+    if is_grounded_execution_request(request):
         return False
     return True
 
