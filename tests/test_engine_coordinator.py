@@ -166,7 +166,8 @@ class TestCoordinatorStaged:
         assert result.engine_name == "graph_beta"
         assert result.status == STATUS_COMPLETED
         assert result.user_message == "graph leaf done"
-        assert engine.execute_kwargs["initial_plan"] is None
+        assert len(engine.execute_kwargs["initial_plan"].steps) == 1
+        assert engine.execute_kwargs["skip_plan"] is False
 
         run = store.get_run(result.run_id)
         assert run["engine"] == "graph_beta"
@@ -338,10 +339,15 @@ class TestTaskAdapter:
             title="Add focused regression tests",
             kind="bugfix",
         ))
+        verification = _bootstrap_step(SimpleNamespace(
+            title="Integrated transport outcome",
+            kind="verification",
+        ))
 
         assert implementation.title == "Implement Transaction restore ordering"
         assert investigation.title == "Investigate Compare queue backends"
         assert test_change.title == "Add focused regression tests"
+        assert verification.title == "Verify Integrated transport outcome"
 
     def test_task_uses_one_rolling_plan_without_an_analyst(self, temp_db, patched_pipeline):
         engine = _LoopEngine("Implemented the fix.", "done")

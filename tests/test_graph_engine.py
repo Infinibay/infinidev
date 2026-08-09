@@ -269,6 +269,7 @@ class TestAdapterCompleted:
             is_cancelled = False
 
             def execute(self, **kwargs):
+                self.execute_kwargs = kwargs
                 return "grounding evidence"
 
             def has_file_changes(self):
@@ -281,6 +282,7 @@ class TestAdapterCompleted:
             def on_status(self, level, message):
                 pass
 
+        engine = Engine()
         result, status = GraphEngineAdapter()._run_live_leaf(
             capsule_text="inspection node",
             budget={"max_tool_calls": 2},
@@ -294,7 +296,7 @@ class TestAdapterCompleted:
             kwargs={
                 "escalation": _escalation("Inspect before fixing the utility"),
                 "agent": Agent(),
-                "engine": Engine(),
+                "engine": engine,
                 "hooks": Hooks(),
                 "session_id": "s1",
                 "reviewer": None,
@@ -303,8 +305,12 @@ class TestAdapterCompleted:
         )
 
         assert (result, status) == ("grounding evidence", STATUS_COMPLETED)
+        assert engine.execute_kwargs["task"].kind == "investigation"
+        assert engine.execute_kwargs["skip_plan"] is False
+        assert len(engine.execute_kwargs["initial_plan"].steps) == 1
+        assert engine.execute_kwargs["initial_plan"].steps[0].title == "Inspect utility"
 
-    def test_live_leaf_skips_loop_plan_management(self, monkeypatch):
+    def test_live_leaf_uses_local_plan_under_graph_authority(self, monkeypatch):
         from infinidev.engine.orchestration import pipeline as pipeline_mod
 
         monkeypatch.setattr(
@@ -375,8 +381,11 @@ class TestAdapterCompleted:
         )
 
         assert (result, status) == ("done", STATUS_COMPLETED)
-        assert engine.execute_kwargs["skip_plan"] is True
+        assert engine.execute_kwargs["skip_plan"] is False
+        assert engine.execute_kwargs["initial_plan"].rolling_horizon_limit == 3
+        assert len(engine.execute_kwargs["initial_plan"].steps) == 1
         task = engine.execute_kwargs["task"]
+        assert task.kind == "feature"
         assert "Only change the transport layer" in task.description
         assert "Do the thing" not in task.description
         assert task.out_of_scope == [

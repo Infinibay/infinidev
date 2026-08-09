@@ -62,9 +62,10 @@ def _bootstrap_step(task: Any) -> PlanStepSpec:
 
     title = str(task.title).strip()
     phase = _step_phase(title)
-    if task.kind == "investigation":
+    if task.kind in {"investigation", "verification"}:
         if phase not in {"discover", "verify"}:
-            title = f"Investigate {title}"
+            action = "Verify" if task.kind == "verification" else "Investigate"
+            title = f"{action} {title}"
     elif phase not in {"change", "test_change"}:
         title = f"Implement {title}"
     return PlanStepSpec(

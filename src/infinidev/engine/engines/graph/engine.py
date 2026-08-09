@@ -389,6 +389,8 @@ class GraphEngineAdapter:
     ) -> tuple[str, str]:
         """Execute one Graph node through the supplied LoopEngine."""
         from infinidev.config.settings import settings
+        from infinidev.engine.analysis.plan import Plan
+        from infinidev.engine.engines.task import _bootstrap_step
         from infinidev.engine.orchestration import pipeline as pipeline_mod
         from infinidev.engine.orchestration.staged_pipeline import (
             _goal_from_escalation,
@@ -406,6 +408,9 @@ class GraphEngineAdapter:
 
         node_objective = (getattr(node, "objective", "") or "").strip()
         is_goal_verification = getattr(node, "node_type", "") == "verification"
+        is_evidence_only = bool(
+            getattr(node, "payload", {}).get("evidence_only")
+        )
         if is_goal_verification:
             literal_description = (
                 f"Verify the complete user goal: {goal.user_request}\n\n"
@@ -446,6 +451,13 @@ class GraphEngineAdapter:
         structured_task = task_from_free_text(
             literal_description,
             title=title,
+            kind=(
+                "verification"
+                if is_goal_verification
+                else "investigation"
+                if is_evidence_only
+                else "feature"
+            ),
             acceptance_criteria=leaf_acceptance,
             derived_verification_criteria=leaf_derived,
             out_of_scope=leaf_out_of_scope,
@@ -460,6 +472,14 @@ class GraphEngineAdapter:
                     else []
                 ),
             ],
+        )
+        leaf_plan = Plan(
+            overview=(
+                "The Graph scheduler owns global scope and dependencies. "
+                "This rolling plan covers only the active Graph node."
+            ),
+            steps=[_bootstrap_step(structured_task)],
+            rolling_horizon_limit=3,
         )
         approach = (
             '<approach authority="DERIVED">\n'
@@ -511,7 +531,7 @@ class GraphEngineAdapter:
                 agent=agent,
                 task_prompt=task_prompt,
                 verbose=True,
-                initial_plan=None,
+                initial_plan=leaf_plan,
                 initial_attachments=(
                     list(escalation.attachments) if escalation.attachments else None
                 ),
@@ -519,7 +539,7 @@ class GraphEngineAdapter:
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=max_tool_calls,
                 preserve_file_tracker=preserve_file_tracker,
-                skip_plan=True,
+                skip_plan=False,
             )
         finally:
             agent.deactivate()
@@ -560,7 +580,7 @@ class GraphEngineAdapter:
             task=structured_task,
             max_iterations=settings.REACT_MAX_ITERATIONS,
             max_total_tool_calls=max_tool_calls,
-            rework_execute_kwargs={"skip_plan": True},
+            rework_execute_kwargs={"skip_plan": False},
             run_verification=is_goal_verification,
         )
         review_status = getattr(engine, "_last_status", "") or "completed"
