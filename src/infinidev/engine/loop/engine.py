@@ -49,7 +49,9 @@ from infinidev.engine.loop.llm_caller import LLMCaller, LLMCallResult, Classifie
 from infinidev.engine.loop.loop_guard import LoopGuard
 from infinidev.engine.loop.loop_plan import (
     _MAX_CONSECUTIVE_DECOMPOSITIONS,
+    _step_concepts,
     _step_phase,
+    _step_targets,
 )
 from infinidev.engine.loop.models import ActionRecord, LoopState, StepResult
 from infinidev.engine.loop.step_complete_gate import (
@@ -296,6 +298,36 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     if edited_now or edited_before:
         return False
 
+    # A broad earlier change can already satisfy a later model-authored Step.
+    # Do not force a cosmetic second edit when the task has concrete edit
+    # evidence and either the Step's declared verifier or a recognised test in
+    # this Step proves the current workspace. User-approved steps remain
+    # literal commitments, and a green baseline alone is insufficient because
+    # ``task_has_edits`` must also be true.
+    verified_by_declared_check = active.index in getattr(
+        ctx.state, "objectively_verified_step_indices", set(),
+    )
+    verified_by_current_test = bool(
+        getattr(tracker, "successful_test_commands", ())
+    )
+    verified_existing_effect = (
+        not active.user_approved
+        and ctx.state.task_has_edits
+        and (verified_by_declared_check or verified_by_current_test)
+    )
+    if verified_existing_effect:
+        evidence = (
+            "its deterministic declared verification"
+            if verified_by_declared_check
+            else "a successful test command in this Step"
+        )
+        step_result.summary = (
+            f"{step_result.summary.rstrip()} "
+            f"{evidence.capitalize()} confirmed that an earlier task edit "
+            "already supplied its requested effect."
+        ).strip()
+        return False
+
     # A model-authored change step sometimes turns itself into an umbrella:
     # it adds concrete change steps, then closes so those steps can run. A
     # strict sequential edit gate kept the umbrella active forever, making its
@@ -303,10 +335,53 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     # when no user-approved frontier would be reordered. Task-level edit and
     # completion gates still require the concrete work to happen.
     pending = [step for step in plan.steps if step.status == "pending"]
+    active_targets = _step_targets(active.title)
+    active_concepts = _step_concepts(active.title)
+
+    def refines_active(step: Any) -> bool:
+        """Whether a pending Step is a concrete version of this same work."""
+        if step.user_approved:
+            return False
+        phase = _step_phase(step.title)
+        if phase and phase != active_phase:
+            return False
+        if active_targets & _step_targets(step.title):
+            return True
+        shared = active_concepts & _step_concepts(step.title)
+        return len(shared) >= 2
+
+    refinements = [step for step in pending if refines_active(step)]
     pending_changes = [
         step for step in pending
-        if _step_phase(step.title) == active_phase
+        if _step_phase(step.title) == active_phase or step in refinements
     ]
+
+    # A user-authorized Step is the durable scope record and cannot be skipped
+    # in favour of model-owned work. It can, however, absorb a more concrete
+    # child for the same target. Keeping both made the prompt say that the
+    # child's edit was future work and therefore forbidden in the parent,
+    # while the edit gate refused to advance to that child: a deterministic
+    # deadlock. Refine the active execution label and retire only the duplicate
+    # model child; the authoritative Task description remains unchanged.
+    if active.user_approved and refinements:
+        child = refinements[0]
+        original_title = active.title
+        active.title = child.title
+        if child.explanation:
+            active.explanation = child.explanation
+        if child.expected_output:
+            active.expected_output = child.expected_output
+        child.status = "skipped"
+        step_result.status = "continue"
+        step_result.interrupted = True
+        step_result.final_answer = None
+        step_result.summary = (
+            f"{step_result.summary.rstrip()} "
+            f"Concrete model Step {child.index} was folded into the active "
+            f"user scope ({original_title!r}) so its edit can execute next."
+        ).strip()
+        return True
+
     if (
         not active.user_approved
         and pending_changes
@@ -1112,6 +1187,7 @@ class LoopEngine(AgentEngine):
         step_result: StepResult | None = None
         action_tool_calls = 0
         saw_tool_calls = False
+        completion_turn_used = False
 
         llm_caller.reset()
         guard.reset()
@@ -1126,10 +1202,14 @@ class LoopEngine(AgentEngine):
         _last_llm_call_end: float | None = None
 
         while (
-            action_tool_calls < ctx.max_per_action
-            and ctx.state.total_tool_calls < ctx.max_total_calls
+            ctx.state.total_tool_calls < ctx.max_total_calls
             and _resource_exhaustion_reason(ctx) is None
+            and (
+                action_tool_calls < ctx.max_per_action
+                or (saw_tool_calls and not completion_turn_used)
+            )
         ):
+            completion_only = action_tool_calls >= ctx.max_per_action
             # Plan pseudo-tools mutate the state in this same inner loop.
             # Recompute the mode for every model turn so an ``add_step`` is
             # followed by execution tools, rather than leaving the model in
@@ -1163,12 +1243,19 @@ class LoopEngine(AgentEngine):
             # Signal UI that LLM call is starting
             _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {
                 "iteration": iteration + 1,
-                "phase": "planning" if is_planning else "deciding",
+                "phase": (
+                    "closing" if completion_only
+                    else "planning" if is_planning
+                    else "deciding"
+                ),
                 "tool_calls_step": action_tool_calls,
                 "tool_calls_total": ctx.state.total_tool_calls,
             })
 
-            result = llm_caller.call(ctx, messages, is_planning, action_tool_calls)
+            result = llm_caller.call(
+                ctx, messages, is_planning, action_tool_calls,
+                completion_only=completion_only,
+            )
             _last_llm_call_end = _time.perf_counter()
 
             # Checked here rather than only inside the regular-tool branch:
@@ -1192,6 +1279,8 @@ class LoopEngine(AgentEngine):
 
             if result.should_retry:
                 continue
+            if completion_only:
+                completion_turn_used = True
             if result.forced_step_result:
                 step_result = result.forced_step_result
                 break
@@ -1215,6 +1304,22 @@ class LoopEngine(AgentEngine):
                 if classified.notes:
                     guard.reset_read_counter()
 
+                if completion_only and classified.regular:
+                    # Native FC providers cannot choose these because their
+                    # schemas were hidden. This guard covers manual mode and
+                    # providers that returned an out-of-schema text call.
+                    names = ", ".join(
+                        call.function.name for call in classified.regular
+                    )
+                    step_result = StepResult(
+                        summary=(
+                            "Step interrupted at its execution-tool budget; "
+                            f"the completion-only turn attempted: {names}."
+                        ),
+                        status="continue",
+                        interrupted=True,
+                    )
+                    break
                 if classified.regular:
                     action_tool_calls = self._critic.review_alongside(
                         ctx, messages, classified.regular,

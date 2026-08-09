@@ -18,6 +18,7 @@ class BehaviorTracker:
         self.files_read: set[str] = set()
         self.files_edited: set[str] = set()
         self.tool_history: list[str] = []
+        self.successful_test_commands: list[str] = []
         self.task_has_edits: bool = False
         self.notes_count: int = 0
         self.score: int = 0
@@ -58,6 +59,11 @@ class BehaviorTracker:
         for rule in self._rules:
             for fb in rule.on_step_end(ctx):
                 self._record(fb)
+
+    def on_successful_test(self, command: str) -> None:
+        """Record deterministic test evidence produced during this Step."""
+        if command and command not in self.successful_test_commands:
+            self.successful_test_commands.append(command)
 
     def drain_feedback(self) -> str:
         """Return and clear queued feedback as a single string block."""

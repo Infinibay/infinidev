@@ -188,6 +188,29 @@ class TestRollingHorizonToolRouting:
 
         assert available is schemas
 
+    def test_completion_turn_exposes_only_note_and_step_complete(self):
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        schemas = [
+            self._schema("read_file"),
+            self._schema("add_step"),
+            self._schema("add_note"),
+            self._schema("step_complete"),
+        ]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=None),
+        )
+
+        available = LLMCaller._available_schemas(
+            ctx, is_planning=False, completion_only=True,
+        )
+
+        assert [schema["function"]["name"] for schema in available] == [
+            "add_note", "step_complete",
+        ]
+
 
 # ── _is_malformed_tool_call ──────────────────────────────────────────────────
 

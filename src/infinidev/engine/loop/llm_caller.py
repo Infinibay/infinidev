@@ -25,6 +25,9 @@ from infinidev.engine.formats.tool_call_parser import (
     parse_text_tool_calls as _parse_text_tool_calls,
 )
 
+
+_COMPLETION_TOOL_NAMES = frozenset({"add_note", "step_complete"})
+
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
 
@@ -294,6 +297,8 @@ class LLMCaller:
         messages: list[dict[str, Any]],
         is_planning: bool,
         action_tool_calls: int = 0,
+        *,
+        completion_only: bool = False,
     ) -> LLMCallResult:
         """Make one LLM call and return a parsed result.
 
@@ -303,7 +308,10 @@ class LLMCaller:
         if ctx.manual_tc:
             result = self._call_manual(ctx, messages, action_tool_calls)
         else:
-            result = self._call_fc(ctx, messages, is_planning, action_tool_calls)
+            result = self._call_fc(
+                ctx, messages, is_planning, action_tool_calls,
+                completion_only=completion_only,
+            )
         self._dispatch_post_model_message(ctx, result, messages)
         return result
 
@@ -455,8 +463,12 @@ class LLMCaller:
     def _call_fc(
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],
         is_planning: bool, action_tool_calls: int,
+        *,
+        completion_only: bool = False,
     ) -> LLMCallResult:
-        iter_tools = self._available_schemas(ctx, is_planning)
+        iter_tools = self._available_schemas(
+            ctx, is_planning, completion_only=completion_only,
+        )
         try:
             allow_retries = getattr(ctx, "allow_llm_retries", True)
             self._record_request_payload(ctx, messages, iter_tools, mode="function_calling")
@@ -499,14 +511,24 @@ class LLMCaller:
     @staticmethod
     def _available_schemas(
         ctx: ExecutionContext, is_planning: bool,
+        *,
+        completion_only: bool = False,
     ) -> list[dict[str, Any]]:
-        """Hide add_step while the rolling horizon has no free slot.
+        """Return the machine-enforced action space for this model turn.
 
-        Tool schemas are a machine-enforced action space. Removing an invalid
-        action before sampling is both cheaper and more reliable than allowing
-        a model to emit a batch of doomed calls and then prompting it to stop.
+        At the per-step execution budget, one final model turn may preserve a
+        note and close the step, but it must not spend another regular tool.
+        At other times, hide ``add_step`` while the rolling horizon has no free
+        slot. Removing invalid actions before sampling is cheaper and more
+        reliable than asking the model not to choose them.
         """
         schemas = ctx.planning_schemas if is_planning else ctx.tool_schemas
+        if completion_only:
+            return [
+                schema for schema in schemas
+                if schema.get("function", {}).get("name")
+                in _COMPLETION_TOOL_NAMES
+            ]
         plan = getattr(getattr(ctx, "state", None), "plan", None)
         if plan is None:
             return schemas

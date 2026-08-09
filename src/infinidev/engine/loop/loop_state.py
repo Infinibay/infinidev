@@ -84,6 +84,11 @@ class LoopState(BaseModel):
     # yet in this task.
     last_test_output: str = ""
     last_test_command: str = ""
+    # Exit status of the latest recognised test command. ``None`` means no
+    # test has run in this Task. A failing latest run is a deterministic
+    # completion veto until a later test succeeds (or the model reports a
+    # genuine blocked outcome).
+    last_test_exit_code: int | None = None
     # Per-test-command outcome history. Keyed by the *normalised* test
     # command (positional targets without flags) so two runs of the
     # same test set are recognised as comparable even if the model

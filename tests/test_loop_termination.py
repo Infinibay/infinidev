@@ -128,6 +128,89 @@ def test_a_step_with_no_function_calls_at_all_is_a_stall():
     assert result.saw_tool_calls is False
 
 
+def _tool_call(name: str, arguments: str = "{}", call_id: str = "tc"):
+    return SimpleNamespace(
+        id=call_id,
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+class _BudgetBoundaryCaller:
+    def __init__(self) -> None:
+        self.completion_modes: list[bool] = []
+
+    def reset(self) -> None:
+        pass
+
+    def call(
+        self, ctx, messages, is_planning, action_tool_calls=0, *,
+        completion_only=False,
+    ):
+        from infinidev.engine.loop.llm_call_result import LLMCallResult
+
+        self.completion_modes.append(completion_only)
+        if not completion_only:
+            return LLMCallResult(tool_calls=[_tool_call("read_file", call_id="read")])
+        return LLMCallResult(tool_calls=[_tool_call(
+            "step_complete",
+            '{"summary":"verified","status":"done","final_answer":"done"}',
+            call_id="complete",
+        )])
+
+
+def _run_budget_boundary(*, max_total_calls: int = 10):
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.loop_guard import LoopGuard
+    from infinidev.engine.loop.tool_processor import ToolProcessor
+
+    engine = LoopEngine()
+    caller = _BudgetBoundaryCaller()
+    ctx = _ctx()
+    ctx.max_per_action = 1
+    ctx.max_total_calls = max_total_calls
+    ctx.max_prompt_tokens = None
+    ctx.allow_plan_mutation = True
+    ctx.skip_plan = False
+    engine._inject_mid_step_user_messages = lambda _ctx, _messages: None
+    engine._guidance = SimpleNamespace(try_queue=lambda *args, **kwargs: None)
+    engine._critic = SimpleNamespace(
+        review_alongside=lambda _ctx, _messages, _calls, _reasoning, run: run(),
+    )
+    engine._step_gate = SimpleNamespace(blocks=lambda *args, **kwargs: False)
+    engine._build_pseudo_only_messages = lambda *args, **kwargs: None
+
+    def execute(
+        _ctx, _classified, _messages, _result, action_tool_calls,
+        _iteration, _guard, _tracker,
+    ):
+        _ctx.state.total_tool_calls += 1
+        return action_tool_calls + 1
+
+    engine._execute_regular_tools = execute
+    result = engine._run_inner_loop(
+        ctx, [], 0, caller, ToolProcessor(), LoopGuard(is_small=False),
+    )
+    return result, caller
+
+
+def test_per_step_tool_budget_allows_one_completion_only_turn():
+    result, caller = _run_budget_boundary()
+
+    assert caller.completion_modes == [False, True]
+    assert result.status == "done"
+    assert result.interrupted is False
+    assert result.action_tool_calls == 1
+
+
+def test_global_tool_fuse_does_not_allow_an_extra_completion_turn():
+    result, caller = _run_budget_boundary(max_total_calls=1)
+
+    assert caller.completion_modes == [False]
+    assert result.status == "continue"
+    assert result.interrupted is True
+    assert "global tool call limit" in result.summary
+
+
 # ── the pseudo-only spin ─────────────────────────────────────────────
 
 
@@ -323,6 +406,191 @@ def test_implementation_step_cannot_close_without_an_edit():
     assert _should_advance_plan(result) is False
 
 
+def test_verified_model_step_accepts_effect_from_an_earlier_task_edit():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.task_has_edits = True
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Implement event dispatch", status="active"),
+    ]
+    ctx.state.objectively_verified_step_indices.add(4)
+    result = StepResult(summary="Focused dispatch checks pass", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert _should_advance_plan(result) is True
+    assert "earlier task edit" in result.summary
+
+
+def test_prior_edit_without_step_verification_cannot_skip_implementation():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.task_has_edits = True
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Implement event dispatch", status="active"),
+    ]
+    result = StepResult(summary="The earlier edit may cover this", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.interrupted is True
+
+
+def test_prior_edit_and_current_green_test_can_close_model_step():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.task_has_edits = True
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Implement event dispatch", status="active"),
+    ]
+    result = StepResult(summary="The focused event tests pass", status="continue")
+    result.behavior_tracker = SimpleNamespace(
+        files_edited=set(),
+        successful_test_commands=["python -m pytest tests/test_eventbus.py -q"],
+    )
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert _should_advance_plan(result) is True
+    assert "successful test command" in result.summary
+
+
+def test_green_test_without_any_task_edit_cannot_skip_implementation():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Implement event dispatch", status="active"),
+    ]
+    result = StepResult(summary="The baseline suite passes", status="continue")
+    result.behavior_tracker = SimpleNamespace(
+        files_edited=set(),
+        successful_test_commands=["python -m pytest -q"],
+    )
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.interrupted is True
+
+
+def test_tool_runner_records_only_successful_recognized_step_tests():
+    import json
+
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+    from infinidev.engine.loop.tool_runner import ToolRunner
+
+    ctx = _ctx()
+    tracker = BehaviorTracker(set())
+    pytest_args = json.dumps({"command": "python -m pytest tests/test_eventbus.py -q"})
+
+    ToolRunner._record_successful_step_test(
+        ctx,
+        pytest_args,
+        json.dumps({"exit_code": 0, "success": True, "stdout": "9 passed"}),
+        tracker,
+    )
+    ToolRunner._record_successful_step_test(
+        ctx,
+        json.dumps({"command": "python -m compileall ."}),
+        json.dumps({"exit_code": 0, "success": True}),
+        tracker,
+    )
+    ToolRunner._record_successful_step_test(
+        ctx,
+        pytest_args,
+        json.dumps({"exit_code": 1, "success": False, "stdout": "1 failed"}),
+        tracker,
+    )
+
+    assert tracker.successful_test_commands == [
+        "python -m pytest tests/test_eventbus.py -q",
+    ]
+
+
+def test_test_capture_replaces_a_failed_exit_with_a_later_green_exit():
+    import json
+
+    from infinidev.engine.loop.tool_runner import ToolRunner
+
+    ctx = _ctx()
+    arguments = json.dumps({"command": "python -m pytest -q"})
+
+    ToolRunner.capture_test_output(
+        ctx,
+        arguments,
+        json.dumps({"exit_code": 1, "success": False, "stdout": "1 failed"}),
+    )
+    assert ctx.state.last_test_exit_code == 1
+
+    ToolRunner.capture_test_output(
+        ctx,
+        arguments,
+        json.dumps({"exit_code": 0, "success": True, "stdout": "1 passed"}),
+    )
+    assert ctx.state.last_test_exit_code == 0
+
+
+def test_failed_latest_test_blocks_done_until_a_green_run():
+    from infinidev.engine.loop.engine import LoopEngine
+
+    engine = LoopEngine()
+    ctx = _ctx()
+    ctx.state.last_test_command = "python tests/runtests.py backend.tests"
+    ctx.state.last_test_exit_code = 1
+    call = _tool_call(
+        "step_complete",
+        '{"summary":"looks complete","status":"done"}',
+        call_id="complete",
+    )
+    messages = [
+        {"role": "tool", "tool_call_id": "complete", "content": "ok"},
+    ]
+
+    assert engine._step_gate._latest_test_failed(ctx, call, messages) is True
+    assert "latest recognised test command" in messages[-1]["content"]
+
+    ctx.state.last_test_exit_code = 0
+    assert engine._step_gate._latest_test_failed(ctx, call, messages) is False
+
+
+def test_failed_latest_test_still_allows_an_honest_blocked_outcome():
+    from infinidev.engine.loop.engine import LoopEngine
+
+    engine = LoopEngine()
+    ctx = _ctx()
+    ctx.state.last_test_command = "python -m pytest"
+    ctx.state.last_test_exit_code = 2
+    call = _tool_call(
+        "step_complete",
+        '{"summary":"missing compiler","status":"blocked"}',
+        call_id="complete",
+    )
+
+    assert engine._step_gate._latest_test_failed(ctx, call, []) is False
+
+
+def test_verified_user_approved_step_still_requires_its_own_edit():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.task_has_edits = True
+    ctx.state.plan.steps = [
+        PlanStep(
+            index=4,
+            title="Implement event dispatch",
+            status="active",
+            user_approved=True,
+        ),
+    ]
+    ctx.state.objectively_verified_step_indices.add(4)
+    result = StepResult(summary="Focused dispatch checks pass", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.interrupted is True
+
+
 def test_model_change_container_advances_to_concrete_change_frontier():
     from infinidev.engine.loop.plan_step import PlanStep
 
@@ -338,6 +606,26 @@ def test_model_change_container_advances_to_concrete_change_frontier():
     assert _enforce_step_effect(ctx, result) is False
     assert result.decomposed_phase == "change"
     assert result.interrupted is False
+    assert _should_advance_plan(result) is True
+
+
+def test_model_change_container_recognizes_a_target_named_child():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(
+            index=1,
+            title="Fix normalize_tags case-insensitive behavior",
+            status="active",
+        ),
+        PlanStep(index=2, title="tags.py: normalize_tags case-insensitively"),
+    ]
+    result = StepResult(summary="Split out the concrete file edit", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert result.decomposed_phase == "change"
     assert _should_advance_plan(result) is True
 
 
@@ -360,6 +648,55 @@ def test_user_approved_change_cannot_be_superseded_without_an_edit():
     assert _enforce_step_effect(ctx, result) is True
     assert result.decomposed_phase == ""
     assert result.interrupted is True
+
+
+def test_user_scope_absorbs_a_concrete_child_for_the_same_target():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(
+            index=1,
+            title="Fix normalize_tags case-insensitive behavior",
+            status="active",
+            user_approved=True,
+        ),
+        PlanStep(
+            index=2,
+            title="tags.py: normalize_tags case-insensitively",
+            explanation="Use casefold keys and retain the original value.",
+            expected_output="Focused normalization tests pass.",
+        ),
+    ]
+    result = StepResult(summary="Decomposed the requested change", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.interrupted is True
+    assert ctx.state.plan.active_step.title.startswith("tags.py:")
+    assert ctx.state.plan.active_step.expected_output == "Focused normalization tests pass."
+    assert ctx.state.plan.steps[1].status == "skipped"
+
+
+def test_user_scope_does_not_absorb_an_unrelated_model_change():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(
+            index=1,
+            title="Fix normalize_tags case-insensitive behavior",
+            status="active",
+            user_approved=True,
+        ),
+        PlanStep(index=2, title="Update database migration rollback"),
+    ]
+    result = StepResult(summary="Added unrelated work", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert ctx.state.plan.active_step.title.startswith("Fix normalize_tags")
+    assert ctx.state.plan.steps[1].status == "pending"
 
 
 def test_production_change_cannot_delegate_to_a_test_change():

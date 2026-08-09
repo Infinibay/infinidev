@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.engine_logging import extract_tool_error
@@ -43,6 +43,9 @@ from infinidev.engine.tool_executor import (
     update_opened_files_cache,
 )
 from infinidev.tools.base.context import get_current_workspace_path
+
+if TYPE_CHECKING:
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
 
 logger = logging.getLogger(__name__)
 
@@ -618,6 +621,9 @@ class ToolRunner:
                     # A denied or malformed command did not run. Recording it as
                     # the latest test command makes the deterministic reviewer
                     # replay a known denial and reject otherwise-green work.
+                    self._record_successful_step_test(
+                        ctx, tc.function.arguments, result, tracker,
+                    )
                     result = self.capture_test_output(
                         ctx, tc.function.arguments, result,
                     )
@@ -891,8 +897,31 @@ class ToolRunner:
     # ── test-runner special case ─────────────────────────────────────
 
     @staticmethod
+    def _record_successful_step_test(
+        ctx: ExecutionContext,
+        arguments: str,
+        result: str,
+        tracker: BehaviorTracker,
+    ) -> None:
+        """Attach a successful recognised test command to Step-local evidence."""
+        with best_effort("step test evidence capture failed for %s", arguments[:80]):
+            from infinidev.engine.guidance import is_test_command
+
+            if not is_test_command(arguments, ctx.state):
+                return
+            parsed_args = json.loads(arguments) if arguments else {}
+            command = str(parsed_args.get("command", ""))
+            payload = json.loads(result)
+            if (
+                isinstance(payload, dict)
+                and payload.get("exit_code") == 0
+                and payload.get("success", True) is not False
+            ):
+                tracker.on_successful_test(command)
+
+    @staticmethod
     def capture_test_output(
-        ctx: ExecutionContext, arguments: str, result: str
+        ctx: ExecutionContext, arguments: str, result: str,
     ) -> str:
         """Side-effects and annotation for an ``execute_command`` that ran tests.
 
@@ -925,6 +954,13 @@ class ToolRunner:
             except Exception:
                 command = arguments
             ctx.state.last_test_command = command[:300]
+            try:
+                payload = json.loads(result)
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            exit_code = payload.get("exit_code") if isinstance(payload, dict) else None
+            if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+                ctx.state.last_test_exit_code = exit_code
 
             if fingerprint := test_outcome_fingerprint(result):
                 key = normalize_test_command(command)

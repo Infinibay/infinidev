@@ -1,6 +1,6 @@
 """The conditions under which a step is allowed to close.
 
-``step_complete`` is the model's own claim that a step is finished, and four
+``step_complete`` is the model's own claim that a step is finished, and seven
 separate things can override it. In the engine they had grown into 165 lines
 of nested branches inside the inner loop, each with its own idea of how to
 say no, and the shape of the decision was invisible: you could not tell from
@@ -14,17 +14,20 @@ check never pays for a critic call:
 0. **Recoverable tool error** — ``status="blocked"`` immediately after an
    unknown-tool result that names available alternatives. The model gets one
    correction turn instead of converting a naming miss into a blocked Task.
-1. **Notes** — a small model that never called ``add_note`` is about to
+1. **Latest test outcome** — ``status="done"`` cannot override a recognised
+   test command whose latest exit code is nonzero. A later green run clears
+   this veto; ``blocked`` remains available for a genuine environment issue.
+2. **Notes** — a small model that never called ``add_note`` is about to
    throw away everything it learned, since raw tool output does not survive
    the step boundary. Fires at most once per step: a second attempt is
    always honoured, or the model would deadlock between "add a note" and
    "that note was not good enough".
-2. **Late user message** — the user typed while the model was generating.
+3. **Late user message** — the user typed while the model was generating.
    They are owed an acknowledgement before a step boundary, not after it.
-3. **Critic** — a ``reject`` verdict from the pair-programming critic.
-4. **Objective** — the step's own deterministic verification. The model does
+4. **Critic** — a ``reject`` verdict from the pair-programming critic.
+5. **Objective** — the step's own deterministic verification. The model does
    not get to decide this one; a check does.
-5. **User hook** — a ``step_end_instruction`` command from the user's
+6. **User hook** — a ``step_end_instruction`` command from the user's
    ``.infinidev/hooks.json``, holding the step for one more pass of work.
 
 Every gate refuses the same way: by overwriting the ``step_complete`` tool
@@ -33,7 +36,7 @@ feedback", and following a tool result is its natural mode right after a
 tool call — far more reliable than a bare user-role message.
 
 The hook gate is deliberately **last**. It fires only once the engine's own
-four have agreed the step is finished, which buys two things: the user's
+gates have agreed the step is finished, which buys two things: the user's
 command is never asked to comment on a step that failed its own
 verification, and it does not run again for each of the correction turns
 that a failing check can cost. Like the note gate it fires at most once per
@@ -161,6 +164,9 @@ class StepCompleteGate:
         if self._recoverable_tool_error(ctx, step_complete_call, messages):
             return True
 
+        if self._latest_test_failed(ctx, step_complete_call, messages):
+            return True
+
         if self._notes_missing(ctx, step_complete_call, messages, action_tool_calls):
             return True
 
@@ -180,6 +186,39 @@ class StepCompleteGate:
             return True
 
         return self._user_hook_holds(ctx, step_complete_call, messages)
+
+    def _latest_test_failed(
+        self,
+        ctx: Any,
+        step_complete_call: Any,
+        messages: list[dict[str, Any]],
+    ) -> bool:
+        """Refuse a successful close while the latest recognised test is red."""
+        if step_complete_status(step_complete_call) != "done":
+            return False
+        state = getattr(ctx, "state", None)
+        exit_code = getattr(state, "last_test_exit_code", None)
+        command = str(getattr(state, "last_test_command", "") or "")
+        if not command or exit_code in (None, 0):
+            return False
+
+        feedback = (
+            "step_complete BLOCKED — the latest recognised test command "
+            f"exited {exit_code}: {command[:220]}. Correct the command or the "
+            "implementation and run a passing test before reporting "
+            "status=\"done\". If the environment genuinely cannot be repaired, "
+            "report status=\"blocked\" with the concrete requirement."
+        )
+        self._engine._overwrite_step_complete_tool_result(
+            messages, step_complete_call.id, feedback,
+        )
+        emit_log(
+            "warning",
+            f"⚠ step_complete blocked — latest test exited {exit_code}",
+            project_id=ctx.project_id,
+            agent_id=ctx.agent_id,
+        )
+        return True
 
     # ── gate 0: recoverable tool errors ─────────────────────────────
 
