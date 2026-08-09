@@ -1,6 +1,7 @@
 """Tool for listing directory contents."""
 
 import fnmatch
+import hashlib
 import json
 import os
 import subprocess
@@ -25,6 +26,26 @@ _FALLBACK_SKIP_DIRS: set[str] = {
     "bower_components",
 }
 _FALLBACK_SKIP_SUFFIXES: set[str] = {".egg-info"}
+
+_HIGH_SIGNAL_NAMES: set[str] = {
+    "agents.md",
+    "cargo.toml",
+    "claude.md",
+    "cmakelists.txt",
+    "compose.yaml",
+    "compose.yml",
+    "conftest.py",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+    "dockerfile",
+    "go.mod",
+    "makefile",
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "setup.cfg",
+    "setup.py",
+}
 
 
 class ListDirectoryTool(InfinibayBaseTool):
@@ -85,6 +106,87 @@ class ListDirectoryTool(InfinibayBaseTool):
             if name.endswith(suffix):
                 return True
         return False
+
+    @staticmethod
+    def _selection_key(index: int, entry: dict) -> tuple[int, bytes, int]:
+        """Rank important entries first, then take a stable unbiased sample."""
+        path = str(entry.get("file_path", ""))
+        basename = os.path.basename(path).lower()
+        if basename in _HIGH_SIGNAL_NAMES or basename.startswith("readme"):
+            priority = 0
+        elif entry.get("type") == "directory":
+            priority = 1
+        else:
+            priority = 2
+        digest = hashlib.blake2s(path.encode("utf-8"), digest_size=8).digest()
+        return priority, digest, index
+
+    def _bounded_listing_result(
+        self,
+        *,
+        file_path: str,
+        entries: list[dict],
+        total: int,
+        entry_limit_reached: bool,
+    ) -> str:
+        """Serialize a navigable listing without overflowing model context.
+
+        A sorted prefix systematically hides later files.  When the full JSON
+        exceeds the configured character budget, retain project entry points
+        and subdirectories first, then use a stable hash sample for broad
+        coverage.  The nested ranking makes binary search exact and keeps
+        repeated calls deterministic.
+        """
+        total = max(total, len(entries))
+
+        def payload(selected: list[dict], *, character_limited: bool) -> dict:
+            data = {
+                "file_path": file_path,
+                "entries": selected,
+                "total": total,
+                "truncated": entry_limit_reached or character_limited,
+            }
+            if character_limited:
+                data.update({
+                    "returned": len(selected),
+                    "omitted": max(0, total - len(selected)),
+                    "truncation_reasons": [
+                        *(["entry_limit"] if entry_limit_reached else []),
+                        "character_budget",
+                    ],
+                    "selection": "priority_hash_sample",
+                    "narrow_with": ["file_path", "pattern"],
+                })
+            return data
+
+        complete = self._success(payload(entries, character_limited=False))
+        max_chars = settings.MAX_DIR_LISTING_CHARS
+        if len(complete) <= max_chars:
+            return complete
+
+        ranked_indices = sorted(
+            range(len(entries)),
+            key=lambda index: self._selection_key(index, entries[index]),
+        )
+
+        def sampled(count: int) -> list[dict]:
+            indices = sorted(ranked_indices[:count])
+            return [entries[index] for index in indices]
+
+        low = 0
+        high = len(entries)
+        best = self._success(payload([], character_limited=True))
+        while low <= high:
+            middle = (low + high) // 2
+            candidate = self._success(
+                payload(sampled(middle), character_limited=True)
+            )
+            if len(candidate) <= max_chars:
+                best = candidate
+                low = middle + 1
+            else:
+                high = middle - 1
+        return best
 
     # ── main entry ────────────────────────────────────────────────────
 
@@ -209,13 +311,12 @@ class ListDirectoryTool(InfinibayBaseTool):
         except PermissionError:
             return self._error(f"Permission denied: {file_path}")
 
-        truncated = count >= max_entries
-        return self._success({
-            "file_path": file_path,
-            "entries": entries,
-            "total": len(entries),
-            "truncated": truncated,
-        })
+        return self._bounded_listing_result(
+            file_path=file_path,
+            entries=entries,
+            total=len(entries),
+            entry_limit_reached=count >= max_entries,
+        )
 
     def _run_in_pod(
         self, file_path: str, recursive: bool, pattern: str | None,
@@ -245,10 +346,9 @@ class ListDirectoryTool(InfinibayBaseTool):
             return self._error(resp.get("error", "Unknown error"))
 
         data = resp["data"]
-        return self._success({
-            "file_path": file_path,
-            "entries": data["entries"],
-            "total": data["count"],
-            "truncated": data["truncated"],
-        })
-
+        return self._bounded_listing_result(
+            file_path=file_path,
+            entries=data["entries"],
+            total=data["count"],
+            entry_limit_reached=data["truncated"],
+        )

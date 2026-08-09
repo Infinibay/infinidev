@@ -115,6 +115,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "File Limits": [
         ("MAX_FILE_SIZE_BYTES", "Max file size for reads (bytes)", "int"),
         ("MAX_DIR_LISTING", "Max entries in directory listing", "int"),
+        ("MAX_DIR_LISTING_CHARS", "Max directory listing characters", "int"),
     ],
     "Code Intel": [
         ("CODE_INTEL_ENABLED", "Enable tree-sitter indexing", "bool"),

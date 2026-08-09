@@ -416,6 +416,7 @@ def handle_settings_command(parts: list[str]):
             "GIT_PUSH_TIMEOUT": int,
             "MAX_FILE_SIZE_BYTES": int,
             "MAX_DIR_LISTING": int,
+            "MAX_DIR_LISTING_CHARS": int,
             "WEB_CACHE_TTL_SECONDS": int,
             "WEB_RPM_LIMIT": int,
             "WEB_ROBOTS_CACHE_TTL": int,

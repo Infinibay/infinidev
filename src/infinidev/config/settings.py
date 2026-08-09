@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     # File limits
     MAX_FILE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5MB
     MAX_DIR_LISTING: int = 1000
+    MAX_DIR_LISTING_CHARS: int = Field(default=12_000, ge=1_024)
 
     # Private command-output capture. Disabled by default so execute_command's
     # return shape and filesystem/database side effects stay backward compatible.
