@@ -54,9 +54,12 @@ class TestExecuteWithRetry:
         _db._conn_cache.path = None
         attempts = 0
         fake_conn = MagicMock()
+        original_new_connection = _db._new_connection
 
-        def _flaky_open(_path):
+        def _flaky_open(path):
             nonlocal attempts
+            if path != "/tmp/retry-open.db":
+                return original_new_connection(path)
             attempts += 1
             if attempts == 1:
                 raise sqlite3.OperationalError("database is locked")
