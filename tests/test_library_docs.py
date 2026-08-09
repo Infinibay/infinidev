@@ -1,35 +1,10 @@
 """Tests for the library documentation system."""
 
 import json
-import os
-import tempfile
 
-import pytest
-
-from infinidev.config.settings import settings
-from infinidev.db.service import execute_with_retry, init_db
+from infinidev.db.service import execute_with_retry
 from infinidev.tools.docs.delete_documentation import DeleteDocumentationTool
 from infinidev.tools.docs.find_documentation import FindDocumentationTool
-
-
-@pytest.fixture
-def temp_db_path():
-    """Create a temporary database for testing."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        temp_path = f.name
-    yield temp_path
-    os.unlink(temp_path)
-
-
-@pytest.fixture
-def temp_db(temp_db_path):
-    """Setup database with temp path."""
-    original = settings.DB_PATH
-    settings.DB_PATH = temp_db_path
-    init_db()
-    yield
-    settings.DB_PATH = original
-
 
 class TestLibraryDocsSchema:
     """Test that init_db creates the library_docs table and FTS."""

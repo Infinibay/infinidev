@@ -10,35 +10,15 @@ one-line summary. Covers:
 
 from __future__ import annotations
 
-import os
-import tempfile
-
-import pytest
-
 from infinidev.config.settings import settings
 from infinidev.db.service import (
-    init_db, execute_with_retry,
+    execute_with_retry,
     record_objective_verdict, get_objective_verdicts,
 )
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.review_result import ReviewResult
 from infinidev.engine.analysis import review_engine as re_mod
 from infinidev.engine.analysis.review_engine import run_review_rework_loop
-
-
-@pytest.fixture
-def temp_db():
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        path = f.name
-    original = settings.DB_PATH
-    settings.DB_PATH = path
-    init_db()
-    try:
-        yield
-    finally:
-        settings.DB_PATH = original
-        os.unlink(path)
-
 
 # ── schema + round-trip ──────────────────────────────────────────────────
 

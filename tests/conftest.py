@@ -27,10 +27,11 @@ def temp_db_path():
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         path = f.name
     yield path
-    try:
-        os.unlink(path)
-    except FileNotFoundError:
-        pass
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.unlink(f"{path}{suffix}")
+        except FileNotFoundError:
+            pass
 
 
 @pytest.fixture
@@ -39,8 +40,19 @@ def temp_db(temp_db_path):
     original = settings.DB_PATH
     settings.DB_PATH = temp_db_path
     init_db()
-    yield temp_db_path
-    settings.DB_PATH = original
+    try:
+        yield temp_db_path
+    finally:
+        try:
+            from infinidev.code_intel._db import _conn_cache
+
+            cached = getattr(_conn_cache, "conn", None)
+            if cached is not None and getattr(_conn_cache, "path", None) == temp_db_path:
+                cached.close()
+                _conn_cache.conn = None
+                _conn_cache.path = None
+        finally:
+            settings.DB_PATH = original
 
 
 # ── Workspace fixtures ───────────────────────────────────────────────────────
