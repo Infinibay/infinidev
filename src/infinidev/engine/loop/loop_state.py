@@ -54,6 +54,11 @@ class LoopState(BaseModel):
     # summary, this survives a tool-budget interruption and lets the next
     # iteration close the same implementation Step after verification.
     edited_step_indices: set[int] = Field(default_factory=set)
+    # Deterministic objective checks that passed for the current plan. This
+    # lets an explicit verification Step close an already-satisfied Task
+    # without manufacturing a no-op edit. Change Steps still require edit
+    # evidence even when their check happens to pass against the baseline.
+    objectively_verified_step_indices: set[int] = Field(default_factory=set)
     # Prompt cache metrics (populated from LLM response usage)
     cache_creation_tokens: int = 0   # Anthropic/DashScope/MiniMax: tokens written to cache
     cache_read_tokens: int = 0       # Anthropic/DashScope/MiniMax: tokens read from cache

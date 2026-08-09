@@ -379,12 +379,14 @@ class TestObjectiveGate:
         ctx, call = _make_ctx(StepVerification(kind="command", spec="true"), tmp_path)
         messages = [{"role": "tool", "tool_call_id": "sc1", "content": "ok"}]
         assert eng._objective_gate_blocks(ctx, call, messages) is False
+        assert ctx.state.objectively_verified_step_indices == {1}
 
     def test_fail_blocks_and_overwrites_result(self, tmp_path):
         eng = LoopEngine()
         ctx, call = _make_ctx(StepVerification(kind="command", spec="false"), tmp_path)
         messages = [{"role": "tool", "tool_call_id": "sc1", "content": "ok"}]
         assert eng._objective_gate_blocks(ctx, call, messages) is True
+        assert ctx.state.objectively_verified_step_indices == set()
         # The step_complete tool result was overwritten with the rejection.
         tool_msg = next(m for m in messages if m.get("tool_call_id") == "sc1")
         assert "BLOCKED" in tool_msg["content"]

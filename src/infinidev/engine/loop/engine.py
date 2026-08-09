@@ -215,10 +215,20 @@ def _enforce_edit_requirement(
     ctx: ExecutionContext, step_result: StepResult,
 ) -> bool:
     """Pause a write Task that claims completion before its first edit."""
+    state = getattr(ctx, "state", None)
+    plan = getattr(state, "plan", None)
+    active = getattr(plan, "active_step", None)
+    verified_noop = (
+        active is not None
+        and _step_phase(active.title) == "verify"
+        and active.index
+        in getattr(state, "objectively_verified_step_indices", set())
+    )
     if (
         step_result.status != "done"
         or not _task_requires_edits(ctx)
         or ctx.state.task_has_edits
+        or verified_noop
     ):
         return False
     step_result.status = "continue"

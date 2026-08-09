@@ -233,6 +233,54 @@ def test_edit_requirement_preserves_the_active_step_before_plan_advance():
     assert _should_advance_plan(result) is False
 
 
+def test_verified_noop_step_can_close_an_already_satisfied_feature_task():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="feature")
+    ctx.state.plan.steps = [PlanStep(
+        index=1,
+        title="Run pytest to confirm the regression cases pass",
+        status="active",
+        verify={
+            "kind": "command",
+            "spec": "python -m pytest -q",
+            "observable": "exit code 0",
+        },
+    )]
+    active = ctx.state.plan.active_step
+    assert active is not None
+    ctx.state.objectively_verified_step_indices.add(active.index)
+
+    result = StepResult(summary="All regression tests pass", status="done")
+
+    assert _enforce_edit_requirement(ctx, result) is False
+
+
+def test_passing_check_does_not_exempt_an_unedited_change_step():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="feature")
+    ctx.state.plan.steps = [PlanStep(
+        index=1,
+        title="Implement the parser fix",
+        status="active",
+        verify={
+            "kind": "command",
+            "spec": "python -m pytest -q",
+            "observable": "exit code 0",
+        },
+    )]
+    active = ctx.state.plan.active_step
+    assert active is not None
+    ctx.state.objectively_verified_step_indices.add(active.index)
+
+    result = StepResult(summary="Existing tests pass", status="done")
+
+    assert _enforce_edit_requirement(ctx, result) is True
+
+
 def test_implementation_step_cannot_close_without_an_edit():
     from infinidev.engine.loop.plan_step import PlanStep
 

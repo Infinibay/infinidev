@@ -316,6 +316,7 @@ class StepCompleteGate:
         if result is None:
             return False  # fail open — the gate must never crash the loop
         if result.passed:
+            ctx.state.objectively_verified_step_indices.add(active.index)
             emit_log(
                 "info",
                 f"✓ step {active.index} objective verified "
