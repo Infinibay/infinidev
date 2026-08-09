@@ -17,6 +17,7 @@ point is that PASS/FAIL is decided by an exit code, not an LLM claim.
 from __future__ import annotations
 
 import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -93,6 +94,24 @@ class TestStepVerification:
 # ── ObjectiveVerifier executor ───────────────────────────────────────────
 
 class TestObjectiveVerifierCommand:
+    def test_incomplete_workspace_venv_falls_back_to_current_interpreter(
+        self, tmp_path,
+    ):
+        venv_bin = tmp_path / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "python").write_text("")
+
+        assert ObjectiveVerifier(str(tmp_path))._interpreter() == sys.executable
+
+    def test_workspace_venv_with_pytest_wins(self, tmp_path):
+        venv_bin = tmp_path / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        python = venv_bin / "python"
+        python.write_text("")
+        (venv_bin / "pytest").write_text("")
+
+        assert ObjectiveVerifier(str(tmp_path))._interpreter() == str(python)
+
     def test_command_pass(self, tmp_path):
         r = ObjectiveVerifier(str(tmp_path)).verify(
             StepVerification(kind="command", spec="true")
@@ -168,6 +187,46 @@ class TestObjectiveVerifierCommand:
         permission.assert_called_once_with(
             command,
             description="Run objective verification command",
+        )
+
+    def test_bare_pytest_uses_selected_interpreter_but_preserves_authored_command(
+        self, tmp_path,
+    ):
+        proc = SimpleNamespace(
+            stdout="1 passed in 0.01s\n",
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+        )
+        verifier = ObjectiveVerifier(str(tmp_path))
+        with (
+            patch.object(verifier, "_interpreter", return_value="/chosen/python"),
+            patch(
+                "infinidev.tools.shell.execute_command_tool.check_command_permission",
+                return_value=None,
+            ) as permission,
+            patch(
+                "infinidev.engine.analysis.objective_verifier.run_captured",
+                return_value=proc,
+            ) as run,
+        ):
+            result = verifier.verify(
+                StepVerification(
+                    kind="command",
+                    spec="pytest -q",
+                    observable="1 passed",
+                )
+            )
+
+        assert result.passed is True
+        permission.assert_called_once_with(
+            "pytest -q",
+            description="Run objective verification command",
+        )
+        assert run.call_args.args[0] == ["/chosen/python", "-m", "pytest", "-q"]
+        assert result.commands_run[0]["command"] == "pytest -q"
+        assert result.commands_run[0]["executed_command"] == (
+            "/chosen/python -m pytest -q"
         )
 
     def test_nonexecutable_check_passes_as_skip(self, tmp_path):

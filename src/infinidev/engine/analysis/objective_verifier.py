@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shlex
 import sys
 
@@ -79,12 +80,25 @@ class ObjectiveVerifier:
         self, command: str, observable: str, expected_exit_code: int = 0,
     ) -> VerificationResult:
         command = self._strip_redundant_workspace_cd(command)
-        run = self._run(command)
+        execution_command = self._canonicalize_bare_pytest(command)
+        run = self._run(execution_command, permission_command=command)
         passed = (
             run["exit_code"] == expected_exit_code
             and self._observable_ok(observable, run["output"])
         )
         return self._result_from_run(run, passed, observable, expected_exit_code)
+
+    def _canonicalize_bare_pytest(self, command: str) -> str | list[str]:
+        """Run a simple bare pytest through the selected Python interpreter."""
+        if re.search(r"[;&|`$><\n]", command):
+            return command
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            return command
+        if not tokens or tokens[0] not in {"pytest", "py.test"}:
+            return command
+        return [self._interpreter(), "-m", "pytest", *tokens[1:]]
 
     def _strip_redundant_workspace_cd(self, command: str) -> str:
         """Drop a strict leading ``cd`` only when it resolves to our cwd."""
@@ -110,9 +124,15 @@ class ObjectiveVerifier:
         Infinidev nor share its environment — and Infinidev's interpreter is
         the fallback, since that one at least exists.
         """
-        for candidate in (".venv/bin/python", "venv/bin/python"):
-            path = os.path.join(self._workspace, candidate)
-            if os.path.exists(path):
+        for venv_dir in (".venv", "venv"):
+            path = os.path.join(self._workspace, venv_dir, "bin", "python")
+            pytest_launchers = (
+                os.path.join(self._workspace, venv_dir, "bin", "pytest"),
+                os.path.join(self._workspace, venv_dir, "bin", "py.test"),
+            )
+            if os.path.exists(path) and any(
+                os.path.exists(launcher) for launcher in pytest_launchers
+            ):
                 return path
         return sys.executable
 
@@ -247,9 +267,15 @@ class ObjectiveVerifier:
             summary = f"required output not found: {observable!r}"
         return VerificationResult(passed=passed, summary=summary, commands_run=[run])
 
-    def _run(self, command: str | list[str]) -> dict:
+    def _run(
+        self,
+        command: str | list[str],
+        *,
+        permission_command: str | None = None,
+    ) -> dict:
         """Execute an approved command and capture truncated output."""
         display_command = command if isinstance(command, str) else shlex.join(command)
+        authored_command = permission_command or display_command
 
         # Planner-authored checks are untrusted model output. They must use the
         # same permission policy as execute_command instead of silently gaining
@@ -257,12 +283,12 @@ class ObjectiveVerifier:
         from infinidev.tools.shell.execute_command_tool import check_command_permission
 
         permission_error = check_command_permission(
-            display_command,
+            authored_command,
             description="Run objective verification command",
         )
         if permission_error:
             return {
-                "command": display_command,
+                "command": authored_command,
                 "exit_code": -1,
                 "output": permission_error,
             }
@@ -289,12 +315,18 @@ class ObjectiveVerifier:
                     "output": f"Command timed out after {self._timeout}s",
                 }
             result = {
-                "command": display_command,
+                "command": authored_command,
                 "exit_code": proc.exit_code,
                 "output": output,
             }
+            if authored_command != display_command:
+                result["executed_command"] = display_command
             if environment_adjustment:
                 result["environment_adjustment"] = environment_adjustment
             return result
         except Exception as exc:  # pragma: no cover - defensive
-            return {"command": display_command, "exit_code": -1, "output": f"Error: {exc}"}
+            return {
+                "command": authored_command,
+                "exit_code": -1,
+                "output": f"Error: {exc}",
+            }
