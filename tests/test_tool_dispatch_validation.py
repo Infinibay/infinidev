@@ -120,7 +120,7 @@ def test_dispatch_maps_minimax_shell_aliases_to_execute_command() -> None:
     """Live M3 naming misses must execute instead of becoming false blockers."""
     tool = _ShellLikeTool()
 
-    for alias in ("shell_command", "shell_exec", "shell_run"):
+    for alias in ("shell_command", "shell_exec", "shell_run", "shell"):
         result = execute_tool_call(
             {tool.name: tool},
             alias,
@@ -128,6 +128,36 @@ def test_dispatch_maps_minimax_shell_aliases_to_execute_command() -> None:
         )
 
         assert json.loads(result) == {"command": "pwd", "cwd": "/tmp/project"}
+
+
+def test_dispatch_moves_leading_cd_to_execute_command_cwd() -> None:
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        tool.name,
+        {"command": "cd '/tmp/project with spaces' && python -m pytest -q"},
+    )
+
+    assert json.loads(result) == {
+        "command": "python -m pytest -q",
+        "cwd": "/tmp/project with spaces",
+    }
+
+
+def test_dispatch_leaves_unsafe_leading_cd_for_permission_layer() -> None:
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        tool.name,
+        {"command": "cd $(pwd) && python -m pytest -q"},
+    )
+
+    assert json.loads(result) == {
+        "command": "cd $(pwd) && python -m pytest -q",
+        "cwd": None,
+    }
 
 
 def test_dispatch_ignores_false_minimax_background_hint() -> None:

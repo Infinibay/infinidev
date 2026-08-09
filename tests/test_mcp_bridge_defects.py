@@ -148,6 +148,18 @@ def test_unknown_tool_does_not_recommend_unavailable_help():
     assert "advertised for this turn" in message
 
 
+def test_unknown_tool_does_not_invent_unrelated_suggestions():
+    from infinidev.engine.tool_dispatch import _unknown_tool_message
+
+    message = _unknown_tool_message(
+        {"delete_file": None, "recall_context": None, "add_step": None},
+        "shell",
+    )
+
+    assert "Did you mean" not in message
+    assert "delete_file" not in message
+
+
 # ── an agent built before warmup must not stay blind for its whole life ──
 
 

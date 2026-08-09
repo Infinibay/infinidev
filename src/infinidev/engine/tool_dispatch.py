@@ -12,6 +12,8 @@ import inspect
 import json
 import logging
 import os
+import re
+import shlex
 import uuid
 from typing import Any
 
@@ -37,6 +39,35 @@ _USER_STOPPED_TOOL_ERROR = (
     "The user stopped this tool execution. Do not retry the same call unchanged; "
     "choose a narrower approach or ask the user before retrying."
 )
+
+_LEADING_CD_RE = re.compile(
+    r"^\s*cd\s+(?P<path>'[^']*'|\"[^\"]*\"|[^\s;&|`$<>]+)"
+    r"\s*&&\s*(?P<command>.+)$",
+    re.DOTALL,
+)
+
+
+def _normalize_execute_command_cwd(args: dict[str, Any]) -> None:
+    """Move a strict leading ``cd PATH &&`` into execute_command's cwd.
+
+    Each call already owns an independent working directory. Only a single
+    literal or quoted path is accepted here; substitutions, redirects, and
+    extra control operators remain for the permission layer to reject.
+    """
+    if args.get("cwd") or not isinstance(args.get("command"), str):
+        return
+    match = _LEADING_CD_RE.match(args["command"])
+    if match is None:
+        return
+    try:
+        path_tokens = shlex.split(match.group("path"))
+    except ValueError:
+        return
+    if len(path_tokens) != 1:
+        return
+    args["cwd"] = path_tokens[0]
+    args["command"] = match.group("command").strip()
+    logger.info("Tool execute_command: moved leading cd into cwd")
 
 
 def _mark_result_stopped_by_user(result: str) -> str:
@@ -107,6 +138,7 @@ _HALLUCINATION_MAP: dict[str, str] = {
     "shell_command": "execute_command",
     "shell_exec": "execute_command",
     "shell_run": "execute_command",
+    "shell": "execute_command",
     "ls": "list_directory",
     "find": "glob",
     "grep": "code_search",
@@ -200,11 +232,6 @@ _SUGGESTION_LIMIT = 8
 # floor the list fills to the limit with whatever ranked next, which puts
 # unrelated tools beside the right answer and dilutes it.
 _SUGGESTION_FLOOR = 0.5
-# …but never answer with nothing: a wrong guess the model can reject still
-# beats an error that offers no way forward.
-_MIN_SUGGESTIONS = 3
-
-
 def _unknown_tool_message(dispatch: dict[str, Any], name: str) -> str:
     """Name the tools the model probably meant.
 
@@ -235,16 +262,13 @@ def _unknown_tool_message(dispatch: dict[str, Any], name: str) -> str:
         ((closeness(candidate), candidate) for candidate in dispatch), reverse=True,
     )
     close = [n for score, n in scored[:_SUGGESTION_LIMIT] if score >= _SUGGESTION_FLOOR]
-    ranked = close or [n for _, n in scored[:_MIN_SUGGESTIONS]]
     recovery = (
         "Call describe_tool() to list every tool you have."
         if "describe_tool" in dispatch
         else "Use one of the tool names advertised for this turn."
     )
-    return (
-        f"Unknown tool: {name}. Did you mean one of: {', '.join(ranked)}? "
-        f"{recovery}"
-    )
+    suggestion = f" Did you mean one of: {', '.join(close)}?" if close else ""
+    return f"Unknown tool: {name}.{suggestion} {recovery}"
 
 
 def execute_tool_call(
@@ -400,6 +424,9 @@ def execute_tool_call(
                     "capability is available, or run the command in foreground."
                 )
             })
+
+    if name == "execute_command":
+        _normalize_execute_command_cwd(args)
 
     # Validate kwargs against _run() signature — reject unknown parameters
     # so the LLM learns the correct schema instead of silently losing data.

@@ -42,6 +42,23 @@ def test_read_only_task_avoids_unrelated_destructive_and_specialist_tools() -> N
     assert "code_interpreter" not in names
 
 
+def test_task_protocol_does_not_enable_destructive_tools() -> None:
+    description = """<task authority="USER_LITERAL">
+Fix nested models and run tests.
+Requested result kind: implementation
+</task>
+
+<rolling-step-policy authority="SYSTEM">
+Add, modify, or remove model-inferred Steps whenever evidence changes.
+</rolling-step-policy>"""
+
+    names = _names(description)
+
+    assert {"read_file", "edit_file", "execute_command"} <= names
+    assert "delete_file" not in names
+    assert "rollback_task_changes" not in names
+
+
 def test_explicit_capabilities_restore_their_tools() -> None:
     names = _names(
         "Research the latest online API documentation, write a report, then git commit the changes"

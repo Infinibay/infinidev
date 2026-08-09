@@ -62,6 +62,10 @@ SAFE_COMMANDS = [
     "python --version",
     "tsc --version",
     "echo hello world",
+    "ls src tests 2>&1",
+    "find src -name '*.py' 2>/dev/null",
+    "ls missing >> /dev/null && python --version",
+    "python -c \"import os; print(os.listdir('.'))\" 2>&1 | head -20",
 ]
 
 RISKY_COMMANDS = [
@@ -119,6 +123,9 @@ RISKY_COMMANDS = [
     "ls && command rm -rf .",
     "tree -o /tmp/out.html",
     "tree --output /tmp/out.html",
+    "ls src 2>errors.txt",
+    "ls src >/tmp/result.txt",
+    "python -c \"open('result.txt', 'w').write('x')\" 2>&1",
 ]
 
 
@@ -289,6 +296,15 @@ class TestNonInteractiveTaskAuthority:
         assert handler("execute_command", "", "python -m pytest -q") is True
         assert handler("execute_command", "", "rm -rf build") is False
         assert handler("delete_file", "", "tests/output.txt") is False
+
+    def test_explicit_test_request_allows_read_only_output_filter(self):
+        handler = make_noninteractive_permission_handler("Run the relevant tests.")
+
+        assert handler(
+            "execute_command",
+            "",
+            "python -m pytest tests/test_tags.py -v 2>&1 | tail -50",
+        ) is True
 
     @pytest.mark.parametrize(
         "command",

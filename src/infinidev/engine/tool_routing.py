@@ -87,11 +87,34 @@ _CAPABILITY_PATTERNS: dict[str, re.Pattern[str]] = {
     ),
 }
 
+_USER_LITERAL_TASK_RE = re.compile(
+    r'<task\s+authority="USER_LITERAL">\s*(.*?)\s*</task>',
+    re.DOTALL,
+)
+_RESULT_KIND_SUFFIX_RE = re.compile(
+    r"\nRequested result kind:\s*[^\n]+\s*$",
+    re.IGNORECASE,
+)
+
+
+def _routing_description(description: str) -> str:
+    """Keep engine protocol prose out of capability inference.
+
+    TaskAdapter wraps the literal request together with rolling-plan policy in
+    one description. Words such as ``remove`` in that policy previously
+    enabled destructive file-management tools for every Task. When the
+    authority block is present, route from its user-authored body only.
+    """
+    match = _USER_LITERAL_TASK_RE.search(description)
+    if match is None:
+        return description
+    return _RESULT_KIND_SUFFIX_RE.sub("", match.group(1)).strip()
+
 
 def task_capabilities(description: str, initial_plan: Any | None = None) -> set[str]:
     """Infer optional capabilities from user text plus planner decomposition."""
 
-    parts = [description]
+    parts = [_routing_description(description)]
     if initial_plan is not None:
         parts.append(str(getattr(initial_plan, "overview", "")))
         for step in getattr(initial_plan, "steps", ()):

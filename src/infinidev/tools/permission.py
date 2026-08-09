@@ -33,19 +33,17 @@ _TEST_DENIAL_RE = re.compile(
     r"prueb(?:es|ar))\s+(?:las?\s+)?pruebas?\b",
     re.IGNORECASE,
 )
-_SHELL_CONTROL_RE = re.compile(r"[;&|`$><\n\r]")
-
-
 def make_noninteractive_permission_handler(
     user_request: str,
 ) -> Callable[[str, str, str], bool]:
-    """Authorize only explicitly requested, single test-runner commands.
+    """Authorize only explicitly requested test verification.
 
     A one-shot CLI has no UI capable of answering an approval prompt. The
     user's literal request can still authorize a bounded verification action:
-    when it asks to run tests, a recognized test command may execute. Shell
-    composition remains denied so test authority cannot be widened into an
-    unrelated command through pipes, chaining, redirects, or substitutions.
+    a recognized test command may run when tests were requested. Provably
+    read-only shell and Python commands bypass this handler in ``auto`` mode.
+    Pipelines are accepted only when every other segment is also proven
+    read-only, so test authority cannot be widened into a mutation.
     """
     request = (user_request or "").strip()
     tests_authorized = bool(
@@ -58,11 +56,28 @@ def make_noninteractive_permission_handler(
         if tool_name != "execute_command" or not tests_authorized:
             return False
         command = (details or "").strip()
-        if not command or _SHELL_CONTROL_RE.search(command):
+        if not command:
             return False
         from infinidev.engine.guidance.test_runners import is_test_command
+        from infinidev.tools.base.command_risk import (
+            classify_command,
+            split_shell_segments,
+        )
 
-        return is_test_command(command)
+        segments, _ = split_shell_segments(command)
+        if segments is None:
+            return False
+        saw_test = False
+        for segment in segments:
+            segment = segment.strip()
+            if not segment:
+                continue
+            if is_test_command(segment):
+                saw_test = True
+                continue
+            if not classify_command(segment)[0]:
+                return False
+        return saw_test
 
     return decide
 

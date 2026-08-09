@@ -23,21 +23,85 @@ import os
 import re
 import shlex
 
+
+_DEV_NULL_REDIRECT_RE = re.compile(r"(?:[012])?>{1,2}\s*/dev/null(?=\s|$)")
+
 # ── shell command classification ─────────────────────────────────────────
 
-# Constructs whose mere presence forces a prompt. We deliberately do NOT try
-# to reason about what's inside a command substitution or a redirect target —
-# `echo $(rm -rf ~)` and `cat secrets > /tmp/x` must both prompt.
-#   $( … )  `( … )`  ${ … }-is-fine-but-$(-)-exec   <( )  >( )   process subst.
-_SUBSTITUTION_RE = re.compile(r"\$\(|`|<\(|>\(")
-# Output redirection (truncate/append/clobber) and here-strings/here-docs.
-# A bare input redirect ``<`` only feeds a file to stdin (read-only) so it is
-# allowed; ``>`` in any form mutates the filesystem.
-_OUTPUT_REDIRECT_RE = re.compile(r">")
+def split_shell_segments(command: str) -> tuple[list[str] | None, str]:
+    """Split shell control operators without interpreting quoted program text.
 
-# Operators that separate a command line into independently-runnable segments.
-# We split on them and require EVERY segment to be a safe read-only command.
-_SEGMENT_SPLIT_RE = re.compile(r"\|\||&&|;|\||&|\n")
+    ``re.split`` cannot distinguish a pipeline from a semicolon inside
+    ``python -c '...'``. This small lexer tracks shell quoting and escaping,
+    rejects execution-bearing substitutions and file-writing redirects, and
+    removes only descriptor-to-descriptor duplication such as ``2>&1``.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+    index = 0
+
+    while index < len(command):
+        char = command[index]
+        if escaped:
+            current.append(char)
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and quote != "'":
+            current.append(char)
+            escaped = True
+            index += 1
+            continue
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            elif quote == '"' and (
+                char == "`" or command.startswith("$(", index)
+            ):
+                return None, "contains command substitution"
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            current.append(char)
+            index += 1
+            continue
+        if char == "`" or command.startswith(("$(", "<(", ">("), index):
+            return None, "contains command/process substitution"
+        dev_null = _DEV_NULL_REDIRECT_RE.match(command, index)
+        if dev_null is not None and (index == 0 or command[index - 1].isspace()):
+            current.append(" ")
+            index = dev_null.end()
+            continue
+        if (
+            char in "012"
+            and index + 3 < len(command)
+            and command[index + 1] in "><"
+            and command[index + 2] == "&"
+            and command[index + 3] in "012"
+            and (index == 0 or command[index - 1].isspace())
+            and (index + 4 == len(command) or command[index + 4].isspace())
+        ):
+            current.append(" ")
+            index += 4
+            continue
+        if char == ">":
+            return None, "writes to a file via output redirection"
+        if char in ";|&\n":
+            segments.append("".join(current))
+            current = []
+            if index + 1 < len(command) and command[index + 1] == char:
+                index += 1
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+
+    segments.append("".join(current))
+    return segments, ""
 
 # Base commands that are read-only no matter what arguments they get. Listing,
 # reading, searching, hashing, text-to-stdout transforms, and system/info
@@ -290,8 +354,6 @@ def _classify_segment(segment: str) -> tuple[bool, str]:
     segment = segment.strip()
     if not segment:
         return True, ""  # empty segment (e.g. trailing operator) is inert
-    if _OUTPUT_REDIRECT_RE.search(segment):
-        return False, "writes to a file via output redirection"
     try:
         tokens = shlex.split(segment)
     except ValueError:
@@ -322,6 +384,9 @@ def _classify_segment(segment: str) -> tuple[bool, str]:
 
     if base == "git":
         return _classify_git(tokens)
+
+    if base in {"python", "python3"} and len(tokens) == 3 and tokens[1] == "-c":
+        return classify_python(tokens[2])
 
     if base in SAFE_COMMANDS:
         bad = _MUTATING_FLAGS.get(base)
@@ -372,11 +437,10 @@ def classify_command(command: str) -> tuple[bool, str]:
     if not command:
         return False, "empty command"
 
-    # Command/process substitution anywhere hides arbitrary execution.
-    if _SUBSTITUTION_RE.search(command):
-        return False, "contains command/process substitution"
-
-    for segment in _SEGMENT_SPLIT_RE.split(command):
+    segments, syntax_error = split_shell_segments(command)
+    if segments is None:
+        return False, syntax_error
+    for segment in segments:
         safe, reason = _classify_segment(segment)
         if not safe:
             return False, reason or "contains a non-read-only command"
