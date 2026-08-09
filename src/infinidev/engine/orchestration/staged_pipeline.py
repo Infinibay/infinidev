@@ -59,6 +59,7 @@ def run_staged_goal(
     force_gather: bool = False,
     max_stage_transitions: int = _DEFAULT_MAX_STAGE_TRANSITIONS,
     max_execution_tool_calls_per_task: int | None = None,
+    preserve_file_tracker_from_handoff: bool = False,
 ) -> StagedRunResult:
     """Run as many evidence-dependent Stages as the Goal requires.
 
@@ -94,6 +95,9 @@ def run_staged_goal(
                 use_phase_engine=use_phase_engine,
                 force_gather=force_gather,
                 max_execution_tool_calls_per_task=max_execution_tool_calls_per_task,
+                preserve_file_tracker_from_handoff=(
+                    preserve_file_tracker_from_handoff
+                ),
             )
             _publish_state(state, session_id, hooks)
             if getattr(used_engine, "is_cancelled", False):
@@ -239,6 +243,7 @@ def _execute_stage(
     use_phase_engine: bool,
     force_gather: bool,
     max_execution_tool_calls_per_task: int | None,
+    preserve_file_tracker_from_handoff: bool,
 ) -> tuple[str, Any]:
     from infinidev.engine.analysis.planner import run_planner
     from infinidev.engine.orchestration import pipeline as pipeline_mod
@@ -380,7 +385,8 @@ def _execute_stage(
                     stage, task, used_engine, workspace_path,
                 ),
                 preserve_file_tracker=(
-                    stage.number > 1
+                    preserve_file_tracker_from_handoff
+                    or stage.number > 1
                     or any(
                         candidate is not task and candidate.attempts > 0
                         for candidate in stage.tasks
@@ -394,6 +400,7 @@ def _execute_stage(
                     )
                     * task.attempts
                 ),
+                max_prompt_tokens=_staged_execution_prompt_budget(),
             )
         except Exception as exc:
             logger.exception("Stage Task execution failed: %s", task.spec.title)
@@ -412,7 +419,11 @@ def _execute_stage(
             return result, used_engine
 
         loop_status = getattr(used_engine, "_last_status", "") or "completed"
-        if loop_status == "exhausted" and _retry_exhausted_task(task):
+        if (
+            loop_status == "exhausted"
+            and not _prompt_budget_exhausted(used_engine)
+            and _retry_exhausted_task(task)
+        ):
             task.status = "pending"
             task.result = result
             task.error = (
@@ -845,17 +856,8 @@ def _run_deterministic_verification_plan(
     check falls through to the ordinary developer loop, where repair work can
     happen under the normal edit and permission gates.
     """
-    if not workspace_path or not plan.steps:
+    if not workspace_path or not _is_deterministic_verification_plan(plan):
         return None
-    for step in plan.steps:
-        action = step.title.rsplit(":", 1)[-1]
-        if (
-            _VERIFY_TASK_RE.search(action) is None
-            or _WRITE_TASK_RE.search(step.title) is not None
-            or step.verify is None
-            or not step.verify.is_deterministic
-        ):
-            return None
 
     from infinidev.engine.analysis.objective_verifier import ObjectiveVerifier
 
@@ -872,12 +874,44 @@ def _run_deterministic_verification_plan(
     )
 
 
+def _is_deterministic_verification_plan(plan: Plan) -> bool:
+    """Whether every Step is an explicit, non-mutating deterministic check."""
+    if not plan.steps:
+        return False
+    for step in plan.steps:
+        action = step.title.rsplit(":", 1)[-1]
+        if (
+            _VERIFY_TASK_RE.search(action) is None
+            or _WRITE_TASK_RE.search(step.title) is not None
+            or step.verify is None
+            or not step.verify.is_deterministic
+        ):
+            return False
+    return True
+
+
 def _staged_execution_tool_budget(override: int | None) -> int:
     if override is not None:
         return override
     from infinidev.config.settings import settings
 
     return settings.STAGED_MAX_EXECUTION_TOOL_CALLS_PER_TASK
+
+
+def _staged_execution_prompt_budget() -> int | None:
+    from infinidev.config.settings import settings
+
+    budget = settings.STAGED_MAX_PROMPT_TOKENS_PER_TASK
+    return budget if budget > 0 else None
+
+
+def _prompt_budget_exhausted(engine: Any) -> bool:
+    budget = _staged_execution_prompt_budget()
+    if budget is None:
+        return False
+    state = getattr(engine, "_last_state", None)
+    total = getattr(state, "total_prompt_tokens", 0)
+    return total >= budget
 
 
 def _retry_exhausted_task(task: TaskExecutionRecord) -> bool:
@@ -948,6 +982,7 @@ def _scope_task_plan(
         f"{plan.overview}"
     )
     steps = list(plan.steps)
+    local_routing = plan.overview.startswith("Local routing:")
     if not steps:
         # A provider may exhaust the Task Planner turn without its terminal
         # tool call. The Stage already supplies a bounded, structured Task;
@@ -955,19 +990,41 @@ def _scope_task_plan(
         # action budget recreating that same scope through add_step. Seed one
         # conservative Step from the Task instead and let execution refine it
         # if evidence changes the tactic.
-        checks = "\n".join(f"- {item}" for item in task.spec.acceptance_criteria)
-        detail = f"Required outcome: {task.spec.outcome}"
-        if checks:
-            detail += f"\nChecks proposed by the Stage Planner:\n{checks}"
-        steps = [PlanStepSpec(
-            title=task.spec.title,
-            detail=detail,
-            expected_output=task.spec.outcome,
-        )]
-        overview += (
-            "\n\nTask Planner fallback: one execution Step was synthesized "
-            "from the active structured Task because no Steps were emitted."
-        )
+        if local_routing:
+            checks = "\n".join(
+                f"- {item}" for item in task.spec.acceptance_criteria
+            )
+            steps = [PlanStepSpec(
+                title=task.spec.title,
+                detail=(
+                    f"Required outcome: {task.spec.outcome}\n"
+                    f"Checks proposed by the Stage Planner:\n{checks}"
+                ).strip(),
+                expected_output=task.spec.outcome,
+            )]
+        else:
+            steps = _fallback_task_steps(task)
+            overview += (
+                "\n\nTask Planner fallback: a bounded execution frontier was "
+                "synthesized from the active Task outcome and acceptance checks "
+                "because no valid Steps were emitted."
+            )
+    elif (
+        not local_routing
+        and stage.spec.purpose == "delivery"
+        and len(steps) < 3
+        and not _is_deterministic_verification_plan(plan)
+    ):
+        uncovered = [
+            criterion for criterion in task.spec.acceptance_criteria
+            if not _criterion_is_covered(criterion, steps)
+        ]
+        if uncovered:
+            steps.extend(_coverage_repair_steps(task, uncovered, 3 - len(steps)))
+            overview += (
+                "\n\nTask plan coverage repair: bounded Steps were synthesized "
+                "for acceptance conditions absent from the emitted plan."
+            )
     return Plan(
         overview=overview,
         steps=steps,
@@ -980,6 +1037,155 @@ def _scope_task_plan(
         # can add the next evidence-backed Step.
         rolling_horizon_limit=1,
     )
+
+
+_FALLBACK_TEST_RE = re.compile(
+    r"\b(test|tests|pytest|regression|coverage|verify|verification|validate|"
+    r"check|assert)\b",
+    re.IGNORECASE,
+)
+_FALLBACK_DISCOVERY_RE = re.compile(
+    r"^\s*(investigate|research|analy[sz]e|inspect|audit|compare)\b",
+    re.IGNORECASE,
+)
+_FALLBACK_VERIFY_TASK_RE = re.compile(
+    r"^\s*(verify|validate|test|check)\b",
+    re.IGNORECASE,
+)
+_COVERAGE_TOKEN_RE = re.compile(r"[A-Za-z0-9_./-]+")
+_COVERAGE_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "be", "by", "for", "from", "in",
+    "is", "it", "of", "on", "or", "the", "to", "with", "task", "step",
+    "implementation", "result", "expected", "required", "outcome",
+})
+
+
+def _coverage_tokens(text: str) -> set[str]:
+    return {
+        token.casefold()
+        for token in _COVERAGE_TOKEN_RE.findall(text)
+        if len(token) > 1 and token.casefold() not in _COVERAGE_STOPWORDS
+    }
+
+
+def _criterion_is_covered(
+    criterion: str,
+    steps: list[PlanStepSpec],
+) -> bool:
+    """Whether a planner Step materially names one Task acceptance condition."""
+    wanted = _coverage_tokens(criterion)
+    if not wanted:
+        return True
+    plan_text = "\n".join(
+        f"{step.title}\n{step.detail}\n{step.expected_output}" for step in steps
+    )
+    observed = _coverage_tokens(plan_text)
+    return len(wanted & observed) / len(wanted) >= 0.5
+
+
+def _coverage_repair_steps(
+    task: TaskExecutionRecord,
+    uncovered: list[str],
+    limit: int,
+) -> list[PlanStepSpec]:
+    """Fit uncovered acceptance conditions into the remaining fixed frontier."""
+    if limit <= 0:
+        return []
+    if limit == 1:
+        return [PlanStepSpec(
+            title=f"Integrate and verify remaining {task.spec.title}"[:120],
+            detail=(
+                "Complete only these acceptance conditions omitted by the "
+                "emitted plan:\n"
+                + "\n".join(f"- {item}" for item in uncovered)
+            ),
+            expected_output="\n".join(uncovered),
+        )]
+
+    candidates = _fallback_task_steps(task, checks_override=uncovered)
+    if len(candidates) <= limit:
+        return candidates
+    # Preserve implementation plus the terminal verification instead of
+    # filling both remaining slots with implementation-only responsibilities.
+    return [*candidates[:limit - 1], candidates[-1]]
+
+
+def _fallback_task_steps(
+    task: TaskExecutionRecord,
+    *,
+    checks_override: list[str] | None = None,
+) -> list[PlanStepSpec]:
+    """Derive a small executable frontier from an already-bounded Stage Task.
+
+    This is used only when Task Planner violates its terminal protocol. The
+    Stage Planner has already supplied an outcome and falsifiable checks, so
+    collapsing them back into the broad Task title discards useful structure
+    and encourages another repository-wide investigation. At most three
+    deterministic Steps preserve that structure without another model call.
+    """
+    source_checks = (
+        checks_override
+        if checks_override is not None
+        else task.spec.acceptance_criteria
+    )
+    checks = [item.strip() for item in source_checks if item.strip()]
+    if _FALLBACK_DISCOVERY_RE.search(task.spec.title):
+        return [PlanStepSpec(
+            title=task.spec.title[:120],
+            detail=(
+                f"Required outcome: {task.spec.outcome}\n"
+                + "\n".join(f"- {item}" for item in checks)
+            ).strip(),
+            expected_output=task.spec.outcome,
+        )]
+    if _FALLBACK_VERIFY_TASK_RE.search(task.spec.title):
+        return [PlanStepSpec(
+            title=task.spec.title[:120],
+            detail=(
+                f"Required outcome: {task.spec.outcome}\n"
+                + "\n".join(f"- {item}" for item in checks)
+            ).strip(),
+            expected_output="\n".join(checks) or task.spec.outcome,
+        )]
+
+    verification = [item for item in checks if _FALLBACK_TEST_RE.search(item)]
+    implementation = [item for item in checks if item not in verification]
+    if not implementation:
+        implementation = [task.spec.outcome]
+
+    # Preserve at most two distinct implementation responsibilities. Extra
+    # criteria remain visible in the detail/expected output of the second.
+    split = 1 if len(implementation) <= 2 else (len(implementation) + 1) // 2
+    groups = [implementation[:split], implementation[split:]]
+    groups = [group for group in groups if group]
+
+    steps: list[PlanStepSpec] = []
+    for index, group in enumerate(groups[:2]):
+        action = "Implement" if index == 0 else "Integrate"
+        focus = " ".join(group[0].split())
+        title = f"{action} {focus}"[:120].rstrip()
+        expected = "\n".join(group)
+        steps.append(PlanStepSpec(
+            title=title,
+            detail=(
+                f"Task outcome: {task.spec.outcome}\n"
+                "Acceptance conditions owned by this Step:\n"
+                + "\n".join(f"- {item}" for item in group)
+            ),
+            expected_output=expected,
+        ))
+
+    verify_checks = verification or checks or [task.spec.outcome]
+    steps.append(PlanStepSpec(
+        title=f"Verify {task.spec.title}"[:120].rstrip(),
+        detail=(
+            "Observe the completed Task against these existing checks; do not "
+            "expand scope:\n"
+            + "\n".join(f"- {item}" for item in verify_checks)
+        ),
+        expected_output="\n".join(verify_checks),
+    ))
+    return steps[:3]
 
 
 def _plan_from_snapshot(task: TaskExecutionRecord) -> Plan | None:

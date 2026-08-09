@@ -382,6 +382,13 @@ Para evitar oscilación:
 Graph puede usar ReAct como ejecutor de hojas. Eso no significa abandonar el grafo; el
 resultado del episodio ReAct vuelve como evidencia y eventos del nodo activo.
 
+La implementación actual aplica automáticamente una sola transición monotónica de ReAct o
+Graph beta hacia Staged cuando el motor de origen alcanza su fusible y devuelve una solicitud
+explícita. El coordinador entrega un resumen acotado de progreso, conserva el estado observado
+de archivos y registra `engine_switched` con `applied=true`. No existe una transición automática
+de regreso dentro del mismo run; las demás direcciones siguen siendo propuestas hasta tener
+sus propias reglas de histéresis.
+
 ## 9. Configuración y TUI
 
 Configuración inicial propuesta:

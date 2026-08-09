@@ -82,6 +82,8 @@ def _ctx(manual_tc: bool = False):
         nudge_message_template=None,
         max_per_action=4,
         max_total_calls=40,
+        allow_plan_mutation=True,
+        skip_plan=False,
     )
 
 
@@ -180,6 +182,38 @@ def test_step_complete_ack_stays_inside_the_block():
         regular=[_call("c1", "read_file", '{"file_path": "a.py"}')],
         step_complete=_call("c2", "step_complete", '{"status": "continue"}'),
     ))
+    assert_tool_block_contiguous(messages)
+
+
+def test_scheduler_owned_plan_call_is_an_ordered_noop_not_an_error():
+    ctx = _ctx()
+    ctx.allow_plan_mutation = False
+    runner = ToolRunner(_engine(nudge_at=None))
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "task"},
+    ]
+    classified = ClassifiedCalls(regular=[
+        _call("c1", "add_step", '{"title":"Duplicate scheduler work"}'),
+    ])
+    result = SimpleNamespace(
+        message=SimpleNamespace(content="", tool_calls=[]), raw_content="",
+    )
+
+    used = runner.run_regular(
+        ctx, classified, messages, result, action_tool_calls=0, iteration=0,
+        guard=LoopGuard(is_small=False), tracker=BehaviorTracker(set()),
+    )
+
+    tool_result = next(
+        message["content"] for message in messages
+        if message.get("tool_call_id") == "c1"
+    )
+    assert used == 1
+    assert ctx.state.total_tool_calls == 1
+    assert '"reason": "scheduler_owned"' in tool_result
+    assert "Unknown tool" not in tool_result
+    assert ctx.state.plan.steps == []
     assert_tool_block_contiguous(messages)
 
 

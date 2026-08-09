@@ -33,6 +33,7 @@ class ExecutionContext:
     max_iterations: int
     max_per_action: int
     max_total_calls: int
+    max_prompt_tokens: int | None
     history_window: int
     max_context_tokens: int
     verbose: bool

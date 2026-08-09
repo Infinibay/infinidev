@@ -197,6 +197,24 @@ def _task_requires_edits(ctx: ExecutionContext) -> bool:
     return task_kind in _EDIT_REQUIRING_TASK_KINDS
 
 
+def _resource_exhaustion_reason(ctx: ExecutionContext) -> str | None:
+    """Return the first reached resource fuse, without inferring success."""
+    if ctx.state.total_tool_calls >= ctx.max_total_calls:
+        return (
+            "Step interrupted: global tool call limit reached "
+            f"({ctx.state.total_tool_calls}/{ctx.max_total_calls} total calls)."
+        )
+    if (
+        ctx.max_prompt_tokens is not None
+        and ctx.state.total_prompt_tokens >= ctx.max_prompt_tokens
+    ):
+        return (
+            "Step interrupted: prompt token limit reached "
+            f"({ctx.state.total_prompt_tokens}/{ctx.max_prompt_tokens} tokens)."
+        )
+    return None
+
+
 def _should_advance_plan(step_result: StepResult) -> bool:
     """Whether this result closes the active Step rather than pausing it."""
     return (
@@ -216,6 +234,7 @@ def _reconcile_step_result(
         not getattr(ctx, "allow_plan_mutation", True)
         and step_result.status == "continue"
         and not step_result.interrupted
+        and len(getattr(ctx.state.plan, "steps", [])) <= 1
     ):
         step_result = step_result.model_copy(update={"interrupted": True})
     return step_result, _enforce_edit_requirement(ctx, step_result)
@@ -529,6 +548,7 @@ class LoopEngine(AgentEngine):
         resume_state: dict | None = None,
         max_iterations: int | None = None,
         max_total_tool_calls: int | None = None,
+        max_prompt_tokens: int | None = None,
         max_tool_calls_per_action: int | None = None,
         nudge_threshold: int | None = None,
         nudge_message_template: str | None = None,
@@ -571,6 +591,7 @@ class LoopEngine(AgentEngine):
             event_id=event_id, resume_state=resume_state,
             max_iterations=max_iterations,
             max_total_tool_calls=max_total_tool_calls,
+            max_prompt_tokens=max_prompt_tokens,
             max_tool_calls_per_action=max_tool_calls_per_action,
             nudge_threshold=nudge_threshold,
             nudge_message_template=nudge_message_template,
@@ -691,16 +712,27 @@ class LoopEngine(AgentEngine):
 
             self._run_post_step(ctx, step_result, step_mgr, messages, step_messages_start, iteration)
 
-            term = self._check_termination(ctx, step_result, step_mgr, iteration, consecutive_all_done)
+            resource_exhaustion = _resource_exhaustion_reason(ctx)
+            if (
+                resource_exhaustion is not None
+                and step_result.status not in {"done", "blocked"}
+            ):
+                return step_mgr.finish(
+                    ctx, "exhausted", iteration, resource_exhaustion,
+                )
+
+            term = self._check_termination(
+                ctx, step_result, step_mgr, iteration, consecutive_all_done
+            )
             if term is not None:
                 return term
 
-            # A global budget is a terminal safety fuse, not an implicit
-            # successful continuation.  The interrupted step was recorded
-            # above, but its active plan item remains open for a later run.
-            if ctx.state.total_tool_calls >= ctx.max_total_calls:
+            # A terminal claim may be demoted by a completion gate. Honour
+            # the already-observed resource fuse before starting another
+            # iteration in that case.
+            if resource_exhaustion is not None:
                 return step_mgr.finish(
-                    ctx, "exhausted", iteration, step_result.summary,
+                    ctx, "exhausted", iteration, resource_exhaustion,
                 )
 
             # Update consecutive all-done counter
@@ -1093,7 +1125,11 @@ class LoopEngine(AgentEngine):
         from infinidev.engine.static_analysis_timer import add_elapsed as _sa_add
         _last_llm_call_end: float | None = None
 
-        while action_tool_calls < ctx.max_per_action and ctx.state.total_tool_calls < ctx.max_total_calls:
+        while (
+            action_tool_calls < ctx.max_per_action
+            and ctx.state.total_tool_calls < ctx.max_total_calls
+            and _resource_exhaustion_reason(ctx) is None
+        ):
             # Plan pseudo-tools mutate the state in this same inner loop.
             # Recompute the mode for every model turn so an ``add_step`` is
             # followed by execution tools, rather than leaving the model in
@@ -1249,8 +1285,11 @@ class LoopEngine(AgentEngine):
         else:
             # Inner loop exhausted (while condition became false)
             if step_result is None:
-                if ctx.state.total_tool_calls >= ctx.max_total_calls:
-                    limit_msg = f"global tool call limit reached ({ctx.state.total_tool_calls}/{ctx.max_total_calls} total calls)"
+                resource_exhaustion = _resource_exhaustion_reason(ctx)
+                if resource_exhaustion is not None:
+                    limit_msg = resource_exhaustion.removeprefix(
+                        "Step interrupted: "
+                    ).removesuffix(".")
                 else:
                     limit_msg = f"per-step tool call limit reached ({action_tool_calls}/{ctx.max_per_action} calls)"
                 step_result = StepResult(

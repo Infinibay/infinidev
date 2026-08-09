@@ -77,6 +77,9 @@ def build_execution_context(
     max_total_calls = (
         kwargs.get("max_total_tool_calls") or settings.LOOP_MAX_TOTAL_TOOL_CALLS
     )
+    max_prompt_tokens = kwargs.get("max_prompt_tokens")
+    if max_prompt_tokens is not None and max_prompt_tokens <= 0:
+        max_prompt_tokens = None
     # An unset per-step budget means "the whole task budget", not "zero".
     max_per_action = (
         kwargs.get("max_tool_calls_per_action")
@@ -185,6 +188,7 @@ def build_execution_context(
         ],
         tools=tools, max_iterations=max_iterations,
         max_per_action=max_per_action, max_total_calls=max_total_calls,
+        max_prompt_tokens=max_prompt_tokens,
         history_window=settings.LOOP_HISTORY_WINDOW,
         max_context_tokens=_get_model_max_context(llm_params),
         verbose=kwargs.get("verbose", True),

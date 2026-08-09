@@ -131,6 +131,7 @@ class _FakeEngine:
         initial_attachments: list[Any] | None = None,
         task: Any | None = None,
         max_total_tool_calls: int | None = None,
+        max_prompt_tokens: int | None = None,
         allow_plan_mutation: bool = True,
     ) -> str:
         self.captured_initial_plan = initial_plan
@@ -138,6 +139,7 @@ class _FakeEngine:
         self.captured_initial_attachments = initial_attachments
         self.captured_task = task
         self.captured_max_total_tool_calls = max_total_tool_calls
+        self.captured_max_prompt_tokens = max_prompt_tokens
         self.captured_allow_plan_mutation = allow_plan_mutation
         return self.result_text
 
@@ -255,8 +257,11 @@ class TestEscalateRunsFullPipeline:
         )
 
         assert result == "All done, bug fixed."
-        # The plan reached the LoopEngine.
-        assert engine.captured_initial_plan.steps == expected_plan.steps
+        # The planner's tactics reach LoopEngine unchanged, followed by the
+        # scheduler-owned acceptance-coverage repair when needed.
+        assert engine.captured_initial_plan.steps[:2] == expected_plan.steps
+        assert len(engine.captured_initial_plan.steps) == 3
+        assert "verify remaining" in engine.captured_initial_plan.steps[2].title
         assert expected_plan.overview in engine.captured_initial_plan.overview
         # task_prompt first element is the user's original request.
         assert escalation.user_request in engine.captured_task_prompt[0]

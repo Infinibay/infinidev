@@ -16,8 +16,14 @@ from infinidev.engine.analysis.staged_planning import (
     StagedPlanningState,
 )
 from infinidev.engine.engines import run_selected_engine
-from infinidev.engine.engines.base import STATUS_BLOCKED, STATUS_COMPLETED
+from infinidev.engine.engines.base import (
+    EngineResult,
+    STATUS_BLOCKED,
+    STATUS_COMPLETED,
+    TransitionRequest,
+)
 from infinidev.engine.engines.react import ReactAdapter
+from infinidev.engine.engines.staged_adapter import StagedAdapter
 from infinidev.engine.engines.task import TaskAdapter, _bootstrap_step
 from infinidev.engine.history import store
 from infinidev.engine.orchestration import staged_pipeline as staged_pipeline_mod
@@ -244,6 +250,11 @@ class TestReactAdapter:
         # The loop ran plan-free with the react budget.
         assert engine.execute_kwargs["initial_plan"] is None
         assert engine.execute_kwargs["skip_plan"] is True
+        assert engine.execute_kwargs["allow_explore"] is False
+        assert (
+            engine.execute_kwargs["max_prompt_tokens"]
+            == settings.REACT_MAX_PROMPT_TOKENS
+        )
         assert engine.execute_kwargs["max_iterations"] == settings.REACT_MAX_ITERATIONS
 
     def test_review_rework_preserves_plan_free_mode_and_budget(
@@ -428,3 +439,98 @@ class TestCoordinatorReactRoute:
 
         assert result.engine_name == "task"
         assert result.user_message == "ok"
+
+    def test_budget_transition_continues_once_in_staged(
+        self, temp_db, monkeypatch, mode
+    ):
+        mode("react")
+        engine = _LoopEngine("read-only progress", "exhausted")
+        captured = {}
+
+        def exhausted_react(_self, **_kwargs):
+            return EngineResult(
+                engine_name="react",
+                status=STATUS_BLOCKED,
+                user_message="Inspected parser.py; implementation remains.",
+                summary="Repository inspection completed without an edit.",
+                engine=engine,
+                transition_request=TransitionRequest(
+                    target="staged", reason="react_budget_exhausted"
+                ),
+                metrics={"max_tool_calls": 40},
+            )
+
+        def completed_staged(_self, **kwargs):
+            captured.update(kwargs)
+            return EngineResult(
+                engine_name="staged",
+                status=STATUS_COMPLETED,
+                user_message="Implemented and verified.",
+                engine=engine,
+                state=_completed_staged_state(),
+            )
+
+        monkeypatch.setattr(ReactAdapter, "run", exhausted_react)
+        monkeypatch.setattr(StagedAdapter, "run", completed_staged)
+
+        result = run_selected_engine(
+            escalation=_packet("Implement the parser fix"),
+            agent=_Agent(), engine=engine, reviewer=None, hooks=_Hooks(),
+            session_id="sess-react-handoff", project_id=1,
+            workspace_path="/workspace", turn_context="Existing context.",
+        )
+
+        assert result.engine_name == "staged"
+        assert result.status == STATUS_COMPLETED
+        assert captured["preserve_file_tracker_from_handoff"] is True
+        assert "Existing context." in captured["turn_context"]
+        assert (
+            '<engine-handoff authority="RUNTIME_EVIDENCE"'
+            in captured["turn_context"]
+        )
+        assert "Repository inspection completed" in captured["turn_context"]
+
+        run = store.get_run(result.run_id)
+        assert run["engine"] == "react"
+        assert run["status"] == "completed"
+        assert run["digest_json"]["engine"]["transitions"][0]["applied"] is True
+        events = store.list_run_events(result.run_id)
+        switched = [event for event in events if event["event_type"] == "engine_switched"]
+        assert len(switched) == 1
+        assert switched[0]["payload"] == {
+            "from": "react",
+            "proposed_target": "staged",
+            "reason": "react_budget_exhausted",
+            "applied": True,
+        }
+        terminal = [
+            event["event_type"] for event in events
+            if event["event_type"] in {"run_completed", "run_blocked", "run_failed"}
+        ]
+        assert terminal == ["run_completed"]
+
+    def test_staged_adapter_forwards_handoff_tracker_flag(
+        self, temp_db, monkeypatch
+    ):
+        captured = {}
+        engine = _LoopEngine("done", "done")
+
+        def fake_run_staged_goal(**kwargs):
+            captured.update(kwargs)
+            return staged_pipeline_mod.StagedRunResult(
+                text="Goal complete.", engine=engine,
+                state=_completed_staged_state(),
+            )
+
+        monkeypatch.setattr(
+            staged_pipeline_mod, "run_staged_goal", fake_run_staged_goal
+        )
+        result = StagedAdapter().run(
+            escalation=_packet(), agent=_Agent(), engine=engine, reviewer=None,
+            hooks=_Hooks(), session_id="sess-staged-handoff", project_id=1,
+            workspace_path="/workspace",
+            preserve_file_tracker_from_handoff=True,
+        )
+
+        assert result.status == STATUS_COMPLETED
+        assert captured["preserve_file_tracker_from_handoff"] is True

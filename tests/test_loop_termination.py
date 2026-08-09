@@ -24,6 +24,7 @@ from infinidev.engine.loop.engine import (
     _enforce_step_effect,
     _has_substantive_done_evidence,
     _reconcile_step_result,
+    _resource_exhaustion_reason,
     _should_advance_plan,
     _task_requires_edits,
 )
@@ -57,6 +58,32 @@ def test_exhausted_run_still_says_iteration_limit():
     state = LoopState()
     state.history = [ActionRecord(step_index=1, summary="edited auth.py")]
     assert "iteration limit" in _synthesize_final(state, "exhausted").lower()
+
+
+def test_prompt_token_budget_is_an_independent_resource_fuse():
+    ctx = _ctx()
+    ctx.max_total_calls = 40
+    ctx.max_prompt_tokens = 300_000
+    ctx.state.total_tool_calls = 12
+    ctx.state.total_prompt_tokens = 300_001
+
+    reason = _resource_exhaustion_reason(ctx)
+
+    assert reason is not None
+    assert "prompt token limit reached" in reason
+    assert "300001/300000" in reason
+
+
+def test_disabled_prompt_budget_leaves_tool_fuse_authoritative():
+    ctx = _ctx()
+    ctx.max_total_calls = 40
+    ctx.max_prompt_tokens = None
+    ctx.state.total_prompt_tokens = 900_000
+
+    assert _resource_exhaustion_reason(ctx) is None
+
+    ctx.state.total_tool_calls = 40
+    assert "tool call limit reached" in _resource_exhaustion_reason(ctx)
 
 
 def test_synthesize_final_defaults_to_exhausted():

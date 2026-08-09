@@ -123,7 +123,9 @@ class ReactAdapter:
                 task=structured_task,
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=settings.REACT_MAX_TOOL_CALLS,
+                max_prompt_tokens=settings.REACT_MAX_PROMPT_TOKENS,
                 skip_plan=True,
+                allow_explore=False,
             )
         finally:
             agent.deactivate()
@@ -211,6 +213,21 @@ class ReactAdapter:
             metrics={
                 "max_iterations": settings.REACT_MAX_ITERATIONS,
                 "max_tool_calls": settings.REACT_MAX_TOOL_CALLS,
+                "max_prompt_tokens": settings.REACT_MAX_PROMPT_TOKENS,
+                "observed_iterations": getattr(
+                    getattr(engine, "_last_state", None), "iteration_count", 0
+                ),
+                "observed_tool_calls": getattr(
+                    getattr(engine, "_last_state", None), "total_tool_calls", 0
+                ),
+                "observed_prompt_tokens": getattr(
+                    getattr(engine, "_last_state", None), "total_prompt_tokens", 0
+                ),
+                "observed_completion_tokens": getattr(
+                    getattr(engine, "_last_state", None),
+                    "total_completion_tokens",
+                    0,
+                ),
             },
         )
 

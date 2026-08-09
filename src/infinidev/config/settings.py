@@ -190,6 +190,11 @@ class Settings(BaseSettings):
     # per-Task fuse prevents one small Task from inheriting the legacy
     # whole-request limit.
     STAGED_MAX_EXECUTION_TOOL_CALLS_PER_TASK: int = 40
+    # Prompt usage is cumulative across the preserved continuation attempt.
+    # Tool count alone did not stop providers that repeatedly returned large
+    # repository excerpts: a single medium Task exceeded 1.5M prompt tokens
+    # while remaining below its retry-adjusted tool allowance.
+    STAGED_MAX_PROMPT_TOKENS_PER_TASK: int = 600_000
     # One continuation window lets a Task resume from an exact budget boundary
     # without turning the whole Stage over to another planner. The second
     # exhaustion is terminal and reported with the concrete Task evidence.
@@ -256,6 +261,10 @@ class Settings(BaseSettings):
     # Hitting them closes the run as blocked with an escalation request.
     REACT_MAX_ITERATIONS: int = 12
     REACT_MAX_TOOL_CALLS: int = 40
+    # ReAct is the low-overhead path. A provider can consume hundreds of
+    # thousands of prompt tokens while still staying under forty read tools,
+    # so tools alone are not a sufficient fuse. Zero disables this limit.
+    REACT_MAX_PROMPT_TOKENS: int = 300_000
     TASK_MAX_ITERATIONS: int = 50
     TASK_MAX_TOOL_CALLS: int = 160
     # A rolling Task must return to its plan after a bounded amount of work.

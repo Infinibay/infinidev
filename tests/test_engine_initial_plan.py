@@ -166,10 +166,18 @@ class TestPlanningMode:
         assert _is_planning_mode(ctx) is False
 
     def test_fixed_plan_continue_keeps_the_outer_scheduler_step_active(self):
+        from infinidev.engine.loop.plan_step import PlanStep
+
         manager = SimpleNamespace(
             reconcile_task_completion=lambda ctx, result: result,
         )
-        ctx = SimpleNamespace(allow_plan_mutation=False, task=None)
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(index=1, title="Execute Graph leaf", status="active"),
+        ]
+        ctx = SimpleNamespace(
+            allow_plan_mutation=False, task=None, state=state,
+        )
 
         result, edit_blocked = _reconcile_step_result(
             ctx,
@@ -178,6 +186,30 @@ class TestPlanningMode:
         )
 
         assert result.interrupted is True
+        assert edit_blocked is False
+
+    def test_fixed_multi_step_plan_advances_without_mutating_topology(self):
+        from infinidev.engine.loop.plan_step import PlanStep
+
+        manager = SimpleNamespace(
+            reconcile_task_completion=lambda ctx, result: result,
+        )
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(index=1, title="Implement cache", status="active"),
+            PlanStep(index=2, title="Add tests", status="pending"),
+        ]
+        ctx = SimpleNamespace(
+            allow_plan_mutation=False, task=None, state=state,
+        )
+
+        result, edit_blocked = _reconcile_step_result(
+            ctx,
+            StepResult(summary="Cache implemented", status="continue"),
+            manager,
+        )
+
+        assert result.interrupted is False
         assert edit_blocked is False
 
 

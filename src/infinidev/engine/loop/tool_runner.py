@@ -267,8 +267,11 @@ class ToolRunner:
                     )
                 )
 
-            cached_results, executable_batch = self._partition_repeated_reads(
+            plan_results, executable_batch = self._partition_plan_mutations(
                 ctx, batch,
+            )
+            cached_results, executable_batch = self._partition_repeated_reads(
+                ctx, executable_batch,
             )
             is_parallel = len(executable_batch) > 1 and not any(
                 _writes_or_mutates(tc) for tc in batch
@@ -292,10 +295,11 @@ class ToolRunner:
             finally:
                 self._engine._finish_tool_batch()
 
-            if cached_results:
+            synthetic_results = [*plan_results, *cached_results]
+            if synthetic_results:
                 by_id = {
                     tc.id: (tc, result)
-                    for tc, result in [*batch_results, *cached_results]
+                    for tc, result in [*batch_results, *synthetic_results]
                 }
                 batch_results = [by_id[tc.id] for tc in batch]
 
@@ -320,6 +324,49 @@ class ToolRunner:
             self._answer_unreached(ctx, messages, calls, answered)
 
         return action_tool_calls
+
+    @staticmethod
+    def _partition_plan_mutations(
+        ctx: ExecutionContext,
+        batch: list[Any],
+    ) -> tuple[list[tuple[Any, str]], list[Any]]:
+        """Acknowledge out-of-authority plan calls without treating them as errors.
+
+        Some providers emit a familiar plan tool even when its schema is not
+        advertised. In fixed-plan and plan-free runs, dispatching that call
+        produces ``Unknown tool`` and can spend the whole window retrying an
+        operation the outer scheduler deliberately owns. A structured no-op
+        preserves protocol ordering and budget accounting while leaving the
+        plan immutable.
+        """
+        if getattr(ctx, "allow_plan_mutation", True) and not getattr(
+            ctx, "skip_plan", False
+        ):
+            return [], batch
+
+        controlled = {"add_step", "modify_step", "remove_step"}
+        synthetic: list[tuple[Any, str]] = []
+        executable: list[Any] = []
+        active = getattr(getattr(ctx.state, "plan", None), "active_step", None)
+        mode = (
+            "plan_free"
+            if getattr(ctx, "skip_plan", False)
+            else "scheduler_owned"
+        )
+        for tc in batch:
+            if tc.function.name not in controlled:
+                executable.append(tc)
+                continue
+            synthetic.append((tc, json.dumps({
+                "status": "ignored",
+                "reason": mode,
+                "active_step": getattr(active, "title", None),
+                "next_action": (
+                    "Use execution tools for the active work, or close it with "
+                    "step_complete. The plan was not changed."
+                ),
+            })))
+        return synthetic, executable
 
     @staticmethod
     def _read_delivery_identity(

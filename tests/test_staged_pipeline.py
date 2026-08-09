@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from infinidev.config.settings import settings
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
 from infinidev.engine.analysis.staged_planning import (
     BlockGoalDecision,
@@ -228,7 +229,7 @@ def test_completed_stage_recovers_when_only_terminal_planner_protocol_fails(
     assert result.engine._last_status == "completed"
 
 
-def test_empty_task_plan_gets_one_step_from_structured_task() -> None:
+def test_empty_task_plan_gets_bounded_steps_from_structured_task() -> None:
     state = StagedPlanningState(goal=GoalSpec(
         title="Fix widget",
         user_request="Fix the widget and verify it.",
@@ -239,11 +240,78 @@ def test_empty_task_plan_gets_one_step_from_structured_task() -> None:
 
     scoped = _scope_task_plan(Plan(overview="No structured plan", steps=[]), stage, task)
 
-    assert len(scoped.steps) == 1
-    assert scoped.steps[0].title == task.spec.title
-    assert scoped.steps[0].expected_output == task.spec.outcome
+    assert [step.title.split()[0] for step in scoped.steps] == [
+        "Implement", "Verify",
+    ]
+    assert task.spec.acceptance_criteria[0] in scoped.steps[0].detail
+    assert task.spec.acceptance_criteria[0] in scoped.steps[1].detail
     assert "fallback" in scoped.overview.lower()
     assert scoped.rolling_horizon_limit == 1
+
+
+def test_empty_task_plan_splits_behavior_invalidation_and_tests() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Deduplicate reads",
+        user_request="Suppress duplicate reads and test invalidation.",
+        intent="implementation",
+    ))
+    spec = StageTaskSpec(
+        id="dedup",
+        title="Implement read result deduplication",
+        outcome="Repeated unchanged reads are compact and edits invalidate them",
+        acceptance_criteria=[
+            "An exact repeated range returns a compact structured result",
+            "A file edit invalidates the prior read revision",
+            "pytest tests/test_read_dedup.py passes",
+        ],
+    )
+    stage = state.add_stage(_stage("Delivery", [spec]).stage)
+
+    scoped = _scope_task_plan(
+        Plan(overview="No structured plan", steps=[]), stage, stage.tasks[0]
+    )
+
+    assert len(scoped.steps) == 3
+    assert scoped.steps[0].title.startswith("Implement ")
+    assert scoped.steps[1].title.startswith("Integrate ")
+    assert scoped.steps[2].title.startswith("Verify ")
+    assert "pytest tests/test_read_dedup.py passes" in scoped.steps[2].detail
+
+
+def test_narrow_valid_plan_is_repaired_for_uncovered_task_checks() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Deduplicate reads",
+        user_request="Suppress duplicate reads and test invalidation.",
+        intent="implementation",
+    ))
+    spec = StageTaskSpec(
+        id="dedup",
+        title="Implement read result deduplication",
+        outcome="Repeated unchanged reads are compact and edits invalidate them",
+        acceptance_criteria=[
+            "A bounded read repetition cache exists",
+            "The cache is integrated into the read_file execution pipeline",
+            "pytest tests/test_read_dedup.py passes",
+        ],
+    )
+    stage = state.add_stage(_stage("Delivery", [spec]).stage)
+    emitted = Plan(
+        overview="Create the cache storage.",
+        steps=[PlanStepSpec(
+            title="Add bounded read repetition cache",
+            detail="Define the cache and its maximum size.",
+            expected_output="A bounded read repetition cache exists",
+        )],
+    )
+
+    scoped = _scope_task_plan(emitted, stage, stage.tasks[0])
+
+    assert len(scoped.steps) == 3
+    assert scoped.steps[0].title == "Add bounded read repetition cache"
+    assert "execution pipeline" in scoped.steps[1].detail
+    assert scoped.steps[2].title.startswith("Verify ")
+    assert "pytest tests/test_read_dedup.py passes" in scoped.steps[2].detail
+    assert "coverage repair" in scoped.overview.lower()
 
 
 def test_first_bounded_path_task_uses_local_plan(
@@ -567,7 +635,47 @@ def test_exhausted_task_prevents_false_goal_completion(
     )
     assert runtime["executions"][1]["preserve_task_state"] is True
     assert runtime["executions"][1]["max_total_tool_calls"] == 80
+    assert (
+        runtime["executions"][1]["max_prompt_tokens"]
+        == settings.STAGED_MAX_PROMPT_TOKENS_PER_TASK
+    )
     assert "Task attempt" in result.text
+
+
+def test_prompt_exhausted_task_does_not_retry(
+    temp_db, monkeypatch, runtime,
+):
+    def exhausted_execute(**kwargs):
+        runtime["executions"].append(kwargs)
+        engine = kwargs["engine"]
+        engine._last_status = "exhausted"
+        engine._last_state = SimpleNamespace(
+            total_prompt_tokens=settings.STAGED_MAX_PROMPT_TOKENS_PER_TASK,
+        )
+        engine.steps = [{"title": "budget exhausted", "status": "active"}]
+        return "prompt token limit reached", engine
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._run_execution_phase",
+        exhausted_execute,
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Attempt", [_task("attempt")]),
+        _complete("The queue is empty"),
+    ])
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=_Engine(), reviewer=object(),
+        hooks=_Hooks(), session_id="prompt-exhausted-task", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "blocked"
+    assert len(runtime["executions"]) == 1
+    assert (
+        runtime["executions"][0]["max_prompt_tokens"]
+        == settings.STAGED_MAX_PROMPT_TOKENS_PER_TASK
+    )
 
 
 def test_blocked_task_does_not_suppress_independent_ready_task(

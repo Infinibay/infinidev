@@ -18,6 +18,7 @@ docs/GRAPH_ENGINE_BETA_DESIGN.md §8.4, §10 and §16.
 
 from __future__ import annotations
 
+from html import escape
 import logging
 from typing import Any
 
@@ -47,6 +48,8 @@ from infinidev.engine.history.digest import (
 )
 
 logger = logging.getLogger(__name__)
+
+_HANDOFF_CONTEXT_LIMIT = 6000
 
 
 def _show_selection(selection: EngineSelection, hooks: Any) -> None:
@@ -107,6 +110,120 @@ def _staged_projection_events(state: Any) -> list[tuple[str, str | None, dict[st
             },
         ))
     return triples
+
+
+def _transition_handoff_context(
+    prior_context: str,
+    result: EngineResult,
+    *,
+    source: str,
+    reason: str,
+) -> str:
+    """Build a bounded runtime-evidence capsule for a monotonic engine switch."""
+    work_summary = ""
+    build_summary = getattr(result.engine, "build_work_summary", None)
+    if callable(build_summary):
+        with best_effort("engine transition work summary failed"):
+            work_summary = build_summary(result.user_message, result.status) or ""
+
+    evidence = work_summary or result.summary or result.user_message
+    body = escape((evidence or "No reusable progress was reported.").strip())
+    prefix = (
+        '<engine-handoff authority="RUNTIME_EVIDENCE" '
+        f'from="{escape(source)}" to="staged">\n'
+        f"Reason: {escape(reason)}\n"
+        "The previous engine stopped at a resource fuse. Reuse verified repository "
+        "state and the progress below; inspect before repeating work. This evidence "
+        "does not expand the user goal.\n"
+    )
+    suffix = "\n</engine-handoff>"
+    prior = prior_context.rstrip()[-1800:]
+    separator = "\n\n" if prior else ""
+    body_limit = max(
+        0,
+        _HANDOFF_CONTEXT_LIMIT
+        - len(prior)
+        - len(separator)
+        - len(prefix)
+        - len(suffix),
+    )
+    return f"{prior}{separator}{prefix}{body[:body_limit]}{suffix}"
+
+
+def _apply_transition(
+    result: EngineResult,
+    *,
+    source: str,
+    dispatch: dict[str, Any],
+    hooks: Any,
+) -> tuple[EngineResult, dict[str, Any] | None]:
+    """Apply at most one safe, monotonic adapter transition.
+
+    ReAct and Graph may outgrow their bounded execution domains. Their only
+    currently supported transition is toward Staged, which is more structured
+    and does not transition back. Keeping the decision here makes the fuse a
+    recovery boundary instead of a user-visible dead end without introducing
+    an LLM routing call or an oscillation loop.
+    """
+    request = result.transition_request
+    if request is None:
+        return result, None
+
+    event = {
+        "from": source,
+        "proposed_target": request.target,
+        "reason": request.reason,
+        "applied": False,
+    }
+    if (
+        result.status != STATUS_BLOCKED
+        or source not in {ENGINE_REACT, ENGINE_GRAPH_BETA}
+        or request.target != ENGINE_STAGED
+    ):
+        return result, event
+
+    with best_effort("engine transition notice failed"):
+        hooks.on_status(
+            "warn",
+            f"{source} reached its safety fuse; continuing once with staged.",
+        )
+
+    staged_dispatch = dict(dispatch)
+    staged_dispatch["turn_context"] = _transition_handoff_context(
+        str(dispatch.get("turn_context", "")),
+        result,
+        source=source,
+        reason=request.reason,
+    )
+    staged_dispatch["preserve_file_tracker_from_handoff"] = True
+
+    try:
+        transitioned = StagedAdapter().run(**staged_dispatch)
+    except Exception as exc:
+        logger.exception("Engine transition %s -> staged failed", source)
+        transitioned = EngineResult(
+            engine_name=ENGINE_STAGED,
+            status=STATUS_FAILED,
+            user_message=(
+                f"The automatic {source} → staged recovery failed: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            summary=f"transition exception: {type(exc).__name__}",
+            engine=dispatch.get("engine"),
+            resume_token=dispatch.get("session_id"),
+        )
+
+    transitioned.metrics = {
+        **transitioned.metrics,
+        "engine_transition": {
+            "from": source,
+            "to": ENGINE_STAGED,
+            "reason": request.reason,
+            "source_metrics": result.metrics,
+        },
+    }
+    event["applied"] = True
+    return transitioned, event
 
 
 def run_selected_engine(
@@ -222,6 +339,12 @@ def run_selected_engine(
             resume_token=session_id,
         )
 
+    result, transition_event = _apply_transition(
+        result,
+        source=selection.engine,
+        dispatch=dispatch,
+        hooks=hooks,
+    )
     result.run_id = run_id
 
     # ── Event log: close the run ───────────────────────────────────────────
@@ -236,19 +359,15 @@ def run_selected_engine(
     }.get(result.status, ev.RUN_FAILED)
 
     with best_effort("engine run closing events failed"):
-        if selection.engine == ENGINE_STAGED and result.state is not None:
+        if result.engine_name == ENGINE_STAGED and result.state is not None:
             for event_type, node_id, payload in _staged_projection_events(result.state):
                 store.append_event(
                     run_id, session_id, event_type, payload, node_id=node_id
                 )
-        if result.transition_request is not None:
+        if transition_event is not None:
             store.append_event(
                 run_id, session_id, ev.ENGINE_SWITCHED,
-                {
-                    "proposed_target": result.transition_request.target,
-                    "reason": result.transition_request.reason,
-                    "applied": False,
-                },
+                transition_event,
             )
         store.append_event(
             run_id, session_id, terminal_event,
@@ -260,7 +379,7 @@ def run_selected_engine(
             },
         )
 
-        if selection.engine == ENGINE_STAGED and result.state is not None:
+        if result.engine_name == ENGINE_STAGED and result.state is not None:
             digest = digest_from_staged_state(
                 result.state,
                 run_id=run_id,
@@ -280,6 +399,8 @@ def run_selected_engine(
                 selection=selection.to_payload(),
                 result_text=result.user_message,
             )
+        if transition_event is not None:
+            digest["engine"]["transitions"] = [transition_event]
         store.append_event(run_id, session_id, ev.DIGEST_CREATED, digest)
         store.finish_run(run_id, result.status, digest=digest, metrics=result.metrics)
 

@@ -27,9 +27,10 @@ STATUS_FAILED = "failed"
 class TransitionRequest:
     """A persisted, explainable request to switch engines.
 
-    Adapters propose; the coordinator (or the user) decides. Proposing a
-    transition never changes the current run — that is how oscillation is
-    kept out of the loop until hysteresis limits exist (§8.5).
+    Adapters propose; the coordinator (or the user) decides. The coordinator
+    may apply one monotonic ReAct/Graph-to-Staged recovery within the current
+    run. Unsupported or second-order transitions remain proposals, preventing
+    oscillation (§8.5).
     """
 
     target: str

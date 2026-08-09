@@ -16,79 +16,72 @@ They don't exercise behaviour — just the import graph.
 
 from __future__ import annotations
 
-import importlib
+import subprocess
 import sys
 
-import pytest
+def _fresh_import(
+    modname: str,
+    *,
+    exports: tuple[str, ...] = (),
+    absent_modules: tuple[str, ...] = (),
+) -> None:
+    """Import one entry point in a clean interpreter and assert its surface.
 
-
-@pytest.fixture(autouse=True)
-def _restore_infinidev_modules():
-    """Snapshot ``sys.modules`` for ``infinidev.*`` and restore on teardown.
-
-    ``_fresh_import`` blows away every cached ``infinidev`` module so the
-    next ``importlib.import_module`` runs the import graph from scratch
-    (the only way to detect a top-level circular-import regression).
-    Without restoration, subsequent tests in the suite end up with mixed
-    module identities — they hold references to the *old* ``settings``
-    singleton or DB connection cache while freshly imported submodules
-    bind to a *new* one. The most visible symptom is fixtures setting
-    ``settings.DB_PATH = temp_db_path`` while production code reads from
-    a different ``settings`` object pointing at the user's real
-    ``~/.infinidev/infinidev.db`` (UNIQUE-constraint failures across
-    tests that should be isolated).
+    Removing live modules from ``sys.modules`` is not thread-safe: deferred
+    embedding workers can still be importing them. A subprocess is both a
+    truer cold-start check and isolated from pytest's background workers.
     """
-    saved = {n: m for n, m in sys.modules.items() if n.startswith("infinidev")}
-    yield
-    for name in [n for n in sys.modules if n.startswith("infinidev")]:
-        del sys.modules[name]
-    sys.modules.update(saved)
-
-
-def _fresh_import(modname: str):
-    """Drop every cached module under ``infinidev`` and re-import *modname*.
-
-    Required because pytest's test order means the modules under test
-    may already be loaded from an earlier test — and a bad top-level
-    import only fails on the FIRST load. Without this, the regression
-    would be invisible in CI.
-    """
-    for name in [m for m in sys.modules if m.startswith("infinidev")]:
-        del sys.modules[name]
-    return importlib.import_module(modname)
+    script = (
+        "import importlib, sys\n"
+        f"module = importlib.import_module({modname!r})\n"
+        f"exports = {exports!r}\n"
+        f"absent = {absent_modules!r}\n"
+        "assert all(hasattr(module, name) for name in exports)\n"
+        "assert all(name not in sys.modules for name in absent)\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 class TestImportAcyclic:
     def test_cli_main_imports_cleanly(self):
-        mod = _fresh_import("infinidev.cli.main")
-        assert hasattr(mod, "main")
+        _fresh_import("infinidev.cli.main", exports=("main",))
 
     def test_pipeline_imports_cleanly(self):
-        mod = _fresh_import("infinidev.engine.orchestration.pipeline")
-        assert hasattr(mod, "run_task")
+        _fresh_import(
+            "infinidev.engine.orchestration.pipeline", exports=("run_task",)
+        )
 
     def test_planner_imports_cleanly(self):
-        mod = _fresh_import("infinidev.engine.analysis.planner")
-        assert hasattr(mod, "run_planner")
+        _fresh_import("infinidev.engine.analysis.planner", exports=("run_planner",))
 
     def test_chat_agent_imports_cleanly(self):
-        mod = _fresh_import("infinidev.engine.orchestration.chat_agent")
-        assert hasattr(mod, "run_chat_agent")
+        _fresh_import(
+            "infinidev.engine.orchestration.chat_agent", exports=("run_chat_agent",)
+        )
 
     def test_orchestration_package_imports_cleanly(self):
-        mod = _fresh_import("infinidev.engine.orchestration")
-        assert hasattr(mod, "run_task")
-        assert hasattr(mod, "OrchestrationHooks")
+        _fresh_import(
+            "infinidev.engine.orchestration",
+            exports=("run_task", "OrchestrationHooks"),
+        )
 
     def test_guidance_library_imports_cleanly(self):
-        mod = _fresh_import("infinidev.engine.guidance.library")
-        assert hasattr(mod, "GuidanceEntry")
+        _fresh_import("infinidev.engine.guidance.library", exports=("GuidanceEntry",))
 
     def test_guidance_public_exports_import_cleanly(self):
-        mod = _fresh_import("infinidev.engine.guidance")
-        assert hasattr(mod, "detect_stuck_pattern")
-        assert hasattr(mod, "drain_pending_guidance")
+        _fresh_import(
+            "infinidev.engine.guidance",
+            exports=("detect_stuck_pattern", "drain_pending_guidance"),
+        )
 
     def test_loop_models_imports_without_loading_loop_engine(self):
-        _fresh_import("infinidev.engine.loop.models")
-        assert "infinidev.engine.loop.engine" not in sys.modules
+        _fresh_import(
+            "infinidev.engine.loop.models",
+            absent_modules=("infinidev.engine.loop.engine",),
+        )

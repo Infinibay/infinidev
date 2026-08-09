@@ -451,6 +451,7 @@ def _run_execution_phase(
     initial_edit_evidence: bool = False,
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
+    max_prompt_tokens: int | None = None,
     max_tool_calls_per_action: int | None = None,
     allow_explore: bool | None = None,
     allow_plan_mutation: bool | None = None,
@@ -501,6 +502,8 @@ def _run_execution_phase(
                 execute_kwargs["max_iterations"] = max_iterations
             if max_total_tool_calls is not None:
                 execute_kwargs["max_total_tool_calls"] = max_total_tool_calls
+            if max_prompt_tokens is not None:
+                execute_kwargs["max_prompt_tokens"] = max_prompt_tokens
             if max_tool_calls_per_action is not None:
                 execute_kwargs["max_tool_calls_per_action"] = max_tool_calls_per_action
             if allow_explore is not None:

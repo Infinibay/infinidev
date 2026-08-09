@@ -52,6 +52,9 @@ class StagedAdapter:
             max_execution_tool_calls_per_task=kwargs.get(
                 "max_execution_tool_calls_per_task"
             ),
+            preserve_file_tracker_from_handoff=kwargs.get(
+                "preserve_file_tracker_from_handoff", False
+            ),
         )
 
         state = staged_run.state
