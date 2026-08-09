@@ -1,10 +1,12 @@
 """Tests for loop engine helper functions (not the full execute loop)."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from infinidev.engine.llm_client import (
+    call_llm,
     is_transient as _is_transient,
     is_malformed_tool_call as _is_malformed_tool_call,
 )
@@ -50,6 +52,118 @@ class TestTransientErrorDetection:
     def test_unknown_error_not_transient(self):
         """Random error message is not transient."""
         assert _is_transient(Exception("something completely different")) is False
+
+
+class TestLLMRetryBudget:
+    """The engine owns one retry budget instead of nesting two loops."""
+
+    @staticmethod
+    def _stub_capabilities(monkeypatch):
+        caps = SimpleNamespace(
+            supports_json_mode=False,
+            supports_tool_choice_required=True,
+        )
+        monkeypatch.setattr(
+            "infinidev.config.model_capabilities.get_model_capabilities",
+            lambda: caps,
+        )
+
+    def test_call_disables_litellm_transport_retries(self, monkeypatch):
+        """call_llm retries itself, so its individual transport call retries zero times."""
+        self._stub_capabilities(monkeypatch)
+        seen = {}
+        response = object()
+        monkeypatch.setattr(
+            "litellm.completion",
+            lambda **kwargs: seen.update(kwargs) or response,
+        )
+
+        params = {
+            "model": "minimax/MiniMax-M3",
+            "num_retries": 3,
+            "retry_strategy": "exponential_backoff_retry",
+        }
+        result = call_llm(
+            params,
+            [{"role": "user", "content": "x"}],
+            retry_attempts=1,
+        )
+
+        assert result is response
+
+        assert seen["num_retries"] == 0
+        assert "retry_strategy" not in seen
+        assert params["num_retries"] == 3
+
+    def test_configured_retries_are_total_outer_budget(self, monkeypatch):
+        """N configured retries mean one initial call plus exactly N retries."""
+        from infinidev.config.settings import settings
+        from infinidev.engine import llm_client
+
+        self._stub_capabilities(monkeypatch)
+        calls = 0
+
+        def fail_with_timeout(**kwargs):
+            nonlocal calls
+            calls += 1
+            assert kwargs["num_retries"] == 0
+            raise Exception("request timeout")
+
+        monkeypatch.setattr(settings, "LLM_NUM_RETRIES", 2)
+        monkeypatch.setattr("litellm.completion", fail_with_timeout)
+        monkeypatch.setattr(llm_client.time, "sleep", lambda delay: None)
+
+        with pytest.raises(Exception, match="request timeout"):
+            call_llm({"model": "minimax/MiniMax-M3"}, [{"role": "user", "content": "x"}])
+
+        assert calls == 3
+
+
+class TestRollingHorizonToolRouting:
+    """Invalid planning actions are removed before the model samples them."""
+
+    @staticmethod
+    def _schema(name):
+        return {"type": "function", "function": {"name": name}}
+
+    def test_full_horizon_hides_add_step(self):
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        plan = SimpleNamespace(
+            rolling_horizon_limit=2,
+            steps=[
+                SimpleNamespace(status="active"),
+                SimpleNamespace(status="pending"),
+            ],
+        )
+        schemas = [self._schema("read_file"), self._schema("add_step")]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=plan),
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+
+        assert [schema["function"]["name"] for schema in available] == ["read_file"]
+
+    def test_open_horizon_keeps_add_step(self):
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        plan = SimpleNamespace(
+            rolling_horizon_limit=2,
+            steps=[SimpleNamespace(status="active")],
+        )
+        schemas = [self._schema("read_file"), self._schema("add_step")]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=plan),
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+
+        assert available is schemas
 
 
 # ── _is_malformed_tool_call ──────────────────────────────────────────────────

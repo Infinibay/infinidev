@@ -134,6 +134,11 @@ class TaskAdapter:
             max_iterations=settings.TASK_MAX_ITERATIONS,
             max_total_tool_calls=settings.TASK_MAX_TOOL_CALLS,
             max_tool_calls_per_action=settings.TASK_MAX_TOOL_CALLS_PER_STEP,
+            # Task already has a durable developer with repository tools and
+            # compact step summaries. Spawning a second exploration engine
+            # duplicates that investigation and discards most of its context.
+            # Dedicated /explore remains available for tree-shaped research.
+            allow_explore=False,
         )
         if getattr(used_engine, "is_cancelled", False):
             return EngineResult(

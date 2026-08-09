@@ -16,10 +16,43 @@ logger = logging.getLogger(__name__)
 
 _SIMILAR_OPEN_STEP_THRESHOLD = 0.80
 
+_STEP_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("discover", re.compile(
+        r"\b(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|trace|understand)\b"
+    )),
+    ("change", re.compile(
+        r"\b(?:add|change|create|edit|fix|implement|refactor|rewrite|update)\b"
+    )),
+    ("verify", re.compile(
+        r"\b(?:check|run|test|validate|verification|verify)\b"
+    )),
+    ("document", re.compile(r"\b(?:document|documentation|explain|write docs?)\b")),
+    ("design", re.compile(r"\b(?:design|plan|prototype)\b")),
+)
+_PATH_RE = re.compile(r"(?:[a-zA-Z0-9_.-]+/)+[a-zA-Z0-9_.-]+")
+_IDENTIFIER_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+
 
 def _normalized_step_title(title: str) -> str:
     """Normalize superficial title differences before overlap scoring."""
     return " ".join(re.findall(r"[a-z0-9_./-]+", title.casefold()))
+
+
+def _step_phase(title: str) -> str:
+    """Classify the action without asking another model."""
+    normalized = title.casefold()
+    for phase, pattern in _STEP_PHASE_PATTERNS:
+        if pattern.search(normalized):
+            return phase
+    return ""
+
+
+def _step_targets(title: str) -> set[str]:
+    """Extract concrete paths and code identifiers named by a plan step."""
+    normalized = title.casefold()
+    paths = {match.rstrip(".,:;)") for match in _PATH_RE.findall(normalized)}
+    identifiers = set(_IDENTIFIER_RE.findall(normalized))
+    return paths | identifiers
 
 # Fields the model may refine on a user-approved step.
 #
@@ -117,6 +150,8 @@ class LoopPlan(BaseModel):
         normalized = _normalized_step_title(title)
         if not normalized:
             return None
+        phase = _step_phase(title)
+        targets = _step_targets(title)
         for step in self.steps:
             if step.status not in ("pending", "active"):
                 continue
@@ -124,7 +159,12 @@ class LoopPlan(BaseModel):
             if not existing:
                 continue
             similarity = SequenceMatcher(None, normalized, existing).ratio()
-            if similarity >= _SIMILAR_OPEN_STEP_THRESHOLD:
+            same_concrete_work = (
+                bool(phase)
+                and phase == _step_phase(step.title)
+                and bool(targets & _step_targets(step.title))
+            )
+            if similarity >= _SIMILAR_OPEN_STEP_THRESHOLD or same_concrete_work:
                 return step
         return None
 

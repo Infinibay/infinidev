@@ -303,7 +303,7 @@ class TestPublicPlanTools:
         assert "cannot be removed" in result["error"]
         assert state.plan.steps[1].status == "pending"
 
-    def test_rolling_horizon_refuses_a_fourth_open_step(self, bound_tool):
+    def test_rolling_horizon_defers_a_fourth_open_step(self, bound_tool):
         state = LoopState()
         state.plan = LoopPlan(rolling_horizon_limit=3)
         state.plan.steps = [
@@ -316,7 +316,7 @@ class TestPublicPlanTools:
 
         result = json.loads(tool._run(title="Document auth.py"))
 
-        assert "Rolling horizon" in result["error"]
+        assert result["status"] == "horizon_full"
         assert len(state.plan.steps) == 3
 
     def test_add_step_reuses_a_near_duplicate_open_step(self, bound_tool):
@@ -355,6 +355,48 @@ class TestPublicPlanTools:
 
         assert result["status"] == "added"
         assert len(state.plan.steps) == 2
+
+    def test_add_step_merges_discovery_steps_for_the_same_file(self, bound_tool):
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(
+                index=1,
+                title=(
+                    "Explore repo and identify serialization in "
+                    "django/db/backends/base/creation.py"
+                ),
+                status="active",
+            ),
+        ]
+        self._bind(state)
+
+        result = json.loads(bound_tool(AddStepTool)._run(
+            title=(
+                "Read django/db/backends/base/creation.py and locate "
+                "serialize methods"
+            ),
+        ))
+
+        assert result["status"] == "duplicate"
+        assert len(state.plan.steps) == 1
+
+    def test_add_step_merges_change_steps_for_the_same_symbol(self, bound_tool):
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(
+                index=1,
+                title="Implement deserialize_db_from_string with deferred constraints",
+                status="active",
+            ),
+        ]
+        self._bind(state)
+
+        result = json.loads(bound_tool(AddStepTool)._run(
+            title="Rewrite deserialize_db_from_string using FK dependency ordering",
+        ))
+
+        assert result["status"] == "duplicate"
+        assert len(state.plan.steps) == 1
 
 
 def test_step_result_operations_cannot_add_duplicate_open_work():

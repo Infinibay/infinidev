@@ -216,6 +216,40 @@ def _resolved_base_url(provider_id: str, configured_base_url: str) -> str:
     return resolve_base_url(provider_id, configured_base_url)
 
 
+def _effective_timeout(provider_id: str, configured_timeout: int | float) -> float | None:
+    """Return a bounded timeout for hosted APIs and the full local timeout.
+
+    Provider ownership is taken from the registry instead of a hand-maintained
+    name list. Editable endpoints are controlled by the user and include the
+    local Ollama, llama.cpp, vLLM, and generic OpenAI-compatible routes. Fixed
+    endpoints are hosted services where a silent request should return control
+    to the engine within a recoverable amount of time.
+    """
+    timeout = float(configured_timeout)
+    if timeout <= 0:
+        return None
+
+    from infinidev.config.providers import PROVIDERS
+
+    provider = PROVIDERS.get(provider_id)
+    if provider is not None and provider.base_url_editable:
+        return timeout
+
+    remote_cap = float(settings.LLM_REMOTE_TIMEOUT)
+    if remote_cap <= 0:
+        return timeout
+    return min(timeout, remote_cap)
+
+
+def _apply_timeout(
+    params: dict[str, Any], provider_id: str, configured_timeout: int | float
+) -> None:
+    """Apply the provider-aware request timeout when timeout is enabled."""
+    timeout = _effective_timeout(provider_id, configured_timeout)
+    if timeout is not None:
+        params["timeout"] = timeout
+
+
 # ── ChatGPT subscription (Codex) ─────────────────────────────────────
 
 CHATGPT_SUBSCRIPTION_PROVIDER = "openai_subscription"
@@ -539,8 +573,7 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
     if base_url and not is_native:
         params["api_base"] = base_url
 
-    if settings.LLM_TIMEOUT:
-        params["timeout"] = float(settings.LLM_TIMEOUT)
+    _apply_timeout(params, provider_id, settings.LLM_TIMEOUT)
 
     if provider_id == "ollama" and settings.OLLAMA_NUM_CTX > 0:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
@@ -595,8 +628,7 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
     if base_url and not is_native:
         params["api_base"] = base_url
 
-    if settings.LLM_TIMEOUT:
-        params["timeout"] = float(settings.LLM_TIMEOUT)
+    _apply_timeout(params, provider_id, settings.LLM_TIMEOUT)
 
     # num_ctx only matters for Ollama-style local providers
     if provider_id == "ollama" and settings.OLLAMA_NUM_CTX > 0:
@@ -650,8 +682,7 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
     if base_url and not is_native:
         params["api_base"] = base_url
 
-    if settings.ASSISTANT_LLM_TIMEOUT:
-        params["timeout"] = float(settings.ASSISTANT_LLM_TIMEOUT)
+    _apply_timeout(params, provider_id, settings.ASSISTANT_LLM_TIMEOUT)
 
     if provider_id == "ollama" and settings.OLLAMA_NUM_CTX > 0:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
@@ -697,8 +728,7 @@ def get_litellm_params() -> dict[str, Any]:
         if base_url:
             params["api_base"] = base_url
 
-    if settings.LLM_TIMEOUT:
-        params["timeout"] = float(settings.LLM_TIMEOUT)
+    _apply_timeout(params, settings.LLM_PROVIDER, settings.LLM_TIMEOUT)
 
     # Retry transient provider errors (e.g. OpenRouter mid-stream
     # "Network connection lost"). LiteLLM retries APIError / Timeout /

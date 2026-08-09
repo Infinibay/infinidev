@@ -21,6 +21,7 @@ from infinidev.engine.loop.action_record import ActionRecord
 from infinidev.engine.loop.engine import (
     _apply_exploration_policy,
     _enforce_edit_requirement,
+    _enforce_step_effect,
     _has_substantive_done_evidence,
     _reconcile_step_result,
     _should_advance_plan,
@@ -178,7 +179,7 @@ def test_bounded_rework_demotes_exploration_to_direct_continuation():
 
     assert changed is True
     assert result.status == "continue"
-    assert "supplied failure evidence" in result.summary
+    assert "direct repository tools" in result.summary
 
 
 def test_first_step_done_with_tools_and_summary_is_substantive():
@@ -230,6 +231,56 @@ def test_edit_requirement_preserves_the_active_step_before_plan_advance():
     assert result.final_answer is None
     assert result.interrupted is True
     assert _should_advance_plan(result) is False
+
+
+def test_implementation_step_cannot_close_without_an_edit():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Implement the parser fix", status="active"),
+    ]
+    result = StepResult(summary="Read the parser and planned tests", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.interrupted is True
+    assert _should_advance_plan(result) is False
+
+
+def test_implementation_step_closes_with_current_edit_evidence():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Fix deserialize_db_from_string", status="active"),
+    ]
+    result = StepResult(summary="Implemented the fix", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited={"creation.py"})
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert _should_advance_plan(result) is True
+
+
+def test_implementation_step_remembers_edit_from_budget_continuation():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=3, title="Implement the parser fix", status="active"),
+    ]
+    ctx.state.history = [
+        ActionRecord(
+            step_index=3,
+            summary="Budget boundary after edit",
+            changes_made="Modified: parser.py",
+        ),
+    ]
+    result = StepResult(summary="Focused test passed", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert _should_advance_plan(result) is True
 
 
 def test_budget_interruption_resumes_the_same_plan_step():

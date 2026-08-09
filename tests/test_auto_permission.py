@@ -306,6 +306,17 @@ class TestNonInteractiveTaskAuthority:
             "python -m pytest tests/test_tags.py -v 2>&1 | tail -50",
         ) is True
 
+    def test_explicit_test_request_allows_django_runner_and_tail(self):
+        handler = make_noninteractive_permission_handler(
+            "Add a regression test and run the relevant Django tests."
+        )
+
+        assert handler(
+            "execute_command",
+            "",
+            "python tests/runtests.py backends.base.test_creation -v 2 2>&1 | tail -40",
+        ) is True
+
     @pytest.mark.parametrize(
         "command",
         [

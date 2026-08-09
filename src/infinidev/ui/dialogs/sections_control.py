@@ -36,6 +36,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
         ("LLM_TIMEOUT", "LLM request timeout in seconds", "int"),
+        ("LLM_REMOTE_TIMEOUT", "Hosted-provider timeout cap (0 = disabled)", "int"),
     ],
     "Embedding": [
         ("EMBEDDING_PROVIDER", "Embedding provider", "select:ollama,openai,huggingface"),
@@ -154,5 +155,4 @@ class SectionsControl(UIControl):
             cursor_position=Point(x=0, y=cursor_row),
             show_cursor=False,
         )
-
 

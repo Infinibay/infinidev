@@ -121,10 +121,15 @@ class AddStepTool(InfinibayBaseTool):
             step.status in ("pending", "active") for step in plan.steps
         )
         if horizon_limit and open_steps >= horizon_limit:
-            return self._error(
-                f"Rolling horizon already has {open_steps}/{horizon_limit} open steps. "
-                "Execute, remove, or complete one before planning further ahead."
-            )
+            return self._success({
+                "status": "horizon_full",
+                "open_steps": open_steps,
+                "horizon_limit": horizon_limit,
+                "message": (
+                    "The rolling horizon is full. This step was not added; "
+                    "execute or complete existing work before extending it."
+                ),
+            })
 
         # ``before`` and ``index`` name the same slot — the step lands there and
         # whatever was pending at that number shifts down. They differ only in

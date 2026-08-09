@@ -62,6 +62,21 @@ def test_recovery_gate_is_bounded_to_one_correction_turn_per_step() -> None:
     assert engine._step_gate._recoverable_tool_error(ctx, call, messages) is False
 
 
+def test_model_reported_tool_surface_miss_requires_a_corrected_attempt() -> None:
+    engine = LoopEngine()
+    call = SimpleNamespace(
+        id="complete-1",
+        function=SimpleNamespace(arguments=(
+            '{"summary":"The shell tool advertised to this turn is not callable",'
+            '"status":"blocked"}'
+        )),
+    )
+    messages = _messages('{"status":"ok"}')
+
+    assert engine._step_gate._recoverable_tool_error(_ctx(), call, messages) is True
+    assert "execute_command" in messages[-1]["content"]
+
+
 def test_unrelated_tool_failure_can_still_report_blocked() -> None:
     engine = LoopEngine()
     messages = _messages('{"error":"Permission denied by user"}')

@@ -47,6 +47,7 @@ from infinidev.engine.loop.guardrail_runner import apply_guardrail
 from infinidev.engine.loop.guidance_handler import GuidanceHandler
 from infinidev.engine.loop.llm_caller import LLMCaller, LLMCallResult, ClassifiedCalls
 from infinidev.engine.loop.loop_guard import LoopGuard
+from infinidev.engine.loop.loop_plan import _step_phase
 from infinidev.engine.loop.models import ActionRecord, LoopState, StepResult
 from infinidev.engine.loop.step_complete_gate import (
     StepCompleteGate,
@@ -143,15 +144,15 @@ def _is_planning_mode(ctx: ExecutionContext) -> bool:
 def _apply_exploration_policy(
     ctx: ExecutionContext, step_result: StepResult,
 ) -> bool:
-    """Demote exploration when the caller already supplied failure evidence."""
+    """Keep bounded engines on their own direct-tool execution path."""
     if step_result.status != "explore" or ctx.allow_explore:
         return False
     step_result.status = "continue"
     step_result.interrupted = True
     step_result.summary = (
         f"{step_result.summary}\n\n"
-        "Exploration was skipped in this bounded rework run; use the supplied "
-        "failure evidence and continue with direct tools."
+        "Tree delegation is disabled for this bounded run. Continue on this "
+        "step with direct repository tools and the evidence already gathered."
     ).strip()
     return True
 
@@ -214,6 +215,40 @@ def _enforce_edit_requirement(
         f"{step_result.summary.rstrip()} "
         "Completion was deferred because this write Task has not made a "
         "successful edit yet."
+    ).strip()
+    return True
+
+
+def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool:
+    """Keep a change Step active until it has concrete edit evidence.
+
+    The model owns its plan, but a Step titled ``Implement`` or ``Fix`` is an
+    observable commitment. Reads and more planning can refine that work; they
+    cannot satisfy it. Evidence survives budget-boundary continuations through
+    ActionRecord.changes_made, so a later test-only turn may still close a Step
+    that edited successfully on its previous attempt.
+    """
+    if step_result.interrupted or step_result.status not in {"continue", "done"}:
+        return False
+    active = getattr(getattr(ctx.state, "plan", None), "active_step", None)
+    if active is None or _step_phase(active.title) != "change":
+        return False
+    tracker = getattr(step_result, "behavior_tracker", None)
+    edited_now = bool(getattr(tracker, "files_edited", ()))
+    edited_before = any(
+        record.step_index == active.index and bool(record.changes_made)
+        for record in getattr(ctx.state, "history", ())
+    )
+    if edited_now or edited_before:
+        return False
+
+    step_result.status = "continue"
+    step_result.interrupted = True
+    step_result.final_answer = None
+    step_result.summary = (
+        f"{step_result.summary.rstrip()} "
+        "This implementation Step remains active because no successful "
+        "workspace edit was observed yet."
     ).strip()
     return True
 
@@ -551,8 +586,16 @@ class LoopEngine(AgentEngine):
             if _apply_exploration_policy(ctx, step_result):
                 _emit_log(
                     "warning",
-                    f"{_YELLOW}⚠ Exploration skipped during bounded rework; "
-                    f"continuing from supplied failure evidence{_RESET}",
+                    f"{_YELLOW}⚠ Tree delegation disabled for this run; "
+                    f"continuing with direct repository tools{_RESET}",
+                    project_id=ctx.project_id,
+                    agent_id=ctx.agent_id,
+                )
+            if _enforce_step_effect(ctx, step_result):
+                _emit_log(
+                    "warning",
+                    f"{_YELLOW}⚠ Implementation Step closed without an edit — "
+                    f"resuming the same Step{_RESET}",
                     project_id=ctx.project_id,
                     agent_id=ctx.agent_id,
                 )

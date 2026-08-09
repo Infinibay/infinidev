@@ -26,6 +26,7 @@ class TestSettings:
         assert s.MAX_FILE_SIZE_BYTES == 5 * 1024 * 1024
         assert s.SANDBOX_ENABLED is False
         assert s.DEDUP_SIMILARITY_THRESHOLD == 0.82
+        assert s.LLM_REMOTE_TIMEOUT == 300
 
     def test_load_from_json_file(self, tmp_path):
         """Settings loaded from JSON file."""
@@ -167,6 +168,84 @@ class TestLLMConfig:
             settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL = original
 
         assert params["api_base"] == "http://gpu-host:11434"
+
+    def test_hosted_provider_timeout_is_capped(self):
+        """A silent hosted request returns control before the local-model limit."""
+        from infinidev.config.llm import get_litellm_params
+
+        original = (
+            settings.LLM_PROVIDER,
+            settings.LLM_MODEL,
+            settings.LLM_TIMEOUT,
+            settings.LLM_REMOTE_TIMEOUT,
+        )
+        settings.LLM_PROVIDER = "minimax"
+        settings.LLM_MODEL = "minimax/MiniMax-M3"
+        settings.LLM_TIMEOUT = 1800
+        settings.LLM_REMOTE_TIMEOUT = 300
+        try:
+            params = get_litellm_params()
+        finally:
+            (
+                settings.LLM_PROVIDER,
+                settings.LLM_MODEL,
+                settings.LLM_TIMEOUT,
+                settings.LLM_REMOTE_TIMEOUT,
+            ) = original
+
+        assert params["timeout"] == 300.0
+
+    def test_hosted_provider_timeout_honors_stricter_global_limit(self):
+        """The hosted cap never lengthens an explicitly shorter timeout."""
+        from infinidev.config.llm import get_litellm_params
+
+        original = (
+            settings.LLM_PROVIDER,
+            settings.LLM_MODEL,
+            settings.LLM_TIMEOUT,
+            settings.LLM_REMOTE_TIMEOUT,
+        )
+        settings.LLM_PROVIDER = "minimax"
+        settings.LLM_MODEL = "minimax/MiniMax-M3"
+        settings.LLM_TIMEOUT = 90
+        settings.LLM_REMOTE_TIMEOUT = 300
+        try:
+            params = get_litellm_params()
+        finally:
+            (
+                settings.LLM_PROVIDER,
+                settings.LLM_MODEL,
+                settings.LLM_TIMEOUT,
+                settings.LLM_REMOTE_TIMEOUT,
+            ) = original
+
+        assert params["timeout"] == 90.0
+
+    def test_editable_provider_keeps_long_local_timeout(self):
+        """Self-hosted models are not constrained by the hosted API cap."""
+        from infinidev.config.llm import get_litellm_params
+
+        original = (
+            settings.LLM_PROVIDER,
+            settings.LLM_MODEL,
+            settings.LLM_TIMEOUT,
+            settings.LLM_REMOTE_TIMEOUT,
+        )
+        settings.LLM_PROVIDER = "ollama"
+        settings.LLM_MODEL = "ollama_chat/qwen2.5-coder:7b"
+        settings.LLM_TIMEOUT = 1800
+        settings.LLM_REMOTE_TIMEOUT = 300
+        try:
+            params = get_litellm_params()
+        finally:
+            (
+                settings.LLM_PROVIDER,
+                settings.LLM_MODEL,
+                settings.LLM_TIMEOUT,
+                settings.LLM_REMOTE_TIMEOUT,
+            ) = original
+
+        assert params["timeout"] == 1800.0
 
 
 # ── Model Capabilities ──────────────────────────────────────────────────────

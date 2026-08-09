@@ -344,6 +344,7 @@ class TestTaskAdapter:
             engine.execute_kwargs["max_tool_calls_per_action"]
             == settings.TASK_MAX_TOOL_CALLS_PER_STEP
         )
+        assert engine.execute_kwargs["allow_explore"] is False
 
 
 class TestCoordinatorReactRoute:

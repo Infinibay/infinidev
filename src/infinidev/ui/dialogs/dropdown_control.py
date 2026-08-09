@@ -35,6 +35,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("LLM_BASE_URL", "API base URL", "str"),
         ("LLM_API_KEY", "API key for the LLM provider", "str"),
         ("LLM_TIMEOUT", "LLM request timeout in seconds", "int"),
+        ("LLM_REMOTE_TIMEOUT", "Hosted-provider timeout cap (0 = disabled)", "int"),
     ],
     "Image Generation": [
         ("IMAGE_GENERATION_PROVIDER", "Separate image provider (empty = disabled)", "str"),
@@ -173,5 +174,4 @@ class DropdownControl(UIControl):
         def get_line(i):
             return lines[i] if 0 <= i < len(lines) else []
         return UIContent(get_line=get_line, line_count=len(lines))
-
 

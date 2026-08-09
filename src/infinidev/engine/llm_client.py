@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 # ── Retry configuration ──────────────────────────────────────────────────
 
-LLM_RETRIES = 5
 LLM_RETRY_DELAY = 3.0  # seconds (base; exponential backoff applied)
 
 # A provider bug or an accidentally unbounded local endpoint must not be
@@ -279,6 +278,12 @@ def call_llm(
     caps = get_model_capabilities()
 
     kwargs: dict[str, Any] = {**params, "messages": messages}
+    # call_llm owns the retry loop. Leaving LiteLLM's retry budget enabled
+    # here nests two exponential retry loops, turning three configured retries
+    # into as many as twenty provider requests. Direct LiteLLM callers still
+    # retain the configured transport retries from get_litellm_params().
+    kwargs["num_retries"] = 0
+    kwargs.pop("retry_strategy", None)
     if tools:
         kwargs["tools"] = tools
         # The ChatGPT/Codex subscription backend supports function tools but
@@ -337,7 +342,11 @@ def call_llm(
     if use_streaming and settings.LLM_PROVIDER in _STREAM_USAGE_PROVIDERS:
         kwargs["stream_options"] = {"include_usage": True}
 
-    attempts = LLM_RETRIES if retry_attempts is None else int(retry_attempts)
+    attempts = (
+        max(1, int(settings.LLM_NUM_RETRIES) + 1)
+        if retry_attempts is None
+        else int(retry_attempts)
+    )
     if attempts < 1:
         raise ValueError("retry_attempts must be positive")
     last_exc: Exception | None = None

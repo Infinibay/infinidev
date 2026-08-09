@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from typing import TYPE_CHECKING
 
 from infinidev.engine.test_parsers import _PARSERS
@@ -68,6 +69,35 @@ def _runtime_test_command_tokens(state: "LoopState | None" = None) -> tuple[str,
     return tuple(t.lower() for t in tokens if t)
 
 
+def _invokes_python_test_script(command: str) -> bool:
+    """Recognize conventional Python project runners in executable position.
+
+    Matching a bare ``runtests.py`` substring would also authorize commands
+    such as ``rm tests/runtests.py``. Tokenizing and checking that Python is
+    the actual executable keeps the headless permission boundary narrow.
+    """
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    while tokens and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[0]):
+        tokens.pop(0)
+    if len(tokens) < 2:
+        return False
+    executable = tokens.pop(0).rsplit("/", 1)[-1].lower()
+    if not re.fullmatch(r"python(?:3(?:\.\d+)?)?", executable):
+        return False
+    while tokens and tokens[0] in {"-B", "-E", "-I", "-O", "-OO", "-s", "-S", "-u"}:
+        tokens.pop(0)
+    if not tokens:
+        return False
+    script = tokens[0].strip("\"'").replace("\\", "/").lower()
+    return (
+        script in {"runtests.py", "tests/runtests.py"}
+        or script.endswith("/tests/runtests.py")
+    )
+
+
 def is_test_command(args_str: str, state: "LoopState | None" = None) -> bool:
     """True iff the execute_command arguments look like a test runner call.
 
@@ -89,6 +119,8 @@ def is_test_command(args_str: str, state: "LoopState | None" = None) -> bool:
     for parser in _PARSERS:
         if parser.matches_command(command):
             return True
+    if _invokes_python_test_script(command):
+        return True
     # 2. User-declared via setting.
     for token in _user_test_command_tokens():
         if token in s:

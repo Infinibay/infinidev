@@ -456,7 +456,7 @@ class LLMCaller:
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],
         is_planning: bool, action_tool_calls: int,
     ) -> LLMCallResult:
-        iter_tools = ctx.planning_schemas if is_planning else ctx.tool_schemas
+        iter_tools = self._available_schemas(ctx, is_planning)
         try:
             allow_retries = getattr(ctx, "allow_llm_retries", True)
             self._record_request_payload(ctx, messages, iter_tools, mode="function_calling")
@@ -495,6 +495,34 @@ class LLMCaller:
             tool_calls=tool_calls, message=message, raw_content=raw,
             reasoning_content=(getattr(message, "reasoning_content", None) or "").strip(),
         )
+
+    @staticmethod
+    def _available_schemas(
+        ctx: ExecutionContext, is_planning: bool,
+    ) -> list[dict[str, Any]]:
+        """Hide add_step while the rolling horizon has no free slot.
+
+        Tool schemas are a machine-enforced action space. Removing an invalid
+        action before sampling is both cheaper and more reliable than allowing
+        a model to emit a batch of doomed calls and then prompting it to stop.
+        """
+        schemas = ctx.planning_schemas if is_planning else ctx.tool_schemas
+        plan = getattr(getattr(ctx, "state", None), "plan", None)
+        if plan is None:
+            return schemas
+        limit = max(0, int(getattr(plan, "rolling_horizon_limit", 0) or 0))
+        if not limit:
+            return schemas
+        open_steps = sum(
+            step.status in ("pending", "active")
+            for step in getattr(plan, "steps", ())
+        )
+        if open_steps < limit:
+            return schemas
+        return [
+            schema for schema in schemas
+            if schema.get("function", {}).get("name") != "add_step"
+        ]
 
     def _fc_fallback_parse_text(
         self, message: Any, action_tool_calls: int,

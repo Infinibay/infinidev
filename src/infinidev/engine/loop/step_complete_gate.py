@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from infinidev.engine._best_effort import best_effort
@@ -76,6 +77,28 @@ def step_complete_status(step_complete_call: Any) -> str:
     except Exception:
         pass
     return "continue"
+
+
+def _step_complete_text(step_complete_call: Any) -> str:
+    """Return the model's summary/final answer for recovery classification."""
+    try:
+        raw = step_complete_call.function.arguments
+        args = json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw or {})
+        if isinstance(args, dict):
+            return " ".join(
+                str(args.get(key) or "") for key in ("summary", "final_answer")
+            ).strip()
+    except Exception:
+        pass
+    return ""
+
+
+_RECOVERABLE_TOOL_BLOCK_RE = re.compile(
+    r"\btool\b.{0,120}\b(?:not callable|not available|unavailable|unknown|"
+    r"not exposed|not advertised|missing)\b|"
+    r"\b(?:not callable|not available|unavailable|unknown|missing)\b.{0,120}\btool\b",
+    re.IGNORECASE,
+)
 
 
 class StepCompleteGate:
@@ -183,17 +206,22 @@ class StepCompleteGate:
             last_result = str(message.get("content") or "")
             break
 
-        if (
-            "Unknown tool:" not in last_result
-            or "Did you mean one of:" not in last_result
-        ):
+        unknown_with_suggestion = (
+            "Unknown tool:" in last_result
+            and "Did you mean one of:" in last_result
+        )
+        model_reported_tool_surface_miss = bool(
+            _RECOVERABLE_TOOL_BLOCK_RE.search(_step_complete_text(step_complete_call))
+        )
+        if not (unknown_with_suggestion or model_reported_tool_surface_miss):
             return False
 
         self._recoverable_error_fired.add(step_key)
         feedback = (
-            "step_complete BLOCKED — the previous tool result describes a "
-            "recoverable naming error and lists available alternatives. Retry "
-            "the intended operation once using the closest listed tool name. "
+            "step_complete BLOCKED — this is a recoverable tool-surface error, "
+            "not a user-action blocker. Retry the intended operation once using "
+            "a concrete tool schema advertised in this turn (for shell commands, "
+            "use execute_command). "
             "Only report status=\"blocked\" if that corrected call also cannot "
             "proceed or requires user action."
         )
