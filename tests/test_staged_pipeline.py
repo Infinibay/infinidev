@@ -245,6 +245,102 @@ def test_empty_task_plan_gets_one_step_from_structured_task() -> None:
     assert scoped.rolling_horizon_limit == 1
 
 
+def test_first_bounded_path_task_uses_local_plan(
+    temp_db, monkeypatch, runtime,
+):
+    bounded = StageTaskSpec(
+        id="bounded",
+        title="Update src/widget.py",
+        outcome="src/widget.py exposes the corrected widget behavior",
+        acceptance_criteria=[
+            "src/widget.py contains the corrected implementation",
+            "No unrelated files change",
+        ],
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Delivery", [bounded]),
+        _complete("The bounded file change is observed"),
+    ])
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=_Engine(), reviewer=object(),
+        hooks=_Hooks(), session_id="bounded-local-plan", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "complete"
+    assert runtime["task_plans"] == []
+    seeded_plan = runtime["executions"][0]["plan"]
+    assert [step.title for step in seeded_plan.steps] == ["Update src/widget.py"]
+    assert "Local routing" in seeded_plan.overview
+
+
+def test_later_path_task_keeps_evidence_aware_task_planner(
+    temp_db, monkeypatch, runtime,
+):
+    first = StageTaskSpec(
+        id="first",
+        title="Update src/widget.py",
+        outcome="src/widget.py is updated",
+        acceptance_criteria=["src/widget.py contains the implementation"],
+    )
+    later = StageTaskSpec(
+        id="later",
+        title="Add tests/test_widget.py",
+        outcome="tests/test_widget.py covers the implementation",
+        acceptance_criteria=["tests/test_widget.py contains focused coverage"],
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Delivery", [first, later]),
+        _complete("Both bounded file Tasks are observed"),
+    ])
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=_Engine(), reviewer=object(),
+        hooks=_Hooks(), session_id="later-planner", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "complete"
+    assert [handoff.task.id for handoff in runtime["task_plans"]] == ["later"]
+
+
+def test_later_task_inherits_edit_evidence_only_for_its_exact_target(
+    temp_db, monkeypatch, runtime,
+):
+    first = StageTaskSpec(
+        id="first",
+        title="Update src/widget.py",
+        outcome="src/widget.py is updated",
+        acceptance_criteria=["src/widget.py contains the implementation"],
+    )
+    later = StageTaskSpec(
+        id="later",
+        title="Add tests/test_widget.py",
+        outcome="tests/test_widget.py covers the implementation",
+        acceptance_criteria=["tests/test_widget.py contains focused coverage"],
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Delivery", [first, later]),
+        _complete("Both file Tasks are observed"),
+    ])
+    engine = _Engine()
+    engine.get_file_tracker = lambda: SimpleNamespace(
+        get_all_paths=lambda: ["/workspace/tests/test_widget.py"],
+    )
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=engine, reviewer=object(),
+        hooks=_Hooks(), session_id="prior-target-edit", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "complete"
+    assert [
+        call["initial_edit_evidence"] for call in runtime["executions"]
+    ] == [False, True]
+
+
 def test_verification_only_stage_task_does_not_require_an_edit() -> None:
     from infinidev.engine.orchestration.staged_pipeline import _task_kind
 

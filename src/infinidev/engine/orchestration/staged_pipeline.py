@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,9 @@ logger = logging.getLogger(__name__)
 # This is a resource fuse, not a success condition or a semantic estimate of
 # Goal size. Hitting it produces an explicit incomplete/blocked outcome.
 _DEFAULT_MAX_STAGE_TRANSITIONS = 24
+_PATH_HINT_RE = re.compile(
+    r"\b(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\b",
+)
 
 
 @dataclass(slots=True)
@@ -264,25 +268,37 @@ def _execute_stage(
         plan = _plan_from_snapshot(task)
         planned_now = plan is None
         if plan is None:
-            handoff = TaskPlanningHandoff(
-                goal=state.goal,
-                stage_id=stage.id,
-                stage_number=stage.number,
-                stage=stage.spec,
-                task=task.spec,
-                dependency_results=_dependency_results(stage, task),
-                evidence=list(state.evidence),
-            )
-            hooks.on_phase("analysis")
-            hooks.on_status("info", f"Planning Task: {task.spec.title}")
-            plan = run_planner(
-                escalation,
-                task_handoff=handoff,
-                session_id=session_id,
-                project_id=project_id,
-                workspace_path=workspace_path,
-                hooks=hooks,
-            )
+            if _use_local_bounded_plan(stage, task):
+                hooks.on_status(
+                    "info",
+                    f"Using bounded local plan for Task: {task.spec.title}",
+                )
+                plan = Plan(
+                    overview=(
+                        "Local routing: the first Task is already bounded by "
+                        "an explicit path, outcome, and acceptance checks."
+                    ),
+                )
+            else:
+                handoff = TaskPlanningHandoff(
+                    goal=state.goal,
+                    stage_id=stage.id,
+                    stage_number=stage.number,
+                    stage=stage.spec,
+                    task=task.spec,
+                    dependency_results=_dependency_results(stage, task),
+                    evidence=list(state.evidence),
+                )
+                hooks.on_phase("analysis")
+                hooks.on_status("info", f"Planning Task: {task.spec.title}")
+                plan = run_planner(
+                    escalation,
+                    task_handoff=handoff,
+                    session_id=session_id,
+                    project_id=project_id,
+                    workspace_path=workspace_path,
+                    hooks=hooks,
+                )
             plan = _scope_task_plan(plan, stage, task)
             task.plan = plan_snapshot(plan)
             state.revision += 1
@@ -359,6 +375,9 @@ def _execute_stage(
                     list(escalation.attachments) if escalation.attachments else None
                 ),
                 task=structured_task,
+                initial_edit_evidence=_prior_task_target_was_edited(
+                    stage, task, used_engine, workspace_path,
+                ),
                 preserve_file_tracker=(
                     stage.number > 1
                     or any(
@@ -678,6 +697,40 @@ def _engine_has_file_changes(engine: Any) -> bool | None:
         return None
 
 
+def _prior_task_target_was_edited(
+    stage: StageExecutionRecord,
+    task: TaskExecutionRecord,
+    engine: Any,
+    workspace_path: str | None,
+) -> bool:
+    """Match prior changed files to explicit paths in the next Task."""
+    if not workspace_path or not any(
+        candidate is not task and candidate.attempts > 0
+        for candidate in stage.tasks
+    ):
+        return False
+    getter = getattr(engine, "get_file_tracker", None)
+    tracker = getter() if callable(getter) else None
+    if tracker is None:
+        return False
+    try:
+        changed = {os.path.realpath(path) for path in tracker.get_all_paths()}
+    except Exception:
+        return False
+    task_text = "\n".join((
+        task.spec.title,
+        task.spec.outcome,
+        *task.spec.acceptance_criteria,
+    ))
+    targets = {
+        os.path.realpath(
+            hint if os.path.isabs(hint) else os.path.join(workspace_path, hint)
+        )
+        for hint in _PATH_HINT_RE.findall(task_text)
+    }
+    return bool(changed & targets)
+
+
 def _has_blocked_steps(engine: Any) -> bool:
     return any(step.get("status") == "blocked" for step in _engine_plan_steps(engine))
 
@@ -754,6 +807,29 @@ def _task_kind(
     if goal_intent == "implementation":
         return "feature"
     return "investigation" if goal_intent == "informational" else "chore"
+
+
+def _use_local_bounded_plan(
+    stage: StageExecutionRecord,
+    task: TaskExecutionRecord,
+) -> bool:
+    """Route a concrete first change Task without a redundant planner call."""
+    if task.spec.depends_on or any(
+        candidate is not task and candidate.attempts > 0
+        for candidate in stage.tasks
+    ):
+        return False
+    task_text = "\n".join((
+        task.spec.title,
+        task.spec.outcome,
+        *task.spec.acceptance_criteria,
+    ))
+    return (
+        len(task_text) <= 1600
+        and len(task.spec.acceptance_criteria) <= 4
+        and _WRITE_TASK_RE.search(task_text) is not None
+        and 1 <= len(set(_PATH_HINT_RE.findall(task_text))) <= 2
+    )
 
 
 def _run_deterministic_verification_plan(

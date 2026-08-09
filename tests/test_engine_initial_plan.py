@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from infinidev.engine.loop.engine import (
     _is_planning_mode,
     _reconcile_step_result,
+    _seed_initial_edit_evidence,
     _seed_initial_plan_if_fresh,
     _seed_state_from_plan,
 )
@@ -108,6 +109,16 @@ class TestSeedStateFromPlan:
         _seed_state_from_plan(state, Plan(overview="", steps=[]))
         assert state.plan.overview == ""
         assert state.plan.steps == []
+
+    def test_prior_target_edit_seeds_task_and_active_step_evidence(self):
+        state = LoopState()
+        ctx = SimpleNamespace(state=state, resumed=False)
+        _seed_initial_plan_if_fresh(ctx, _sample_plan())
+
+        _seed_initial_edit_evidence(ctx, True)
+
+        assert state.task_has_edits is True
+        assert state.edited_step_indices == {1}
 
     def test_resumed_state_is_not_replaced_by_the_task_bootstrap_plan(self):
         state = LoopState()

@@ -448,6 +448,7 @@ def _run_execution_phase(
     task: Any | None = None,
     preserve_file_tracker: bool = False,
     preserve_task_state: bool = False,
+    initial_edit_evidence: bool = False,
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
     max_tool_calls_per_action: int | None = None,
@@ -493,6 +494,8 @@ def _run_execution_phase(
                 execute_kwargs["preserve_file_tracker"] = True
             if preserve_task_state:
                 execute_kwargs["preserve_task_state"] = True
+            if initial_edit_evidence:
+                execute_kwargs["initial_edit_evidence"] = True
             if max_iterations is not None:
                 execute_kwargs["max_iterations"] = max_iterations
             if max_total_tool_calls is not None:

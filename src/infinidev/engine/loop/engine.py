@@ -139,6 +139,16 @@ def _seed_initial_plan_if_fresh(ctx, plan) -> None:
         _seed_state_from_plan(ctx.state, plan)
 
 
+def _seed_initial_edit_evidence(ctx: ExecutionContext, enabled: bool) -> None:
+    """Carry an exact prior target edit across a scheduler Task boundary."""
+    if not enabled:
+        return
+    ctx.state.task_has_edits = True
+    active = ctx.state.plan.active_step
+    if active is not None:
+        ctx.state.edited_step_indices.add(active.index)
+
+
 def _is_planning_mode(ctx: ExecutionContext) -> bool:
     """Whether the next model call must use the plan-management protocol."""
     return (
@@ -532,6 +542,7 @@ class LoopEngine(AgentEngine):
         allow_explore: bool = True,
         preserve_file_tracker: bool = False,
         preserve_task_state: bool = False,
+        initial_edit_evidence: bool = False,
         skip_plan: bool = False,
         allow_plan_mutation: bool = True,
     ) -> str:
@@ -592,6 +603,7 @@ class LoopEngine(AgentEngine):
                 pass
 
         _seed_initial_plan_if_fresh(ctx, initial_plan)
+        _seed_initial_edit_evidence(ctx, initial_edit_evidence)
         # Stash attachments on the engine instance for the first
         # iteration only — subsequent turns rebuild the prompt from
         # compact summaries and don't need the raw payload.
