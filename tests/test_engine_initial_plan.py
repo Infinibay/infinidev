@@ -16,11 +16,13 @@ from types import SimpleNamespace
 
 from infinidev.engine.loop.engine import (
     _is_planning_mode,
+    _reconcile_step_result,
     _seed_initial_plan_if_fresh,
     _seed_state_from_plan,
 )
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.context import build_iteration_prompt
+from infinidev.engine.loop.step_result import StepResult
 
 
 def _sample_plan() -> Plan:
@@ -141,8 +143,31 @@ class TestPlanningMode:
         assert _is_planning_mode(ctx) is True
 
     def test_plan_free_adapter_never_enters_planning(self):
-        ctx = SimpleNamespace(state=LoopState(), skip_plan=True)
+        ctx = SimpleNamespace(
+            state=LoopState(), skip_plan=True, allow_plan_mutation=True,
+        )
         assert _is_planning_mode(ctx) is False
+
+    def test_outer_scheduler_owned_plan_never_enters_local_planning(self):
+        ctx = SimpleNamespace(
+            state=LoopState(), skip_plan=False, allow_plan_mutation=False,
+        )
+        assert _is_planning_mode(ctx) is False
+
+    def test_fixed_plan_continue_keeps_the_outer_scheduler_step_active(self):
+        manager = SimpleNamespace(
+            reconcile_task_completion=lambda ctx, result: result,
+        )
+        ctx = SimpleNamespace(allow_plan_mutation=False, task=None)
+
+        result, edit_blocked = _reconcile_step_result(
+            ctx,
+            StepResult(summary="More node work remains", status="continue"),
+            manager,
+        )
+
+        assert result.interrupted is True
+        assert edit_blocked is False
 
 
 class TestSeededStateRendersCorrectly:

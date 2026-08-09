@@ -120,11 +120,13 @@ def build_execution_context(
         description=task_prompt[0],
         initial_plan=kwargs.get("initial_plan"),
     )
-    if kwargs.get("skip_plan", False):
-        # ReAct and graph leaf runs have no execution plan to mutate. Exposing
-        # these tools lets a model create a pending step that the plan-free
-        # loop can neither activate nor close, producing a false scope-gate
-        # failure after the requested work and tests already succeeded.
+    if (
+        kwargs.get("skip_plan", False)
+        or not kwargs.get("allow_plan_mutation", True)
+    ):
+        # Plan-free runs have no state machine to mutate. Fixed-plan runs are
+        # owned by an outer scheduler. In both cases, exposing these tools
+        # creates work the local loop has no authority to schedule.
         tools = _filter_plan_free_tools(tools)
     tool_schemas = (
         build_tool_schemas(tools, small_model=is_small)
@@ -193,6 +195,7 @@ def build_execution_context(
         agent_role=getattr(agent, "role", "agent"),
         desc=desc, expected=expected, event_id=event_id,
         skip_plan=kwargs.get("skip_plan", False),
+        allow_plan_mutation=kwargs.get("allow_plan_mutation", True),
         allow_explore=kwargs.get("allow_explore", True),
         nudge_message_template=kwargs.get("nudge_message_template"),
         state=state, file_tracker=file_tracker,

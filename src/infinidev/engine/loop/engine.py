@@ -141,7 +141,11 @@ def _seed_initial_plan_if_fresh(ctx, plan) -> None:
 
 def _is_planning_mode(ctx: ExecutionContext) -> bool:
     """Whether the next model call must use the plan-management protocol."""
-    return not ctx.skip_plan and ctx.state.plan.active_step is None
+    return (
+        getattr(ctx, "allow_plan_mutation", True)
+        and not ctx.skip_plan
+        and ctx.state.plan.active_step is None
+    )
 
 
 def _apply_exploration_policy(
@@ -198,6 +202,12 @@ def _reconcile_step_result(
 ) -> tuple[StepResult, bool]:
     """Apply Task-scope reconciliation before whole-Task completion gates."""
     step_result = step_mgr.reconcile_task_completion(ctx, step_result)
+    if (
+        not getattr(ctx, "allow_plan_mutation", True)
+        and step_result.status == "continue"
+        and not step_result.interrupted
+    ):
+        step_result = step_result.model_copy(update={"interrupted": True})
     return step_result, _enforce_edit_requirement(ctx, step_result)
 
 
@@ -513,6 +523,7 @@ class LoopEngine(AgentEngine):
         preserve_file_tracker: bool = False,
         preserve_task_state: bool = False,
         skip_plan: bool = False,
+        allow_plan_mutation: bool = True,
     ) -> str:
         """Plan-execute-summarize loop.
 
@@ -551,6 +562,7 @@ class LoopEngine(AgentEngine):
             allow_explore=allow_explore,
             preserve_file_tracker=preserve_file_tracker,
             skip_plan=skip_plan,
+            allow_plan_mutation=allow_plan_mutation,
         )
         self._cr_delivered_targets.clear()
         # On a resumed session the engine is brand-new (lazily created in
@@ -739,6 +751,12 @@ class LoopEngine(AgentEngine):
                 list(getattr(ctx.agent, "tools", []) or []),
                 capability,
             )
+            if not ctx.allow_plan_mutation:
+                from infinidev.engine.loop.context_builder import (
+                    _filter_plan_free_tools,
+                )
+
+                expanded = _filter_plan_free_tools(expanded)
             added = [tool for tool in expanded if tool.name not in before]
             if not added:
                 return json.dumps({

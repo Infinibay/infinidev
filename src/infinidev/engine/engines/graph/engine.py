@@ -540,6 +540,7 @@ class GraphEngineAdapter:
                 max_total_tool_calls=max_tool_calls,
                 preserve_file_tracker=preserve_file_tracker,
                 skip_plan=False,
+                allow_plan_mutation=False,
             )
         finally:
             agent.deactivate()
@@ -580,7 +581,10 @@ class GraphEngineAdapter:
             task=structured_task,
             max_iterations=settings.REACT_MAX_ITERATIONS,
             max_total_tool_calls=max_tool_calls,
-            rework_execute_kwargs={"skip_plan": False},
+            rework_execute_kwargs={
+                "skip_plan": False,
+                "allow_plan_mutation": False,
+            },
             run_verification=is_goal_verification,
         )
         review_status = getattr(engine, "_last_status", "") or "completed"

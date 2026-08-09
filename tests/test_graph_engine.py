@@ -307,6 +307,7 @@ class TestAdapterCompleted:
         assert (result, status) == ("grounding evidence", STATUS_COMPLETED)
         assert engine.execute_kwargs["task"].kind == "investigation"
         assert engine.execute_kwargs["skip_plan"] is False
+        assert engine.execute_kwargs["allow_plan_mutation"] is False
         assert len(engine.execute_kwargs["initial_plan"].steps) == 1
         assert engine.execute_kwargs["initial_plan"].steps[0].title == "Inspect utility"
 
@@ -382,6 +383,7 @@ class TestAdapterCompleted:
 
         assert (result, status) == ("done", STATUS_COMPLETED)
         assert engine.execute_kwargs["skip_plan"] is False
+        assert engine.execute_kwargs["allow_plan_mutation"] is False
         assert engine.execute_kwargs["initial_plan"].rolling_horizon_limit == 3
         assert len(engine.execute_kwargs["initial_plan"].steps) == 1
         task = engine.execute_kwargs["task"]
@@ -402,6 +404,10 @@ class TestAdapterCompleted:
             not in engine.execute_kwargs["task_prompt"][0]
         )
         assert review_kwargs["run_verification"] is False
+        assert review_kwargs["rework_execute_kwargs"] == {
+            "skip_plan": False,
+            "allow_plan_mutation": False,
+        }
 
 
 # ── Adapter: blocked / budget paths ─────────────────────────────────────────
