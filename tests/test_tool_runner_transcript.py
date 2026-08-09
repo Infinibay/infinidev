@@ -253,6 +253,61 @@ def test_proven_read_only_shell_keeps_cache_without_rereading(tmp_path):
     assert ctx.state.opened_files[str(path)].content == "known-current"
 
 
+def test_exact_unchanged_read_is_replaced_by_compact_notice(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("value = 1\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+    call = _call(
+        "read-1",
+        "read_file",
+        '{"file_path":"module.py","offset":1,"limit":20}',
+    )
+
+    cached, executable = runner._partition_repeated_reads(ctx, [call])
+    assert cached == []
+    assert executable == [call]
+
+    runner._record_read_delivery(ctx, call)
+    cached, executable = runner._partition_repeated_reads(ctx, [call])
+
+    assert executable == []
+    assert json.loads(cached[0][1]) == {
+        "status": "already_delivered",
+        "path": str(path),
+        "message": (
+            "This exact unchanged range was already delivered. Use the existing "
+            "opened-files/prior result, request a narrower offset+limit, or call "
+            "recall_context for archived evidence."
+        ),
+    }
+
+
+def test_read_delivery_cache_invalidates_on_edit_or_range_change(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("value = 1\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+    original = _call("read-1", "read_file", '{"file_path":"module.py","limit":20}')
+    narrower = _call(
+        "read-2",
+        "read_file",
+        '{"file_path":"module.py","offset":2,"limit":5}',
+    )
+    runner._record_read_delivery(ctx, original)
+
+    cached, executable = runner._partition_repeated_reads(ctx, [narrower])
+    assert cached == []
+    assert executable == [narrower]
+
+    path.write_text("value = 200\n")
+    cached, executable = runner._partition_repeated_reads(ctx, [original])
+    assert cached == []
+    assert executable == [original]
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

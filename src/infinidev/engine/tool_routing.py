@@ -13,7 +13,8 @@ _CORE = frozenset({
     "read_file", "create_file", "edit_file", "apply_file_patch",
     "list_directory", "code_search", "glob",
     "git_diff", "git_status", "execute_command",
-    "recall_context", "add_step", "modify_step", "remove_step",
+    "send_message", "describe_tool", "recall_context",
+    "add_step", "modify_step", "remove_step",
     "declare_test_command", "tail_test_output", "request_capability",
 })
 

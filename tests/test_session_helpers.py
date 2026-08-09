@@ -195,6 +195,23 @@ class TestContextManagerCompact:
         assert msgs[3]["content"].endswith("old-tail")
         assert msgs[5]["content"] == "recent" + "y" * 4_000
 
+    def test_default_compacts_every_result_consumed_by_a_newer_turn(self):
+        from infinidev.engine.loop.context_manager import ContextManager
+
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "u"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "old"}]},
+            {"role": "tool", "content": "old" + "x" * 4_000, "tool_call_id": "old"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "new"}]},
+            {"role": "tool", "content": "new" + "y" * 4_000, "tool_call_id": "new"},
+        ]
+
+        ContextManager.compact_old_tool_results(msgs)
+
+        assert "chars compacted after prior delivery" in msgs[3]["content"]
+        assert msgs[5]["content"] == "new" + "y" * 4_000
+
 
 def test_opened_files_prompt_prefers_the_active_step_with_a_finite_budget():
     from infinidev.engine.loop.context import _render_opened_files

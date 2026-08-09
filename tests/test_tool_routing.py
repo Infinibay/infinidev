@@ -24,12 +24,24 @@ def _names(description: str, plan=None) -> set[str]:
 def test_routine_code_task_gets_core_not_every_specialist_tool() -> None:
     names = _names("Fix the token validation bug and run its tests")
 
-    assert {"read_file", "edit_file", "execute_command", "git_diff"} <= names
+    assert {
+        "read_file", "edit_file", "execute_command", "git_diff",
+        "send_message", "describe_tool",
+    } <= names
     assert "web_search" not in names
     assert "git_commit" not in names
     assert "write_report" not in names
     assert "run_in_background" not in names
     assert "request_capability" in names
+
+
+def test_small_model_keeps_prompt_required_communication_tools() -> None:
+    names = {
+        tool.name
+        for tool in get_tools_for_role("developer", small_model=True)
+    }
+
+    assert {"send_message", "describe_tool"} <= names
 
 
 def test_read_only_task_avoids_unrelated_destructive_and_specialist_tools() -> None:

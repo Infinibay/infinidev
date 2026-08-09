@@ -269,6 +269,15 @@ def apply_thinking_budget(
             kwargs["max_tokens"] = tokens * 3  # thinking + response headroom
         return
 
+    # MiniMax can otherwise inherit the generic 3x headroom (12,288 for the
+    # default medium preset), exceeding the model metadata's documented
+    # 8,192-token output ceiling. Preserve the reasoning preset while
+    # enforcing the provider's finite output contract.
+    if provider_id == "minimax":
+        if preset != "ultra" and tokens > 0:
+            kwargs["max_tokens"] = min(tokens * 3, 8_192)
+        return
+
     # ── llama.cpp / vLLM / OpenAI-compatible / OpenRouter / GMI ──
     if provider_id in ("llama_cpp", "vllm", "openai_compatible", "openrouter", "gmi"):
         if preset == "low":

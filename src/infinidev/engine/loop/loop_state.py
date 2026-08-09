@@ -32,6 +32,10 @@ class LoopState(BaseModel):
     history: list[ActionRecord] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)  # Scratchpad notes that persist across iterations
     opened_files: dict[str, OpenedFile] = Field(default_factory=dict)  # File content cache
+    # Exact read_file request -> filesystem revision last delivered to the
+    # model. Repeating an unchanged read returns a compact cache notice rather
+    # than another full source body; edits invalidate it through the revision.
+    read_delivery_revisions: dict[str, str] = Field(default_factory=dict)
     current_step_index: int = 0
     iteration_count: int = 0
     total_tool_calls: int = 0

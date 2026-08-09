@@ -21,7 +21,8 @@ _STEP_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"\b(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|trace|understand)\b"
     )),
     ("change", re.compile(
-        r"\b(?:add|change|create|edit|fix|implement|refactor|rewrite|update)\b"
+        r"\b(?:add|adjust|change|correct|create|edit|fix|implement|limit|"
+        r"refactor|repair|replace|rewrite|update)\b"
     )),
     ("verify", re.compile(
         r"\b(?:check|run|test|validate|verification|verify)\b"
@@ -39,7 +40,8 @@ _LEADING_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"^(?:check|run|test|validate|verification|verify)\b"
     )),
     ("change", re.compile(
-        r"^(?:add|change|create|edit|fix|implement|refactor|rewrite|update)\b"
+        r"^(?:add|adjust|change|correct|create|edit|fix|implement|limit|"
+        r"refactor|repair|replace|rewrite|update)\b"
     )),
     ("document", re.compile(r"^(?:document|documentation|explain|write docs?)\b")),
     ("design", re.compile(r"^(?:design|plan|prototype)\b")),

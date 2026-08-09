@@ -403,6 +403,8 @@ class TestPublicPlanTools:
 
         assert _step_phase("Verify fix by running pytest") == "verify"
         assert _step_phase("Fix parser and run tests") == "change"
+        assert _step_phase("Limit regression test to JSON and re-run tests") == "change"
+        assert _step_phase("Replace workaround and verify behavior") == "change"
 
 
 def test_step_result_operations_cannot_add_duplicate_open_work():

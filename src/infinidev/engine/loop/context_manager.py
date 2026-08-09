@@ -18,7 +18,11 @@ class ContextManager:
 
     # How many tool call rounds before assistant thinking is truncated.
     THINKING_TTL = 3
-    TOOL_RESULT_TTL = 4
+    # A tool result is fully visible to the model on the request immediately
+    # after it is produced. Once a newer assistant turn exists, resending the
+    # complete body charges for evidence the model already consumed. Keep the
+    # current result intact and compact prior rounds deterministically.
+    TOOL_RESULT_TTL = 1
     TOOL_RESULT_COMPACT_CHARS = 1_200
 
     @staticmethod

@@ -42,6 +42,7 @@ from infinidev.engine.tool_executor import (
     maybe_emit_file_change,
     update_opened_files_cache,
 )
+from infinidev.tools.base.context import get_current_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ _BUDGET_EXHAUSTED_RESULT = (
     '{"error": "not_run: tool budget exhausted; inspect completed tool results '
     'and continue in the next step"}'
 )
+_REPEATED_READ_STATUS = "already_delivered"
+_MAX_READ_DELIVERY_KEYS = 256
 
 
 class ToolRunner:
@@ -264,7 +267,10 @@ class ToolRunner:
                     )
                 )
 
-            is_parallel = len(batch) > 1 and not any(
+            cached_results, executable_batch = self._partition_repeated_reads(
+                ctx, batch,
+            )
+            is_parallel = len(executable_batch) > 1 and not any(
                 _writes_or_mutates(tc) for tc in batch
             )
 
@@ -274,16 +280,24 @@ class ToolRunner:
                     hook_meta["call_num"] = action_tool_calls + 1
                     hook_meta["total_calls"] = ctx.state.total_tool_calls + 1
                     batch_results = execute_tool_calls_parallel(
-                        batch, ctx.tool_dispatch,
+                        executable_batch, ctx.tool_dispatch,
                         hook_metadata=hook_meta,
                         attachments_by_tc=attachments_by_tc,
                     )
                 else:
                     batch_results = self._run_serial(
-                        ctx, batch, hook_meta, action_tool_calls, attachments_by_tc,
+                        ctx, executable_batch, hook_meta, action_tool_calls,
+                        attachments_by_tc,
                     )
             finally:
                 self._engine._finish_tool_batch()
+
+            if cached_results:
+                by_id = {
+                    tc.id: (tc, result)
+                    for tc, result in [*batch_results, *cached_results]
+                }
+                batch_results = [by_id[tc.id] for tc in batch]
 
             if self._engine._cancel_event.is_set():
                 self._answer_unreached(ctx, messages, batch,
@@ -306,6 +320,116 @@ class ToolRunner:
             self._answer_unreached(ctx, messages, calls, answered)
 
         return action_tool_calls
+
+    @staticmethod
+    def _read_delivery_identity(
+        ctx: ExecutionContext,
+        tc: Any,
+    ) -> tuple[str, str, str] | None:
+        """Return ``(key, revision, path)`` for a concrete read_file call."""
+        if tc.function.name not in {"read_file", "partial_read"}:
+            return None
+        try:
+            args = (
+                json.loads(tc.function.arguments)
+                if isinstance(tc.function.arguments, str)
+                else (tc.function.arguments or {})
+            )
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(args, dict):
+            return None
+        raw_path = next(
+            (
+                args[name]
+                for name in ("file_path", "path", "filepath", "file", "filename")
+                if isinstance(args.get(name), str) and args[name].strip()
+            ),
+            None,
+        )
+        if raw_path is None:
+            return None
+        workspace = (
+            getattr(ctx, "workspace_path", None)
+            or get_current_workspace_path()
+            or os.getcwd()
+        )
+        path = os.path.realpath(os.path.join(workspace, os.path.expanduser(raw_path)))
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return None
+        canonical_range = {
+            "offset": args.get("offset", args.get("start_line")),
+            "limit": args.get("limit"),
+            "end_line": args.get("end_line"),
+            "line_range": args.get("line_range"),
+        }
+        key = json.dumps(
+            [path, canonical_range],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        revision = f"{stat.st_mtime_ns}:{stat.st_size}"
+        return key, revision, path
+
+    @classmethod
+    def _partition_repeated_reads(
+        cls,
+        ctx: ExecutionContext,
+        batch: list[Any],
+    ) -> tuple[list[tuple[Any, str]], list[Any]]:
+        """Replace unchanged exact re-reads with a bounded cache notice."""
+        cached: list[tuple[Any, str]] = []
+        executable: list[Any] = []
+        delivered = ctx.state.read_delivery_revisions
+        for tc in batch:
+            identity = cls._read_delivery_identity(ctx, tc)
+            if identity is None:
+                executable.append(tc)
+                continue
+            key, revision, path = identity
+            if delivered.get(key) != revision:
+                executable.append(tc)
+                continue
+            cached.append((tc, json.dumps({
+                "status": _REPEATED_READ_STATUS,
+                "path": path,
+                "message": (
+                    "This exact unchanged range was already delivered. Use the "
+                    "existing opened-files/prior result, request a narrower "
+                    "offset+limit, or call recall_context for archived evidence."
+                ),
+            })))
+        return cached, executable
+
+    @classmethod
+    def _record_read_delivery(
+        cls,
+        ctx: ExecutionContext,
+        tc: Any,
+    ) -> None:
+        identity = cls._read_delivery_identity(ctx, tc)
+        if identity is None:
+            return
+        key, revision, _ = identity
+        delivered = ctx.state.read_delivery_revisions
+        delivered[key] = revision
+        while len(delivered) > _MAX_READ_DELIVERY_KEYS:
+            delivered.pop(next(iter(delivered)))
+
+    @staticmethod
+    def _is_repeated_read_result(result: str) -> bool:
+        try:
+            payload = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return (
+            isinstance(payload, dict)
+            and payload.get("status") == _REPEATED_READ_STATUS
+        )
 
     @staticmethod
     def _answer_budget_limited(
@@ -424,13 +548,15 @@ class ToolRunner:
 
         for tc, result in batch_results:
             tool_error = extract_tool_error(result)
+            repeated_read = self._is_repeated_read_result(result)
             guard.on_tool_result(tc.function.name, tc.function.arguments, bool(tool_error))
             tracker.on_tool_call(tc.function.name, tc.function.arguments, bool(tool_error))
 
-            if not tool_error:
+            if not tool_error and not repeated_read:
                 update_opened_files_cache(
                     ctx.state, tc.function.name, tc.function.arguments, result,
                 )
+                self._record_read_delivery(ctx, tc)
                 ToolProcessor.auto_note_for_small(
                     ctx, tc.function.name, tc.function.arguments, result,
                 )
@@ -452,7 +578,7 @@ class ToolRunner:
                         ctx, tc.function.arguments,
                     )
 
-            if not tool_error:
+            if not tool_error and not repeated_read:
                 with best_effort("memory annotation failed for %s", tc.function.name):
                     from infinidev.engine.tool_executor import annotate_with_memory
 

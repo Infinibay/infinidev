@@ -118,6 +118,29 @@ class TestLLMRetryBudget:
 
         assert calls == 3
 
+    def test_minimax_output_is_capped_to_provider_contract(self, monkeypatch):
+        from infinidev.config.settings import settings
+
+        self._stub_capabilities(monkeypatch)
+        seen = {}
+        response = object()
+        monkeypatch.setattr(settings, "LLM_PROVIDER", "minimax")
+        monkeypatch.setattr(settings, "THINKING_ENABLED", True)
+        monkeypatch.setattr(settings, "THINKING_BUDGET", "high")
+        monkeypatch.setattr(
+            "litellm.completion",
+            lambda **kwargs: seen.update(kwargs) or response,
+        )
+
+        result = call_llm(
+            {"model": "minimax/MiniMax-M3"},
+            [{"role": "user", "content": "x"}],
+            retry_attempts=1,
+        )
+
+        assert result is response
+        assert seen["max_tokens"] == 8_192
+
 
 class TestRollingHorizonToolRouting:
     """Invalid planning actions are removed before the model samples them."""

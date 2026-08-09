@@ -200,6 +200,11 @@ SMALL_MODEL_TOOLS = [
     BackgroundStatusTool,
     StopBackgroundTaskTool,
     WaitForBackgroundTaskTool,
+    # Communication + tool discovery (2). The compact developer prompts
+    # explicitly require both; hiding their schemas makes the model spend a
+    # turn explaining that the requested tool is unavailable.
+    SendMessageTool,
+    HelpTool,
     # Knowledge (2)
     RecordFindingTool,
     SearchKnowledgeTool,
