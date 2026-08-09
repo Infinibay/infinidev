@@ -30,6 +30,36 @@ warnings.filterwarnings(
 _normalizer_warned = False
 
 
+def _silence_litellm_debug_output() -> None:
+    """Keep provider-library diagnostics out of every Infinidev host.
+
+    LiteLLM prints some caught provider-probe failures directly to stdout;
+    logger configuration cannot intercept them. The CLI used to set these
+    flags during TUI bootstrap, leaving benchmarks, tests, and engine
+    embedders noisy. Actual request failures still propagate as exceptions
+    through Infinidev's normal error path.
+    """
+    for name in (
+        "litellm",
+        "LiteLLM",
+        "litellm.utils",
+        "litellm.main",
+        "litellm.cost_calculator",
+        "litellm.litellm_core_utils",
+    ):
+        logging.getLogger(name).setLevel(logging.ERROR)
+    try:
+        import litellm
+
+        litellm.suppress_debug_info = True
+        litellm.set_verbose = False
+    except Exception as exc:
+        logger.debug("Could not configure LiteLLM output: %s", exc)
+
+
+_silence_litellm_debug_output()
+
+
 # ── Register models missing from LiteLLM's built-in database ─────────
 # LiteLLM rejects requests for unknown models with wrong context-window
 # limits.  We register them once at import time so every call_llm() and

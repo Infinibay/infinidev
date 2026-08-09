@@ -1086,3 +1086,17 @@ def test_efforts_are_empty_without_a_catalog(codex_home):
     from infinidev.config.thinking_budget import subscription_efforts
 
     assert subscription_efforts("openai/responses/unknown") == []
+
+
+def test_litellm_direct_prints_are_suppressed_outside_cli(monkeypatch):
+    import litellm
+
+    from infinidev.config.llm import _silence_litellm_debug_output
+
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    monkeypatch.setattr(litellm, "set_verbose", True)
+
+    _silence_litellm_debug_output()
+
+    assert litellm.suppress_debug_info is True
+    assert litellm.set_verbose is False
