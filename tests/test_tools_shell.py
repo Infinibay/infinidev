@@ -70,6 +70,27 @@ class TestExecuteCommand:
         assert data["success"] is False
         assert data["exit_code"] == 1
 
+    def test_pipeline_reports_failure_from_an_earlier_stage(
+        self, bound_tool, auto_approve_permissions
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+        result = tool._run(command="sh -c 'exit 7' | tail -1")
+        data = json.loads(result)
+
+        assert data["success"] is False
+        assert data["exit_code"] == 7
+
+    def test_successful_pipeline_still_returns_its_output(
+        self, bound_tool, auto_approve_permissions
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+        result = tool._run(command="printf 'hello\\n' | tail -1")
+        data = json.loads(result)
+
+        assert data["success"] is True
+        assert data["exit_code"] == 0
+        assert data["stdout"] == "hello\n"
+
     def test_execute_timeout(self, bound_tool, auto_approve_permissions):
         """Command that exceeds timeout returns error."""
         tool = bound_tool(ExecuteCommandTool)

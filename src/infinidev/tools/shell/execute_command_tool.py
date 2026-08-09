@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
+from infinidev.tools.shell.shell_invocation import shell_invocation
 from infinidev.tools.stdin_prompt import (
     has_stdin_input_handler,
     request_stdin_input,
@@ -322,9 +323,10 @@ class ExecuteCommandTool(InfinibayBaseTool):
         ``sudo`` exit with "no tty present" instead of hanging the
         parent terminal.
         """
+        invocation, use_shell = shell_invocation(command)
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            invocation,
+            shell=use_shell,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -360,9 +362,10 @@ class ExecuteCommandTool(InfinibayBaseTool):
         output. Loops until the process exits or the overall timeout
         is hit.
         """
+        invocation, use_shell = shell_invocation(command)
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            invocation,
+            shell=use_shell,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

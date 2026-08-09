@@ -61,6 +61,14 @@ class TestBackgroundManager:
         assert task.exit_code == 3
         assert task.status == "exited"
 
+    def test_pipeline_reports_failure_from_an_earlier_stage(self, tmp_path):
+        mgr = BackgroundTaskManager()
+        task = mgr.start("sh -c 'exit 9' | tail -1", "failing pipeline", str(tmp_path))
+
+        assert _wait_for(lambda: not task.is_running)
+        assert task.exit_code == 9
+        assert task.status == "exited"
+
 
 class TestBackgroundWait:
     """The blocking wait() primitive on BackgroundTask."""

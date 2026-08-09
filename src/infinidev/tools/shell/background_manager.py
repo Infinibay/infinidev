@@ -26,6 +26,8 @@ import subprocess
 import threading
 import time
 
+from infinidev.tools.shell.shell_invocation import shell_invocation
+
 logger = logging.getLogger(__name__)
 
 # How much output we retain per stream. Background commands (servers, log
@@ -320,9 +322,10 @@ class BackgroundTaskManager:
         env: dict[str, str] | None = None,
     ) -> BackgroundTask:
         """Spawn ``command`` detached and register it. Raises on spawn failure."""
+        invocation, use_shell = shell_invocation(command)
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            invocation,
+            shell=use_shell,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
