@@ -16,7 +16,10 @@ from infinidev.engine.engines.graph.domain import (
     GraphState,
     Lifecycle,
 )
-from infinidev.engine.engines.graph.engine import GraphEngineAdapter
+from infinidev.engine.engines.graph.engine import (
+    _LEAF_INTERRUPTED,
+    GraphEngineAdapter,
+)
 from infinidev.engine.engines.graph.ops import (
     ActivateNodeOp,
     EdgeSpec,
@@ -409,11 +412,141 @@ class TestAdapterCompleted:
             "allow_plan_mutation": False,
         }
 
+    def test_live_leaf_reports_budget_exhaustion_as_resumable(self, monkeypatch):
+        from infinidev.engine.orchestration import pipeline as pipeline_mod
+
+        monkeypatch.setattr(
+            pipeline_mod, "_run_gather_phase", lambda **kwargs: kwargs["task_prompt"]
+        )
+
+        class Agent:
+            def activate_context(self, **kwargs):
+                pass
+
+            def deactivate(self):
+                pass
+
+        class Engine:
+            _last_status = "exhausted"
+            is_cancelled = False
+
+            def execute(self, **kwargs):
+                return "Step interrupted at its tool-call boundary."
+
+        class Hooks:
+            def on_phase(self, phase):
+                pass
+
+            def on_status(self, level, message):
+                pass
+
+        result, status = GraphEngineAdapter()._run_live_leaf(
+            capsule_text="active graph node",
+            budget={"max_tool_calls": 2},
+            node=SimpleNamespace(
+                title="Implement middleware",
+                node_type="work",
+                objective="Implement middleware",
+                expected_outcome="Middleware works",
+                payload={"deferred_scope": []},
+            ),
+            kwargs={
+                "escalation": _escalation(),
+                "agent": Agent(),
+                "engine": Engine(),
+                "hooks": Hooks(),
+                "session_id": "s1",
+                "reviewer": None,
+            },
+            preserve_file_tracker=False,
+        )
+
+        assert result == "Step interrupted at its tool-call boundary."
+        assert status == _LEAF_INTERRUPTED
+
 
 # ── Adapter: blocked / budget paths ─────────────────────────────────────────
 
 
 class TestAdapterBlocked:
+    def test_leaf_resume_keeps_evidence_but_refreshes_episode_budgets(self):
+        from infinidev.engine.loop.loop_state import LoopState
+
+        state = LoopState(
+            iteration_count=3,
+            total_tool_calls=20,
+            total_tokens=900,
+            total_prompt_tokens=800,
+            total_completion_tokens=100,
+            task_has_edits=True,
+            edited_step_indices={1},
+            notes=["Implemented the requested API"],
+            prompt_composition_history=[{"iteration": 1}],
+            request_payload_history=[{"message_count": 2}],
+        )
+
+        resumed = GraphEngineAdapter._resume_leaf_state(
+            SimpleNamespace(_last_state=state)
+        )
+
+        assert resumed is not None
+        assert resumed["iteration_count"] == 0
+        assert resumed["total_tool_calls"] == 0
+        assert resumed["total_tokens"] == 0
+        assert resumed["task_has_edits"] is True
+        assert resumed["edited_step_indices"] == [1]
+        assert resumed["notes"] == ["Implemented the requested API"]
+        assert resumed["prompt_composition_history"] == []
+        assert resumed["request_payload_history"] == []
+
+    def test_budget_interrupted_leaf_is_checkpointed_and_retried(self):
+        class RetryAdapter(GraphEngineAdapter):
+            calls = 0
+            capsules = []
+            resume_flags = []
+
+            def _run_live_leaf(self, **kwargs):
+                self.calls += 1
+                self.capsules.append(kwargs["capsule_text"])
+                self.resume_flags.append(
+                    (kwargs["resume_leaf"], kwargs["preserve_file_tracker"])
+                )
+                if self.calls == 1:
+                    return "Tests passed at the budget boundary", _LEAF_INTERRUPTED
+                return "Work resumed and completed", STATUS_COMPLETED
+
+        adapter = RetryAdapter(max_leaf_runs=2)
+        result = adapter.run(escalation=_escalation(), session_id="s1")
+
+        assert result.status == STATUS_COMPLETED
+        assert adapter.calls == 2
+        work = next(
+            node for node in result.state.nodes.values() if node.node_type == "work"
+        )
+        assert work.lifecycle is Lifecycle.RESOLVED
+        assert "Tests passed at the budget boundary" in adapter.capsules[1]
+        assert adapter.resume_flags == [(False, False), (True, True)]
+
+    def test_interrupted_leaf_retry_obeys_revisit_fuse(self):
+        from infinidev.engine.engines.graph.scheduler import SchedulerLimits
+
+        class AlwaysInterrupted(GraphEngineAdapter):
+            calls = 0
+
+            def _run_live_leaf(self, **kwargs):
+                self.calls += 1
+                return "budget boundary", _LEAF_INTERRUPTED
+
+        adapter = AlwaysInterrupted(
+            limits=SchedulerLimits(max_node_revisits=1),
+            max_leaf_runs=3,
+        )
+        result = adapter.run(escalation=_escalation(), session_id="s1")
+
+        assert result.status == STATUS_BLOCKED
+        assert adapter.calls == 1
+        assert "revisit budget (1)" in result.summary
+
     def test_revisit_fuse_zero_blocks_immediately(self):
         from infinidev.engine.engines.graph.scheduler import SchedulerLimits
 

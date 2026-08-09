@@ -46,6 +46,7 @@ from infinidev.engine.engines.graph.ops import (
     NodeSpec,
     ResolveNodeOp,
     ReviseGoalOp,
+    SuspendNodeOp,
 )
 from infinidev.engine.engines.graph.reducer import GraphInvariantError, reduce
 from infinidev.engine.engines.graph.scheduler import SchedulerLimits, select_next
@@ -60,6 +61,12 @@ LeafExecutor = Callable[[str, dict[str, Any]], str]
 #: Safety fuse for the number of leaf executions in one run. Distinct from the
 #: design's token/tool budgets; it only guarantees the loop terminates.
 _DEFAULT_MAX_LEAF_RUNS = 12
+
+# Internal, non-terminal leaf outcome. EngineResult intentionally has no
+# ``interrupted`` status because a Graph budget boundary is scheduler state,
+# not a user-visible task result: checkpoint the node and let the existing
+# revisit/leaf-run fuses decide whether another micro-episode may resume it.
+_LEAF_INTERRUPTED = "interrupted"
 
 
 class GraphEngineAdapter:
@@ -386,6 +393,7 @@ class GraphEngineAdapter:
         node: Any,
         kwargs: dict[str, Any],
         preserve_file_tracker: bool,
+        resume_leaf: bool = False,
     ) -> tuple[str, str]:
         """Execute one Graph node through the supplied LoopEngine."""
         from infinidev.config.settings import settings
@@ -527,6 +535,7 @@ class GraphEngineAdapter:
         )
         agent.activate_context(session_id=session_id)
         try:
+            resume_state = self._resume_leaf_state(engine) if resume_leaf else None
             result = engine.execute(
                 agent=agent,
                 task_prompt=task_prompt,
@@ -539,6 +548,7 @@ class GraphEngineAdapter:
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=max_tool_calls,
                 preserve_file_tracker=preserve_file_tracker,
+                resume_state=resume_state,
                 skip_plan=False,
                 allow_plan_mutation=False,
             )
@@ -554,7 +564,9 @@ class GraphEngineAdapter:
             return result, STATUS_CANCELLED
 
         loop_status = getattr(engine, "_last_status", "") or "completed"
-        if loop_status in {"blocked", "exhausted"}:
+        if loop_status == "exhausted":
+            return result, _LEAF_INTERRUPTED
+        if loop_status == "blocked":
             return result, STATUS_BLOCKED
         if loop_status == "failed":
             return result, STATUS_FAILED
@@ -590,11 +602,45 @@ class GraphEngineAdapter:
         review_status = getattr(engine, "_last_status", "") or "completed"
         if getattr(engine, "is_cancelled", False):
             return result, STATUS_CANCELLED
-        if review_status in {"blocked", "exhausted"}:
+        if review_status == "exhausted":
+            return result, _LEAF_INTERRUPTED
+        if review_status == "blocked":
             return result, STATUS_BLOCKED
         if review_status == "failed":
             return result, STATUS_FAILED
         return result, STATUS_COMPLETED
+
+    @staticmethod
+    def _resume_leaf_state(engine: Any) -> dict[str, Any] | None:
+        """Carry leaf evidence into a fresh bounded micro-episode.
+
+        The plan, edits, notes, and compact history form the checkpoint.
+        Resource counters are episode-local fuses, so carrying them forward
+        would make the resumed loop exit before its first model turn. Graph
+        calls this only for an immediate retry of the same node; sibling
+        leaves always start from isolated state.
+        """
+        previous = getattr(engine, "_last_state", None)
+        if previous is None:
+            return None
+        state = previous.model_dump(mode="json")
+        for field in (
+            "iteration_count",
+            "total_tool_calls",
+            "total_tokens",
+            "total_prompt_tokens",
+            "total_completion_tokens",
+            "last_prompt_tokens",
+            "last_completion_tokens",
+            "cache_creation_tokens",
+            "cache_read_tokens",
+            "cached_tokens",
+            "tool_calls_since_last_note",
+        ):
+            state[field] = 0
+        state["prompt_composition_history"] = []
+        state["request_payload_history"] = []
+        return state
 
     # ── main loop ──────────────────────────────────────────────────────
 
@@ -618,6 +664,7 @@ class GraphEngineAdapter:
 
         visits: dict[str, int] = {}
         leaf_runs = 0
+        resume_node_id: str | None = None
         last_result = ""
         completed_results: list[tuple[str, str]] = []
 
@@ -666,9 +713,23 @@ class GraphEngineAdapter:
                     ),
                 )
 
-            node, reason = select_next(
-                state, visits=visits, limits=self._limits
-            )
+            resuming_leaf = resume_node_id is not None
+            if resuming_leaf:
+                resume_visits = visits.get(resume_node_id, 0)
+                if resume_visits >= self._limits.max_node_revisits:
+                    node = None
+                    reason = (
+                        f"checkpointed node {resume_node_id} exceeded its "
+                        f"revisit budget ({self._limits.max_node_revisits})"
+                    )
+                else:
+                    node = state.nodes.get(resume_node_id)
+                    reason = f"resume checkpointed node {resume_node_id}"
+                resume_node_id = None
+            else:
+                node, reason = select_next(
+                    state, visits=visits, limits=self._limits
+                )
             if node is None:
                 return EngineResult(
                     engine_name=self.name,
@@ -705,11 +766,10 @@ class GraphEngineAdapter:
                         budget=node_budget,
                         node=node,
                         kwargs=kwargs,
-                        # Each leaf owns its diff and review. Carrying the
-                        # tracker across branches makes a read-only branch
-                        # inherit earlier edits and lets review repair sibling
-                        # failures inside the wrong node.
-                        preserve_file_tracker=False,
+                        # Carry state only across an immediate retry of this
+                        # node. Sibling branches must never inherit its diff.
+                        preserve_file_tracker=resuming_leaf,
+                        resume_leaf=resuming_leaf,
                     )
                 else:
                     result_text = self._executor(capsule_text, node_budget)
@@ -724,6 +784,31 @@ class GraphEngineAdapter:
                     state=state,
                     resume_token=session_id,
                 )
+
+            if leaf_status == _LEAF_INTERRUPTED:
+                try:
+                    state, _ = self._apply(
+                        state,
+                        SuspendNodeOp(
+                            node_id=node_id,
+                            reason="leaf execution budget exhausted",
+                            checkpoint=result_text,
+                        ),
+                    )
+                except GraphInvariantError as exc:
+                    return EngineResult(
+                        engine_name=self.name,
+                        status=STATUS_BLOCKED,
+                        user_message=f"Could not checkpoint interrupted leaf: {exc}",
+                        summary=str(exc),
+                        engine=kwargs.get("engine"),
+                        state=state,
+                        resume_token=session_id,
+                    )
+                visits[node_id] = visits.get(node_id, 0) + 1
+                leaf_runs += 1
+                resume_node_id = node_id
+                continue
 
             if leaf_status != STATUS_COMPLETED:
                 return EngineResult(
