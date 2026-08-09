@@ -375,6 +375,7 @@ def _execute_stage(
                     list(escalation.attachments) if escalation.attachments else None
                 ),
                 task=structured_task,
+                allow_plan_mutation=False,
                 initial_edit_evidence=_prior_task_target_was_edited(
                     stage, task, used_engine, workspace_path,
                 ),

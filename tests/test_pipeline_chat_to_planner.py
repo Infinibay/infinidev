@@ -131,12 +131,14 @@ class _FakeEngine:
         initial_attachments: list[Any] | None = None,
         task: Any | None = None,
         max_total_tool_calls: int | None = None,
+        allow_plan_mutation: bool = True,
     ) -> str:
         self.captured_initial_plan = initial_plan
         self.captured_task_prompt = task_prompt
         self.captured_initial_attachments = initial_attachments
         self.captured_task = task
         self.captured_max_total_tool_calls = max_total_tool_calls
+        self.captured_allow_plan_mutation = allow_plan_mutation
         return self.result_text
 
     def has_file_changes(self) -> bool:

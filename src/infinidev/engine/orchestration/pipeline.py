@@ -453,6 +453,7 @@ def _run_execution_phase(
     max_total_tool_calls: int | None = None,
     max_tool_calls_per_action: int | None = None,
     allow_explore: bool | None = None,
+    allow_plan_mutation: bool | None = None,
 ) -> tuple[str, Any]:
     """Execution: dispatch to LoopEngine (or PhaseEngine for ``--think``).
 
@@ -504,6 +505,8 @@ def _run_execution_phase(
                 execute_kwargs["max_tool_calls_per_action"] = max_tool_calls_per_action
             if allow_explore is not None:
                 execute_kwargs["allow_explore"] = allow_explore
+            if allow_plan_mutation is not None:
+                execute_kwargs["allow_plan_mutation"] = allow_plan_mutation
             result = engine.execute(
                 agent=agent,
                 task_prompt=task_prompt,

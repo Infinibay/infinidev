@@ -187,6 +187,7 @@ def test_small_goal_uses_one_stage_one_task_then_evidence_completion(
     ]
     assert "Outcome only is observed" in structured.derived_verification_criteria
     assert runtime["executions"][0]["max_total_tool_calls"] == 40
+    assert runtime["executions"][0]["allow_plan_mutation"] is False
     assert runtime["reviews"][0]["task"] is structured
     assert runtime["reviews"][0]["max_total_tool_calls"] == 40
     assert seen[1].evidence
