@@ -162,6 +162,7 @@ def _run_llm_loop(
         call_kwargs = dict(base_kwargs)
         call_kwargs["messages"] = messages
         call_kwargs["tools"] = tool_schemas
+        call_kwargs["tool_choice"] = "required"
         call_kwargs.setdefault("temperature", 0.1)
         call_kwargs.setdefault("stream", False)
         call_kwargs.setdefault("max_tokens", 3000)

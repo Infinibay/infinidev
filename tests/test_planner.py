@@ -244,6 +244,7 @@ class TestToolboxIntegrity:
         run_planner(_sample_escalation())
         assert len(scripted.calls) == 1
         tools = scripted.calls[0]["tools"]
+        assert scripted.calls[0]["tool_choice"] == "required"
         names = {t["function"]["name"] for t in tools}
         assert "emit_task_plan" in names
         assert "emit_plan" not in names
