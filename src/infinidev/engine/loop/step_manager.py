@@ -17,6 +17,7 @@ from infinidev.engine.engine_logging import (
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.loop.models import ActionRecord, StepResult
 from infinidev.engine.loop.behavior_rules import _READ_TOOLS, is_workspace_edit_tool
+from infinidev.engine.loop.loop_plan import _step_phase
 from infinidev.engine.loop.step_summarizer import _summarize_step, _synthesize_final
 
 if TYPE_CHECKING:
@@ -164,11 +165,25 @@ class StepManager:
             # A step the model gave up on is recorded as given up on. Filing it
             # as ``done`` told run_report, and through it the reviewer, that the
             # work had succeeded.
-            ctx.state.plan.mark_active(
-                "blocked" if step_result.status == "blocked" else "done"
+            active = ctx.state.plan.active_step
+            active_phase = _step_phase(active.title) if active is not None else ""
+            close_status = (
+                "blocked"
+                if step_result.status == "blocked"
+                else ("skipped" if step_result.decomposed_phase else "done")
             )
+            ctx.state.plan.mark_active(close_status)
             if step_result.next_steps:
                 ctx.state.plan.apply_operations(step_result.next_steps)
+            if step_result.decomposed_phase:
+                ctx.state.plan.execution_phase = step_result.decomposed_phase
+                ctx.state.plan.consecutive_decompositions += 1
+            elif (
+                active is not None
+                and active_phase in {"change", "test_change"}
+                and active.index in ctx.state.edited_step_indices
+            ):
+                ctx.state.plan.consecutive_decompositions = 0
             ctx.state.plan.activate_next()
         # Notify a UI hook (if any) that a new step is now active. Best
         # effort — never let a hook error interrupt the engine loop.
@@ -212,7 +227,8 @@ class StepManager:
         # needs to know what failed.
         if step_result.status != "explore" and not step_result.interrupted:
             closed = [
-                s for s in ctx.state.plan.steps if s.status in ("done", "blocked")
+                s for s in ctx.state.plan.steps
+                if s.status in ("done", "blocked", "skipped")
             ]
             if closed:
                 step_index = closed[-1].index

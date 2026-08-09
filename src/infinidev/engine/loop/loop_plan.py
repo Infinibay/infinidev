@@ -15,14 +15,20 @@ from infinidev.engine.loop.step_operation import StepOperation
 logger = logging.getLogger(__name__)
 
 _SIMILAR_OPEN_STEP_THRESHOLD = 0.80
+_MAX_CONSECUTIVE_DECOMPOSITIONS = 1
+_TEST_CHANGE_RE = re.compile(
+    r"^(?:add|create|edit|implement|patch|update|write)\b.{0,60}"
+    r"\b(?:tests?|regressions?|coverage)\b"
+)
 
 _STEP_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("discover", re.compile(
         r"\b(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|trace|understand)\b"
     )),
     ("change", re.compile(
-        r"\b(?:add|adjust|change|correct|create|edit|fix|implement|limit|"
-        r"refactor|repair|replace|rewrite|update)\b"
+        r"\b(?:add|adjust|change|configure|connect|correct|create|delete|edit|"
+        r"fix|implement|integrate|invalidate|limit|migrate|patch|refactor|"
+        r"remove|repair|replace|rewrite|update|wire)\b"
     )),
     ("verify", re.compile(
         r"\b(?:check|run|test|validate|verification|verify)\b"
@@ -32,6 +38,14 @@ _STEP_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _PATH_RE = re.compile(r"(?:[a-zA-Z0-9_.-]+/)+[a-zA-Z0-9_.-]+")
 _IDENTIFIER_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_STEP_CONCEPT_STOPWORDS = {
+    "a", "add", "adjust", "and", "change", "configure", "connect",
+    "correct", "create", "delete", "edit", "file", "fix", "for", "from",
+    "implement", "in", "integrate", "into", "invalidate", "limit", "migrate",
+    "module", "of", "patch", "refactor", "remove", "repair", "replace",
+    "rewrite", "the", "to", "under", "update", "wire", "with",
+}
 _LEADING_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("discover", re.compile(
         r"^(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|trace|understand)\b"
@@ -40,8 +54,9 @@ _LEADING_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"^(?:check|run|test|validate|verification|verify)\b"
     )),
     ("change", re.compile(
-        r"^(?:add|adjust|change|correct|create|edit|fix|implement|limit|"
-        r"refactor|repair|replace|rewrite|update)\b"
+        r"^(?:add|adjust|change|configure|connect|correct|create|delete|edit|"
+        r"fix|implement|integrate|invalidate|limit|migrate|patch|refactor|"
+        r"remove|repair|replace|rewrite|update|wire)\b"
     )),
     ("document", re.compile(r"^(?:document|documentation|explain|write docs?)\b")),
     ("design", re.compile(r"^(?:design|plan|prototype)\b")),
@@ -56,6 +71,8 @@ def _normalized_step_title(title: str) -> str:
 def _step_phase(title: str) -> str:
     """Classify the action without asking another model."""
     normalized = title.casefold()
+    if _TEST_CHANGE_RE.search(normalized):
+        return "test_change"
     # Step titles commonly include the object of work ("Verify the parser
     # fix"). The leading action owns the phase; a later noun must not turn a
     # verification Step into an implementation Step.
@@ -74,6 +91,16 @@ def _step_targets(title: str) -> set[str]:
     paths = {match.rstrip(".,:;)") for match in _PATH_RE.findall(normalized)}
     identifiers = set(_IDENTIFIER_RE.findall(normalized))
     return paths | identifiers
+
+
+def _step_concepts(title: str) -> set[str]:
+    """Return action-independent concepts for deterministic deduplication."""
+    expanded = _CAMEL_BOUNDARY_RE.sub(" ", title)
+    tokens = re.findall(r"[a-z0-9]+", expanded.casefold().replace("_", " "))
+    return {
+        token for token in tokens
+        if len(token) > 1 and token not in _STEP_CONCEPT_STOPWORDS
+    }
 
 # Fields the model may refine on a user-approved step.
 #
@@ -104,6 +131,14 @@ class LoopPlan(BaseModel):
     # ``0`` means unrestricted (legacy plans). A rolling Task keeps at most
     # this many active/pending Steps; completed history remains intact.
     rolling_horizon_limit: int = 0
+    # Non-empty only when a model-authored step decomposed itself into more
+    # concrete work of the same phase. ``activate_next`` drains that phase
+    # before returning to ordinary index order (typically verification).
+    # Persisting it keeps resumed runs on the same deterministic frontier.
+    execution_phase: str = ""
+    # A successful edit resets this. Until then, only one model-authored
+    # container may hand work to a more concrete Step.
+    consecutive_decompositions: int = 0
 
     @property
     def active_step(self) -> PlanStep | None:
@@ -118,7 +153,7 @@ class LoopPlan(BaseModel):
         """True if any step is pending or active."""
         return any(s.status in ("pending", "active") for s in self.steps)
 
-    def mark_active(self, status: Literal["done", "blocked"]) -> None:
+    def mark_active(self, status: Literal["done", "blocked", "skipped"]) -> None:
         """Close the active step with an explicit terminal status."""
         for step in self.steps:
             if step.status == "active":
@@ -155,6 +190,15 @@ class LoopPlan(BaseModel):
 
     def activate_next(self) -> None:
         """Activate the next pending step."""
+        if self.execution_phase:
+            for step in self.steps:
+                if (
+                    step.status == "pending"
+                    and _step_phase(step.title) == self.execution_phase
+                ):
+                    step.status = "active"
+                    return
+            self.execution_phase = ""
         for step in self.steps:
             if step.status == "pending":
                 step.status = "active"
@@ -173,6 +217,7 @@ class LoopPlan(BaseModel):
             return None
         phase = _step_phase(title)
         targets = _step_targets(title)
+        concepts = _step_concepts(title)
         for step in self.steps:
             if step.status not in ("pending", "active"):
                 continue
@@ -185,7 +230,21 @@ class LoopPlan(BaseModel):
                 and phase == _step_phase(step.title)
                 and bool(targets & _step_targets(step.title))
             )
-            if similarity >= _SIMILAR_OPEN_STEP_THRESHOLD or same_concrete_work:
+            existing_concepts = _step_concepts(step.title)
+            shared_concepts = concepts & existing_concepts
+            semantic_overlap = (
+                bool(phase)
+                and phase == _step_phase(step.title)
+                and len(shared_concepts) >= 3
+                and len(shared_concepts)
+                / min(len(concepts), len(existing_concepts))
+                >= 0.60
+            )
+            if (
+                similarity >= _SIMILAR_OPEN_STEP_THRESHOLD
+                or same_concrete_work
+                or semantic_overlap
+            ):
                 return step
         return None
 

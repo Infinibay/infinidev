@@ -154,3 +154,55 @@ class TestStepTransition:
         assert terminal is None
         assert state.plan.steps[0].status == "blocked"
         assert state.plan.steps[1].status == "active"
+
+    def test_decomposed_change_drains_changes_before_verification(self) -> None:
+        state = _state(
+            PlanStep(index=1, title="Implement cache", status="active"),
+            PlanStep(index=2, title="Run cache tests"),
+            PlanStep(index=3, title="Add cache state"),
+            PlanStep(index=4, title="Update tool runner"),
+        )
+        manager = StepManager(SimpleNamespace(_hooks=None))
+
+        manager.advance_plan(
+            _ctx(state),
+            StepResult(
+                summary="Split into concrete edits",
+                status="continue",
+                decomposed_phase="change",
+            ),
+        )
+
+        assert state.plan.steps[0].status == "skipped"
+        assert state.plan.steps[1].status == "pending"
+        assert state.plan.steps[2].status == "active"
+        assert state.plan.execution_phase == "change"
+        assert state.plan.consecutive_decompositions == 1
+
+        manager.advance_plan(
+            _ctx(state), StepResult(summary="Added state", status="continue"),
+        )
+        assert state.plan.steps[3].status == "active"
+        assert state.plan.steps[1].status == "pending"
+
+        manager.advance_plan(
+            _ctx(state), StepResult(summary="Updated runner", status="continue"),
+        )
+        assert state.plan.steps[1].status == "active"
+        assert state.plan.execution_phase == ""
+
+    def test_successful_concrete_edit_resets_decomposition_budget(self) -> None:
+        state = _state(
+            PlanStep(index=2, title="Add cache state", status="active"),
+            PlanStep(index=3, title="Run cache tests"),
+        )
+        state.plan.consecutive_decompositions = 1
+        state.edited_step_indices.add(2)
+        manager = StepManager(SimpleNamespace(_hooks=None))
+
+        manager.advance_plan(
+            _ctx(state), StepResult(summary="Added cache state", status="continue"),
+        )
+
+        assert state.plan.consecutive_decompositions == 0
+        assert state.plan.steps[1].status == "active"

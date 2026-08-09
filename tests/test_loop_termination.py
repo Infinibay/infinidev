@@ -248,6 +248,77 @@ def test_implementation_step_cannot_close_without_an_edit():
     assert _should_advance_plan(result) is False
 
 
+def test_model_change_container_advances_to_concrete_change_frontier():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Implement cache support", status="active"),
+        PlanStep(index=2, title="Run cache tests"),
+        PlanStep(index=3, title="Add cache state to LoopState"),
+    ]
+    result = StepResult(summary="Decomposed the implementation", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert result.decomposed_phase == "change"
+    assert result.interrupted is False
+    assert _should_advance_plan(result) is True
+
+
+def test_user_approved_change_cannot_be_superseded_without_an_edit():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(
+            index=1,
+            title="Implement cache support",
+            status="active",
+            user_approved=True,
+        ),
+        PlanStep(index=2, title="Add cache state to LoopState"),
+    ]
+    result = StepResult(summary="Decomposed the implementation", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.decomposed_phase == ""
+    assert result.interrupted is True
+
+
+def test_production_change_cannot_delegate_to_a_test_change():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Implement cache support", status="active"),
+        PlanStep(index=2, title="Add focused regression tests"),
+    ]
+    result = StepResult(summary="Tests will cover it", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.decomposed_phase == ""
+    assert result.interrupted is True
+
+
+def test_consecutive_change_decomposition_is_bounded():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.consecutive_decompositions = 1
+    ctx.state.plan.steps = [
+        PlanStep(index=2, title="Implement cache support", status="active"),
+        PlanStep(index=3, title="Wire cache into the runner"),
+    ]
+    result = StepResult(summary="Split it again", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.decomposed_phase == ""
+
+
 def test_implementation_step_closes_with_current_edit_evidence():
     from infinidev.engine.loop.plan_step import PlanStep
 
@@ -281,6 +352,45 @@ def test_implementation_step_remembers_edit_from_budget_continuation():
 
     assert _enforce_step_effect(ctx, result) is False
     assert _should_advance_plan(result) is True
+
+
+def test_implementation_step_uses_persisted_edit_evidence_after_interruption():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=3, title="Implement the parser fix", status="active"),
+    ]
+    ctx.state.edited_step_indices.add(3)
+    result = StepResult(summary="Focused test passed", status="continue")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert _should_advance_plan(result) is True
+
+
+def test_finalize_inner_loop_persists_current_step_edit_evidence():
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Update tags.py", status="active"),
+    ]
+    tracker = BehaviorTracker(set())
+    tracker.task_has_edits = True
+    tracker.files_edited.add("src/tags.py")
+
+    LoopEngine()._finalize_inner_loop(
+        ctx,
+        StepResult(summary="budget", status="continue", interrupted=True),
+        action_tool_calls=10,
+        tracker=tracker,
+        saw_tool_calls=True,
+    )
+
+    assert ctx.state.edited_step_indices == {4}
 
 
 def test_budget_interruption_resumes_the_same_plan_step():

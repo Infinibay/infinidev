@@ -398,6 +398,44 @@ class TestPublicPlanTools:
         assert result["status"] == "duplicate"
         assert len(state.plan.steps) == 1
 
+    def test_add_step_merges_same_work_across_path_and_camel_case(self, bound_tool):
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(
+                index=1,
+                title=(
+                    "Add ReadRepeatCache module under infinidev/engine with "
+                    "deterministic short-circuit and edit invalidation"
+                ),
+                status="active",
+            ),
+        ]
+        self._bind(state)
+
+        result = json.loads(bound_tool(AddStepTool)._run(
+            title=(
+                "Create src/infinidev/engine/read_repeat_cache.py and wire "
+                "short-circuit plus edit invalidation"
+            ),
+        ))
+
+        assert result["status"] == "duplicate"
+        assert len(state.plan.steps) == 1
+
+    def test_add_step_keeps_distinct_changes_with_generic_cache_terms(self, bound_tool):
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(index=1, title="Add cache state to LoopState", status="active"),
+        ]
+        self._bind(state)
+
+        result = json.loads(bound_tool(AddStepTool)._run(
+            title="Wire cache invalidation into the tool runner",
+        ))
+
+        assert result["status"] == "added"
+        assert len(state.plan.steps) == 2
+
     def test_verify_fix_title_is_not_classified_as_an_implementation_step(self):
         from infinidev.engine.loop.loop_plan import _step_phase
 
@@ -405,6 +443,11 @@ class TestPublicPlanTools:
         assert _step_phase("Fix parser and run tests") == "change"
         assert _step_phase("Limit regression test to JSON and re-run tests") == "change"
         assert _step_phase("Replace workaround and verify behavior") == "change"
+        assert _step_phase("Wire cache handling into tool_runner") == "change"
+        assert _step_phase("Invalidate cache entries after every write") == "change"
+        assert _step_phase("Connect dynamic blend state and verify it") == "change"
+        assert _step_phase("Add focused regression tests") == "test_change"
+        assert _step_phase("Patch tests/test_cache.py with invalidation coverage") == "test_change"
 
 
 def test_step_result_operations_cannot_add_duplicate_open_work():

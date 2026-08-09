@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from infinidev.config.settings import settings
@@ -16,7 +18,7 @@ from infinidev.engine.analysis.staged_planning import (
 from infinidev.engine.engines import run_selected_engine
 from infinidev.engine.engines.base import STATUS_BLOCKED, STATUS_COMPLETED
 from infinidev.engine.engines.react import ReactAdapter
-from infinidev.engine.engines.task import TaskAdapter
+from infinidev.engine.engines.task import TaskAdapter, _bootstrap_step
 from infinidev.engine.history import store
 from infinidev.engine.orchestration import staged_pipeline as staged_pipeline_mod
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
@@ -323,6 +325,24 @@ class TestReactAdapter:
 
 
 class TestTaskAdapter:
+    def test_bootstrap_step_is_executable_without_reclassifying_investigation(self):
+        implementation = _bootstrap_step(SimpleNamespace(
+            title="Transaction restore ordering",
+            kind="bugfix",
+        ))
+        investigation = _bootstrap_step(SimpleNamespace(
+            title="Compare queue backends",
+            kind="investigation",
+        ))
+        test_change = _bootstrap_step(SimpleNamespace(
+            title="Add focused regression tests",
+            kind="bugfix",
+        ))
+
+        assert implementation.title == "Implement Transaction restore ordering"
+        assert investigation.title == "Investigate Compare queue backends"
+        assert test_change.title == "Add focused regression tests"
+
     def test_task_uses_one_rolling_plan_without_an_analyst(self, temp_db, patched_pipeline):
         engine = _LoopEngine("Implemented the fix.", "done")
         adapter = TaskAdapter()
@@ -335,7 +355,11 @@ class TestTaskAdapter:
 
         assert result.status == STATUS_COMPLETED
         assert result.engine_name == "task"
-        assert engine.execute_kwargs["initial_plan"].steps == []
+        assert len(engine.execute_kwargs["initial_plan"].steps) == 1
+        assert (
+            engine.execute_kwargs["initial_plan"].steps[0].title
+            == "Implement the feedback tool"
+        )
         assert "rolling" in engine.execute_kwargs["initial_plan"].overview.lower()
         assert engine.execute_kwargs["initial_plan"].rolling_horizon_limit == 3
         assert engine.execute_kwargs["max_iterations"] == settings.TASK_MAX_ITERATIONS

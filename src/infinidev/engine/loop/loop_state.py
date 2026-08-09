@@ -50,6 +50,10 @@ class LoopState(BaseModel):
     request_payload_history: list[dict[str, object]] = Field(default_factory=list)
     tool_calls_since_last_note: int = 0  # For gentle note-taking nudge
     task_has_edits: bool = False  # Set once when any edit tool succeeds
+    # Successful edit evidence keyed by the active Step. Unlike an LLM
+    # summary, this survives a tool-budget interruption and lets the next
+    # iteration close the same implementation Step after verification.
+    edited_step_indices: set[int] = Field(default_factory=set)
     # Prompt cache metrics (populated from LLM response usage)
     cache_creation_tokens: int = 0   # Anthropic/DashScope/MiniMax: tokens written to cache
     cache_read_tokens: int = 0       # Anthropic/DashScope/MiniMax: tokens read from cache

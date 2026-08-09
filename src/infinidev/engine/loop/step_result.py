@@ -36,3 +36,8 @@ class StepResult(BaseModel):
     # completion gate ends an in-flight step. ``status=continue`` from the
     # model closes the current step; an interrupted continuation resumes it.
     interrupted: bool = Field(default=False, exclude=True)
+    # A model-authored change step can become a planning container by adding
+    # concrete change steps behind itself. The state machine marks that
+    # container superseded and drains the concrete phase before later
+    # verification, avoiding a sequential-plan deadlock.
+    decomposed_phase: str = Field(default="", exclude=True)

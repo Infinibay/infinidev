@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from infinidev.config.settings import settings
-from infinidev.engine.analysis.plan import Plan
+from infinidev.engine.analysis.plan import Plan, PlanStepSpec
 from infinidev.engine.engines.base import (
     EngineResult,
     STATUS_BLOCKED,
@@ -54,6 +54,27 @@ def _build_task_prompt(escalation: Any, turn_context: str) -> tuple[str, str]:
         f"{context}"
     )
     return description, get_flow_config("develop").expected_output
+
+
+def _bootstrap_step(task: Any) -> PlanStepSpec:
+    """Create one executable frontier step without another model round-trip."""
+    from infinidev.engine.loop.loop_plan import _step_phase
+
+    title = str(task.title).strip()
+    phase = _step_phase(title)
+    if task.kind == "investigation":
+        if phase not in {"discover", "verify"}:
+            title = f"Investigate {title}"
+    elif phase not in {"change", "test_change"}:
+        title = f"Implement {title}"
+    return PlanStepSpec(
+        title=title,
+        expected_output=(
+            "Make concrete progress toward the Task and leave the relevant "
+            "verification passing; refine the rolling plan if evidence "
+            "reveals distinct remaining work."
+        ),
+    )
 
 
 class TaskAdapter:
@@ -116,7 +137,11 @@ class TaskAdapter:
                 "Developer-owned rolling plan. Keep only the next 1-3 "
                 "evidence-backed Steps and extend it after they complete."
             ),
-            steps=[],
+            # Starting empty forces an otherwise deterministic model call just
+            # to name the first Step. Seed one executable frontier from the
+            # already-structured Task; the developer can still modify or
+            # decompose it as repository evidence arrives.
+            steps=[_bootstrap_step(structured_task)],
             rolling_horizon_limit=3,
         )
         result, used_engine = pipeline_mod._run_execution_phase(

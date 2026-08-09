@@ -47,7 +47,10 @@ from infinidev.engine.loop.guardrail_runner import apply_guardrail
 from infinidev.engine.loop.guidance_handler import GuidanceHandler
 from infinidev.engine.loop.llm_caller import LLMCaller, LLMCallResult, ClassifiedCalls
 from infinidev.engine.loop.loop_guard import LoopGuard
-from infinidev.engine.loop.loop_plan import _step_phase
+from infinidev.engine.loop.loop_plan import (
+    _MAX_CONSECUTIVE_DECOMPOSITIONS,
+    _step_phase,
+)
 from infinidev.engine.loop.models import ActionRecord, LoopState, StepResult
 from infinidev.engine.loop.step_complete_gate import (
     StepCompleteGate,
@@ -230,16 +233,43 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     """
     if step_result.interrupted or step_result.status not in {"continue", "done"}:
         return False
-    active = getattr(getattr(ctx.state, "plan", None), "active_step", None)
-    if active is None or _step_phase(active.title) != "change":
+    plan = getattr(ctx.state, "plan", None)
+    active = getattr(plan, "active_step", None)
+    active_phase = _step_phase(active.title) if active is not None else ""
+    if active is None or active_phase not in {"change", "test_change"}:
         return False
     tracker = getattr(step_result, "behavior_tracker", None)
     edited_now = bool(getattr(tracker, "files_edited", ()))
     edited_before = any(
         record.step_index == active.index and bool(record.changes_made)
         for record in getattr(ctx.state, "history", ())
-    )
+    ) or active.index in getattr(ctx.state, "edited_step_indices", set())
     if edited_now or edited_before:
+        return False
+
+    # A model-authored change step sometimes turns itself into an umbrella:
+    # it adds concrete change steps, then closes so those steps can run. A
+    # strict sequential edit gate kept the umbrella active forever, making its
+    # children unreachable. Supersede only model-owned containers, and only
+    # when no user-approved frontier would be reordered. Task-level edit and
+    # completion gates still require the concrete work to happen.
+    pending = [step for step in plan.steps if step.status == "pending"]
+    pending_changes = [
+        step for step in pending
+        if _step_phase(step.title) == active_phase
+    ]
+    if (
+        not active.user_approved
+        and pending_changes
+        and not any(step.user_approved for step in pending)
+        and plan.consecutive_decompositions < _MAX_CONSECUTIVE_DECOMPOSITIONS
+    ):
+        step_result.decomposed_phase = active_phase
+        step_result.summary = (
+            f"{step_result.summary.rstrip()} "
+            "The model-authored change step was superseded by its concrete "
+            "pending change steps; advancing through that execution frontier."
+        ).strip()
         return False
 
     step_result.status = "continue"
@@ -1214,6 +1244,9 @@ class LoopEngine(AgentEngine):
             ctx.state.task_has_edits = True
 
         if tracker.files_edited:
+            active = ctx.state.plan.active_step
+            if active is not None:
+                ctx.state.edited_step_indices.add(active.index)
             warned = set(ctx.state.similarity_warned_files)
             new_paths = [p for p in tracker.files_edited if p not in warned]
             if new_paths:
