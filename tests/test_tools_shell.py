@@ -2,14 +2,18 @@
 
 import json
 import signal
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from infinidev.config.settings import settings
+from infinidev.engine.test_environment import prepare_test_environment
 from infinidev.tools.shell.execute_command import ExecuteCommandTool
 from infinidev.tools.shell.execute_command_input import ExecuteCommandInput
-from infinidev.tools.shell.execute_command_tool import _effective_command_timeout
+from infinidev.tools.shell.execute_command_tool import (
+    _effective_command_timeout,
+)
 
 
 class TestExecuteCommand:
@@ -32,6 +36,12 @@ class TestExecuteCommand:
         parsed = ExecuteCommandInput(command="pytest -q", rationale="Verify focused regression")
 
         assert parsed.rationale == "Verify focused regression"
+
+    def test_missing_rationale_is_derived_from_the_command(self):
+        parsed = ExecuteCommandInput(command="pytest tests/test_auth.py -q")
+
+        assert "pytest tests/test_auth.py -q" in parsed.rationale
+        assert "observable result" in parsed.rationale
 
     def test_description_explains_that_shell_state_does_not_persist(self):
         description = ExecuteCommandTool.model_fields["description"].default
@@ -201,6 +211,55 @@ class TestExecuteCommand:
         )
         data = json.loads(result)
         assert "test_value_123" in data["stdout"]
+
+    def test_pytest_uses_checked_out_src_package_without_installing(
+        self, bound_tool, auto_approve_permissions, tmp_path
+    ):
+        package = tmp_path / "src" / "demo_package"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("VALUE = 'checkout'\n")
+        (tmp_path / "test_demo.py").write_text(
+            "import demo_package\n\n"
+            "def test_checkout_import():\n"
+            "    assert demo_package.VALUE == 'checkout'\n"
+        )
+
+        result = json.loads(bound_tool(ExecuteCommandTool)._run(
+            command="python -m pytest test_demo.py -q",
+            cwd=str(tmp_path),
+        ))
+
+        assert result["exit_code"] == 0
+        assert "1 passed" in result["stdout"]
+        assert "Prepended" in result["environment_adjustment"]
+
+    def test_explicit_pythonpath_is_never_overridden(self, tmp_path):
+        (tmp_path / "src" / "demo").mkdir(parents=True)
+        (tmp_path / "src" / "demo" / "__init__.py").write_text("")
+        run_env = {"PYTHONPATH": "inherited"}
+
+        run_env, adjustment = prepare_test_environment(
+            "python -m pytest -q",
+            str(tmp_path),
+            explicit_env={"PYTHONPATH": "explicit"},
+            base_env=run_env,
+        )
+
+        assert adjustment is None
+        assert run_env["PYTHONPATH"] == "explicit"
+
+    def test_absolute_python_pytest_command_gets_src_checkout(self, tmp_path):
+        (tmp_path / "src" / "demo").mkdir(parents=True)
+        (tmp_path / "src" / "demo" / "__init__.py").write_text("")
+
+        run_env, adjustment = prepare_test_environment(
+            [sys.executable, "-m", "pytest", "-q"],
+            str(tmp_path),
+            base_env={},
+        )
+
+        assert adjustment is not None
+        assert run_env["PYTHONPATH"] == str(tmp_path / "src")
 
     def test_permission_auto_approve(self, bound_tool):
         """auto_approve mode allows any command."""

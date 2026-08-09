@@ -108,11 +108,20 @@ def evaluate_goal(state: GraphState) -> GoalAssessment:
         else:
             missing.append(req.title or req.node_id)
 
+    open_work = [
+        node for node in state.nodes.values()
+        if node.node_type in {"work", "verification"}
+        and node.lifecycle is not Lifecycle.RESOLVED
+    ]
+    if open_work:
+        missing.extend(node.title or node.node_id for node in open_work)
+
     if missing:
         return GoalAssessment(
             status="in_progress",
             reasons=[
-                f"{len(satisfied)}/{len(requirements)} requirement(s) satisfied"
+                f"{len(satisfied)}/{len(requirements)} requirement(s) satisfied; "
+                f"{len(open_work)} executable node(s) still open"
             ],
             missing=missing,
         )

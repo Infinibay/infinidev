@@ -179,7 +179,7 @@ def build_execution_context(
         tool_dispatch=tool_dispatch,
         planning_schemas=[
             ADD_STEP_SCHEMA, MODIFY_STEP_SCHEMA, REMOVE_STEP_SCHEMA,
-            ADD_NOTE_SCHEMA,
+            ADD_NOTE_SCHEMA, STEP_COMPLETE_SCHEMA,
         ],
         tools=tools, max_iterations=max_iterations,
         max_per_action=max_per_action, max_total_calls=max_total_calls,
@@ -193,6 +193,7 @@ def build_execution_context(
         agent_role=getattr(agent, "role", "agent"),
         desc=desc, expected=expected, event_id=event_id,
         skip_plan=kwargs.get("skip_plan", False),
+        allow_explore=kwargs.get("allow_explore", True),
         nudge_message_template=kwargs.get("nudge_message_template"),
         state=state, file_tracker=file_tracker,
         start_iteration=state.iteration_count,

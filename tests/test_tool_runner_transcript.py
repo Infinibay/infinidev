@@ -221,6 +221,38 @@ def test_no_nudge_no_trailing_user_turn():
     assert messages[-1]["role"] == "tool"
 
 
+def test_mutating_shell_refreshes_and_evicts_cached_files(tmp_path):
+    kept = tmp_path / "kept.py"
+    removed = tmp_path / "removed.py"
+    kept.write_text("old = True\n")
+    removed.write_text("gone = False\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    ctx.state.cache_file(str(kept), "stale")
+    ctx.state.cache_file(str(removed), "stale")
+
+    kept.write_text("fresh = True\n")
+    removed.unlink()
+    ToolRunner._refresh_opened_files_after_shell(
+        ctx, {"command": "mv source.py destination.py"},
+    )
+
+    assert "fresh = True" in ctx.state.opened_files[str(kept)].content
+    assert str(removed) not in ctx.state.opened_files
+
+
+def test_proven_read_only_shell_keeps_cache_without_rereading(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("disk = 'new'\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    ctx.state.cache_file(str(path), "known-current")
+
+    ToolRunner._refresh_opened_files_after_shell(ctx, {"command": "ls -la"})
+
+    assert ctx.state.opened_files[str(path)].content == "known-current"
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

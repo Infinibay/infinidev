@@ -41,7 +41,8 @@ class PlanStepArg(BaseModel):
     # only when no command/file/test can decide the step (e.g. a pure
     # readability refactor).
     verify_kind: Literal[
-        "none", "command", "test_id", "file_contains", "symbol_exists", "llm_judge"
+        "none", "command", "test_id", "file_contains", "file_absent",
+        "symbol_exists", "llm_judge"
     ] = Field(
         "none",
         description=(
@@ -50,7 +51,8 @@ class PlanStepArg(BaseModel):
             "this repository, then 'test_id'. A shell command that exits 0 "
             "exactly when the step succeeded, then 'command'. A substring a "
             "named file must contain, then 'file_contains'. A string whose "
-            "presence proves this step ran, then 'symbol_exists'. A sentence "
+            "presence proves this step ran, then 'symbol_exists'. When success "
+            "means a path was removed, use 'file_absent' with that path. A sentence "
             "an independent reviewer checks against the diff at task end, "
             "then 'llm_judge'. Use 'none' when you cannot write that "
             "sentence. NEVER name a node id you have not seen: the engine "
@@ -61,7 +63,7 @@ class PlanStepArg(BaseModel):
         "",
         description=(
             "The thing to run/inspect/judge, per verify_kind: the command, the "
-            "pytest node id, the file path (file_contains), the name/snippet "
+            "pytest node id, the file path (file_contains or file_absent), the name/snippet "
             "(symbol_exists), or — for llm_judge — a precise acceptance "
             "statement a reviewer can check against the code (e.g. 'the three "
             "duplicated parse blocks in reader.py are replaced by one helper'). "

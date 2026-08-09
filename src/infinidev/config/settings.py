@@ -184,6 +184,10 @@ class Settings(BaseSettings):
     # per-Task fuse prevents one small Task from inheriting the legacy
     # whole-request limit.
     STAGED_MAX_EXECUTION_TOOL_CALLS_PER_TASK: int = 40
+    # One continuation window lets a Task resume from an exact budget boundary
+    # without turning the whole Stage over to another planner. The second
+    # exhaustion is terminal and reported with the concrete Task evidence.
+    STAGED_MAX_TASK_ATTEMPTS: int = 2
     DYNAMIC_TOOL_ROUTING_ENABLED: bool = True
     LOOP_HISTORY_WINDOW: int = 0  # 0 = keep all
     LOOP_STEP_NUDGE_THRESHOLD: int = 6  # Nudge agent to call step_complete after N tool calls

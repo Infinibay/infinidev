@@ -117,6 +117,7 @@ def test_model_call_replaces_stale_working_label_with_current_phase():
     )
 
     assert app._chat_history_control.work_label == "Model is deciding next action"
+    assert app._actions_text == "Model is deciding next action"
     assert app._chat_history_control.invalidations == 1
     assert app.invalidations == 1
 

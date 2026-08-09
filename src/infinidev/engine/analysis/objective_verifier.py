@@ -21,6 +21,7 @@ import sys
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.verification_result import VerificationResult
 from infinidev.engine.subprocess_runner import run_captured
+from infinidev.engine.test_environment import prepare_test_environment
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ class ObjectiveVerifier:
             )
         if check.kind == "file_contains":
             return self._verify_file_contains(check.spec, check.observable)
+        if check.kind == "file_absent":
+            return self._verify_file_absent(check.spec)
         if check.kind == "symbol_exists":
             return self._verify_symbol_exists(check.spec)
 
@@ -110,9 +113,7 @@ class ObjectiveVerifier:
         return self._result_from_run(run, passed, observable, expected_exit_code)
 
     def _verify_file_contains(self, path: str, needle: str) -> VerificationResult:
-        workspace = os.path.realpath(self._workspace)
-        candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
-        abs_path = os.path.realpath(candidate)
+        abs_path, inside_workspace = self._resolve_workspace_path(path)
         # Spelled out rather than set-notation: this string reaches the
         # developer inside the BLOCKED message (verification_result.py:52).
         entry = {
@@ -120,10 +121,6 @@ class ObjectiveVerifier:
             "exit_code": 0,
             "output": "",
         }
-        try:
-            inside_workspace = os.path.commonpath((workspace, abs_path)) == workspace
-        except ValueError:
-            inside_workspace = False
         if not inside_workspace:
             entry["exit_code"] = 1
             entry["output"] = f"Refused to read outside the workspace: {path}"
@@ -150,6 +147,45 @@ class ObjectiveVerifier:
             summary=("file_contains passed" if present else "file_contains failed"),
             commands_run=[entry],
         )
+
+    def _verify_file_absent(self, path: str) -> VerificationResult:
+        abs_path, inside_workspace = self._resolve_workspace_path(path)
+        entry = {
+            "command": f"(file_absent {path!r})",
+            "exit_code": 0,
+            "output": "",
+        }
+        if not inside_workspace:
+            entry["exit_code"] = 1
+            entry["output"] = f"Refused to inspect outside the workspace: {path}"
+            return VerificationResult(
+                passed=False,
+                summary="file_absent path is outside the workspace",
+                commands_run=[entry],
+            )
+        absent = not os.path.lexists(abs_path)
+        entry["exit_code"] = 0 if absent else 1
+        entry["output"] = (
+            f"No file-system entry exists at {path}"
+            if absent
+            else f"File-system entry still exists at {path}"
+        )
+        return VerificationResult(
+            passed=absent,
+            summary=("file_absent passed" if absent else "file_absent failed"),
+            commands_run=[entry],
+        )
+
+    def _resolve_workspace_path(self, path: str) -> tuple[str, bool]:
+        """Resolve an authored path and report whether it stays in the workspace."""
+        workspace = os.path.realpath(self._workspace)
+        candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
+        abs_path = os.path.realpath(candidate)
+        try:
+            inside_workspace = os.path.commonpath((workspace, abs_path)) == workspace
+        except ValueError:
+            inside_workspace = False
+        return abs_path, inside_workspace
 
     def _verify_symbol_exists(self, symbol: str) -> VerificationResult:
         # Cheap, language-agnostic existence check via grep. -r recursive,
@@ -215,12 +251,17 @@ class ObjectiveVerifier:
             }
 
         try:
-            proc = run_captured(
-                command,
-                shell=isinstance(command, str),
-                cwd=self._workspace,
-                timeout=self._timeout,
+            run_env, environment_adjustment = prepare_test_environment(
+                command, self._workspace,
             )
+            run_kwargs = {
+                "shell": isinstance(command, str),
+                "cwd": self._workspace,
+                "timeout": self._timeout,
+            }
+            if environment_adjustment:
+                run_kwargs["env"] = run_env
+            proc = run_captured(command, **run_kwargs)
             output = (proc.stdout + proc.stderr).strip()
             if len(output) > 3000:
                 output = output[-3000:]
@@ -230,10 +271,13 @@ class ObjectiveVerifier:
                     "exit_code": -1,
                     "output": f"Command timed out after {self._timeout}s",
                 }
-            return {
+            result = {
                 "command": display_command,
                 "exit_code": proc.exit_code,
                 "output": output,
             }
+            if environment_adjustment:
+                result["environment_adjustment"] = environment_adjustment
+            return result
         except Exception as exc:  # pragma: no cover - defensive
             return {"command": display_command, "exit_code": -1, "output": f"Error: {exc}"}

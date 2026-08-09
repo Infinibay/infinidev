@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from difflib import SequenceMatcher
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -11,6 +13,13 @@ from infinidev.engine.loop.plan_step import PlanStep
 from infinidev.engine.loop.step_operation import StepOperation
 
 logger = logging.getLogger(__name__)
+
+_SIMILAR_OPEN_STEP_THRESHOLD = 0.80
+
+
+def _normalized_step_title(title: str) -> str:
+    """Normalize superficial title differences before overlap scoring."""
+    return " ".join(re.findall(r"[a-z0-9_./-]+", title.casefold()))
 
 # Fields the model may refine on a user-approved step.
 #
@@ -96,6 +105,28 @@ class LoopPlan(BaseModel):
             if step.status == "pending":
                 step.status = "active"
                 break
+
+    def find_similar_open_step(self, title: str) -> PlanStep | None:
+        """Return an existing open step that substantially duplicates ``title``.
+
+        Plan titles are short and structured, so character-sequence overlap is
+        both cheaper and more predictable than another model call.  The high
+        threshold keeps adjacent phases such as "implement" and "test" distinct
+        while catching cosmetic restatements of the same work.
+        """
+        normalized = _normalized_step_title(title)
+        if not normalized:
+            return None
+        for step in self.steps:
+            if step.status not in ("pending", "active"):
+                continue
+            existing = _normalized_step_title(step.title)
+            if not existing:
+                continue
+            similarity = SequenceMatcher(None, normalized, existing).ratio()
+            if similarity >= _SIMILAR_OPEN_STEP_THRESHOLD:
+                return step
+        return None
 
     def advance(self) -> None:
         """Mark the active step as done and activate the next pending step."""
@@ -194,6 +225,28 @@ class LoopPlan(BaseModel):
         ``_verify_attempts``). Neither may move, so an add that would displace
         one is refused outright rather than silently appended.
         """
+        open_steps = sum(
+            step.status in ("pending", "active") for step in self.steps
+        )
+        if self.rolling_horizon_limit and open_steps >= self.rolling_horizon_limit:
+            logger.info(
+                "Ignored added step %r because the rolling horizon is full (%d/%d)",
+                op.title,
+                open_steps,
+                self.rolling_horizon_limit,
+            )
+            return
+
+        duplicate = self.find_similar_open_step(op.title)
+        if duplicate is not None:
+            logger.info(
+                "Ignored duplicate open step %r; it overlaps step %d (%r)",
+                op.title,
+                duplicate.index,
+                duplicate.title,
+            )
+            return
+
         target = op.index
         occupant = next((s for s in self.steps if s.index == target), None)
 
@@ -250,4 +303,3 @@ class LoopPlan(BaseModel):
                 line += f" [evidence, recall_context these: {shown}{more}]"
             lines.append(line)
         return "\n".join(lines)
-

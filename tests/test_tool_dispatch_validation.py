@@ -39,6 +39,44 @@ class _ShellLikeTool(InfinibayBaseTool):
         return json.dumps({"command": command, "cwd": cwd})
 
 
+class _SearchLikeTool(InfinibayBaseTool):
+    name: str = "code_search"
+    description: str = "Record normalized search arguments."
+
+    def _run(self, pattern: str, context_lines: int = 0) -> str:
+        return json.dumps({"pattern": pattern, "context_lines": context_lines})
+
+
+class _EditLikeTool(InfinibayBaseTool):
+    name: str = "edit_file"
+    description: str = "Record normalized edit arguments."
+
+    def _run(self, file_path: str, old_string: str, new_string: str) -> str:
+        return json.dumps({
+            "file_path": file_path,
+            "old_string": old_string,
+            "new_string": new_string,
+        })
+
+
+class _ReadPathTool:
+    name = "read_file"
+
+    @staticmethod
+    def _resolve_path(path: str) -> str:
+        return path
+
+    def _run(self, file_path: str, offset: int = 1) -> str:
+        return json.dumps({"read": file_path, "offset": offset})
+
+
+class _ListPathTool:
+    name = "list_directory"
+
+    def _run(self, file_path: str = ".") -> str:
+        return json.dumps({"listed": file_path})
+
+
 def test_dispatch_enforces_pydantic_constraints() -> None:
     tool = _ConstrainedTool()
 
@@ -82,3 +120,47 @@ def test_dispatch_maps_minimax_shell_aliases_to_execute_command() -> None:
         )
 
         assert json.loads(result) == {"command": "pwd", "cwd": "/tmp/project"}
+
+
+def test_dispatch_normalizes_minimax_code_search_context() -> None:
+    tool = _SearchLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        tool.name,
+        {"pattern": "Widget", "context": 20},
+    )
+
+    assert json.loads(result) == {"pattern": "Widget", "context_lines": 5}
+
+
+def test_dispatch_expands_minimax_structured_edit_replacement() -> None:
+    tool = _EditLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        tool.name,
+        {
+            "file_path": "src/widget.py",
+            "replace": {"old": "before", "new": "after"},
+        },
+    )
+
+    assert json.loads(result) == {
+        "file_path": "src/widget.py",
+        "old_string": "before",
+        "new_string": "after",
+    }
+
+
+def test_dispatch_routes_read_file_on_directory_to_list_directory(tmp_path) -> None:
+    read = _ReadPathTool()
+    listing = _ListPathTool()
+
+    result = execute_tool_call(
+        {read.name: read, listing.name: listing},
+        "read_file",
+        {"file_path": str(tmp_path), "offset": 50},
+    )
+
+    assert json.loads(result) == {"listed": str(tmp_path)}

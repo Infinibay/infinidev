@@ -56,6 +56,7 @@ class ExecutionContext:
 
     # Behavior flags
     skip_plan: bool = False  # True for agents that don't use plan management (e.g. analyst)
+    allow_explore: bool = True
 
     # Structured task spec — when set, the prompt builder renders the
     # task via ``render_task_xml`` instead of the legacy plain

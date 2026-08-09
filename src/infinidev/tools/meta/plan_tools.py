@@ -104,6 +104,18 @@ class AddStepTool(InfinibayBaseTool):
         plan = ctx.loop_state.plan
         from infinidev.engine.loop.step_operation import StepOperation
 
+        duplicate = plan.find_similar_open_step(title)
+        if duplicate is not None:
+            return self._success({
+                "status": "duplicate",
+                "existing_index": duplicate.index,
+                "existing_title": duplicate.title,
+                "message": (
+                    "This work is already represented by an open step. "
+                    "Continue that step or refine it with modify_step."
+                ),
+            })
+
         horizon_limit = max(0, int(getattr(plan, "rolling_horizon_limit", 0) or 0))
         open_steps = sum(
             step.status in ("pending", "active") for step in plan.steps

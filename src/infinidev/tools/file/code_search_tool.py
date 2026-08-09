@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shlex
 from typing import Type
 
@@ -67,6 +68,14 @@ class CodeSearchTool(InfinibayBaseTool):
         if sandbox_err:
             return self._error(sandbox_err)
 
+        if os.path.isfile(file_path):
+            return self._search_single_file(
+                pattern,
+                file_path,
+                case_sensitive=case_sensitive,
+                max_results=max_results,
+                context_lines=context_lines,
+            )
         if not os.path.isdir(file_path):
             return self._error(f"Directory not found: {file_path}")
 
@@ -234,6 +243,56 @@ class CodeSearchTool(InfinibayBaseTool):
             "file_path": file_path,
             "match_count": len(matches),
             "truncated": truncated,
+            "matches": matches,
+        })
+
+    def _search_single_file(
+        self,
+        pattern: str,
+        file_path: str,
+        *,
+        case_sensitive: bool,
+        max_results: int,
+        context_lines: int,
+    ) -> str:
+        """Search one file directly when the model supplies a file path."""
+        try:
+            matcher = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+        except re.error as exc:
+            return self._error(f"Invalid search regex: {exc}")
+        try:
+            with open(file_path, encoding="utf-8", errors="replace") as handle:
+                lines = handle.read().splitlines()
+        except OSError as exc:
+            return self._error(f"Could not read {file_path}: {exc}")
+
+        matches: list[dict[str, object]] = []
+        hit_cap = False
+        for index, line in enumerate(lines):
+            if not matcher.search(line):
+                continue
+            if len(matches) >= max_results:
+                hit_cap = True
+                break
+            start = max(0, index - context_lines)
+            end = min(len(lines), index + context_lines + 1)
+            match: dict[str, object] = {
+                "file": file_path,
+                "line": index + 1,
+                "content": line,
+            }
+            if context_lines:
+                match["context"] = [
+                    {"line": line_index + 1, "content": lines[line_index]}
+                    for line_index in range(start, end)
+                ]
+            matches.append(match)
+
+        return json.dumps({
+            "pattern": pattern,
+            "file_path": file_path,
+            "match_count": len(matches),
+            "truncated": hit_cap,
             "matches": matches,
         })
 

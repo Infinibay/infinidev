@@ -41,3 +41,46 @@ def test_max_depth_search_returns_matches(bound_tool, workspace_dir) -> None:
 
     assert result["match_count"] == 1
     assert result["matches"][0]["file"].endswith("nested/source.py")
+
+
+def test_search_accepts_a_single_file_path(bound_tool, workspace_dir) -> None:
+    source = workspace_dir / "source.py"
+    source.write_text("before\nneedle = True\nafter\n")
+
+    result = json.loads(bound_tool(CodeSearchTool)._run(
+        pattern="needle",
+        file_path=str(source),
+        context_lines=1,
+    ))
+
+    assert result["match_count"] == 1
+    assert result["matches"][0]["line"] == 2
+    assert [row["line"] for row in result["matches"][0]["context"]] == [1, 2, 3]
+
+
+def test_single_file_exact_limit_is_not_truncated(bound_tool, workspace_dir) -> None:
+    source = workspace_dir / "source.py"
+    source.write_text("needle\nneedle\n")
+
+    result = json.loads(bound_tool(CodeSearchTool)._run(
+        pattern="needle",
+        file_path=str(source),
+        max_results=2,
+    ))
+
+    assert result["match_count"] == 2
+    assert result["truncated"] is False
+
+
+def test_single_file_more_than_limit_is_truncated(bound_tool, workspace_dir) -> None:
+    source = workspace_dir / "source.py"
+    source.write_text("needle\nneedle\nneedle\n")
+
+    result = json.loads(bound_tool(CodeSearchTool)._run(
+        pattern="needle",
+        file_path=str(source),
+        max_results=2,
+    ))
+
+    assert result["match_count"] == 2
+    assert result["truncated"] is True

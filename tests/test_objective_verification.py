@@ -50,6 +50,9 @@ class TestStepVerification:
             kind="file_contains", spec="a.py", observable="def foo"
         ).is_executable is True
 
+    def test_file_absent_only_needs_a_path(self):
+        assert StepVerification(kind="file_absent", spec="old.py").is_executable is True
+
     def test_from_loose_flat_authoring_shape(self):
         v = StepVerification.from_loose({
             "title": "step",
@@ -184,6 +187,34 @@ class TestObjectiveVerifierFileContains:
                 spec=str(outside),
                 observable="SECRET",
             )
+        )
+
+        assert result.passed is False
+        assert "outside the workspace" in result.summary
+
+
+class TestObjectiveVerifierFileAbsent:
+    def test_missing_path_passes(self, tmp_path):
+        result = ObjectiveVerifier(str(tmp_path)).verify(
+            StepVerification(kind="file_absent", spec="obsolete.py")
+        )
+
+        assert result.passed is True
+        assert result.summary == "file_absent passed"
+
+    def test_existing_path_fails(self, tmp_path):
+        (tmp_path / "obsolete.py").write_text("still here")
+
+        result = ObjectiveVerifier(str(tmp_path)).verify(
+            StepVerification(kind="file_absent", spec="obsolete.py")
+        )
+
+        assert result.passed is False
+        assert "still exists" in result.commands_run[0]["output"]
+
+    def test_path_outside_workspace_is_rejected(self, tmp_path):
+        result = ObjectiveVerifier(str(tmp_path)).verify(
+            StepVerification(kind="file_absent", spec=str(tmp_path.parent / "gone.py"))
         )
 
         assert result.passed is False

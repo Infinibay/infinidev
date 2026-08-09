@@ -93,6 +93,11 @@ def run_staged_goal(
             _publish_state(state, session_id, hooks)
             if getattr(used_engine, "is_cancelled", False):
                 return _cancelled_result(state, used_engine, last_result, session_id, hooks)
+            failed_stage = _failed_stage_result(
+                state, active_stage, used_engine, session_id, hooks,
+            )
+            if failed_stage is not None:
+                return failed_stage
 
         hooks.on_phase("analysis")
         hooks.on_status("info", "Evaluating Goal and planning the next Stage...")
@@ -291,7 +296,12 @@ def _execute_stage(
         structured_task = task_from_free_text(
             _render_structured_task_description(state, stage, task),
             title=_schema_safe_title(task.spec.title),
-            kind=_task_kind(state.goal.intent, stage.spec.purpose),
+            kind=_task_kind(
+                state.goal.intent,
+                stage.spec.purpose,
+                task.spec.title,
+                task.spec.outcome,
+            ),
             acceptance_criteria=list(state.goal.acceptance_criteria) or None,
             derived_verification_criteria=task_checks,
         )
@@ -324,8 +334,12 @@ def _execute_stage(
                     )
                     or task.attempts > 1
                 ),
-                max_total_tool_calls=_staged_execution_tool_budget(
-                    max_execution_tool_calls_per_task
+                preserve_task_state=task.attempts > 1,
+                max_total_tool_calls=(
+                    _staged_execution_tool_budget(
+                        max_execution_tool_calls_per_task
+                    )
+                    * task.attempts
                 ),
             )
         except Exception as exc:
@@ -345,6 +359,21 @@ def _execute_stage(
             return result, used_engine
 
         loop_status = getattr(used_engine, "_last_status", "") or "completed"
+        if loop_status == "exhausted" and _retry_exhausted_task(task):
+            task.status = "pending"
+            task.result = result
+            task.error = (
+                "Execution reached its bounded tool window; resuming the "
+                "same Task and active Step once."
+            )
+            _record_task_evidence(state, stage, task, result, used_engine)
+            hooks.on_status(
+                "warn",
+                f"Task tool window exhausted; resuming {task.spec.title!r} "
+                f"from preserved state (attempt {task.attempts + 1}/2).",
+            )
+            _publish_state(state, session_id, hooks)
+            continue
         if loop_status in {"blocked", "failed", "exhausted"} or _has_blocked_steps(used_engine):
             task.status = "blocked"
             task.result = result
@@ -363,6 +392,10 @@ def _execute_stage(
             hooks=hooks,
             acceptance_criteria=None,
             derived_verification_criteria=task_checks,
+            task=structured_task,
+            max_total_tool_calls=_staged_execution_tool_budget(
+                max_execution_tool_calls_per_task
+            ) * task.attempts,
         )
         last_result = result
         if getattr(used_engine, "is_cancelled", False):
@@ -639,7 +672,28 @@ def _render_structured_task_description(
     )
 
 
-def _task_kind(goal_intent: str, stage_purpose: str) -> str:
+_WRITE_TASK_RE = re.compile(
+    r"\b(add|create|write|implement|modify|edit|remove|delete|fix|update|"
+    r"document|wire|integrate|agregar|crear|escribir|implementar|modificar|"
+    r"editar|eliminar|borrar|corregir|actualizar|documentar|integrar)\b",
+    re.IGNORECASE,
+)
+_VERIFY_TASK_RE = re.compile(
+    r"\b(run|re-?run|verify|confirm|check|validate|execute|inspect|audit|"
+    r"ejecutar|verificar|confirmar|comprobar|validar|inspeccionar|auditar)\b",
+    re.IGNORECASE,
+)
+
+
+def _task_kind(
+    goal_intent: str,
+    stage_purpose: str,
+    task_title: str = "",
+    task_outcome: str = "",
+) -> str:
+    task_text = f"{task_title}\n{task_outcome}"
+    if _VERIFY_TASK_RE.search(task_text) and not _WRITE_TASK_RE.search(task_text):
+        return "investigation"
     if stage_purpose == "discovery":
         return "investigation"
     if goal_intent == "implementation":
@@ -653,6 +707,55 @@ def _staged_execution_tool_budget(override: int | None) -> int:
     from infinidev.config.settings import settings
 
     return settings.STAGED_MAX_EXECUTION_TOOL_CALLS_PER_TASK
+
+
+def _retry_exhausted_task(task: TaskExecutionRecord) -> bool:
+    from infinidev.config.settings import settings
+
+    return task.attempts < settings.STAGED_MAX_TASK_ATTEMPTS
+
+
+def _failed_stage_result(
+    state: StagedPlanningState,
+    stage: StageExecutionRecord,
+    engine: Any,
+    session_id: str,
+    hooks: Any,
+) -> StagedRunResult | None:
+    """Close a Stage whose concrete Tasks failed without another LLM call."""
+    failed = [
+        task for task in stage.tasks
+        if task.status in {"blocked", "failed"}
+    ]
+    if not failed:
+        return None
+
+    details = [
+        f"{task.spec.title}: {task.error or task.result or task.status}"
+        for task in failed
+    ]
+    reason = (
+        f"Stage {stage.number} cannot complete because {len(failed)} Task(s) "
+        "ended without satisfying their execution contract."
+    )
+    missing = "\n".join(f"- {detail}" for detail in details)
+    evidence = [f"{entry.id}: {entry.summary}" for entry in state.evidence]
+    stage.status = "blocked"
+    state.status = "blocked"
+    state.terminal = GoalTerminalState(
+        kind="goal_blocked",
+        summary=reason,
+        evidence=evidence,
+        missing=missing,
+    )
+    state.revision += 1
+    _set_engine_status(engine, "blocked")
+    _publish_state(state, session_id, hooks)
+    return StagedRunResult(
+        text=_blocked_text(reason, missing, evidence),
+        engine=engine,
+        state=state,
+    )
 
 
 def _schema_safe_title(title: str) -> str:
@@ -699,6 +802,12 @@ def _scope_task_plan(
         steps=steps,
         acceptance_criteria=list(plan.acceptance_criteria),
         acceptance_criteria_authority=plan.acceptance_criteria_authority,
+        # The outer Stage already decomposed the Goal into bounded Tasks.
+        # Keep only one open execution Step so the developer cannot plan work
+        # reserved for sibling Tasks while the current Task is still active.
+        # It may still continue incrementally: after closing the frontier it
+        # can add the next evidence-backed Step.
+        rolling_horizon_limit=1,
     )
 
 

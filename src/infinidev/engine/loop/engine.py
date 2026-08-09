@@ -137,7 +137,77 @@ def _seed_initial_plan_if_fresh(ctx, plan) -> None:
 
 def _is_planning_mode(ctx: ExecutionContext) -> bool:
     """Whether the next model call must use the plan-management protocol."""
-    return not ctx.skip_plan and not ctx.state.plan.steps
+    return not ctx.skip_plan and ctx.state.plan.active_step is None
+
+
+def _apply_exploration_policy(
+    ctx: ExecutionContext, step_result: StepResult,
+) -> bool:
+    """Demote exploration when the caller already supplied failure evidence."""
+    if step_result.status != "explore" or ctx.allow_explore:
+        return False
+    step_result.status = "continue"
+    step_result.summary = (
+        f"{step_result.summary}\n\n"
+        "Exploration was skipped in this bounded rework run; use the supplied "
+        "failure evidence and continue with direct tools."
+    ).strip()
+    return True
+
+
+_EDIT_REQUIRING_TASK_KINDS = frozenset({
+    "feature", "bugfix", "refactor", "performance", "docs", "test",
+    "config", "migration", "security",
+})
+
+
+def _has_substantive_done_evidence(
+    ctx: ExecutionContext, step_result: StepResult,
+) -> bool:
+    """Whether a first-step close has enough machine activity to be credible."""
+    if not step_result.summary.strip() or step_result.action_tool_calls <= 0:
+        return False
+    task_kind = str(getattr(getattr(ctx, "task", None), "kind", "") or "").casefold()
+    if task_kind in _EDIT_REQUIRING_TASK_KINDS and not ctx.state.task_has_edits:
+        return False
+    return True
+
+
+def _task_requires_edits(ctx: ExecutionContext) -> bool:
+    task_kind = str(getattr(getattr(ctx, "task", None), "kind", "") or "").casefold()
+    return task_kind in _EDIT_REQUIRING_TASK_KINDS
+
+
+def _should_advance_plan(step_result: StepResult) -> bool:
+    """Whether this result closes the active Step rather than pausing it."""
+    return (
+        (
+            step_result.status in {"done", "blocked"}
+            or (step_result.status == "continue" and step_result.advance_plan)
+        )
+        and not step_result.interrupted
+    )
+
+
+def _enforce_edit_requirement(
+    ctx: ExecutionContext, step_result: StepResult,
+) -> bool:
+    """Pause a write Task that claims completion before its first edit."""
+    if (
+        step_result.status != "done"
+        or not _task_requires_edits(ctx)
+        or ctx.state.task_has_edits
+    ):
+        return False
+    step_result.status = "continue"
+    step_result.final_answer = None
+    step_result.interrupted = True
+    step_result.summary = (
+        f"{step_result.summary.rstrip()} "
+        "Completion was deferred because this write Task has not made a "
+        "successful edit yet."
+    ).strip()
+    return True
 
 
 class LoopEngine(AgentEngine):
@@ -366,6 +436,7 @@ class LoopEngine(AgentEngine):
         task: Any | None = None,
         context_corpus: str | None = None,
         allow_llm_retries: bool = True,
+        allow_explore: bool = True,
         preserve_file_tracker: bool = False,
         preserve_task_state: bool = False,
         skip_plan: bool = False,
@@ -404,6 +475,7 @@ class LoopEngine(AgentEngine):
             task=task,
             context_corpus=context_corpus,
             allow_llm_retries=allow_llm_retries,
+            allow_explore=allow_explore,
             preserve_file_tracker=preserve_file_tracker,
             skip_plan=skip_plan,
         )
@@ -456,6 +528,25 @@ class LoopEngine(AgentEngine):
                 ctx, messages, iteration, llm_caller, tool_proc, guard,
                 step_messages_start=step_messages_start,
             )
+
+            edit_requirement_blocked = _enforce_edit_requirement(ctx, step_result)
+            step_result = step_mgr.reconcile_task_completion(ctx, step_result)
+            if edit_requirement_blocked:
+                _emit_log(
+                    "warning",
+                    f"{_YELLOW}⚠ Edit-requiring Task declared done before any "
+                    f"successful edit — resuming the same Step{_RESET}",
+                    project_id=ctx.project_id,
+                    agent_id=ctx.agent_id,
+                )
+            if _apply_exploration_policy(ctx, step_result):
+                _emit_log(
+                    "warning",
+                    f"{_YELLOW}⚠ Exploration skipped during bounded rework; "
+                    f"continuing from supplied failure evidence{_RESET}",
+                    project_id=ctx.project_id,
+                    agent_id=ctx.agent_id,
+                )
 
             # A step interrupted mid-flight did not finish, so the plan must
             # not advance over it and the summariser must not be paid for
@@ -693,7 +784,7 @@ class LoopEngine(AgentEngine):
         # nothing reactivates a step — ``apply_operations`` will not even
         # re-add it when it is user_approved. The step stays active and the
         # exploration's findings land on it.
-        if step_result.status in {"done", "blocked"}:
+        if _should_advance_plan(step_result):
             step_mgr.advance_plan(ctx, step_result)
 
         with best_effort("ContextRank step activation failed"):
@@ -756,9 +847,14 @@ class LoopEngine(AgentEngine):
             return None
 
         if step_result.status == "done":
-            if not step_result.final_answer and iteration == ctx.start_iteration:
+            if (
+                not step_result.final_answer
+                and iteration == ctx.start_iteration
+                and not _has_substantive_done_evidence(ctx, step_result)
+            ):
                 _emit_log("warning",
-                          f"{_YELLOW}\u26a0 LLM declared done on first step without final_answer \u2014 forcing continue{_RESET}",
+                          f"{_YELLOW}\u26a0 LLM declared done on first step without "
+                          f"evidence or final_answer \u2014 forcing continue{_RESET}",
                           project_id=ctx.project_id, agent_id=ctx.agent_id)
                 step_result.status = "continue"
                 return None
@@ -1025,7 +1121,11 @@ class LoopEngine(AgentEngine):
                     limit_msg = f"global tool call limit reached ({ctx.state.total_tool_calls}/{ctx.max_total_calls} total calls)"
                 else:
                     limit_msg = f"per-step tool call limit reached ({action_tool_calls}/{ctx.max_per_action} calls)"
-                step_result = StepResult(summary=f"Step interrupted: {limit_msg}.", status="continue")
+                step_result = StepResult(
+                    summary=f"Step interrupted: {limit_msg}.",
+                    status="continue",
+                    interrupted=True,
+                )
                 _emit_log("error", f"{_RED}⚠ Inner loop exhausted: {limit_msg}{_RESET}",
                           project_id=ctx.project_id, agent_id=ctx.agent_id)
 

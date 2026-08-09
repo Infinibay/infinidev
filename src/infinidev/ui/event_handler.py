@@ -284,6 +284,7 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         app._streaming_token_count = 0
         phase = data.get("phase", "deciding")
         label = "Model is planning" if phase == "planning" else "Model is deciding next action"
+        app._actions_text = label
         app._chat_history_control.work_label = label
         app._chat_history_control.invalidate_cache()
         app.invalidate()

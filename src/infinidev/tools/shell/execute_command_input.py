@@ -5,7 +5,7 @@ import os
 import shlex
 import subprocess
 from typing import Type
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 
@@ -15,14 +15,13 @@ logger = logging.getLogger(__name__)
 class ExecuteCommandInput(BaseModel):
     command: str = Field(..., description="Command to execute")
     rationale: str = Field(
-        ...,
-        min_length=1,
+        default="",
         description=(
-            "REQUIRED. Explain WHAT you expect this command to do and "
+            "Explain WHAT you expect this command to do and "
             "WHY you need to run it. The assistant critic "
             "reads this before the command runs. Do NOT use vague "
-            "phrases like 'running tests' — say which tests, what "
-            "outcome you expect, and why the outcome matters."
+            "phrases like 'running tests'. If omitted, the controller derives "
+            "a bounded rationale from the command instead of rejecting it."
         ),
     )
     timeout: int = Field(
@@ -43,3 +42,12 @@ class ExecuteCommandInput(BaseModel):
     env: dict[str, str] | None = Field(
         default=None, description="Additional environment variables"
     )
+
+    @model_validator(mode="after")
+    def _derive_missing_rationale(self) -> "ExecuteCommandInput":
+        if not self.rationale.strip():
+            shown = " ".join(self.command.split())[:100]
+            self.rationale = (
+                f"Run `{shown}` and inspect its observable result for the active task."
+            )
+        return self

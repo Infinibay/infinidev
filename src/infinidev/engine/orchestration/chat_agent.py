@@ -58,6 +58,71 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_ITERATIONS = 5
 _MAX_RESULT_CHARS = 8000  # trim overly long tool outputs before re-prompting
 
+_EXECUTION_ACTION_RE = re.compile(
+    r"\b(?:add|implement|fix|change|update|remove|delete|refactor|create|write|"
+    r"build|run|execute|agreg(?:a|ar)|implement(?:a|ar)|arregl(?:a|ar|á)|"
+    r"cambi(?:a|ar)|actualiz(?:a|ar)|elimin(?:a|ar)|cre(?:a|ar)|ejecut(?:a|ar))\b",
+    re.IGNORECASE,
+)
+_EXECUTION_TARGET_RE = re.compile(
+    r"\b(?:repo(?:sitory)?|codebase|code|bug|function|helper|class|module|"
+    r"archivo|repositorio|c[oó]digo|funci[oó]n|clase|m[oó]dulo)\b|"
+    r"(?:^|\s)(?:src|tests?)/\S+|\b\w+\.(?:py|js|ts|rs|go|java|c|cpp|h)\b",
+    re.IGNORECASE,
+)
+_EXECUTION_VERIFY_RE = re.compile(
+    r"\b(?:tests?|pytest|verify|validate|pruebas?|probar|verificar|validar)\b",
+    re.IGNORECASE,
+)
+_INFORMATIONAL_RE = re.compile(
+    r"^\s*(?:how\s+(?:do|can|would|should)|what\s+(?:is|does|would|should)|why\b|"
+    r"explain\b|c[oó]mo\s+(?:puedo|se|har[ií]a)|qu[eé]\s+(?:es|hace)|por\s+qu[eé]\b|"
+    r"explic(?:a|ame|ar)\b)",
+    re.IGNORECASE,
+)
+_NO_EXECUTION_RE = re.compile(
+    r"\b(?:do not|don't)\s+(?:change|edit|modify|implement)\s+"
+    r"(?:anything|the\s+code|code|files?)\b|"
+    r"\bwithout\s+(?:making\s+)?(?:changes?|edits?|modifying)\b|"
+    r"\bno\s+(?:cambies|edites|modifiques|implementes)\s+"
+    r"(?:nada|el\s+c[oó]digo|archivos?)\b|"
+    r"\bsin\s+(?:hacer\s+)?(?:cambios|editar|modificar)\b|"
+    r"\b(?:just|only|solo|solamente)\s+(?:explain|describe|explica|describe)\b",
+    re.IGNORECASE,
+)
+
+
+def _explicit_execution_score(user_input: str) -> int:
+    """Score high-confidence work requests without spending an LLM call."""
+    text = (user_input or "").strip()
+    if not text or _INFORMATIONAL_RE.search(text) or _NO_EXECUTION_RE.search(text):
+        return 0
+    score = 0
+    if _EXECUTION_ACTION_RE.search(text):
+        score += 2
+    if _EXECUTION_TARGET_RE.search(text):
+        score += 1
+    if _EXECUTION_VERIFY_RE.search(text):
+        score += 1
+    return score
+
+
+def _direct_execution_route(
+    user_input: str, attachments: list[Any] | None,
+) -> ChatAgentResult | None:
+    """Bypass conversational routing only for high-confidence work intent."""
+    if _explicit_execution_score(user_input) < 4:
+        return None
+    request = user_input.strip()
+    packet = EscalationPacket(
+        user_request=request,
+        understanding=request,
+        user_signal="(algorithmic route: explicit execution request)",
+        suggested_flow="develop",
+        attachments=list(attachments or []),
+    )
+    return ChatAgentResult(kind="escalate", escalation=packet)
+
 
 def run_chat_agent(
     user_input: str,
@@ -121,6 +186,9 @@ def run_chat_agent(
                 "No request was sent; your text and attachments were left unchanged."
             ),
         )
+    direct_route = _direct_execution_route(user_input, attachments)
+    if direct_route is not None:
+        return direct_route
     tools = get_tools_for_role("chat_agent", supports_vision=_supports_vision)
     bind_tools_to_agent(tools, agent_id)
     set_context(
@@ -852,6 +920,7 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
     accumulated: dict[int, dict[str, str]] = {}  # idx → {id, name, args}
     emitted_per_tc: dict[int, str] = {}  # idx → chars already emitted
     content_buffer = ""
+    visible_content_buffer = ""
     streamed = False
     # Suppress <think>...</think> blocks from reaching the TUI
     # mid-stream. The filter holds back partial open-tag fragments
@@ -870,15 +939,12 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
             content_buffer += delta_content
             safe_delta = content_filter.feed(delta_content)
             if safe_delta:
-                # Stream plain-text content too. Most chat-agent turns
-                # end in a tool call, but some models emit plain text
-                # as a respond-equivalent; either way the user sees it
-                # live — minus any think-block content.
-                try:
-                    hooks.notify_stream_chunk("Infinidev", safe_delta, "agent")
-                    streamed = True
-                except Exception as exc:
-                    logger.warning("notify_stream_chunk failed (content): %s", exc)
+                # A provider may emit an internal prose preamble before its
+                # first tool-call delta. Buffer until the stream shape is
+                # known; publishing now leaks narration/reasoning on read or
+                # escalate turns. Plain-text-only responses are emitted once
+                # the stream closes below.
+                visible_content_buffer += safe_delta
 
         delta_tool_calls = getattr(delta, "tool_calls", None) or []
         for tc_delta in delta_tool_calls:
@@ -913,11 +979,7 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
     # that never resolved into a full <think> block).
     tail = content_filter.flush()
     if tail:
-        try:
-            hooks.notify_stream_chunk("Infinidev", tail, "agent")
-            streamed = True
-        except Exception as exc:
-            logger.warning("notify_stream_chunk failed (flush): %s", exc)
+        visible_content_buffer += tail
 
     tool_calls: list[Any] = []
     for idx, slot in sorted(accumulated.items()):
@@ -930,6 +992,15 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
                 arguments=slot["arguments"],
             ),
         ))
+
+    if not tool_calls and visible_content_buffer:
+        try:
+            hooks.notify_stream_chunk(
+                "Infinidev", visible_content_buffer, "agent",
+            )
+            streamed = True
+        except Exception as exc:
+            logger.warning("notify_stream_chunk failed (content): %s", exc)
 
     return content_buffer, tool_calls, streamed
 

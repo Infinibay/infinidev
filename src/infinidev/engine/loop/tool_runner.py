@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 from infinidev.engine._best_effort import best_effort
@@ -439,6 +440,7 @@ class ToolRunner:
                 # never alter the result the model receives.
                 self._propagate_command_output_handles(ctx, tc.id, result)
                 result = self.capture_test_output(ctx, tc.function.arguments, result)
+                self._refresh_opened_files_after_shell(ctx, tc.function.arguments)
 
             if not tool_error:
                 with best_effort("memory annotation failed for %s", tc.function.name):
@@ -505,6 +507,54 @@ class ToolRunner:
                 deferred.append({"role": "user", "content": pending_nudge})
 
         return action_tool_calls
+
+    @staticmethod
+    def _refresh_opened_files_after_shell(
+        ctx: ExecutionContext, arguments: str | dict[str, Any],
+    ) -> None:
+        """Reconcile model-visible file state after a possibly mutating shell.
+
+        Shell commands can move, delete, generate, or rewrite files without
+        passing through the first-class file tools.  Keeping the old
+        ``opened_files`` entries after such a command tells the next model turn
+        that deleted content is current.  Read-only commands are proven by the
+        same allow-list used by the permission broker; everything else gets a
+        bounded refresh of the at-most-ten cached files.
+        """
+        try:
+            args = json.loads(arguments) if isinstance(arguments, str) else arguments
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        command = str(args.get("command", "")) if isinstance(args, dict) else ""
+
+        from infinidev.tools.base.command_risk import classify_command
+
+        safe, _ = classify_command(command)
+        if safe:
+            return
+
+        workspace = getattr(ctx, "workspace_path", None) or os.getcwd()
+        for key, opened in list(ctx.state.opened_files.items()):
+            if key.startswith("[symbol] "):
+                ctx.state.opened_files.pop(key, None)
+                continue
+            path = key if os.path.isabs(key) else os.path.join(workspace, key)
+            if not os.path.isfile(path):
+                ctx.state.opened_files.pop(key, None)
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                    content = handle.read()
+            except OSError:
+                ctx.state.opened_files.pop(key, None)
+                continue
+            if len(content) > 32_000:
+                ctx.state.opened_files.pop(key, None)
+                continue
+            opened.content = "\n".join(
+                f"{index + 1:>6}\t{line}"
+                for index, line in enumerate(content.split("\n"))
+            )
 
     @staticmethod
     def _propagate_command_output_handles(

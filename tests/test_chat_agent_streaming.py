@@ -243,8 +243,7 @@ class TestStreamingPath:
         assert result.reply == "hello"
         assert result.streamed is True
         assert hooks.chunks == [
-            ("Infinidev", "hel", "agent"),
-            ("Infinidev", "lo", "agent"),
+            ("Infinidev", "hello", "agent"),
         ]
 
     def test_escalate_does_not_stream(self, patch_stream):
@@ -259,6 +258,20 @@ class TestStreamingPath:
         result = run_chat_agent("arreglá el bug", hooks=hooks)
         assert result.kind == "escalate"
         # No streaming chunks — escalate's args are internal.
+        assert hooks.chunks == []
+
+    def test_plain_text_preamble_before_escalate_stays_internal(self, patch_stream):
+        patch_stream([
+            _content_chunk("I should hand this to the developer."),
+            _tc_chunk(0, id_="tc-1", name="escalate"),
+            _tc_chunk(0, args_piece='{"understanding":"implement the fix"}'),
+        ])
+        hooks = _RecordingHooks()
+
+        result = run_chat_agent("fix it", hooks=hooks)
+
+        assert result.kind == "escalate"
+        assert result.streamed is False
         assert hooks.chunks == []
 
     def test_read_tool_then_respond_streams_only_respond(self, patch_stream):
@@ -541,6 +554,20 @@ class TestRespondReplyLandsInChatOnce:
         # The reply text appears exactly once across the whole chat.
         occurrences = [m for m in app.chat_messages if m["text"] == "hola!"]
         assert len(occurrences) == 1
+
+    def test_phase_transition_restores_busy_indicator_after_stream(self):
+        from infinidev.ui.hooks_tui import TUIHooks
+
+        app = _FakeApp()
+        hooks = TUIHooks(app)
+        hooks.notify_stream_chunk("Infinidev", "I will inspect it", "agent")
+        assert app._chat_history_control.show_thinking is False
+
+        hooks.notify_stream_end("Infinidev", "agent")
+        hooks.on_phase("execute")
+
+        assert app._chat_history_control.show_thinking is True
+        assert app._chat_history_control.work_label == "Working..."
 
     def test_develop_path_leaves_flag_unset_so_worker_shows_result(self, monkeypatch):
         from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult

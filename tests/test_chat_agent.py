@@ -23,7 +23,10 @@ from typing import Any
 import pytest
 
 import infinidev.engine.orchestration.chat_agent as chat_agent_mod
-from infinidev.engine.orchestration.chat_agent import run_chat_agent
+from infinidev.engine.orchestration.chat_agent import (
+    _explicit_execution_score,
+    run_chat_agent,
+)
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 
 
@@ -143,6 +146,26 @@ class TestRespondTerminator:
 
 
 class TestEscalateTerminator:
+    def test_explicit_repo_change_bypasses_llm_router(self, patch_litellm):
+        scripted = patch_litellm([])
+
+        result = run_chat_agent(
+            "In this repository, add src/demo.py and run focused tests."
+        )
+
+        assert result.kind == "escalate"
+        assert result.escalation is not None
+        assert "algorithmic route" in result.escalation.user_signal
+        assert scripted.calls == []
+
+    def test_intent_score_keeps_informational_questions_in_chat(self):
+        assert _explicit_execution_score("How do I fix a bug in this repository?") == 0
+        assert _explicit_execution_score("Solo explica el código, no modificar") == 0
+        assert _explicit_execution_score(
+            "In this repository, add src/demo.py and tests. "
+            "Do not change unrelated behavior."
+        ) >= 4
+
     def test_escalate_populates_packet(self, patch_litellm):
         patch_litellm([
             _response([_tc("escalate", {

@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 import uuid
 from typing import Any
 
@@ -278,6 +279,39 @@ def execute_tool_call(
     if requested_name == "search_findings":
         args.setdefault("mode", "semantic")
 
+    # Reading a path is an intent models express more reliably than the
+    # file-vs-directory distinction. Resolve that distinction from the
+    # filesystem instead of charging an error/retry when read_file receives a
+    # directory. Both tools are read-only and share ``file_path``.
+    if name == "read_file":
+        path_arg = next(
+            (
+                args[key]
+                for key in ("file_path", "path", "directory", "dir")
+                if key in args
+            ),
+            None,
+        )
+        if isinstance(path_arg, str):
+            try:
+                resolved_path = tool._resolve_path(os.path.expanduser(path_arg))
+            except Exception:
+                resolved_path = path_arg
+            directory_tool = dispatch.get("list_directory")
+            validate_path = getattr(tool, "_validate_sandbox_path", None)
+            sandbox_error = (
+                validate_path(resolved_path) if callable(validate_path) else None
+            )
+            if (
+                directory_tool is not None
+                and not sandbox_error
+                and os.path.isdir(resolved_path)
+            ):
+                logger.info("Tool intent correction: read_file directory -> list_directory")
+                tool = directory_tool
+                name = "list_directory"
+                args = {"file_path": path_arg}
+
     # Auto-correct common parameter name aliases that LLMs frequently use.
     # Maps wrong_param -> correct_param. Applied globally to all tools
     # because the wrong names listed here never collide with any real
@@ -325,7 +359,23 @@ def execute_tool_call(
         "recall_context": {
             "context": "query",
         },
+        "code_search": {
+            "context": "context_lines",
+        },
     }
+
+    # M3 commonly emits edit_file(replace={old: ..., new: ...}). Preserve
+    # both values by expanding the structured alias before ordinary signature
+    # validation; treating ``replace`` as one scalar alias would lose data.
+    if name == "edit_file" and "replace" in args:
+        replacement = args.pop("replace")
+        if isinstance(replacement, dict):
+            old_value = replacement.get("old_string", replacement.get("old"))
+            new_value = replacement.get("new_string", replacement.get("new"))
+            if old_value is not None and "old_string" not in args:
+                args["old_string"] = old_value
+            if new_value is not None and "new_string" not in args:
+                args["new_string"] = new_value
 
     # Validate kwargs against _run() signature — reject unknown parameters
     # so the LLM learns the correct schema instead of silently losing data.
@@ -361,6 +411,13 @@ def execute_tool_call(
                         fixed[correct] = value
                         del args[key]
             args.update(fixed)
+            if name == "code_search" and "context_lines" in args:
+                try:
+                    args["context_lines"] = min(
+                        5, max(0, int(args["context_lines"]))
+                    )
+                except (TypeError, ValueError):
+                    pass
             # Silently strip metadata params that LLMs commonly add
             _METADATA_PARAMS = {"description", "reason", "explanation", "language"}
             for meta in _METADATA_PARAMS:

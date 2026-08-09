@@ -1208,3 +1208,81 @@ class TestPhase1Evidenced:
         assert "logic_bug" in text
         assert "src/a.py:42" in text
         assert "if x < y:" in text
+
+    def test_exhausted_verification_cannot_be_overridden_by_reviewer(
+        self, tmp_path, monkeypatch,
+    ):
+        from infinidev.engine.analysis.review_engine import run_review_rework_loop
+        from infinidev.engine.analysis.verification_result import VerificationResult
+
+        class StubEngine:
+            _workspace = str(tmp_path)
+            _last_state = None
+
+            def __init__(self):
+                self.execute_calls = 0
+
+            def get_file_contents(self):
+                return {"a.py": "broken = True\n"}
+
+            def get_file_tracker(self):
+                return None
+
+            def get_plan_steps(self):
+                return []
+
+            def execute(self, **kwargs):
+                self.execute_calls += 1
+                return "attempted fix"
+
+        class StubAgent:
+            def activate_context(self, **kwargs):
+                pass
+
+            def deactivate(self):
+                pass
+
+        class StubVerifier:
+            def __init__(self, **kwargs):
+                pass
+
+            def verify(self, **kwargs):
+                return VerificationResult(
+                    passed=False,
+                    summary="1 deterministic test still fails",
+                    commands_run=[{
+                        "command": "pytest",
+                        "exit_code": 1,
+                        "output": "failure",
+                    }],
+                )
+
+        monkeypatch.setattr(
+            "infinidev.engine.analysis.verification_engine.VerificationEngine",
+            StubVerifier,
+        )
+        engine = StubEngine()
+        reviewer = ReviewEngine()
+        monkeypatch.setattr(
+            reviewer,
+            "review",
+            lambda **kwargs: (_ for _ in ()).throw(
+                AssertionError("textual reviewer must not run after a red gate")
+            ),
+        )
+
+        result, review = run_review_rework_loop(
+            engine=engine,
+            agent=StubAgent(),
+            session_id="session",
+            task_prompt=("fix it", "done"),
+            initial_result="initial attempt",
+            reviewer=reviewer,
+        )
+
+        assert result == "attempted fix"
+        assert engine.execute_calls == 2
+        assert review is not None
+        assert review.is_rejected
+        assert review.summary == "1 deterministic test still fails"
+        assert review.issues[0]["check_id"] == "verification_gate"

@@ -1,13 +1,28 @@
 """Centralized LLM configuration for Infinidev CLI."""
 
 from __future__ import annotations
-import os
+
 import logging
+import os
 import re
+import warnings
 from typing import Any
+
 from infinidev.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# LiteLLM's Responses stream logger serializes an intermediate chunk before it
+# has converted ``usage`` from a dict into ``ResponseAPIUsage``. The final
+# ModelResponse exposes a valid ``Usage`` instance, but Pydantic otherwise
+# prints this same harmless warning for every request. Keep the filter exact so
+# unrelated serializer warnings remain visible.
+warnings.filterwarnings(
+    "ignore",
+    message=r"(?s)^Pydantic serializer warnings:.*Expected `ResponseAPIUsage`",
+    category=UserWarning,
+    module=r"pydantic\.main",
+)
 
 # Warn-once guard for the response normalizer: it fires on every completion, so
 # repeated failures would spam the log. Warn loudly the first time it regresses
@@ -192,6 +207,13 @@ def _is_native_provider_id(provider_id: str, model: str) -> bool:
 def _is_native_provider(model: str) -> bool:
     """Return True if LiteLLM handles this provider's endpoint natively."""
     return _is_native_provider_id(settings.LLM_PROVIDER, model)
+
+
+def _resolved_base_url(provider_id: str, configured_base_url: str) -> str:
+    """Return the endpoint owned by *provider_id* for every LLM lane."""
+    from infinidev.config.providers import resolve_base_url
+
+    return resolve_base_url(provider_id, configured_base_url)
 
 
 # ── ChatGPT subscription (Codex) ─────────────────────────────────────
@@ -512,18 +534,8 @@ def get_litellm_params_for_review_extractor() -> dict[str, Any]:
     if api_key:
         params["api_key"] = api_key
 
-    try:
-        from infinidev.config.providers import get_provider
-
-        provider = get_provider(provider_id)
-        is_native = bool(getattr(provider, "is_native", False))
-    except Exception:
-        is_native = _extract_provider(model) in {
-            "deepseek",
-            "anthropic",
-            "gemini",
-            "openai",
-        }
+    is_native = _is_native_provider_id(provider_id, model)
+    base_url = _resolved_base_url(provider_id, base_url)
     if base_url and not is_native:
         params["api_base"] = base_url
 
@@ -578,18 +590,8 @@ def get_litellm_params_for_behavior() -> dict[str, Any]:
 
     # Mirror the native-provider rule: only pass api_base for non-native
     # providers, otherwise litellm routes to the wrong endpoint.
-    try:
-        from infinidev.config.providers import get_provider
-
-        provider = get_provider(provider_id)
-        is_native = bool(getattr(provider, "is_native", False))
-    except Exception:
-        is_native = _extract_provider(model) in {
-            "deepseek",
-            "anthropic",
-            "gemini",
-            "openai",
-        }
+    is_native = _is_native_provider_id(provider_id, model)
+    base_url = _resolved_base_url(provider_id, base_url)
     if base_url and not is_native:
         params["api_base"] = base_url
 
@@ -643,18 +645,8 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
     if api_key:
         params["api_key"] = api_key
 
-    try:
-        from infinidev.config.providers import get_provider
-
-        provider = get_provider(provider_id)
-        is_native = bool(getattr(provider, "is_native", False))
-    except Exception:
-        is_native = _extract_provider(model) in {
-            "deepseek",
-            "anthropic",
-            "gemini",
-            "openai",
-        }
+    is_native = _is_native_provider_id(provider_id, model)
+    base_url = _resolved_base_url(provider_id, base_url)
     if base_url and not is_native:
         params["api_base"] = base_url
 
@@ -700,8 +692,10 @@ def get_litellm_params() -> dict[str, Any]:
     if settings.LLM_API_KEY:
         params["api_key"] = settings.LLM_API_KEY
 
-    if settings.LLM_BASE_URL and not _is_native_provider(model):
-        params["api_base"] = settings.LLM_BASE_URL
+    if not _is_native_provider(model):
+        base_url = _resolved_base_url(settings.LLM_PROVIDER, settings.LLM_BASE_URL)
+        if base_url:
+            params["api_base"] = base_url
 
     if settings.LLM_TIMEOUT:
         params["timeout"] = float(settings.LLM_TIMEOUT)

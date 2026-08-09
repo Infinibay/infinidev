@@ -187,6 +187,8 @@ def test_small_goal_uses_one_stage_one_task_then_evidence_completion(
     ]
     assert "Outcome only is observed" in structured.derived_verification_criteria
     assert runtime["executions"][0]["max_total_tool_calls"] == 40
+    assert runtime["reviews"][0]["task"] is structured
+    assert runtime["reviews"][0]["max_total_tool_calls"] == 40
     assert seen[1].evidence
     assert result.text.startswith("executed Task only")
 
@@ -240,6 +242,24 @@ def test_empty_task_plan_gets_one_step_from_structured_task() -> None:
     assert scoped.steps[0].title == task.spec.title
     assert scoped.steps[0].expected_output == task.spec.outcome
     assert "fallback" in scoped.overview.lower()
+    assert scoped.rolling_horizon_limit == 1
+
+
+def test_verification_only_stage_task_does_not_require_an_edit() -> None:
+    from infinidev.engine.orchestration.staged_pipeline import _task_kind
+
+    assert _task_kind(
+        "implementation",
+        "delivery",
+        "Run the new tests and confirm pass",
+        "pytest exits successfully without changing files",
+    ) == "investigation"
+    assert _task_kind(
+        "implementation",
+        "delivery",
+        "Create focused tests",
+        "A new test module exists",
+    ) == "feature"
 
 
 def test_task_dag_executes_only_dependency_ready_tasks(
@@ -314,7 +334,7 @@ def test_blocked_task_prevents_false_goal_completion(
 
     assert result.state.status == "blocked"
     assert result.state.stages[0].tasks[0].status == "blocked"
-    assert "rejected" in result.text
+    assert "Task attempt" in result.text
 
 
 def test_exhausted_task_prevents_false_goal_completion(
@@ -344,7 +364,10 @@ def test_exhausted_task_prevents_false_goal_completion(
 
     assert result.state.status == "blocked"
     assert result.state.stages[0].tasks[0].status == "blocked"
-    assert "rejected" in result.text
+    assert len(runtime["executions"]) == 2
+    assert runtime["executions"][1]["preserve_task_state"] is True
+    assert runtime["executions"][1]["max_total_tool_calls"] == 80
+    assert "Task attempt" in result.text
 
 
 def test_blocked_task_does_not_suppress_independent_ready_task(

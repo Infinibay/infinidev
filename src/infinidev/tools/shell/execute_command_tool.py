@@ -133,7 +133,6 @@ _BACKGROUNDING_GUIDANCE = (
     "(no '&') and let execute_command return when it finishes."
 )
 
-
 def check_command_permission(
     command: str, *, description: str = "Execute shell command"
 ) -> str | None:
@@ -270,17 +269,18 @@ class ExecuteCommandTool(InfinibayBaseTool):
         if perm_error:
             return self._error(perm_error)
 
-        # Use shell=True to allow piping and other shell features,
-        # since this is a local CLI for the user's own machine.
-        run_env = os.environ.copy()
-        if env:
-            # LLMs sometimes send non-string values (ints, bools) in env dicts.
-            # subprocess requires all env values to be strings.
-            if isinstance(env, dict):
-                run_env.update({str(k): str(v) for k, v in env.items()})
-
         if not cwd or not isinstance(cwd, str):
             cwd = self.workspace_path or os.getcwd()
+
+        # Use shell=True to allow piping and other shell features,
+        # since this is a local CLI for the user's own machine.
+        from infinidev.engine.test_environment import prepare_test_environment
+
+        run_env, environment_adjustment = prepare_test_environment(
+            command,
+            cwd,
+            explicit_env=env if isinstance(env, dict) else None,
+        )
 
         effective_timeout = _effective_command_timeout(timeout)
 
@@ -298,6 +298,8 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     result = self._run_sealed(
                         command, cwd, run_env, effective_timeout,
                     )
+            if environment_adjustment:
+                result["environment_adjustment"] = environment_adjustment
             return self._success(result)
 
         except subprocess.TimeoutExpired:

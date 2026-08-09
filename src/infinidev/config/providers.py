@@ -363,6 +363,21 @@ def get_provider(provider_id: str) -> ProviderConfig:
     return PROVIDERS.get(provider_id, PROVIDERS["ollama"])
 
 
+def resolve_base_url(provider_id: str, configured_base_url: str = "") -> str:
+    """Resolve the endpoint for a provider without leaking stale global state.
+
+    ``LLM_BASE_URL`` is a single setting shared by every provider.  When the
+    active provider changes, that value may still point at the previous one
+    (most visibly, Ollama's localhost endpoint).  Fixed providers therefore
+    own their canonical endpoint; only providers marked editable accept the
+    configured override.
+    """
+    provider = get_provider(provider_id)
+    if provider.default_base_url and not provider.base_url_editable:
+        return provider.default_base_url.rstrip("/")
+    return (configured_base_url or provider.default_base_url).rstrip("/")
+
+
 def list_provider_ids() -> list[str]:
     """Return ordered list of provider IDs."""
     return list(PROVIDERS.keys())
@@ -384,14 +399,7 @@ def fetch_models(
     real errors to the user).
     """
     provider = get_provider(provider_id)
-    # For providers with a fixed URL, always use their default — the passed
-    # base_url likely belongs to a previously-selected provider (e.g. Ollama).
-    if not provider.base_url_editable and provider.default_base_url:
-        url = provider.default_base_url.rstrip("/")
-    else:
-        url = (
-            base_url.rstrip("/") if base_url else provider.default_base_url.rstrip("/")
-        )
+    url = resolve_base_url(provider_id, base_url)
 
     if not url:
         return [f"{provider.prefix}{m}" for m in provider.static_models]

@@ -67,6 +67,7 @@ class TUIHooks:
         # planning pass looks identical to a hung process.
         control = getattr(self._app, "_chat_history_control", None)
         if control is not None:
+            control.show_thinking = phase != "idle"
             control.work_label = "" if phase == "idle" else labels.get(phase, phase)
         if phase == "idle":
             self._app._context_flow = ""

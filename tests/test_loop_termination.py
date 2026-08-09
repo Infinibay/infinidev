@@ -18,6 +18,13 @@ from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.step_result import StepResult
 from infinidev.engine.loop.step_summarizer import _synthesize_final
 from infinidev.engine.loop.action_record import ActionRecord
+from infinidev.engine.loop.engine import (
+    _apply_exploration_policy,
+    _enforce_edit_requirement,
+    _has_substantive_done_evidence,
+    _should_advance_plan,
+    _task_requires_edits,
+)
 
 
 def _ctx() -> SimpleNamespace:
@@ -135,6 +142,109 @@ def test_error_circuit_requires_a_diagnosed_alternative_before_blocking():
     assert "working directory" in guidance
     assert "known local correction must be tried" in guidance
     assert "only when the changed approach also cannot proceed" in guidance
+
+
+def test_identical_failed_tool_call_is_nudged_after_second_attempt():
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), []
+
+    guard.on_tool_result("add_step", "{}", had_error=True)
+    assert guard.check_repetition(ctx, messages) is None
+    assert messages == []
+
+    guard.on_tool_result("add_step", "{}", had_error=True)
+    assert guard.check_repetition(ctx, messages) is None
+    assert "exact same 'add_step' call" in messages[-1]["content"]
+
+
+def test_identical_successful_tool_call_keeps_normal_threshold():
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), []
+
+    for _ in range(2):
+        guard.on_tool_result("read_file", '{"file_path":"a.py"}', had_error=False)
+        assert guard.check_repetition(ctx, messages) is None
+
+    assert messages == []
+
+
+def test_bounded_rework_demotes_exploration_to_direct_continuation():
+    ctx = _ctx()
+    ctx.allow_explore = False
+    result = StepResult(summary="Need to investigate import resolution", status="explore")
+
+    changed = _apply_exploration_policy(ctx, result)
+
+    assert changed is True
+    assert result.status == "continue"
+    assert "supplied failure evidence" in result.summary
+
+
+def test_first_step_done_with_tools_and_summary_is_substantive():
+    ctx = _ctx()
+    result = StepResult(summary="Implemented helper and ran focused tests", status="done")
+    result.action_tool_calls = 4
+
+    assert _has_substantive_done_evidence(ctx, result) is True
+
+
+def test_first_step_done_without_actions_still_needs_confirmation():
+    ctx = _ctx()
+    result = StepResult(summary="Looks done", status="done")
+
+    assert _has_substantive_done_evidence(ctx, result) is False
+
+
+def test_feature_task_cannot_close_before_any_edit():
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="feature")
+    result = StepResult(summary="Inspected all relevant files", status="done")
+    result.action_tool_calls = 9
+
+    assert _has_substantive_done_evidence(ctx, result) is False
+
+    ctx.state.task_has_edits = True
+    assert _has_substantive_done_evidence(ctx, result) is True
+
+
+def test_edit_requirement_applies_beyond_the_first_step():
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="feature")
+
+    assert _task_requires_edits(ctx) is True
+    assert ctx.state.task_has_edits is False
+
+
+def test_edit_requirement_preserves_the_active_step_before_plan_advance():
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="feature")
+    result = StepResult(
+        summary="Inspected the implementation",
+        status="done",
+        final_answer="Already complete",
+    )
+
+    assert _enforce_edit_requirement(ctx, result) is True
+    assert result.status == "continue"
+    assert result.final_answer is None
+    assert result.interrupted is True
+    assert _should_advance_plan(result) is False
+
+
+def test_budget_interruption_resumes_the_same_plan_step():
+    interrupted = StepResult(
+        summary="tool budget reached",
+        status="continue",
+        interrupted=True,
+    )
+    completed = StepResult(
+        summary="step complete",
+        status="continue",
+        advance_plan=True,
+    )
+
+    assert _should_advance_plan(interrupted) is False
+    assert _should_advance_plan(completed) is True
 
 
 # ── the critic's veto is bounded too ─────────────────────────────────

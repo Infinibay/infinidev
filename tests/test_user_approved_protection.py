@@ -317,6 +317,69 @@ class TestPublicPlanTools:
         assert "Rolling horizon" in result["error"]
         assert len(state.plan.steps) == 3
 
+    def test_add_step_reuses_a_near_duplicate_open_step(self, bound_tool):
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(
+                index=1,
+                title="Implement click.utils.normalize_prog_name in src/click/utils.py",
+                status="active",
+            ),
+        ]
+        self._bind(state)
+
+        result = json.loads(bound_tool(AddStepTool)._run(
+            title="Implement normalize_prog_name function in src/click/utils.py",
+        ))
+
+        assert result["status"] == "duplicate"
+        assert result["existing_index"] == 1
+        assert len(state.plan.steps) == 1
+
+    def test_add_step_keeps_distinct_phases_for_the_same_target(self, bound_tool):
+        state = LoopState()
+        state.plan.steps = [
+            PlanStep(
+                index=1,
+                title="Implement normalize_prog_name in src/click/utils.py",
+                status="active",
+            ),
+        ]
+        self._bind(state)
+
+        result = json.loads(bound_tool(AddStepTool)._run(
+            title="Test normalize_prog_name in tests/test_utils.py",
+        ))
+
+        assert result["status"] == "added"
+        assert len(state.plan.steps) == 2
+
+
+def test_step_result_operations_cannot_add_duplicate_open_work():
+    plan = LoopPlan()
+    plan.steps = [
+        PlanStep(index=1, title="Inspect src/auth.py", status="active"),
+    ]
+
+    plan.apply_operations([
+        StepOperation(op="add", index=2, title="Inspect the src/auth.py file"),
+    ])
+
+    assert len(plan.steps) == 1
+
+
+def test_step_result_operations_respect_the_rolling_horizon():
+    plan = LoopPlan(rolling_horizon_limit=1)
+    plan.steps = [
+        PlanStep(index=1, title="Implement src/auth.py", status="active"),
+    ]
+
+    plan.apply_operations([
+        StepOperation(op="add", index=2, title="Test tests/test_auth.py"),
+    ])
+
+    assert len(plan.steps) == 1
+
 
 class TestOverviewImmutability:
     def test_apply_operations_does_not_touch_overview(self):

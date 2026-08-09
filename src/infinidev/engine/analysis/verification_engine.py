@@ -17,6 +17,7 @@ from typing import Any
 
 from infinidev.engine.analysis.verification_result import VerificationResult
 from infinidev.engine.subprocess_runner import run_captured
+from infinidev.engine.test_environment import prepare_test_environment
 
 logger = logging.getLogger(__name__)
 
@@ -226,12 +227,17 @@ class VerificationEngine:
             }
 
         try:
-            proc = run_captured(
-                command,
-                cwd=self._workspace,
-                timeout=timeout,
-                shell=is_shell_command,
+            run_env, environment_adjustment = prepare_test_environment(
+                command, self._workspace,
             )
+            run_kwargs: dict[str, Any] = {
+                "cwd": self._workspace,
+                "timeout": timeout,
+                "shell": is_shell_command,
+            }
+            if environment_adjustment:
+                run_kwargs["env"] = run_env
+            proc = run_captured(command, **run_kwargs)
             output = (proc.stdout + proc.stderr).strip()
             # Truncate very long output
             if len(output) > 3000:
@@ -242,11 +248,14 @@ class VerificationEngine:
                     "exit_code": -1,
                     "output": f"Command timed out after {timeout}s",
                 }
-            return {
+            result = {
                 "command": display_command,
                 "exit_code": proc.exit_code,
                 "output": output,
             }
+            if environment_adjustment:
+                result["environment_adjustment"] = environment_adjustment
+            return result
         except Exception as exc:
             return {
                 "command": display_command,

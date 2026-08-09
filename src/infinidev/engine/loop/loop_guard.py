@@ -37,6 +37,7 @@ class LoopGuard:
         self.text_retries = 0
         self.consecutive_tool_errors = 0
         self.last_tool_sig: str | None = None
+        self.last_tool_had_error = False
         self.same_tool_streak = 0
         self.repetition_nudged = False
         self.reads_since_last_note = 0
@@ -69,6 +70,7 @@ class LoopGuard:
             self.last_tool_sig = sig
             self.same_tool_streak = 1
             self.repetition_nudged = False
+        self.last_tool_had_error = had_error
 
     def reset_read_counter(self) -> None:
         """Reset the read-without-note counter (called when a note is recorded)."""
@@ -79,7 +81,11 @@ class LoopGuard:
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],
     ) -> StepResult | None:
         """Returns StepResult if loop detected and must force-break, else None."""
-        threshold = 2 if self._is_small else _MAX_SAME_TOOL_CONSECUTIVE
+        threshold = (
+            2
+            if self._is_small or self.last_tool_had_error
+            else _MAX_SAME_TOOL_CONSECUTIVE
+        )
         tool_name = (self.last_tool_sig or "").split(":", 1)[0]
 
         if self.same_tool_streak >= threshold and not self.repetition_nudged:

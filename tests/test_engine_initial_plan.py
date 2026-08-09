@@ -131,6 +131,15 @@ class TestPlanningMode:
         _seed_state_from_plan(state, _sample_plan())
         assert _is_planning_mode(ctx) is False
 
+    def test_reenters_planning_when_the_horizon_has_no_active_step(self):
+        state = LoopState()
+        _seed_state_from_plan(state, _sample_plan())
+        for step in state.plan.steps:
+            step.status = "done"
+        ctx = SimpleNamespace(state=state, skip_plan=False)
+
+        assert _is_planning_mode(ctx) is True
+
     def test_plan_free_adapter_never_enters_planning(self):
         ctx = SimpleNamespace(state=LoopState(), skip_plan=True)
         assert _is_planning_mode(ctx) is False

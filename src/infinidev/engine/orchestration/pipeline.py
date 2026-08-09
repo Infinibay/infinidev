@@ -447,6 +447,7 @@ def _run_execution_phase(
     initial_attachments: list[Any] | None = None,
     task: Any | None = None,
     preserve_file_tracker: bool = False,
+    preserve_task_state: bool = False,
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
     max_tool_calls_per_action: int | None = None,
@@ -489,6 +490,8 @@ def _run_execution_phase(
             execute_kwargs: dict[str, Any] = {}
             if preserve_file_tracker:
                 execute_kwargs["preserve_file_tracker"] = True
+            if preserve_task_state:
+                execute_kwargs["preserve_task_state"] = True
             if max_iterations is not None:
                 execute_kwargs["max_iterations"] = max_iterations
             if max_total_tool_calls is not None:
@@ -528,6 +531,7 @@ def _run_review_phase(
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
     rework_execute_kwargs: dict[str, Any] | None = None,
+    run_verification: bool = True,
 ) -> str:
     """Review code changes or evidence-ground an informational outcome.
 
@@ -631,7 +635,7 @@ def _run_review_phase(
             )
 
     try:
-        result, _ = run_review_rework_loop(
+        result, review_result = run_review_rework_loop(
             engine=engine,
             agent=agent,
             session_id=session_id,
@@ -646,7 +650,10 @@ def _run_review_phase(
             max_iterations=max_iterations,
             max_total_tool_calls=max_total_tool_calls,
             rework_execute_kwargs=rework_execute_kwargs,
+            run_verification=run_verification,
         )
+        if review_result is not None and review_result.is_rejected:
+            engine._last_status = "blocked"
     except Exception as exc:
         logger.error("Review phase failed: %s", exc, exc_info=True)
         hooks.on_status("error", f"Review error: {exc}")

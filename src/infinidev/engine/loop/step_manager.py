@@ -99,14 +99,58 @@ class StepManager:
     def __init__(self, engine: "LoopEngine") -> None:
         self._engine = engine
 
+    @staticmethod
+    def reconcile_task_completion(
+        ctx: ExecutionContext, step_result: StepResult,
+    ) -> StepResult:
+        """Turn a premature Task close into the documented Step transition.
+
+        ``done`` means the whole Task is complete.  If another planned Step is
+        still open, the only valid interpretation is that the current Step is
+        complete and execution should continue.  Reconcile that mismatch in
+        the state machine instead of spending extra LLM calls asking the model
+        to repeat the same tool call with a different enum value.
+        """
+        if step_result.status != "done":
+            return step_result
+
+        plan = getattr(ctx.state, "plan", None)
+        if plan is None or not plan.steps:
+            return step_result
+
+        active = plan.active_step
+        pending = plan.undischarged(
+            exclude_index=active.index if active is not None else None,
+        )
+        if not pending:
+            return step_result
+
+        titles = ", ".join(f"{step.index}. {step.title}" for step in pending)
+        _emit_log(
+            "info",
+            "↪ Task completion advanced to the next planned Step; still open: "
+            f"{titles}",
+            project_id=ctx.project_id,
+            agent_id=ctx.agent_id,
+        )
+        return step_result.model_copy(
+            update={
+                "status": "continue",
+                "final_answer": None,
+                "advance_plan": True,
+                "summary": (
+                    f"{step_result.summary.rstrip()} "
+                    f"Continuing because planned work remains: {titles}."
+                ).strip(),
+            },
+        )
+
     def advance_plan(self, ctx: ExecutionContext, step_result: StepResult) -> None:
         """Create or update plan from step_result, activate next step.
 
-        ``auto_split`` used to sit in front of this, turning a premature
-        ``done`` back into ``continue``. It only fired when ``final_answer``
-        was empty, so ``step_complete(status="done", final_answer="…")`` walked
-        past every pending step — the scope gate now catches both, before the
-        step closes rather than after.
+        Task-level completion is reconciled before this method and marks its
+        internal transition explicitly. Model-authored ``continue`` results
+        never reach this method; they resume the active Step.
         """
         if not ctx.state.plan.steps:
             if step_result.next_steps:
@@ -166,7 +210,7 @@ class StepManager:
         # counts as closed here: the step is over, and its archived context is
         # worth as much as a successful step's — more, since the next attempt
         # needs to know what failed.
-        if step_result.status != "explore":
+        if step_result.status != "explore" and not step_result.interrupted:
             closed = [
                 s for s in ctx.state.plan.steps if s.status in ("done", "blocked")
             ]
@@ -178,7 +222,7 @@ class StepManager:
             if self._engine._summarizer_override is not None
             else _get_settings().LOOP_SUMMARIZER_ENABLED
         )
-        if _summarizer_on:
+        if _summarizer_on and not step_result.interrupted:
             try:
                 from infinidev.engine.static_analysis_timer import measure as _sa_measure
                 with _sa_measure("summarizer_llm"):
@@ -421,13 +465,10 @@ class StepManager:
     def _record_undischarged(ctx: ExecutionContext) -> None:
         """Note any plan step the run never reached, on every way out.
 
-        The scope gate refuses a ``done`` that would strand steps, but it only
-        sees a ``step_complete`` call. A run can also end by exhausting its
-        iterations, by tripping the loop guard, or through the idle-completion
-        branch where every remaining step is ``blocked`` and therefore not
-        pending. Recording it here — one place all of those pass through —
-        means a stranded step is visible to the reviewer and to the next turn's
-        work summary no matter which exit was taken.
+        Normal completion is reconciled before the plan advances, but a run can
+        still end by exhausting its iterations, tripping the loop guard, or
+        being cancelled. Recording stranded work here — one place all exits
+        pass through — keeps it visible to the reviewer and the next turn.
         """
         plan = getattr(ctx.state, "plan", None)
         if plan is None or not plan.steps:

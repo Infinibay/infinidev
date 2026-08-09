@@ -11,24 +11,20 @@ back for one more turn, and the order is deliberate — cheapest and most
 mechanical first, LLM-backed last, so a step that fails the note-discipline
 check never pays for a critic call:
 
-0. **Task completion** — ``status="done"`` while any planned Step remains
-   open. A rolling horizon is a commitment until its Steps are completed,
-   blocked, or removed with evidence. A list comprehension over the plan makes
-   an attempt to end the run early cheap to refuse.
-1. **Recoverable tool error** — ``status="blocked"`` immediately after an
+0. **Recoverable tool error** — ``status="blocked"`` immediately after an
    unknown-tool result that names available alternatives. The model gets one
    correction turn instead of converting a naming miss into a blocked Task.
-2. **Notes** — a small model that never called ``add_note`` is about to
+1. **Notes** — a small model that never called ``add_note`` is about to
    throw away everything it learned, since raw tool output does not survive
    the step boundary. Fires at most once per step: a second attempt is
    always honoured, or the model would deadlock between "add a note" and
    "that note was not good enough".
-3. **Late user message** — the user typed while the model was generating.
+2. **Late user message** — the user typed while the model was generating.
    They are owed an acknowledgement before a step boundary, not after it.
-4. **Critic** — a ``reject`` verdict from the pair-programming critic.
-5. **Objective** — the step's own deterministic verification. The model does
+3. **Critic** — a ``reject`` verdict from the pair-programming critic.
+4. **Objective** — the step's own deterministic verification. The model does
    not get to decide this one; a check does.
-6. **User hook** — a ``step_end_instruction`` command from the user's
+5. **User hook** — a ``step_end_instruction`` command from the user's
    ``.infinidev/hooks.json``, holding the step for one more pass of work.
 
 Every gate refuses the same way: by overwriting the ``step_complete`` tool
@@ -70,14 +66,6 @@ _NOTE_NUDGE = (
 # missing note to be a real loss, and nagging it reads as noise.
 _MIN_CALLS_BEFORE_NOTE_GATE = 2
 
-# How many times a run may be told that ending here would abandon plan steps.
-# Bounded for the same reason the objective gate is: a model that has decided
-# it is finished twice will not be talked out of it a third time, and the run
-# is worth more finished-with-the-gap-recorded than spinning. Two, not three —
-# the first refusal is the useful one, the second catches a misread.
-_SCOPE_GATE_MAX_ATTEMPTS = 2
-
-
 def step_complete_status(step_complete_call: Any) -> str:
     """Best-effort read of the ``status`` argument, defaulting to continue."""
     try:
@@ -108,11 +96,6 @@ class StepCompleteGate:
         # index rather than a flag because steps can be added mid-run, and a
         # single flag would let step 4 inherit step 3's "already fired".
         self._hook_fired: set[int] = set()
-        # Run-level, unlike the other three: the scope gate is about the plan
-        # as a whole, not about the step being closed. Keying it per step would
-        # hand the model a fresh pair of attempts at every step it tries to end
-        # the run from.
-        self._scope_attempts = 0
         # Step indices that have already received the recoverable-error
         # correction turn. The second blocked claim is honoured so a broken
         # suggestion cannot deadlock the Task.
@@ -138,7 +121,6 @@ class StepCompleteGate:
         self._verify_attempts = {}
         self._note_fired = set()
         self._hook_fired = set()
-        self._scope_attempts = 0
         self._recoverable_error_fired = set()
 
     # ── the chain ────────────────────────────────────────────────────
@@ -153,9 +135,6 @@ class StepCompleteGate:
         reasoning: str | None,
     ) -> bool:
         """``True`` when the step must stay open for one more turn."""
-        if self._scope_open(ctx, step_complete_call, messages):
-            return True
-
         if self._recoverable_tool_error(ctx, step_complete_call, messages):
             return True
 
@@ -179,97 +158,7 @@ class StepCompleteGate:
 
         return self._user_hook_holds(ctx, step_complete_call, messages)
 
-    # ── gate 0: the user's scope ─────────────────────────────────────
-
-    def _scope_open(
-        self,
-        ctx: Any,
-        step_complete_call: Any,
-        messages: list[dict[str, Any]],
-    ) -> bool:
-        """Refuse a ``done`` that would leave planned work unstarted.
-
-        User-approved Steps are scope records; developer-authored Steps are
-        the current execution commitment. Either must be explicitly completed,
-        blocked, or removed before the Task may close. Otherwise a model can
-        create a rolling horizon, perform its first item, and silently skip the
-        rest by declaring the whole Task done.
-
-        Ordered first in the chain because it is a comprehension over at most a
-        handful of steps: an attempt to finish early is refused before it can
-        cost a critic call or a verification subprocess.
-
-        ``blocked`` is deliberately not caught. A step closed as blocked was
-        attempted and reported, which is the honest outcome this gate exists to
-        distinguish from a silent drop.
-        """
-        if step_complete_status(step_complete_call) != "done":
-            return False
-
-        plan = getattr(ctx.state, "plan", None)
-        if plan is None or not plan.steps:
-            return False
-
-        undischarged = plan.undischarged(
-            exclude_index=self._step_key(ctx),
-            approved_only=False,
-        )
-        if not undischarged:
-            return False
-
-        self._scope_attempts += 1
-        titles = [f"  {s.index}. {s.title}" for s in undischarged]
-
-        if self._scope_attempts > _SCOPE_GATE_MAX_ATTEMPTS:
-            # Honour the close rather than spin, but a plan step that quietly
-            # went undone is exactly what the reviewer and the next turn need
-            # to be told about. ``notes`` is the channel that survives the
-            # prompt rebuild and reaches both.
-            note = (
-                f"⚠ Run ended with {len(undischarged)} plan step(s) not "
-                "executed from the approved plan:\n"
-                + "\n".join(titles)
-            )
-            emit_log("error", note, project_id=ctx.project_id, agent_id=ctx.agent_id)
-            with best_effort("scope-gate note append failed"):
-                ctx.state.notes.append(note)
-            return False
-
-        exits = (
-            "Finish these steps, remove work you now know is unnecessary, or "
-            "close each one you cannot do with status=\"blocked\" and say why. "
-            "Rewording a step does not discharge it."
-        )
-        self._engine._overwrite_step_complete_tool_result(
-            messages,
-            step_complete_call.id,
-            (
-                f"step_complete BLOCKED — you set status=\"done\", but "
-                f"{len(undischarged)} open step(s) remain in the plan:\n"
-                + "\n".join(titles) + "\n\n" + exits + " Then set "
-                f"status=\"done\" (attempt {self._scope_attempts}/"
-                f"{_SCOPE_GATE_MAX_ATTEMPTS})."
-            ),
-        )
-        with best_effort("scope-gate loop event failed"):
-            emit_loop_event(
-                "loop_scope_gate", ctx.project_id, ctx.agent_id,
-                {
-                    "undischarged": [s.index for s in undischarged],
-                    "attempt": self._scope_attempts,
-                    "blocked": True,
-                },
-            )
-        emit_log(
-            "info",
-            f"⚠ step_complete blocked — {len(undischarged)} open step(s) "
-            f"still pending, attempt {self._scope_attempts}/"
-            f"{_SCOPE_GATE_MAX_ATTEMPTS}",
-            project_id=ctx.project_id, agent_id=ctx.agent_id,
-        )
-        return True
-
-    # ── gate 1: recoverable tool errors ─────────────────────────────
+    # ── gate 0: recoverable tool errors ─────────────────────────────
 
     def _recoverable_tool_error(
         self,
@@ -326,7 +215,7 @@ class StepCompleteGate:
             )
         return True
 
-    # ── gate 2: notes ────────────────────────────────────────────────
+    # ── gate 1: notes ────────────────────────────────────────────────
 
     def _notes_missing(
         self,
@@ -365,7 +254,7 @@ class StepCompleteGate:
         })
         return True
 
-    # ── gate 4: the step's own verification ──────────────────────────
+    # ── gate 4: the step's own verification ─────────────────────────
 
     def objective_unmet(
         self,

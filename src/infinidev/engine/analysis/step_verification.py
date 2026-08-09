@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 #   test_id       → ``spec`` is a pytest node id; run it, PASS on exit 0
 #   file_contains → ``spec`` is a file path, ``observable`` the required
 #                   substring; PASS when the substring is present in the file
+#   file_absent   → ``spec`` is a file path; PASS when no entry exists there
 #   symbol_exists → ``spec`` is a name/snippet; PASS when grep finds it in the
 #                   workspace (cheap, language-agnostic, no code-intel coupling)
 #   llm_judge     → ``spec`` is a rubric/acceptance statement an INDEPENDENT
@@ -32,14 +33,15 @@ from pydantic import BaseModel, Field
 #                   no command can decide). Runs once post-loop, never per step.
 #   none          → no executable check; falls back to self-attestation
 VerificationKind = Literal[
-    "none", "command", "test_id", "file_contains", "symbol_exists", "llm_judge"
+    "none", "command", "test_id", "file_contains", "file_absent",
+    "symbol_exists", "llm_judge"
 ]
 
 # The kinds whose verdict is an exit code / substring / grep hit — runnable
 # cheaply and synchronously in the per-step gate. ``llm_judge`` is excluded:
 # it costs an LLM call and is deferred to the task-end re-verification.
 _DETERMINISTIC_KINDS = frozenset(
-    {"command", "test_id", "file_contains", "symbol_exists"}
+    {"command", "test_id", "file_contains", "file_absent", "symbol_exists"}
 )
 
 

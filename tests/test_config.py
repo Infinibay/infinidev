@@ -123,6 +123,51 @@ class TestLLMConfig:
         finally:
             settings.LLM_MODEL = orig
 
+    def test_fixed_provider_replaces_stale_base_url(self):
+        """A provider switch must not send cloud traffic to the old endpoint."""
+        from infinidev.config.llm import get_litellm_params
+
+        original = (settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL)
+        settings.LLM_PROVIDER = "minimax"
+        settings.LLM_MODEL = "minimax/MiniMax-M3"
+        settings.LLM_BASE_URL = "http://localhost:11434"
+        try:
+            params = get_litellm_params()
+        finally:
+            settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL = original
+
+        assert params["api_base"] == "https://api.minimax.io/v1"
+
+    def test_behavior_lane_replaces_stale_base_url(self):
+        """Chat and planning use the same fixed-provider endpoint policy."""
+        from infinidev.config.llm import get_litellm_params_for_behavior
+
+        original = (settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL)
+        settings.LLM_PROVIDER = "minimax"
+        settings.LLM_MODEL = "minimax/MiniMax-M3"
+        settings.LLM_BASE_URL = "http://localhost:11434"
+        try:
+            params = get_litellm_params_for_behavior()
+        finally:
+            settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL = original
+
+        assert params["api_base"] == "https://api.minimax.io/v1"
+
+    def test_editable_provider_preserves_configured_base_url(self):
+        """Local and proxy providers retain the endpoint the user selected."""
+        from infinidev.config.llm import get_litellm_params
+
+        original = (settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL)
+        settings.LLM_PROVIDER = "ollama"
+        settings.LLM_MODEL = "ollama_chat/custom-model"
+        settings.LLM_BASE_URL = "http://gpu-host:11434"
+        try:
+            params = get_litellm_params()
+        finally:
+            settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL = original
+
+        assert params["api_base"] == "http://gpu-host:11434"
+
 
 # ── Model Capabilities ──────────────────────────────────────────────────────
 

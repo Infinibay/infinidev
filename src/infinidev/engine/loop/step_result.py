@@ -32,5 +32,11 @@ class StepResult(BaseModel):
     # step_complete has zero of them while being perfectly well-behaved.
     # The abort for "the model cannot produce function calls" reads this.
     saw_tool_calls: bool = False
-
-
+    # Set only by the engine when a resource fuse ends an in-flight step.
+    # ``status=continue`` from the model means the current step closed and the
+    # plan may advance; an interrupted continuation must resume the same step.
+    interrupted: bool = Field(default=False, exclude=True)
+    # Internal transition bit. A model-authored ``continue`` resumes the same
+    # Step. The state machine sets this only when a Task-level ``done`` is
+    # reconciled into completion of the current Step because siblings remain.
+    advance_plan: bool = Field(default=False, exclude=True)

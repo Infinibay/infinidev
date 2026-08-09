@@ -1042,6 +1042,7 @@ def run_review_rework_loop(
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
     rework_execute_kwargs: dict[str, Any] | None = None,
+    run_verification: bool = True,
 ) -> tuple[str, ReviewResult | None]:
     """Run verification + review-rework cycle.
 
@@ -1072,6 +1073,7 @@ def run_review_rework_loop(
             on_status(level, msg)
 
     rework_kwargs: dict[str, Any] = dict(rework_execute_kwargs or {})
+    rework_kwargs.setdefault("allow_explore", False)
     if task is not None:
         rework_kwargs.update(
             task=task,
@@ -1080,8 +1082,29 @@ def run_review_rework_loop(
             max_total_tool_calls=max_total_tool_calls,
         )
 
+    deterministic_blocker: str | None = None
+
+    def _blocked_review(summary: str) -> ReviewResult:
+        """Represent an exhausted deterministic gate without another LLM call."""
+        return ReviewResult(
+            verdict="REJECTED",
+            summary=summary,
+            issues=[{
+                "severity": "blocking",
+                "file": "",
+                "line": None,
+                "quoted_text": "",
+                "description": summary,
+                "why": "Deterministic acceptance checks still fail.",
+                "fix": "Resolve the reported failures and rerun verification.",
+                "category": "test_failure",
+                "check_id": "verification_gate",
+            }],
+        )
+
     def _run_verification_and_fix(current_result: str) -> str:
-        """Run tests; if they fail, re-execute developer with failure context."""
+        """Run tests and bound rework until the latest diff is actually green."""
+        nonlocal deterministic_blocker
         from infinidev.engine.analysis.verification_engine import VerificationEngine
 
         workspace = getattr(engine, '_workspace', None)
@@ -1092,46 +1115,52 @@ def run_review_rework_loop(
         if not workspace:
             return current_result
 
-        state = getattr(engine, "_last_state", None)
-        preferred_test_command = getattr(state, "last_test_command", "")
-        verifier = VerificationEngine(
-            workspace=workspace,
-            preferred_test_command=preferred_test_command,
-        )
-        changed = list((engine.get_file_contents() or {}).keys())
-        tracker = getattr(engine, 'get_file_tracker', lambda: None)()
-        vresult = verifier.verify(changed_files=changed, file_tracker=tracker)
-
-        if vresult.passed:
-            _notify("verification_pass", vresult.summary)
-            return current_result
-
-        # Tests failed — feed output back to developer
-        _notify("verification_fail", vresult.summary)
-        failure_feedback = vresult.format_for_developer()
-        if not failure_feedback:
-            return current_result
-
-        fix_description = (
-            f"{task_prompt[0]}\n\n"
-            f"## IMPORTANT: Tests are FAILING\n"
-            f"You MUST fix the test failures below before proceeding.\n\n"
-            f"{failure_feedback}"
-        )
-        fix_prompt = (fix_description, task_prompt[1])
-
-        agent.activate_context(session_id=session_id)
-        try:
-            new_result = engine.execute(
-                agent=agent,
-                task_prompt=fix_prompt,
-                verbose=True,
-                preserve_file_tracker=True,
-                **rework_kwargs,
+        result_under_test = current_result
+        for attempt in range(3):
+            state = getattr(engine, "_last_state", None)
+            preferred_test_command = getattr(state, "last_test_command", "")
+            verifier = VerificationEngine(
+                workspace=workspace,
+                preferred_test_command=preferred_test_command,
             )
-            return new_result if new_result and new_result.strip() else current_result
-        finally:
-            agent.deactivate()
+            changed = list((engine.get_file_contents() or {}).keys())
+            tracker = getattr(engine, 'get_file_tracker', lambda: None)()
+            vresult = verifier.verify(changed_files=changed, file_tracker=tracker)
+
+            if vresult.passed:
+                deterministic_blocker = None
+                _notify("verification_pass", vresult.summary)
+                return result_under_test
+
+            _notify("verification_fail", vresult.summary)
+            failure_feedback = vresult.format_for_developer()
+            if not failure_feedback or attempt == 2:
+                deterministic_blocker = vresult.summary or "Verification failed"
+                return result_under_test
+
+            fix_description = (
+                f"{task_prompt[0]}\n\n"
+                f"## IMPORTANT: Tests are FAILING\n"
+                f"You MUST fix the test failures below before proceeding.\n\n"
+                f"{failure_feedback}"
+            )
+            fix_prompt = (fix_description, task_prompt[1])
+
+            agent.activate_context(session_id=session_id)
+            try:
+                new_result = engine.execute(
+                    agent=agent,
+                    task_prompt=fix_prompt,
+                    verbose=True,
+                    preserve_file_tracker=True,
+                    **rework_kwargs,
+                )
+                if new_result and new_result.strip():
+                    result_under_test = new_result
+            finally:
+                agent.deactivate()
+
+        return result_under_test
 
     def _run_objective_reverification_and_fix(
         current_result: str, checks: list[tuple[int, str, Any]],
@@ -1144,6 +1173,7 @@ def run_review_rework_loop(
         re-executes the developer with the failing checks — bounded by
         ``REVIEW_OBJECTIVE_REVERIFY_MAX_ROUNDS`` so it cannot thrash.
         """
+        nonlocal deterministic_blocker
         from infinidev.config.settings import settings as _settings
 
         if not checks or not getattr(_settings, "REVIEW_OBJECTIVE_REVERIFY_ENABLED", True):
@@ -1242,6 +1272,7 @@ def run_review_rework_loop(
                     f"surfaced for human confirmation",
                 )
             if not failed:
+                deterministic_blocker = None
                 _notify("objectives_pass",
                         f"{len(checks) - len(unverified)} objective check(s) verified")
                 _finalize(results)
@@ -1249,7 +1280,11 @@ def run_review_rework_loop(
 
             _notify("objectives_fail", f"{len(failed)}/{len(checks)} objective check(s) failing")
             if rounds >= max_rounds:
-                _notify("max_reviews", "objective checks still failing after rework")
+                deterministic_blocker = (
+                    f"{len(failed)}/{len(checks)} objective check(s) still failing "
+                    "after bounded rework"
+                )
+                _notify("max_reviews", deterministic_blocker)
                 _finalize(results)
                 return current_result
 
@@ -1281,11 +1316,22 @@ def run_review_rework_loop(
     # Snapshot objective checks before any re-execution rebuilds the plan.
     objective_checks = _collect_objective_checks(engine)
 
-    # Run verification before review (catch real breakage first)
-    result = _run_verification_and_fix(result)
+    # Graph work leaves are partial by construction. Their loop-level
+    # objective checks still verify the active branch, while the integrating
+    # verification node owns the repository-wide deterministic gate.
+    if run_verification:
+        result = _run_verification_and_fix(result)
+
+    if deterministic_blocker:
+        review = _blocked_review(deterministic_blocker)
+        _notify("max_reviews", review.format_for_user())
+        return result, review
 
     # Re-verify objectives together (cross-objective regression backstop).
     result = _run_objective_reverification_and_fix(result, objective_checks)
+    if deterministic_blocker:
+        review = _blocked_review(deterministic_blocker)
+        return result, review
 
     # User criteria define acceptance. Planner-derived criteria are useful
     # verification leads, but cannot expand scope or become user authority.
@@ -1399,3 +1445,13 @@ def run_review_rework_loop(
                 result = "Done. (no additional output)"
         finally:
             agent.deactivate()
+        if run_verification:
+            result = _run_verification_and_fix(result)
+        if deterministic_blocker:
+            review = _blocked_review(deterministic_blocker)
+            _notify("max_reviews", review.format_for_user())
+            return result, review
+        result = _run_objective_reverification_and_fix(result, objective_checks)
+        if deterministic_blocker:
+            review = _blocked_review(deterministic_blocker)
+            return result, review
