@@ -133,6 +133,43 @@ class TestObjectiveVerifierCommand:
         assert r.passed is False
         assert "required output not found" in r.summary
 
+    def test_redundant_cd_to_workspace_is_removed_before_permission_check(
+        self, tmp_path,
+    ):
+        with patch(
+            "infinidev.tools.shell.execute_command_tool.check_command_permission",
+            return_value=None,
+        ) as permission:
+            result = ObjectiveVerifier(str(tmp_path)).verify(
+                StepVerification(
+                    kind="command",
+                    spec=f"cd {tmp_path} && echo WORKSPACE_OK",
+                    observable="WORKSPACE_OK",
+                )
+            )
+
+        assert result.passed is True
+        permission.assert_called_once_with(
+            "echo WORKSPACE_OK",
+            description="Run objective verification command",
+        )
+
+    def test_cd_outside_workspace_is_not_rewritten(self, tmp_path):
+        command = f"cd {tmp_path.parent} && echo OUTSIDE"
+        with patch(
+            "infinidev.tools.shell.execute_command_tool.check_command_permission",
+            return_value="Command denied by policy",
+        ) as permission:
+            result = ObjectiveVerifier(str(tmp_path)).verify(
+                StepVerification(kind="command", spec=command)
+            )
+
+        assert result.passed is False
+        permission.assert_called_once_with(
+            command,
+            description="Run objective verification command",
+        )
+
     def test_nonexecutable_check_passes_as_skip(self, tmp_path):
         r = ObjectiveVerifier(str(tmp_path)).verify(StepVerification(kind="none"))
         assert r.passed is True

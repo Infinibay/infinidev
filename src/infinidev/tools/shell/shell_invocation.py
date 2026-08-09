@@ -3,7 +3,35 @@
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
+
+
+_LEADING_CD_RE = re.compile(
+    r"^\s*cd\s+(?P<path>'[^']*'|\"[^\"]*\"|[^\s;&|`$<>]+)"
+    r"\s*&&\s*(?P<command>.+)$",
+    re.DOTALL,
+)
+
+
+def split_leading_cd(command: str) -> tuple[str, str] | None:
+    """Parse a strict literal ``cd PATH && COMMAND`` shell prelude.
+
+    Substitutions, redirects, and nested control operators are deliberately
+    excluded. Callers remain responsible for validating whether the parsed
+    directory is an allowed target.
+    """
+    match = _LEADING_CD_RE.match(command)
+    if match is None:
+        return None
+    try:
+        path_tokens = shlex.split(match.group("path"))
+    except ValueError:
+        return None
+    if len(path_tokens) != 1:
+        return None
+    return match.group("command").strip(), path_tokens[0]
 
 
 def shell_invocation(command: str) -> tuple[str | list[str], bool]:
@@ -22,4 +50,4 @@ def shell_invocation(command: str) -> tuple[str | list[str], bool]:
     return [bash, "-o", "pipefail", "-c", command], False
 
 
-__all__ = ["shell_invocation"]
+__all__ = ["shell_invocation", "split_leading_cd"]

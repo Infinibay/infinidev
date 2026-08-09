@@ -22,6 +22,7 @@ from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.verification_result import VerificationResult
 from infinidev.engine.subprocess_runner import run_captured
 from infinidev.engine.test_environment import prepare_test_environment
+from infinidev.tools.shell.shell_invocation import split_leading_cd
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +78,28 @@ class ObjectiveVerifier:
     def _verify_command(
         self, command: str, observable: str, expected_exit_code: int = 0,
     ) -> VerificationResult:
+        command = self._strip_redundant_workspace_cd(command)
         run = self._run(command)
         passed = (
             run["exit_code"] == expected_exit_code
             and self._observable_ok(observable, run["output"])
         )
         return self._result_from_run(run, passed, observable, expected_exit_code)
+
+    def _strip_redundant_workspace_cd(self, command: str) -> str:
+        """Drop a strict leading ``cd`` only when it resolves to our cwd."""
+        parsed = split_leading_cd(command)
+        if parsed is None:
+            return command
+        inner_command, authored_cwd = parsed
+        target = (
+            authored_cwd
+            if os.path.isabs(authored_cwd)
+            else os.path.join(self._workspace, authored_cwd)
+        )
+        if os.path.realpath(target) != os.path.realpath(self._workspace):
+            return command
+        return inner_command
 
     def _interpreter(self) -> str:
         """The python that can import this workspace's test dependencies.

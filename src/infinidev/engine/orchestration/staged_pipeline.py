@@ -296,6 +296,30 @@ def _execute_stage(
             notify("Planner", plan.overview, "agent")
         _publish_state(state, session_id, hooks)
 
+        direct_verification = _run_deterministic_verification_plan(
+            plan, workspace_path,
+        )
+        if direct_verification is not None:
+            last_result = direct_verification
+            task.status = "completed"
+            task.result = direct_verification
+            hooks.on_status(
+                "info",
+                f"Task verified deterministically without a developer turn: "
+                f"{task.spec.title}",
+            )
+            _record_task_evidence(
+                state,
+                stage,
+                task,
+                direct_verification,
+                used_engine,
+                plan=plan,
+                workspace_changed=False,
+            )
+            _publish_state(state, session_id, hooks)
+            continue
+
         flow_config = get_flow_config("develop")
         task_prompt = (
             _render_developer_task(state, stage, task, turn_context),
@@ -590,8 +614,26 @@ def _record_task_evidence(
     task: TaskExecutionRecord,
     result: str,
     engine: Any,
+    *,
+    plan: Plan | None = None,
+    workspace_changed: bool | None = None,
 ) -> None:
-    plan_steps = _engine_plan_steps(engine)
+    plan_steps = (
+        [
+            {
+                "title": step.title,
+                "status": "done",
+                "verify": (
+                    step.verify.model_dump(mode="json")
+                    if step.verify is not None
+                    else None
+                ),
+            }
+            for step in plan.steps
+        ]
+        if plan is not None
+        else _engine_plan_steps(engine)
+    )
     entry = EvidenceEntry(
         kind="task_result",
         summary=(result or task.error or f"Task {task.spec.id} produced no text result")[:6000],
@@ -605,7 +647,11 @@ def _record_task_evidence(
             ])),
             "plan_steps": plan_steps,
             "error": task.error,
-            "workspace_changed": _engine_has_file_changes(engine),
+            "workspace_changed": (
+                _engine_has_file_changes(engine)
+                if workspace_changed is None
+                else workspace_changed
+            ),
         },
     )
     if state.add_evidence(entry):
@@ -708,6 +754,45 @@ def _task_kind(
     if goal_intent == "implementation":
         return "feature"
     return "investigation" if goal_intent == "informational" else "chore"
+
+
+def _run_deterministic_verification_plan(
+    plan: Plan,
+    workspace_path: str | None,
+) -> str | None:
+    """Execute a verification-only Task without spending a developer turn.
+
+    A planner-authored command is not trusted merely because it exists. Every
+    Step must explicitly lead with verification intent, contain no write verb,
+    and provide an executable deterministic check. A failed or ineligible
+    check falls through to the ordinary developer loop, where repair work can
+    happen under the normal edit and permission gates.
+    """
+    if not workspace_path or not plan.steps:
+        return None
+    for step in plan.steps:
+        action = step.title.rsplit(":", 1)[-1]
+        if (
+            _VERIFY_TASK_RE.search(action) is None
+            or _WRITE_TASK_RE.search(step.title) is not None
+            or step.verify is None
+            or not step.verify.is_deterministic
+        ):
+            return None
+
+    from infinidev.engine.analysis.objective_verifier import ObjectiveVerifier
+
+    verifier = ObjectiveVerifier(workspace_path)
+    summaries: list[str] = []
+    for step in plan.steps:
+        result = verifier.verify(step.verify)
+        if not result.passed:
+            return None
+        summaries.append(f"- {step.title}: {result.summary}")
+    return (
+        "Deterministic verification completed without a developer turn:\n"
+        + "\n".join(summaries)
+    )
 
 
 def _staged_execution_tool_budget(override: int | None) -> int:

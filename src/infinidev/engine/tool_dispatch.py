@@ -12,8 +12,6 @@ import inspect
 import json
 import logging
 import os
-import re
-import shlex
 import uuid
 from typing import Any
 
@@ -32,6 +30,7 @@ from infinidev.engine.schema_sanitizer import (
     MODIFY_STEP_SCHEMA,
     REMOVE_STEP_SCHEMA,
 )
+from infinidev.tools.shell.shell_invocation import split_leading_cd
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +38,6 @@ _USER_STOPPED_TOOL_ERROR = (
     "The user stopped this tool execution. Do not retry the same call unchanged; "
     "choose a narrower approach or ask the user before retrying."
 )
-
-_LEADING_CD_RE = re.compile(
-    r"^\s*cd\s+(?P<path>'[^']*'|\"[^\"]*\"|[^\s;&|`$<>]+)"
-    r"\s*&&\s*(?P<command>.+)$",
-    re.DOTALL,
-)
-
 
 def _normalize_execute_command_cwd(args: dict[str, Any]) -> None:
     """Move a strict leading ``cd PATH &&`` into execute_command's cwd.
@@ -56,17 +48,12 @@ def _normalize_execute_command_cwd(args: dict[str, Any]) -> None:
     """
     if args.get("cwd") or not isinstance(args.get("command"), str):
         return
-    match = _LEADING_CD_RE.match(args["command"])
-    if match is None:
+    parsed = split_leading_cd(args["command"])
+    if parsed is None:
         return
-    try:
-        path_tokens = shlex.split(match.group("path"))
-    except ValueError:
-        return
-    if len(path_tokens) != 1:
-        return
-    args["cwd"] = path_tokens[0]
-    args["command"] = match.group("command").strip()
+    command, cwd = parsed
+    args["cwd"] = cwd
+    args["command"] = command
     logger.info("Tool execute_command: moved leading cd into cwd")
 
 

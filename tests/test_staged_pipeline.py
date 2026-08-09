@@ -262,6 +262,102 @@ def test_verification_only_stage_task_does_not_require_an_edit() -> None:
     ) == "feature"
 
 
+def test_deterministic_verification_task_skips_developer_execution(
+    temp_db, monkeypatch, runtime,
+):
+    from infinidev.engine.analysis.verification_result import VerificationResult
+    from infinidev.engine.analysis.step_verification import StepVerification
+
+    stage = _stage("Delivery", [_task("change"), _task("verify")])
+    _install_stage_planner(monkeypatch, [
+        stage,
+        _complete("The change and direct verification are observed"),
+    ])
+
+    def task_planner(_escalation, *, task_handoff=None, **_kwargs):
+        if task_handoff.task.id == "verify":
+            return Plan(
+                overview="Verify the completed change",
+                steps=[PlanStepSpec(
+                    title="Run pytest and confirm exit 0",
+                    verify=StepVerification(kind="command", spec="pytest -q"),
+                )],
+            )
+        return Plan(
+            overview="Make the change",
+            steps=[PlanStepSpec(title="Implement the change")],
+        )
+
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.planner.run_planner", task_planner,
+    )
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.objective_verifier.ObjectiveVerifier.verify",
+        lambda self, check: VerificationResult(
+            passed=True,
+            summary="verification passed",
+            commands_run=[],
+        ),
+    )
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=_Engine(), reviewer=object(),
+        hooks=_Hooks(), session_id="direct-verify-pass", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "complete"
+    assert len(runtime["executions"]) == 1
+    verification_task = result.state.stages[0].tasks[1]
+    assert verification_task.status == "completed"
+    assert "without a developer turn" in verification_task.result
+    evidence = next(
+        entry for entry in result.state.evidence
+        if entry.task_id == verification_task.spec.id
+    )
+    assert evidence.details["workspace_changed"] is False
+    assert evidence.details["plan_steps"][0]["verify"]["spec"] == "pytest -q"
+
+
+def test_failed_deterministic_verification_falls_through_to_developer(
+    temp_db, monkeypatch, runtime,
+):
+    from infinidev.engine.analysis.verification_result import VerificationResult
+    from infinidev.engine.analysis.step_verification import StepVerification
+
+    _install_stage_planner(monkeypatch, [
+        _stage("Verification", [_task("verify")]),
+        _complete("The repaired verification Task completed"),
+    ])
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.planner.run_planner",
+        lambda *_args, **_kwargs: Plan(
+            overview="Verify and repair if needed",
+            steps=[PlanStepSpec(
+                title="Run pytest and confirm exit 0",
+                verify=StepVerification(kind="command", spec="pytest -q"),
+            )],
+        ),
+    )
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.objective_verifier.ObjectiveVerifier.verify",
+        lambda self, check: VerificationResult(
+            passed=False,
+            summary="verification failed",
+            commands_run=[],
+        ),
+    )
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=_Engine(), reviewer=object(),
+        hooks=_Hooks(), session_id="direct-verify-fail", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "complete"
+    assert len(runtime["executions"]) == 1
+
+
 def test_task_dag_executes_only_dependency_ready_tasks(
     temp_db, monkeypatch, runtime,
 ):
