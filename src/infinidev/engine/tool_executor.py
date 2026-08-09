@@ -156,7 +156,21 @@ def update_opened_files_cache(
 
     # Path is a convenience for handlers that key by file. Symbol-based
     # handlers get None and use args["name"] / args["symbol"] instead.
-    path = args.get("path") or args.get("file_path")
+    # Tool dispatch accepts conventional path aliases before invoking the
+    # implementation. Cache bookkeeping receives the original model call,
+    # so it must recognise the same aliases rather than crashing after a
+    # successful read when, for example, MiniMax emits ``file``.
+    path = next(
+        (
+            args[key]
+            for key in (
+                "file_path", "path", "filepath", "file", "filename",
+                "directory", "dir", "dir_path",
+            )
+            if isinstance(args.get(key), str) and args[key].strip()
+        ),
+        None,
+    )
     if path and not _os.path.isabs(path):
         path = _os.path.normpath(_os.path.join(ws, path))
 
@@ -178,7 +192,7 @@ def _is_error_result(result: Any) -> bool:
 
 
 def _cache_read(state, path, args, result, ws):
-    if not _is_error_result(result):
+    if path is not None and not _is_error_result(result):
         state.cache_file(path, result)
 
 

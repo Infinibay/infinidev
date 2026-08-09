@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
 from infinidev.engine.loop.action_record import ActionRecord
 from infinidev.engine.loop.loop_plan import LoopPlan
 from infinidev.engine.loop.opened_file import OpenedFile
+
+logger = logging.getLogger(__name__)
 
 # Default TTL for opened files (in tool calls)
 OPENED_FILE_TTL = 20
@@ -109,6 +113,12 @@ class LoopState(BaseModel):
 
     def cache_file(self, path: str, content: str, pinned: bool = False) -> None:
         """Add or update a file in the opened files cache."""
+        if not isinstance(path, str) or not path.strip():
+            logger.warning("Ignoring opened-file cache entry without a valid path")
+            return
+        if not isinstance(content, str):
+            logger.warning("Ignoring opened-file cache entry without string content")
+            return
         if len(content) > MAX_CACHE_CONTENT_SIZE:
             # Too large to cache — skip
             return

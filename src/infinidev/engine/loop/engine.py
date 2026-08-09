@@ -147,6 +147,7 @@ def _apply_exploration_policy(
     if step_result.status != "explore" or ctx.allow_explore:
         return False
     step_result.status = "continue"
+    step_result.interrupted = True
     step_result.summary = (
         f"{step_result.summary}\n\n"
         "Exploration was skipped in this bounded rework run; use the supplied "
@@ -181,12 +182,19 @@ def _task_requires_edits(ctx: ExecutionContext) -> bool:
 def _should_advance_plan(step_result: StepResult) -> bool:
     """Whether this result closes the active Step rather than pausing it."""
     return (
-        (
-            step_result.status in {"done", "blocked"}
-            or (step_result.status == "continue" and step_result.advance_plan)
-        )
+        step_result.status in {"continue", "done", "blocked"}
         and not step_result.interrupted
     )
+
+
+def _reconcile_step_result(
+    ctx: ExecutionContext,
+    step_result: StepResult,
+    step_mgr: StepManager,
+) -> tuple[StepResult, bool]:
+    """Apply Task-scope reconciliation before whole-Task completion gates."""
+    step_result = step_mgr.reconcile_task_completion(ctx, step_result)
+    return step_result, _enforce_edit_requirement(ctx, step_result)
 
 
 def _enforce_edit_requirement(
@@ -529,8 +537,9 @@ class LoopEngine(AgentEngine):
                 step_messages_start=step_messages_start,
             )
 
-            edit_requirement_blocked = _enforce_edit_requirement(ctx, step_result)
-            step_result = step_mgr.reconcile_task_completion(ctx, step_result)
+            step_result, edit_requirement_blocked = _reconcile_step_result(
+                ctx, step_result, step_mgr,
+            )
             if edit_requirement_blocked:
                 _emit_log(
                     "warning",
@@ -1141,7 +1150,11 @@ class LoopEngine(AgentEngine):
     ) -> StepResult:
         """Default step_result, propagate edit state, attach metadata."""
         if step_result is None:
-            step_result = StepResult(summary="Step completed.", status="continue")
+            step_result = StepResult(
+                summary="Step interrupted without a completion result.",
+                status="continue",
+                interrupted=True,
+            )
 
         tracker.on_step_end()
         if tracker.task_has_edits:

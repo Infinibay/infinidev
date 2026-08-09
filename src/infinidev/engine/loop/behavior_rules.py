@@ -11,20 +11,34 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Literal
 
+from infinidev.tools.base.tool_effects import local_effects_for_name
+
 # ── Tool name sets ──────────────────────────────────────────────────────
 
 _EDIT_TOOLS = frozenset({
     "edit_file", "create_file", "rename_symbol", "move_symbol",
+    # Raw compatibility names are observed before dispatch canonicalises them.
+    "write_file", "apply_patch", "multi_edit_file",
 })
 
 _READ_TOOLS = frozenset({
-    "read_file", "partial_read",
+    "read_file", "partial_read", "read", "cat",
 })
 
 _TEST_PATTERNS = frozenset({
     "pytest", "unittest", "test", "npm test", "cargo test",
     "go test", "make test", "jest", "mocha", "vitest",
 })
+
+
+def is_workspace_edit_tool(name: str) -> bool:
+    """Return whether a successful call mutates workspace files.
+
+    Built-in tool effects are the source of truth. The small compatibility
+    set covers raw hallucination aliases because behavior tracking runs on
+    the model-authored name, before dispatch canonicalisation.
+    """
+    return name in _EDIT_TOOLS or local_effects_for_name(name).writes_workspace
 
 
 # ── Data classes ────────────────────────────────────────────────────────
@@ -80,7 +94,7 @@ class ReadBeforeEditRule(BehaviorRule):
         self._praised_paths: set[str] = set()
 
     def on_tool_call(self, ctx: RuleContext) -> list[Feedback]:
-        if ctx.tool_name not in _EDIT_TOOLS:
+        if not is_workspace_edit_tool(ctx.tool_name):
             return []
 
         path = ctx.tool_args.get("file_path", ctx.tool_args.get("path", ""))

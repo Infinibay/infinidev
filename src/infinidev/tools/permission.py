@@ -6,6 +6,7 @@ The UI registers a handler via `set_permission_handler()`.
 
 from __future__ import annotations
 
+import re
 import threading
 import logging
 from typing import Callable
@@ -16,6 +17,54 @@ logger = logging.getLogger(__name__)
 # Must be thread-safe — called from the loop engine's worker thread.
 _permission_handler: Callable[[str, str, str], bool] | None = None
 _handler_lock = threading.Lock()
+
+_TEST_AUTHORIZATION_RE = re.compile(
+    r"\b(?:run|execute|verify|validate|test|ejecut(?:a|ar|e)|corr(?:e|er)|"
+    r"prob(?:a|ar|á)|verific(?:a|ar)|valid(?:a|ar))\b[^.\n]{0,100}"
+    r"\b(?:tests?|pytest|test\s+suite|pruebas?|suite\s+de\s+pruebas)\b|"
+    r"\b(?:tests?|pytest|pruebas?)\b[^.\n]{0,100}"
+    r"\b(?:run|execute|verify|validate|ejecut(?:a|ar|e)|corr(?:e|er)|"
+    r"prob(?:a|ar|á)|verific(?:a|ar)|valid(?:a|ar))\b",
+    re.IGNORECASE,
+)
+_TEST_DENIAL_RE = re.compile(
+    r"\b(?:do\s+not|don't|never)\s+(?:run|execute)?\s*(?:the\s+)?tests?\b|"
+    r"\b(?:no|nunca)\s+(?:ejecut(?:es|ar)|corr(?:as|er)|"
+    r"prueb(?:es|ar))\s+(?:las?\s+)?pruebas?\b",
+    re.IGNORECASE,
+)
+_SHELL_CONTROL_RE = re.compile(r"[;&|`$><\n\r]")
+
+
+def make_noninteractive_permission_handler(
+    user_request: str,
+) -> Callable[[str, str, str], bool]:
+    """Authorize only explicitly requested, single test-runner commands.
+
+    A one-shot CLI has no UI capable of answering an approval prompt. The
+    user's literal request can still authorize a bounded verification action:
+    when it asks to run tests, a recognized test command may execute. Shell
+    composition remains denied so test authority cannot be widened into an
+    unrelated command through pipes, chaining, redirects, or substitutions.
+    """
+    request = (user_request or "").strip()
+    tests_authorized = bool(
+        request
+        and _TEST_AUTHORIZATION_RE.search(request)
+        and not _TEST_DENIAL_RE.search(request)
+    )
+
+    def decide(tool_name: str, _description: str, details: str) -> bool:
+        if tool_name != "execute_command" or not tests_authorized:
+            return False
+        command = (details or "").strip()
+        if not command or _SHELL_CONTROL_RE.search(command):
+            return False
+        from infinidev.engine.guidance.test_runners import is_test_command
+
+        return is_test_command(command)
+
+    return decide
 
 
 def set_permission_handler(handler: Callable[[str, str, str], bool] | None) -> None:

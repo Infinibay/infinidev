@@ -13,7 +13,10 @@ import pytest
 from infinidev.config.settings import Settings, settings
 from infinidev.tools.base.command_risk import classify_command, classify_python
 from infinidev.tools.base.permissions import check_file_permission
-from infinidev.tools.permission import set_permission_handler
+from infinidev.tools.permission import (
+    make_noninteractive_permission_handler,
+    set_permission_handler,
+)
 from infinidev.tools.shell.execute_command_tool import check_command_permission
 
 
@@ -274,6 +277,46 @@ class TestCommandAutoMode:
         # provably-safe commands still run with no handler (never escalate)
         set_permission_handler(None)
         assert check_command_permission("git status") is None
+
+
+class TestNonInteractiveTaskAuthority:
+    def test_explicit_test_request_authorizes_only_test_runner(self):
+        handler = make_noninteractive_permission_handler(
+            "Fix normalize_tags, run pytest tests/test_tags.py, then verify the suite."
+        )
+
+        assert handler("execute_command", "", "pytest tests/test_tags.py -q") is True
+        assert handler("execute_command", "", "python -m pytest -q") is True
+        assert handler("execute_command", "", "rm -rf build") is False
+        assert handler("delete_file", "", "tests/output.txt") is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pytest -q; rm -rf build",
+            "pytest -q && touch released",
+            "pytest -q | tee result.txt",
+            "pytest -q > result.txt",
+            "pytest $(cat targets.txt)",
+        ],
+    )
+    def test_shell_composition_cannot_expand_test_authority(self, command):
+        handler = make_noninteractive_permission_handler("Run all tests.")
+
+        assert handler("execute_command", "", command) is False
+
+    @pytest.mark.parametrize(
+        "user_request",
+        [
+            "Explain how the tests work.",
+            "Review the implementation but do not run tests.",
+            "Revisa el cambio, no ejecutes las pruebas.",
+        ],
+    )
+    def test_missing_or_negative_test_authority_fails_closed(self, user_request):
+        handler = make_noninteractive_permission_handler(user_request)
+
+        assert handler("execute_command", "", "pytest -q") is False
 
 
 # ── check_file_permission: auto branch ───────────────────────────────────

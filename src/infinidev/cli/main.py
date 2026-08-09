@@ -381,6 +381,12 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
         sr.begin_fresh_session(session_id)
     hooks = NonInteractiveHooks()
     engine = LoopEngine()
+    from infinidev.tools.permission import (
+        make_noninteractive_permission_handler,
+        set_permission_handler,
+    )
+
+    set_permission_handler(make_noninteractive_permission_handler(prompt_text))
 
     # A one-shot run is still a conversation as far as Ken is concerned:
     # the turn opens its session lazily inside run_task, and every exit
@@ -427,6 +433,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
         if not getattr(hooks, "reply_already_shown", False):
             click.echo(result or "Done.")
     finally:
+        set_permission_handler(None)
         _end_ken_sessions()
 
 

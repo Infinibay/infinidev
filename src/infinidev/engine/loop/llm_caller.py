@@ -565,7 +565,7 @@ class LLMCaller:
                 return LLMCallResult(should_retry=True)
             _emit_log(
                 "error",
-                f"{_RED}⚠ Malformed tool calls persisted — forcing step completion{_RESET}",
+                f"{_RED}⚠ Malformed tool calls persisted — pausing the step{_RESET}",
                 project_id=ctx.project_id, agent_id=ctx.agent_id,
             )
             return LLMCallResult(forced_step_result=StepResult(
@@ -574,6 +574,7 @@ class LLMCaller:
                     f"({self._malformed_retries} attempts). Will retry on next step."
                 ),
                 status="continue",
+                interrupted=True,
             ))
 
         exc_msg = str(exc).lower()

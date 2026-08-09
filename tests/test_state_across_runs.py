@@ -112,7 +112,7 @@ def test_explore_leaves_the_step_active():
     assert state.plan.steps[2].status == "pending"
 
 
-def test_continue_does_not_advance_the_plan():
+def test_model_continue_advances_the_plan():
     from infinidev.engine.loop.engine import LoopEngine
 
     engine = LoopEngine()
@@ -130,4 +130,4 @@ def test_continue_does_not_advance_the_plan():
     engine._run_post_step(
         ctx, StepResult(summary="done", status="continue"), step_mgr, [], 0, 0,
     )
-    assert advanced == []
+    assert advanced == [True]

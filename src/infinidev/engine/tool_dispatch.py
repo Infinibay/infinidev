@@ -106,6 +106,7 @@ _HALLUCINATION_MAP: dict[str, str] = {
     # a false blocked task.
     "shell_command": "execute_command",
     "shell_exec": "execute_command",
+    "shell_run": "execute_command",
     "ls": "list_directory",
     "find": "glob",
     "grep": "code_search",
@@ -235,9 +236,14 @@ def _unknown_tool_message(dispatch: dict[str, Any], name: str) -> str:
     )
     close = [n for score, n in scored[:_SUGGESTION_LIMIT] if score >= _SUGGESTION_FLOOR]
     ranked = close or [n for _, n in scored[:_MIN_SUGGESTIONS]]
+    recovery = (
+        "Call describe_tool() to list every tool you have."
+        if "describe_tool" in dispatch
+        else "Use one of the tool names advertised for this turn."
+    )
     return (
         f"Unknown tool: {name}. Did you mean one of: {', '.join(ranked)}? "
-        f"Call describe_tool() to list every tool you have."
+        f"{recovery}"
     )
 
 
@@ -362,6 +368,9 @@ def execute_tool_call(
         "code_search": {
             "context": "context_lines",
         },
+        "declare_test_command": {
+            "command": "command_pattern",
+        },
     }
 
     # M3 commonly emits edit_file(replace={old: ..., new: ...}). Preserve
@@ -376,6 +385,21 @@ def execute_tool_call(
                 args["old_string"] = old_value
             if new_value is not None and "new_string" not in args:
                 args["new_string"] = new_value
+
+    # MiniMax attaches this transport hint to ordinary foreground commands.
+    # False carries no semantic effect and should not invalidate the call;
+    # true must use the tracked background-task tool instead of silently
+    # changing execution mode.
+    if name == "execute_command" and "is_background" in args:
+        is_background = args.pop("is_background")
+        if is_background not in (False, None, 0, "", "false", "False", "0"):
+            return json.dumps({
+                "error": (
+                    "execute_command cannot run with is_background=true. "
+                    "Use run_in_background(command, description) when that "
+                    "capability is available, or run the command in foreground."
+                )
+            })
 
     # Validate kwargs against _run() signature — reject unknown parameters
     # so the LLM learns the correct schema instead of silently losing data.
@@ -420,6 +444,8 @@ def execute_tool_call(
                     pass
             # Silently strip metadata params that LLMs commonly add
             _METADATA_PARAMS = {"description", "reason", "explanation", "language"}
+            if name == "declare_test_command":
+                _METADATA_PARAMS.add("cwd")
             for meta in _METADATA_PARAMS:
                 if meta in args and meta not in allowed:
                     logger.debug("Tool %s: stripping metadata param '%s'", name, meta)

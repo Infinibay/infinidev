@@ -391,3 +391,21 @@ def test_invalid_handle_is_not_propagated(monkeypatch):
 
     assert messages[0]["content"].startswith(original)
     assert not hasattr(ctx, "pending_command_output_handles")
+
+
+def test_denied_test_command_does_not_replace_verifier_command(monkeypatch):
+    def unexpected_capture(*args, **kwargs):
+        raise AssertionError("denied commands must not be captured as test runs")
+
+    monkeypatch.setattr(
+        ToolRunner,
+        "capture_test_output",
+        staticmethod(unexpected_capture),
+    )
+
+    ctx, messages = _append_command_result(
+        json.dumps({"error": "Command denied by user: pytest | tail"})
+    )
+
+    assert ctx.state.last_test_command == ""
+    assert "Command denied by user" in messages[0]["content"]

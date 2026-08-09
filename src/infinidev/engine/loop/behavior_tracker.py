@@ -7,7 +7,7 @@ from typing import Any
 
 from infinidev.engine.loop.behavior_rules import (
     BehaviorRule, Feedback, RuleContext, discover_rules,
-    _EDIT_TOOLS, _READ_TOOLS,
+    _READ_TOOLS, is_workspace_edit_tool,
 )
 
 
@@ -37,11 +37,12 @@ class BehaviorTracker:
 
         # Update state
         self.tool_history.append(name)
-        if name in _READ_TOOLS and path:
+        if not had_error and name in _READ_TOOLS and path:
             self.files_read.add(path)
-        if name in _EDIT_TOOLS and path:
-            self.files_edited.add(path)
+        if not had_error and is_workspace_edit_tool(name):
             self.task_has_edits = True
+            if path:
+                self.files_edited.add(path)
         if name == "add_note":
             self.notes_count += 1
 

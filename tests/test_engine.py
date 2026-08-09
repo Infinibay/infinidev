@@ -50,6 +50,18 @@ class TestLoopState:
         ]
         assert state.plan.has_pending is False
 
+    def test_opened_file_cache_rejects_invalid_entries(self, caplog):
+        """Cache bookkeeping is best-effort and cannot abort the engine."""
+        state = LoopState()
+
+        state.cache_file(None, "content")  # type: ignore[arg-type]
+        state.cache_file("", "content")
+        state.cache_file("valid.py", None)  # type: ignore[arg-type]
+
+        assert state.opened_files == {}
+        assert "without a valid path" in caplog.text
+        assert "without string content" in caplog.text
+
 
 class TestLoopPlan:
     """Tests for LoopPlan model."""

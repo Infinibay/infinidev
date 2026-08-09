@@ -16,7 +16,7 @@ from infinidev.engine.engine_logging import (
 )
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.loop.models import ActionRecord, StepResult
-from infinidev.engine.loop.behavior_rules import _EDIT_TOOLS, _READ_TOOLS
+from infinidev.engine.loop.behavior_rules import _READ_TOOLS, is_workspace_edit_tool
 from infinidev.engine.loop.step_summarizer import _summarize_step, _synthesize_final
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ def _auto_enhance_record(record: ActionRecord, messages: list[dict]) -> ActionRe
                 if fn_name in _READ_TOOLS and path:
                     if path not in files_read:
                         files_read.append(path)
-                elif fn_name in _EDIT_TOOLS and path:
+                elif is_workspace_edit_tool(fn_name) and path:
                     if path not in files_changed:
                         files_changed.append(path)
         elif msg.get("role") == "tool":
@@ -137,7 +137,6 @@ class StepManager:
             update={
                 "status": "continue",
                 "final_answer": None,
-                "advance_plan": True,
                 "summary": (
                     f"{step_result.summary.rstrip()} "
                     f"Continuing because planned work remains: {titles}."
@@ -148,9 +147,10 @@ class StepManager:
     def advance_plan(self, ctx: ExecutionContext, step_result: StepResult) -> None:
         """Create or update plan from step_result, activate next step.
 
-        Task-level completion is reconciled before this method and marks its
-        internal transition explicitly. Model-authored ``continue`` results
-        never reach this method; they resume the active Step.
+        Task-level completion is reconciled before this method. Both an
+        ordinary model-authored ``continue`` and a reconciled premature
+        ``done`` close the active Step; engine-forced interruptions do not
+        call this method.
         """
         if not ctx.state.plan.steps:
             if step_result.next_steps:

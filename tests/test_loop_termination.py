@@ -22,6 +22,7 @@ from infinidev.engine.loop.engine import (
     _apply_exploration_policy,
     _enforce_edit_requirement,
     _has_substantive_done_evidence,
+    _reconcile_step_result,
     _should_advance_plan,
     _task_requires_edits,
 )
@@ -240,11 +241,32 @@ def test_budget_interruption_resumes_the_same_plan_step():
     completed = StepResult(
         summary="step complete",
         status="continue",
-        advance_plan=True,
     )
 
     assert _should_advance_plan(interrupted) is False
     assert _should_advance_plan(completed) is True
+
+
+def test_pending_step_reconciliation_precedes_whole_task_edit_gate():
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.loop.step_manager import StepManager
+
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="feature")
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Inspect src/tags.py", status="active"),
+        PlanStep(index=2, title="Edit normalize_tags in src/tags.py"),
+    ]
+    result, edit_blocked = _reconcile_step_result(
+        ctx,
+        StepResult(summary="Inspection complete", status="done"),
+        StepManager(SimpleNamespace(_hooks=None)),
+    )
+
+    assert edit_blocked is False
+    assert result.status == "continue"
+    assert result.interrupted is False
+    assert _should_advance_plan(result) is True
 
 
 # ── the critic's veto is bounded too ─────────────────────────────────

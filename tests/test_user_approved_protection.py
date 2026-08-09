@@ -253,7 +253,9 @@ class TestPublicPlanTools:
             "Reading", "Add auth.py helper", "Implement api.py",
         ]
 
-    def test_first_public_step_becomes_active(self, bound_tool):
+    def test_bootstrap_steps_remain_pending_until_planning_turn_closes(
+        self, bound_tool,
+    ):
         state = LoopState()
         self._bind(state)
 
@@ -262,8 +264,8 @@ class TestPublicPlanTools:
         ))
 
         assert result["status"] == "added"
-        assert state.plan.active_step is not None
-        assert state.plan.active_step.title == "Inspect src/widget.py"
+        assert state.plan.active_step is None
+        assert state.plan.steps[0].status == "pending"
 
     def test_later_public_step_stays_pending(self, bound_tool):
         state = LoopState()

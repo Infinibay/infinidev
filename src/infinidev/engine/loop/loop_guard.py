@@ -111,12 +111,13 @@ class LoopGuard:
             _emit_log(
                 "error",
                 f"{_RED}⚠ Tool loop detected: identical '{tool_name}' call "
-                f"{self.same_tool_streak}x — forcing step completion{_RESET}",
+                f"{self.same_tool_streak}x — pausing the step{_RESET}",
                 project_id=ctx.project_id, agent_id=ctx.agent_id,
             )
             return StepResult(
                 summary=f"Step interrupted: identical {tool_name} calls ({self.same_tool_streak}x) without progress.",
                 status="continue",
+                interrupted=True,
             )
         return None
 
@@ -188,15 +189,16 @@ class LoopGuard:
         _emit_log(
             "warning",
             f"{_YELLOW}⚠ {self.pseudo_only_rounds} consecutive turns without a "
-            f"real tool call — closing the step{_RESET}",
+            f"real tool call — pausing the step{_RESET}",
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         )
         return StepResult(
             summary=(
-                "Step closed: the model kept thinking and taking notes "
-                "without calling a tool or completing the step."
+                "Step interrupted: the model kept thinking and taking notes "
+                "without calling a real tool or completing the step."
             ),
             status="continue",
+            interrupted=True,
         )
 
     def handle_text_only(
@@ -222,13 +224,14 @@ class LoopGuard:
             _emit_log(
                 "warning",
                 f"{_YELLOW}⚠ LLM returned text {self.text_retries}x without "
-                f"calling a tool — forcing step completion{_RESET}",
+                f"calling a tool — pausing the step{_RESET}",
                 project_id=ctx.project_id, agent_id=ctx.agent_id,
             )
             summary = content[:197] + "..." if len(content) > 200 else content
             return StepResult(
                 summary=summary or "Step completed (model failed to produce tool calls).",
                 status="continue",
+                interrupted=True,
             )
 
         # Dispatch thinking hook

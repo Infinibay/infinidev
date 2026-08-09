@@ -135,8 +135,17 @@ def test_unknown_tool_message_points_at_help():
     from infinidev.engine.tool_dispatch import _unknown_tool_message
 
     assert "describe_tool()" in _unknown_tool_message(
-        {"read_file": None}, "raed_file"
+        {"read_file": None, "describe_tool": None}, "raed_file"
     )
+
+
+def test_unknown_tool_does_not_recommend_unavailable_help():
+    from infinidev.engine.tool_dispatch import _unknown_tool_message
+
+    message = _unknown_tool_message({"read_file": None}, "raed_file")
+
+    assert "describe_tool()" not in message
+    assert "advertised for this turn" in message
 
 
 # ── an agent built before warmup must not stay blind for its whole life ──

@@ -59,6 +59,14 @@ class _EditLikeTool(InfinibayBaseTool):
         })
 
 
+class _DeclareTestLikeTool(InfinibayBaseTool):
+    name: str = "declare_test_command"
+    description: str = "Record a custom test command."
+
+    def _run(self, command_pattern: str) -> str:
+        return command_pattern
+
+
 class _ReadPathTool:
     name = "read_file"
 
@@ -112,7 +120,7 @@ def test_dispatch_maps_minimax_shell_aliases_to_execute_command() -> None:
     """Live M3 naming misses must execute instead of becoming false blockers."""
     tool = _ShellLikeTool()
 
-    for alias in ("shell_command", "shell_exec"):
+    for alias in ("shell_command", "shell_exec", "shell_run"):
         result = execute_tool_call(
             {tool.name: tool},
             alias,
@@ -120,6 +128,42 @@ def test_dispatch_maps_minimax_shell_aliases_to_execute_command() -> None:
         )
 
         assert json.loads(result) == {"command": "pwd", "cwd": "/tmp/project"}
+
+
+def test_dispatch_ignores_false_minimax_background_hint() -> None:
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        "run_command",
+        {"command": "ls -la", "is_background": False},
+    )
+
+    assert json.loads(result) == {"command": "ls -la", "cwd": None}
+
+
+def test_dispatch_refuses_true_background_hint() -> None:
+    tool = _ShellLikeTool()
+
+    result = json.loads(execute_tool_call(
+        {tool.name: tool},
+        "run_command",
+        {"command": "server", "is_background": True},
+    ))
+
+    assert "run_in_background" in result["error"]
+
+
+def test_dispatch_normalizes_minimax_declared_test_command() -> None:
+    tool = _DeclareTestLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        tool.name,
+        {"command": "pytest -q", "cwd": "/tmp/project"},
+    )
+
+    assert result == "pytest -q"
 
 
 def test_dispatch_normalizes_minimax_code_search_context() -> None:

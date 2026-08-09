@@ -162,14 +162,10 @@ class AddStepTool(InfinibayBaseTool):
                 "referenced by archived work, so nothing can shift past it. "
                 "Omit index and before (or pass 0) to append at the end instead."
             )
-        # Bootstrap runs start without an active Step and instruct the model to
-        # create the first one with this public tool. A newly added Step used
-        # to remain pending forever: execution continued plan-less, then the
-        # scope gate rejected completion because the Step had never become
-        # active. Activate only when there is no current Step; later additions
-        # remain pending in the intended order.
-        if plan.active_step is None:
-            added.status = "active"
+        # Bootstrap planning has no active Step. Keep new Steps pending until
+        # step_complete closes that planning turn; StepManager then activates
+        # the first one. Activating here would make the planning turn's
+        # status="continue" incorrectly mark an unexecuted Step done.
         result: dict = {
             "status": "added",
             "index": index,

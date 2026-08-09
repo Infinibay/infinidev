@@ -439,8 +439,16 @@ class ToolRunner:
                 # test parsing can append prose and make the JSON non-parseable;
                 # never alter the result the model receives.
                 self._propagate_command_output_handles(ctx, tc.id, result)
-                result = self.capture_test_output(ctx, tc.function.arguments, result)
-                self._refresh_opened_files_after_shell(ctx, tc.function.arguments)
+                if not tool_error:
+                    # A denied or malformed command did not run. Recording it as
+                    # the latest test command makes the deterministic reviewer
+                    # replay a known denial and reject otherwise-green work.
+                    result = self.capture_test_output(
+                        ctx, tc.function.arguments, result,
+                    )
+                    self._refresh_opened_files_after_shell(
+                        ctx, tc.function.arguments,
+                    )
 
             if not tool_error:
                 with best_effort("memory annotation failed for %s", tc.function.name):
@@ -701,8 +709,8 @@ class ToolRunner:
             f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls "
             f"for this step. Step scope: \"{active}\". "
             f"Call step_complete now. If the step is not finished, set "
-            f"status='continue' and add/modify next_steps to capture the "
-            f"remaining work."
+            f"status='continue' after using add_step or modify_step to capture "
+            f"the remaining work."
         )
 
     # ── test-runner special case ─────────────────────────────────────
