@@ -21,10 +21,15 @@ _TEST_CHANGE_RE = re.compile(
     r"\b(?:tests?|regressions?|coverage)\b"
 )
 
+_DISCOVER_ACTIONS = (
+    r"(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|"
+    r"trace|understand|analiz(?:a|ar)|explor(?:a|ar)|identific(?:a|ar)|"
+    r"inspeccion(?:a|ar)|investig(?:a|ar)|localiz(?:a|ar)|le(?:e|er|a)|"
+    r"busc(?:a|ar)|rastre(?:a|ar)|entiende|entender|estudi(?:a|ar))"
+)
+
 _STEP_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("discover", re.compile(
-        r"\b(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|trace|understand)\b"
-    )),
+    ("discover", re.compile(rf"\b{_DISCOVER_ACTIONS}\b")),
     ("change", re.compile(
         r"\b(?:add|adjust|change|configure|connect|correct|create|delete|edit|"
         r"extend|fix|implement|integrate|invalidate|limit|migrate|patch|refactor|"
@@ -47,9 +52,7 @@ _STEP_CONCEPT_STOPWORDS = {
     "rewrite", "the", "to", "under", "update", "wire", "with",
 }
 _LEADING_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("discover", re.compile(
-        r"^(?:analy[sz]e|explore|find|identify|inspect|investigate|locate|read|search|trace|understand)\b"
-    )),
+    ("discover", re.compile(rf"^{_DISCOVER_ACTIONS}\b")),
     ("verify", re.compile(
         r"^(?:check|run|test|validate|verification|verify)\b"
     )),

@@ -328,8 +328,9 @@ def _configure_progress_recovery(
 
     if unlimited_reads:
         read_policy = (
-            "Direct read_file remains available without a tool-call allowance; "
-            "context pressure is the only budget. Use it only on the exact edit target."
+            "Direct read_file has no call-count allowance. It is exposed only "
+            "when exact target source is not live or context pressure compacted "
+            "it; otherwise act on the source already present."
         )
     elif ctx.semantic_recovery_context_calls:
         read_policy = (

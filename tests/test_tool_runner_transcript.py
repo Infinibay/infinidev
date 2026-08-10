@@ -19,6 +19,7 @@ import pytest
 
 from infinidev.engine.loop.classified_calls import ClassifiedCalls
 from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.loop_guard import LoopGuard
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.tool_runner import ToolRunner
@@ -122,6 +123,20 @@ def assert_tool_block_contiguous(messages: list[dict]) -> None:
             f"by a {prev.get('role')!r} turn — the assistant→tool block is split. "
             f"Roles: {[m.get('role') for m in messages]}"
         )
+
+
+def test_tool_runner_defers_compaction_until_context_pressure(monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("tool-round compaction bypassed context pressure")
+
+    monkeypatch.setattr(ContextManager, "compact_for_small", fail_if_called)
+    monkeypatch.setattr(ContextManager, "compact_old_tool_results", fail_if_called)
+
+    messages = _run(ClassifiedCalls(regular=[
+        _call("c1", "read_file", '{"file_path":"module.py"}'),
+    ]))
+
+    assert_tool_block_contiguous(messages)
 
 
 # ── the four ways the block used to split ────────────────────────────
@@ -383,6 +398,48 @@ def test_exact_unchanged_read_is_replaced_by_compact_notice(tmp_path):
             "no information."
         ),
     }
+
+
+def test_minimax_recovery_redelivers_an_exact_cached_read_under_pressure(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("value = 1\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    ctx.suppress_discovery_this_step = True
+    ctx.unlimited_recovery_reads = True
+    ctx.max_context_tokens = 1_000_000
+    ctx.state.last_prompt_tokens = 700_000
+    runner = ToolRunner(_engine(nudge_at=99))
+    call = _call(
+        "read-1",
+        "read_file",
+        '{"file_path":"module.py","offset":1,"limit":20}',
+    )
+    runner._record_read_delivery(ctx, call)
+
+    cached, executable = runner._partition_repeated_reads(ctx, [call])
+
+    assert cached == []
+    assert executable == [call]
+
+
+def test_minimax_recovery_hides_a_reread_while_target_source_is_live(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("value = 1\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    ctx.suppress_discovery_this_step = True
+    ctx.unlimited_recovery_reads = True
+    runner = ToolRunner(_engine(nudge_at=99))
+    call = _call("read-1", "read_file", '{"file_path":"module.py"}')
+    runner._record_read_delivery(ctx, call)
+
+    suppressed, executable = runner._partition_suppressed_discovery(ctx, [call])
+
+    assert executable == []
+    payload = json.loads(suppressed[0][1])
+    assert payload["status"] == "discovery_suppressed"
+    assert "already present in the full live transcript" in payload["reason"]
 
 
 def test_read_delivery_cache_allows_uncovered_range_and_invalidates_on_edit(tmp_path):

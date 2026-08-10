@@ -68,6 +68,9 @@ _MINIMAX_M3_PROMPT_ADDENDUM = """\
   narrowed the tool surface.
 - Once an edit target is grounded, stop repository orientation. Read only the
   exact missing lines needed for the next code decision, then edit.
+- During recovery, read_file is exposed only when target source is not already
+  live or context pressure compacted it. If it is absent, act on the delivered
+  source; do not report a local reread as a blocker.
 - One relevant finding plus a current read of the target is sufficient evidence
   for a reversible implementation attempt. Do not seek independent corroboration
   first. Trust your best local hypothesis, fail fast with the narrowest relevant
@@ -103,7 +106,7 @@ _MINIMAX_M3_CHAT_PROMPT_ADDENDUM = """\
 # full schema catalogue on every continuation.  Keep the full reasoning prompt;
 # adapt only machine-controlled surface and timing.
 _MINIMAX_M3 = ModelExecutionPolicy(
-    name="minimax-m3-v11",
+    name="minimax-m3-v12",
     compact_tool_schemas=True,
     require_step_orientation=False,
     step_nudge_fraction=0.85,

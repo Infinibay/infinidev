@@ -354,11 +354,21 @@ class TestTaskAdapter:
             title="Integrated transport outcome",
             kind="verification",
         ))
+        spanish_continuation = _bootstrap_step(SimpleNamespace(
+            title="Lee infinigpu/CONTINUE.md y continua el trabajo",
+            kind="bugfix",
+        ))
 
         assert implementation.title == "Implement Transaction restore ordering"
         assert investigation.title == "Investigate Compare queue backends"
         assert test_change.title == "Add focused regression tests"
         assert verification.title == "Verify Integrated transport outcome"
+        assert spanish_continuation.title == (
+            "Lee infinigpu/CONTINUE.md y continua el trabajo"
+        )
+        assert "add or modify one concrete change Step" in (
+            spanish_continuation.expected_output
+        )
 
     def test_task_uses_one_rolling_plan_without_an_analyst(self, temp_db, patched_pipeline):
         engine = _LoopEngine("Implemented the fix.", "done")

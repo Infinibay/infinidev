@@ -352,9 +352,10 @@ class StepCompleteGate:
             feedback = (
                 "step_complete BLOCKED — needing more local source or context is "
                 "still not an external blocker when repeated. Do not use blocked "
-                "to request more discovery. Direct read_file remains available "
-                "without a call-count allowance; use it on the most plausible "
-                "target and make the smallest "
+                "to request more discovery. Direct read_file has no call-count "
+                "allowance and reappears only when target source is not live or "
+                "was compacted; otherwise use the delivered source and make the "
+                "smallest "
                 "reversible edit, or close a completed discovery/verification Step "
                 "with status=\"continue\" and transition to one concrete change "
                 "Step. The Step has no call budget."
@@ -363,9 +364,10 @@ class StepCompleteGate:
             feedback = (
                 "step_complete BLOCKED — the engine's discovery recovery is not an "
                 "external blocker. The Step remains active and has no call budget. "
-                "Direct read_file remains available on the already grounded source "
-                "target without a call-count allowance. Read the exact missing lines, "
-                "then make the smallest implementation change and run its focused "
+                "Direct read_file has no call-count allowance and is exposed only "
+                "when grounded source is not live or was compacted. Otherwise "
+                "make the smallest implementation change from delivered source "
+                "and run its focused "
                 "test. Repeat status=\"blocked\" only with concrete evidence "
                 "of a requirement outside this process."
             )

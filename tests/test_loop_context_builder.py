@@ -47,7 +47,7 @@ def test_zero_total_tool_budget_reaches_the_loop_as_unlimited(
     assert ctx.max_iterations is None
     assert ctx.max_total_calls is None
     assert ctx.max_per_action == 0
-    assert ctx.model_policy_name == "minimax-m3-v11"
+    assert ctx.model_policy_name == "minimax-m3-v12"
     assert ctx.renew_step_budget_on_progress is True
     assert ctx.semantic_stagnation_control is True
     assert ctx.phase_boundary_control is True

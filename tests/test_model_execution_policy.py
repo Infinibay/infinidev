@@ -6,7 +6,7 @@ from infinidev.engine.model_execution_policy import resolve_model_execution_poli
 def test_minimax_m3_uses_compact_operational_policy() -> None:
     policy = resolve_model_execution_policy("minimax", "minimax/MiniMax-M3")
 
-    assert policy.name == "minimax-m3-v11"
+    assert policy.name == "minimax-m3-v12"
     assert policy.compact_tool_schemas is True
     assert policy.require_step_orientation is False
     assert policy.renew_step_budget_on_progress is True
@@ -27,6 +27,7 @@ def test_minimax_m3_uses_compact_operational_policy() -> None:
     assert "Treat rolling Steps as phase contracts" in policy.prompt_addendum
     assert "Never create a container" in policy.prompt_addendum
     assert "Do not pivot to an" in policy.prompt_addendum
+    assert "target source is not already" in policy.prompt_addendum
     assert policy.step_nudge_threshold(
         max_tool_calls=12,
         configured_threshold=6,

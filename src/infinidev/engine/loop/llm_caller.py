@@ -539,14 +539,13 @@ class LLMCaller:
             from infinidev.engine.loop.behavior_rules import is_workspace_edit_tool
             from infinidev.engine.loop.semantic_stagnation import (
                 SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES,
+                recovery_source_refresh_available,
             )
 
             context_calls = int(
                 getattr(ctx, "semantic_recovery_context_calls", 0) or 0
             )
-            unlimited_reads = bool(
-                getattr(ctx, "unlimited_recovery_reads", False)
-            )
+            source_refresh_available = recovery_source_refresh_available(ctx)
             schemas = [
                 schema for schema in schemas
                 if (
@@ -555,7 +554,7 @@ class LLMCaller:
                     or name == "execute_command"
                     or is_workspace_edit_tool(name)
                     or (
-                        (unlimited_reads or context_calls > 0)
+                        (source_refresh_available or context_calls > 0)
                         and name in SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES
                     )
                 )

@@ -1346,7 +1346,8 @@ def test_two_no_progress_windows_latch_corrective_surface(tmp_path):
     assert ctx.semantic_recovery_context_calls == 0
     assert ctx.state.discovery_suppression_steps == 0
     assert "<progress-recovery" in messages[0]["content"]
-    assert "without a tool-call allowance" in messages[0]["content"]
+    assert "no call-count allowance" in messages[0]["content"]
+    assert "source already present" in messages[0]["content"]
 
     engine._finalize_inner_loop(
         ctx,
@@ -1362,7 +1363,8 @@ def test_two_no_progress_windows_latch_corrective_surface(tmp_path):
 
     assert ctx.suppress_discovery_this_step is True
     assert ctx.semantic_recovery_context_calls == 0
-    assert "without a tool-call allowance" in next_messages[0]["content"]
+    assert "no call-count allowance" in next_messages[0]["content"]
+    assert "source already present" in next_messages[0]["content"]
 
 
 def test_new_test_outcome_releases_latched_progress_recovery(tmp_path):

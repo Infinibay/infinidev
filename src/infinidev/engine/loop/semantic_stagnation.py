@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import Any, TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -27,6 +28,62 @@ SEMANTIC_STAGNATION_STRONG_WINDOW = 2
 # model with a remembered location but no source body to edit.
 SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES = frozenset({"read_file"})
 SEMANTIC_RECOVERY_CONTEXT_CALLS = 2
+
+
+def recovery_target_source_visible(ctx: Any) -> bool:
+    """Whether current-Step source for the active target is still live."""
+    state = getattr(ctx, "state", None)
+    delivered = getattr(state, "read_delivery_revisions", {}) or {}
+    if not delivered:
+        return False
+
+    delivered_paths: set[str] = set()
+    for key in delivered:
+        try:
+            path, _interval = json.loads(key)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if isinstance(path, str):
+            delivered_paths.add(path.casefold())
+    if not delivered_paths:
+        return False
+
+    active = getattr(getattr(state, "plan", None), "active_step", None)
+    active_text = " ".join(
+        str(part) for part in (
+            getattr(active, "title", ""),
+            getattr(active, "explanation", ""),
+        ) if part
+    )
+    from infinidev.engine.loop.loop_plan import _step_targets
+
+    targets = {
+        target.lstrip("./").casefold()
+        for target in _step_targets(active_text)
+        if "/" in target
+    }
+    if not targets:
+        return True
+    return any(
+        path == target or path.endswith(f"/{target}")
+        for path in delivered_paths
+        for target in targets
+    )
+
+
+def recovery_source_refresh_available(ctx: Any) -> bool:
+    """Expose a direct reread only when live context cannot supply the source."""
+    if not getattr(ctx, "unlimited_recovery_reads", False):
+        return int(getattr(ctx, "semantic_recovery_context_calls", 0) or 0) > 0
+
+    from infinidev.engine.loop.context_manager import ContextManager
+
+    state = getattr(ctx, "state", None)
+    used = int(getattr(state, "last_prompt_tokens", 0) or 0)
+    limit = int(getattr(ctx, "max_context_tokens", 0) or 0)
+    if ContextManager.under_context_pressure(used, limit):
+        return True
+    return not recovery_target_source_visible(ctx)
 
 
 @dataclass(frozen=True)
@@ -106,4 +163,6 @@ __all__ = [
     "SEMANTIC_STAGNATION_WINDOW",
     "SemanticStagnation",
     "detect_semantic_stagnation",
+    "recovery_source_refresh_available",
+    "recovery_target_source_visible",
 ]

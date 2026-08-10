@@ -287,6 +287,43 @@ class TestRollingHorizonToolRouting:
             "read_file", "edit_file", "execute_command", "step_complete",
         ]
 
+    def test_recovery_hides_read_when_target_source_is_live_until_pressure(self):
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        schemas = [
+            self._schema("read_file"),
+            self._schema("edit_file"),
+            self._schema("execute_command"),
+            self._schema("step_complete"),
+        ]
+        state = SimpleNamespace(
+            plan=None,
+            last_prompt_tokens=100_000,
+            read_delivery_revisions={
+                json.dumps(["/workspace/module.py", None]): "1:10",
+            },
+        )
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=state,
+            suppress_discovery_this_step=True,
+            semantic_recovery_context_calls=0,
+            unlimited_recovery_reads=True,
+            max_context_tokens=1_000_000,
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+        assert [schema["function"]["name"] for schema in available] == [
+            "edit_file", "execute_command", "step_complete",
+        ]
+
+        state.last_prompt_tokens = 700_000
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+        assert [schema["function"]["name"] for schema in available] == [
+            "read_file", "edit_file", "execute_command", "step_complete",
+        ]
+
 
 # ── _is_malformed_tool_call ──────────────────────────────────────────────────
 

@@ -66,16 +66,31 @@ def _bootstrap_step(task: Any) -> PlanStepSpec:
         if phase not in {"discover", "verify"}:
             action = "Verify" if task.kind == "verification" else "Investigate"
             title = f"{action} {title}"
-    elif phase not in {"change", "test_change"}:
+    elif phase not in {"change", "test_change", "discover", "verify"}:
         title = f"Implement {title}"
-    return PlanStepSpec(
-        title=title,
-        expected_output=(
+
+    phase = _step_phase(title)
+    if phase == "discover":
+        expected_output = (
+            "Establish the named fact or read the named reference, record the "
+            "exact next change target, add or modify one concrete change Step, "
+            "then complete this Step with status=continue. Do not turn initial "
+            "orientation into implementation under this Step."
+        )
+    elif phase == "verify":
+        expected_output = (
+            "Run the named check and record its observed result. If it exposes "
+            "work, add or modify one concrete change Step and complete this Step "
+            "with status=continue; verification evidence need not be green to "
+            "close a baseline Step."
+        )
+    else:
+        expected_output = (
             "Make concrete progress toward the Task and leave the relevant "
             "verification passing; refine the rolling plan if evidence "
             "reveals distinct remaining work."
-        ),
-    )
+        )
+    return PlanStepSpec(title=title, expected_output=expected_output)
 
 
 class TaskAdapter:

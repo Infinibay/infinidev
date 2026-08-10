@@ -30,7 +30,6 @@ from typing import Any, TYPE_CHECKING
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.engine_logging import extract_tool_error
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
-from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.llm_caller import ClassifiedCalls, LLMCallResult
 from infinidev.engine.loop.step_manager import _get_settings
@@ -127,10 +126,12 @@ class ToolRunner:
         )
         self._answer_budget_limited(ctx, messages, skipped, tool_results_text)
 
-        if ctx.is_small:
-            ContextManager.compact_for_small(messages)
-        else:
-            ContextManager.compact_old_tool_results(messages)
+        # Keep the transcript faithful until the model's actual context window
+        # reaches its pressure threshold. The engine evaluates that threshold
+        # before every LLM call and compacts at 70% used or under 100k free.
+        # Compacting here on every tool round kept the live prompt artificially
+        # small, so an unlimited Step could read forever without ever reaching
+        # its only intended resource boundary.
 
         self.append_pseudo_results(ctx, classified, messages, tool_results_text)
         # Only now is the assistant→tool block closed. Everything the model
@@ -464,8 +465,9 @@ class ToolRunner:
         revision = f"{stat.st_mtime_ns}:{stat.st_size}"
         return key, revision, path
 
-    @staticmethod
+    @classmethod
     def _partition_suppressed_discovery(
+        cls,
         ctx: ExecutionContext,
         batch: list[Any],
     ) -> tuple[list[tuple[Any, str]], list[Any]]:
@@ -477,6 +479,7 @@ class ToolRunner:
         from infinidev.engine.loop.llm_caller import _COMPLETION_TOOL_NAMES
         from infinidev.engine.loop.semantic_stagnation import (
             SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES,
+            recovery_source_refresh_available,
         )
 
         synthetic: list[tuple[Any, str]] = []
@@ -525,9 +528,25 @@ class ToolRunner:
             unlimited_reads = bool(
                 getattr(ctx, "unlimited_recovery_reads", False)
             )
-            if context_read and (unlimited_reads or allowance > 0):
-                if not unlimited_reads:
-                    ctx.semantic_recovery_context_calls = allowance - 1
+            if context_read and unlimited_reads:
+                if recovery_source_refresh_available(ctx):
+                    executable.append(tc)
+                else:
+                    synthetic.append((tc, json.dumps({
+                        "status": _DISCOVERY_SUPPRESSED_STATUS,
+                        "reason": (
+                            "the active target source is already present in the "
+                            "full live transcript; read_file reopens only after "
+                            "context-pressure compaction"
+                        ),
+                        "available_actions": (
+                            "make the smallest reversible edit from the delivered "
+                            "source, run its focused test, or complete the Step"
+                        ),
+                    })))
+                continue
+            if context_read and allowance > 0:
+                ctx.semantic_recovery_context_calls = allowance - 1
                 executable.append(tc)
                 continue
             suppress = not allow_action
@@ -541,9 +560,10 @@ class ToolRunner:
                     "successful edit or new test outcome"
                 ),
                 "available_actions": (
-                    "edit the target named by the active Step, run the test "
-                    "whose target covers that edited file, or complete the "
-                    "current Step. Plan mutation is frozen during recovery"
+                    "read_file on the exact edit target, edit that target, run "
+                    "the focused test after an edit, or complete the current "
+                    "Step. Shell inspection, broad search, and plan mutation "
+                    "are frozen during recovery"
                 ),
             })))
         return synthetic, executable
@@ -881,6 +901,20 @@ class ToolRunner:
         executable: list[Any] = []
         delivered = ctx.state.read_delivery_revisions
         for tc in batch:
+            if (
+                getattr(ctx, "suppress_discovery_this_step", False)
+                and getattr(ctx, "unlimited_recovery_reads", False)
+                and tc.function.name == "read_file"
+            ):
+                from infinidev.engine.loop.semantic_stagnation import (
+                    recovery_source_refresh_available,
+                )
+
+                if recovery_source_refresh_available(ctx):
+                    # Context pressure may have compacted the original source;
+                    # restore it even when the filesystem revision is unchanged.
+                    executable.append(tc)
+                    continue
             identities = cls._read_delivery_identities(ctx, tc)
             if not identities:
                 executable.append(tc)
