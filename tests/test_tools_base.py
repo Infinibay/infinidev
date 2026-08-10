@@ -13,6 +13,7 @@ from infinidev.tools.base.context import (
     clear_agent_context,
     get_context_for_agent,
     set_context,
+    set_repository_path,
 )
 
 
@@ -257,7 +258,7 @@ class TestContextResolution:
 
 
 class TestGitCwd:
-    """_git_cwd property returns workspace or None."""
+    """_git_cwd prefers a targeted nested repository."""
 
     def test_returns_workspace_when_exists(self, tool_context, workspace_dir):
         """Returns workspace_path when directory exists."""
@@ -270,6 +271,19 @@ class TestGitCwd:
         tool = _DummyTool()
         with patch.object(type(tool), "workspace_path", new_callable=lambda: property(lambda self: None)):
             assert tool._git_cwd is None
+
+    def test_prefers_nested_repository_without_narrowing_workspace(
+        self, tool_context, workspace_dir
+    ):
+        repository = workspace_dir / "infinigpu"
+        repository.mkdir()
+        set_repository_path("test-agent", str(repository))
+        tool = _DummyTool()
+        bind_tools_to_agent([tool], "test-agent")
+
+        assert tool.workspace_path == str(workspace_dir)
+        assert tool.repository_path == str(repository)
+        assert tool._git_cwd == str(repository)
 
 
 # ── TestBaseToolStandalone (crewai removed) ──────────────────────────────────

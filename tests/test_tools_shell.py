@@ -9,6 +9,7 @@ import pytest
 
 from infinidev.config.settings import settings
 from infinidev.engine.test_environment import prepare_test_environment
+from infinidev.tools.base.context import set_repository_path
 from infinidev.tools.shell.execute_command import ExecuteCommandTool
 from infinidev.tools.shell.execute_command_input import ExecuteCommandInput
 from infinidev.tools.shell.execute_command_tool import (
@@ -375,6 +376,18 @@ class TestExecuteCommand:
         data = json.loads(result)
         ws = tool.workspace_path
         assert ws in data["stdout"]
+
+    def test_cwd_defaults_to_target_repository(
+        self, bound_tool, auto_approve_permissions, workspace_dir
+    ):
+        repository = workspace_dir / "infinigpu"
+        repository.mkdir()
+        set_repository_path("test-agent", str(repository))
+        tool = bound_tool(ExecuteCommandTool)
+
+        data = json.loads(tool._run(command="pwd"))
+
+        assert data["stdout"].strip() == str(repository)
 
 
 class TestManualBackgroundingDetection:

@@ -113,6 +113,19 @@ def build_chat_agent_system_prompt() -> str:
     # much as to the developer.
     project = render_project_instructions(None)
     rendered = f"{prompt}\n\n{project}" if project else prompt
+    from infinidev.config.llm import get_litellm_params_for_behavior
+    from infinidev.config.settings import settings
+    from infinidev.engine.model_execution_policy import (
+        resolve_model_execution_policy,
+    )
+
+    route = get_litellm_params_for_behavior()
+    policy = resolve_model_execution_policy(
+        settings.LLM_PROVIDER,
+        str(route.get("model", settings.LLM_MODEL)),
+    )
+    if policy.chat_prompt_addendum:
+        rendered = f"{rendered}\n\n{policy.chat_prompt_addendum}"
     from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
     return apply_calibrated_guidance(rendered, "chat_agent")

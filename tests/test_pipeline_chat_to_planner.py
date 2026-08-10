@@ -30,6 +30,11 @@ from infinidev.engine.analysis.staged_planning import (
     StageSpec,
     StageTaskSpec,
 )
+from infinidev.tools.base.context import (
+    clear_agent_context,
+    get_context_for_agent,
+    set_context,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -207,12 +212,98 @@ class TestChatRespondShortCircuits:
         )
 
 
+    def test_continuation_attaches_nested_repository_before_chat(
+        self, monkeypatch, tmp_path
+    ):
+        repository = tmp_path / "infinigpu"
+        (repository / ".git").mkdir(parents=True)
+        (repository / "CONTINUE.md").write_text("Continue the implementation.\n")
+        captured: dict[str, Any] = {}
+
+        def _chat_respond(user_input, **kwargs):
+            captured["input"] = user_input
+            captured["workspace_path"] = kwargs["workspace_path"]
+            return ChatAgentResult(kind="respond", reply="captured")
+
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            _chat_respond,
+        )
+        set_context(
+            project_id=1,
+            agent_id="test-agent",
+            workspace_path=str(tmp_path),
+        )
+        hooks = _RecordingHooks()
+        engine = _FakeEngine()
+        try:
+            run_task(
+                agent=_FakeAgent(),
+                user_input="Lee infinigpu/CONTINUE.md y continua el trabajo",
+                session_id="nested-repo-session",
+                engine=engine,
+                reviewer=_FakeReviewer(),
+                hooks=hooks,
+            )
+
+            context = get_context_for_agent("test-agent")
+            assert context.workspace_path == str(tmp_path)
+            assert context.repository_path == str(repository)
+            assert engine._repository_path == str(repository)
+            assert captured["workspace_path"] == str(tmp_path)
+            assert f"Target Git repository: {repository}" in captured["input"]
+            assert ("info", "Target repository: infinigpu") in hooks.statuses
+        finally:
+            clear_agent_context("test-agent")
+
+    def test_continuation_resolves_nested_repository_from_cwd_without_context(
+        self, monkeypatch, tmp_path
+    ):
+        repository = tmp_path / "infinigpu"
+        (repository / ".git").mkdir(parents=True)
+        (repository / "CONTINUE.md").write_text("Continue the implementation.\n")
+        captured: dict[str, Any] = {}
+
+        def _chat_respond(user_input, **kwargs):
+            captured["input"] = user_input
+            captured["workspace_path"] = kwargs["workspace_path"]
+            return ChatAgentResult(kind="respond", reply="captured")
+
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            _chat_respond,
+        )
+        monkeypatch.chdir(tmp_path)
+        clear_agent_context("test-agent")
+        hooks = _RecordingHooks()
+        engine = _FakeEngine()
+        try:
+            run_task(
+                agent=_FakeAgent(),
+                user_input="Lee infinigpu/CONTINUE.md y continua el trabajo",
+                session_id="nested-repo-cwd-session",
+                engine=engine,
+                reviewer=_FakeReviewer(),
+                hooks=hooks,
+            )
+
+            assert engine._repository_path == str(repository)
+            assert captured["workspace_path"] == str(tmp_path)
+            assert f"Target Git repository: {repository}" in captured["input"]
+            assert ("info", "Target repository: infinigpu") in hooks.statuses
+        finally:
+            clear_agent_context("test-agent")
+
+
 class TestEscalateRunsFullPipeline:
     def test_escalation_feeds_plan_to_loop_engine(self, monkeypatch):
         """Chat agent escalates → planner produces a Plan → LoopEngine
         receives it via initial_plan=."""
         escalation = EscalationPacket(
-            user_request="fix the JWT bug",
+            user_request=(
+                "arreglá el JWT\n\n"
+                "<retrieval-context>weigh several alternatives</retrieval-context>"
+            ),
             understanding="Fix JWT validation in auth.py",
             opened_files=["src/auth.py"],
             user_visible_preview="Voy a arreglar el JWT.",
@@ -231,7 +322,8 @@ class TestEscalateRunsFullPipeline:
 
         def _planner(*args, **kwargs):
             assert args and isinstance(args[0], EscalationPacket)
-            assert args[0] is escalation
+            assert args[0] is not escalation
+            assert args[0].user_request == "arreglá el JWT"
             return expected_plan
 
         monkeypatch.setattr(
@@ -264,7 +356,8 @@ class TestEscalateRunsFullPipeline:
         assert "verify remaining" in engine.captured_initial_plan.steps[2].title
         assert expected_plan.overview in engine.captured_initial_plan.overview
         # task_prompt first element is the user's original request.
-        assert escalation.user_request in engine.captured_task_prompt[0]
+        assert "arreglá el JWT" in engine.captured_task_prompt[0]
+        assert "weigh several alternatives" not in engine.captured_task_prompt[0]
         # The user saw the preview AND the plan overview, in order.
         previews = [
             (speaker, msg)

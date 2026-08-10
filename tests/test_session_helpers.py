@@ -211,6 +211,39 @@ class TestContextManagerCompact:
 
         assert "chars compacted after prior delivery" in msgs[3]["content"]
         assert msgs[5]["content"] == "new" + "y" * 4_000
+    def test_pressure_starts_at_seventy_percent_or_below_100k_free(self):
+        from infinidev.engine.loop.context_manager import ContextManager
+
+        assert ContextManager.under_context_pressure(699_999, 1_000_000) is False
+        assert ContextManager.under_context_pressure(700_000, 1_000_000) is True
+        assert ContextManager.under_context_pressure(150_000, 250_000) is False
+        assert ContextManager.under_context_pressure(150_000, 249_999) is True
+        assert ContextManager.under_context_pressure(0, 1_000_000) is False
+        assert ContextManager.under_context_pressure(700_000, 0) is False
+
+    def test_pressure_compacts_consumed_history_but_keeps_current_result(self):
+        from infinidev.engine.loop.context_manager import ContextManager
+
+        old_thinking = "old reasoning\n" + "r" * 1_000
+        current_result = "CURRENT" + "y" * 4_000
+        msgs = [
+            {"role": "system", "content": "system contract"},
+            {"role": "user", "content": "active task"},
+            {"role": "assistant", "content": old_thinking, "tool_calls": [{"id": "old"}]},
+            {"role": "tool", "content": "OLD" + "x" * 4_000, "tool_call_id": "old"},
+            {"role": "assistant", "content": "new reasoning\n" + "n" * 1_000,
+             "tool_calls": [{"id": "new"}]},
+            {"role": "tool", "content": current_result, "tool_call_id": "new"},
+        ]
+
+        ContextManager.compact_for_pressure(msgs)
+
+        assert msgs[0]["content"] == "system contract"
+        assert msgs[1]["content"] == "active task"
+        assert msgs[2]["content"].startswith("[thinking truncated]")
+        assert "compacted after prior delivery" in msgs[3]["content"]
+        assert msgs[5]["content"] == current_result
+
 
 
 def test_opened_files_prompt_prefers_the_active_step_with_a_finite_budget():

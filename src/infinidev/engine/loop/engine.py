@@ -193,7 +193,7 @@ def _apply_exploration_policy(
 
 
 _EDIT_REQUIRING_TASK_KINDS = frozenset({
-    "feature", "bugfix", "refactor", "performance", "docs", "test",
+    "feature", "bugfix", "refactor", "performance", "docs", "test", "chore",
     "config", "migration", "security",
 })
 
@@ -270,7 +270,7 @@ def _renew_step_tool_window(
     ],
     renewals_used: int,
 ) -> tuple[
-    int,
+    int | None,
     tuple[
         tuple[tuple[str, str], ...],
         tuple[tuple[str, tuple[str, ...]], ...],
@@ -284,6 +284,8 @@ def _renew_step_tool_window(
     Task-level budget and makes no model call.
     """
     current = _step_progress_marker(ctx, tracker)
+    if ctx.step_tool_limit is None:
+        return None, current, renewals_used
     if (
         not getattr(ctx, "renew_step_budget_on_progress", False)
         or current == previous
@@ -292,6 +294,103 @@ def _renew_step_tool_window(
         return ctx.step_tool_limit, current, renewals_used
     ctx.step_tool_limit += ctx.max_per_action
     return ctx.step_tool_limit, current, renewals_used + 1
+
+
+def _configure_progress_recovery(
+    ctx: ExecutionContext,
+    messages: list[dict[str, Any]],
+) -> None:
+    """Latch an implementation Step into action-only mode until it advances."""
+    from infinidev.engine.loop.semantic_stagnation import (
+        SEMANTIC_RECOVERY_CONTEXT_CALLS,
+    )
+
+    active = ctx.state.plan.active_step
+    step_index = active.index if active is not None else -1
+    no_progress_windows = ctx.state.no_progress_windows_by_step.get(step_index, 0)
+    transient = bool(getattr(ctx.state, "discovery_suppression_steps", 0))
+    latched = no_progress_windows >= 2
+    ctx.suppress_discovery_this_step = transient or latched
+    if transient:
+        ctx.state.discovery_suppression_steps = max(
+            0, ctx.state.discovery_suppression_steps - 1
+        )
+    ctx.semantic_recovery_context_calls = (
+        SEMANTIC_RECOVERY_CONTEXT_CALLS
+        if ctx.suppress_discovery_this_step and no_progress_windows <= 2
+        else 0
+    )
+    if not ctx.suppress_discovery_this_step:
+        return
+
+    if ctx.semantic_recovery_context_calls:
+        read_policy = (
+            f"You may use at most {ctx.semantic_recovery_context_calls} direct "
+            "read_file calls for the exact edit target."
+        )
+    else:
+        read_policy = "The recovery read allowance is exhausted."
+    notice = (
+        '<progress-recovery authority="SYSTEM">\n'
+        "Repeated implementation windows produced no net workspace change or "
+        "new test outcome. Broad discovery is now mechanically unavailable for "
+        "this Step and remains unavailable until concrete progress occurs. "
+        f"{read_policy} Choose the most plausible reversible edit now and let its "
+        "focused test decide; recovery is not a request for more certainty. Low "
+        "confidence or several local candidates is not an external blocker. Do "
+        "not restart repository orientation.\n"
+        "</progress-recovery>"
+    )
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            message["content"] = f"{message.get('content', '')}\n\n{notice}"
+            break
+
+
+def _apply_context_pressure(
+    ctx: ExecutionContext,
+    messages: list[dict[str, Any]],
+    *,
+    announced: bool,
+) -> bool:
+    """Compact the live transcript while preserving the active Step."""
+    used = int(getattr(ctx.state, "last_prompt_tokens", 0) or 0)
+    limit = int(getattr(ctx, "max_context_tokens", 0) or 0)
+    if not ContextManager.under_context_pressure(used, limit):
+        return False
+
+    ContextManager.compact_for_pressure(messages)
+    if announced:
+        return True
+
+    remaining = max(0, limit - used)
+    percent = min(100.0, (used / limit) * 100)
+    _emit_loop_event(
+        "loop_context_compaction",
+        ctx.project_id,
+        ctx.agent_id,
+        {
+            "prompt_tokens": used,
+            "context_limit": limit,
+            "remaining_tokens": remaining,
+            "percent_used": percent,
+        },
+    )
+    notice = (
+        '<context-compaction authority="SYSTEM">\n'
+        f"Automatic compaction activated at {percent:.1f}% context usage "
+        f"with {remaining} tokens free. Older tool results already consumed "
+        "by the model were shortened; the current Step remains active and has "
+        "no tool-call budget. Continue from notes, opened files, and recent "
+        "evidence. Use recall_context only if exact older output is needed.\n"
+        "</context-compaction>"
+    )
+    for message in reversed(messages):
+        content = message.get("content")
+        if message.get("role") == "user" and isinstance(content, str):
+            message["content"] = f"{content}\n\n{notice}"
+            break
+    return True
 
 
 def _should_advance_plan(step_result: StepResult) -> bool:
@@ -832,7 +931,8 @@ class LoopEngine(AgentEngine):
         # turn) and the host owns end (per process); what this loop still
         # feeds Ken is the reactive channel, one event per tool call, from
         # ``ToolRunner._report_to_ken``.
-        for iteration in range(ctx.start_iteration, ctx.max_iterations):
+        iteration = ctx.start_iteration
+        while ctx.max_iterations is None or iteration < ctx.max_iterations:
             if self._cancel_event.is_set():
                 return self._finish_cancelled(ctx, step_mgr, iteration - 1)
 
@@ -928,9 +1028,13 @@ class LoopEngine(AgentEngine):
                 consecutive_all_done += 1
             else:
                 consecutive_all_done = 0
+            iteration += 1
 
-        # Outer loop exhausted
-        return step_mgr.finish(ctx, "exhausted", ctx.max_iterations - 1)
+        # Only explicitly bounded auxiliary loops can reach this point.
+        assert ctx.max_iterations is not None
+        return step_mgr.finish(
+            ctx, "exhausted", max(ctx.start_iteration - 1, ctx.max_iterations - 1)
+        )
 
     # ── Extracted phases of execute() ──────────────────────────────────
 
@@ -1312,10 +1416,12 @@ class LoopEngine(AgentEngine):
         guard.reset()
         tracker = BehaviorTracker(set(ctx.state.opened_files.keys()))
         tracker.task_has_edits = ctx.state.task_has_edits
+        file_tracker = getattr(ctx, "file_tracker", None)
+        if file_tracker is not None and hasattr(file_tracker, "change_fingerprint"):
+            guard.seed_workspace_fingerprint(file_tracker.change_fingerprint())
         active_step = ctx.state.plan.active_step
         if active_step is not None:
             entry_fingerprints = ctx.state.step_entry_change_fingerprints
-            file_tracker = getattr(ctx, "file_tracker", None)
             if file_tracker is not None and hasattr(
                 file_tracker, "change_fingerprint"
             ):
@@ -1327,22 +1433,8 @@ class LoopEngine(AgentEngine):
         # the current Step transcript. After summarization, large-file slices
         # may no longer be model-visible, so one later read must be deliverable.
         ctx.state.read_delivery_revisions.clear()
-        ctx.suppress_discovery_this_step = bool(
-            getattr(ctx.state, "discovery_suppression_steps", 0)
-        )
-        from infinidev.engine.loop.semantic_stagnation import (
-            SEMANTIC_RECOVERY_CONTEXT_CALLS,
-        )
-        ctx.semantic_recovery_context_calls = (
-            SEMANTIC_RECOVERY_CONTEXT_CALLS
-            if ctx.suppress_discovery_this_step
-            else 0
-        )
-        if ctx.suppress_discovery_this_step:
-            ctx.state.discovery_suppression_steps = max(
-                0, ctx.state.discovery_suppression_steps - 1
-            )
-        ctx.step_tool_limit = ctx.max_per_action
+        _configure_progress_recovery(ctx, messages)
+        ctx.step_tool_limit = ctx.max_per_action or None
         progress_marker = _step_progress_marker(ctx, tracker)
         progress_renewals = 0
 
@@ -1352,18 +1444,27 @@ class LoopEngine(AgentEngine):
         import time as _time
         from infinidev.engine.static_analysis_timer import add_elapsed as _sa_add
         _last_llm_call_end: float | None = None
+        context_pressure_announced = False
 
         while (
             _resource_exhaustion_reason(ctx) is None
             and (
-                action_tool_calls < ctx.step_tool_limit
+                ctx.step_tool_limit is None
+                or action_tool_calls < ctx.step_tool_limit
                 or (
                     saw_tool_calls
                     and completion_turns_used < _MAX_COMPLETION_ONLY_TURNS
                 )
             )
         ):
-            completion_only = action_tool_calls >= ctx.step_tool_limit
+            completion_only = (
+                ctx.step_tool_limit is not None
+                and action_tool_calls >= ctx.step_tool_limit
+            )
+            context_pressure_announced = _apply_context_pressure(
+                ctx, messages, announced=context_pressure_announced
+            )
+
             # Plan pseudo-tools mutate the state in this same inner loop.
             # Recompute the mode for every model turn so an ``add_step`` is
             # followed by execution tools, rather than leaving the model in
@@ -1395,15 +1496,21 @@ class LoopEngine(AgentEngine):
             self._inject_mid_step_user_messages(ctx, messages)
 
             # Signal UI that LLM call is starting
+            progress_step = ctx.state.plan.active_step
+            step_limit = getattr(ctx, "step_tool_limit", ctx.max_per_action)
             _emit_loop_event("loop_llm_call_start", ctx.project_id, ctx.agent_id, {
                 "iteration": iteration + 1,
                 "phase": (
                     "closing" if completion_only
                     else "planning" if is_planning
+                    else "recovery" if ctx.suppress_discovery_this_step
                     else "deciding"
                 ),
+                "step_title": progress_step.title if progress_step is not None else "",
                 "tool_calls_step": action_tool_calls,
+                "tool_calls_step_limit": step_limit,
                 "tool_calls_total": ctx.state.total_tool_calls,
+                "tool_calls_total_limit": ctx.max_total_calls,
             })
 
             result = llm_caller.call(
@@ -1509,6 +1616,7 @@ class LoopEngine(AgentEngine):
                         break
                     guard.check_error_circuit_breaker(ctx, messages)
                     guard.check_note_discipline(ctx, messages)
+                    guard.check_progress_drift(ctx, messages)
 
                     # A2 — Mid-step guidance: run detectors right after
                     # each successful tool execution so patterns fire on
@@ -1644,11 +1752,10 @@ class LoopEngine(AgentEngine):
                 )
                 ctx.state.no_progress_windows_by_step[active.index] = windows
                 ctx.state.last_test_outcomes_by_step[active.index] = test_marker
-                if windows >= 2:
+                if windows == 2:
                     ctx.state.discovery_suppression_steps = max(
                         ctx.state.discovery_suppression_steps, 1
                     )
-                    ctx.state.no_progress_windows_by_step[active.index] = 0
                     _emit_log(
                         "warning",
                         "Two complete implementation windows produced no net "

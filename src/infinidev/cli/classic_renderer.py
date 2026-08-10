@@ -212,10 +212,25 @@ class ClassicRenderer:
     def _on_loop_tool_start(self, agent_id: str, data: dict) -> None:
         name = data.get("tool_name", "?")
         detail = _truncate(data.get("tool_detail"), 100)
+        call_num = int(data.get("call_num", 0) or 0)
+        total_calls = int(data.get("total_calls", 0) or 0)
+        step_limit = int(data.get("step_limit", 0) or 0)
+        total_limit = int(data.get("total_limit", 0) or 0)
         self.status.activity = f"running {name}"
         line = f"  {_dim('running')} {_bold(name)}"
         if detail:
             line += f" {_dim(detail)}"
+        budgets = []
+        if call_num:
+            budgets.append(
+                f"step {call_num}/{step_limit}" if step_limit else f"step {call_num}"
+            )
+        if total_calls:
+            budgets.append(
+                f"total {total_calls}/{total_limit}" if total_limit else f"total {total_calls}"
+            )
+        if budgets:
+            line += " " + _dim("[" + " · ".join(budgets) + "]")
         self._println(line)
 
     def _on_loop_tool_call(self, agent_id: str, data: dict) -> None:
@@ -242,11 +257,50 @@ class ClassicRenderer:
         if reasoning:
             self._println(f"{_dim('💭 ' + _truncate(reasoning, 320))}")
 
+    def _on_loop_context_compaction(self, agent_id: str, data: dict) -> None:
+        used = int(data.get("prompt_tokens", 0) or 0)
+        limit = int(data.get("context_limit", 0) or 0)
+        remaining = int(data.get("remaining_tokens", 0) or 0)
+        percent = float(data.get("percent_used", 0) or 0)
+        self.status.activity = "compacting context"
+        self.status.last_prompt_tokens = used
+        self._println(
+            _dim(
+                f"  compacting context [{used:,}/{limit:,} · "
+                f"{percent:.1f}% · {remaining:,} free]"
+            )
+        )
+
+
     def _on_loop_llm_call_start(self, agent_id: str, data: dict) -> None:
         phase = data.get("phase", "deciding")
-        self.status.activity = (
-            "model planning" if phase == "planning" else "model deciding"
+        activity = (
+            "model planning" if phase == "planning"
+            else "model closing step" if phase == "closing"
+            else "model recovery" if phase == "recovery"
+            else "model deciding"
         )
+        self.status.activity = activity
+        step_title = _truncate(data.get("step_title"), 100)
+        step_calls = int(data.get("tool_calls_step", 0) or 0)
+        step_limit = int(data.get("tool_calls_step_limit", 0) or 0)
+        total_calls = int(data.get("tool_calls_total", 0) or 0)
+        total_limit = int(data.get("tool_calls_total_limit", 0) or 0)
+        line = f"  {_dim(activity)}"
+        if step_title:
+            line += f" {_bold(step_title)}"
+        budgets = []
+        if step_limit:
+            budgets.append(f"step tools {step_calls}/{step_limit}")
+        elif step_calls:
+            budgets.append(f"step tools {step_calls}")
+        if total_limit:
+            budgets.append(f"total {total_calls}/{total_limit}")
+        elif total_calls:
+            budgets.append(f"total {total_calls}")
+        if budgets:
+            line += " " + _dim("[" + " · ".join(budgets) + "]")
+        self._println(line)
 
     def _on_loop_thinking_chunk(self, agent_id: str, data: dict) -> None:
         text = data.get("text") or ""

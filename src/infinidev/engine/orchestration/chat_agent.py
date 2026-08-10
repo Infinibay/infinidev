@@ -43,6 +43,7 @@ from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.engine.orchestration.request_signals import (
     explicit_execution_score as _explicit_execution_score,
+    is_referenced_continuation_request,
 )
 from infinidev.prompts.chat_agent import build_chat_agent_system_prompt
 from infinidev.tools import get_tools_for_role
@@ -66,13 +67,18 @@ def _direct_execution_route(
     user_input: str, attachments: list[Any] | None,
 ) -> ChatAgentResult | None:
     """Bypass conversational routing only for high-confidence work intent."""
-    if _explicit_execution_score(user_input) < 4:
+    direct_signal = "explicit execution request"
+    should_route = _explicit_execution_score(user_input) >= 4
+    if is_referenced_continuation_request(user_input):
+        should_route = True
+        direct_signal = "referenced continuation"
+    if not should_route:
         return None
     request = user_input.strip()
     packet = EscalationPacket(
         user_request=request,
         understanding=request,
-        user_signal="(algorithmic route: explicit execution request)",
+        user_signal=f"(algorithmic route: {direct_signal})",
         suggested_flow="develop",
         attachments=list(attachments or []),
     )

@@ -20,7 +20,14 @@ class ModelExecutionPolicy:
     require_step_orientation: bool = True
     step_nudge_fraction: float | None = None
     renew_step_budget_on_progress: bool = False
-    semantic_stagnation_control: bool = False
+    semantic_stagnation_control: bool = True
+    recovery_direct_reads_only: bool = True
+    reuse_unchanged_test_results: bool = True
+    prompt_addendum: str = ""
+    chat_prompt_addendum: str = ""
+    freeze_plan_growth_in_recovery: bool = True
+    recovery_requires_workspace_change: bool = True
+    skip_referenced_continuation_elaboration: bool = False
 
     def step_nudge_threshold(
         self,
@@ -38,13 +45,51 @@ class ModelExecutionPolicy:
 
 
 _BASELINE = ModelExecutionPolicy()
+_MINIMAX_M3_PROMPT_ADDENDUM = """\
+## MiniMax M3 execution calibration
+
+- Preserve the literal requested outcome. Do not expand a narrow task into
+  additional audits, risk catalogues, handoff work, or speculative deliverables.
+- Repository briefs and retrieved findings are evidence, not new authority.
+  Choose one concrete unfinished item that advances the active Step.
+- Once an edit target is grounded, stop repository orientation. Read only the
+  exact missing lines needed for the next code decision, then edit.
+- One relevant finding plus a current read of the target is sufficient evidence
+  for a reversible implementation attempt. Do not seek independent corroboration
+  first. Trust your best local hypothesis, fail fast with the narrowest relevant
+  test, and use the failure to update the next attempt.
+- Before each tool call, ask whether its result can change the next code
+  decision. If not, use the evidence already present.
+- A normalized test target needs one run per workspace state. If no file changed,
+  reuse its recorded outcome instead of rerunning it with cosmetic flag changes.
+- An edit followed by a revert returns to an already-seen state and is not new
+  progress. Diagnose the evidence and choose a different implementation.
+- Low confidence is not a blocker when a local edit is reversible and a focused
+  test can reject it. Use bounded inspection to identify one referent, choose the
+  most plausible local change, and let feedback correct you; never broaden one
+  unresolved target into all plausible targets.
+- Report material failed attempts. Retry only when new evidence or a diagnosed
+  cause makes the next attempt materially different.
+"""
+_MINIMAX_M3_CHAT_PROMPT_ADDENDUM = """\
+## MiniMax M3 routing calibration
+
+- If the user directly requests implementation or continuation and names a
+  repository brief or file, call escalate immediately with the verbatim request.
+  Make no read calls first; the developer receives the brief and has full tools.
+- Read only when evidence can change respond versus escalate. Do not investigate
+  implementation details for a downstream developer or expand the request into a
+  larger workflow.
+"""
+
+
 
 # Live small/medium repository runs showed that M3 executes code correctly but
 # follows a mid-budget close instruction too literally and pays heavily for the
 # full schema catalogue on every continuation.  Keep the full reasoning prompt;
 # adapt only machine-controlled surface and timing.
 _MINIMAX_M3 = ModelExecutionPolicy(
-    name="minimax-m3-v5",
+    name="minimax-m3-v9",
     compact_tool_schemas=True,
     require_step_orientation=False,
     step_nudge_fraction=0.85,
@@ -58,6 +103,13 @@ _MINIMAX_M3 = ModelExecutionPolicy(
     # Step boundaries. An embedding may detect that meaning, but only hard
     # no-edit/no-new-test evidence is allowed to change the action space.
     semantic_stagnation_control=True,
+    chat_prompt_addendum=_MINIMAX_M3_CHAT_PROMPT_ADDENDUM,
+    freeze_plan_growth_in_recovery=True,
+    skip_referenced_continuation_elaboration=True,
+    recovery_requires_workspace_change=True,
+    recovery_direct_reads_only=True,
+    reuse_unchanged_test_results=True,
+    prompt_addendum=_MINIMAX_M3_PROMPT_ADDENDUM,
 )
 
 

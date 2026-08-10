@@ -388,9 +388,13 @@ class TestTaskAdapter:
         )
         assert engine.execute_kwargs["allow_explore"] is False
         assert result.metrics["max_tool_calls"] is None
+        assert result.metrics["max_iterations"] is None
+        assert result.metrics["max_tool_calls_per_step"] is None
         status_messages = "\n".join(message for _level, message in hooks.statuses)
         assert "unlimited total tool calls" in status_messages
         assert "160 tool calls" not in status_messages
+        assert "unlimited Steps" in status_messages
+        assert "no tool-call limit per Step" in status_messages
 
     def test_task_reports_an_explicit_opt_in_total_budget(self, temp_db, patched_pipeline, monkeypatch):
         monkeypatch.setattr(settings, "TASK_MAX_TOOL_CALLS", 240)
@@ -408,6 +412,35 @@ class TestTaskAdapter:
         assert "240 total tool calls" in "\n".join(
             message for _level, message in hooks.statuses
         )
+
+    def test_task_review_rework_keeps_steps_unlimited(
+        self, temp_db, monkeypatch
+    ):
+        from infinidev.engine.orchestration import pipeline as pipeline_mod
+
+        monkeypatch.setattr(
+            pipeline_mod,
+            "_run_gather_phase",
+            lambda **kwargs: kwargs["task_prompt"],
+        )
+        captured = {}
+
+        def review(**kwargs):
+            captured.update(kwargs)
+            return kwargs["result"]
+
+        monkeypatch.setattr(pipeline_mod, "_run_review_phase", review)
+        engine = _LoopEngine("Implemented the fix.", "done")
+
+        TaskAdapter().run(
+            escalation=_packet("Implement the feedback tool"), agent=_Agent(),
+            engine=engine, reviewer=None, hooks=_Hooks(), session_id="task-review",
+            project_id=1, workspace_path="/workspace",
+        )
+
+        assert captured["rework_execute_kwargs"] == {
+            "max_tool_calls_per_action": 0,
+        }
 
 
 class TestCoordinatorReactRoute:

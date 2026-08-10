@@ -4,7 +4,7 @@ The ranker's reactive, predictive and explicit-mention channels are computed
 from a stream of events, not from a query string — which is why asking Ken
 questions without reporting the session left three of its channels dark.
 These tests cover the reporting client: that it speaks the daemon's
-protocol, that it stays silent when there is no daemon, and above all that
+protocol, that it starts a missing local daemon boundedly, and above all that
 nothing it does can take down a coding session.
 """
 
@@ -14,7 +14,12 @@ import json
 
 import pytest
 
-from infinidev.engine.ken_session import KenSession, get_ken_session, reset_ken_sessions
+from infinidev.engine.ken_session import (
+    KenSession,
+    ensure_ken_ready,
+    get_ken_session,
+    reset_ken_sessions,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +27,10 @@ def _enabled(monkeypatch):
     from infinidev.config import settings as settings_mod
 
     monkeypatch.setattr(settings_mod.settings, "KEN_SESSION_ENABLED", True, raising=False)
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.shutil.which",
+        lambda _name: None,
+    )
     reset_ken_sessions()
     yield
     reset_ken_sessions()
@@ -56,9 +65,10 @@ def posted(monkeypatch):
             return False
 
     def fake_urlopen(request, timeout=None):
+        payload = {} if request.data is None else json.loads(request.data.decode())
         calls.append((
             request.full_url,
-            json.loads(request.data.decode()),
+            payload,
             dict(request.headers),
         ))
         return _Response(b'{"ok": true, "context_block": "<context-rank/>"}')
@@ -128,6 +138,71 @@ def test_a_failed_tool_is_reported_so_ken_can_retract_it(workspace, posted):
 
 def test_start_returns_the_resume_brief(workspace, posted):
     assert KenSession(workspace, "sess-1").start() == "<context-rank/>"
+
+
+def test_start_expands_the_recent_findings_ken_already_selected(workspace, monkeypatch):
+    topic = "infinigpu ICD per-draw UV-byte root cause"
+    brief = f"<ken-session-brief>Recent finding: {topic}</ken-session-brief>"
+    runs: list[list[str]] = []
+
+    class _Response:
+        def read(self):
+            return json.dumps({"ok": True, "context_block": brief}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    class _Completed:
+        returncode = 0
+        stdout = json.dumps(
+            [
+                {
+                    "topic": topic,
+                    "content": "sync.c reads p->vbufs <before> the pack loop.",
+                },
+                {"topic": "unselected finding", "content": "must stay out"},
+            ]
+        )
+
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.urllib.request.urlopen",
+        lambda _request, timeout=None: _Response(),
+    )
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.shutil.which",
+        lambda _name: "/usr/bin/ken",
+    )
+
+    def fake_run(command, **_kwargs):
+        runs.append(command)
+        return _Completed()
+
+    monkeypatch.setattr("infinidev.engine.ken_session.subprocess.run", fake_run)
+
+    session = KenSession(workspace, "sess-1")
+    context = session.start()
+
+    assert brief in context
+    assert "<ken-findings-expanded" in context
+    assert "one matching current read is enough" in context
+    assert "sync.c reads p-&gt;vbufs &lt;before&gt; the pack loop." in context
+    assert "must stay out" not in context
+    assert runs == [
+        [
+            "/usr/bin/ken",
+            "findings",
+            "--path",
+            str(workspace),
+            "--json",
+            "-n",
+            "3",
+        ]
+    ]
+    assert session.start() is None
+    assert len(runs) == 1
 
 
 def test_the_reply_is_what_makes_turn_end_worth_posting(workspace, posted):
@@ -251,12 +326,173 @@ def test_no_ken_directory_means_silence(tmp_path, posted):
     assert posted == []
 
 
-def test_a_daemon_that_is_not_running_is_not_contacted(tmp_path, posted):
-    """The port file is how ken advertises a live daemon. Without it the
-    client stays quiet rather than spawning one — a coding session must not
-    pay for a subprocess launch and a model load at startup."""
+def test_missing_daemon_is_not_available_before_first_use(tmp_path):
+    """The port file remains the authority for whether the daemon is live."""
     (tmp_path / ".ken").mkdir()
     assert KenSession(tmp_path, "sess-1").available is False
+
+
+def test_incomplete_ancestor_ken_directory_is_not_a_project(tmp_path):
+    from infinidev.engine.ken_session import _project_root
+
+    (tmp_path / ".ken").mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    assert _project_root(workspace) is None
+
+    (tmp_path / ".ken" / "meta.json").write_text(
+        json.dumps({"auth_token": "s3cret"})
+    )
+    assert _project_root(workspace) == tmp_path
+
+
+def test_missing_daemon_is_started_before_the_first_event(tmp_path, posted, monkeypatch):
+    ken = tmp_path / ".ken"
+    ken.mkdir()
+    (ken / "meta.json").write_text(json.dumps({"auth_token": "s3cret"}))
+    spawned: list[tuple[list[str], dict]] = []
+
+    def fake_popen(command, **kwargs):
+        spawned.append((command, kwargs))
+        (ken / "daemon.port").write_text("54321")
+        return object()
+
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.shutil.which",
+        lambda name: "/usr/bin/ken" if name == "ken" else None,
+    )
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.subprocess.Popen",
+        fake_popen,
+    )
+
+    session = KenSession(tmp_path, "sess-1")
+    assert session.start() == "<context-rank/>"
+
+    command, kwargs = spawned[0]
+    assert command == ["/usr/bin/ken", "serve", str(tmp_path), "--background"]
+    assert kwargs["cwd"] == str(tmp_path)
+    assert kwargs["start_new_session"] is True
+    assert posted[-1][0].endswith("/sessions/start")
+
+
+def test_missing_project_is_installed_embedded_and_started(tmp_path, posted, monkeypatch):
+    installed: list[tuple[list[str], dict]] = []
+    spawned: list[tuple[list[str], dict]] = []
+    statuses: list[str] = []
+
+    class _Completed:
+        returncode = 0
+        stdout = ""
+
+    def fake_run(command, **kwargs):
+        installed.append((command, kwargs))
+        ken = tmp_path / ".ken"
+        ken.mkdir()
+        (ken / "meta.json").write_text(json.dumps({"auth_token": "s3cret"}))
+        return _Completed()
+
+    def fake_popen(command, **kwargs):
+        spawned.append((command, kwargs))
+        (tmp_path / ".ken" / "daemon.port").write_text("54321")
+        return object()
+
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.shutil.which",
+        lambda name: "/usr/bin/ken" if name == "ken" else None,
+    )
+    monkeypatch.setattr("infinidev.engine.ken_session.subprocess.run", fake_run)
+    monkeypatch.setattr("infinidev.engine.ken_session.subprocess.Popen", fake_popen)
+
+    assert ensure_ken_ready(tmp_path, on_status=statuses.append) == tmp_path
+
+    install_command, install_kwargs = installed[0]
+    assert install_command == [
+        "/usr/bin/ken",
+        "install",
+        "--quiet",
+        "--embed",
+        "--no-wire",
+        str(tmp_path),
+    ]
+    assert install_kwargs["cwd"] == str(tmp_path)
+    assert spawned[0][0] == [
+        "/usr/bin/ken",
+        "serve",
+        str(tmp_path),
+        "--background",
+    ]
+    assert statuses == [
+        "Ken: creating and embedding the workspace index...",
+        "Ken: workspace index ready.",
+        "Ken: starting the workspace daemon...",
+        "Ken: daemon ready.",
+    ]
+    assert posted[-1][0].endswith("/health")
+
+
+def test_healthy_project_skips_install_and_spawn(workspace, posted, monkeypatch):
+    monkeypatch.setattr(
+        "infinidev.engine.ken_session.shutil.which",
+        lambda name: "/usr/bin/ken" if name == "ken" else None,
+    )
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("healthy Ken must be reused")
+
+    monkeypatch.setattr("infinidev.engine.ken_session.subprocess.run", unexpected)
+    monkeypatch.setattr("infinidev.engine.ken_session.subprocess.Popen", unexpected)
+
+    assert ensure_ken_ready(workspace) == workspace
+    assert posted == [(
+        "http://127.0.0.1:54321/health",
+        {},
+        {"Authorization": "Bearer s3cret"},
+    )]
+
+
+def test_cli_bootstrap_prepares_ken_before_runtime(tmp_path, monkeypatch, capsys):
+    from infinidev.cli import main as cli_main
+
+    calls: list[tuple[str, object]] = []
+
+    def fake_ready(workspace, *, on_status=None):
+        calls.append((workspace, on_status))
+        assert on_status is not None
+        on_status("Ken: daemon ready.")
+        return tmp_path
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("infinidev.engine.ken_session.ensure_ken_ready", fake_ready)
+
+    cli_main._bootstrap_ken_runtime()
+
+    assert calls[0][0] == str(tmp_path)
+    assert "Ken: daemon ready." in capsys.readouterr().out
+
+
+def test_missing_ken_executable_degrades_once_without_delaying_every_event(
+    tmp_path, posted, monkeypatch
+):
+    ken = tmp_path / ".ken"
+    ken.mkdir()
+    (ken / "meta.json").write_text(json.dumps({"auth_token": "s3cret"}))
+    lookups: list[str] = []
+
+    def missing(name: str):
+        lookups.append(name)
+        return None
+
+    monkeypatch.setattr("infinidev.engine.ken_session.shutil.which", missing)
+    session = KenSession(tmp_path, "sess-1")
+
+    assert session.start() is None
+    assert session.prompt("continue") is None
+    session.tool_pre("read_file", {"file_path": "src/a.py"})
+
+    assert lookups == ["ken"]
+    assert posted == []
 
 
 def test_a_refusing_daemon_never_raises(workspace, monkeypatch):
@@ -378,6 +614,8 @@ def test_the_blocks_receive_host_authority_metadata(fake_ken):
     assert block.count("<context-rank>") == 1
     assert block.startswith('<retrieval-context source="ken" authority="advisory"')
     assert "not a user requirement, permission, or proof" in block
+    assert "Before broad discovery" in block
+    assert "matches the active task" in block
     assert block.endswith("</retrieval-context>")
 
 

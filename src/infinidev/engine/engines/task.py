@@ -133,11 +133,16 @@ class TaskAdapter:
             if total_tool_budget <= 0
             else f"{total_tool_budget} total tool calls"
         )
+        iteration_status = (
+            "unlimited Steps"
+            if settings.TASK_MAX_ITERATIONS <= 0
+            else f"{settings.TASK_MAX_ITERATIONS} Steps"
+        )
         hooks.on_status(
             "info",
             "Task execution with a rolling Step horizon "
-            f"({settings.TASK_MAX_ITERATIONS} iterations / {tool_budget_status} / "
-            f"{settings.TASK_MAX_TOOL_CALLS_PER_STEP} per Step)",
+            f"({iteration_status} / {tool_budget_status} / "
+            "no tool-call limit per Step; context compacts under pressure)",
         )
         rolling_plan = Plan(
             overview=(
@@ -199,6 +204,11 @@ class TaskAdapter:
                 task=structured_task,
                 max_iterations=settings.TASK_MAX_ITERATIONS,
                 max_total_tool_calls=settings.TASK_MAX_TOOL_CALLS,
+                rework_execute_kwargs={
+                    "max_tool_calls_per_action": (
+                        settings.TASK_MAX_TOOL_CALLS_PER_STEP
+                    ),
+                },
             )
             review_status = getattr(used_engine, "_last_status", "") or "completed"
             if review_status in {"blocked", "failed", "exhausted"}:
@@ -213,11 +223,17 @@ class TaskAdapter:
             state=getattr(used_engine, "_last_state", None),
             resume_token=session_id,
             metrics={
-                "max_iterations": settings.TASK_MAX_ITERATIONS,
+                "max_iterations": (
+                    None if settings.TASK_MAX_ITERATIONS <= 0
+                    else settings.TASK_MAX_ITERATIONS
+                ),
                 "max_tool_calls": (
                     None if total_tool_budget <= 0 else total_tool_budget
                 ),
-                "max_tool_calls_per_step": settings.TASK_MAX_TOOL_CALLS_PER_STEP,
+                "max_tool_calls_per_step": (
+                    None if settings.TASK_MAX_TOOL_CALLS_PER_STEP <= 0
+                    else settings.TASK_MAX_TOOL_CALLS_PER_STEP
+                ),
             },
         )
 

@@ -25,29 +25,32 @@ class IndexQueue:
     ):
         self._project_id = project_id
         self._post_index = post_index_callback
-        self._queue: queue.Queue[str | object] = queue.Queue()
+        self._queue: queue.Queue[tuple[str, bool] | object] = queue.Queue()
         self._stop = Event()
         self._worker: Thread | None = None
         self._stop_lock = Lock()
         self._stopped = False
 
-    def enqueue(self, file_path: str) -> None:
-        """Add a file to be re-indexed. Safe to call from any thread."""
-        self._queue.put(file_path)
+    def enqueue(self, file_path: str, *, notify_integrity: bool = True) -> None:
+        """Add a file while preserving whether this is a baseline observation."""
+        self._queue.put((file_path, notify_integrity))
 
     def _process(self) -> None:
         """Worker loop: pull from queue, call ensure_indexed()."""
         from infinidev.code_intel.smart_index import ensure_indexed
 
         while True:
-            path = self._queue.get()
-            if path is _STOP:
+            item = self._queue.get()
+            if item is _STOP:
                 return
             if self._stop.is_set():
                 return
 
+            path, notify_integrity = item
             try:
-                reindexed = ensure_indexed(self._project_id, path)
+                reindexed = ensure_indexed(
+                    self._project_id, path, notify_integrity=notify_integrity,
+                )
                 if reindexed and self._post_index:
                     self._post_index(path)
             except Exception as exc:
@@ -69,7 +72,7 @@ class IndexQueue:
         # A previous stop enqueued a wake-up sentinel. It is normally consumed
         # by that worker; drain any leftover one before a stop→start cycle so
         # the replacement worker cannot exit immediately on stale control data.
-        pending: list[str] = []
+        pending: list[tuple[str, bool]] = []
         while True:
             try:
                 item = self._queue.get_nowait()

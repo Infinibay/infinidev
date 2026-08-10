@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 
@@ -53,6 +54,14 @@ _BEHAVIOR_CONTRACT_RE = re.compile(
     r"preservar|sin\s+cambiar|casos?)\b",
     re.IGNORECASE,
 )
+_REFERENCED_CONTINUATION_RE = re.compile(
+    r"\b(?:continue|resume|continua|continuar|reanuda|reanudar)\b",
+    re.IGNORECASE,
+)
+_REFERENCED_FILE_RE = re.compile(
+    r"(?<![\w/])(?P<path>[\w./-]+\.(?:md|txt|rst))(?![\w/])",
+    re.IGNORECASE,
+)
 
 
 def explicit_execution_score(user_input: str) -> int:
@@ -86,4 +95,68 @@ def is_grounded_execution_request(user_input: str) -> bool:
     )
 
 
-__all__ = ["explicit_execution_score", "is_grounded_execution_request"]
+def is_referenced_continuation_request(user_input: str) -> bool:
+    """Whether the request asks to continue work from a named text brief."""
+    text = (user_input or "").strip()
+    return bool(
+        _REFERENCED_CONTINUATION_RE.search(text)
+        and _REFERENCED_FILE_RE.search(text)
+    )
+
+
+def referenced_file_paths(user_input: str) -> tuple[str, ...]:
+    """Return unique text-brief paths named by the request, in order."""
+    return tuple(dict.fromkeys(
+        match.group("path")
+        for match in _REFERENCED_FILE_RE.finditer(user_input or "")
+    ))
+
+
+def resolve_referenced_repository(
+    user_input: str,
+    workspace_path: str | None,
+) -> str | None:
+    """Resolve one nested Git repository containing a referenced brief.
+
+    The file workspace remains unchanged so literal paths in the request keep
+    working. This resolver supplies a separate cwd for Git and shell tools.
+    It fails closed when paths escape the workspace or name multiple repos.
+    """
+    if not workspace_path:
+        return None
+    workspace = os.path.realpath(os.path.expanduser(workspace_path))
+    if not os.path.isdir(workspace):
+        return None
+
+    repositories: set[str] = set()
+    for raw_path in referenced_file_paths(user_input):
+        candidate = os.path.realpath(os.path.join(workspace, raw_path))
+        try:
+            if os.path.commonpath((workspace, candidate)) != workspace:
+                continue
+        except ValueError:
+            continue
+        if not os.path.exists(candidate):
+            continue
+        current = candidate if os.path.isdir(candidate) else os.path.dirname(candidate)
+        while True:
+            if os.path.exists(os.path.join(current, ".git")):
+                repositories.add(current)
+                break
+            if current == workspace:
+                break
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+
+    return next(iter(repositories)) if len(repositories) == 1 else None
+
+
+__all__ = [
+    "explicit_execution_score",
+    "is_grounded_execution_request",
+    "is_referenced_continuation_request",
+    "referenced_file_paths",
+    "resolve_referenced_repository",
+]

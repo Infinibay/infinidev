@@ -49,6 +49,7 @@ class ToolContext:
     agent_run_id: Optional[str] = None
     session_id: Optional[str] = None
     workspace_path: Optional[str] = None
+    repository_path: Optional[str] = None
     event_id: Optional[int] = None
     resume_state: Optional[dict] = None
     loop_state: Optional[Any] = None  # LoopState reference for plan tools
@@ -117,6 +118,7 @@ def set_context(
                 agent_run_id=agent_run_id if agent_run_id is not None else existing.agent_run_id,
                 session_id=session_id if session_id is not None else existing.session_id,
                 workspace_path=workspace_path if workspace_path is not None else existing.workspace_path,
+                repository_path=existing.repository_path,
                 event_id=event_id if event_id is not None else existing.event_id,
                 resume_state=resume_state if resume_state is not None else existing.resume_state,
                 loop_state=existing.loop_state,  # ← preserved across set_context
@@ -166,6 +168,17 @@ def set_file_tracker(agent_id: str, file_tracker: Any) -> None:
             ctx = ToolContext(agent_id=agent_id)
             _agent_contexts[agent_id] = ctx
         ctx.file_tracker = file_tracker
+
+
+def set_repository_path(agent_id: str, repository_path: str | None) -> None:
+    """Attach the target Git repository without narrowing file-tool access."""
+
+    with _agent_contexts_lock:
+        ctx = _agent_contexts.get(agent_id)
+        if ctx is None:
+            ctx = ToolContext(agent_id=agent_id)
+            _agent_contexts[agent_id] = ctx
+        ctx.repository_path = repository_path
 
 
 def set_capability_requester(agent_id: str, requester: Any) -> None:

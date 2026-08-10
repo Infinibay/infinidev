@@ -88,7 +88,7 @@ class TestGeneralizedBehaviorContract:
     def test_develop_flow_uses_proportional_defaults(self):
         prompt = get_variant("flow.develop.identity", "generalized")
         assert prompt is not None
-        assert "inspect evidence proportional to the change" in prompt
+        assert "Inspect only enough evidence for the next reversible code decision" in prompt
         assert "After every edit" not in prompt
         assert "production-ready" not in prompt
 
@@ -110,6 +110,7 @@ class TestCrossStyleBehaviorContract:
         assert "Do not choose one or broaden the target to all" in BEHAVIOR_GUIDELINES
         assert "Keep literal user requirements separate" in BEHAVIOR_GUIDELINES
         assert "Retry a failure only when it supplied new evidence" in BEHAVIOR_GUIDELINES
+        assert "Correctness comes from that feedback loop" in BEHAVIOR_GUIDELINES
 
     def test_shared_behavior_keeps_the_literal_task_authoritative(self):
         assert "The literal active task is authoritative" in BEHAVIOR_GUIDELINES

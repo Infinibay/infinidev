@@ -56,7 +56,12 @@ def get_global_queue() -> "IndexQueue | None":
         return _global_queue
 
 
-def enqueue_or_sync(project_id: int, file_path: str) -> None:
+def enqueue_or_sync(
+    project_id: int,
+    file_path: str,
+    *,
+    notify_integrity: bool = True,
+) -> None:
     """Enqueue *file_path* for background indexing, or do it synchronously.
 
     Behaviour:
@@ -73,7 +78,7 @@ def enqueue_or_sync(project_id: int, file_path: str) -> None:
     queue = get_global_queue()
     if queue is not None and queue.is_running() and queue._project_id == project_id:
         try:
-            queue.enqueue(file_path)
+            queue.enqueue(file_path, notify_integrity=notify_integrity)
             return
         except Exception as exc:
             logger.debug("background_indexer: enqueue failed for %s: %s", file_path, exc)
@@ -82,7 +87,9 @@ def enqueue_or_sync(project_id: int, file_path: str) -> None:
     # Sync fallback — same code path as before this module existed.
     try:
         from infinidev.code_intel.smart_index import ensure_indexed
-        ensure_indexed(project_id, file_path)
+        ensure_indexed(
+            project_id, file_path, notify_integrity=notify_integrity,
+        )
     except Exception as exc:
         logger.debug("background_indexer: sync index failed for %s: %s", file_path, exc)
 

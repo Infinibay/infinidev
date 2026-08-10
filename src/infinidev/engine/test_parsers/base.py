@@ -167,6 +167,8 @@ class TestParser(ABC):
             if low in self.flags_with_arg:
                 skip_next = True
                 continue
+            if tok == "--":
+                continue
             if tok in ("2>&1", "|", ">>", ">"):
                 break
             out.append(tok)

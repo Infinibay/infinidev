@@ -146,7 +146,21 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         if not isinstance(tool_args, dict):
             tool_args = {}
         live_detail = str(tool_args.get("command") or tool_detail or "")
-        app._actions_text = f">> {tool_name}"
+        call_num = int(data.get("call_num", 0) or 0)
+        total_calls = int(data.get("total_calls", 0) or 0)
+        step_limit = int(data.get("step_limit", 0) or 0)
+        total_limit = int(data.get("total_limit", 0) or 0)
+        budgets = []
+        if call_num:
+            budgets.append(
+                f"step {call_num}/{step_limit}" if step_limit else f"step {call_num}"
+            )
+        if total_calls:
+            budgets.append(
+                f"total {total_calls}/{total_limit}" if total_limit else f"total {total_calls}"
+            )
+        budget_text = f"  [{' · '.join(budgets)}]" if budgets else ""
+        app._actions_text = f">> {tool_name}{budget_text}"
         if live_detail:
             app._actions_text += f"\n   {live_detail}"
 
@@ -169,9 +183,22 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         if callable(persist):
             persist(message)
         label_detail = live_detail[:120]
-        app._chat_history_control.work_label = (
-            f"Running {tool_name}: {label_detail}".rstrip(": ")
-        )
+        running_label = f"Running {tool_name}"
+        if call_num:
+            running_label += (
+                f" · step call {call_num}/{step_limit}"
+                if step_limit
+                else f" · step call {call_num}"
+            )
+        if total_calls:
+            running_label += (
+                f" · total {total_calls}/{total_limit}"
+                if total_limit
+                else f" · total {total_calls}"
+            )
+        if label_detail:
+            running_label += f": {label_detail}"
+        app._chat_history_control.work_label = running_label
         app._chat_history_control.invalidate_cache()
         app.invalidate()
 
@@ -276,6 +303,25 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         app._chat_history_control.invalidate_cache()
         app.invalidate()
 
+    elif event_type == "loop_context_compaction":
+        used = int(data.get("prompt_tokens", 0) or 0)
+        limit = int(data.get("context_limit", 0) or 0)
+        remaining = int(data.get("remaining_tokens", 0) or 0)
+        percent = float(data.get("percent_used", 0) or 0)
+        label = (
+            f"Compacting context · {percent:.1f}% used · "
+            f"{remaining:,} tokens free"
+        )
+        app._actions_text = label
+        app._chat_history_control.work_label = label
+        app.add_log(
+            f"Context compaction: {used:,}/{limit:,} tokens; "
+            f"{remaining:,} free"
+        )
+        app.update_context_tokens(prompt_tokens=used)
+        app._chat_history_control.invalidate_cache()
+        app.invalidate()
+
     elif event_type == "loop_llm_call_start":
         # Keep the previous action visible, but make the transcript's live
         # indicator say what is happening now. Otherwise a completed tool's
@@ -283,7 +329,32 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         app._streaming_tool_name = None
         app._streaming_token_count = 0
         phase = data.get("phase", "deciding")
-        label = "Model is planning" if phase == "planning" else "Model is deciding next action"
+        if phase == "planning":
+            label = "Model is planning"
+        elif phase == "closing":
+            label = "Model is closing the step"
+        elif phase == "recovery":
+            label = "Model is recovering from stalled discovery"
+        else:
+            label = "Model is deciding next action"
+        step_title = str(data.get("step_title") or "").strip()
+        if step_title:
+            label += f": {step_title[:100]}"
+        step_calls = int(data.get("tool_calls_step", 0) or 0)
+        step_limit = int(data.get("tool_calls_step_limit", 0) or 0)
+        total_calls = int(data.get("tool_calls_total", 0) or 0)
+        total_limit = int(data.get("tool_calls_total_limit", 0) or 0)
+        budgets = []
+        if step_limit:
+            budgets.append(f"step tools {step_calls}/{step_limit}")
+        elif step_calls:
+            budgets.append(f"step tools {step_calls}")
+        if total_limit:
+            budgets.append(f"total {total_calls}/{total_limit}")
+        elif total_calls:
+            budgets.append(f"total {total_calls}")
+        if budgets:
+            label += f" · {' · '.join(budgets)}"
         app._actions_text = label
         app._chat_history_control.work_label = label
         app._chat_history_control.invalidate_cache()

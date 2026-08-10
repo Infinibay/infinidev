@@ -1,14 +1,15 @@
-"""Tool for viewing Git status."""
+"""Input schema for viewing Git status."""
 
-from typing import Type
-
-from pydantic import BaseModel
-
-from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.git._helpers import run_git, GitToolError
+from pydantic import BaseModel, Field
 
 
 class GitStatusInput(BaseModel):
-    pass
+    path: str | None = Field(
+        default=None,
+        description=(
+            "Repository directory relative to the workspace. Omit when the runtime "
+            "already selected a target or the workspace contains exactly one repo."
+        ),
+    )
 
 

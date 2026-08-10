@@ -385,6 +385,8 @@ class TestPromptRendering:
         assert 'authority="advisory"' in rendered
         assert 'scope-effect="none"' in rendered
         assert "not user requirements" in rendered
+        assert "Before broad discovery" in rendered
+        assert "matches the active step" in rendered
         assert "src/auth.py" in rendered
         assert "4.2" in rendered
         assert "Auth.verify" in rendered

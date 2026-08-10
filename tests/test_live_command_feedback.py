@@ -52,6 +52,10 @@ def _event_payload(run_id: str = "run-1") -> dict:
         "tool_name": "execute_command",
         "tool_detail": "python -m pytest",
         "tool_arguments": {"command": "python -m pytest", "timeout": 300},
+        "call_num": 4,
+        "total_calls": 17,
+        "step_limit": 12,
+        "total_limit": 1000,
     }
 
 
@@ -71,6 +75,8 @@ def test_event_lifecycle_keeps_one_row_and_only_the_latest_lines():
     assert message["running"] is True
     assert message["text"] == "python -m pytest"
     assert "python -m pytest" in app._actions_text
+    assert "step 4/12" in app._actions_text
+    assert "total 17/1000" in app._chat_history_control.work_label
 
     output = "".join(f"line-{index}\n" for index in range(25)) + "partial-progress"
     process_event(
@@ -113,13 +119,69 @@ def test_model_call_replaces_stale_working_label_with_current_phase():
     process_event(
         app,
         "loop_llm_call_start",
-        {"phase": "deciding", "iteration": 2, "tool_calls_step": 1},
+        {
+            "phase": "deciding",
+            "iteration": 2,
+            "step_title": "Fix forwarded decoder",
+            "tool_calls_step": 1,
+            "tool_calls_step_limit": 12,
+            "tool_calls_total": 14,
+            "tool_calls_total_limit": 1000,
+        },
     )
 
-    assert app._chat_history_control.work_label == "Model is deciding next action"
-    assert app._actions_text == "Model is deciding next action"
+    expected = (
+        "Model is deciding next action: Fix forwarded decoder "
+        "· step tools 1/12 · total 14/1000"
+    )
+    assert app._chat_history_control.work_label == expected
+    assert app._actions_text == expected
     assert app._chat_history_control.invalidations == 1
     assert app.invalidations == 1
+
+
+def test_model_call_exposes_stalled_discovery_recovery():
+    app = _App()
+
+    process_event(
+        app,
+        "loop_llm_call_start",
+        {
+            "phase": "recovery",
+            "step_title": "Implement parser fix",
+            "tool_calls_step": 12,
+            "tool_calls_step_limit": 0,
+            "tool_calls_total": 24,
+            "tool_calls_total_limit": 0,
+        },
+    )
+
+    expected = (
+        "Model is recovering from stalled discovery: Implement parser fix "
+        "· step tools 12 · total 24"
+    )
+    assert app._actions_text == expected
+    assert app._chat_history_control.work_label == expected
+def test_context_compaction_is_visible_and_updates_token_status():
+    app = _App()
+
+    process_event(
+        app,
+        "loop_context_compaction",
+        {
+            "prompt_tokens": 700_000,
+            "context_limit": 1_000_000,
+            "remaining_tokens": 300_000,
+            "percent_used": 70.0,
+        },
+    )
+
+    expected = "Compacting context · 70.0% used · 300,000 tokens free"
+    assert app._actions_text == expected
+    assert app._chat_history_control.work_label == expected
+    assert app.token_updates == [{"prompt_tokens": 700_000}]
+    assert "Context compaction: 700,000/1,000,000" in app.logs[-1]
+
 
 
 def test_running_command_is_visible_and_click_reveals_live_tail():
@@ -177,6 +239,8 @@ def test_pre_tool_event_contains_full_arguments_and_run_id():
             "tool_arguments": {"command": "uv run pytest tests/test_tools_shell.py"},
             "call_num": 0,
             "total_calls": 0,
+            "step_limit": 0,
+            "total_limit": 0,
             "iteration": 0,
         },
     )]

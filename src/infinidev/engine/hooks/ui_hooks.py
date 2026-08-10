@@ -67,6 +67,8 @@ def _on_pre_tool(ctx: HookContext) -> None:
         "tool_arguments": tool_args,
         "call_num": ctx.metadata.get("call_num", 0),
         "total_calls": ctx.metadata.get("total_calls", 0),
+        "step_limit": ctx.metadata.get("step_limit", 0),
+        "total_limit": ctx.metadata.get("total_limit", 0),
         "iteration": ctx.metadata.get("iteration", 0),
     })
 
@@ -116,6 +118,8 @@ def _on_post_tool(ctx: HookContext) -> None:
         "exec_data": exec_data,
         "call_num": ctx.metadata.get("call_num", 0),
         "total_calls": ctx.metadata.get("total_calls", 0),
+        "step_limit": ctx.metadata.get("step_limit", 0),
+        "total_limit": ctx.metadata.get("total_limit", 0),
         "iteration": ctx.metadata.get("iteration", 0),
         "tokens_total": ctx.metadata.get("tokens_total", 0),
         "prompt_tokens": ctx.metadata.get("prompt_tokens", 0),

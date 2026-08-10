@@ -196,6 +196,16 @@ def _walk_for_errors(node: Any, source_lines: list[str], issues: list[SyntaxIssu
     for child in node.children:
         _walk_for_errors(child, source_lines, issues)
 
+def collect_tree_syntax_issues(tree: Any, text: str) -> list[SyntaxIssue]:
+    """Collect syntax issues from an already-parsed tree-sitter tree."""
+    if tree is None or not text or not tree.root_node.has_error:
+        return []
+
+    issues: list[SyntaxIssue] = []
+    _walk_for_errors(tree.root_node, text.splitlines(), issues)
+    return issues
+
+
 
 # ── Public API ───────────────────────────────────────────────────────────
 
@@ -232,14 +242,7 @@ def check_syntax(text: str, language: str | None = None, file_path: str | None =
     except Exception:
         return []
 
-    if not tree.root_node.has_error:
-        # has_error is True iff the tree contains any ERROR or missing nodes.
-        # Fast-path: skip the walk when the file is clean.
-        return []
-
-    issues: list[SyntaxIssue] = []
-    _walk_for_errors(tree.root_node, text.splitlines(), issues)
-    return issues
+    return collect_tree_syntax_issues(tree, text)
 
 
 def format_issues(issues: list[SyntaxIssue], *, max_show: int = 5) -> str:

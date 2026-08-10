@@ -21,6 +21,8 @@ from infinidev.engine.loop.step_summarizer import _synthesize_final
 from infinidev.engine.loop.action_record import ActionRecord
 from infinidev.engine.loop.engine import (
     _apply_exploration_policy,
+    _apply_context_pressure,
+    _configure_progress_recovery,
     _enforce_edit_requirement,
     _enforce_step_effect,
     _has_substantive_done_evidence,
@@ -447,6 +449,165 @@ def test_identical_successful_tool_call_keeps_normal_threshold():
         assert guard.check_repetition(ctx, messages) is None
 
     assert messages == []
+def test_identical_calls_enter_recovery_without_interrupting_the_step():
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), []
+    ctx.suppress_discovery_this_step = False
+    ctx.semantic_recovery_context_calls = 2
+
+    outcomes = []
+    for _ in range(5):
+        guard.on_tool_result(
+            "read_file", '{"file_path":"a.py"}', had_error=False,
+        )
+        outcomes.append(guard.check_repetition(ctx, messages))
+
+    assert outcomes == [None] * 5
+    assert ctx.suppress_discovery_this_step is True
+    assert ctx.semantic_recovery_context_calls == 0
+    assert "Step remains active and has no call budget" in messages[-1]["content"]
+    assert "MUST now call the step_complete" not in "\n".join(
+        message["content"] for message in messages
+    )
+
+
+def test_twelve_evidence_free_calls_narrow_discovery_until_progress():
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), [{"role": "user", "content": "Implement the fix."}]
+    ctx.semantic_stagnation_control = True
+    ctx.suppress_discovery_this_step = False
+    ctx.semantic_recovery_context_calls = 0
+
+    for index in range(12):
+        guard.on_tool_result(
+            "read_file", f'{{"file_path":"file-{index}.py"}}', had_error=False,
+        )
+
+    assert guard.check_progress_drift(ctx, messages) is None
+    assert ctx.suppress_discovery_this_step is True
+    assert ctx.semantic_recovery_context_calls == 2
+    assert "Step remains active" in messages[-1]["content"]
+
+    guard.on_tool_result(
+        "edit_file", '{"file_path":"target.py"}', had_error=False,
+        made_progress=True,
+    )
+    guard.check_progress_drift(ctx, messages)
+
+    assert guard.non_progress_tool_calls == 0
+    assert ctx.suppress_discovery_this_step is False
+    assert ctx.semantic_recovery_context_calls == 0
+
+
+def test_new_test_evidence_cannot_mask_repeated_calls_without_a_workspace_change():
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), [{"role": "user", "content": "Implement the fix."}]
+    ctx.task = SimpleNamespace(kind="bugfix")
+    ctx.semantic_stagnation_control = True
+    ctx.recovery_requires_workspace_change = True
+    ctx.suppress_discovery_this_step = False
+    ctx.semantic_recovery_context_calls = 0
+    baseline = (("target.py", "unchanged"),)
+    guard.seed_workspace_fingerprint(baseline)
+
+    for index in range(13):
+        guard.on_tool_result(
+            "execute_command",
+            f'{{"command":"pytest test_case_{index}"}}',
+            had_error=False,
+            made_progress=True,
+            workspace_fingerprint=baseline,
+        )
+
+    guard.check_progress_drift(ctx, messages)
+
+    assert guard.non_progress_tool_calls == 0
+    assert guard.evidence_progress_resets == 1
+    assert guard.workspace_stagnation_tool_calls == 12
+    assert ctx.suppress_discovery_this_step is True
+    assert "no net workspace change" in messages[-1]["content"]
+    assert "experiment phase, not a certainty gate" in messages[-1]["content"]
+    assert "not an external blocker" in messages[-1]["content"]
+
+
+def test_workspace_recovery_does_not_constrain_investigation_tasks():
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), []
+    ctx.task = SimpleNamespace(kind="investigation")
+    ctx.semantic_stagnation_control = True
+    ctx.recovery_requires_workspace_change = True
+    ctx.suppress_discovery_this_step = False
+    baseline = (("target.py", "unchanged"),)
+    guard.seed_workspace_fingerprint(baseline)
+
+    for index in range(20):
+        guard.on_tool_result(
+            "read_file",
+            f'{{"file_path":"file-{index}.py"}}',
+            had_error=False,
+            workspace_fingerprint=baseline,
+        )
+
+    guard.check_progress_drift(ctx, messages)
+
+    assert ctx.suppress_discovery_this_step is False
+    assert messages == []
+
+
+def test_edit_revert_cycle_is_not_repeated_progress():
+    guard = LoopGuard(is_small=False)
+    baseline: tuple[tuple[str, str], ...] = ()
+    changed = (("/workspace/module.py", "changed"),)
+    guard.seed_workspace_fingerprint(baseline)
+
+    guard.on_tool_result(
+        "edit_file",
+        '{"file_path":"module.py"}',
+        False,
+        workspace_fingerprint=changed,
+    )
+    assert guard.non_progress_tool_calls == 0
+
+    guard.on_tool_result(
+        "edit_file",
+        '{"file_path":"module.py"}',
+        False,
+        workspace_fingerprint=baseline,
+    )
+    guard.on_tool_result(
+        "edit_file",
+        '{"file_path":"module.py"}',
+        False,
+        workspace_fingerprint=changed,
+    )
+
+    assert guard.non_progress_tool_calls == 2
+
+
+def test_context_pressure_compacts_and_announces_once(monkeypatch):
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        "infinidev.engine.loop.engine._emit_loop_event",
+        lambda event_type, _project, _agent, data: events.append(
+            (event_type, data)
+        ),
+    )
+    ctx = _ctx()
+    ctx.max_context_tokens = 1_000_000
+    ctx.state.last_prompt_tokens = 700_000
+    messages = [{"role": "user", "content": "Keep implementing."}]
+
+    announced = _apply_context_pressure(ctx, messages, announced=False)
+    announced = _apply_context_pressure(ctx, messages, announced=announced)
+
+    assert announced is True
+    assert [event_type for event_type, _data in events] == [
+        "loop_context_compaction"
+    ]
+    assert events[0][1]["remaining_tokens"] == 300_000
+    assert "current Step remains active" in messages[0]["content"]
+    assert "no tool-call budget" in messages[0]["content"]
+
 
 
 def test_bounded_rework_demotes_exploration_to_direct_continuation():
@@ -737,6 +898,29 @@ def test_failed_latest_test_still_allows_an_honest_blocked_outcome():
     )
 
     assert engine._step_gate._latest_test_failed(ctx, call, []) is False
+
+
+def test_recovery_mode_cannot_be_reported_as_an_external_blocker_once():
+    from infinidev.engine.loop.engine import LoopEngine
+
+    engine = LoopEngine()
+    ctx = _ctx()
+    ctx.suppress_discovery_this_step = True
+    ctx.recovery_requires_workspace_change = True
+    ctx.semantic_recovery_context_calls = 0
+    call = _tool_call(
+        "step_complete",
+        '{"summary":"discovery suppression prevented the read","status":"blocked"}',
+        call_id="complete",
+    )
+    messages = [
+        {"role": "tool", "tool_call_id": "complete", "content": "ok"},
+    ]
+
+    assert engine._step_gate._workspace_recovery_escape(ctx, call, messages) is True
+    assert ctx.semantic_recovery_context_calls == 2
+    assert "recovery is not an external blocker" in messages[-1]["content"]
+    assert engine._step_gate._workspace_recovery_escape(ctx, call, messages) is False
 
 
 def test_verified_user_approved_step_still_requires_its_own_edit():
@@ -1041,7 +1225,7 @@ def test_net_diff_not_edit_call_count_controls_progress_renewal(tmp_path):
     assert renewals == 0
 
 
-def test_two_no_progress_windows_arm_corrective_surface(tmp_path):
+def test_two_no_progress_windows_latch_corrective_surface(tmp_path):
     from infinidev.engine.file_change_tracker import FileChangeTracker
     from infinidev.engine.loop.behavior_tracker import BehaviorTracker
     from infinidev.engine.loop.engine import LoopEngine
@@ -1057,7 +1241,7 @@ def test_two_no_progress_windows_arm_corrective_surface(tmp_path):
     ctx.state.step_entry_change_fingerprints[1] = ()
     engine = LoopEngine()
 
-    for expected in (0, 1):
+    for expected_suppression, expected_windows in ((0, 1), (1, 2)):
         engine._finalize_inner_loop(
             ctx,
             StepResult(summary="No task evidence changed", status="continue"),
@@ -1065,10 +1249,36 @@ def test_two_no_progress_windows_arm_corrective_surface(tmp_path):
             tracker=BehaviorTracker(set()),
             saw_tool_calls=True,
         )
-        assert ctx.state.discovery_suppression_steps == expected
+        assert ctx.state.discovery_suppression_steps == expected_suppression
+        assert ctx.state.no_progress_windows_by_step[1] == expected_windows
+
+    messages = [{"role": "user", "content": "Implement the parser fix."}]
+    _configure_progress_recovery(ctx, messages)
+
+    assert ctx.suppress_discovery_this_step is True
+    assert ctx.semantic_recovery_context_calls == 2
+    assert ctx.state.discovery_suppression_steps == 0
+    assert "<progress-recovery" in messages[0]["content"]
+    assert "at most 2 direct read_file calls" in messages[0]["content"]
+
+    engine._finalize_inner_loop(
+        ctx,
+        StepResult(summary="Recovery still made no change", status="continue"),
+        action_tool_calls=12,
+        tracker=BehaviorTracker(set()),
+        saw_tool_calls=True,
+    )
+    assert ctx.state.no_progress_windows_by_step[1] == 3
+
+    next_messages = [{"role": "user", "content": "Continue."}]
+    _configure_progress_recovery(ctx, next_messages)
+
+    assert ctx.suppress_discovery_this_step is True
+    assert ctx.semantic_recovery_context_calls == 0
+    assert "recovery read allowance is exhausted" in next_messages[0]["content"]
 
 
-def test_new_test_outcome_resets_no_progress_window_counter(tmp_path):
+def test_new_test_outcome_releases_latched_progress_recovery(tmp_path):
     from infinidev.engine.file_change_tracker import FileChangeTracker
     from infinidev.engine.loop.behavior_tracker import BehaviorTracker
     from infinidev.engine.loop.engine import LoopEngine
@@ -1083,13 +1293,19 @@ def test_new_test_outcome_resets_no_progress_window_counter(tmp_path):
     ctx.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
     ctx.state.step_entry_change_fingerprints[1] = ()
     engine = LoopEngine()
-    engine._finalize_inner_loop(
-        ctx,
-        StepResult(summary="No task evidence changed", status="continue"),
-        action_tool_calls=12,
-        tracker=BehaviorTracker(set()),
-        saw_tool_calls=True,
+    for _ in range(2):
+        engine._finalize_inner_loop(
+            ctx,
+            StepResult(summary="No task evidence changed", status="continue"),
+            action_tool_calls=12,
+            tracker=BehaviorTracker(set()),
+            saw_tool_calls=True,
+        )
+
+    _configure_progress_recovery(
+        ctx, [{"role": "user", "content": "Recover with a concrete action."}]
     )
+    assert ctx.suppress_discovery_this_step is True
 
     ctx.state.test_outcome_history = {"pytest tests/test_parser.py": ["1 failed"]}
     engine._finalize_inner_loop(
@@ -1102,6 +1318,44 @@ def test_new_test_outcome_resets_no_progress_window_counter(tmp_path):
 
     assert ctx.state.no_progress_windows_by_step[1] == 0
     assert ctx.state.discovery_suppression_steps == 0
+
+    messages = [{"role": "user", "content": "Use the new test evidence."}]
+    _configure_progress_recovery(ctx, messages)
+    assert ctx.suppress_discovery_this_step is False
+    assert ctx.semantic_recovery_context_calls == 0
+    assert "<progress-recovery" not in messages[0]["content"]
+
+def test_minimax_recovery_stays_latched_until_workspace_changes():
+    ctx = _ctx()
+    ctx.semantic_stagnation_control = True
+    ctx.recovery_requires_workspace_change = True
+    ctx.suppress_discovery_this_step = True
+    ctx.semantic_recovery_context_calls = 1
+    messages: list[dict] = []
+    guard = LoopGuard()
+    baseline = ("baseline",)
+    changed = ("changed",)
+    guard.seed_workspace_fingerprint(baseline)
+
+    guard.on_tool_result(
+        "execute_command",
+        '{"command":"cargo test focused_case"}',
+        False,
+        made_progress=True,
+        workspace_fingerprint=baseline,
+    )
+    guard.check_progress_drift(ctx, messages)
+
+    assert ctx.suppress_discovery_this_step is True
+    assert ctx.semantic_recovery_context_calls == 1
+
+    guard.on_tool_result(
+        "edit_file", "{}", False, workspace_fingerprint=changed,
+    )
+    guard.check_progress_drift(ctx, messages)
+
+    assert ctx.suppress_discovery_this_step is False
+    assert ctx.semantic_recovery_context_calls == 0
 
 
 def test_budget_interruption_resumes_the_same_plan_step():

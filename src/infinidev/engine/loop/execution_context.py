@@ -30,16 +30,21 @@ class ExecutionContext:
     require_step_orientation: bool
     renew_step_budget_on_progress: bool
     semantic_stagnation_control: bool
+    recovery_direct_reads_only: bool
+    reuse_unchanged_test_results: bool
+    freeze_plan_growth_in_recovery: bool
     system_prompt: str
     tool_schemas: list[dict[str, Any]]
+    recovery_requires_workspace_change: bool
     tool_dispatch: dict[str, Any]
     planning_schemas: list[dict[str, Any]]
     tools: list[Any]
-    max_iterations: int
+    max_iterations: int | None
     max_per_action: int
-    # Mutable boundary for the active Step. Model policy may renew it after
-    # observable progress without changing the configured base window.
-    step_tool_limit: int
+    # Mutable boundary for explicitly bounded auxiliary Steps. ``None`` keeps
+    # a durable Task open until context compaction, completion, or cancellation.
+    # Model policy may renew a finite boundary after observable progress.
+    step_tool_limit: int | None
     # ``None`` means the durable run has no global call-count ceiling. Bounded
     # auxiliary phases can still request a positive, explicit fuse.
     max_total_calls: int | None

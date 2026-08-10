@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 import infinidev.engine.orchestration.chat_agent as chat_agent_mod
+from infinidev.config.settings import settings
 from infinidev.engine.orchestration.chat_agent import (
     _explicit_execution_score,
     run_chat_agent,
@@ -156,6 +157,18 @@ class TestEscalateTerminator:
         assert result.kind == "escalate"
         assert result.escalation is not None
         assert "algorithmic route" in result.escalation.user_signal
+        assert scripted.calls == []
+
+    def test_referenced_continuation_bypasses_llm_router(self, patch_litellm):
+        scripted = patch_litellm([])
+
+        result = run_chat_agent(
+            "Lee infinigpu/CONTINUE.md y continua el trabajo"
+        )
+
+        assert result.kind == "escalate"
+        assert result.escalation is not None
+        assert "referenced continuation" in result.escalation.user_signal
         assert scripted.calls == []
 
     def test_intent_score_keeps_informational_questions_in_chat(self):

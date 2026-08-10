@@ -1,11 +1,16 @@
 """Tool for viewing Git diffs."""
 
+import os
 from typing import Type
 
 from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.git._helpers import run_git, GitToolError
+from infinidev.tools.git._helpers import (
+    GitToolError,
+    resolve_git_cwd,
+    run_git,
+)
 from infinidev.tools.git.git_diff_input import GitDiffInput
 
 
@@ -20,10 +25,16 @@ class GitDiffTool(InfinibayBaseTool):
 
     def _run(
         self,
+        path: str | None = None,
         branch: str | None = None,
         file: str | None = None,
         staged: bool = False,
     ) -> str:
+        try:
+            cwd = resolve_git_cwd(self, path)
+        except GitToolError as e:
+            return self._error(str(e))
+
         cmd = ["git", "diff"]
 
         if staged:
@@ -35,10 +46,10 @@ class GitDiffTool(InfinibayBaseTool):
             cmd.extend(["--", file])
 
         if self._is_pod_mode():
-            return self._run_in_pod(cmd)
+            return self._run_in_pod(cmd, cwd)
 
         try:
-            result = run_git(cmd, cwd=self._git_cwd, timeout=30, check=True)
+            result = run_git(cmd, cwd=cwd, timeout=30, check=True)
         except GitToolError as e:
             return self._error(str(e))
 
@@ -48,10 +59,16 @@ class GitDiffTool(InfinibayBaseTool):
 
         return output
 
-    def _run_in_pod(self, cmd: list[str]) -> str:
+    def _run_in_pod(self, cmd: list[str], host_cwd: str) -> str:
         """Execute git diff inside the agent's pod."""
+        workspace = self.workspace_path
+        cwd = None
+        if workspace:
+            workspace_real = os.path.realpath(workspace)
+            if os.path.commonpath((workspace_real, host_cwd)) == workspace_real:
+                cwd = os.path.relpath(host_cwd, workspace_real)
         try:
-            r = self._exec_in_pod(cmd, timeout=30)
+            r = self._exec_in_pod(cmd, cwd=cwd, timeout=30)
         except RuntimeError as e:
             return self._error(f"Pod execution failed: {e}")
 

@@ -123,6 +123,17 @@ class TestGating:
 
         assert se.should_elaborate(escalation) is True
 
+
+    def test_referenced_continuation_skips_elaboration_for_every_route(self):
+        request = "Lee infinigpu/CONTINUE.md y continua el trabajo"
+        escalation = EscalationPacket(
+            user_request=request,
+            understanding=request,
+        )
+
+        assert se.should_elaborate(escalation) is False
+
+
     def test_disabled_flag_skips(self, long_escalation):
         orig = settings.SPEC_ELABORATION_ENABLED
         settings.SPEC_ELABORATION_ENABLED = False

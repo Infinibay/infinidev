@@ -1,14 +1,16 @@
-"""Tool for viewing Git diffs."""
-
-from typing import Type
+"""Input schema for viewing Git diffs."""
 
 from pydantic import BaseModel, Field
 
-from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.git._helpers import run_git, GitToolError
-
 
 class GitDiffInput(BaseModel):
+    path: str | None = Field(
+        default=None,
+        description=(
+            "Repository directory relative to the workspace. Omit when the runtime "
+            "already selected a target or the workspace contains exactly one repo."
+        ),
+    )
     branch: str | None = Field(
         default=None, description="Branch to diff against (e.g. 'main')"
     )

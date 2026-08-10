@@ -147,6 +147,30 @@ def _parser_for_command(cmd: str) -> "TestParser | None":
     return None
 
 
+_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+
+
+def _strip_test_command_wrappers(command: str) -> str:
+    """Remove execution wrappers that do not change the selected tests."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return command
+    while tokens and _ENV_ASSIGNMENT_RE.match(tokens[0]):
+        tokens.pop(0)
+    if tokens and tokens[0].rsplit("/", 1)[-1].lower() == "timeout":
+        tokens.pop(0)
+        while tokens and tokens[0].startswith("-"):
+            option = tokens.pop(0)
+            if option in {"-s", "--signal", "-k", "--kill-after"} and tokens:
+                tokens.pop(0)
+        if tokens:
+            tokens.pop(0)
+        while tokens and _ENV_ASSIGNMENT_RE.match(tokens[0]):
+            tokens.pop(0)
+    return " ".join(tokens)
+
+
 def normalize_test_command(cmd: str) -> str:
     """Reduce a test command to its 'what is being tested' essence.
 
@@ -176,6 +200,7 @@ def normalize_test_command(cmd: str) -> str:
     if s.lower().startswith("cd ") and "&&" in s:
         s = s.split("&&", 1)[1].strip()
 
+    s = _strip_test_command_wrappers(s)
     parser = _parser_for_command(s)
     if parser is not None:
         return parser.normalize_command(s)

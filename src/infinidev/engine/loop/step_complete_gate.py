@@ -126,6 +126,7 @@ class StepCompleteGate:
         # correction turn. The second blocked claim is honoured so a broken
         # suggestion cannot deadlock the Task.
         self._recoverable_error_fired: set[int] = set()
+        self._recovery_escape_fired: set[int] = set()
 
     @staticmethod
     def _step_key(ctx: Any) -> int:
@@ -148,6 +149,7 @@ class StepCompleteGate:
         self._note_fired = set()
         self._hook_fired = set()
         self._recoverable_error_fired = set()
+        self._recovery_escape_fired = set()
 
     # ── the chain ────────────────────────────────────────────────────
 
@@ -162,6 +164,9 @@ class StepCompleteGate:
     ) -> bool:
         """``True`` when the step must stay open for one more turn."""
         if self._recoverable_tool_error(ctx, step_complete_call, messages):
+            return True
+
+        if self._workspace_recovery_escape(ctx, step_complete_call, messages):
             return True
 
         if self._latest_test_failed(ctx, step_complete_call, messages):
@@ -280,6 +285,59 @@ class StepCompleteGate:
                 ctx.agent_id,
                 {"step_index": step_key, "blocked": True},
             )
+        return True
+
+    def _workspace_recovery_escape(
+        self,
+        ctx: Any,
+        step_complete_call: Any,
+        messages: list[dict[str, Any]],
+    ) -> bool:
+        """Refuse one blocked escape caused only by the engine's recovery mode."""
+        if step_complete_status(step_complete_call) != "blocked":
+            return False
+        if not (
+            getattr(ctx, "suppress_discovery_this_step", False)
+            and getattr(ctx, "recovery_requires_workspace_change", False)
+        ):
+            return False
+
+        step_key = self._step_key(ctx)
+        if step_key in self._recovery_escape_fired:
+            return False
+
+        state = getattr(ctx, "state", None)
+        active = getattr(getattr(state, "plan", None), "active_step", None)
+        tracker = getattr(ctx, "file_tracker", None)
+        if tracker is not None and hasattr(tracker, "change_fingerprint"):
+            current = tracker.change_fingerprint(reconcile=True)
+            entry = getattr(state, "step_entry_change_fingerprints", {}).get(
+                getattr(active, "index", step_key)
+            )
+            if entry is not None and current != entry:
+                return False
+
+        self._recovery_escape_fired.add(step_key)
+        ctx.semantic_recovery_context_calls = max(
+            2, int(getattr(ctx, "semantic_recovery_context_calls", 0) or 0)
+        )
+        feedback = (
+            "step_complete BLOCKED — the engine's discovery recovery is not an "
+            "external blocker. The Step remains active and has no call budget. "
+            "Use the restored direct read_file allowance on the already grounded "
+            "source target, then make the smallest implementation change and run "
+            "its focused test. Repeat status=\"blocked\" only with concrete evidence "
+            "of a requirement outside this process."
+        )
+        self._engine._overwrite_step_complete_tool_result(
+            messages, step_complete_call.id, feedback,
+        )
+        emit_log(
+            "info",
+            "⚠ step_complete blocked — recovery mode is not an external blocker",
+            project_id=ctx.project_id,
+            agent_id=ctx.agent_id,
+        )
         return True
 
     # ── gate 1: notes ────────────────────────────────────────────────

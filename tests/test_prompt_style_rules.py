@@ -437,6 +437,7 @@ def test_primary_loop_prompt_separates_bars_from_adaptable_methods() -> None:
         BEHAVIOR_GUIDELINES,
         BEHAVIOR_GUIDELINES_SMALL,
         CLI_AGENT_IDENTITY,
+        LOOP_PROTOCOL,
     )
 
     assert "## Product bars and working guidance" in BEHAVIOR_GUIDELINES
@@ -449,6 +450,10 @@ def test_primary_loop_prompt_separates_bars_from_adaptable_methods() -> None:
     assert "| `anchor_file=" not in CLI_AGENT_IDENTITY
     assert "NEVER pause mid-loop" not in CLI_AGENT_IDENTITY
     assert "NEVER re-open it" not in CLI_AGENT_IDENTITY
+    assert "intentionally exposes planning tools" in LOOP_PROTOCOL
+    assert "There is no tool-call\nquota per Step" in LOOP_PROTOCOL
+    assert "Context pressure alone is not a technical\nblocker" in LOOP_PROTOCOL
+    assert "[Tool call N/threshold]" not in LOOP_PROTOCOL
 
 
 def test_execute_prompt_does_not_turn_heuristics_into_universal_rules() -> None:

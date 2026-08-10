@@ -52,6 +52,24 @@ _GRAPH_KEYWORDS = (
     "several ways", "options for", "branching", "non-linear", "weigh",
     "investiga", "compara", "alternativas", "hipótesis", "explora enfoques",
 )
+_INTERNAL_CONTEXT_MARKERS = (
+    "<retrieval-context",
+    '<hook-output event="task_start"',
+)
+
+
+def _literal_routing_request(request: str) -> str:
+    """Exclude injected retrieval/hook text from engine classification."""
+    lowered = request.lower()
+    cut_points = [
+        index
+        for marker in _INTERNAL_CONTEXT_MARKERS
+        if (index := lowered.find(marker)) >= 0
+    ]
+    if cut_points:
+        request = request[:min(cut_points)]
+    return request.strip()
+
 
 
 @dataclass(frozen=True)
@@ -95,7 +113,9 @@ def normalize_mode(raw: str | None) -> str:
 
 def _extract_features(escalation: Any) -> dict[str, Any]:
     """Cheap, explainable features off the EscalationPacket."""
-    request = getattr(escalation, "user_request", "") or ""
+    request = _literal_routing_request(
+        getattr(escalation, "user_request", "") or ""
+    )
     text = request.lower()
     features = {
         "request_len": len(request),

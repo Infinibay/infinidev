@@ -45,6 +45,7 @@ from infinidev.engine.oversized_result import (
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.engine.orchestration.request_signals import (
     is_grounded_execution_request,
+    is_referenced_continuation_request,
 )
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
@@ -56,7 +57,6 @@ from infinidev.tools.base.context import (
 logger = logging.getLogger(__name__)
 
 _MAX_RESULT_CHARS = 6000
-
 
 # ── Public entry point ────────────────────────────────────────────────────
 
@@ -74,6 +74,8 @@ def should_elaborate(escalation: EscalationPacket) -> bool:
     if len(request) < settings.SPEC_ELABORATION_MIN_CHARS:
         return False
     if is_grounded_execution_request(request):
+        return False
+    if is_referenced_continuation_request(request):
         return False
     return True
 

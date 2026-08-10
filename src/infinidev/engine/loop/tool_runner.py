@@ -62,6 +62,7 @@ _BUDGET_EXHAUSTED_RESULT = (
 )
 _REPEATED_READ_STATUS = "already_delivered"
 _DISCOVERY_SUPPRESSED_STATUS = "discovery_suppressed"
+_REPEATED_TEST_STATUS = "test_already_run"
 _MAX_READ_DELIVERY_KEYS = 256
 
 
@@ -90,7 +91,11 @@ class ToolRunner:
         tool_results_text: list[str] = []
         deferred: list[dict[str, Any]] = []
         step_limit = getattr(ctx, "step_tool_limit", ctx.max_per_action)
-        remaining = max(0, step_limit - action_tool_calls)
+        remaining = (
+            len(classified.regular)
+            if step_limit is None
+            else max(0, step_limit - action_tool_calls)
+        )
         if ctx.max_total_calls is not None:
             remaining = min(
                 remaining,
@@ -249,6 +254,8 @@ class ToolRunner:
             "completion_tokens": ctx.state.last_completion_tokens,
             "project_id": ctx.project_id,
             "agent_id": ctx.agent_id,
+            "step_limit": getattr(ctx, "step_tool_limit", ctx.max_per_action),
+            "total_limit": ctx.max_total_calls,
             "cancel_event": self._engine._tool_cancel_event,
         }
         # tc.id → the images that call produced. Flushed as their own user
@@ -282,6 +289,9 @@ class ToolRunner:
             suppressed_results, executable_batch = self._partition_suppressed_discovery(
                 ctx, executable_batch,
             )
+            repeated_test_results, executable_batch = self._partition_repeated_tests(
+                ctx, executable_batch,
+            )
             cached_results, executable_batch = self._partition_repeated_reads(
                 ctx, executable_batch,
             )
@@ -308,7 +318,8 @@ class ToolRunner:
                 self._engine._finish_tool_batch()
 
             synthetic_results = [
-                *plan_results, *suppressed_results, *cached_results,
+                *plan_results, *suppressed_results, *repeated_test_results,
+                *cached_results,
             ]
             if synthetic_results:
                 by_id = {
@@ -459,6 +470,11 @@ class ToolRunner:
                 name in _COMPLETION_TOOL_NAMES
                 or is_workspace_edit_tool(name)
             )
+            if (
+                getattr(ctx, "freeze_plan_growth_in_recovery", False)
+                and name in {"add_step", "remove_step"}
+            ):
+                allow_action = False
             if name == "execute_command":
                 try:
                     args = (
@@ -481,7 +497,10 @@ class ToolRunner:
                 # Workspace mutations have first-class tools; the only shell
                 # action admitted here is a recognised test runner.
                 allow_action = is_test
-                context_read = safe and not is_test
+                context_read = (
+                    safe and not is_test
+                    and not getattr(ctx, "recovery_direct_reads_only", False)
+                )
             allowance = int(
                 getattr(ctx, "semantic_recovery_context_calls", 0) or 0
             )
@@ -504,6 +523,51 @@ class ToolRunner:
                     "whose target covers that edited file, update the plan, "
                     "or complete the Step"
                 ),
+            })))
+        return synthetic, executable
+    @staticmethod
+    def _partition_repeated_tests(
+        ctx: ExecutionContext,
+        batch: list[Any],
+    ) -> tuple[list[tuple[Any, str]], list[Any]]:
+        """Reuse an unchanged test target only for opted-in model routes."""
+        if not getattr(ctx, "reuse_unchanged_test_results", False):
+            return [], batch
+        from infinidev.engine.guidance import is_test_command, normalize_test_command
+
+        file_tracker = getattr(ctx, "file_tracker", None)
+        if file_tracker is None or not hasattr(file_tracker, "change_fingerprint"):
+            return [], batch
+        fingerprint = file_tracker.change_fingerprint()
+        checkpoints = ctx.state.test_workspace_fingerprints
+        synthetic: list[tuple[Any, str]] = []
+        executable: list[Any] = []
+        for tc in batch:
+            if (
+                tc.function.name != "execute_command"
+                or not is_test_command(tc.function.arguments, ctx.state)
+            ):
+                executable.append(tc)
+                continue
+            try:
+                args = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            command = str(args.get("command", "")) if isinstance(args, dict) else ""
+            key = normalize_test_command(command)
+            if key not in checkpoints or checkpoints[key] != fingerprint:
+                executable.append(tc)
+                continue
+            history = ctx.state.test_outcome_history.get(key, [])
+            synthetic.append((tc, json.dumps({
+                "status": _REPEATED_TEST_STATUS,
+                "message": (
+                    "This test target already ran against the current workspace. "
+                    "Use last_test_output or tail_test_output; change the code "
+                    "before running it again."
+                ),
+                "test_target": key,
+                "previous_outcome": history[-1] if history else None,
             })))
         return synthetic, executable
 
@@ -861,6 +925,7 @@ class ToolRunner:
             and payload.get("status") in {
                 _REPEATED_READ_STATUS,
                 _DISCOVERY_SUPPRESSED_STATUS,
+                _REPEATED_TEST_STATUS,
             }
         )
 
@@ -980,9 +1045,13 @@ class ToolRunner:
         pending_nudge: str | None = None
 
         for tc, result in batch_results:
+            progress_before = tuple(sorted(
+                (command, tuple(fingerprints))
+                for command, fingerprints
+                in ctx.state.test_outcome_history.items()
+            ))
             tool_error = extract_tool_error(result)
             no_new_evidence = self._is_synthetic_no_evidence_result(result)
-            guard.on_tool_result(tc.function.name, tc.function.arguments, bool(tool_error))
             tracker.on_tool_call(tc.function.name, tc.function.arguments, bool(tool_error))
 
             if not tool_error and not no_new_evidence:
@@ -1013,6 +1082,27 @@ class ToolRunner:
                     self._refresh_opened_files_after_shell(
                         ctx, tc.function.arguments,
                     )
+            progress_after = tuple(sorted(
+                (command, tuple(fingerprints))
+                for command, fingerprints
+                in ctx.state.test_outcome_history.items()
+            ))
+            workspace_fingerprint = (
+                ctx.file_tracker.change_fingerprint()
+                if hasattr(ctx.file_tracker, "change_fingerprint")
+                else None
+            )
+            guard.on_tool_result(
+                tc.function.name,
+                tc.function.arguments,
+                bool(tool_error),
+                made_progress=(
+                    not tool_error
+                    and not no_new_evidence
+                    and progress_after != progress_before
+                ),
+                workspace_fingerprint=workspace_fingerprint,
+            )
 
             if not tool_error and not no_new_evidence:
                 with best_effort("memory annotation failed for %s", tc.function.name):
@@ -1205,10 +1295,14 @@ class ToolRunner:
     def _counter_tag(
         ctx: ExecutionContext, action_tool_calls: int, is_parallel: bool
     ) -> str:
-        """Tell the model how much of its per-step budget it has spent."""
+        """Tell the model the Step-local call count without inventing a budget."""
+        step_limit = getattr(ctx, "step_tool_limit", ctx.max_per_action)
+        if step_limit is None:
+            tag = f"\n[Tool call {action_tool_calls + 1} for this step]"
+            return tag + " (parallel)" if is_parallel else tag
         tag = (
             f"\n[Tool call {action_tool_calls + 1}/"
-            f"{getattr(ctx, 'step_tool_limit', ctx.max_per_action)} "
+            f"{step_limit} "
             f"for this step]"
         )
         return tag + " (parallel)" if is_parallel else tag
@@ -1260,6 +1354,9 @@ class ToolRunner:
         not on every remaining call of the step.
         """
         default = 4 if ctx.is_small else _get_settings().LOOP_STEP_NUDGE_THRESHOLD
+        step_limit = getattr(ctx, "step_tool_limit", ctx.max_per_action)
+        if step_limit is None:
+            return None
         override = self._engine._nudge_threshold_override
         threshold = override if override is not None else default
         if threshold <= 0 or action_tool_calls != threshold:
@@ -1270,7 +1367,6 @@ class ToolRunner:
                 used=action_tool_calls, threshold=threshold,
             )
         active = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
-        step_limit = getattr(ctx, "step_tool_limit", ctx.max_per_action)
         remaining = max(0, step_limit - action_tool_calls)
         return (
             f"You have used {action_tool_calls}/{step_limit} tool calls "
@@ -1348,13 +1444,23 @@ class ToolRunner:
             exit_code = payload.get("exit_code") if isinstance(payload, dict) else None
             if isinstance(exit_code, int) and not isinstance(exit_code, bool):
                 ctx.state.last_test_exit_code = exit_code
+                if exit_code == 0 and command.strip():
+                    ctx.state.last_passing_test_command = command[:300]
 
+            key = normalize_test_command(command)
             if fingerprint := test_outcome_fingerprint(result):
-                key = normalize_test_command(command)
                 history = ctx.state.test_outcome_history.get(key, [])
                 if not history or history[-1] != fingerprint:
                     history.append(fingerprint)
                     ctx.state.test_outcome_history[key] = history[-2:]
+                if getattr(ctx, "reuse_unchanged_test_results", False):
+                    file_tracker = getattr(ctx, "file_tracker", None)
+                    if file_tracker is not None and hasattr(
+                        file_tracker, "change_fingerprint"
+                    ):
+                        ctx.state.test_workspace_fingerprints[key] = (
+                            file_tracker.change_fingerprint()
+                        )
 
             try:
                 from infinidev.engine.test_parsers import parse_test_failures

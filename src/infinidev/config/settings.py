@@ -181,11 +181,11 @@ class Settings(BaseSettings):
 
     # Loop Engine (plan-execute-summarize)
     LOOP_MAX_ITERATIONS: int = 50
-    # A hard per-step fuse applies to every execution engine. Individual
-    # adapters may choose a tighter value, but no model can consume an entire
-    # task/node budget in one unbounded inner loop.
-    LOOP_MAX_TOOL_CALLS_PER_ACTION: int = 12  # 0 = unlimited (legacy opt-out)
-    LOOP_MAX_TOTAL_TOOL_CALLS: int = 1000
+    # Developer loops compact on context pressure and stop on semantic
+    # non-progress, not on an arbitrary count of otherwise useful tool calls.
+    # Explicit compatibility engines may still pass their own run-level fuse.
+    LOOP_MAX_TOOL_CALLS_PER_ACTION: int = 0
+    LOOP_MAX_TOTAL_TOOL_CALLS: int = 0
     # Staged execution starts a new developer loop for every Task. A bounded
     # per-Task fuse prevents one small Task from inheriting the legacy
     # whole-request limit.
@@ -254,7 +254,7 @@ class Settings(BaseSettings):
     # Whether the Auto coordinator may pick graph_beta for non-linear,
     # branching work. Explicit `graph_beta` always runs the Graph engine
     # regardless of this flag.
-    AUTO_ENGINE_ALLOW_GRAPH: bool = True
+    AUTO_ENGINE_ALLOW_GRAPH: bool = False
     # Surface a short "engine X chosen because …" status line per task.
     ENGINE_SHOW_SELECTION_REASON: bool = True
     # ReAct budget fuses — resource ceilings, never success conditions.
@@ -265,16 +265,16 @@ class Settings(BaseSettings):
     # thousands of prompt tokens while still staying under forty read tools,
     # so tools alone are not a sufficient fuse. Zero disables this limit.
     REACT_MAX_PROMPT_TOKENS: int = 300_000
-    TASK_MAX_ITERATIONS: int = 50
+    # The durable Task has no Step-count ceiling. Zero means unlimited; its
+    # active transcript is bounded by automatic context compaction instead.
+    TASK_MAX_ITERATIONS: int = 0
     # A durable Task is progress-bounded, not call-count-bounded. Zero means
     # unlimited total calls. Local Step boundaries still compact accumulated
     # context, while the loop's non-progress guards remain independent.
     TASK_MAX_TOOL_CALLS: int = 0
-    # A rolling Task must return to its plan after a bounded amount of work.
-    # ``LOOP_MAX_TOOL_CALLS_PER_ACTION=0`` intentionally means unlimited for
-    # the legacy loop, but inheriting the full Task budget here lets one
-    # exploratory step consume the entire Task before its nudge is honoured.
-    TASK_MAX_TOOL_CALLS_PER_STEP: int = 12
+    # Steps are bounded by context pressure and progress evidence, not call count.
+    # Zero keeps their tool surface open until completion, cancellation, or compaction.
+    TASK_MAX_TOOL_CALLS_PER_STEP: int = 0
     # The chat agent is a router, not a second developer loop. Its prompt
     # allows 0-3 grounding reads before a required respond/escalate decision;
     # keep a short hard ceiling so it cannot delay every engine behind a long
@@ -504,9 +504,12 @@ class Settings(BaseSettings):
     # explicit-mention channels are computed from. Without it Ken answers
     # with only the name/text channels — measured: reactive 0, explicit 0,
     # findings 0 — because a query string cannot say what this session has
-    # been doing. Off by default: it changes what the model sees, so it
-    # wants measuring before it becomes the default.
-    KEN_SESSION_ENABLED: bool = False
+    # been doing.
+    # Enabled by default when the workspace has a .ken project. The client is
+    # best-effort and silent elsewhere; when Ken is installed it also starts
+    # the local daemon on first use so this switch cannot be nominally on but
+    # operationally inert. Set false to opt out of automatic Ken retrieval.
+    KEN_SESSION_ENABLED: bool = True
 
     # ContextRank (cross-session context prioritization)
     CONTEXT_RANK_ENABLED: bool = False

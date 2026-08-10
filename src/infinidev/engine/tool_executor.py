@@ -534,9 +534,18 @@ def capture_pre_content(
         if size > MAX_TRACK_FILE_SIZE:
             return None
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
+            content = f.read()
     except Exception:
         return None
+    try:
+        from infinidev.code_intel.file_change_notifications import (
+            record_text_integrity_baseline,
+        )
+
+        record_text_integrity_baseline(file_path, content)
+    except Exception:
+        pass
+    return content
 
 
 def extract_reason_from_args(arguments: str | dict) -> str:

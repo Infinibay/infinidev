@@ -13,7 +13,12 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def ensure_indexed(project_id: int, file_path: str) -> bool:
+def ensure_indexed(
+    project_id: int,
+    file_path: str,
+    *,
+    notify_integrity: bool = True,
+) -> bool:
     """Ensure a file is indexed with its current content.
 
     Compares the stored content hash with the current file content.
@@ -22,6 +27,8 @@ def ensure_indexed(project_id: int, file_path: str) -> bool:
     Args:
         project_id: Project ID for the index
         file_path: Absolute or relative path to the file
+        notify_integrity: Whether parser errors should be queued. Reads pass
+            False to establish a pre-change baseline without warning.
 
     Returns:
         True if the file was (re)indexed, False if already up-to-date or skipped.
@@ -48,12 +55,26 @@ def ensure_indexed(project_id: int, file_path: str) -> bool:
     stored_hash = get_file_hash(project_id, abs_path)
 
     if stored_hash == current_hash:
-        return False  # Already up-to-date
+        if not notify_integrity:
+            from infinidev.code_intel.file_change_notifications import (
+                has_integrity_baseline,
+                record_text_integrity_baseline,
+            )
+
+            if not has_integrity_baseline(abs_path):
+                record_text_integrity_baseline(
+                    abs_path, content.decode("utf-8", errors="replace"),
+                )
+        return False
 
     # Needs (re)indexing
     try:
         from infinidev.code_intel.indexer import index_file
-        count = index_file(project_id, abs_path)
+        count = index_file(
+            project_id,
+            abs_path,
+            notify_integrity=notify_integrity,
+        )
         if count > 0:
             logger.debug("Reindexed %s: %d symbols", abs_path, count)
             return True

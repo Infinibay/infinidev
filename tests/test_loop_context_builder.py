@@ -38,17 +38,25 @@ def test_zero_total_tool_budget_reaches_the_loop_as_unlimited(
         agent,
         ("Complete a long task", "Verified result"),
         task_tools=[],
+        max_iterations=0,
         max_total_tool_calls=0,
-        max_tool_calls_per_action=12,
+        max_tool_calls_per_action=0,
         verbose=False,
     )
 
+    assert ctx.max_iterations is None
     assert ctx.max_total_calls is None
-    assert ctx.max_per_action == 12
-    assert ctx.model_policy_name == "minimax-m3-v5"
+    assert ctx.max_per_action == 0
+    assert ctx.model_policy_name == "minimax-m3-v9"
     assert ctx.renew_step_budget_on_progress is True
     assert ctx.semantic_stagnation_control is True
-    assert ctx.step_tool_limit == 12
+    assert ctx.recovery_direct_reads_only is True
+    assert ctx.reuse_unchanged_test_results is True
+    assert ctx.freeze_plan_growth_in_recovery is True
+    assert ctx.recovery_requires_workspace_change is True
+    assert "MiniMax M3 execution calibration" in ctx.system_prompt
+    assert "Preserve the literal requested outcome" in ctx.system_prompt
+    assert ctx.step_tool_limit is None
 
 
 def test_positive_total_tool_budget_remains_available_for_bounded_phases(
@@ -88,4 +96,9 @@ def test_positive_total_tool_budget_remains_available_for_bounded_phases(
     assert ctx.max_total_calls == 40
     assert ctx.max_per_action == 12
     assert ctx.renew_step_budget_on_progress is False
-    assert ctx.semantic_stagnation_control is False
+    assert ctx.semantic_stagnation_control is True
+    assert ctx.recovery_direct_reads_only is True
+    assert ctx.reuse_unchanged_test_results is True
+    assert ctx.freeze_plan_growth_in_recovery is True
+    assert ctx.recovery_requires_workspace_change is True
+    assert "MiniMax M3 execution calibration" not in ctx.system_prompt

@@ -98,6 +98,9 @@ class LoopState(BaseModel):
     # yet in this task.
     last_test_output: str = ""
     last_test_command: str = ""
+    # Most recent recognised test command that exited successfully. Failed
+    # diagnostic suites must not replace the review gate with unrelated debt.
+    last_passing_test_command: str = ""
     # Exit status of the latest recognised test command. ``None`` means no
     # test has run in this Task. A failing latest run is a deterministic
     # completion veto until a later test succeeds (or the model reports a
@@ -116,6 +119,13 @@ class LoopState(BaseModel):
     # plus the 2-entry-per-key history makes it impossible to confuse
     # an unrelated test run with a regression.
     test_outcome_history: dict[str, list[str]] = Field(default_factory=dict)
+    # Net workspace fingerprint at the last execution of each normalised test
+    # command. MiniMax reuses the prior result when the target and workspace
+    # state are unchanged instead of spending another process/tool call.
+    test_workspace_fingerprints: dict[
+        str, tuple[tuple[str, str], ...]
+    ] = Field(default_factory=dict)
+
     # Sticky flag set the moment the regression detector observes a
     # regression for the first time in this task. The detector checks
     # this and self-suppresses on subsequent steps so the model isn't

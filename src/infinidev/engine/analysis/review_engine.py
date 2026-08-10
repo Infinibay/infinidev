@@ -1010,6 +1010,36 @@ def _format_objective_failures(failed: list[tuple[int, str, Any, Any]]) -> str:
     return "\n".join(parts)
 
 
+
+
+def _preferred_review_test_command(state: Any) -> str:
+    """Return only a test command already observed passing in this task."""
+    if state is None:
+        return ""
+    passing = str(getattr(state, "last_passing_test_command", "") or "").strip()
+    if passing:
+        return passing
+    if getattr(state, "last_test_exit_code", None) == 0:
+        return str(getattr(state, "last_test_command", "") or "").strip()
+    return ""
+def _review_workspace(engine: Any, agent: Any) -> str | None:
+    """Prefer the request's nested repository over the broad file workspace."""
+    from infinidev.tools.base.context import (
+        get_context_for_agent,
+        get_current_workspace_path,
+    )
+
+    repository = getattr(engine, "_repository_path", None)
+    if repository:
+        return repository
+    agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)
+    if agent_id:
+        repository = get_context_for_agent(agent_id).repository_path
+        if repository:
+            return repository
+    return getattr(engine, "_workspace", None) or get_current_workspace_path()
+
+
 def _build_review_rework_description(task_description: str, feedback: str) -> str:
     """Keep reviewer-requested rework inside the original task boundary."""
     return (
@@ -1107,10 +1137,7 @@ def run_review_rework_loop(
         nonlocal deterministic_blocker
         from infinidev.engine.analysis.verification_engine import VerificationEngine
 
-        workspace = getattr(engine, '_workspace', None)
-        if not workspace:
-            from infinidev.tools.base.context import get_current_workspace_path
-            workspace = get_current_workspace_path()
+        workspace = _review_workspace(engine, agent)
 
         if not workspace:
             return current_result
@@ -1118,7 +1145,7 @@ def run_review_rework_loop(
         result_under_test = current_result
         for attempt in range(3):
             state = getattr(engine, "_last_state", None)
-            preferred_test_command = getattr(state, "last_test_command", "")
+            preferred_test_command = _preferred_review_test_command(state)
             verifier = VerificationEngine(
                 workspace=workspace,
                 preferred_test_command=preferred_test_command,
@@ -1179,10 +1206,7 @@ def run_review_rework_loop(
         if not checks or not getattr(_settings, "REVIEW_OBJECTIVE_REVERIFY_ENABLED", True):
             return current_result
 
-        workspace = getattr(engine, '_workspace', None)
-        if not workspace:
-            from infinidev.tools.base.context import get_current_workspace_path
-            workspace = get_current_workspace_path()
+        workspace = _review_workspace(engine, agent)
         if not workspace:
             return current_result
 

@@ -207,6 +207,40 @@ def test_unlimited_total_budget_does_not_truncate_a_tool_batch() -> None:
         for message in messages
     )
     assert_tool_block_contiguous(messages)
+def test_unlimited_step_executes_the_full_batch_without_budget_nudge() -> None:
+    ctx = _ctx()
+    ctx.max_per_action = 0
+    ctx.step_tool_limit = None
+    ctx.max_total_calls = None
+    runner = ToolRunner(_engine(nudge_at=1))
+    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "task"}]
+    classified = ClassifiedCalls(regular=[
+        _call("c1", "read_file", '{"file_path": "a.py"}'),
+        _call("c2", "read_file", '{"file_path": "b.py"}'),
+        _call("c3", "read_file", '{"file_path": "c.py"}'),
+    ])
+    result = SimpleNamespace(
+        message=SimpleNamespace(content="", tool_calls=[]), raw_content="",
+    )
+
+    used = runner.run_regular(
+        ctx, classified, messages, result, action_tool_calls=0, iteration=0,
+        guard=LoopGuard(is_small=False), tracker=BehaviorTracker(set()),
+    )
+
+    assert used == 3
+    assert ctx.state.total_tool_calls == 3
+    tool_bodies = [
+        message["content"] for message in messages if message.get("role") == "tool"
+    ]
+    assert any("[Tool call 3 for this step]" in body for body in tool_bodies)
+    assert not any("STEP BUDGET" in body for body in tool_bodies)
+    assert not any(
+        "not_run: tool budget exhausted" in message.get("content", "")
+        for message in messages
+    )
+    assert_tool_block_contiguous(messages)
+
 
 
 def test_step_complete_ack_stays_inside_the_block():
@@ -620,6 +654,118 @@ def test_semantic_recovery_spends_two_local_reads_then_suppresses_discovery(tmp_
     assert ctx.semantic_recovery_context_calls == 0
 
 
+def test_minimax_recovery_allows_only_direct_file_reads():
+    ctx = _ctx()
+    ctx.suppress_discovery_this_step = True
+    ctx.semantic_recovery_context_calls = 2
+    ctx.recovery_direct_reads_only = True
+    runner = ToolRunner(_engine(nudge_at=99))
+    ctx.freeze_plan_growth_in_recovery = True
+    calls = [
+        _call("read-1", "read_file", '{"file_path":"module.py"}'),
+        _call(
+            "shell-1",
+            "execute_command",
+            '{"command":"grep -n needle module.py"}',
+        ),
+        _call("plan-1", "add_step", '{"title":"Investigate alternatives"}'),
+    ]
+
+    suppressed, executable = runner._partition_suppressed_discovery(ctx, calls)
+
+    assert [call.id for call, _ in suppressed] == ["shell-1", "plan-1"]
+    assert [call.id for call in executable] == ["read-1"]
+    assert ctx.semantic_recovery_context_calls == 1
+
+
+def test_repeated_test_checkpoint_is_minimax_policy_conditional():
+    from infinidev.engine.guidance import normalize_test_command
+
+    ctx = _ctx()
+    runner = ToolRunner(_engine(nudge_at=99))
+    call = _call(
+        "test-1",
+        "execute_command",
+        '{"command":"pytest tests/test_module.py -q"}',
+    )
+    key = normalize_test_command("pytest tests/test_module.py -q")
+    ctx.state.test_workspace_fingerprints[key] = ()
+    ctx.state.test_outcome_history[key] = ["passed:1"]
+
+    ctx.reuse_unchanged_test_results = True
+    cached, executable = runner._partition_repeated_tests(ctx, [call])
+    assert executable == []
+    assert json.loads(cached[0][1])["status"] == "test_already_run"
+
+    ctx.reuse_unchanged_test_results = False
+    cached, executable = runner._partition_repeated_tests(ctx, [call])
+    assert cached == []
+    assert executable == [call]
+
+def test_cargo_test_checkpoint_normalizes_wrappers_and_argument_separator():
+    from infinidev.engine.guidance import normalize_test_command
+
+    first = (
+        "timeout 300 cargo test -p infinigpu-device --lib --no-fail-fast "
+        "forwarded_cmdlist_decodes 2>&1 | tail -20"
+    )
+    repeated = (
+        "RUST_BACKTRACE=1 cargo test -p infinigpu-device --lib "
+        "--no-fail-fast -- forwarded_cmdlist_decodes"
+    )
+    assert normalize_test_command(first) == normalize_test_command(repeated)
+
+    ctx = _ctx()
+    ctx.reuse_unchanged_test_results = True
+    key = normalize_test_command(first)
+    ctx.state.test_workspace_fingerprints[key] = ()
+    ctx.state.test_outcome_history[key] = ["1 failed"]
+    call = _call(
+        "test-2", "execute_command", json.dumps({"command": repeated})
+    )
+
+    cached, executable = ToolRunner(_engine())._partition_repeated_tests(
+        ctx, [call]
+    )
+
+    assert executable == []
+    assert json.loads(cached[0][1])["status"] == "test_already_run"
+
+
+def test_no_run_command_does_not_create_test_checkpoint():
+    ctx = _ctx()
+    ctx.reuse_unchanged_test_results = True
+    arguments = json.dumps({"command": "cargo test --lib --no-run"})
+    result = json.dumps({
+        "exit_code": 0,
+        "stdout": "Finished test profile; executable generated",
+    })
+
+    ToolRunner.capture_test_output(ctx, arguments, result)
+
+    assert ctx.state.test_outcome_history == {}
+    assert ctx.state.test_workspace_fingerprints == {}
+
+
+
+def test_workspace_change_releases_minimax_test_checkpoint(tmp_path):
+    from infinidev.engine.guidance import normalize_test_command
+
+    ctx = _ctx()
+    ctx.reuse_unchanged_test_results = True
+    runner = ToolRunner(_engine(nudge_at=99))
+    call = _call("test-1", "execute_command", '{"command":"pytest -q"}')
+    key = normalize_test_command("pytest -q")
+    ctx.state.test_workspace_fingerprints[key] = ()
+    path = tmp_path / "module.py"
+    ctx.file_tracker.record(str(path), "before\n", "after\n")
+
+    cached, executable = runner._partition_repeated_tests(ctx, [call])
+
+    assert cached == []
+    assert executable == [call]
+
+
 def test_semantic_recovery_does_not_treat_unknown_shell_as_progress():
     ctx = _ctx()
     ctx.suppress_discovery_this_step = True
@@ -799,3 +945,22 @@ def test_denied_test_command_does_not_replace_verifier_command(monkeypatch):
 
     assert ctx.state.last_test_command == ""
     assert "Command denied by user" in messages[0]["content"]
+
+
+def test_failed_diagnostic_does_not_replace_last_passing_test_command():
+    ctx = _ctx()
+
+    ToolRunner.capture_test_output(
+        ctx,
+        json.dumps({"command": "pytest tests/test_focused.py"}),
+        json.dumps({"exit_code": 0, "stdout": "1 passed", "stderr": ""}),
+    )
+    ToolRunner.capture_test_output(
+        ctx,
+        json.dumps({"command": "pytest"}),
+        json.dumps({"exit_code": 1, "stdout": "3 failed", "stderr": ""}),
+    )
+
+    assert ctx.state.last_test_command == "pytest"
+    assert ctx.state.last_test_exit_code == 1
+    assert ctx.state.last_passing_test_command == "pytest tests/test_focused.py"

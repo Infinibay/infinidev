@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from infinidev.config.settings import settings
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.models import LoopState
+from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.prompt.tools_section import (
     build_tools_prompt_section,
     _build_tools_prompt_small,
@@ -32,6 +34,18 @@ __all__ = [
 # breakpoints, the marker is stripped before the LLM call. Looks like a
 # benign HTML comment if ever leaked.
 CACHE_BREAKPOINT_MARKER = "<!--__INFINIDEV_CACHE_BREAK__-->"
+_STRUCTURED_TASK_COPY_RE = re.compile(
+    r"<task\b[^>]*>.*?</task>|<goal\b[^>]*>.*?</goal>",
+    re.DOTALL,
+)
+
+
+def _structured_task_supplement(description: str) -> str:
+    """Keep orchestration context while avoiding a duplicate task/goal block."""
+    match = _STRUCTURED_TASK_COPY_RE.search(description)
+    if match is None:
+        return ""
+    return (description[:match.start()] + description[match.end():]).strip()
 
 
 def _verbatim_step_budget() -> int:
@@ -243,6 +257,8 @@ def build_iteration_prompt(
             # Defensive: if rendering somehow fails, never lose the
             # task — fall through to the plain block.
             parts.append(f"<task>\n{description}\n</task>")
+        else:
+            _append_if(parts, _structured_task_supplement(description))
     else:
         parts.append(f"<task>\n{description}\n</task>")
 
@@ -272,14 +288,12 @@ def build_iteration_prompt(
         if notifications:
             lines = ["<file-integrity-warning>"]
             lines.append(
-                "The following files on disk are currently in a "
-                "syntactically broken state. Something (a shell "
-                "command, an external editor, or one of your own "
-                "edits) left them with tree-sitter parse errors. "
-                "Read each file, understand what went wrong, and "
-                "fix it with edit_file or create_file before "
-                "doing anything else — downstream tools that read "
-                "these files will see garbage."
+                "The following files gained new tree-sitter parse errors "
+                "relative to their last indexed baseline. A shell command, "
+                "external editor, or recent tool edit may have introduced "
+                "them. Read the cited area and fix the newly introduced "
+                "error before continuing. Do not rewrite unrelated "
+                "pre-existing syntax or parser limitations."
             )
             lines.append("")
             for n in notifications[:5]:
@@ -534,17 +548,12 @@ def build_iteration_prompt(
             f"Tokens remaining: {remaining}",
         ]
 
-        if pct_used >= 85:
+        if ContextManager.under_context_pressure(used, max_context_tokens):
             budget_lines.append(
-                "⚠ CRITICAL: context window almost full — wrap up NOW per the protocol's "
-                "context-budget rule: step_complete(status=\"done\"), summarising what was "
-                "accomplished and what remains in final_answer."
-            )
-        elif pct_used >= 70:
-            budget_lines.append(
-                "⚠ WARNING: context window running low — finish this step, then "
-                "step_complete(status=\"done\") per the protocol's context-budget rule, "
-                "with remaining work listed as follow-ups in final_answer."
+                "⚠ Automatic context compaction is active: consumed tool output "
+                "is shortened while current evidence, notes, and the active Step "
+                "remain available. Continue the Step normally; context pressure "
+                "is not a completion signal and does not create a tool-call budget."
             )
 
         parts.append(
@@ -630,7 +639,10 @@ def _render_context_rank(result: Any | None, *, max_chars: int | None = None) ->
         '<context-rank source="infinidev.context-rank" authority="advisory" '
         'scope-effect="none">',
         "Automated retrieval suggestions, not user requirements, permission, or proof.",
-        "Use them to decide what to inspect; verify relevance and current contents before acting.",
+        "Before broad discovery, use the highest-ranked target whose path or finding reason "
+        "matches the active step. If a finding names a file, symbol, or constraint, verify that "
+        "target directly instead of rediscovering it through repeated searches and reads.",
+        "Verify relevance and current contents before acting.",
         "Symbol outlines are retrieval previews and may be stale.",
     ]
     if result.files:

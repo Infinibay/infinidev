@@ -80,7 +80,13 @@ def build_execution_context(
             "Ensure INFINIDEV_LLM_MODEL is set."
         )
 
-    max_iterations = kwargs.get("max_iterations") or settings.LOOP_MAX_ITERATIONS
+    configured_iterations = kwargs.get("max_iterations")
+    max_iterations = (
+        settings.LOOP_MAX_ITERATIONS
+        if configured_iterations is None
+        else int(configured_iterations)
+    )
+    max_iterations = max_iterations if max_iterations > 0 else None
     configured_total_calls = kwargs.get("max_total_tool_calls")
     if configured_total_calls is None:
         configured_total_calls = settings.LOOP_MAX_TOTAL_TOOL_CALLS
@@ -88,15 +94,13 @@ def build_execution_context(
     max_prompt_tokens = kwargs.get("max_prompt_tokens")
     if max_prompt_tokens is not None and max_prompt_tokens <= 0:
         max_prompt_tokens = None
-    # A zero per-step budget retains the legacy opt-out. When the total is
-    # unlimited too, use a machine-sized sentinel internally; normal durable
-    # Tasks always keep their finite local Step fuse.
+    # Zero means no call-count boundary for a Step. Keep it explicit rather
+    # than replacing it with a huge integer that leaks into prompts and UI.
     configured_per_action = kwargs.get("max_tool_calls_per_action")
     if configured_per_action is None:
         configured_per_action = settings.LOOP_MAX_TOOL_CALLS_PER_ACTION
-    max_per_action = int(configured_per_action)
-    if max_per_action <= 0:
-        max_per_action = max_total_calls or (2**63 - 1)
+    max_per_action = max(0, int(configured_per_action))
+    step_tool_limit = max_per_action or None
 
     model_policy = resolve_model_execution_policy(
         settings.LLM_PROVIDER,
@@ -175,6 +179,8 @@ def build_execution_context(
         small_model=is_small,
         workspace_path=getattr(agent, "workspace_path", None),
     )
+    if model_policy.prompt_addendum:
+        system_prompt = f"{system_prompt}\n\n{model_policy.prompt_addendum}"
     from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
     system_prompt = apply_calibrated_guidance(system_prompt, "developer")
@@ -210,6 +216,11 @@ def build_execution_context(
         require_step_orientation=model_policy.require_step_orientation,
         renew_step_budget_on_progress=model_policy.renew_step_budget_on_progress,
         semantic_stagnation_control=model_policy.semantic_stagnation_control,
+        recovery_direct_reads_only=model_policy.recovery_direct_reads_only,
+        reuse_unchanged_test_results=model_policy.reuse_unchanged_test_results,
+        freeze_plan_growth_in_recovery=model_policy.freeze_plan_growth_in_recovery,
+        recovery_requires_workspace_change=(
+            model_policy.recovery_requires_workspace_change),
         system_prompt=system_prompt, tool_schemas=tool_schemas,
         tool_dispatch=tool_dispatch,
         planning_schemas=[
@@ -217,7 +228,7 @@ def build_execution_context(
             ADD_NOTE_SCHEMA, STEP_COMPLETE_SCHEMA,
         ],
         tools=tools, max_iterations=max_iterations,
-        max_per_action=max_per_action, step_tool_limit=max_per_action,
+        max_per_action=max_per_action, step_tool_limit=step_tool_limit,
         max_total_calls=max_total_calls,
         max_prompt_tokens=max_prompt_tokens,
         history_window=settings.LOOP_HISTORY_WINDOW,

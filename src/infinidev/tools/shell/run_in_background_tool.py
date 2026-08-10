@@ -51,7 +51,7 @@ class RunInBackgroundTool(InfinibayBaseTool):
             run_env.update({str(k): str(v) for k, v in env.items()})
 
         if not cwd or not isinstance(cwd, str):
-            cwd = self.workspace_path or os.getcwd()
+            cwd = self.repository_path or self.workspace_path or os.getcwd()
 
         try:
             task = get_background_manager().start(

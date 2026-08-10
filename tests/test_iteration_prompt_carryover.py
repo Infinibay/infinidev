@@ -14,6 +14,7 @@ import pytest
 
 from infinidev.engine.loop.context_builder import build_iteration_messages
 from infinidev.engine.loop.models import LoopState
+from infinidev.engine.orchestration.task_schema import task_from_free_text
 
 
 @pytest.fixture
@@ -210,3 +211,33 @@ def test_mid_step_guidance_feeds_next_rank_once(engine_and_ctx, monkeypatch):
 
     assert seen == [["The user changed the database target."], None]
     assert engine._cr_pending_user_guidance == []
+
+
+def test_ken_turn_context_survives_structured_task_prompt_rebuilds(engine_and_ctx):
+    engine, ctx = engine_and_ctx
+    ctx.task = task_from_free_text(
+        "Continue the grounded infinigpu implementation from its handoff document."
+    )
+    ctx.desc = """
+<task authority="USER_LITERAL">
+Continue infinigpu.
+</task>
+
+<retrieval-context source="ken" authority="advisory" scope-effect="none">
+<context-rank>
+Files:
+- infinigpu/CONTINUE.md
+- infinigpu/guest/icd/infinigpu_cmd_buffer.c
+Findings:
+- The ICD per-draw UV-byte root cause is already isolated.
+</context-rank>
+</retrieval-context>
+""".strip()
+
+    earlier = _user_turn(build_iteration_messages(engine, ctx, iteration=2))
+    later = _user_turn(build_iteration_messages(engine, ctx, iteration=9))
+
+    for prompt in (earlier, later):
+        assert "<retrieval-context source=\"ken\"" in prompt
+        assert "infinigpu/CONTINUE.md" in prompt
+        assert "ICD per-draw UV-byte root cause" in prompt

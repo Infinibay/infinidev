@@ -342,7 +342,11 @@ class ReadFileTool(InfinibayBaseTool):
             project_id = self.project_id
             if project_id:
                 with _sa_measure("file_indexing"):
-                    enqueue_or_sync(project_id, file_path)
+                    enqueue_or_sync(
+                        project_id,
+                        file_path,
+                        notify_integrity=False,
+                    )
         except Exception:
             pass  # Never fail a read because of indexing
 

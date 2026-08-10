@@ -137,40 +137,28 @@ def index_file(
     except Exception as exc:
         logger.debug("method_index hook failed for %s: %s", file_path, exc)
 
-    # ContextRank fuzzy symbol embeddings — deferred to a background pass
-    # after the main index completes.  Embedding is slow (~50-200ms/file
-    # on CPU) and blocks the index from being "ready".  The ranker handles
-    # missing embeddings by skipping the fuzzy channel, so deferring is safe.
-    # Files that need embeddings are queued and processed by
-    # _run_deferred_embeddings() after index_directory() returns.
-    _deferred_embedding_queue.append((project_id, file_path, symbols, language))
-
-    # File integrity check — the single-source-of-truth for "did a
-    # change on disk leave this file in a broken syntactic state?".
-    # This fires on EVERY path that calls index_file: direct writes
-    # by file tools (create_file, replace_lines, etc.), the background
-    # file watcher when an external edit or shell redirect lands, and
-    # the /reindex slash command. Because ``ensure_indexed`` short-
-    # circuits on unchanged content hashes, the check only runs when
-    # something actually changed — no duplicate work across trigger
-    # paths.
-    #
-    # On valid content, ``push_notification`` with an empty list
-    # auto-heals the queue for this file. On broken content, it pushes
-    # a dedup'd entry the engine will drain into the next prompt.
-    # Best-effort — never let a check_syntax bug break the indexer.
+    # Record syntax state from the tree already built. Baseline scans establish
+    # pre-existing parser errors without notifying; incremental paths compare
+    # against that state and report only newly introduced errors. No second
+    # tree-sitter parse is needed.
     try:
-        from infinidev.code_intel.syntax_check import check_syntax
         from infinidev.code_intel.file_change_notifications import push_notification
-        try:
-            text = content.decode("utf-8", errors="replace")
-        except Exception:
-            text = ""
-        if text and notify_integrity:
-            issues = check_syntax(text, file_path=file_path)
-            push_notification(file_path, language, issues)
+        from infinidev.code_intel.syntax_check import collect_tree_syntax_issues
+
+        text = content.decode("utf-8", errors="replace")
+        if text:
+            issues = collect_tree_syntax_issues(tree, text)
+            push_notification(
+                file_path,
+                language,
+                issues,
+                notify=notify_integrity,
+            )
     except Exception as exc:
         logger.debug("integrity check failed for %s: %s", file_path, exc)
+
+    # ContextRank fuzzy symbol embeddings are independent of integrity state.
+    _deferred_embedding_queue.append((project_id, file_path, symbols, language))
 
     return len(symbols)
 

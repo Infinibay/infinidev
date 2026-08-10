@@ -79,6 +79,23 @@ class TestAutoClassifier:
         )
         selection = select_engine(_packet(text), mode="auto")
         assert selection.engine == ENGINE_TASK
+    def test_injected_ken_context_cannot_route_a_concrete_handoff_to_graph(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "AUTO_ENGINE_ALLOW_GRAPH", True)
+        request = """
+Lee infinigpu/CONTINUE.md y continua el trabajo
+
+<retrieval-context source="ken" authority="advisory">
+A historical finding says to weigh multiple approaches and alternatives.
+</retrieval-context>
+""".strip()
+
+        selection = select_engine(_packet(request), mode="auto")
+
+        assert selection.engine == ENGINE_TASK
+        assert selection.reasons == ["durable_task_with_rolling_steps"]
+
 
     def test_branching_request_prefers_graph_when_enabled(self, monkeypatch):
         monkeypatch.setattr(settings, "AUTO_ENGINE_ALLOW_GRAPH", True)

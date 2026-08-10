@@ -368,6 +368,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
         run_task, run_flow_task, NonInteractiveHooks,
     )
     from infinidev.cli import session_resume as sr
+    from infinidev.cli.classic_renderer import ClassicRenderer, SessionStatus
 
     _bootstrap_single_prompt_runtime()
 
@@ -381,6 +382,14 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
         sr.begin_fresh_session(session_id)
     hooks = NonInteractiveHooks()
     engine = LoopEngine()
+    renderer = ClassicRenderer(SessionStatus(
+        provider=settings.LLM_PROVIDER,
+        model=(
+            settings.LLM_MODEL.split("/", 1)[-1]
+            if "/" in settings.LLM_MODEL else settings.LLM_MODEL
+        ),
+    ))
+    renderer.subscribe()
     from infinidev.tools.permission import (
         make_noninteractive_permission_handler,
         set_permission_handler,
@@ -433,8 +442,29 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
         if not getattr(hooks, "reply_already_shown", False):
             click.echo(result or "Done.")
     finally:
+        renderer.unsubscribe()
         set_permission_handler(None)
         _end_ken_sessions()
+
+
+def _bootstrap_ken_runtime() -> None:
+    """Prepare Ken before entering the TUI or classic runtime."""
+    if not getattr(settings, "KEN_SESSION_ENABLED", False):
+        return
+
+    from infinidev.engine.ken_session import ensure_ken_ready
+
+    def _show_status(message: str) -> None:
+        failed = "failed" in message.lower() or "unavailable" in message.lower()
+        click.echo(
+            click.style(
+                f"  {message}",
+                fg="yellow" if failed else None,
+                dim=not failed,
+            )
+        )
+
+    ensure_ken_ready(os.getcwd(), on_status=_show_status)
 
 
 @click.command()
@@ -472,6 +502,8 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, pro
     if model or provider:
         from infinidev.config.model_capabilities import _reset_capabilities
         _reset_capabilities()
+
+    _bootstrap_ken_runtime()
 
     with SessionProfiler(enabled=profile) as profiler:
         _run_main(no_tui, classic, prompt, think, profile, continue_session, resume)

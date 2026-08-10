@@ -38,6 +38,27 @@ class TestIndexQueue:
         h = get_file_hash(1, str(py_file))
         assert h is not None  # file was indexed
 
+    def test_baseline_enqueue_does_not_report_preexisting_syntax(
+        self, workspace_dir, temp_db,
+    ):
+        from infinidev.code_intel.file_change_notifications import (
+            drain_pending_notifications,
+            reset_notifications,
+        )
+
+        reset_notifications()
+        py_file = workspace_dir / "preexisting.py"
+        py_file.write_text("def broken(:\n")
+
+        indexed = threading.Event()
+        q = IndexQueue(project_id=1, post_index_callback=lambda _: indexed.set())
+        q.start()
+        q.enqueue(str(py_file), notify_integrity=False)
+
+        assert indexed.wait(5.0), "baseline index did not complete"
+        q.stop()
+        assert drain_pending_notifications() == []
+
     def test_post_index_callback(self, workspace_dir, temp_db):
         """Post-index callback fires after successful indexing."""
         py_file = workspace_dir / "callback_test.py"

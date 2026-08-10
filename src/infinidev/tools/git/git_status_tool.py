@@ -1,11 +1,16 @@
 """Tool for viewing Git status."""
 
+import os
 from typing import Type
 
 from pydantic import BaseModel
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.git._helpers import run_git, GitToolError
+from infinidev.tools.git._helpers import (
+    GitToolError,
+    resolve_git_cwd,
+    run_git,
+)
 from infinidev.tools.git.git_status_input import GitStatusInput
 
 
@@ -17,11 +22,14 @@ class GitStatusTool(InfinibayBaseTool):
     )
     args_schema: Type[BaseModel] = GitStatusInput
 
-    def _run(self) -> str:
-        if self._is_pod_mode():
-            return self._run_in_pod()
+    def _run(self, path: str | None = None) -> str:
+        try:
+            cwd = resolve_git_cwd(self, path)
+        except GitToolError as e:
+            return self._error(str(e))
 
-        cwd = self._git_cwd
+        if self._is_pod_mode():
+            return self._run_in_pod(cwd)
         try:
             result = run_git(["git", "status", "--porcelain"], cwd=cwd, check=True)
         except GitToolError as e:
@@ -68,10 +76,18 @@ class GitStatusTool(InfinibayBaseTool):
             "clean": len(lines) == 0,
         })
 
-    def _run_in_pod(self) -> str:
+    def _run_in_pod(self, host_cwd: str) -> str:
         """Execute git status inside the agent's pod."""
+        workspace = self.workspace_path
+        cwd = None
+        if workspace:
+            workspace_real = os.path.realpath(workspace)
+            if os.path.commonpath((workspace_real, host_cwd)) == workspace_real:
+                cwd = os.path.relpath(host_cwd, workspace_real)
         try:
-            r = self._exec_in_pod(["git", "status", "--porcelain"], timeout=15)
+            r = self._exec_in_pod(
+                ["git", "status", "--porcelain"], cwd=cwd, timeout=15,
+            )
             if r.exit_code != 0:
                 return self._error(f"Git status failed: {r.stderr.strip()}")
         except RuntimeError as e:
@@ -106,7 +122,9 @@ class GitStatusTool(InfinibayBaseTool):
         # Get branch
         try:
             br = self._exec_in_pod(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=10,
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=cwd,
+                timeout=10,
             )
             branch = br.stdout.strip() if br.exit_code == 0 else "unknown"
         except RuntimeError:

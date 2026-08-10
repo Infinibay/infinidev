@@ -97,6 +97,10 @@ def test_loop_tool_start_is_visible_before_long_tool_finishes(
     fresh_bus.emit("loop_tool_start", 1, "agent-a", {
         "tool_name": "execute_command",
         "tool_detail": "python -m pytest",
+        "call_num": 3,
+        "step_limit": 12,
+        "total_calls": 19,
+        "total_limit": 1000,
     })
 
     assert status.activity == "running execute_command"
@@ -104,15 +108,65 @@ def test_loop_tool_start_is_visible_before_long_tool_finishes(
     assert "running" in out
     assert "execute_command" in out
     assert "python -m pytest" in out
+    assert "step 3/12" in out
+    assert "total 19/1000" in out
 
 
-def test_loop_llm_call_updates_activity_without_noisy_output(
+def test_loop_llm_call_prints_current_work_and_budget(
     renderer, fresh_bus, status, capsys
 ):
-    fresh_bus.emit("loop_llm_call_start", 1, "agent-a", {"phase": "planning"})
+    fresh_bus.emit("loop_llm_call_start", 1, "agent-a", {
+        "phase": "planning",
+        "step_title": "Fix forwarded decoder",
+        "tool_calls_step": 2,
+        "tool_calls_step_limit": 12,
+        "tool_calls_total": 18,
+        "tool_calls_total_limit": 1000,
+    })
 
     assert status.activity == "model planning"
-    assert capsys.readouterr().out == ""
+    out = capsys.readouterr().out
+    assert "model planning" in out
+    assert "Fix forwarded decoder" in out
+    assert "step tools 2/12" in out
+    assert "total 18/1000" in out
+
+
+def test_loop_llm_call_shows_stalled_discovery_recovery(
+    renderer, fresh_bus, status, capsys
+):
+    fresh_bus.emit("loop_llm_call_start", 1, "agent-a", {
+        "phase": "recovery",
+        "step_title": "Implement parser fix",
+        "tool_calls_step": 12,
+        "tool_calls_step_limit": 0,
+        "tool_calls_total": 24,
+        "tool_calls_total_limit": 0,
+    })
+
+    assert status.activity == "model recovery"
+    out = capsys.readouterr().out
+    assert "model recovery" in out
+    assert "Implement parser fix" in out
+    assert "step tools 12" in out
+    assert "total 24" in out
+def test_context_compaction_is_printed_in_classic_mode(
+    renderer, fresh_bus, status, capsys
+):
+    fresh_bus.emit("loop_context_compaction", 1, "agent-a", {
+        "prompt_tokens": 700_000,
+        "context_limit": 1_000_000,
+        "remaining_tokens": 300_000,
+        "percent_used": 70.0,
+    })
+
+    assert status.activity == "compacting context"
+    assert status.last_prompt_tokens == 700_000
+    out = capsys.readouterr().out
+    assert "compacting context" in out
+    assert "70.0%" in out
+    assert "300,000 free" in out
+
 
 
 def test_loop_tool_call_with_error_renders_red_marker(renderer, fresh_bus, capsys):

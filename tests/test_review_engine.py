@@ -7,6 +7,61 @@ from unittest.mock import patch, MagicMock
 from infinidev.engine.analysis.review_engine import ReviewEngine, ReviewResult
 
 
+def test_review_workspace_prefers_bound_nested_repository(tmp_path):
+    from infinidev.engine.analysis.review_engine import _review_workspace
+    from infinidev.tools.base.context import (
+        clear_agent_context,
+        set_context,
+        set_repository_path,
+    )
+
+    repository = tmp_path / "infinigpu"
+    repository.mkdir()
+    set_context(agent_id="review-agent", workspace_path=str(tmp_path))
+    set_repository_path("review-agent", str(repository))
+    try:
+        agent = type("Agent", (), {"agent_id": "review-agent"})()
+        engine = type("Engine", (), {"_workspace": str(tmp_path)})()
+
+        assert _review_workspace(engine, agent) == str(repository)
+    finally:
+        clear_agent_context("review-agent")
+
+
+def test_review_workspace_keeps_nested_repository_after_agent_deactivation(tmp_path):
+    from infinidev.engine.analysis.review_engine import _review_workspace
+    from infinidev.tools.base.context import clear_agent_context
+
+    repository = tmp_path / "infinigpu"
+    repository.mkdir()
+    agent = type("Agent", (), {"agent_id": "review-agent"})()
+    engine = type("Engine", (), {
+        "_workspace": str(tmp_path),
+        "_repository_path": str(repository),
+    })()
+
+    clear_agent_context("review-agent")
+
+    assert _review_workspace(engine, agent) == str(repository)
+
+
+def test_review_reuses_passing_test_not_later_failed_diagnostic_suite():
+    from infinidev.engine.analysis.review_engine import (
+        _preferred_review_test_command,
+    )
+
+    state = type("State", (), {
+        "last_test_command": "cargo test",
+        "last_test_exit_code": 1,
+        "last_passing_test_command": "cargo test -p icd focused_case",
+    })()
+
+    assert (
+        _preferred_review_test_command(state)
+        == "cargo test -p icd focused_case"
+    )
+
+
 class TestReviewResult:
     """Test ReviewResult data class."""
 

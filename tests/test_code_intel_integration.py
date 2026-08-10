@@ -116,6 +116,46 @@ class TestIndexer:
         notifications = drain_pending_notifications()
         assert [item.file_path for item in notifications] == [str(path)]
 
+    def test_preexisting_parser_errors_survive_harmless_edit_without_warning(
+        self, tmp_path, temp_db,
+    ):
+        from infinidev.code_intel.file_change_notifications import (
+            drain_pending_notifications,
+            reset_notifications,
+        )
+        from infinidev.code_intel.indexer import reindex_file
+
+        reset_notifications()
+        path = tmp_path / "broken.py"
+        path.write_text("def broken(:\n")
+        index_file(1, str(path), notify_integrity=False)
+
+        path.write_text("def broken(:\n\nVALUE = 1\n")
+        reindex_file(1, str(path))
+
+        assert drain_pending_notifications() == []
+
+    def test_new_parser_error_after_clean_baseline_still_warns(
+        self, tmp_path, temp_db,
+    ):
+        from infinidev.code_intel.file_change_notifications import (
+            drain_pending_notifications,
+            reset_notifications,
+        )
+        from infinidev.code_intel.indexer import reindex_file
+
+        reset_notifications()
+        path = tmp_path / "module.py"
+        path.write_text("VALUE = 1\n")
+        index_file(1, str(path), notify_integrity=False)
+
+        path.write_text("VALUE = 1\nif (\n")
+        reindex_file(1, str(path))
+
+        notifications = drain_pending_notifications()
+        assert [item.file_path for item in notifications] == [str(path)]
+        assert notifications[0].issue_count > 0
+
     def test_large_directory_progress_is_bounded_to_about_fifty_updates(
         self, tmp_path, temp_db,
     ):

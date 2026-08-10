@@ -12,6 +12,10 @@ from __future__ import annotations
 
 from typing import Any
 
+CONTEXT_COMPACTION_USED_FRACTION = 0.70
+CONTEXT_COMPACTION_MIN_REMAINING = 100_000
+CONTEXT_PRESSURE_TOOL_RESULT_CHARS = 400
+
 
 class ContextManager:
     """Context-window policies applied between loop iterations."""
@@ -137,3 +141,25 @@ class ContextManager:
                 + f"\n[... {omitted} chars compacted after prior delivery ...]\n"
                 + content[-tail_chars:]
             )
+
+    @staticmethod
+    def under_context_pressure(prompt_tokens: int, max_context_tokens: int) -> bool:
+        """Whether the real prompt crossed either automatic compaction trigger."""
+        if prompt_tokens <= 0 or max_context_tokens <= 0:
+            return False
+        remaining = max(0, max_context_tokens - prompt_tokens)
+        return (
+            prompt_tokens / max_context_tokens >= CONTEXT_COMPACTION_USED_FRACTION
+            or remaining < CONTEXT_COMPACTION_MIN_REMAINING
+        )
+
+    @staticmethod
+    def compact_for_pressure(messages: list[dict[str, Any]]) -> None:
+        """Aggressively compact evidence already consumed by a newer model turn."""
+        ContextManager.expire_thinking(messages, ttl=0)
+        ContextManager.compact_for_small(messages)
+        ContextManager.compact_old_tool_results(
+            messages,
+            keep_assistant_rounds=1,
+            max_chars=CONTEXT_PRESSURE_TOOL_RESULT_CHARS,
+        )

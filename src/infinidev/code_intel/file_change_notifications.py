@@ -32,6 +32,7 @@ the loop state — so it's safe to import from any layer.
 
 from __future__ import annotations
 
+from collections import Counter
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
@@ -51,7 +52,7 @@ class FileIntegrityNotification:
     def render(self) -> str:
         """Render the notification as a single human-readable line."""
         return (
-            f"⚠ {self.file_path}: {self.issue_count} syntax error(s) "
+            f"⚠ {self.file_path}: {self.issue_count} new syntax error(s) "
             f"at L{self.first_issue_line}:{self.first_issue_column} "
             f"({self.first_issue_message})"
         )
@@ -79,6 +80,7 @@ class _NotificationQueue:
         # so successive iterations don't re-warn until the file gets
         # fixed (then re-broken). Cleared explicitly on ``drain``.
         self._already_drained: set[str] = set()
+        self._issue_states: dict[str, Counter[tuple[str, str]]] = {}
 
     def push(self, notification: FileIntegrityNotification) -> None:
         """Add or replace an entry for *notification.file_path*.
@@ -101,6 +103,67 @@ class _NotificationQueue:
                 self._entries.pop(oldest, None)
                 self._already_drained.discard(oldest)
 
+    @staticmethod
+    def _issue_signature(issue: object) -> tuple[str, str]:
+        message = str(getattr(issue, "message", "")).strip()
+        snippet = " ".join(str(getattr(issue, "snippet", "")).split())
+        return message, snippet
+
+    def observe(
+        self,
+        file_path: str,
+        language: str,
+        issues: list[object],
+        *,
+        notify: bool,
+    ) -> None:
+        """Record parser state and optionally queue newly introduced issues."""
+        current = Counter(self._issue_signature(issue) for issue in issues)
+        with self._lock:
+            previous = self._issue_states.get(file_path)
+            self._issue_states[file_path] = current
+
+            if not current:
+                self._entries.pop(file_path, None)
+                self._already_drained.discard(file_path)
+                return
+            if not notify:
+                return
+
+            novel = current if previous is None else current - previous
+            novel_count = sum(novel.values())
+            if novel_count <= 0:
+                return
+
+            remaining = novel.copy()
+            first = issues[0]
+            for issue in issues:
+                signature = self._issue_signature(issue)
+                if remaining[signature] > 0:
+                    first = issue
+                    break
+
+            notification = FileIntegrityNotification(
+                file_path=file_path,
+                language=language or "",
+                issue_count=novel_count,
+                first_issue_line=int(getattr(first, "line", 0)),
+                first_issue_column=int(getattr(first, "column", 0)),
+                first_issue_message=str(getattr(first, "message", ""))[:120],
+            )
+            self._entries[file_path] = notification
+            self._already_drained.discard(file_path)
+            while len(self._entries) > self._MAX_ENTRIES:
+                oldest = next(iter(self._entries))
+                self._entries.pop(oldest, None)
+                self._already_drained.discard(oldest)
+
+    def has_baseline(self, file_path: str) -> bool:
+        """Return whether parser state has been observed for file_path."""
+        with self._lock:
+            return file_path in self._issue_states
+
+
     def clear_file(self, file_path: str) -> None:
         """Remove *file_path* from the queue — its syntax is valid again.
 
@@ -111,6 +174,7 @@ class _NotificationQueue:
         with self._lock:
             self._entries.pop(file_path, None)
             self._already_drained.discard(file_path)
+            self._issue_states[file_path] = Counter()
 
     def drain(self) -> list[FileIntegrityNotification]:
         """Pop all entries NOT already delivered, mark them as delivered.
@@ -149,6 +213,7 @@ class _NotificationQueue:
             self._entries.clear()
             self._already_drained.clear()
 
+            self._issue_states.clear()
 
 # Module-level singleton. All the push/drain helpers below delegate
 # to this instance so call sites don't need to know it exists.
@@ -158,36 +223,31 @@ _queue = _NotificationQueue()
 def push_notification(
     file_path: str,
     language: str,
-    issues,  # list[SyntaxIssue], but avoiding the import loop here
+    issues,
+    *,
+    notify: bool = True,
 ) -> None:
-    """Public helper: build a notification from a list of syntax issues
-    and push it onto the queue.
+    """Record syntax state and optionally notify about newly introduced issues.
 
-    Called by the indexer right after ``check_syntax`` returns a
-    non-empty list. Accepts the issues as an opaque list to avoid
-    an import cycle between this module and ``code_intel.syntax_check``.
-    When *issues* is empty, this function calls ``clear_file`` instead
-    so the queue auto-heals when a file becomes valid.
+    With notify=False this establishes a baseline. With notify=True it
+    compares against the last observation and queues only novel signatures.
     """
-    if not issues:
-        _queue.clear_file(file_path)
+    _queue.observe(file_path, language, list(issues or []), notify=notify)
+
+
+def record_text_integrity_baseline(file_path: str, text: str) -> None:
+    """Parse text once and remember its pre-change syntax state."""
+    if not text:
         return
-    first = issues[0]
-    try:
-        line = int(getattr(first, "line", 0))
-        col = int(getattr(first, "column", 0))
-        msg = str(getattr(first, "message", ""))[:120]
-    except Exception:
-        line, col, msg = 0, 0, ""
-    notification = FileIntegrityNotification(
-        file_path=file_path,
-        language=language or "",
-        issue_count=len(issues),
-        first_issue_line=line,
-        first_issue_column=col,
-        first_issue_message=msg,
-    )
-    _queue.push(notification)
+    from infinidev.code_intel.syntax_check import check_syntax
+
+    issues = check_syntax(text, file_path=file_path)
+    push_notification(file_path, "", issues, notify=False)
+
+
+def has_integrity_baseline(file_path: str) -> bool:
+    """Return whether parser state for file_path is already known."""
+    return _queue.has_baseline(file_path)
 
 
 def clear_file_notification(file_path: str) -> None:
@@ -221,6 +281,8 @@ __all__ = [
     "push_notification",
     "clear_file_notification",
     "drain_pending_notifications",
+    "record_text_integrity_baseline",
+    "has_integrity_baseline",
     "peek_pending_notifications",
     "reset_notifications",
 ]

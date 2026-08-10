@@ -56,14 +56,18 @@ the work and skipping the half that pays for it.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
+import shutil
+import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -78,31 +82,196 @@ _RANKING_PATHS = {"/prompts", "/sessions/start"}
 # until something resets it.
 _MAX_CONSECUTIVE_FAILURES = 3
 
+# Match Ken's hook client: starting a missing local daemon is bounded and the
+# coding turn degrades cleanly when it cannot come up. A process-wide lock
+# prevents two concurrent agent sessions from racing to spawn the same daemon.
+_SPAWN_POLL_TIMEOUT_S = 5.0
+_SPAWN_POLL_INTERVAL_S = 0.05
+_HEALTH_TIMEOUT_S = 1.0
+_FINDINGS_CLI_TIMEOUT_S = 3.0
+_RECENT_FINDINGS_LIMIT = 3
+_RECENT_FINDING_CHARS = 1_800
+_RECENT_FINDINGS_TOTAL_CHARS = 5_000
+_DAEMON_START_LOCK = threading.Lock()
+_PROJECT_SETUP_LOCK = threading.Lock()
+
 
 def _project_root(start: Path) -> Path | None:
-    """Walk up looking for the ``.ken`` directory that owns this workspace."""
+    """Walk up looking for a complete Ken project that owns this workspace."""
     for candidate in (start, *start.parents):
-        if (candidate / ".ken").is_dir():
+        if (candidate / ".ken" / "meta.json").is_file():
             return candidate
     return None
+
+
+StatusCallback = Callable[[str], None]
+
+
+def _notify(on_status: StatusCallback | None, message: str) -> None:
+    if on_status is not None:
+        on_status(message)
+
+
+def _endpoint_for_root(root: Path) -> tuple[str, str] | None:
+    """Return the daemon endpoint advertised by a Ken project."""
+    try:
+        port = (root / ".ken" / "daemon.port").read_text().strip()
+        meta = json.loads((root / ".ken" / "meta.json").read_text())
+        token = str(meta.get("auth_token", ""))
+    except (OSError, ValueError):
+        return None
+    if not port or not token:
+        return None
+    return f"http://127.0.0.1:{port}", token
+
+
+def _daemon_healthy(root: Path) -> bool:
+    """Whether the advertised local daemon answers its authenticated health check."""
+    endpoint = _endpoint_for_root(root)
+    if endpoint is None:
+        return False
+    base, token = endpoint
+    request = urllib.request.Request(
+        f"{base}/health",
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=_HEALTH_TIMEOUT_S) as response:
+            body = json.loads(response.read().decode() or "{}")
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return False
+    return bool(body.get("ok"))
+
+
+def _clear_stale_port(root: Path) -> None:
+    try:
+        (root / ".ken" / "daemon.port").unlink()
+    except OSError:
+        pass
+
+
+def _spawn_daemon(root: Path, executable: str) -> bool:
+    """Spawn Ken detached and wait until its authenticated health check succeeds."""
+    _clear_stale_port(root)
+    log_handle = None
+    try:
+        log_path = root / ".ken" / "daemon.log"
+        log_handle = log_path.open("ab")
+        subprocess.Popen(
+            [executable, "serve", str(root), "--background"],
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=str(root),
+            env={**os.environ, "KEN_PROJECT_ROOT": str(root)},
+        )
+    except OSError as exc:
+        logger.info("ken daemon could not start: %s", exc)
+        return False
+    finally:
+        if log_handle is not None:
+            log_handle.close()
+
+    deadline = time.monotonic() + _SPAWN_POLL_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if _daemon_healthy(root):
+            return True
+        time.sleep(_SPAWN_POLL_INTERVAL_S)
+    logger.info(
+        "ken daemon did not become healthy within %.1fs; continuing without it",
+        _SPAWN_POLL_TIMEOUT_S,
+    )
+    return False
+
+
+def ensure_ken_ready(
+    workspace: str | os.PathLike[str],
+    *,
+    on_status: StatusCallback | None = None,
+) -> Path | None:
+    """Install/index Ken when absent and ensure its daemon is healthy.
+
+    Project setup uses Ken's public CLI contract. 'install' performs the
+    structural index, '--embed' eagerly materializes semantic vectors, and
+    '--no-wire' avoids installing hooks for a different host.
+    """
+    workspace_path = Path(workspace).resolve()
+    executable = shutil.which("ken")
+    if executable is None:
+        _notify(on_status, "Ken executable not found; automatic retrieval is unavailable.")
+        logger.info("the 'ken' executable is unavailable")
+        return None
+
+    with _PROJECT_SETUP_LOCK:
+        root = _project_root(workspace_path)
+        if root is None:
+            _notify(on_status, "Ken: creating and embedding the workspace index...")
+            command = [
+                executable,
+                "install",
+                "--quiet",
+                "--embed",
+                "--no-wire",
+                str(workspace_path),
+            ]
+            try:
+                completed = subprocess.run(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(workspace_path),
+                    env={**os.environ, "KEN_PROJECT_ROOT": str(workspace_path)},
+                    check=False,
+                )
+            except OSError as exc:
+                logger.info("ken project installation could not start: %s", exc)
+                _notify(on_status, f"Ken setup failed: {exc}")
+                return None
+            if completed.returncode != 0:
+                output = (completed.stdout or "").strip()
+                logger.info("ken project installation failed: %s", output[-4000:])
+                _notify(on_status, "Ken setup failed; continuing without automatic retrieval.")
+                return None
+            root = _project_root(workspace_path)
+            if root is None:
+                logger.info("ken install succeeded but did not create a .ken project")
+                _notify(on_status, "Ken setup produced no .ken project; continuing without it.")
+                return None
+            _notify(on_status, "Ken: workspace index ready.")
+
+        if _daemon_healthy(root):
+            return root
+
+        _notify(on_status, "Ken: starting the workspace daemon...")
+        if _spawn_daemon(root, executable):
+            _notify(on_status, "Ken: daemon ready.")
+        else:
+            _notify(on_status, "Ken daemon did not start; continuing without retrieval.")
+        return root
 
 
 class KenSession:
     """Reports what the agent is doing to the Ken daemon for this workspace.
 
-    Deliberately does not spawn a daemon: Ken's hooks may, because there a
-    missing daemon means a missing feature for the tool the user just ran.
-    Here it would mean a coding session paying for a subprocess launch and a
-    model load at startup. If the daemon is not up, the ranker degrades to
-    what it does today and the next ``ken`` command will start it.
+    Starts Ken's local daemon on first use when the project exists but no live
+    endpoint has been advertised. Merely enabling session reporting while
+    requiring an unrelated manual ``ken`` command left automatic retrieval
+    silently inert in ordinary Infinidev sessions.
     """
 
     def __init__(self, workspace: str | os.PathLike[str], session_id: str) -> None:
-        self._root = _project_root(Path(workspace).resolve())
+        self._workspace = Path(workspace).resolve()
+        self._root = _project_root(self._workspace)
         self._session_id = session_id
         self._failures = 0
         self._lock = threading.Lock()
         self._started = False
+        self._bootstrap_attempted = False
+        self._spawn_attempted = False
 
     # ── availability ─────────────────────────────────────────────────
 
@@ -117,24 +286,42 @@ class KenSession:
         """``(base_url, auth_token)`` for the running daemon, or ``None``."""
         if self._root is None:
             return None
-        try:
-            port = (self._root / ".ken" / "daemon.port").read_text().strip()
-            meta = json.loads((self._root / ".ken" / "meta.json").read_text())
-            token = str(meta.get("auth_token", ""))
-        except (OSError, ValueError):
-            return None
-        if not port or not token:
-            return None
-        return f"http://127.0.0.1:{port}", token
+        return _endpoint_for_root(self._root)
+
+    def _start_daemon(self) -> None:
+        """Start Ken's local daemon once, boundedly, without failing the host."""
+        if self._root is None or self._spawn_attempted:
+            return
+
+        with _DAEMON_START_LOCK:
+            if _daemon_healthy(self._root) or self._spawn_attempted:
+                return
+            self._spawn_attempted = True
+            executable = shutil.which("ken")
+            if executable is None:
+                logger.info("ken project found but the 'ken' executable is unavailable")
+                return
+            _spawn_daemon(self._root, executable)
 
     # ── transport ────────────────────────────────────────────────────
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-        if not self.available:
+        if self._failures >= _MAX_CONSECUTIVE_FAILURES:
             return None
+        if self._root is None:
+            if self._bootstrap_attempted:
+                return None
+            self._bootstrap_attempted = True
+            self._root = ensure_ken_ready(self._workspace)
+            self._spawn_attempted = True
+            if self._root is None:
+                return None
         endpoint = self._endpoint()
         if endpoint is None:
-            return None
+            self._start_daemon()
+            endpoint = self._endpoint()
+            if endpoint is None:
+                return None
         base, token = endpoint
 
         request = urllib.request.Request(
@@ -168,6 +355,67 @@ class KenSession:
 
     # ── the six events ───────────────────────────────────────────────
 
+    def _expanded_recent_findings(self, brief: str) -> str:
+        """Expand the recent finding previews Ken chose for the session brief."""
+        if self._root is None or "<ken-session-brief>" not in brief:
+            return ""
+        executable = shutil.which("ken")
+        if executable is None:
+            return ""
+        try:
+            completed = subprocess.run(
+                [
+                    executable,
+                    "findings",
+                    "--path",
+                    str(self._root),
+                    "--json",
+                    "-n",
+                    str(_RECENT_FINDINGS_LIMIT),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=_FINDINGS_CLI_TIMEOUT_S,
+                check=False,
+            )
+            rows = json.loads(completed.stdout) if completed.returncode == 0 else []
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return ""
+        if not isinstance(rows, list):
+            return ""
+
+        rendered: list[str] = []
+        remaining = _RECENT_FINDINGS_TOTAL_CHARS
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            topic = row.get("topic")
+            content = row.get("content")
+            if not isinstance(topic, str) or not isinstance(content, str):
+                continue
+            if not topic or topic not in brief or not content or remaining <= 0:
+                continue
+            body = content[: min(_RECENT_FINDING_CHARS, remaining)]
+            remaining -= len(body)
+            rendered.append(
+                '<finding topic="{}">\n{}\n</finding>'.format(
+                    html.escape(topic, quote=True),
+                    html.escape(body, quote=False),
+                )
+            )
+        if not rendered:
+            return ""
+        return (
+            '<ken-findings-expanded authority="advisory" scope-effect="none">\n'
+            "Full versions of the recent saved-finding previews selected by Ken. "
+            "Treat them as historical leads. Verify only the specific claim your "
+            "next action depends on; one matching current read is enough to attempt "
+            "a reversible edit, whose focused test supplies the proof.\n"
+            + "\n".join(rendered)
+            + "\n</ken-findings-expanded>"
+        )
     def start(self, workspace: str | None = None) -> str | None:
         """Open the session. Returns Ken's resume brief, if it has one.
 
@@ -188,7 +436,11 @@ class KenSession:
         if result is None:
             return None
         self._started = True
-        return result.get("context_block") or result.get("session_brief")
+        brief = result.get("context_block") or result.get("session_brief")
+        if not isinstance(brief, str):
+            return None
+        expanded = self._expanded_recent_findings(brief)
+        return "\n\n".join(part for part in (brief, expanded) if part)
 
     def prompt(self, text: str) -> str | None:
         """Record a USER turn — never a plan step. See the module docstring.

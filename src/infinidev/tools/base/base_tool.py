@@ -246,6 +246,14 @@ class InfinibayBaseTool(BaseTool, ABC):
             return ctx.workspace_path
         return get_current_workspace_path()
 
+    @property
+    def repository_path(self) -> str | None:
+        """Return the nested repository targeted by the current request, if any."""
+        ctx = self._get_bound_context()
+        if ctx and ctx.repository_path is not None:
+            return ctx.repository_path
+        return None
+
     def _bind_delegate(self, tool: "InfinibayBaseTool") -> None:
         """Propagate agent binding to a tool created at runtime.
 
@@ -284,12 +292,12 @@ class InfinibayBaseTool(BaseTool, ABC):
     def _git_cwd(self) -> str | None:
         """Return the directory to use as ``cwd`` for git subprocess calls.
 
-        Returns ``workspace_path`` if set and the directory exists, otherwise
+        Returns ``repository_path`` or ``workspace_path`` if it exists, otherwise
         ``None`` (subprocess will use the process CWD as fallback).
         """
-        ws = self.workspace_path
-        if ws and os.path.isdir(ws):
-            return ws
+        target = self.repository_path or self.workspace_path
+        if target and os.path.isdir(target):
+            return target
         return None
 
     def _is_pod_mode(self) -> bool:

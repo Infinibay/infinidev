@@ -230,7 +230,8 @@ def _effective_command_timeout(requested: int | None) -> int:
 class ExecuteCommandTool(InfinibayBaseTool):
     name: str = "execute_command"
     description: str = (
-        "Execute a shell command. Each call starts independently in the workspace "
+        "Execute a shell command. Each call starts independently in the target "
+        "repository (or workspace when no nested repository is targeted) "
         "unless you pass cwd; a shell cd from an earlier call does not persist. "
         "Returns stdout, stderr, and exit code."
     )
@@ -271,7 +272,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
             return self._error(perm_error)
 
         if not cwd or not isinstance(cwd, str):
-            cwd = self.workspace_path or os.getcwd()
+            cwd = self.repository_path or self.workspace_path or os.getcwd()
 
         # Use shell=True to allow piping and other shell features,
         # since this is a local CLI for the user's own machine.
