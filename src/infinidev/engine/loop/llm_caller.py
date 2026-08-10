@@ -544,6 +544,9 @@ class LLMCaller:
             context_calls = int(
                 getattr(ctx, "semantic_recovery_context_calls", 0) or 0
             )
+            unlimited_reads = bool(
+                getattr(ctx, "unlimited_recovery_reads", False)
+            )
             schemas = [
                 schema for schema in schemas
                 if (
@@ -552,7 +555,7 @@ class LLMCaller:
                     or name == "execute_command"
                     or is_workspace_edit_tool(name)
                     or (
-                        context_calls > 0
+                        (unlimited_reads or context_calls > 0)
                         and name in SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES
                     )
                 )

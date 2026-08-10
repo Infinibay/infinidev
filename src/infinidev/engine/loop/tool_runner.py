@@ -65,6 +65,24 @@ _DISCOVERY_SUPPRESSED_STATUS = "discovery_suppressed"
 _REPEATED_TEST_STATUS = "test_already_run"
 _MAX_READ_DELIVERY_KEYS = 256
 
+def _reconcile_masked_test_exit(result: str) -> str:
+    """Make a proven test failure outrank a shell wrapper's final zero."""
+    try:
+        payload = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return result
+    if not isinstance(payload, dict):
+        return result
+
+    from infinidev.engine.guidance.test_runners import (
+        reconcile_test_result_payload,
+    )
+
+    reconciled = reconcile_test_result_payload(payload)
+    if reconciled is payload:
+        return result
+    return json.dumps(reconciled)
+
 
 class ToolRunner:
     """Executes a step's tool calls and writes the result into *messages*."""
@@ -472,7 +490,7 @@ class ToolRunner:
             )
             if (
                 getattr(ctx, "freeze_plan_growth_in_recovery", False)
-                and name in {"add_step", "remove_step"}
+                and name in {"add_step", "modify_step", "remove_step"}
             ):
                 allow_action = False
             if name == "execute_command":
@@ -504,8 +522,12 @@ class ToolRunner:
             allowance = int(
                 getattr(ctx, "semantic_recovery_context_calls", 0) or 0
             )
-            if context_read and allowance > 0:
-                ctx.semantic_recovery_context_calls = allowance - 1
+            unlimited_reads = bool(
+                getattr(ctx, "unlimited_recovery_reads", False)
+            )
+            if context_read and (unlimited_reads or allowance > 0):
+                if not unlimited_reads:
+                    ctx.semantic_recovery_context_calls = allowance - 1
                 executable.append(tc)
                 continue
             suppress = not allow_action
@@ -520,8 +542,8 @@ class ToolRunner:
                 ),
                 "available_actions": (
                     "edit the target named by the active Step, run the test "
-                    "whose target covers that edited file, update the plan, "
-                    "or complete the Step"
+                    "whose target covers that edited file, or complete the "
+                    "current Step. Plan mutation is frozen during recovery"
                 ),
             })))
         return synthetic, executable
@@ -1073,11 +1095,11 @@ class ToolRunner:
                     # A denied or malformed command did not run. Recording it as
                     # the latest test command makes the deterministic reviewer
                     # replay a known denial and reject otherwise-green work.
-                    self._record_successful_step_test(
-                        ctx, tc.function.arguments, result, tracker,
-                    )
                     result = self.capture_test_output(
                         ctx, tc.function.arguments, result,
+                    )
+                    self._record_successful_step_test(
+                        ctx, tc.function.arguments, result, tracker,
                     )
                     self._refresh_opened_files_after_shell(
                         ctx, tc.function.arguments,
@@ -1429,6 +1451,8 @@ class ToolRunner:
 
             if not is_test_command(arguments, ctx.state):
                 return result
+
+            result = _reconcile_masked_test_exit(result)
 
             ctx.state.last_test_output = result
             try:

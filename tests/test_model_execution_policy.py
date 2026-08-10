@@ -6,12 +6,14 @@ from infinidev.engine.model_execution_policy import resolve_model_execution_poli
 def test_minimax_m3_uses_compact_operational_policy() -> None:
     policy = resolve_model_execution_policy("minimax", "minimax/MiniMax-M3")
 
-    assert policy.name == "minimax-m3-v9"
+    assert policy.name == "minimax-m3-v11"
     assert policy.compact_tool_schemas is True
     assert policy.require_step_orientation is False
     assert policy.renew_step_budget_on_progress is True
     assert policy.semantic_stagnation_control is True
+    assert policy.phase_boundary_control is True
     assert policy.recovery_direct_reads_only is True
+    assert policy.unlimited_recovery_reads is True
     assert policy.reuse_unchanged_test_results is True
     assert policy.freeze_plan_growth_in_recovery is True
     assert policy.recovery_requires_workspace_change is True
@@ -22,6 +24,9 @@ def test_minimax_m3_uses_compact_operational_policy() -> None:
     assert "normalized test target" in policy.prompt_addendum
     assert "sufficient evidence" in policy.prompt_addendum
     assert "Low confidence is not a blocker" in policy.prompt_addendum
+    assert "Treat rolling Steps as phase contracts" in policy.prompt_addendum
+    assert "Never create a container" in policy.prompt_addendum
+    assert "Do not pivot to an" in policy.prompt_addendum
     assert policy.step_nudge_threshold(
         max_tool_calls=12,
         configured_threshold=6,
@@ -65,7 +70,9 @@ def test_other_routes_keep_the_neutral_baseline() -> None:
         assert policy.require_step_orientation is True
         assert policy.renew_step_budget_on_progress is False
         assert policy.semantic_stagnation_control is True
+        assert policy.phase_boundary_control is False
         assert policy.recovery_direct_reads_only is True
+        assert policy.unlimited_recovery_reads is True
         assert policy.reuse_unchanged_test_results is True
         assert policy.prompt_addendum == ""
         assert policy.freeze_plan_growth_in_recovery is True

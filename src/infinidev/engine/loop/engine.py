@@ -315,15 +315,23 @@ def _configure_progress_recovery(
         ctx.state.discovery_suppression_steps = max(
             0, ctx.state.discovery_suppression_steps - 1
         )
+    unlimited_reads = bool(getattr(ctx, "unlimited_recovery_reads", False))
     ctx.semantic_recovery_context_calls = (
         SEMANTIC_RECOVERY_CONTEXT_CALLS
-        if ctx.suppress_discovery_this_step and no_progress_windows <= 2
+        if ctx.suppress_discovery_this_step
+        and no_progress_windows <= 2
+        and not unlimited_reads
         else 0
     )
     if not ctx.suppress_discovery_this_step:
         return
 
-    if ctx.semantic_recovery_context_calls:
+    if unlimited_reads:
+        read_policy = (
+            "Direct read_file remains available without a tool-call allowance; "
+            "context pressure is the only budget. Use it only on the exact edit target."
+        )
+    elif ctx.semantic_recovery_context_calls:
         read_policy = (
             f"You may use at most {ctx.semantic_recovery_context_calls} direct "
             "read_file calls for the exact edit target."

@@ -231,6 +231,11 @@ _NUMBER_KEYWORD_RE = re.compile(
     + r")\s*:\s*(\d+))",
     re.IGNORECASE,
 )
+_MASKED_TEST_FAILURE_RE = re.compile(
+    r"(?im)^\s*(?:test result:\s*FAILED\b|"
+    r"error:\s*(?:test failed|could not compile)\b)"
+)
+_EXPLICIT_EXIT_RE = re.compile(r"(?im)^\s*EXIT(?:_CODE)?=(\d+)\s*$")
 
 
 def test_outcome_fingerprint(content: str) -> str | None:
@@ -281,4 +286,40 @@ def test_outcome_fingerprint(content: str) -> str | None:
     return ", ".join(parts)
 
 
-__all__ = ["is_test_command", "test_outcome_fingerprint", "normalize_test_command"]
+def reconcile_test_result_payload(payload: dict) -> dict:
+    """Override a shell zero when the test output proves the run failed."""
+    if payload.get("exit_code") != 0:
+        return payload
+    output = "\n".join(
+        str(payload.get(key) or "") for key in ("stdout", "stderr")
+    )
+    explicit_codes = [int(value) for value in _EXPLICIT_EXIT_RE.findall(output)]
+    effective_exit = explicit_codes[-1] if explicit_codes else 0
+    if effective_exit == 0:
+        fingerprint = test_outcome_fingerprint(output) or ""
+        failed_count = re.search(
+            r"(?:^|,\s*)([1-9]\d*)\s+(?:failed|error)\b",
+            fingerprint,
+        )
+        if failed_count or _MASKED_TEST_FAILURE_RE.search(output):
+            effective_exit = 1
+    if effective_exit == 0:
+        return payload
+
+    reconciled = dict(payload)
+    reconciled["shell_exit_code"] = 0
+    reconciled["exit_code"] = effective_exit
+    reconciled["success"] = False
+    reconciled["status_note"] = (
+        "Test output proves failure; the shell's final zero was produced by "
+        "a wrapper such as tail, echo, or || true."
+    )
+    return reconciled
+
+
+__all__ = [
+    "is_test_command",
+    "normalize_test_command",
+    "reconcile_test_result_payload",
+    "test_outcome_fingerprint",
+]

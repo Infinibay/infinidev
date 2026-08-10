@@ -92,6 +92,41 @@ class TestExecuteCommand:
         assert data["exit_code"] == 0
         assert data["stdout"] == "hello\n"
 
+    def test_test_output_failure_overrides_a_wrapper_final_zero(
+        self, bound_tool, auto_approve_permissions
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+        command = (
+            "printf 'test result: FAILED. 54 passed; 3 failed\\n"
+            "error: test failed\\nEXIT=101\\n'"
+        )
+
+        data = json.loads(
+            tool._run(command=f"cargo test --help >/dev/null; {command}")
+        )
+
+        assert data["shell_exit_code"] == 0
+        assert data["exit_code"] == 101
+        assert data["success"] is False
+        assert "shell's final zero" in data["status_note"]
+
+    def test_successful_test_output_keeps_shell_zero(
+        self, bound_tool, auto_approve_permissions
+    ):
+        tool = bound_tool(ExecuteCommandTool)
+
+        data = json.loads(
+            tool._run(
+                command=(
+                    "printf 'test result: ok. 57 passed; 0 failed\\n' # cargo test"
+                )
+            )
+        )
+
+        assert data["exit_code"] == 0
+        assert data["success"] is True
+        assert "shell_exit_code" not in data
+
     def test_execute_timeout(self, bound_tool, auto_approve_permissions):
         """Command that exceeds timeout returns error."""
         tool = bound_tool(ExecuteCommandTool)

@@ -261,6 +261,32 @@ class TestRollingHorizonToolRouting:
             "read_file", "edit_file", "execute_command", "step_complete",
         ]
 
+    def test_recovery_keeps_direct_reads_visible_without_a_call_budget(self):
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        schemas = [
+            self._schema("read_file"),
+            self._schema("recall_context"),
+            self._schema("web_search"),
+            self._schema("edit_file"),
+            self._schema("execute_command"),
+            self._schema("step_complete"),
+        ]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=None),
+            suppress_discovery_this_step=True,
+            semantic_recovery_context_calls=0,
+            unlimited_recovery_reads=True,
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+
+        assert [schema["function"]["name"] for schema in available] == [
+            "read_file", "edit_file", "execute_command", "step_complete",
+        ]
+
 
 # ── _is_malformed_tool_call ──────────────────────────────────────────────────
 

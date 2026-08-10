@@ -54,6 +54,7 @@ class LoopGuard:
         self.evidence_progress_resets = 0
         self._progress_since_check = False
         self._workspace_progress_since_check = False
+        self._test_progress_since_check = False
         self._last_workspace_fingerprint: Any | None = None
         self._seen_workspace_fingerprints: set[Any] = set()
 
@@ -98,6 +99,8 @@ class LoopGuard:
         if made_progress:
             self.non_progress_tool_calls = 0
             self._progress_since_check = True
+            if tool_name == "execute_command":
+                self._test_progress_since_check = True
             if workspace_progress:
                 self._workspace_progress_since_check = True
         else:
@@ -233,6 +236,27 @@ class LoopGuard:
         if task is not None and task_kind not in _EDIT_REQUIRING_TASK_KINDS:
             return
 
+        if (
+            self._test_progress_since_check
+            and getattr(ctx, "phase_boundary_control", False)
+        ):
+            from infinidev.engine.loop.loop_plan import _step_phase
+
+            state = getattr(ctx, "state", None)
+            plan = getattr(state, "plan", None) if state is not None else None
+            active = getattr(plan, "active_step", None) if plan is not None else None
+            if _step_phase(getattr(active, "title", "")) == "verify":
+                notice = (
+                    "VERIFICATION EVIDENCE UPDATED: a new test or check outcome is "
+                    "now recorded. Compare it only with this Verify Step's named "
+                    "criterion. If the criterion is satisfied, do not inspect or "
+                    "edit implementation under this Step: add or modify exactly one "
+                    "concrete change Step and call step_complete(status=\"continue\") "
+                    "now. Otherwise run only the one remaining declared check."
+                )
+                messages.append({"role": "user", "content": notice})
+            self._test_progress_since_check = False
+
         if self._progress_since_check:
             requires_workspace_change = getattr(
                 ctx, "recovery_requires_workspace_change", False,
@@ -259,12 +283,56 @@ class LoopGuard:
         ):
             return
 
+        if getattr(ctx, "phase_boundary_control", False):
+            from infinidev.engine.loop.loop_plan import _step_phase
+
+            state = getattr(ctx, "state", None)
+            plan = getattr(state, "plan", None) if state is not None else None
+            active = getattr(plan, "active_step", None) if plan is not None else None
+            phase = _step_phase(getattr(active, "title", ""))
+            if phase in {"discover", "verify"}:
+                # No workspace change is expected from these phases. Treat the
+                # threshold as a phase-boundary signal instead of forcing an
+                # implementation experiment under the wrong Step contract.
+                # Resetting only this evidence window makes the reminder
+                # periodic; it is feedback, not a tool-call ceiling.
+                self.workspace_stagnation_tool_calls = 0
+                self.evidence_progress_resets = 0
+                _emit_log(
+                    "warning",
+                    f"{_YELLOW}⚠ {phase} Step has enough evidence to choose its "
+                    f"next phase; requesting a concrete transition{_RESET}",
+                    project_id=ctx.project_id,
+                    agent_id=ctx.agent_id,
+                )
+                notice = (
+                    "PHASE BOUNDARY: this is a discovery or verification Step, "
+                    "so workspace edits are not its progress criterion. If its "
+                    "named fact or check is established, stop investigating under "
+                    "this Step. Add or modify exactly one concrete change Step and "
+                    "call step_complete(status=\"continue\") now; the evidence you "
+                    "already gathered survives the transition. If one fact is still "
+                    "missing, make only the single highest-information call, then "
+                    "transition. Missing more local context is not an external blocker."
+                )
+                if messages and messages[-1].get("role") == "user":
+                    content = messages[-1].get("content", "")
+                    if isinstance(content, str):
+                        messages[-1]["content"] = f"{content}\n\n{notice}"
+                        return
+                messages.append({"role": "user", "content": notice})
+                return
+
         from infinidev.engine.loop.semantic_stagnation import (
             SEMANTIC_RECOVERY_CONTEXT_CALLS,
         )
 
         ctx.suppress_discovery_this_step = True
-        ctx.semantic_recovery_context_calls = SEMANTIC_RECOVERY_CONTEXT_CALLS
+        ctx.semantic_recovery_context_calls = (
+            0
+            if getattr(ctx, "unlimited_recovery_reads", False)
+            else SEMANTIC_RECOVERY_CONTEXT_CALLS
+        )
         _emit_log(
             "warning",
             f"{_YELLOW}⚠ {self.workspace_stagnation_tool_calls} tool calls produced "
@@ -278,8 +346,9 @@ class LoopGuard:
             "Read and test evidence remains available, but it no longer counts as "
             "implementation progress. This is not a tool-call budget and the Step "
             "remains active. Broad discovery is now unavailable. Recovery is an "
-            "experiment phase, not a certainty gate: use the small direct read_file "
-            "allowance only for the most plausible edit target, make one reversible "
+            "experiment phase, not a certainty gate: direct read_file remains "
+            "available without a call-count allowance, but use it only for the "
+            "most plausible edit target. Make one reversible "
             "edit now, and let its focused test accept or reject the hypothesis. "
             "Low confidence or multiple plausible fixes is not an external blocker. "
             "Report blocked only after a concrete external constraint prevents both "

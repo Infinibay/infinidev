@@ -216,7 +216,9 @@ def build_execution_context(
         require_step_orientation=model_policy.require_step_orientation,
         renew_step_budget_on_progress=model_policy.renew_step_budget_on_progress,
         semantic_stagnation_control=model_policy.semantic_stagnation_control,
+        phase_boundary_control=model_policy.phase_boundary_control,
         recovery_direct_reads_only=model_policy.recovery_direct_reads_only,
+        unlimited_recovery_reads=model_policy.unlimited_recovery_reads,
         reuse_unchanged_test_results=model_policy.reuse_unchanged_test_results,
         freeze_plan_growth_in_recovery=model_policy.freeze_plan_growth_in_recovery,
         recovery_requires_workspace_change=(

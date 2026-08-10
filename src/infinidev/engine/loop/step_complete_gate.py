@@ -103,6 +103,25 @@ _RECOVERABLE_TOOL_BLOCK_RE = re.compile(
     re.IGNORECASE,
 )
 
+_RECOVERY_INTERNAL_BLOCK_RE = re.compile(
+    r"\b(?:discovery suppression|recovery (?:mode|restriction|allowance))\b|"
+    r"\b(?:need|needs|needed|require|requires|required)\b.{0,100}"
+    r"\b(?:more local context|source (?:code|lines?|files?)|read_file|"
+    r"read|inspect|inspection|discovery)\b|"
+    r"\b(?:insufficient|missing|not enough)\b.{0,80}"
+    r"\b(?:local context|source context|information|source lines?)\b|"
+    r"\b(?:read_file|reads?|inspection)\b.{0,80}"
+    r"\b(?:suppress(?:ed|ion)?|unavailable|hidden|not available)\b",
+    re.IGNORECASE,
+)
+
+_RECOVERY_EXTERNAL_BLOCK_RE = re.compile(
+    r"\b(?:permission denied|read[- ]only file system|authentication|"
+    r"credentials?|api key|network unavailable|user action|outside (?:the )?"
+    r"process|hardware unavailable|no space left)\b",
+    re.IGNORECASE,
+)
+
 
 class StepCompleteGate:
     """Decides whether a ``step_complete`` call is honoured."""
@@ -293,7 +312,7 @@ class StepCompleteGate:
         step_complete_call: Any,
         messages: list[dict[str, Any]],
     ) -> bool:
-        """Refuse one blocked escape caused only by the engine's recovery mode."""
+        """Refuse a blocked escape caused only by local missing context."""
         if step_complete_status(step_complete_call) != "blocked":
             return False
         if not (
@@ -303,7 +322,11 @@ class StepCompleteGate:
             return False
 
         step_key = self._step_key(ctx)
-        if step_key in self._recovery_escape_fired:
+        summary = _step_complete_text(step_complete_call)
+        local_context_block = bool(_RECOVERY_INTERNAL_BLOCK_RE.search(summary))
+        concrete_external_block = bool(_RECOVERY_EXTERNAL_BLOCK_RE.search(summary))
+        repeated = step_key in self._recovery_escape_fired
+        if repeated and (not local_context_block or concrete_external_block):
             return False
 
         state = getattr(ctx, "state", None)
@@ -318,17 +341,34 @@ class StepCompleteGate:
                 return False
 
         self._recovery_escape_fired.add(step_key)
-        ctx.semantic_recovery_context_calls = max(
-            2, int(getattr(ctx, "semantic_recovery_context_calls", 0) or 0)
-        )
-        feedback = (
-            "step_complete BLOCKED — the engine's discovery recovery is not an "
-            "external blocker. The Step remains active and has no call budget. "
-            "Use the restored direct read_file allowance on the already grounded "
-            "source target, then make the smallest implementation change and run "
-            "its focused test. Repeat status=\"blocked\" only with concrete evidence "
-            "of a requirement outside this process."
-        )
+        unlimited_reads = bool(getattr(ctx, "unlimited_recovery_reads", False))
+        if unlimited_reads:
+            ctx.semantic_recovery_context_calls = 0
+        else:
+            ctx.semantic_recovery_context_calls = max(
+                2, int(getattr(ctx, "semantic_recovery_context_calls", 0) or 0)
+            )
+        if repeated and local_context_block:
+            feedback = (
+                "step_complete BLOCKED — needing more local source or context is "
+                "still not an external blocker when repeated. Do not use blocked "
+                "to request more discovery. Direct read_file remains available "
+                "without a call-count allowance; use it on the most plausible "
+                "target and make the smallest "
+                "reversible edit, or close a completed discovery/verification Step "
+                "with status=\"continue\" and transition to one concrete change "
+                "Step. The Step has no call budget."
+            )
+        else:
+            feedback = (
+                "step_complete BLOCKED — the engine's discovery recovery is not an "
+                "external blocker. The Step remains active and has no call budget. "
+                "Direct read_file remains available on the already grounded source "
+                "target without a call-count allowance. Read the exact missing lines, "
+                "then make the smallest implementation change and run its focused "
+                "test. Repeat status=\"blocked\" only with concrete evidence "
+                "of a requirement outside this process."
+            )
         self._engine._overwrite_step_complete_tool_result(
             messages, step_complete_call.id, feedback,
         )

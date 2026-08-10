@@ -30,7 +30,9 @@ class ExecutionContext:
     require_step_orientation: bool
     renew_step_budget_on_progress: bool
     semantic_stagnation_control: bool
+    phase_boundary_control: bool
     recovery_direct_reads_only: bool
+    unlimited_recovery_reads: bool
     reuse_unchanged_test_results: bool
     freeze_plan_growth_in_recovery: bool
     system_prompt: str

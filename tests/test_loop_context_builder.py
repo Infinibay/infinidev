@@ -47,10 +47,12 @@ def test_zero_total_tool_budget_reaches_the_loop_as_unlimited(
     assert ctx.max_iterations is None
     assert ctx.max_total_calls is None
     assert ctx.max_per_action == 0
-    assert ctx.model_policy_name == "minimax-m3-v9"
+    assert ctx.model_policy_name == "minimax-m3-v11"
     assert ctx.renew_step_budget_on_progress is True
     assert ctx.semantic_stagnation_control is True
+    assert ctx.phase_boundary_control is True
     assert ctx.recovery_direct_reads_only is True
+    assert ctx.unlimited_recovery_reads is True
     assert ctx.reuse_unchanged_test_results is True
     assert ctx.freeze_plan_growth_in_recovery is True
     assert ctx.recovery_requires_workspace_change is True
@@ -97,7 +99,9 @@ def test_positive_total_tool_budget_remains_available_for_bounded_phases(
     assert ctx.max_per_action == 12
     assert ctx.renew_step_budget_on_progress is False
     assert ctx.semantic_stagnation_control is True
+    assert ctx.phase_boundary_control is False
     assert ctx.recovery_direct_reads_only is True
+    assert ctx.unlimited_recovery_reads is True
     assert ctx.reuse_unchanged_test_results is True
     assert ctx.freeze_plan_growth_in_recovery is True
     assert ctx.recovery_requires_workspace_change is True

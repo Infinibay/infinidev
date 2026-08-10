@@ -654,28 +654,31 @@ def test_semantic_recovery_spends_two_local_reads_then_suppresses_discovery(tmp_
     assert ctx.semantic_recovery_context_calls == 0
 
 
-def test_minimax_recovery_allows_only_direct_file_reads():
+def test_minimax_recovery_keeps_direct_reads_and_freezes_all_plan_mutation():
     ctx = _ctx()
     ctx.suppress_discovery_this_step = True
-    ctx.semantic_recovery_context_calls = 2
+    ctx.semantic_recovery_context_calls = 0
     ctx.recovery_direct_reads_only = True
+    ctx.unlimited_recovery_reads = True
     runner = ToolRunner(_engine(nudge_at=99))
     ctx.freeze_plan_growth_in_recovery = True
     calls = [
         _call("read-1", "read_file", '{"file_path":"module.py"}'),
+        _call("read-2", "read_file", '{"file_path":"other.py"}'),
         _call(
             "shell-1",
             "execute_command",
             '{"command":"grep -n needle module.py"}',
         ),
         _call("plan-1", "add_step", '{"title":"Investigate alternatives"}'),
+        _call("plan-2", "modify_step", '{"index":1,"title":"Switch option"}'),
     ]
 
     suppressed, executable = runner._partition_suppressed_discovery(ctx, calls)
 
-    assert [call.id for call, _ in suppressed] == ["shell-1", "plan-1"]
-    assert [call.id for call in executable] == ["read-1"]
-    assert ctx.semantic_recovery_context_calls == 1
+    assert [call.id for call, _ in suppressed] == ["shell-1", "plan-1", "plan-2"]
+    assert [call.id for call in executable] == ["read-1", "read-2"]
+    assert ctx.semantic_recovery_context_calls == 0
 
 
 def test_repeated_test_checkpoint_is_minimax_policy_conditional():
@@ -964,3 +967,34 @@ def test_failed_diagnostic_does_not_replace_last_passing_test_command():
     assert ctx.state.last_test_command == "pytest"
     assert ctx.state.last_test_exit_code == 1
     assert ctx.state.last_passing_test_command == "pytest tests/test_focused.py"
+
+
+def test_masked_cargo_failure_overrides_shell_zero_for_feedback_and_state():
+    ctx = _ctx()
+    raw = json.dumps({
+        "exit_code": 0,
+        "success": True,
+        "stdout": (
+            "test result: FAILED. 54 passed; 3 failed\n"
+            "error: test failed\nEXIT=101\n"
+        ),
+        "stderr": "",
+    })
+
+    result = ToolRunner.capture_test_output(
+        ctx,
+        json.dumps({
+            "command": (
+                "cargo test -p infinigpu-device --lib | tail -15; "
+                "echo EXIT=$?"
+            ),
+        }),
+        raw,
+    )
+    payload = json.loads(result)
+
+    assert payload["shell_exit_code"] == 0
+    assert payload["exit_code"] == 101
+    assert payload["success"] is False
+    assert "shell's final zero" in payload["status_note"]
+    assert ctx.state.last_test_exit_code == 101

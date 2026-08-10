@@ -499,12 +499,74 @@ def test_twelve_evidence_free_calls_narrow_discovery_until_progress():
     assert ctx.semantic_recovery_context_calls == 0
 
 
+def test_minimax_verification_step_transitions_instead_of_demanding_an_edit():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), [{"role": "user", "content": "Continue."}]
+    ctx.task = SimpleNamespace(kind="bugfix")
+    ctx.semantic_stagnation_control = True
+    ctx.phase_boundary_control = True
+    ctx.recovery_requires_workspace_change = True
+    ctx.suppress_discovery_this_step = False
+    ctx.semantic_recovery_context_calls = 0
+    ctx.state.plan.steps = [
+        PlanStep(
+            index=1,
+            title="Baseline verification per CONTINUE.md",
+            status="active",
+        ),
+    ]
+
+    for index in range(12):
+        guard.on_tool_result(
+            "read_file", f'{{"file_path":"file-{index}.py"}}', had_error=False,
+        )
+
+    guard.check_progress_drift(ctx, messages)
+
+    assert ctx.suppress_discovery_this_step is False
+    assert ctx.semantic_recovery_context_calls == 0
+    assert guard.workspace_stagnation_tool_calls == 0
+    assert "PHASE BOUNDARY" in messages[-1]["content"]
+    assert 'step_complete(status="continue")' in messages[-1]["content"]
+
+
+def test_minimax_verify_step_gets_phase_feedback_on_each_new_test_outcome():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    guard = LoopGuard(is_small=False)
+    ctx, messages = _ctx(), []
+    ctx.task = SimpleNamespace(kind="bugfix")
+    ctx.semantic_stagnation_control = True
+    ctx.phase_boundary_control = True
+    ctx.recovery_requires_workspace_change = True
+    ctx.suppress_discovery_this_step = False
+    ctx.semantic_recovery_context_calls = 0
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Verify CONTINUE.md baseline", status="active"),
+    ]
+
+    guard.on_tool_result(
+        "execute_command",
+        '{"command":"cargo test -p infinigpu-device --lib"}',
+        had_error=False,
+        made_progress=True,
+    )
+    guard.check_progress_drift(ctx, messages)
+
+    assert ctx.suppress_discovery_this_step is False
+    assert "VERIFICATION EVIDENCE UPDATED" in messages[-1]["content"]
+    assert "do not inspect or edit implementation" in messages[-1]["content"]
+
+
 def test_new_test_evidence_cannot_mask_repeated_calls_without_a_workspace_change():
     guard = LoopGuard(is_small=False)
     ctx, messages = _ctx(), [{"role": "user", "content": "Implement the fix."}]
     ctx.task = SimpleNamespace(kind="bugfix")
     ctx.semantic_stagnation_control = True
     ctx.recovery_requires_workspace_change = True
+    ctx.unlimited_recovery_reads = True
     ctx.suppress_discovery_this_step = False
     ctx.semantic_recovery_context_calls = 0
     baseline = (("target.py", "unchanged"),)
@@ -525,6 +587,7 @@ def test_new_test_evidence_cannot_mask_repeated_calls_without_a_workspace_change
     assert guard.evidence_progress_resets == 1
     assert guard.workspace_stagnation_tool_calls == 12
     assert ctx.suppress_discovery_this_step is True
+    assert ctx.semantic_recovery_context_calls == 0
     assert "no net workspace change" in messages[-1]["content"]
     assert "experiment phase, not a certainty gate" in messages[-1]["content"]
     assert "not an external blocker" in messages[-1]["content"]
@@ -900,13 +963,14 @@ def test_failed_latest_test_still_allows_an_honest_blocked_outcome():
     assert engine._step_gate._latest_test_failed(ctx, call, []) is False
 
 
-def test_recovery_mode_cannot_be_reported_as_an_external_blocker_once():
+def test_recovery_mode_rejects_repeated_local_context_as_a_blocker():
     from infinidev.engine.loop.engine import LoopEngine
 
     engine = LoopEngine()
     ctx = _ctx()
     ctx.suppress_discovery_this_step = True
     ctx.recovery_requires_workspace_change = True
+    ctx.unlimited_recovery_reads = True
     ctx.semantic_recovery_context_calls = 0
     call = _tool_call(
         "step_complete",
@@ -918,8 +982,30 @@ def test_recovery_mode_cannot_be_reported_as_an_external_blocker_once():
     ]
 
     assert engine._step_gate._workspace_recovery_escape(ctx, call, messages) is True
-    assert ctx.semantic_recovery_context_calls == 2
+    assert ctx.semantic_recovery_context_calls == 0
     assert "recovery is not an external blocker" in messages[-1]["content"]
+    assert engine._step_gate._workspace_recovery_escape(ctx, call, messages) is True
+    assert "still not an external blocker" in messages[-1]["content"]
+
+
+def test_recovery_mode_keeps_the_generic_escape_gate_bounded():
+    from infinidev.engine.loop.engine import LoopEngine
+
+    engine = LoopEngine()
+    ctx = _ctx()
+    ctx.suppress_discovery_this_step = True
+    ctx.recovery_requires_workspace_change = True
+    ctx.semantic_recovery_context_calls = 0
+    call = _tool_call(
+        "step_complete",
+        '{"summary":"cannot proceed","status":"blocked"}',
+        call_id="complete",
+    )
+    messages = [
+        {"role": "tool", "tool_call_id": "complete", "content": "ok"},
+    ]
+
+    assert engine._step_gate._workspace_recovery_escape(ctx, call, messages) is True
     assert engine._step_gate._workspace_recovery_escape(ctx, call, messages) is False
 
 
@@ -1234,6 +1320,7 @@ def test_two_no_progress_windows_latch_corrective_surface(tmp_path):
 
     ctx = _ctx()
     ctx.semantic_stagnation_control = True
+    ctx.unlimited_recovery_reads = True
     ctx.state.plan.steps = [
         PlanStep(index=1, title="Implement parser fix", status="active"),
     ]
@@ -1256,10 +1343,10 @@ def test_two_no_progress_windows_latch_corrective_surface(tmp_path):
     _configure_progress_recovery(ctx, messages)
 
     assert ctx.suppress_discovery_this_step is True
-    assert ctx.semantic_recovery_context_calls == 2
+    assert ctx.semantic_recovery_context_calls == 0
     assert ctx.state.discovery_suppression_steps == 0
     assert "<progress-recovery" in messages[0]["content"]
-    assert "at most 2 direct read_file calls" in messages[0]["content"]
+    assert "without a tool-call allowance" in messages[0]["content"]
 
     engine._finalize_inner_loop(
         ctx,
@@ -1275,7 +1362,7 @@ def test_two_no_progress_windows_latch_corrective_surface(tmp_path):
 
     assert ctx.suppress_discovery_this_step is True
     assert ctx.semantic_recovery_context_calls == 0
-    assert "recovery read allowance is exhausted" in next_messages[0]["content"]
+    assert "without a tool-call allowance" in next_messages[0]["content"]
 
 
 def test_new_test_outcome_releases_latched_progress_recovery(tmp_path):

@@ -302,6 +302,13 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     )
             if environment_adjustment:
                 result["environment_adjustment"] = environment_adjustment
+            from infinidev.engine.guidance.test_runners import (
+                is_test_command,
+                reconcile_test_result_payload,
+            )
+
+            if is_test_command(command):
+                result = reconcile_test_result_payload(result)
             return self._success(result)
 
         except subprocess.TimeoutExpired:
