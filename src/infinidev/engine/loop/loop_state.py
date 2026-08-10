@@ -36,6 +36,9 @@ class LoopState(BaseModel):
     # model. Repeating an unchanged read returns a compact cache notice rather
     # than another full source body; edits invalidate it through the revision.
     read_delivery_revisions: dict[str, str] = Field(default_factory=dict)
+    # Number of upcoming Steps whose discovery surface is narrowed after
+    # embedding similarity and deterministic no-progress evidence agree.
+    discovery_suppression_steps: int = 0
     current_step_index: int = 0
     iteration_count: int = 0
     total_tool_calls: int = 0
@@ -54,6 +57,17 @@ class LoopState(BaseModel):
     # summary, this survives a tool-budget interruption and lets the next
     # iteration close the same implementation Step after verification.
     edited_step_indices: set[int] = Field(default_factory=set)
+    # Net task-diff fingerprint observed when a Step first became active.
+    # Comparing against it prevents edit-then-revert activity from satisfying
+    # an implementation Step or renewing its local tool window.
+    step_entry_change_fingerprints: dict[
+        int, tuple[tuple[str, str], ...]
+    ] = Field(default_factory=dict)
+    # Model prose is not the only stagnation signal. Count complete Step
+    # windows whose task diff and test outcomes both remain unchanged so an
+    # alternating summary style cannot evade the corrective action surface.
+    no_progress_windows_by_step: dict[int, int] = Field(default_factory=dict)
+    last_test_outcomes_by_step: dict[int, tuple[str, ...]] = Field(default_factory=dict)
     # Deterministic objective checks that passed for the current plan. This
     # lets an explicit verification Step close an already-satisfied Task
     # without manufacturing a no-op edit. Change Steps still require edit

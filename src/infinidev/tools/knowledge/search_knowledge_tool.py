@@ -156,7 +156,8 @@ class SearchKnowledgeTool(InfinibayBaseTool):
                 params.append(finding_type)
             rows = conn.execute(
                 "SELECT id, topic, content, sources_json, session_id, confidence, "
-                "finding_type, status, created_at, embedding FROM findings WHERE "
+                "finding_type, status, created_at, embedding, embedding_space "
+                "FROM findings WHERE "
                 + " AND ".join(conditions)
                 + " ORDER BY created_at DESC LIMIT 500",
                 params,
@@ -170,22 +171,56 @@ class SearchKnowledgeTool(InfinibayBaseTool):
                     "mode": "semantic", "query": query, "results": [], "count": 0,
                 })
 
-            from infinidev.tools.base.dedup import _cosine_similarity, _get_embed_fn
-            from infinidev.tools.base.embeddings import embedding_from_blob
+            from infinidev.tools.base.dedup import _cosine_similarity
+            from infinidev.tools.base.embeddings import (
+                current_embedding_space,
+                embed_passages,
+                embed_queries,
+                embedding_from_blob,
+                embedding_is_current,
+            )
 
-            embed = _get_embed_fn()
-            query_vectors = [np.asarray(item) for item in embed(parse_query_or_terms(query))]
-            missing = [item for item in candidates if not item.get("embedding")]
-            generated = iter(embed([
-                f"{item['topic']} {(item.get('content') or '')[:500]}" for item in missing
-            ])) if missing else iter(())
+            query_vectors = [
+                np.asarray(item) for item in embed_queries(parse_query_or_terms(query))
+            ]
+            current_dim = int(query_vectors[0].shape[0])
+            current_space = current_embedding_space()
+            stale = [
+                item for item in candidates
+                if not embedding_is_current(
+                    item.get("embedding"),
+                    item.get("embedding_space"),
+                    live_space=current_space,
+                    dim=current_dim,
+                )
+            ]
+            generated_vectors = embed_passages([
+                f"{item['topic']} {(item.get('content') or '')[:500]}" for item in stale
+            ]) if stale else []
+            regenerated = {
+                item["id"]: np.asarray(vector, dtype=np.float32)
+                for item, vector in zip(stale, generated_vectors, strict=True)
+            }
+            if regenerated:
+                def _store_refreshed(conn: sqlite3.Connection) -> None:
+                    conn.executemany(
+                        "UPDATE findings SET embedding = ?, embedding_space = ? "
+                        "WHERE id = ?",
+                        [
+                            (vector.tobytes(), current_space, finding_id)
+                            for finding_id, vector in regenerated.items()
+                        ],
+                    )
+                    conn.commit()
+
+                execute_with_retry(_store_refreshed)
 
             results: list[dict] = []
             for item in candidates:
                 vector = (
-                    embedding_from_blob(item["embedding"])
-                    if item.get("embedding")
-                    else np.asarray(next(generated))
+                    regenerated[item["id"]]
+                    if item["id"] in regenerated
+                    else embedding_from_blob(item["embedding"])
                 )
                 similarity = max(
                     _cosine_similarity(query_vector, vector)
@@ -195,6 +230,7 @@ class SearchKnowledgeTool(InfinibayBaseTool):
                     continue
                 result = dict(item)
                 result.pop("embedding", None)
+                result.pop("embedding_space", None)
                 if not include_content:
                     result.pop("content", None)
                     result.pop("sources_json", None)

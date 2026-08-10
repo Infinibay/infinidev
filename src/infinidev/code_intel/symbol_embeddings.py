@@ -11,8 +11,8 @@ embeddings to find semantic matches.
 Compared to the old substring approach this:
 
 1. **Handles typos.**  ``AuthServise`` still matches ``AuthService``
-   because all-MiniLM-L6-v2 encodes the subword structure, not the
-   literal string.
+   because the static Qwen3 table encodes subword structure, not only
+   the literal string.
 2. **Handles synonyms.**  "authentication service" matches
    ``AuthenticationHandler`` via shared semantic space, even though
    the literal strings don't overlap.
@@ -54,8 +54,10 @@ from __future__ import annotations
 import logging
 import os
 
+import numpy as np
+
 from infinidev.code_intel._db import execute_with_retry
-from infinidev.tools.base.embeddings import compute_embedding
+from infinidev.tools.base.embeddings import compute_embedding, current_embedding_space
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +83,80 @@ _EMBEDDABLE_KINDS = frozenset({
 })
 
 # Maximum docstring characters to include in the embedding text.  The
-# all-MiniLM-L6-v2 model truncates at 256 tokens, so there's no point
-# embedding 2000-char docstrings — the tail would be discarded anyway.
-# 200 chars leaves room for the kind + name prefix.
+# The static Qwen3 table is additive rather than context-window-bound, but long
+# docstrings still dilute the symbol name and make retrieval less precise.
+# 200 characters leaves room for the kind + name anchor.
 _MAX_DESC_CHARS = 200
 
 # Top-N symbol names to include in a file's embedding text when the
 # file has no module docstring.  Names alone are a decent proxy for
 # "what this file is about" when nothing else is available.
 _FILE_TOP_N_SYMBOLS = 8
+
+
+def refresh_project_embedding_space(project_id: int) -> tuple[int, int]:
+    """Re-encode stale code-index rows from their stored canonical text.
+
+    Model changes do not require reparsing source files. The index already keeps
+    the exact text that produced each vector, and the static backend can refresh
+    thousands of rows in a fraction of a second. Rows predating ``embedding_text``
+    remain available through lexical/structural channels until their file changes.
+    """
+    from infinidev.tools.base.dedup import _get_embed_fn
+
+    space = current_embedding_space()
+
+    def _fetch(conn):
+        files = conn.execute(
+            "SELECT id, embedding_text FROM ci_files "
+            "WHERE project_id = ? AND embedding_text IS NOT NULL "
+            "AND (embedding_space IS NULL OR embedding_space != ?)",
+            (project_id, space),
+        ).fetchall()
+        symbols = conn.execute(
+            "SELECT id, embedding_text FROM ci_symbols "
+            "WHERE project_id = ? AND embedding_text IS NOT NULL "
+            "AND (embedding_space IS NULL OR embedding_space != ?)",
+            (project_id, space),
+        ).fetchall()
+        return files, symbols
+
+    files, symbols = execute_with_retry(_fetch)
+    if not files and not symbols:
+        return 0, 0
+
+    embed = _get_embed_fn()
+    file_vectors = embed([row["embedding_text"] for row in files]) if files else []
+    symbol_vectors = embed([row["embedding_text"] for row in symbols]) if symbols else []
+
+    def _store(conn) -> None:
+        if files:
+            conn.executemany(
+                "UPDATE ci_files SET embedding = ?, embedding_space = ? WHERE id = ?",
+                [
+                    (np.asarray(vector, dtype=np.float32).tobytes(), space, row["id"])
+                    for row, vector in zip(files, file_vectors, strict=True)
+                ],
+            )
+        if symbols:
+            conn.executemany(
+                "UPDATE ci_symbols SET embedding = ?, embedding_space = ? WHERE id = ?",
+                [
+                    (np.asarray(vector, dtype=np.float32).tobytes(), space, row["id"])
+                    for row, vector in zip(symbols, symbol_vectors, strict=True)
+                ],
+            )
+        conn.commit()
+
+    execute_with_retry(_store)
+    logger.info(
+        "Refreshed code embeddings for project %d into %s (%d files, %d symbols)",
+        project_id,
+        space,
+        len(files),
+        len(symbols),
+    )
+    return len(files), len(symbols)
 
 
 def _first_line(text: str, max_chars: int = _MAX_DESC_CHARS) -> str:
@@ -138,9 +205,8 @@ def _build_symbol_text(sym) -> str:
 
     ``desc`` is the first line of the docstring when present,
     falling back to the signature, falling back to the name alone.
-    The em-dash separator is intentional — it gives sentence-
-    transformers a clear break between the identity (kind + name)
-    and the description.
+    The em-dash separator is intentional — it gives the tokenizer a clear
+    break between the identity (kind + name) and the description.
     """
     kind = _kind_str(sym).replace("_", " ")
     name = str(getattr(sym, "name", "") or "")
@@ -211,14 +277,15 @@ def embed_file_symbols(
         # ── File-level embedding ──────────────────────────────────
         file_text = _build_file_text(file_path, language, symbols)
         file_emb = compute_embedding(file_text)
+        embedding_space = current_embedding_space() if file_emb is not None else None
 
         def _update_file(conn):
             if file_emb is not None:
                 conn.execute(
                     "UPDATE ci_files "
-                    "SET embedding = ?, embedding_text = ? "
+                    "SET embedding = ?, embedding_text = ?, embedding_space = ? "
                     "WHERE project_id = ? AND file_path = ?",
-                    (file_emb, file_text, project_id, file_path),
+                    (file_emb, file_text, embedding_space, project_id, file_path),
                 )
                 conn.commit()
         execute_with_retry(_update_file)
@@ -245,9 +312,8 @@ def embed_file_symbols(
 
     try:
         from infinidev.tools.base.dedup import _get_embed_fn
-        import numpy as np
-
         embed_fn = _get_embed_fn()
+        embedding_space = current_embedding_space()
         texts = [item[0] for item in sym_items]
         vectors = embed_fn(texts)
 
@@ -256,12 +322,14 @@ def embed_file_symbols(
         for i, (text, name, line_start) in enumerate(sym_items):
             arr = np.asarray(vectors[i], dtype=np.float32)
             emb = arr.tobytes()
-            updates.append((emb, text, project_id, file_path, name, line_start))
+            updates.append(
+                (emb, text, embedding_space, project_id, file_path, name, line_start)
+            )
 
         def _batch_update(conn):
             conn.executemany(
                 "UPDATE ci_symbols "
-                "SET embedding = ?, embedding_text = ? "
+                "SET embedding = ?, embedding_text = ?, embedding_space = ? "
                 "WHERE project_id = ? "
                 "  AND file_path = ? "
                 "  AND name = ? "

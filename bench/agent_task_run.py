@@ -31,6 +31,7 @@ from bench.agent_task_eval import (
 
 MIN_REQUEST_INTERVAL_SECONDS = 2.0
 _IGNORED_PARTS = frozenset({".git", ".infinidev", ".pytest_cache", "__pycache__"})
+_CONDITIONS = ("baseline", "candidate")
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,9 @@ def configured_evaluation_runtime(
         "LLM_BASE_URL",
         "LLM_API_KEY",
         "LLM_NUM_RETRIES",
+        "EXECUTE_COMMANDS_PERMISSION",
+        "FILE_OPERATIONS_PERMISSION",
+        "TOOL_EFFECTS_PERMISSION",
         "CONTEXT_RANK_ENABLED",
         "USER_PREFERENCE_PROFILE",
         "USER_PREFERENCE_PROFILE_SHA256",
@@ -179,6 +183,13 @@ def configured_evaluation_runtime(
         if api_key:
             settings.LLM_API_KEY = api_key
         settings.LLM_NUM_RETRIES = 0
+        # The runner owns a fresh disposable workspace and has no approval UI.
+        # Leaving interactive permission modes active turns valid verification
+        # commands into artificial tool failures and measures workarounds rather
+        # than agent behavior.
+        settings.EXECUTE_COMMANDS_PERMISSION = "auto_approve"
+        settings.FILE_OPERATIONS_PERMISSION = "auto_approve"
+        settings.TOOL_EFFECTS_PERMISSION = "auto_approve"
         settings.CONTEXT_RANK_ENABLED = False
         settings.USER_PREFERENCE_PROFILE = str(profile_path)
         settings.USER_PREFERENCE_PROFILE_SHA256 = profile_sha
@@ -341,6 +352,8 @@ def run_one(
     verify_stderr = ""
     engine_status = ""
     tool_trace: list[dict[str, object]] = []
+    engine: LoopEngine | None = None
+    agent: InfinidevAgent | None = None
     with tempfile.TemporaryDirectory(prefix="infinidev-agent-task-") as temp:
         temp_root = Path(temp)
         run_workspace = temp_root / "repo"
@@ -348,44 +361,54 @@ def run_one(
         seed = f"{run_name}:{run_workspace.resolve()}"
         project_id = int.from_bytes(hashlib.sha256(seed.encode()).digest()[:4], "big")
         instance_id = f"agent-task-{project_id:08x}-{repetition}"
-        engine = LoopEngine()
-        agent = InfinidevAgent(
-            agent_id=f"agent-task-{instance_id}", role="developer", project_id=project_id
-        )
         try:
-            with (
-                configured_evaluation_runtime(config, condition, manifest, temp_root),
-                _workspace(run_workspace),
-                capture_tool_trace(
-                    tool_trace,
+            with configured_evaluation_runtime(config, condition, manifest, temp_root):
+                # Tool resolution consults the active model capabilities. Build
+                # both objects only after the evaluation route is installed;
+                # otherwise a previous/default provider contaminates the run.
+                engine = LoopEngine()
+                agent = InfinidevAgent(
+                    agent_id=f"agent-task-{instance_id}",
+                    role="developer",
                     project_id=project_id,
-                    agent_id=agent.agent_id,
-                ),
-            ):
-                agent.activate_context(session_id=instance_id)
-                final_answer = engine.execute(
-                    agent,
-                    (
-                        task.request,
-                        "Complete this isolated evaluation task. Do not create branches, commit, push, "
-                        "or modify anything outside the workspace. Leave deterministic verification passing.",
-                    ),
-                    verbose=False,
-                    max_iterations=config.max_iterations,
-                    max_total_tool_calls=config.max_total_tool_calls,
-                    max_tool_calls_per_action=config.max_tool_calls_per_action,
-                    allow_llm_retries=False,
                 )
-                verified = _verify(task.verify_command, run_workspace, config.verify_timeout_seconds)
-                verify_exit = verified.returncode
-                verify_stdout = verified.stdout
-                verify_stderr = verified.stderr
+                with (
+                    _workspace(run_workspace),
+                    capture_tool_trace(
+                        tool_trace,
+                        project_id=project_id,
+                        agent_id=agent.agent_id,
+                    ),
+                ):
+                    agent.activate_context(session_id=instance_id)
+                    final_answer = engine.execute(
+                        agent,
+                        (
+                            task.request,
+                            "Complete this isolated evaluation task. Do not create branches, commit, push, "
+                            "or modify anything outside the workspace. Leave deterministic verification passing.",
+                        ),
+                        verbose=False,
+                        max_iterations=config.max_iterations,
+                        max_total_tool_calls=config.max_total_tool_calls,
+                        max_tool_calls_per_action=config.max_tool_calls_per_action,
+                        allow_llm_retries=False,
+                    )
+                    verified = _verify(
+                        task.verify_command,
+                        run_workspace,
+                        config.verify_timeout_seconds,
+                    )
+                    verify_exit = verified.returncode
+                    verify_stdout = verified.stdout
+                    verify_stderr = verified.stderr
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         finally:
-            agent.deactivate()
-        engine_status = str(getattr(engine, "_last_status", ""))
-        state = getattr(engine, "_last_state", None)
+            if agent is not None:
+                agent.deactivate()
+        engine_status = str(getattr(engine, "_last_status", "")) if engine else ""
+        state = getattr(engine, "_last_state", None) if engine else None
         history = list(getattr(state, "history", ()))
         changed = changed_paths(source, run_workspace)
         forbidden = tuple(
@@ -424,7 +447,7 @@ def run_one(
         "run_config": asdict(config),
         "final_answer": final_answer,
         "engine_status": engine_status,
-        "plan_steps": engine.get_plan_steps(),
+        "plan_steps": engine.get_plan_steps() if engine else [],
         "action_records": [
             record.model_dump(mode="json") if hasattr(record, "model_dump") else str(record)
             for record in history
@@ -437,8 +460,8 @@ def run_one(
         "action_pattern_checks": action_checks,
         "prompt_composition_history": list(getattr(state, "prompt_composition_history", ())),
         "request_payload_history": list(getattr(state, "request_payload_history", ())),
-        "changed_files_summary": engine.get_changed_files_summary(),
-        "file_change_reasons": engine.get_file_change_reasons(),
+        "changed_files_summary": engine.get_changed_files_summary() if engine else "",
+        "file_change_reasons": engine.get_file_change_reasons() if engine else {},
         "verify_exit_code": verify_exit,
         "verify_stdout": verify_stdout,
         "verify_stderr": verify_stderr,
@@ -484,6 +507,28 @@ def _append_jsonl(path: Path, value: Mapping[str, object]) -> None:
         os.fsync(handle.fileno())
 
 
+def select_agent_tasks(
+    tasks: list[AgentTask],
+    *,
+    split: str,
+    include_drafts: bool,
+    task_ids: tuple[str, ...] = (),
+) -> list[AgentTask]:
+    """Select an explicit ordered task subset, rejecting misspelled ids."""
+    requested = set(task_ids)
+    known = {task.id for task in tasks}
+    unknown = requested - known
+    if unknown:
+        raise ValueError(f"unknown agent task ids: {', '.join(sorted(unknown))}")
+    return [
+        task
+        for task in tasks
+        if task.split == split
+        and (include_drafts or task.review_status == "approved")
+        and (not requested or task.id in requested)
+    ]
+
+
 def run_campaign(
     tasks_path: Path,
     conditions_path: Path,
@@ -494,6 +539,8 @@ def run_campaign(
     fixture_root: Path,
     split: str,
     include_drafts: bool,
+    task_ids: tuple[str, ...] = (),
+    conditions: tuple[str, ...] = _CONDITIONS,
     acquire_global_lock: bool = True,
 ) -> None:
     """Run every task/condition serially and stop on the first runtime error."""
@@ -507,11 +554,16 @@ def run_campaign(
     )
     if manifest.get("model_identity") != config.model_identity:
         raise ValueError("agent task manifest model identity does not match run config")
-    selected = [
-        task
-        for task in tasks
-        if task.split == split and (include_drafts or task.review_status == "approved")
-    ]
+    if not conditions or any(condition not in _CONDITIONS for condition in conditions):
+        raise ValueError("agent task conditions must contain baseline and/or candidate")
+    if len(set(conditions)) != len(conditions):
+        raise ValueError("agent task conditions must be unique")
+    selected = select_agent_tasks(
+        tasks,
+        split=split,
+        include_drafts=include_drafts,
+        task_ids=task_ids,
+    )
     if not selected:
         raise ValueError(f"no selected agent tasks for split: {split}")
     if observations_path.exists() and observations_path.stat().st_size:
@@ -520,7 +572,7 @@ def run_campaign(
     with lock:
         for repetition in range(config.repetitions):
             for task in selected:
-                for condition in ("baseline", "candidate"):
+                for condition in conditions:
                     row = run_one(
                         task,
                         condition,
@@ -550,6 +602,19 @@ def main() -> None:
     parser.add_argument("--fixture-root", type=Path, default=Path("bench/agent_task_fixtures"))
     parser.add_argument("--split", choices=("calibration", "validation"), default="validation")
     parser.add_argument("--include-drafts", action="store_true")
+    parser.add_argument(
+        "--task-id",
+        action="append",
+        default=[],
+        help="run only this task id; repeat to select more than one",
+    )
+    parser.add_argument(
+        "--condition",
+        action="append",
+        choices=_CONDITIONS,
+        default=[],
+        help="run only this condition; repeat to select both",
+    )
     args = parser.parse_args()
     run_campaign(
         args.tasks,
@@ -560,6 +625,8 @@ def main() -> None:
         fixture_root=args.fixture_root,
         split=args.split,
         include_drafts=args.include_drafts,
+        task_ids=tuple(args.task_id),
+        conditions=tuple(args.condition) or _CONDITIONS,
     )
 
 

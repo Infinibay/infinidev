@@ -53,9 +53,9 @@ class ContextRankHooks:
         if self._task_context_id is not None:
             def _embed_and_store():
                 compute_context_embedding(self._task_context_id)
-                from infinidev.tools.base.embeddings import compute_embedding
+                from infinidev.tools.base.embeddings import compute_query_embedding
                 from infinidev.engine.context_rank.ranker import _simplify_query
-                raw_emb = compute_embedding(task_description)
+                raw_emb = compute_query_embedding(task_description)
                 self._task_embedding = raw_emb
                 # Canal 3 (fuzzy symbol search) uses a simplified query
                 # embedding to prevent conversational noise from diluting
@@ -66,7 +66,7 @@ class ContextRankHooks:
                 except Exception:
                     simplified = task_description
                 if simplified and simplified != task_description:
-                    self._task_embedding_simplified = compute_embedding(simplified)
+                    self._task_embedding_simplified = compute_query_embedding(simplified)
                 else:
                     self._task_embedding_simplified = raw_emb
             _embed_pool.submit(_embed_and_store)

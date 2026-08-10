@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from infinidev.engine._best_effort import best_effort
@@ -17,7 +19,7 @@ from infinidev.engine.engine_logging import (
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
 from infinidev.engine.loop.models import ActionRecord, StepResult
 from infinidev.engine.loop.behavior_rules import _READ_TOOLS, is_workspace_edit_tool
-from infinidev.engine.loop.loop_plan import _step_phase
+from infinidev.engine.loop.loop_plan import _step_concepts, _step_phase
 from infinidev.engine.loop.step_summarizer import _summarize_step, _synthesize_final
 
 if TYPE_CHECKING:
@@ -74,6 +76,72 @@ def _get_settings():
     return settings
 
 
+_FOLDED_STEP_GENERIC_CONCEPTS = frozenset({
+    "args", "arguments", "behavior", "keyword", "only", "semantics",
+    "using",
+})
+_MAX_FOLD_EVIDENCE_BYTES = 256 * 1024
+
+
+def _edited_evidence_words(ctx: ExecutionContext, files_edited: set[str]) -> set[str]:
+    """Collect bounded lexical evidence from files changed in the current Step."""
+    workspace = Path(str(getattr(getattr(ctx, "agent", None), "workspace_path", "") or "."))
+    parts: list[str] = []
+    for raw_path in sorted(files_edited)[:20]:
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = workspace / path
+        parts.append(path.name)
+        try:
+            if path.is_file() and path.stat().st_size <= _MAX_FOLD_EVIDENCE_BYTES:
+                parts.append(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+    return set(re.findall(r"[a-z0-9]+", "\n".join(parts).casefold()))
+
+
+def _fold_verified_model_steps(
+    ctx: ExecutionContext,
+    step_result: StepResult,
+) -> None:
+    """Close model-created change Steps already evidenced by this done turn.
+
+    This is intentionally stricter than title similarity.  Folding requires
+    actual edits, a recognised green test, and lexical coverage in the changed
+    files.  User-approved Steps are never inferred complete.
+    """
+    tracker = getattr(step_result, "behavior_tracker", None)
+    files_edited = set(getattr(tracker, "files_edited", ()) or ())
+    successful_tests = list(
+        getattr(tracker, "successful_test_commands", ()) or ()
+    )
+    if not files_edited or not successful_tests:
+        return
+
+    evidence_words = _edited_evidence_words(ctx, files_edited)
+    if not evidence_words:
+        return
+    active = ctx.state.plan.active_step
+    for step in ctx.state.plan.steps:
+        if step.status != "pending" or step.user_approved:
+            continue
+        if _step_phase(step.title) not in {"change", "test_change"}:
+            continue
+        concepts = _step_concepts(step.title) - _FOLDED_STEP_GENERIC_CONCEPTS
+        if not concepts:
+            continue
+        covered = concepts & evidence_words
+        required = 1 if len(concepts) <= 2 else max(2, (len(concepts) + 2) // 3)
+        if len(covered) < required:
+            continue
+        step.status = "done"
+        step.conclusion = (
+            f"Satisfied within Step {active.index if active is not None else '?'}: "
+            f"changed files cover {', '.join(sorted(covered))}; "
+            f"verified by {successful_tests[-1]}."
+        )
+
+
 def _log_cache_summary(state: Any) -> None:
     """Log a one-line cache summary if any cache metrics are non-zero."""
     cache_read = state.cache_read_tokens
@@ -118,6 +186,8 @@ class StepManager:
         plan = getattr(ctx.state, "plan", None)
         if plan is None or not plan.steps:
             return step_result
+
+        _fold_verified_model_steps(ctx, step_result)
 
         active = plan.active_step
         pending = plan.undischarged(
@@ -167,6 +237,35 @@ class StepManager:
             # work had succeeded.
             active = ctx.state.plan.active_step
             active_phase = _step_phase(active.title) if active is not None else ""
+            file_tracker = getattr(ctx, "file_tracker", None)
+            if (
+                active is not None
+                and active_phase in {"change", "test_change"}
+                and file_tracker is not None
+                and hasattr(file_tracker, "change_fingerprint")
+            ):
+                entry = dict(
+                    ctx.state.step_entry_change_fingerprints.get(active.index, ())
+                )
+                current = dict(
+                    file_tracker.change_fingerprint(reconcile=True)
+                )
+                changed_paths = {
+                    path for path in set(entry) | set(current)
+                    if entry.get(path) != current.get(path)
+                }
+                retired = ctx.state.plan.retire_discovery_subsumed_by_change(
+                    change_title=active.title,
+                    changed_paths=changed_paths,
+                )
+                if retired:
+                    _emit_log(
+                        "info",
+                        "Retired model discovery already subsumed by the net "
+                        f"change (Steps {', '.join(map(str, retired))}).",
+                        project_id=ctx.project_id,
+                        agent_id=ctx.agent_id,
+                    )
             close_status = (
                 "blocked"
                 if step_result.status == "blocked"
@@ -184,6 +283,10 @@ class StepManager:
                 and active.index in ctx.state.edited_step_indices
             ):
                 ctx.state.plan.consecutive_decompositions = 0
+            if active is not None:
+                ctx.state.step_entry_change_fingerprints.pop(active.index, None)
+                ctx.state.no_progress_windows_by_step.pop(active.index, None)
+                ctx.state.last_test_outcomes_by_step.pop(active.index, None)
             ctx.state.plan.activate_next()
         # Notify a UI hook (if any) that a new step is now active. Best
         # effort — never let a hook error interrupt the engine loop.
@@ -297,8 +400,16 @@ class StepManager:
             record.behavior_score = bsum["behavior_score"]
             record.behavior_good = bsum["good_patterns"]
             record.behavior_bad = bsum["bad_patterns"]
+            record.successful_edit_count = bt.successful_edit_count
+            record.net_workspace_changed = bt.net_workspace_changed
+        record.test_outcome_fingerprints = tuple(sorted(
+            fingerprint
+            for fingerprints in ctx.state.test_outcome_history.values()
+            for fingerprint in fingerprints
+        ))
 
         ctx.state.history.append(record)
+        self._arm_semantic_stagnation_control(ctx)
 
         # Pre-load files recommended by summarizer
         for fpath in record.files_to_preload:
@@ -311,6 +422,39 @@ class StepManager:
 
         # Keep _last_state up-to-date for live introspection (e.g. /debug panel)
         self._engine._last_state = ctx.state
+
+    @staticmethod
+    def _arm_semantic_stagnation_control(ctx: ExecutionContext) -> None:
+        """Narrow one future Step after semantic and hard evidence agree."""
+        if not getattr(ctx, "semantic_stagnation_control", False):
+            return
+        from infinidev.engine.loop.semantic_stagnation import (
+            detect_semantic_stagnation,
+        )
+
+        signal = detect_semantic_stagnation(ctx.state.history)
+        if signal is None:
+            return
+        step = next(
+            (item for item in ctx.state.plan.steps if item.index == signal.step_index),
+            None,
+        )
+        if step is None or _step_phase(step.title) not in {"change", "test_change"}:
+            return
+        ctx.state.discovery_suppression_steps = max(
+            ctx.state.discovery_suppression_steps, 1
+        )
+        evidence = "cosine " + ", ".join(
+            f"{value:.3f}" for value in signal.similarities
+        )
+        _emit_log(
+            "warning",
+            "Semantic stagnation detected with unchanged edit/test evidence "
+            f"(Step {signal.step_index}, {evidence}); narrowing "
+            "discovery tools for the next Step.",
+            project_id=ctx.project_id,
+            agent_id=ctx.agent_id,
+        )
 
     @staticmethod
     def _step_end_summary_hook(

@@ -10,7 +10,13 @@ from pydantic import BaseModel, Field
 
 from infinidev.db.service import execute_with_retry
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.base.embeddings import compute_embedding, embedding_from_blob
+from infinidev.tools.base.embeddings import (
+    compute_query_embedding,
+    current_embedding_space,
+    embed_passages,
+    embedding_from_blob,
+    embedding_is_current,
+)
 
 logger = logging.getLogger(__name__)
 from infinidev.tools.docs.find_documentation_input import FindDocumentationInput
@@ -146,7 +152,7 @@ class FindDocumentationTool(InfinibayBaseTool):
             return self._success({"query": query, "results": results})
 
         # Fallback: cosine similarity with embeddings
-        query_emb = compute_embedding(query)
+        query_emb = compute_query_embedding(query)
         if query_emb is None:
             return self._error(f"No FTS results and embedding computation failed for query: {query}")
 
@@ -156,7 +162,7 @@ class FindDocumentationTool(InfinibayBaseTool):
                 return None
             return conn.execute(
                 """\
-                SELECT id, section_title, content, embedding
+                SELECT id, section_title, content, embedding, embedding_space
                 FROM library_docs
                 WHERE library_name = ? AND language = ? AND version = ?
                   AND embedding IS NOT NULL
@@ -174,10 +180,44 @@ class FindDocumentationTool(InfinibayBaseTool):
 
         query_vec = np.frombuffer(query_emb, dtype=np.float32)
         query_norm = float(np.linalg.norm(query_vec))
+        current_space = current_embedding_space()
+        stale = [
+            row for row in rows
+            if not embedding_is_current(
+                row["embedding"],
+                row["embedding_space"],
+                live_space=current_space,
+                dim=query_vec.size,
+            )
+        ]
+        regenerated: dict[int, np.ndarray] = {}
+        if stale:
+            vectors = embed_passages([
+                f"{row['section_title']} {row['content'][:500]}" for row in stale
+            ])
+            regenerated = {
+                row["id"]: np.asarray(vector, dtype=np.float32)
+                for row, vector in zip(stale, vectors, strict=True)
+            }
+
+            def _store_refreshed(conn: sqlite3.Connection) -> None:
+                conn.executemany(
+                    "UPDATE library_docs SET embedding = ?, embedding_space = ? "
+                    "WHERE id = ?",
+                    [
+                        (vector.tobytes(), current_space, document_id)
+                        for document_id, vector in regenerated.items()
+                    ],
+                )
+                conn.commit()
+
+            execute_with_retry(_store_refreshed)
         scored = []
         for row in rows:
             try:
-                doc_vec = embedding_from_blob(row["embedding"])
+                doc_vec = regenerated.get(row["id"])
+                if doc_vec is None:
+                    doc_vec = embedding_from_blob(row["embedding"])
             except ValueError:
                 # Truncated / corrupt BLOB (size not a multiple of 4 bytes).
                 continue
@@ -195,4 +235,3 @@ class FindDocumentationTool(InfinibayBaseTool):
             for sim, title, snippet in scored[:5]
         ]
         return self._success({"query": query, "results": results})
-

@@ -420,7 +420,7 @@ class TestPromptRendering:
 def _insert_symbol(conn, *, project_id=1, name, kind="function",
                    file_path="src/auth.py", qualified_name=None,
                    line_start=10, line_end=20, docstring="",
-                   embedding=None, embedding_text=None):
+                   embedding=None, embedding_text=None, embedding_space=None):
     """Helper to insert a symbol for fuzzy symbol search tests.
 
     Optional ``embedding`` / ``embedding_text`` let tests seed pre-
@@ -430,23 +430,34 @@ def _insert_symbol(conn, *, project_id=1, name, kind="function",
     conn.execute(
         "INSERT INTO ci_symbols "
         "(project_id, file_path, name, qualified_name, kind, line_start, "
-        "line_end, signature, docstring, language, embedding, embedding_text) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "line_end, signature, docstring, language, embedding, embedding_text, "
+        "embedding_space) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (project_id, file_path, name, qualified_name or name, kind,
          line_start, line_end, f"{kind} {name}()", docstring, "python",
-         embedding, embedding_text),
+         embedding, embedding_text, embedding_space or _space_for(embedding)),
     )
 
 
 def _insert_file(conn, *, project_id=1, file_path, language="python",
-                 embedding=None, embedding_text=None):
+                 embedding=None, embedding_text=None, embedding_space=None):
     """Helper to insert an indexed file for fuzzy symbol search tests."""
     conn.execute(
         "INSERT INTO ci_files "
-        "(project_id, file_path, language, content_hash, embedding, embedding_text) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (project_id, file_path, language, "hash", embedding, embedding_text),
+        "(project_id, file_path, language, content_hash, embedding, embedding_text, "
+        "embedding_space) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            project_id, file_path, language, "hash", embedding, embedding_text,
+            embedding_space or _space_for(embedding),
+        ),
     )
+
+
+def _space_for(embedding):
+    if embedding is None:
+        return None
+    from infinidev.tools.base.embeddings import current_embedding_space
+
+    return current_embedding_space()
 
 
 def _embed_symbol_like(name: str, kind: str = "class", desc: str = "") -> bytes | None:

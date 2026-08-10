@@ -18,6 +18,7 @@ def test_apply_file_patch_counts_as_successful_edit():
 
     assert tracker.task_has_edits is True
     assert tracker.files_edited == {"src/app.py"}
+    assert tracker.successful_edit_count == 1
 
 
 def test_failed_workspace_write_does_not_count_as_edit():
@@ -27,6 +28,7 @@ def test_failed_workspace_write_does_not_count_as_edit():
 
     assert tracker.task_has_edits is False
     assert tracker.files_edited == set()
+    assert tracker.successful_edit_count == 0
 
 
 def test_other_effectful_file_tools_use_central_metadata():

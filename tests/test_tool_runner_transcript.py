@@ -139,6 +139,9 @@ def test_budget_nudge_does_not_split_a_single_batch_with_a_pseudo_tool():
     ))
     assert_tool_block_contiguous(messages)
     assert messages[-1]["role"] == "user", "the nudge should close the turn"
+    nudge = messages[-1]["content"]
+    assert "If the success criterion is already verified" in nudge
+    assert "Call step_complete now" not in nudge
 
 
 def test_budget_nudge_does_not_split_a_multi_batch_turn():
@@ -174,6 +177,35 @@ def test_budget_refuses_overflow_without_executing_or_breaking_transcript():
     assert ctx.state.total_tool_calls == 1
     overflow = next(message for message in messages if message.get("tool_call_id") == "c2")
     assert "not_run: tool budget exhausted" in overflow["content"]
+    assert_tool_block_contiguous(messages)
+
+
+def test_unlimited_total_budget_does_not_truncate_a_tool_batch() -> None:
+    ctx = _ctx()
+    ctx.max_per_action = 2
+    ctx.max_total_calls = None
+    ctx.state.total_tool_calls = 160
+    runner = ToolRunner(_engine(nudge_at=None))
+    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "task"}]
+    classified = ClassifiedCalls(regular=[
+        _call("c1", "read_file", '{"file_path": "a.py"}'),
+        _call("c2", "read_file", '{"file_path": "b.py"}'),
+    ])
+    result = SimpleNamespace(
+        message=SimpleNamespace(content="", tool_calls=[]), raw_content="",
+    )
+
+    used = runner.run_regular(
+        ctx, classified, messages, result, action_tool_calls=0, iteration=0,
+        guard=LoopGuard(is_small=False), tracker=BehaviorTracker(set()),
+    )
+
+    assert used == 2
+    assert ctx.state.total_tool_calls == 162
+    assert not any(
+        "not_run: tool budget exhausted" in message.get("content", "")
+        for message in messages
+    )
     assert_tool_block_contiguous(messages)
 
 
@@ -310,36 +342,305 @@ def test_exact_unchanged_read_is_replaced_by_compact_notice(tmp_path):
     assert json.loads(cached[0][1]) == {
         "status": "already_delivered",
         "path": str(path),
+        "coverage": "exact",
         "message": (
-            "This exact unchanged range was already delivered. Use the existing "
-            "opened-files/prior result, request a narrower offset+limit, or call "
-            "recall_context for archived evidence."
+            "This unchanged read is already fully covered by prior results. Use "
+            "the existing opened-files/prior evidence; running it again would add "
+            "no information."
         ),
     }
 
 
-def test_read_delivery_cache_invalidates_on_edit_or_range_change(tmp_path):
+def test_read_delivery_cache_allows_uncovered_range_and_invalidates_on_edit(tmp_path):
     path = tmp_path / "module.py"
     path.write_text("value = 1\n")
     ctx = _ctx()
     ctx.workspace_path = str(tmp_path)
     runner = ToolRunner(_engine(nudge_at=99))
     original = _call("read-1", "read_file", '{"file_path":"module.py","limit":20}')
-    narrower = _call(
+    uncovered = _call(
         "read-2",
         "read_file",
-        '{"file_path":"module.py","offset":2,"limit":5}',
+        '{"file_path":"module.py","offset":21,"limit":5}',
     )
     runner._record_read_delivery(ctx, original)
 
-    cached, executable = runner._partition_repeated_reads(ctx, [narrower])
+    cached, executable = runner._partition_repeated_reads(ctx, [uncovered])
     assert cached == []
-    assert executable == [narrower]
+    assert executable == [uncovered]
 
     path.write_text("value = 200\n")
     cached, executable = runner._partition_repeated_reads(ctx, [original])
     assert cached == []
     assert executable == [original]
+
+
+def test_read_delivery_cache_normalizes_aliases_and_covered_subranges(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("".join(f"line_{line}\n" for line in range(1, 81)))
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+
+    first = _call(
+        "read-1",
+        "read_file",
+        '{"file_path":"module.py","offset":"10","limit":"21"}',
+    )
+    alias = _call(
+        "read-2",
+        "partial_read",
+        '{"path":"module.py","start_line":10,"end_line":30}',
+    )
+    contained = _call(
+        "read-3",
+        "read_file",
+        '{"file_path":"module.py","line_range":"15-20"}',
+    )
+    runner._record_read_delivery(ctx, first)
+
+    alias_cached, alias_executable = runner._partition_repeated_reads(ctx, [alias])
+    contained_cached, contained_executable = runner._partition_repeated_reads(
+        ctx, [contained]
+    )
+
+    assert alias_executable == []
+    assert json.loads(alias_cached[0][1])["coverage"] == "exact"
+    assert contained_executable == []
+    assert json.loads(contained_cached[0][1])["coverage"] == "contained"
+
+
+def test_read_delivery_cache_unions_ranges_but_does_not_bridge_gaps(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("".join(f"line_{line}\n" for line in range(1, 81)))
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+
+    runner._record_read_delivery(
+        ctx,
+        _call("read-1", "read_file", '{"file_path":"module.py","offset":1,"limit":10}'),
+    )
+    runner._record_read_delivery(
+        ctx,
+        _call("read-2", "read_file", '{"file_path":"module.py","offset":11,"limit":10}'),
+    )
+    covered = _call(
+        "read-3", "read_file", '{"file_path":"module.py","offset":5,"limit":15}'
+    )
+    gap = _call(
+        "read-4", "read_file", '{"file_path":"module.py","offset":5,"limit":25}'
+    )
+
+    cached, executable = runner._partition_repeated_reads(ctx, [covered, gap])
+
+    assert [call.id for call, _ in cached] == ["read-3"]
+    assert executable == [gap]
+
+
+def test_shell_head_reuses_covered_native_and_shell_ranges(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("".join(f"line_{line}\n" for line in range(1, 121)))
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+
+    first_head = _call(
+        "shell-1",
+        "execute_command",
+        '{"command":"head -n 100 module.py","cwd":"."}',
+    )
+    smaller_head = _call(
+        "shell-2",
+        "execute_command",
+        '{"command":"head --lines=80 module.py","cwd":"."}',
+    )
+    native_subset = _call(
+        "read-3",
+        "read_file",
+        '{"file_path":"module.py","offset":20,"limit":20}',
+    )
+    runner._record_read_delivery(ctx, first_head)
+
+    cached, executable = runner._partition_repeated_reads(
+        ctx, [smaller_head, native_subset]
+    )
+
+    assert [call.id for call, _ in cached] == ["shell-2", "read-3"]
+    assert executable == []
+    assert all(json.loads(result)["coverage"] == "contained" for _, result in cached)
+
+
+def test_shell_cat_covers_later_ranges_and_respects_file_revision(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("one\ntwo\nthree\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+    cat = _call(
+        "shell-1",
+        "execute_command",
+        '{"command":"cd . && cat module.py"}',
+    )
+    subset = _call(
+        "read-2", "read_file", '{"file_path":"module.py","offset":2,"limit":1}'
+    )
+    runner._record_read_delivery(ctx, cat)
+
+    cached, executable = runner._partition_repeated_reads(ctx, [subset])
+    assert executable == []
+    assert json.loads(cached[0][1])["coverage"] == "contained"
+
+    path.write_text("one\nchanged\nthree\n")
+    cached, executable = runner._partition_repeated_reads(ctx, [subset])
+    assert cached == []
+    assert executable == [subset]
+
+
+def test_shell_read_parser_abstains_on_pipeline_and_unknown_transform(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("one\ntwo\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+    calls = [
+        _call("shell-1", "execute_command", '{"command":"cat module.py | head"}'),
+        _call("shell-2", "execute_command", '{"command":"sort module.py"}'),
+    ]
+
+    cached, executable = runner._partition_repeated_reads(ctx, calls)
+
+    assert cached == []
+    assert executable == calls
+
+
+def test_range_coverage_handles_same_start_with_bounded_and_open_end(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("\n".join(str(index) for index in range(100)))
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+    bounded = _call(
+        "read-1", "read_file",
+        '{"file_path":"module.py","offset":10,"limit":5}',
+    )
+    open_ended = _call(
+        "read-2", "read_file",
+        '{"file_path":"module.py","offset":10}',
+    )
+    runner._record_read_delivery(ctx, bounded)
+    runner._record_read_delivery(ctx, open_ended)
+    contained = _call(
+        "read-3", "read_file",
+        '{"file_path":"module.py","offset":15,"limit":20}',
+    )
+
+    cached, executable = runner._partition_repeated_reads(ctx, [contained])
+
+    assert executable == []
+    assert json.loads(cached[0][1])["coverage"] == "contained"
+
+
+def test_exact_shell_search_is_cached_until_an_input_file_changes(tmp_path):
+    path = tmp_path / "module.py"
+    path.write_text("needle = 1\nother = 2\n")
+    ctx = _ctx()
+    ctx.workspace_path = str(tmp_path)
+    runner = ToolRunner(_engine(nudge_at=99))
+    first = _call(
+        "shell-1",
+        "execute_command",
+        '{"command":"grep -n needle module.py","cwd":"."}',
+    )
+    repeated = _call(
+        "shell-2",
+        "execute_command",
+        '{"command":"cd . && grep -n needle module.py"}',
+    )
+    runner._record_read_delivery(ctx, first)
+
+    cached, executable = runner._partition_repeated_reads(ctx, [repeated])
+    assert executable == []
+    assert json.loads(cached[0][1])["coverage"] == "exact"
+
+    path.write_text("needle = 3\nother = 2\n")
+    cached, executable = runner._partition_repeated_reads(ctx, [repeated])
+    assert cached == []
+    assert executable == [repeated]
+
+
+def test_semantic_stagnation_step_suppresses_discovery_but_allows_tests(tmp_path):
+    ctx = _ctx()
+    ctx.suppress_discovery_this_step = True
+    runner = ToolRunner(_engine(nudge_at=99))
+    calls = [
+        _call("read-1", "read_file", '{"file_path":"module.py"}'),
+        _call(
+            "shell-1",
+            "execute_command",
+            '{"command":"grep -n needle module.py"}',
+        ),
+        _call(
+            "test-1",
+            "execute_command",
+            '{"command":"pytest tests/test_module.py -q"}',
+        ),
+        _call("edit-1", "edit_file", '{}'),
+    ]
+
+    suppressed, executable = runner._partition_suppressed_discovery(ctx, calls)
+
+    assert [call.id for call, _ in suppressed] == ["read-1", "shell-1"]
+    assert [call.id for call in executable] == ["test-1", "edit-1"]
+    assert all(
+        json.loads(result)["status"] == "discovery_suppressed"
+        for _, result in suppressed
+    )
+
+
+def test_semantic_recovery_spends_two_local_reads_then_suppresses_discovery(tmp_path):
+    ctx = _ctx()
+    ctx.suppress_discovery_this_step = True
+    ctx.semantic_recovery_context_calls = 2
+    runner = ToolRunner(_engine(nudge_at=99))
+    calls = [
+        _call("read-1", "read_file", '{"file_path":"module.py"}'),
+        _call(
+            "shell-1", "execute_command",
+            '{"command":"grep -n needle module.py"}',
+        ),
+        _call("web-1", "web_search", '{"query":"module implementation"}'),
+        _call("edit-1", "edit_file", '{}'),
+    ]
+
+    suppressed, executable = runner._partition_suppressed_discovery(ctx, calls)
+
+    assert [call.id for call, _ in suppressed] == ["web-1"]
+    assert [call.id for call in executable] == ["read-1", "shell-1", "edit-1"]
+    assert ctx.semantic_recovery_context_calls == 0
+
+
+def test_semantic_recovery_does_not_treat_unknown_shell_as_progress():
+    ctx = _ctx()
+    ctx.suppress_discovery_this_step = True
+    runner = ToolRunner(_engine(nudge_at=99))
+    calls = [
+        _call(
+            "python-inspect",
+            "execute_command",
+            '{"command":"python -c \\"print(open(\'module.py\').read())\\""}',
+        ),
+        _call(
+            "test-1",
+            "execute_command",
+            '{"command":"python -m pytest tests/test_module.py -q"}',
+        ),
+    ]
+
+    suppressed, executable = runner._partition_suppressed_discovery(ctx, calls)
+
+    assert [call.id for call, _ in suppressed] == ["python-inspect"]
+    assert [call.id for call in executable] == ["test-1"]
 
 
 @pytest.mark.parametrize(

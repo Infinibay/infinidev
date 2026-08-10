@@ -120,3 +120,19 @@ class TestPerStepDetailRendering:
             "task", "expected", state, small_model=True
         )
         assert active_detail in prompt
+
+    def test_model_policy_can_suppress_redundant_step_orientation(self):
+        state = _state_with_steps(
+            PlanStep(index=1, title="Implement the fix", status="active"),
+        )
+
+        prompt = build_iteration_prompt(
+            "task",
+            "expected",
+            state,
+            require_step_orientation=False,
+        )
+
+        assert "Step 1: Implement the fix" in prompt
+        assert "USER ORIENTATION" not in prompt
+        assert "Before the first work tool" not in prompt

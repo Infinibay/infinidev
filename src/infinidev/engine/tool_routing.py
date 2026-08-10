@@ -71,7 +71,10 @@ _CAPABILITY_PATTERNS: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "file_management": re.compile(
-        r"\b(delete|remove|move|rename|rollback|revert)\b",
+        r"\b(?:delete|remove|move|rename)\b.{0,24}"
+        r"\b(?:files?|directories|directory|folders?|paths?)\b|"
+        r"\b(?:rollback|revert)\b.{0,24}\b(?:files?|changes?|workspace|task)\b|"
+        r"\b(?:git\s+mv|mv|rm)\s+[^\s]",
         re.IGNORECASE,
     ),
     "vision": re.compile(

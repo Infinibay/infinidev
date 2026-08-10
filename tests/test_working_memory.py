@@ -158,6 +158,54 @@ def test_recall_matches_by_meaning_not_shared_words(tmp_path, monkeypatch):
     assert records[0].score > 0
 
 
+def test_same_dimension_stale_space_falls_back_to_lexical(memory) -> None:
+    """Equal vector length does not make vectors from another model comparable."""
+    import numpy as np
+
+    from infinidev.tools.base.db import execute_with_retry
+
+    memory.remember(
+        "pytest regression",
+        "The parser regression fails because the expected node is absent.",
+    )
+
+    def _make_stale(conn):
+        conn.execute(
+            "UPDATE working_memory SET embedding = ?, embedding_space = ?",
+            (np.ones(1024, dtype=np.float32).tobytes(), "other:1024:space"),
+        )
+        conn.commit()
+
+    execute_with_retry(_make_stale, db_path=memory._db_path)
+
+    records = memory.search("pytest parser regression")
+    assert records
+    assert records[0].title == "pytest regression"
+
+
+def test_existing_working_memory_table_is_migrated(tmp_path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE working_memory ("
+        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, step_index INTEGER, "
+        "kind TEXT, title TEXT, content TEXT, content_hash TEXT, "
+        "embedding BLOB, created_at TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = WorkingMemory("legacy", embed=False, db_path=str(db_path))
+
+    conn = sqlite3.connect(db_path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(working_memory)")}
+    conn.close()
+    assert migrated._ready
+    assert "embedding_space" in columns
+
+
 def test_recall_returns_nothing_for_unrelated_queries(memory):
     memory.archive_step(1, _step_messages(), summary="")
     assert memory.search("kubernetes ingress annotations") == []

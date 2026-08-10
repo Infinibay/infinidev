@@ -15,6 +15,7 @@ from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.plan_step import PlanStep
 from infinidev.engine.loop.step_manager import StepManager
 from infinidev.engine.loop.step_result import StepResult
+from infinidev.engine.loop.behavior_tracker import BehaviorTracker
 
 
 def _state(*steps: PlanStep) -> LoopState:
@@ -28,6 +29,7 @@ def _ctx(state: LoopState) -> SimpleNamespace:
         state=state,
         project_id=None,
         agent_id="test-agent",
+        agent=SimpleNamespace(workspace_path="."),
     )
 
 
@@ -74,6 +76,58 @@ class TestPrematureTaskCompletion:
 
         assert result.status == "continue"
 
+    def test_verified_edits_fold_covered_model_substeps(self, tmp_path) -> None:
+        dispatcher = tmp_path / "dispatcher.py"
+        registry = tmp_path / "registry.py"
+        dispatcher.write_text(
+            "class EventBus:\n    def emit(self, snapshot, priority, once): pass\n",
+            encoding="utf-8",
+        )
+        registry.write_text(
+            "class Registry:\n    def subscribe(self, priority, once): pass\n",
+            encoding="utf-8",
+        )
+        state = _state(
+            PlanStep(index=1, title="Implement the event bus", status="active"),
+            PlanStep(index=2, title="Extend Registry subscribe with priority and once"),
+            PlanStep(index=3, title="Implement EventBus emit snapshot semantics"),
+        )
+        context = _ctx(state)
+        context.agent.workspace_path = str(tmp_path)
+        tracker = BehaviorTracker(set())
+        tracker.files_edited.update({"dispatcher.py", "registry.py"})
+        tracker.successful_test_commands.append("pytest -q")
+        result = _done()
+        result.behavior_tracker = tracker
+
+        reconciled = StepManager.reconcile_task_completion(context, result)
+
+        assert reconciled is result
+        assert [step.status for step in state.plan.steps] == [
+            "active", "done", "done",
+        ]
+        assert "verified by pytest -q" in state.plan.steps[1].conclusion
+
+    def test_verified_edits_do_not_fold_unrelated_model_substep(self, tmp_path) -> None:
+        changed = tmp_path / "registry.py"
+        changed.write_text("def subscribe(priority, once): pass\n", encoding="utf-8")
+        state = _state(
+            PlanStep(index=1, title="Implement subscriptions", status="active"),
+            PlanStep(index=2, title="Rewrite authentication token refresh"),
+        )
+        context = _ctx(state)
+        context.agent.workspace_path = str(tmp_path)
+        tracker = BehaviorTracker(set())
+        tracker.files_edited.add("registry.py")
+        tracker.successful_test_commands.append("pytest -q")
+        result = _done()
+        result.behavior_tracker = tracker
+
+        reconciled = StepManager.reconcile_task_completion(context, result)
+
+        assert reconciled.status == "continue"
+        assert state.plan.steps[1].status == "pending"
+
 
 class TestValidCompletion:
     def test_current_active_step_is_not_counted_as_future_work(self) -> None:
@@ -107,6 +161,25 @@ class TestValidCompletion:
 
 
 class TestStepTransition:
+    def test_continue_without_follow_up_keeps_the_same_step_active(self) -> None:
+        from infinidev.engine.loop.engine import _reconcile_step_result
+
+        state = _state(
+            PlanStep(index=1, title="Implement and verify", status="active"),
+        )
+        context = _ctx(state)
+        manager = StepManager(SimpleNamespace(_hooks=None))
+
+        result, _ = _reconcile_step_result(
+            context,
+            StepResult(summary="Implementation done; tests remain", status="continue"),
+            manager,
+        )
+
+        assert result.interrupted is True
+        assert "No follow-up Step was scheduled" in result.summary
+        assert state.plan.active_step is state.plan.steps[0]
+
     def test_continue_closes_active_step_and_activates_next(self) -> None:
         state = _state(
             PlanStep(index=1, title="Inspect", status="active"),
@@ -206,3 +279,36 @@ class TestStepTransition:
 
         assert state.plan.consecutive_decompositions == 0
         assert state.plan.steps[1].status == "active"
+
+    def test_net_change_retires_older_discovery_for_the_edited_file(
+        self, monkeypatch,
+    ) -> None:
+        state = _state(
+            PlanStep(
+                index=2,
+                title="Implement all/any handling in assertion/rewrite.py",
+                status="active",
+            ),
+            PlanStep(index=3, title="Explore assertion/rewrite.py helpers"),
+            PlanStep(index=4, title="Run assertion rewrite tests"),
+        )
+        state.step_entry_change_fingerprints[2] = ()
+        context = _ctx(state)
+        context.file_tracker = SimpleNamespace(
+            change_fingerprint=lambda **kwargs: (
+                ("/workspace/assertion/rewrite.py", "new-digest"),
+            )
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.loop.step_manager._emit_log", lambda *a, **k: None,
+        )
+
+        StepManager(SimpleNamespace(_hooks=None)).advance_plan(
+            context,
+            StepResult(summary="Implemented the change", status="continue"),
+        )
+
+        assert state.plan.steps[0].status == "done"
+        assert state.plan.steps[1].status == "skipped"
+        assert state.plan.steps[2].status == "active"
+        assert 2 not in state.step_entry_change_fingerprints

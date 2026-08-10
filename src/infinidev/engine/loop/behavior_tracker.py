@@ -19,6 +19,8 @@ class BehaviorTracker:
         self.files_edited: set[str] = set()
         self.tool_history: list[str] = []
         self.successful_test_commands: list[str] = []
+        self.successful_edit_count: int = 0
+        self.net_workspace_changed: bool = False
         self.task_has_edits: bool = False
         self.notes_count: int = 0
         self.score: int = 0
@@ -42,6 +44,7 @@ class BehaviorTracker:
             self.files_read.add(path)
         if not had_error and is_workspace_edit_tool(name):
             self.task_has_edits = True
+            self.successful_edit_count += 1
             if path:
                 self.files_edited.add(path)
         if name == "add_note":

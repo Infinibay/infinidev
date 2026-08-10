@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS findings (
     validation_method     TEXT,
     reproducibility_score REAL,
     embedding             BLOB,
+    embedding_space       TEXT,
     created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
     -- migrated columns (anchored memory) — appended in migration order
@@ -243,6 +244,7 @@ CREATE TABLE IF NOT EXISTS library_docs (
     section_order  INTEGER NOT NULL DEFAULT 0,
     content        TEXT NOT NULL,
     embedding      BLOB,
+    embedding_space TEXT,
     source_urls    TEXT DEFAULT '[]',
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -472,9 +474,12 @@ CREATE TABLE IF NOT EXISTS ci_files (
     parser_version INTEGER DEFAULT 0,
     embedding BLOB,
     embedding_text TEXT,
+    embedding_space TEXT,
     UNIQUE(project_id, file_path)
 );
 CREATE INDEX IF NOT EXISTS idx_ci_files_path ON ci_files(project_id, file_path);
+CREATE INDEX IF NOT EXISTS idx_ci_files_embedding_space
+    ON ci_files(project_id, embedding_space);
 
 CREATE TABLE IF NOT EXISTS ci_symbols (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -497,13 +502,16 @@ CREATE TABLE IF NOT EXISTS ci_symbols (
     language TEXT NOT NULL,
     -- migrated columns — appended in migration order
     embedding BLOB,
-    embedding_text TEXT
+    embedding_text TEXT,
+    embedding_space TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ci_symbols_name ON ci_symbols(name);
 CREATE INDEX IF NOT EXISTS idx_ci_symbols_kind ON ci_symbols(kind, name);
 CREATE INDEX IF NOT EXISTS idx_ci_symbols_file ON ci_symbols(project_id, file_path);
 CREATE INDEX IF NOT EXISTS idx_ci_symbols_qualified ON ci_symbols(qualified_name);
 CREATE INDEX IF NOT EXISTS idx_ci_symbols_parent ON ci_symbols(parent_symbol);
+CREATE INDEX IF NOT EXISTS idx_ci_symbols_embedding_space
+    ON ci_symbols(project_id, embedding_space);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS ci_symbols_fts USING fts5(
     name, qualified_name, signature, docstring,
@@ -517,7 +525,8 @@ CREATE TRIGGER IF NOT EXISTS ci_symbols_ad AFTER DELETE ON ci_symbols BEGIN
     INSERT INTO ci_symbols_fts(ci_symbols_fts, rowid, name, qualified_name, signature, docstring)
     VALUES ('delete', old.id, old.name, old.qualified_name, old.signature, old.docstring);
 END;
-CREATE TRIGGER IF NOT EXISTS ci_symbols_au AFTER UPDATE ON ci_symbols BEGIN
+CREATE TRIGGER IF NOT EXISTS ci_symbols_au
+AFTER UPDATE OF name, qualified_name, signature, docstring ON ci_symbols BEGIN
     INSERT INTO ci_symbols_fts(ci_symbols_fts, rowid, name, qualified_name, signature, docstring)
     VALUES ('delete', old.id, old.name, old.qualified_name, old.signature, old.docstring);
     INSERT INTO ci_symbols_fts(rowid, name, qualified_name, signature, docstring)
@@ -599,6 +608,7 @@ CREATE TABLE IF NOT EXISTS cr_contexts (
     context_type TEXT NOT NULL,
     content      TEXT NOT NULL,
     embedding    BLOB,
+    embedding_space TEXT,
     iteration    INTEGER,
     step_index   INTEGER,
     created_at   REAL NOT NULL

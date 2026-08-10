@@ -30,6 +30,7 @@ import hashlib
 import json
 import logging
 import queue
+import sqlite3
 import threading
 import time
 import uuid
@@ -47,10 +48,10 @@ logger = logging.getLogger(__name__)
 MIN_ARCHIVE_CHARS = 60
 # Hard cap per entry — recall returns excerpts, not whole files.
 MAX_ARCHIVE_CHARS = 8000
-# Embedding input is capped separately: MiniLM truncates at 256 tokens
-# anyway, so feeding it more is pure cost.
+# Embedding input is capped separately so long command output does not dilute
+# its title and leading evidence in the additive static representation.
 MAX_EMBED_CHARS = 1200
-# Relevance floor for recall. Deliberately low: MiniLM scores a natural
+# Relevance floor for recall. Deliberately low: dense embeddings score a natural
 # language question against a stack trace or a code listing around
 # 0.15–0.40 even when they are about exactly the same thing (measured on
 # this repo's own archives), so the 0.82 threshold used for *dedup* would
@@ -417,6 +418,7 @@ def _ensure_table(db_path: str | None = None) -> None:
             " content TEXT NOT NULL,"
             " content_hash TEXT NOT NULL,"
             " embedding BLOB,"
+            " embedding_space TEXT,"
             " created_at TEXT NOT NULL"
             ");"
             "CREATE INDEX IF NOT EXISTS working_memory_session_idx"
@@ -424,6 +426,11 @@ def _ensure_table(db_path: str | None = None) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS working_memory_dedup_idx"
             " ON working_memory(session_id, content_hash);"
         )
+        try:
+            conn.execute("ALTER TABLE working_memory ADD COLUMN embedding_space TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
         conn.commit()
 
     execute_with_retry(_create, db_path=db_path)
@@ -859,22 +866,30 @@ class WorkingMemory:
 
     @staticmethod
     def _embed_batch(batch: list[_PendingEmbed]) -> None:
-        from infinidev.tools.base.dedup import _get_embed_fn
+        from infinidev.tools.base.embeddings import (
+            current_embedding_space,
+            embed_passages,
+        )
 
-        vectors = _get_embed_fn()([item.text for item in batch])
+        vectors = embed_passages([item.text for item in batch])
+        embedding_space = current_embedding_space()
         # One UPDATE per database: a batch can mix sessions, and (in tests
         # or after a workspace switch) those sessions can live in different
         # database files.
-        by_db: dict[str, list[tuple[str, Any]]] = {}
+        by_db: dict[str, list[tuple[bytes, str, str]]] = {}
         for item, vector in zip(batch, vectors):
             blob = np.asarray(vector, dtype=np.float32).tobytes()
-            by_db.setdefault(item.db_path, []).append((blob, item.record_id))
+            by_db.setdefault(item.db_path, []).append(
+                (blob, embedding_space, item.record_id)
+            )
 
         for db_path, updates in by_db.items():
 
             def _update(conn, _updates=updates):
                 conn.executemany(
-                    "UPDATE working_memory SET embedding = ? WHERE id = ?", _updates
+                    "UPDATE working_memory "
+                    "SET embedding = ?, embedding_space = ? WHERE id = ?",
+                    _updates,
                 )
                 conn.commit()
 
@@ -914,7 +929,7 @@ class WorkingMemory:
         """
         if not self._ready or not query.strip():
             return []
-        # Generous: the first call in a process pays for loading MiniLM.
+        # Generous: the first call in a process pays for loading the embedding table.
         # Missing the window is survivable (keyword scoring), so this is a
         # ceiling, not a typical cost.
         self.flush(timeout=20.0)
@@ -934,12 +949,12 @@ class WorkingMemory:
             if all_sessions:
                 return conn.execute(
                     "SELECT id, session_id, step_index, kind, title, content,"
-                    " embedding, created_at FROM working_memory"
+                    " embedding, embedding_space, created_at FROM working_memory"
                     " ORDER BY created_at DESC LIMIT 2000"
                 ).fetchall()
             return conn.execute(
                 "SELECT id, session_id, step_index, kind, title, content,"
-                " embedding, created_at FROM working_memory"
+                " embedding, embedding_space, created_at FROM working_memory"
                 " WHERE session_id = ? ORDER BY step_index DESC LIMIT 2000",
                 (self.session_id,),
             ).fetchall()
@@ -972,13 +987,20 @@ class WorkingMemory:
         most relevant one, and silently omitting it would look like the
         archive lost it.
         """
-        embedded = [row for row in rows if row[6]]
+        try:
+            from infinidev.tools.base.embeddings import current_embedding_space
+
+            embedding_space = current_embedding_space()
+        except Exception:
+            logger.debug("embedding-space identity failed; falling back to keywords")
+            return None
+        embedded = [row for row in rows if row[6] and row[7] == embedding_space]
         if not embedded:
             return None
         try:
-            from infinidev.tools.base.dedup import _get_embed_fn
+            from infinidev.tools.base.embeddings import embed_queries
 
-            query_vec = np.asarray(_get_embed_fn()([query])[0], dtype=np.float32)
+            query_vec = np.asarray(embed_queries([query])[0], dtype=np.float32)
         except Exception:
             logger.debug("query embedding failed; falling back to keywords")
             return None
@@ -993,11 +1015,23 @@ class WorkingMemory:
             denominator = norm * float(np.linalg.norm(vector))
             score = 0.0 if denominator == 0 else float(query_vec @ vector) / denominator
             records.append(_row_to_record(row, score))
-        unembedded = [row for row in rows if not row[6]]
+        embedded_ids = {row[0] for row in embedded}
+        unembedded = [row for row in rows if row[0] not in embedded_ids]
         if unembedded:
             for record in _score_keyword(query, unembedded):
                 record.score *= 0.5
                 records.append(record)
+        # Exact lexical evidence remains valuable even when an embedding is
+        # present. Use the stronger independent signal instead of allowing a
+        # weak semantic cosine to hide a literal error, command, or symbol.
+        by_id = {record.id: record for record in records}
+        for lexical in _score_keyword(query, rows):
+            existing = by_id.get(lexical.id)
+            if existing is None:
+                records.append(lexical)
+                by_id[lexical.id] = lexical
+            else:
+                existing.score = max(existing.score, lexical.score)
         return records or None
 
     # ── introspection ────────────────────────────────────────────────
@@ -1071,7 +1105,7 @@ def _row_to_record(row: tuple, score: float) -> MemoryRecord:
         kind=row[3],
         title=row[4],
         content=row[5],
-        created_at=row[7],
+        created_at=row[8],
         score=score,
     )
 

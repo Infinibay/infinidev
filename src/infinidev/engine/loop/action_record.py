@@ -27,5 +27,8 @@ class ActionRecord(BaseModel):
     behavior_score: int = 0
     behavior_good: list[str] = Field(default_factory=list)
     behavior_bad: list[str] = Field(default_factory=list)
-
-
+    # Deterministic evidence snapshots used by code-controlled progress
+    # detection. These are deliberately separate from LLM-written prose.
+    successful_edit_count: int = 0
+    net_workspace_changed: bool = False
+    test_outcome_fingerprints: tuple[str, ...] = ()

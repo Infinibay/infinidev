@@ -25,6 +25,11 @@ class ExecutionContext:
     llm_params: dict[str, Any]
     manual_tc: bool
     is_small: bool
+    model_policy_name: str
+    compact_tool_schemas: bool
+    require_step_orientation: bool
+    renew_step_budget_on_progress: bool
+    semantic_stagnation_control: bool
     system_prompt: str
     tool_schemas: list[dict[str, Any]]
     tool_dispatch: dict[str, Any]
@@ -32,7 +37,12 @@ class ExecutionContext:
     tools: list[Any]
     max_iterations: int
     max_per_action: int
-    max_total_calls: int
+    # Mutable boundary for the active Step. Model policy may renew it after
+    # observable progress without changing the configured base window.
+    step_tool_limit: int
+    # ``None`` means the durable run has no global call-count ceiling. Bounded
+    # auxiliary phases can still request a positive, explicit fuse.
+    max_total_calls: int | None
     max_prompt_tokens: int | None
     history_window: int
     max_context_tokens: int
@@ -54,6 +64,13 @@ class ExecutionContext:
     file_tracker: FileChangeTracker
     start_iteration: int
     resumed: bool = False
+    # Consumed from LoopState at the start of one Step. While true, native
+    # discovery schemas are hidden and provably read-only shell inspection is
+    # declined; edits, tests, plan mutation and completion remain available.
+    suppress_discovery_this_step: bool = False
+    # Remaining local context reads in that recovery Step. This is a narrow
+    # bridge for source bodies that were too large to persist in opened-files.
+    semantic_recovery_context_calls: int = 0
 
     # Behavior flags
     skip_plan: bool = False  # True for agents that don't use plan management (e.g. analyst)

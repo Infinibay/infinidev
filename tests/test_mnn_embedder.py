@@ -71,11 +71,19 @@ def test_mnn_matches_chromadb_onnx(model_path):
 
 
 def test_dedup_picks_mnn_when_configured(model_path):
-    """dedup._get_embed_fn should switch to MNN when the env var is set."""
+    """MNN remains the fallback when the bundled static table is absent."""
     from infinidev.tools.base import dedup
     from infinidev.tools.base.mnn_embedder import MNNEmbedder
 
     # Reset the module singleton so we re-probe.
     dedup._embed_fn = None
-    fn = dedup._get_embed_fn()
-    assert isinstance(fn, MNNEmbedder), f"expected MNNEmbedder, got {type(fn).__name__}"
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "infinidev.tools.base.static_qwen3_embedder.get_static_qwen3_embedder",
+            lambda: None,
+        )
+        fn = dedup._get_embed_fn()
+        assert isinstance(fn, MNNEmbedder), (
+            f"expected MNNEmbedder, got {type(fn).__name__}"
+        )
+    dedup._embed_fn = None

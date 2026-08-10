@@ -42,6 +42,22 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+def _benchmark_environment(instance_dir: Path) -> dict[str, str]:
+    """Build process settings for one disposable benchmark checkout.
+
+    SWE-bench instances have no approval UI and are thrown away after their
+    patch is collected.  Granting tool effects here is therefore evaluator
+    policy, not a model instruction: verification commands must measure the
+    agent's behavior instead of an artificial headless permission failure.
+    """
+    env = os.environ.copy()
+    env["INFINIDEV_WORKSPACE"] = str(instance_dir)
+    env["INFINIDEV_EXECUTE_COMMANDS_PERMISSION"] = "auto_approve"
+    env["INFINIDEV_FILE_OPERATIONS_PERMISSION"] = "auto_approve"
+    env["INFINIDEV_TOOL_EFFECTS_PERMISSION"] = "auto_approve"
+    return env
+
+
 def load_dataset(config: BenchConfig) -> list[dict]:
     """Load SWE-bench dataset from HuggingFace."""
     from datasets import load_dataset
@@ -160,8 +176,7 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
         start = time.time()
 
         # Run infinidev non-interactively
-        env = os.environ.copy()
-        env["INFINIDEV_WORKSPACE"] = str(instance_dir)
+        env = _benchmark_environment(instance_dir)
 
         # Always use the project's source via python -m to ensure latest code
         cmd = [sys.executable, "-m", "infinidev.cli.main"]
@@ -219,7 +234,8 @@ def run_instance(instance: dict, config: BenchConfig) -> dict:
         log.exception("Error running %s", instance_id)
         result["model_patch"] = ""
     finally:
-        cleanup_instance(instance_dir)
+        if config.cleanup:
+            cleanup_instance(instance_dir)
 
     return result
 
@@ -264,6 +280,8 @@ def main():
         config.workdir = Path(args.workdir)
     if args.no_resume:
         config.resume = False
+    if args.no_cleanup:
+        config.cleanup = False
 
     config.workdir.mkdir(parents=True, exist_ok=True)
 

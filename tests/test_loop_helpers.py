@@ -188,12 +188,14 @@ class TestRollingHorizonToolRouting:
 
         assert available is schemas
 
-    def test_completion_turn_exposes_only_note_and_step_complete(self):
+    def test_completion_turn_exposes_state_only_plan_tools(self):
         from infinidev.engine.loop.llm_caller import LLMCaller
 
         schemas = [
             self._schema("read_file"),
             self._schema("add_step"),
+            self._schema("modify_step"),
+            self._schema("remove_step"),
             self._schema("add_note"),
             self._schema("step_complete"),
         ]
@@ -208,7 +210,55 @@ class TestRollingHorizonToolRouting:
         )
 
         assert [schema["function"]["name"] for schema in available] == [
-            "add_note", "step_complete",
+            "add_step", "modify_step", "remove_step", "add_note", "step_complete",
+        ]
+
+    def test_semantic_stagnation_hides_discovery_but_keeps_action_tools(self):
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        schemas = [
+            self._schema("read_file"),
+            self._schema("recall_context"),
+            self._schema("edit_file"),
+            self._schema("execute_command"),
+            self._schema("step_complete"),
+        ]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=None),
+            suppress_discovery_this_step=True,
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+
+        assert [schema["function"]["name"] for schema in available] == [
+            "edit_file", "execute_command", "step_complete",
+        ]
+
+    def test_semantic_recovery_exposes_only_bounded_local_context(self):
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        schemas = [
+            self._schema("read_file"),
+            self._schema("recall_context"),
+            self._schema("web_search"),
+            self._schema("edit_file"),
+            self._schema("execute_command"),
+            self._schema("step_complete"),
+        ]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=None),
+            suppress_discovery_this_step=True,
+            semantic_recovery_context_calls=2,
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+
+        assert [schema["function"]["name"] for schema in available] == [
+            "read_file", "edit_file", "execute_command", "step_complete",
         ]
 
 

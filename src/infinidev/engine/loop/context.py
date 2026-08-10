@@ -204,6 +204,7 @@ def build_iteration_prompt(
     user_messages: list[str] | None = None,
     skip_plan: bool = False,
     small_model: bool = False,
+    require_step_orientation: bool = True,
     task: Any | None = None,  # infinidev.engine.orchestration.task_schema.Task
 ) -> str:
     """Build the user prompt for one iteration of the loop.
@@ -393,7 +394,12 @@ def build_iteration_prompt(
     # Current action — skip for agents that don't use plans
     active = state.plan.active_step if not skip_plan else None
     if active:
-        parts.append(_render_current_action(active, state, small_model))
+        parts.append(_render_current_action(
+            active,
+            state,
+            small_model,
+            require_step_orientation=require_step_orientation,
+        ))
     elif state.plan.steps:
         # All planned steps are done — prompt to continue or finish
         parts.append(
@@ -972,7 +978,13 @@ def _render_note_nudge(state: LoopState, small_model: bool) -> str:
     return "\n\n".join(blocks)
 
 
-def _render_current_action(active: Any, state: LoopState, small_model: bool) -> str:
+def _render_current_action(
+    active: Any,
+    state: LoopState,
+    small_model: bool,
+    *,
+    require_step_orientation: bool = True,
+) -> str:
     """Render the ``<current-action>`` block for the active step.
 
     Small models get a terse "DO NOW" form; regular models get an
@@ -987,7 +999,7 @@ def _render_current_action(active: Any, state: LoopState, small_model: bool) -> 
         "sentences; include technical detail only when leaving it out would be inaccurate "
         "or would hide an important constraint. Do not print the step title as a status line "
         "or merely restate it. Explain the concrete next move and its purpose."
-    )
+    ) if require_step_orientation else ""
 
     if small_model:
         guidance = f"\n{active.explanation}" if active.explanation else ""

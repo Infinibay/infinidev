@@ -101,4 +101,44 @@ class TestSchemaWiring:
         ci_symbol_cols = {r[1] for r in c.execute("PRAGMA table_info(ci_symbols)")}
         c.close()
         assert {"session_id", "anchor_file", "updated_at"} <= findings_cols
-        assert {"embedding", "embedding_text"} <= ci_symbol_cols
+        assert {"embedding", "embedding_text", "embedding_space"} <= ci_symbol_cols
+
+    def test_old_code_index_gets_embedding_space_before_indexes(self, tmp_path, monkeypatch):
+        """An existing DB must not fail while schema.sql creates new indexes."""
+        db = tmp_path / "old.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript(service._load_schema_sql())
+        conn.execute("DROP INDEX idx_ci_files_embedding_space")
+        conn.execute("DROP INDEX idx_ci_symbols_embedding_space")
+        conn.execute("ALTER TABLE ci_files DROP COLUMN embedding_space")
+        conn.execute("ALTER TABLE ci_symbols DROP COLUMN embedding_space")
+        conn.commit()
+        conn.close()
+
+        _build_via_init_db(str(db), monkeypatch)
+
+        conn = sqlite3.connect(str(db))
+        indexes = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            )
+        }
+        file_columns = {row[1] for row in conn.execute("PRAGMA table_info(ci_files)")}
+        symbol_columns = {row[1] for row in conn.execute("PRAGMA table_info(ci_symbols)")}
+        conn.close()
+        assert "embedding_space" in file_columns
+        assert "embedding_space" in symbol_columns
+        assert "idx_ci_files_embedding_space" in indexes
+        assert "idx_ci_symbols_embedding_space" in indexes
+
+    def test_embedding_refresh_does_not_rewrite_symbol_fts(self, tmp_path, monkeypatch):
+        db = tmp_path / "trigger.db"
+        _build_via_init_db(str(db), monkeypatch)
+        conn = sqlite3.connect(str(db))
+        trigger_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' "
+            "AND name = 'ci_symbols_au'"
+        ).fetchone()[0]
+        conn.close()
+
+        assert "UPDATE OF name, qualified_name, signature, docstring" in trigger_sql

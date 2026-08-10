@@ -13,7 +13,7 @@ import litellm
 from infinidev.config.llm import get_litellm_params
 from infinidev.db.service import execute_with_retry
 from infinidev.tools.base.dedup import find_semantic_duplicate
-from infinidev.tools.base.embeddings import compute_embedding
+from infinidev.tools.base.embeddings import compute_embedding, current_embedding_space
 from infinidev.tools.web.backends import search_ddg, fetch_with_trafilatura
 
 logger = logging.getLogger(__name__)
@@ -384,23 +384,25 @@ Source material (extract facts for "{title}"):
             nonlocal stored
             for sec in sections:
                 emb = compute_embedding(f"{sec['title']} {sec['content'][:500]}")
+                embedding_space = current_embedding_space() if emb is not None else None
                 conn.execute(
                     """\
                     INSERT INTO library_docs
                         (library_name, language, version, section_title, section_order,
-                         content, embedding, source_urls)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         content, embedding, embedding_space, source_urls)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(library_name, language, version, section_title) DO UPDATE SET
                         section_order = excluded.section_order,
                         content       = excluded.content,
                         embedding     = excluded.embedding,
+                        embedding_space = excluded.embedding_space,
                         source_urls   = excluded.source_urls,
                         updated_at    = CURRENT_TIMESTAMP
                     """,
                     (
                         library_name, language, version,
                         sec["title"], sec["order"],
-                        sec["content"], emb, urls_json,
+                        sec["content"], emb, embedding_space, urls_json,
                     ),
                 )
                 stored += 1

@@ -8,6 +8,7 @@ comparing original → current state, combining multiple edits into one diff.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import os
 
 from infinidev.engine.workspace_baseline import WorkspaceBaseline
@@ -171,6 +172,29 @@ class FileChangeTracker:
             for path, current in self._current.items()
             if self._originals.get(path, "") != current
         ]
+
+    def change_fingerprint(
+        self, *, reconcile: bool = False,
+    ) -> tuple[tuple[str, str], ...]:
+        """Return a stable identity for the current net task diff.
+
+        Historical tool activity is intentionally absent. If an edit restores
+        the prior content, its path disappears from this value. ``reconcile``
+        is reserved for Step boundaries, where detecting shell-side writes is
+        worth a bounded workspace scan; the per-tool progress path uses the
+        already recorded in-memory state.
+        """
+        if reconcile and self._active:
+            self.reconcile_workspace()
+        rows: list[tuple[str, str]] = []
+        for path, current in self._current.items():
+            if self._originals.get(path, "") == current:
+                continue
+            digest = hashlib.sha256(
+                current.encode("utf-8", errors="surrogatepass")
+            ).hexdigest()
+            rows.append((path, digest))
+        return tuple(sorted(rows))
 
     def record_deleted_symbols(self, path: str, symbols: list[str]) -> None:
         """Record symbol names that were removed from a file.

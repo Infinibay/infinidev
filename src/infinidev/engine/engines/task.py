@@ -127,11 +127,17 @@ class TaskAdapter:
             hooks=hooks,
         )
 
+        total_tool_budget = settings.TASK_MAX_TOOL_CALLS
+        tool_budget_status = (
+            "unlimited total tool calls"
+            if total_tool_budget <= 0
+            else f"{total_tool_budget} total tool calls"
+        )
         hooks.on_status(
             "info",
             "Task execution with a rolling Step horizon "
-            f"({settings.TASK_MAX_ITERATIONS} iterations / "
-            f"{settings.TASK_MAX_TOOL_CALLS} tool calls)",
+            f"({settings.TASK_MAX_ITERATIONS} iterations / {tool_budget_status} / "
+            f"{settings.TASK_MAX_TOOL_CALLS_PER_STEP} per Step)",
         )
         rolling_plan = Plan(
             overview=(
@@ -208,7 +214,10 @@ class TaskAdapter:
             resume_token=session_id,
             metrics={
                 "max_iterations": settings.TASK_MAX_ITERATIONS,
-                "max_tool_calls": settings.TASK_MAX_TOOL_CALLS,
+                "max_tool_calls": (
+                    None if total_tool_budget <= 0 else total_tool_budget
+                ),
+                "max_tool_calls_per_step": settings.TASK_MAX_TOOL_CALLS_PER_STEP,
             },
         )
 

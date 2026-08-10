@@ -11,7 +11,9 @@ from bench.agent_task_run import (
     capture_tool_trace,
     changed_paths,
     configured_evaluation_runtime,
+    select_agent_tasks,
 )
+from bench.agent_task_eval import load_tasks
 
 
 @pytest.mark.parametrize(
@@ -101,6 +103,9 @@ def test_provider_runtime_resolves_route_disables_retries_and_restores_settings(
         settings.LLM_BASE_URL,
         settings.LLM_API_KEY,
         settings.LLM_NUM_RETRIES,
+        settings.EXECUTE_COMMANDS_PERMISSION,
+        settings.FILE_OPERATIONS_PERMISSION,
+        settings.TOOL_EFFECTS_PERMISSION,
     )
     with configured_evaluation_runtime(config, "baseline", manifest, tmp_path):
         assert settings.LLM_PROVIDER == "kimi"
@@ -108,12 +113,18 @@ def test_provider_runtime_resolves_route_disables_retries_and_restores_settings(
         assert settings.LLM_BASE_URL == "https://api.moonshot.ai/v1"
         assert settings.LLM_API_KEY == "test-secret"
         assert settings.LLM_NUM_RETRIES == 0
+        assert settings.EXECUTE_COMMANDS_PERMISSION == "auto_approve"
+        assert settings.FILE_OPERATIONS_PERMISSION == "auto_approve"
+        assert settings.TOOL_EFFECTS_PERMISSION == "auto_approve"
     assert (
         settings.LLM_PROVIDER,
         settings.LLM_MODEL,
         settings.LLM_BASE_URL,
         settings.LLM_API_KEY,
         settings.LLM_NUM_RETRIES,
+        settings.EXECUTE_COMMANDS_PERMISSION,
+        settings.FILE_OPERATIONS_PERMISSION,
+        settings.TOOL_EFFECTS_PERMISSION,
     ) == previous
 
 
@@ -169,3 +180,31 @@ def test_tool_trace_captures_exact_post_tool_evidence() -> None:
             "failed": True,
         }
     ]
+
+
+def test_task_selection_supports_small_live_subsets() -> None:
+    tasks = load_tasks(Path("bench/agent_task_pilot.tasks.jsonl"))
+
+    selected = select_agent_tasks(
+        tasks,
+        split="validation",
+        include_drafts=True,
+        task_ids=("reversible-ambiguity", "tool-failure-recovery"),
+    )
+
+    assert [task.id for task in selected] == [
+        "reversible-ambiguity",
+        "tool-failure-recovery",
+    ]
+
+
+def test_task_selection_rejects_unknown_ids() -> None:
+    tasks = load_tasks(Path("bench/agent_task_pilot.tasks.jsonl"))
+
+    with pytest.raises(ValueError, match="unknown agent task ids"):
+        select_agent_tasks(
+            tasks,
+            split="validation",
+            include_drafts=True,
+            task_ids=("typo-task",),
+        )

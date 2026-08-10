@@ -27,7 +27,7 @@ _STEP_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     )),
     ("change", re.compile(
         r"\b(?:add|adjust|change|configure|connect|correct|create|delete|edit|"
-        r"fix|implement|integrate|invalidate|limit|migrate|patch|refactor|"
+        r"extend|fix|implement|integrate|invalidate|limit|migrate|patch|refactor|"
         r"remove|repair|replace|rewrite|update|wire)\b"
     )),
     ("verify", re.compile(
@@ -41,7 +41,7 @@ _IDENTIFIER_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _STEP_CONCEPT_STOPWORDS = {
     "a", "add", "adjust", "and", "change", "configure", "connect",
-    "correct", "create", "delete", "edit", "file", "fix", "for", "from",
+    "correct", "create", "delete", "edit", "extend", "file", "fix", "for", "from",
     "implement", "in", "integrate", "into", "invalidate", "limit", "migrate",
     "module", "of", "patch", "refactor", "remove", "repair", "replace",
     "rewrite", "the", "to", "under", "update", "wire", "with",
@@ -55,7 +55,7 @@ _LEADING_PHASE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     )),
     ("change", re.compile(
         r"^(?:add|adjust|change|configure|connect|correct|create|delete|edit|"
-        r"fix|implement|integrate|invalidate|limit|migrate|patch|refactor|"
+        r"extend|fix|implement|integrate|invalidate|limit|migrate|patch|refactor|"
         r"remove|repair|replace|rewrite|update|wire)\b"
     )),
     ("document", re.compile(r"^(?:document|documentation|explain|write docs?)\b")),
@@ -203,6 +203,45 @@ class LoopPlan(BaseModel):
             if step.status == "pending":
                 step.status = "active"
                 break
+
+    def retire_discovery_subsumed_by_change(
+        self,
+        *,
+        change_title: str,
+        changed_paths: set[str],
+    ) -> list[int]:
+        """Skip model discovery whose named file was already changed.
+
+        A model may append exploration before implementation and later drain
+        the change phase first. Returning to "inspect the same file" after a
+        net edit wastes a Step and can displace corrective/test work under the
+        rolling horizon. Only model-owned pending discovery is eligible; user
+        scope and unrelated files are untouched.
+        """
+        changed_names = {
+            name
+            for path in changed_paths
+            for name in (path.casefold(), path.rsplit("/", 1)[-1].casefold())
+            if name
+        }
+        if not changed_names:
+            return []
+        retired: list[int] = []
+        change_concepts = _step_concepts(change_title)
+        for step in self.steps:
+            if (
+                step.status != "pending"
+                or step.user_approved
+                or _step_phase(step.title) != "discover"
+            ):
+                continue
+            title = step.title.casefold()
+            names_file = any(name in title for name in changed_names)
+            shares_change = len(change_concepts & _step_concepts(step.title)) >= 3
+            if names_file or shares_change:
+                step.status = "skipped"
+                retired.append(step.index)
+        return retired
 
     def find_similar_open_step(self, title: str) -> PlanStep | None:
         """Return an existing open step that substantially duplicates ``title``.

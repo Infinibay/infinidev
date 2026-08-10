@@ -21,6 +21,7 @@ class TestSettings:
         assert s.LOOP_MAX_ITERATIONS == 50
         assert s.LOOP_MAX_TOOL_CALLS_PER_ACTION == 12
         assert s.LOOP_MAX_TOTAL_TOOL_CALLS == 1000
+        assert s.TASK_MAX_TOOL_CALLS == 0
         assert s.TASK_MAX_TOOL_CALLS_PER_STEP == 12
         assert s.CHAT_AGENT_MAX_ITERATIONS == 5
         assert s.MAX_FILE_SIZE_BYTES == 5 * 1024 * 1024

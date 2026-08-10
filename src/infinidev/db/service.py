@@ -60,6 +60,15 @@ def _migrate_add_column(conn: sqlite3.Connection, table: str, column: str, col_t
 def init_db():
     """Initialize the SQLite database with essential tables."""
     def _init(conn):
+        # Old databases need indexed columns before schema.sql can create the
+        # corresponding indexes. Missing tables on a fresh database are a
+        # harmless no-op here and are created immediately below.
+        _migrate_add_column(conn, "ci_symbols", "embedding_space", "TEXT")
+        _migrate_add_column(conn, "ci_files", "embedding_space", "TEXT")
+        # Replace the historical catch-all update trigger. Derived embedding
+        # refreshes must not rewrite the external-content FTS index.
+        conn.execute("DROP TRIGGER IF EXISTS ci_symbols_au")
+
         # Fresh databases are fully provisioned from schema.sql (the single
         # source of truth). On an existing DB every CREATE ... IF NOT EXISTS
         # is a no-op.
@@ -85,8 +94,13 @@ def init_db():
         _migrate_add_column(conn, "ci_files", "parser_version", "INTEGER DEFAULT 0")
         _migrate_add_column(conn, "ci_symbols", "embedding", "BLOB")
         _migrate_add_column(conn, "ci_symbols", "embedding_text", "TEXT")
+        _migrate_add_column(conn, "ci_symbols", "embedding_space", "TEXT")
         _migrate_add_column(conn, "ci_files", "embedding", "BLOB")
         _migrate_add_column(conn, "ci_files", "embedding_text", "TEXT")
+        _migrate_add_column(conn, "ci_files", "embedding_space", "TEXT")
+        _migrate_add_column(conn, "findings", "embedding_space", "TEXT")
+        _migrate_add_column(conn, "library_docs", "embedding_space", "TEXT")
+        _migrate_add_column(conn, "cr_contexts", "embedding_space", "TEXT")
         _migrate_add_column(conn, "cr_interactions", "was_error", "INTEGER DEFAULT 0")
         _migrate_add_column(conn, "cr_session_scores", "productivity", "REAL DEFAULT 1.0")
         _migrate_add_column(conn, "cr_session_scores", "was_edited", "INTEGER DEFAULT 0")

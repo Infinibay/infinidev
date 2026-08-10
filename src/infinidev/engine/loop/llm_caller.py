@@ -26,7 +26,12 @@ from infinidev.engine.formats.tool_call_parser import (
 )
 
 
-_COMPLETION_TOOL_NAMES = frozenset({"add_note", "step_complete"})
+COMPLETION_PLAN_TOOL_NAMES = frozenset({
+    "add_step", "modify_step", "remove_step",
+})
+_COMPLETION_TOOL_NAMES = frozenset({
+    "add_note", "step_complete", *COMPLETION_PLAN_TOOL_NAMES,
+})
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.execution_context import ExecutionContext
@@ -516,8 +521,9 @@ class LLMCaller:
     ) -> list[dict[str, Any]]:
         """Return the machine-enforced action space for this model turn.
 
-        At the per-step execution budget, one final model turn may preserve a
-        note and close the step, but it must not spend another regular tool.
+        At the per-step execution budget, final turns may preserve a note,
+        update the in-memory plan, and close the step, but cannot perform more
+        workspace I/O.
         At other times, hide ``add_step`` while the rolling horizon has no free
         slot. Removing invalid actions before sampling is cheaper and more
         reliable than asking the model not to choose them.
@@ -528,6 +534,28 @@ class LLMCaller:
                 schema for schema in schemas
                 if schema.get("function", {}).get("name")
                 in _COMPLETION_TOOL_NAMES
+            ]
+        if not is_planning and getattr(ctx, "suppress_discovery_this_step", False):
+            from infinidev.engine.loop.behavior_rules import is_workspace_edit_tool
+            from infinidev.engine.loop.semantic_stagnation import (
+                SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES,
+            )
+
+            context_calls = int(
+                getattr(ctx, "semantic_recovery_context_calls", 0) or 0
+            )
+            schemas = [
+                schema for schema in schemas
+                if (
+                    (name := schema.get("function", {}).get("name", ""))
+                    in _COMPLETION_TOOL_NAMES
+                    or name == "execute_command"
+                    or is_workspace_edit_tool(name)
+                    or (
+                        context_calls > 0
+                        and name in SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES
+                    )
+                )
             ]
         plan = getattr(getattr(ctx, "state", None), "plan", None)
         if plan is None:

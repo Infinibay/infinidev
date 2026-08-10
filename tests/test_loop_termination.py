@@ -15,6 +15,7 @@ import pytest
 from infinidev.engine.loop.critic_liaison import CriticLiaison, _MAX_REJECTS_PER_STEP
 from infinidev.engine.loop.loop_guard import LoopGuard, _MAX_PSEUDO_ONLY_ROUNDS
 from infinidev.engine.loop.models import LoopState
+from infinidev.engine.loop.context_builder import _normalize_total_tool_budget
 from infinidev.engine.loop.step_result import StepResult
 from infinidev.engine.loop.step_summarizer import _synthesize_final
 from infinidev.engine.loop.action_record import ActionRecord
@@ -25,6 +26,8 @@ from infinidev.engine.loop.engine import (
     _has_substantive_done_evidence,
     _reconcile_step_result,
     _resource_exhaustion_reason,
+    _renew_step_tool_window,
+    _step_progress_marker,
     _should_advance_plan,
     _task_requires_edits,
 )
@@ -84,6 +87,21 @@ def test_disabled_prompt_budget_leaves_tool_fuse_authoritative():
 
     ctx.state.total_tool_calls = 40
     assert "tool call limit reached" in _resource_exhaustion_reason(ctx)
+
+
+def test_unlimited_total_tool_calls_never_exhaust_from_count() -> None:
+    ctx = _ctx()
+    ctx.max_total_calls = None
+    ctx.max_prompt_tokens = None
+    ctx.state.total_tool_calls = 1_000_000
+
+    assert _resource_exhaustion_reason(ctx) is None
+
+
+def test_zero_total_tool_budget_normalizes_to_unlimited() -> None:
+    assert _normalize_total_tool_budget(0) is None
+    assert _normalize_total_tool_budget(-1) is None
+    assert _normalize_total_tool_budget(160) == 160
 
 
 def test_synthesize_final_defaults_to_exhausted():
@@ -158,15 +176,98 @@ class _BudgetBoundaryCaller:
         )])
 
 
-def _run_budget_boundary(*, max_total_calls: int = 10):
+class _NoteThenCompleteCaller(_BudgetBoundaryCaller):
+    def __init__(self) -> None:
+        super().__init__()
+        self._completion_calls = 0
+
+    def call(
+        self, ctx, messages, is_planning, action_tool_calls=0, *,
+        completion_only=False,
+    ):
+        from infinidev.engine.loop.llm_call_result import LLMCallResult
+
+        self.completion_modes.append(completion_only)
+        if not completion_only:
+            return LLMCallResult(tool_calls=[_tool_call("read_file", call_id="read")])
+        self._completion_calls += 1
+        if self._completion_calls == 1:
+            return LLMCallResult(tool_calls=[_tool_call(
+                "add_session_note",
+                '{"note":"verified state"}',
+                call_id="note",
+            )])
+        return LLMCallResult(tool_calls=[_tool_call(
+            "step_complete",
+            '{"summary":"verified","status":"done","final_answer":"done"}',
+            call_id="complete",
+        )])
+
+
+class _EditThenReadThenCompleteCaller(_BudgetBoundaryCaller):
+    def __init__(self) -> None:
+        super().__init__()
+        self._regular_calls = 0
+
+    def call(
+        self, ctx, messages, is_planning, action_tool_calls=0, *,
+        completion_only=False,
+    ):
+        from infinidev.engine.loop.llm_call_result import LLMCallResult
+
+        self.completion_modes.append(completion_only)
+        if completion_only:
+            return LLMCallResult(tool_calls=[_tool_call(
+                "step_complete",
+                '{"summary":"verified","status":"done","final_answer":"done"}',
+                call_id="complete",
+            )])
+        self._regular_calls += 1
+        name = "edit_file" if self._regular_calls == 1 else "read_file"
+        return LLMCallResult(tool_calls=[_tool_call(name, call_id=f"regular-{self._regular_calls}")])
+
+
+class _PlanThenCompleteCaller(_BudgetBoundaryCaller):
+    def __init__(self) -> None:
+        super().__init__()
+        self._completion_calls = 0
+
+    def call(
+        self, ctx, messages, is_planning, action_tool_calls=0, *,
+        completion_only=False,
+    ):
+        from infinidev.engine.loop.llm_call_result import LLMCallResult
+
+        self.completion_modes.append(completion_only)
+        if not completion_only:
+            return LLMCallResult(tool_calls=[_tool_call("read_file", call_id="read")])
+        self._completion_calls += 1
+        if self._completion_calls == 1:
+            return LLMCallResult(tool_calls=[_tool_call(
+                "modify_step",
+                '{"index":1,"title":"Implement src/app.py fix"}',
+                call_id="plan",
+            )])
+        return LLMCallResult(tool_calls=[_tool_call(
+            "step_complete",
+            '{"summary":"planned next action","status":"continue"}',
+            call_id="complete",
+        )])
+
+
+def _run_budget_boundary(
+    *, max_total_calls: int = 10, caller=None, renew_on_progress: bool = False,
+):
     from infinidev.engine.loop.engine import LoopEngine
     from infinidev.engine.loop.loop_guard import LoopGuard
     from infinidev.engine.loop.tool_processor import ToolProcessor
 
     engine = LoopEngine()
-    caller = _BudgetBoundaryCaller()
+    caller = caller or _BudgetBoundaryCaller()
     ctx = _ctx()
     ctx.max_per_action = 1
+    ctx.step_tool_limit = 1
+    ctx.renew_step_budget_on_progress = renew_on_progress
     ctx.max_total_calls = max_total_calls
     ctx.max_prompt_tokens = None
     ctx.allow_plan_mutation = True
@@ -183,6 +284,8 @@ def _run_budget_boundary(*, max_total_calls: int = 10):
         _ctx, _classified, _messages, _result, action_tool_calls,
         _iteration, _guard, _tracker,
     ):
+        call = _classified.regular[0]
+        _tracker.on_tool_call(call.function.name, call.function.arguments, False)
         _ctx.state.total_tool_calls += 1
         return action_tool_calls + 1
 
@@ -200,6 +303,72 @@ def test_per_step_tool_budget_allows_one_completion_only_turn():
     assert result.status == "done"
     assert result.interrupted is False
     assert result.action_tool_calls == 1
+
+
+def test_completion_only_note_gets_one_bounded_close_turn() -> None:
+    result, caller = _run_budget_boundary(caller=_NoteThenCompleteCaller())
+
+    assert caller.completion_modes == [False, True, True]
+    assert result.status == "done"
+    assert result.interrupted is False
+    assert result.action_tool_calls == 1
+
+
+def test_completion_only_turn_can_record_plan_transition() -> None:
+    result, caller = _run_budget_boundary(caller=_PlanThenCompleteCaller())
+
+    assert caller.completion_modes == [False, True, True]
+    assert result.status == "continue"
+    assert result.interrupted is False
+    assert result.action_tool_calls == 2
+
+
+def test_minimax_policy_renews_step_window_after_observable_edit() -> None:
+    result, caller = _run_budget_boundary(
+        caller=_EditThenReadThenCompleteCaller(),
+        renew_on_progress=True,
+    )
+
+    assert caller.completion_modes == [False, False, True]
+    assert result.status == "done"
+    assert result.action_tool_calls == 2
+
+
+def test_minimax_policy_does_not_renew_step_window_for_reads() -> None:
+    result, caller = _run_budget_boundary(renew_on_progress=True)
+
+    assert caller.completion_modes == [False, True]
+    assert result.action_tool_calls == 1
+
+
+def test_new_test_outcome_renews_once_but_identical_state_does_not() -> None:
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+
+    ctx = _ctx()
+    ctx.max_per_action = 2
+    ctx.step_tool_limit = 2
+    ctx.renew_step_budget_on_progress = True
+    tracker = BehaviorTracker(set())
+    marker = _step_progress_marker(ctx, tracker)
+
+    ctx.state.test_outcome_history = {"pytest tests/test_x.py": ["failed:test_x"]}
+    limit, marker, renewals = _renew_step_tool_window(
+        ctx, tracker, marker, 0,
+    )
+    assert limit == 4
+    assert renewals == 1
+
+    limit, marker, renewals = _renew_step_tool_window(
+        ctx, tracker, marker, renewals,
+    )
+    assert limit == 4
+
+    ctx.state.test_outcome_history["pytest tests/test_x.py"].append("passed")
+    limit, marker, renewals = _renew_step_tool_window(
+        ctx, tracker, marker, renewals,
+    )
+    assert limit == 4
+    assert renewals == 1
 
 
 def test_global_tool_fuse_does_not_allow_an_extra_completion_turn():
@@ -803,6 +972,136 @@ def test_finalize_inner_loop_persists_current_step_edit_evidence():
     )
 
     assert ctx.state.edited_step_indices == {4}
+
+
+def test_finalize_inner_loop_rejects_edit_then_revert_as_step_effect(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    path = tmp_path / "parser.py"
+    path.write_text("original = True\n")
+    file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    ctx = _ctx()
+    ctx.file_tracker = file_tracker
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Implement parser fix", status="active"),
+    ]
+    ctx.state.step_entry_change_fingerprints[4] = (
+        file_tracker.change_fingerprint(reconcile=True)
+    )
+    tracker = BehaviorTracker(set())
+    tracker.task_has_edits = True
+    tracker.successful_edit_count = 2
+    tracker.files_edited.add(str(path))
+    path.write_text("temporary = True\n")
+    file_tracker.record(str(path), "original = True\n", "temporary = True\n")
+    path.write_text("original = True\n")
+    file_tracker.record(str(path), "temporary = True\n", "original = True\n")
+
+    result = LoopEngine()._finalize_inner_loop(
+        ctx,
+        StepResult(summary="Tried and reverted", status="continue"),
+        action_tool_calls=2,
+        tracker=tracker,
+        saw_tool_calls=True,
+    )
+
+    assert tracker.net_workspace_changed is False
+    assert ctx.state.edited_step_indices == set()
+    assert _enforce_step_effect(ctx, result) is True
+    assert result.interrupted is True
+
+
+def test_net_diff_not_edit_call_count_controls_progress_renewal(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    path = tmp_path / "module.py"
+    path.write_text("before\n")
+    ctx = _ctx()
+    ctx.file_tracker = FileChangeTracker(
+        WorkspaceBaseline.capture(str(tmp_path))
+    )
+    ctx.max_per_action = 2
+    ctx.step_tool_limit = 2
+    ctx.renew_step_budget_on_progress = True
+    tracker = BehaviorTracker(set())
+    marker = _step_progress_marker(ctx, tracker)
+
+    tracker.successful_edit_count = 2
+    ctx.file_tracker.record(str(path), "before\n", "temporary\n")
+    ctx.file_tracker.record(str(path), "temporary\n", "before\n")
+    limit, _marker, renewals = _renew_step_tool_window(ctx, tracker, marker, 0)
+
+    assert limit == 2
+    assert renewals == 0
+
+
+def test_two_no_progress_windows_arm_corrective_surface(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    ctx = _ctx()
+    ctx.semantic_stagnation_control = True
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Implement parser fix", status="active"),
+    ]
+    ctx.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    ctx.state.step_entry_change_fingerprints[1] = ()
+    engine = LoopEngine()
+
+    for expected in (0, 1):
+        engine._finalize_inner_loop(
+            ctx,
+            StepResult(summary="No task evidence changed", status="continue"),
+            action_tool_calls=12,
+            tracker=BehaviorTracker(set()),
+            saw_tool_calls=True,
+        )
+        assert ctx.state.discovery_suppression_steps == expected
+
+
+def test_new_test_outcome_resets_no_progress_window_counter(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    ctx = _ctx()
+    ctx.semantic_stagnation_control = True
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Implement parser fix", status="active"),
+    ]
+    ctx.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    ctx.state.step_entry_change_fingerprints[1] = ()
+    engine = LoopEngine()
+    engine._finalize_inner_loop(
+        ctx,
+        StepResult(summary="No task evidence changed", status="continue"),
+        action_tool_calls=12,
+        tracker=BehaviorTracker(set()),
+        saw_tool_calls=True,
+    )
+
+    ctx.state.test_outcome_history = {"pytest tests/test_parser.py": ["1 failed"]}
+    engine._finalize_inner_loop(
+        ctx,
+        StepResult(summary="A new failing test was observed", status="continue"),
+        action_tool_calls=2,
+        tracker=BehaviorTracker(set()),
+        saw_tool_calls=True,
+    )
+
+    assert ctx.state.no_progress_windows_by_step[1] == 0
+    assert ctx.state.discovery_suppression_steps == 0
 
 
 def test_budget_interruption_resumes_the_same_plan_step():

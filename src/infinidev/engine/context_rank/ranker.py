@@ -50,6 +50,7 @@ import logging
 import math
 import os
 import re
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -105,17 +106,17 @@ _ALPHA_SPARSE_REACTIVE_MULT = 0.5
 # and descriptive queries uniformly.
 #
 # Below this cosine similarity a symbol match is too weak to surface.
-# Empirically calibrated against a live 9232-symbol TypeScript
-# project.  We tried lowering to 0.40 to rescue one descriptive
-# query whose top real match was at 0.445, but doing so introduced
-# a false positive on conversational noise queries that matched
-# literal symbol names (e.g. "what's the weather today" matching a
-# symbol literally named `today`).  The scores for genuine weak
-# matches and noise matches are indistinguishable with a linear
-# threshold — 0.45 is the point that gives the best hit rate
-# overall, at the cost of occasionally missing a relevant match
-# by a few thousandths.
+# The base threshold is calibrated on the committed 3,536-symbol benchmark
+# after re-embedding it with static-qwen3-r512-v2. A Zipf-derived per-symbol
+# adjustment below handles common bare words that a single threshold cannot
+# distinguish from conversational noise.
 _FUZZY_SYMBOL_MIN_SIM = 0.45
+# Natural-language words used as bare lowercase identifiers need stronger
+# evidence. This continuous frequency penalty replaces a brittle stop-word
+# list and adapts to identifiers such as ``today`` without special cases.
+_FUZZY_COMMON_SYMBOL_ZIPF_START = 4.0
+_FUZZY_COMMON_SYMBOL_ZIPF_SCALE = 0.16
+_FUZZY_COMMON_SYMBOL_MAX_PENALTY = 0.30
 # Score scale: sim ∈ [0.45, 1.0] × 5.0 → [2.25, 5.0], putting fuzzy
 # scores in the same range as the old substring mention scores so
 # the `max()` merge treats them comparably.
@@ -136,7 +137,8 @@ _FUZZY_FILE_SCALE = 4.5
 # (0-5 region) so the `max()` merge compares apples to apples.
 _FINDING_SEMANTIC_SCALE = 3.0
 # Below this similarity, the finding is not semantically related
-# enough to surface.  Calibrated against all-MiniLM-L6-v2 embeddings.
+# enough to surface.  Recalibrate these values when the embedding space changes;
+# they are retrieval thresholds, not universal semantic equivalence cutoffs.
 _FINDING_SEMANTIC_MIN_SIM = 0.5
 # Score for literal topic-word matches: `BASE + ratio * BONUS`.
 _FINDING_TOPIC_BASE = 3.0
@@ -423,8 +425,8 @@ def rank(
     query_embedding = cached_embedding
     if query_embedding is None:
         try:
-            from infinidev.tools.base.embeddings import compute_embedding
-            query_embedding = compute_embedding(current_input)
+            from infinidev.tools.base.embeddings import compute_query_embedding
+            query_embedding = compute_query_embedding(current_input)
         except Exception:
             query_embedding = None
 
@@ -433,8 +435,8 @@ def rank(
         try:
             simplified_text = _simplify_query(current_input)
             if simplified_text and simplified_text != current_input:
-                from infinidev.tools.base.embeddings import compute_embedding
-                simplified_embedding = compute_embedding(simplified_text)
+                from infinidev.tools.base.embeddings import compute_query_embedding
+                simplified_embedding = compute_query_embedding(simplified_text)
             else:
                 simplified_embedding = query_embedding
         except Exception:
@@ -651,7 +653,11 @@ def _compute_predictive_scores(
     — ``rank()`` computes it once and shares it across channels.
     """
     from time import time as _now
-    from infinidev.tools.base.embeddings import embedding_from_blob
+    from infinidev.tools.base.embeddings import (
+        current_embedding_space,
+        embedding_from_blob,
+        embedding_is_current,
+    )
     from infinidev.tools.base.dedup import _cosine_similarity
 
     min_sim = settings.CONTEXT_RANK_MIN_SIMILARITY
@@ -662,6 +668,7 @@ def _compute_predictive_scores(
     if cached_embedding is None:
         return {}
     query_vec = np.frombuffer(cached_embedding, dtype=np.float32)
+    embedding_space = current_embedding_space()
 
     now = _now()
     age_cutoff = now - (max_age_days * 86400)
@@ -671,8 +678,9 @@ def _compute_predictive_scores(
             # (2a) Widen the fetch and filter by age in SQL.  The
             # index idx_cr_contexts_created_at makes the range scan
             # cheap even on large tables.
-            return conn.execute(
-                "SELECT id, session_id, context_type, embedding, created_at "
+            rows = conn.execute(
+                "SELECT id, session_id, context_type, content, embedding, "
+                "embedding_space, created_at "
                 "FROM cr_contexts "
                 "WHERE embedding IS NOT NULL "
                 "  AND session_id != ? "
@@ -680,6 +688,7 @@ def _compute_predictive_scores(
                 "ORDER BY created_at DESC LIMIT ?",
                 (exclude_session, age_cutoff, fetch_limit),
             ).fetchall()
+            return [dict(row) for row in rows]
         ctx_rows = execute_with_retry(_fetch_contexts)
     except Exception:
         return {}
@@ -687,8 +696,52 @@ def _compute_predictive_scores(
     if not ctx_rows:
         return {}
 
+    stale_contexts = [
+        row for row in ctx_rows
+        if not embedding_is_current(
+            row["embedding"],
+            row["embedding_space"],
+            live_space=embedding_space,
+            dim=query_vec.size,
+        )
+    ]
+    if stale_contexts:
+        try:
+            from infinidev.tools.base.dedup import _get_embed_fn
+
+            vectors = _get_embed_fn()([row["content"] for row in stale_contexts])
+            refreshed = {
+                row["id"]: np.asarray(vector, dtype=np.float32)
+                for row, vector in zip(stale_contexts, vectors, strict=True)
+            }
+
+            def _store_contexts(conn) -> None:
+                conn.executemany(
+                    "UPDATE cr_contexts SET embedding = ?, embedding_space = ? "
+                    "WHERE id = ?",
+                    [
+                        (vector.tobytes(), embedding_space, context_id)
+                        for context_id, vector in refreshed.items()
+                    ],
+                )
+                conn.commit()
+
+            execute_with_retry(_store_contexts)
+            for row in stale_contexts:
+                row["embedding"] = refreshed[row["id"]].tobytes()
+                row["embedding_space"] = embedding_space
+        except Exception:
+            logger.debug("context embedding-space refresh failed", exc_info=True)
+
     matched_contexts: list[tuple[int, float, float]] = []
     for row in ctx_rows:
+        if not embedding_is_current(
+            row["embedding"],
+            row["embedding_space"],
+            live_space=embedding_space,
+            dim=query_vec.size,
+        ):
+            continue
         ctx_vec = embedding_from_blob(row["embedding"])
         sim = float(_cosine_similarity(query_vec, ctx_vec))
         if sim < min_sim:
@@ -778,8 +831,8 @@ _COMMON_WORDS: frozenset[str] = frozenset({
 # conversational noise words to concentrate the distinctive tokens
 # in the resulting embedding.
 #
-# The core insight: ``all-MiniLM-L6-v2`` averages the vectors of all
-# input tokens.  When 4 of 5 tokens are generic ("show", "me", "the",
+# The core insight also applies to the additive static Qwen3 table: generic
+# token rows dilute the distinctive direction. When 4 of 5 tokens are generic ("show", "me", "the",
 # "class"), the single distinctive token ("ErorHandler") contributes
 # only 1/5 of the resulting vector, and the query's cosine against
 # its intended target collapses into the same ~0.46 band as every
@@ -950,6 +1003,34 @@ def _simplify_query(text: str) -> str:
     return " ".join(kept)
 
 
+@lru_cache(maxsize=8192)
+def _symbol_similarity_floor(name: str) -> float:
+    """Return a data-driven cosine floor for a symbol identifier.
+
+    CamelCase, snake_case, and unknown terms retain the calibrated base floor.
+    A bare lowercase word that is common in natural language is much more
+    likely to occur incidentally in a conversational request, so its required
+    similarity rises continuously with corpus frequency.
+    """
+    if not name.isalpha() or not name.islower():
+        return _FUZZY_SYMBOL_MIN_SIM
+    try:
+        from wordfreq import zipf_frequency
+
+        frequency = max(
+            zipf_frequency(name, language)
+            for language in _QUERY_SUPPORTED_LANGS
+        )
+    except Exception:
+        return _FUZZY_SYMBOL_MIN_SIM
+    penalty = min(
+        _FUZZY_COMMON_SYMBOL_MAX_PENALTY,
+        max(0.0, frequency - _FUZZY_COMMON_SYMBOL_ZIPF_START)
+        * _FUZZY_COMMON_SYMBOL_ZIPF_SCALE,
+    )
+    return _FUZZY_SYMBOL_MIN_SIM + penalty
+
+
 def _compute_mention_scores(
     current_input: str, project_id: int, workspace: str | None = None,
     *, cached_simplified_embedding: bytes | None = None,
@@ -958,7 +1039,8 @@ def _compute_mention_scores(
 
     v3 replaces the old substring-based mention detection entirely.
     At index time, ``symbol_embeddings.embed_file_symbols`` populates
-    ``ci_symbols.embedding`` and ``ci_files.embedding`` with 384-dim
+    ``ci_symbols.embedding`` and ``ci_files.embedding`` with versioned
+    1024-dimensional static Qwen3 vectors
     float32 vectors computed from text like
     ``{kind} {name} — {docstring_first_line}``.  At rank time this
     function does a vectorized cosine sweep and keeps matches above
@@ -1004,6 +1086,18 @@ def _compute_mention_scores(
 
     result: dict[str, tuple[float, str, str]] = {}
 
+    try:
+        from infinidev.tools.base.embeddings import current_embedding_space
+        from infinidev.code_intel.symbol_embeddings import (
+            refresh_project_embedding_space,
+        )
+
+        embedding_space = current_embedding_space()
+        refresh_project_embedding_space(project_id)
+    except Exception:
+        logger.debug("code embedding-space refresh failed", exc_info=True)
+        return result
+
     # ── Symbols ────────────────────────────────────────────────
     try:
         def _fetch_symbols(conn):
@@ -1017,10 +1111,11 @@ def _compute_mention_scores(
                 "SELECT name, qualified_name, file_path, kind, embedding "
                 "FROM ci_symbols "
                 "WHERE project_id = ? "
+                "  AND embedding_space = ? "
                 "  AND embedding IS NOT NULL "
                 "  AND name IS NOT NULL "
                 "  AND name != ''",
-                (project_id,),
+                (project_id, embedding_space),
             ).fetchall()
         sym_rows = execute_with_retry(_fetch_symbols)
     except Exception:
@@ -1029,9 +1124,14 @@ def _compute_mention_scores(
 
     if sym_rows:
         try:
-            mat = np.stack([
-                np.frombuffer(r["embedding"], dtype=np.float32) for r in sym_rows
-            ])
+            from infinidev.tools.base.embeddings import stack_compatible_embeddings
+
+            mat, kept = stack_compatible_embeddings(
+                [row["embedding"] for row in sym_rows], dim=query_vec.size,
+            )
+            sym_rows = [sym_rows[index] for index in kept]
+            if not sym_rows:
+                raise ValueError("No symbol embeddings match the live vector space")
             # Row-normalize the matrix.  Adding a small epsilon so
             # zero-vector rows (shouldn't exist but defensive) don't
             # NaN the division.
@@ -1041,10 +1141,10 @@ def _compute_mention_scores(
 
             for row, sim in zip(sym_rows, sims):
                 sim_val = float(sim)
-                if sim_val < _FUZZY_SYMBOL_MIN_SIM:
+                name = row["name"]
+                if sim_val < _symbol_similarity_floor(name):
                     continue
                 base_score = sim_val * _FUZZY_SYMBOL_SCALE
-                name = row["name"]
 
                 # File gets the max symbol-level score
                 fp = _normalize_path(row["file_path"], workspace)
@@ -1075,8 +1175,9 @@ def _compute_mention_scores(
         def _fetch_files(conn):
             return conn.execute(
                 "SELECT file_path, embedding FROM ci_files "
-                "WHERE project_id = ? AND embedding IS NOT NULL",
-                (project_id,),
+                "WHERE project_id = ? AND embedding_space = ? "
+                "AND embedding IS NOT NULL",
+                (project_id, embedding_space),
             ).fetchall()
         file_rows = execute_with_retry(_fetch_files)
     except Exception:
@@ -1085,9 +1186,14 @@ def _compute_mention_scores(
 
     if file_rows:
         try:
-            mat = np.stack([
-                np.frombuffer(r["embedding"], dtype=np.float32) for r in file_rows
-            ])
+            from infinidev.tools.base.embeddings import stack_compatible_embeddings
+
+            mat, kept = stack_compatible_embeddings(
+                [row["embedding"] for row in file_rows], dim=query_vec.size,
+            )
+            file_rows = [file_rows[index] for index in kept]
+            if not file_rows:
+                raise ValueError("No file embeddings match the live vector space")
             row_norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
             m_unit = mat / row_norms
             sims = m_unit @ q_unit
@@ -1132,13 +1238,18 @@ def _compute_finding_scores(
     — ``rank()`` computes it once and shares it across channels.
     """
     import json
-    from infinidev.tools.base.embeddings import embedding_from_blob
+    from infinidev.tools.base.embeddings import (
+        current_embedding_space,
+        embedding_from_blob,
+        embedding_is_current,
+    )
     from infinidev.tools.base.dedup import _cosine_similarity
 
     query_vec = (
         np.frombuffer(cached_embedding, dtype=np.float32)
         if cached_embedding else None
     )
+    embedding_space = current_embedding_space() if query_vec is not None else ""
 
     input_lower = current_input.lower()
     padded = " " + input_lower + " "
@@ -1149,17 +1260,59 @@ def _compute_finding_scores(
             # trusted findings when a project accumulates more.
             # Dedup is keyed by id (not topic) so two findings with the
             # same topic don't overwrite each other in the result dict.
-            return conn.execute(
-                "SELECT id, topic, content, embedding, tags_json "
+            rows = conn.execute(
+                "SELECT id, topic, content, embedding, embedding_space, tags_json "
                 "FROM findings "
                 "WHERE project_id = ? AND status = 'active' "
                 "ORDER BY confidence DESC, updated_at DESC "
                 "LIMIT 500",
                 (project_id,),
             ).fetchall()
+            return [dict(row) for row in rows]
         rows = execute_with_retry(_fetch)
     except Exception:
         return {}
+
+    if query_vec is not None:
+        stale_findings = [
+            row for row in rows
+            if not embedding_is_current(
+                row["embedding"],
+                row["embedding_space"],
+                live_space=embedding_space,
+                dim=query_vec.size,
+            )
+        ]
+        if stale_findings:
+            try:
+                from infinidev.tools.base.dedup import _get_embed_fn
+
+                vectors = _get_embed_fn()([
+                    f"{row['topic'] or ''} {(row['content'] or '')[:500]}"
+                    for row in stale_findings
+                ])
+                refreshed = {
+                    row["id"]: np.asarray(vector, dtype=np.float32)
+                    for row, vector in zip(stale_findings, vectors, strict=True)
+                }
+
+                def _store_findings(conn) -> None:
+                    conn.executemany(
+                        "UPDATE findings SET embedding = ?, embedding_space = ? "
+                        "WHERE id = ?",
+                        [
+                            (vector.tobytes(), embedding_space, finding_id)
+                            for finding_id, vector in refreshed.items()
+                        ],
+                    )
+                    conn.commit()
+
+                execute_with_retry(_store_findings)
+                for row in stale_findings:
+                    row["embedding"] = refreshed[row["id"]].tobytes()
+                    row["embedding_space"] = embedding_space
+            except Exception:
+                logger.debug("finding embedding-space refresh failed", exc_info=True)
 
     result: dict[str, tuple[float, str, str]] = {}
     for row in rows:
@@ -1171,9 +1324,16 @@ def _compute_finding_scores(
         scores: list[tuple[float, str]] = []
 
         # ── Signal 1: semantic similarity ────────────────────────
-        if query_vec is not None and row["embedding"]:
+        if query_vec is not None and embedding_is_current(
+            row["embedding"],
+            row["embedding_space"],
+            live_space=embedding_space,
+            dim=query_vec.size,
+        ):
             try:
                 f_vec = embedding_from_blob(row["embedding"])
+                if f_vec.shape != query_vec.shape:
+                    continue
                 sim = float(_cosine_similarity(query_vec, f_vec))
                 if sim >= _FINDING_SEMANTIC_MIN_SIM:
                     scores.append((

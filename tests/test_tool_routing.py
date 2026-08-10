@@ -71,6 +71,22 @@ Add, modify, or remove model-inferred Steps whenever evidence changes.
     assert "rollback_task_changes" not in names
 
 
+def test_domain_remove_does_not_enable_file_management() -> None:
+    names = _names(
+        "Remove a once event handler before invoking it, then test re-entrant emit"
+    )
+
+    assert "delete_file" not in names
+    assert "move_file" not in names
+    assert "rollback_task_changes" not in names
+
+
+def test_explicit_file_management_still_routes_file_tools() -> None:
+    names = _names("Rename the file old_config.py to config.py")
+
+    assert {"delete_file", "move_file", "preview_changes"} <= names
+
+
 def test_explicit_capabilities_restore_their_tools() -> None:
     names = _names(
         "Research the latest online API documentation, write a report, then git commit the changes"

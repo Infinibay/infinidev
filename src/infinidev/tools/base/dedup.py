@@ -1,10 +1,8 @@
 """Semantic duplicate detection for epics, milestones, and tasks.
 
-Uses ChromaDB's built-in DefaultEmbeddingFunction (all-MiniLM-L6-v2) to
-embed titles and compute cosine similarity.  This avoids coupling to the
-RAG pipeline or its settings — the number of titles per project is small
-(tens, not thousands) so a transient embed + numpy cosine is simpler than
-managing a persistent ChromaDB collection.
+Uses Infinidev's shared embedding backend to embed titles and compute cosine
+similarity.  The primary backend is the bundled ``ken/static-qwen3-r512-v2``
+table; legacy MNN/Chroma MiniLM paths remain compatibility fallbacks.
 """
 
 from __future__ import annotations
@@ -23,13 +21,25 @@ _embed_fn = None
 def _get_embed_fn():
     """Return the active embedder.
 
-    Prefers the MNN-backed embedder (~10x faster on CPU, identical output)
-    when `INFINIDEV_MNN_MODEL_PATH` is configured and loadable. Falls back
-    to ChromaDB's ONNX default otherwise.
+    Prefers the static Qwen3 table: it is bundled, multilingual, offline, and
+    requires only table lookup plus one projection.  The old MiniLM backends
+    remain available so stripped source packages and explicit legacy installs
+    fail soft rather than losing semantic features entirely.
     """
     global _embed_fn
     if _embed_fn is not None:
         return _embed_fn
+    try:
+        from infinidev.tools.base.static_qwen3_embedder import (
+            get_static_qwen3_embedder,
+        )
+
+        static = get_static_qwen3_embedder()
+        if static is not None:
+            _embed_fn = static
+            return _embed_fn
+    except Exception:
+        logger.debug("Static Qwen3 embedder probe failed; trying MiniLM", exc_info=True)
     try:
         from infinidev.tools.base.mnn_embedder import get_mnn_embedder
         mnn = get_mnn_embedder()
@@ -93,19 +103,28 @@ def find_semantic_duplicate(
 
     existing_titles = [item["title"] for item in existing_items]
 
-    # Embed everything in a single batch call (new title + all existing).
-    all_texts = [new_title] + existing_titles
     try:
-        embeddings = embed_fn(all_texts)
+        query_method = getattr(embed_fn, "embed_queries", None)
+        passage_method = getattr(embed_fn, "embed_passages", None)
+        new_embedding = (
+            query_method([new_title])[0]
+            if callable(query_method)
+            else embed_fn([new_title])[0]
+        )
+        embeddings = (
+            passage_method(existing_titles)
+            if callable(passage_method)
+            else embed_fn(existing_titles)
+        )
     except Exception:
         logger.warning("Embedding failed during dedup check; skipping", exc_info=True)
         return None
 
-    new_vec = np.asarray(embeddings[0])
+    new_vec = np.asarray(new_embedding)
     best_sim = -1.0
     best_idx = -1
 
-    for i, emb in enumerate(embeddings[1:]):
+    for i, emb in enumerate(embeddings):
         sim = _cosine_similarity(new_vec, np.asarray(emb))
         if sim > best_sim:
             best_sim = sim

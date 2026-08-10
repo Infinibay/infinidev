@@ -23,6 +23,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import shlex
 from typing import Any, TYPE_CHECKING
 
 from infinidev.engine._best_effort import best_effort
@@ -59,6 +61,7 @@ _BUDGET_EXHAUSTED_RESULT = (
     'and continue in the next step"}'
 )
 _REPEATED_READ_STATUS = "already_delivered"
+_DISCOVERY_SUPPRESSED_STATUS = "discovery_suppressed"
 _MAX_READ_DELIVERY_KEYS = 256
 
 
@@ -86,10 +89,13 @@ class ToolRunner:
 
         tool_results_text: list[str] = []
         deferred: list[dict[str, Any]] = []
-        remaining = min(
-            max(0, ctx.max_per_action - action_tool_calls),
-            max(0, ctx.max_total_calls - ctx.state.total_tool_calls),
-        )
+        step_limit = getattr(ctx, "step_tool_limit", ctx.max_per_action)
+        remaining = max(0, step_limit - action_tool_calls)
+        if ctx.max_total_calls is not None:
+            remaining = min(
+                remaining,
+                max(0, ctx.max_total_calls - ctx.state.total_tool_calls),
+            )
         executable = classified.regular[:remaining]
         skipped = classified.regular[remaining:]
         action_tool_calls = self._run_batches(
@@ -273,6 +279,9 @@ class ToolRunner:
             plan_results, executable_batch = self._partition_plan_mutations(
                 ctx, batch,
             )
+            suppressed_results, executable_batch = self._partition_suppressed_discovery(
+                ctx, executable_batch,
+            )
             cached_results, executable_batch = self._partition_repeated_reads(
                 ctx, executable_batch,
             )
@@ -298,7 +307,9 @@ class ToolRunner:
             finally:
                 self._engine._finish_tool_batch()
 
-            synthetic_results = [*plan_results, *cached_results]
+            synthetic_results = [
+                *plan_results, *suppressed_results, *cached_results,
+            ]
             if synthetic_results:
                 by_id = {
                     tc.id: (tc, result)
@@ -409,12 +420,11 @@ class ToolRunner:
             stat = os.stat(path)
         except OSError:
             return None
-        canonical_range = {
-            "offset": args.get("offset", args.get("start_line")),
-            "limit": args.get("limit"),
-            "end_line": args.get("end_line"),
-            "line_range": args.get("line_range"),
-        }
+        valid_range, canonical_range = ToolRunner._canonical_read_range(args)
+        if not valid_range:
+            # ``read_file(limit=0)`` returns an empty-range warning, not file
+            # evidence. Caching it would let that warning claim future reads.
+            return None
         key = json.dumps(
             [path, canonical_range],
             ensure_ascii=False,
@@ -424,6 +434,355 @@ class ToolRunner:
         )
         revision = f"{stat.st_mtime_ns}:{stat.st_size}"
         return key, revision, path
+
+    @staticmethod
+    def _partition_suppressed_discovery(
+        ctx: ExecutionContext,
+        batch: list[Any],
+    ) -> tuple[list[tuple[Any, str]], list[Any]]:
+        """Decline read-only discovery during one evidence-triggered Step."""
+        if not getattr(ctx, "suppress_discovery_this_step", False):
+            return [], batch
+
+        from infinidev.engine.loop.behavior_rules import is_workspace_edit_tool
+        from infinidev.engine.loop.llm_caller import _COMPLETION_TOOL_NAMES
+        from infinidev.engine.loop.semantic_stagnation import (
+            SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES,
+        )
+
+        synthetic: list[tuple[Any, str]] = []
+        executable: list[Any] = []
+        for tc in batch:
+            name = tc.function.name
+            context_read = name in SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES
+            allow_action = (
+                name in _COMPLETION_TOOL_NAMES
+                or is_workspace_edit_tool(name)
+            )
+            if name == "execute_command":
+                try:
+                    args = (
+                        json.loads(tc.function.arguments)
+                        if isinstance(tc.function.arguments, str)
+                        else (tc.function.arguments or {})
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                command = str(args.get("command", "")) if isinstance(args, dict) else ""
+                from infinidev.engine.guidance.test_runners import is_test_command
+                from infinidev.tools.base.command_risk import classify_command
+
+                safe, _ = classify_command(command)
+                is_test = is_test_command(tc.function.arguments, ctx.state)
+                # A non-read-only classification is not evidence that a shell
+                # command advances the Step.  In particular, ``python -c`` is
+                # often used as another inspection surface and previously let
+                # a stagnant model bypass this recovery gate indefinitely.
+                # Workspace mutations have first-class tools; the only shell
+                # action admitted here is a recognised test runner.
+                allow_action = is_test
+                context_read = safe and not is_test
+            allowance = int(
+                getattr(ctx, "semantic_recovery_context_calls", 0) or 0
+            )
+            if context_read and allowance > 0:
+                ctx.semantic_recovery_context_calls = allowance - 1
+                executable.append(tc)
+                continue
+            suppress = not allow_action
+            if not suppress:
+                executable.append(tc)
+                continue
+            synthetic.append((tc, json.dumps({
+                "status": _DISCOVERY_SUPPRESSED_STATUS,
+                "reason": (
+                    "semantically repeated Step summaries produced no "
+                    "successful edit or new test outcome"
+                ),
+                "available_actions": (
+                    "edit the target named by the active Step, run the test "
+                    "whose target covers that edited file, update the plan, "
+                    "or complete the Step"
+                ),
+            })))
+        return synthetic, executable
+
+    @staticmethod
+    def _identity_for_file_evidence(
+        path: str,
+        evidence: dict[str, Any],
+    ) -> tuple[str, str, str] | None:
+        """Build a delivery identity tied to the current file revision."""
+        path = os.path.realpath(os.path.expanduser(path))
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return None
+        if not os.path.isfile(path):
+            return None
+        key = json.dumps(
+            [path, evidence],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return key, f"{stat.st_mtime_ns}:{stat.st_size}", path
+
+    @classmethod
+    def _shell_read_identities(
+        cls,
+        ctx: ExecutionContext,
+        tc: Any,
+    ) -> list[tuple[str, str, str]] | None:
+        """Recognise simple ``cat``/``head`` calls as file evidence.
+
+        This deliberately abstains on pipelines, transforms, stdin and tools
+        such as ``awk`` whose program can execute or write. The permission
+        classifier answers whether a command is safe; this narrower parser
+        answers the different question of exactly which unchanged lines it
+        delivered, so only commands with an unambiguous interval qualify.
+        """
+        if tc.function.name != "execute_command":
+            return None
+        try:
+            args = (
+                json.loads(tc.function.arguments)
+                if isinstance(tc.function.arguments, str)
+                else (tc.function.arguments or {})
+            )
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(args, dict) or not isinstance(args.get("command"), str):
+            return None
+
+        command = args["command"]
+        cwd = args.get("cwd") if isinstance(args.get("cwd"), str) else None
+        if cwd is None:
+            from infinidev.tools.shell.shell_invocation import split_leading_cd
+
+            split = split_leading_cd(command)
+            if split is not None:
+                command, cwd = split
+
+        from infinidev.tools.base.command_risk import split_shell_segments
+
+        segments, _ = split_shell_segments(command)
+        live_segments = [segment.strip() for segment in segments or [] if segment.strip()]
+        if len(live_segments) != 1:
+            return None
+        try:
+            tokens = shlex.split(live_segments[0])
+        except ValueError:
+            return None
+        if not tokens:
+            return None
+
+        workspace = (
+            getattr(ctx, "workspace_path", None)
+            or get_current_workspace_path()
+            or os.getcwd()
+        )
+        base_dir = cwd or workspace
+        if not os.path.isabs(base_dir):
+            base_dir = os.path.join(workspace, base_dir)
+
+        base = os.path.basename(tokens[0])
+        paths: list[str]
+        interval: dict[str, int | None]
+        if base == "cat":
+            # Options may change numbering/visibility, and '-' reads stdin.
+            paths = tokens[1:]
+            if not paths or any(path.startswith("-") for path in paths):
+                return None
+            interval = {"start": 1, "end": None}
+        elif base == "head":
+            count = 10
+            paths = []
+            index = 1
+            while index < len(tokens):
+                token = tokens[index]
+                if token in ("-n", "--lines"):
+                    if index + 1 >= len(tokens):
+                        return None
+                    try:
+                        count = int(tokens[index + 1])
+                    except ValueError:
+                        return None
+                    index += 2
+                    continue
+                if token.startswith("--lines="):
+                    try:
+                        count = int(token.split("=", 1)[1])
+                    except ValueError:
+                        return None
+                    index += 1
+                    continue
+                if re.fullmatch(r"-\d+", token):
+                    count = int(token[1:])
+                    index += 1
+                    continue
+                if token.startswith("-"):
+                    return None
+                paths.append(token)
+                index += 1
+            if count <= 0 or not paths:
+                return None
+            interval = {"start": 1, "end": count}
+        elif base in {"grep", "egrep", "fgrep", "rg", "wc"}:
+            # Exact query cache: these commands select or summarise rather
+            # than deliver a contiguous interval. Bind the normalised query
+            # to every explicit regular-file argument, and abstain when the
+            # command only searches stdin/a directory/the implicit workspace.
+            paths = []
+            for token in tokens[1:]:
+                candidate = token if os.path.isabs(token) else os.path.join(base_dir, token)
+                if os.path.isfile(candidate):
+                    paths.append(token)
+            if not paths:
+                return None
+            signature = {
+                "command": shlex.join(tokens),
+                "cwd": os.path.realpath(base_dir),
+            }
+            identities = []
+            for raw_path in paths:
+                path = raw_path if os.path.isabs(raw_path) else os.path.join(base_dir, raw_path)
+                identity = cls._identity_for_file_evidence(path, signature)
+                if identity is None:
+                    return None
+                identities.append(identity)
+            return identities
+        else:
+            return None
+
+        identities: list[tuple[str, str, str]] = []
+        for raw_path in paths:
+            if raw_path == "-":
+                return None
+            path = raw_path if os.path.isabs(raw_path) else os.path.join(base_dir, raw_path)
+            identity = cls._identity_for_file_evidence(path, interval)
+            if identity is None:
+                return None
+            identities.append(identity)
+        return identities
+
+    @classmethod
+    def _read_delivery_identities(
+        cls,
+        ctx: ExecutionContext,
+        tc: Any,
+    ) -> list[tuple[str, str, str]] | None:
+        identity = cls._read_delivery_identity(ctx, tc)
+        if identity is not None:
+            return [identity]
+        return cls._shell_read_identities(ctx, tc)
+
+    @staticmethod
+    def _canonical_read_range(
+        args: dict[str, Any],
+    ) -> tuple[bool, dict[str, int | None] | None]:
+        """Mirror ``ReadFileTool`` aliases as one delivered line interval.
+
+        ``None`` is the tool's unbounded/skeleton request. A finite mapping is
+        inclusive, so syntactically different calls for the same lines share
+        an identity and overlapping deliveries can be unioned later.
+        """
+
+        def as_int(value: Any) -> int | None:
+            if value is None:
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        offset = as_int(args.get("offset"))
+        limit = as_int(args.get("limit"))
+        start_line = as_int(args.get("start_line"))
+        end_line = as_int(args.get("end_line"))
+
+        line_range = args.get("line_range")
+        if line_range is not None and offset is None:
+            match = re.match(r"(\d+)\s*[-:,]\s*(\d+)", str(line_range))
+            if match:
+                start_line = int(match.group(1))
+                end_line = int(match.group(2))
+            else:
+                start_line = as_int(line_range)
+
+        if start_line is not None and offset is None:
+            offset = start_line
+        if end_line is not None and limit is None:
+            if offset is None:
+                offset = 1
+            limit = max(1, end_line - (offset or 1) + 1)
+
+        if limit is not None and limit <= 0:
+            return False, None
+        if offset is None and limit is None:
+            return True, None
+
+        start = max(offset or 1, 1)
+        end = None if limit is None else start + limit - 1
+        return True, {"start": start, "end": end}
+
+    @staticmethod
+    def _read_range_from_key(
+        key: str,
+    ) -> tuple[str, dict[str, int | None] | None] | None:
+        """Decode a current delivery key, ignoring older incompatible shapes."""
+        try:
+            path, interval = json.loads(key)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        if not isinstance(path, str):
+            return None
+        if interval is None:
+            return path, None
+        if not isinstance(interval, dict) or set(interval) != {"start", "end"}:
+            return None
+        start = interval.get("start")
+        end = interval.get("end")
+        if not isinstance(start, int) or (end is not None and not isinstance(end, int)):
+            return None
+        return path, {"start": start, "end": end}
+
+    @classmethod
+    def _read_range_is_covered(
+        cls,
+        delivered: dict[str, str],
+        *,
+        path: str,
+        revision: str,
+        target: dict[str, int | None],
+    ) -> bool:
+        """Whether unchanged prior deliveries cover every target line."""
+        intervals: list[tuple[int, int | None]] = []
+        for key, stored_revision in delivered.items():
+            if stored_revision != revision:
+                continue
+            decoded = cls._read_range_from_key(key)
+            if decoded is None or decoded[0] != path or decoded[1] is None:
+                continue
+            intervals.append((decoded[1]["start"], decoded[1]["end"]))
+
+        target_start = target["start"]
+        target_end = target["end"]
+        cursor = target_start
+        # Sort only by the lower bound. Two deliveries may start on the same
+        # line while one is open-ended; tuple ordering would then compare
+        # ``None`` with an integer and crash instead of answering the read.
+        for start, end in sorted(intervals, key=lambda item: item[0]):
+            if end is not None and end < cursor:
+                continue
+            if start > cursor:
+                break
+            if end is None:
+                return True
+            cursor = max(cursor, end + 1)
+            if target_end is not None and cursor > target_end:
+                return True
+        return False
 
     @classmethod
     def _partition_repeated_reads(
@@ -436,23 +795,44 @@ class ToolRunner:
         executable: list[Any] = []
         delivered = ctx.state.read_delivery_revisions
         for tc in batch:
-            identity = cls._read_delivery_identity(ctx, tc)
-            if identity is None:
+            identities = cls._read_delivery_identities(ctx, tc)
+            if not identities:
                 executable.append(tc)
                 continue
-            key, revision, path = identity
-            if delivered.get(key) != revision:
+            statuses: list[str] = []
+            paths: list[str] = []
+            for key, revision, path in identities:
+                decoded = cls._read_range_from_key(key)
+                interval = decoded[1] if decoded is not None else None
+                exact = delivered.get(key) == revision
+                covered = bool(
+                    not exact
+                    and interval is not None
+                    and cls._read_range_is_covered(
+                        delivered,
+                        path=path,
+                        revision=revision,
+                        target=interval,
+                    )
+                )
+                statuses.append("exact" if exact else "contained" if covered else "")
+                paths.append(path)
+            if not all(statuses):
                 executable.append(tc)
                 continue
-            cached.append((tc, json.dumps({
+            payload: dict[str, Any] = {
                 "status": _REPEATED_READ_STATUS,
-                "path": path,
+                "coverage": "exact" if all(s == "exact" for s in statuses) else "contained",
                 "message": (
-                    "This exact unchanged range was already delivered. Use the "
-                    "existing opened-files/prior result, request a narrower "
-                    "offset+limit, or call recall_context for archived evidence."
+                    "This unchanged read is already fully covered by prior "
+                    "results. Use the existing opened-files/prior evidence; "
+                    "running it again would add no information."
                 ),
-            })))
+            }
+            payload["path" if len(paths) == 1 else "paths"] = (
+                paths[0] if len(paths) == 1 else paths
+            )
+            cached.append((tc, json.dumps(payload)))
         return cached, executable
 
     @classmethod
@@ -461,24 +841,27 @@ class ToolRunner:
         ctx: ExecutionContext,
         tc: Any,
     ) -> None:
-        identity = cls._read_delivery_identity(ctx, tc)
-        if identity is None:
+        identities = cls._read_delivery_identities(ctx, tc)
+        if not identities:
             return
-        key, revision, _ = identity
         delivered = ctx.state.read_delivery_revisions
-        delivered[key] = revision
+        for key, revision, _ in identities:
+            delivered[key] = revision
         while len(delivered) > _MAX_READ_DELIVERY_KEYS:
             delivered.pop(next(iter(delivered)))
 
     @staticmethod
-    def _is_repeated_read_result(result: str) -> bool:
+    def _is_synthetic_no_evidence_result(result: str) -> bool:
         try:
             payload = json.loads(result)
         except (json.JSONDecodeError, TypeError):
             return False
         return (
             isinstance(payload, dict)
-            and payload.get("status") == _REPEATED_READ_STATUS
+            and payload.get("status") in {
+                _REPEATED_READ_STATUS,
+                _DISCOVERY_SUPPRESSED_STATUS,
+            }
         )
 
     @staticmethod
@@ -598,11 +981,11 @@ class ToolRunner:
 
         for tc, result in batch_results:
             tool_error = extract_tool_error(result)
-            repeated_read = self._is_repeated_read_result(result)
+            no_new_evidence = self._is_synthetic_no_evidence_result(result)
             guard.on_tool_result(tc.function.name, tc.function.arguments, bool(tool_error))
             tracker.on_tool_call(tc.function.name, tc.function.arguments, bool(tool_error))
 
-            if not tool_error and not repeated_read:
+            if not tool_error and not no_new_evidence:
                 update_opened_files_cache(
                     ctx.state, tc.function.name, tc.function.arguments, result,
                 )
@@ -631,7 +1014,7 @@ class ToolRunner:
                         ctx, tc.function.arguments,
                     )
 
-            if not tool_error and not repeated_read:
+            if not tool_error and not no_new_evidence:
                 with best_effort("memory annotation failed for %s", tc.function.name):
                     from infinidev.engine.tool_executor import annotate_with_memory
 
@@ -824,7 +1207,8 @@ class ToolRunner:
     ) -> str:
         """Tell the model how much of its per-step budget it has spent."""
         tag = (
-            f"\n[Tool call {action_tool_calls + 1}/{ctx.max_per_action} "
+            f"\n[Tool call {action_tool_calls + 1}/"
+            f"{getattr(ctx, 'step_tool_limit', ctx.max_per_action)} "
             f"for this step]"
         )
         return tag + " (parallel)" if is_parallel else tag
@@ -886,12 +1270,15 @@ class ToolRunner:
                 used=action_tool_calls, threshold=threshold,
             )
         active = ctx.state.plan.active_step.title if ctx.state.plan.active_step else ""
+        step_limit = getattr(ctx, "step_tool_limit", ctx.max_per_action)
+        remaining = max(0, step_limit - action_tool_calls)
         return (
-            f"You have used {action_tool_calls}/{ctx.max_per_action} tool calls "
-            f"for this step. Step scope: \"{active}\". "
-            f"Call step_complete now. If the step is not finished, set "
-            f"status='continue' after using add_step or modify_step to capture "
-            f"the remaining work."
+            f"You have used {action_tool_calls}/{step_limit} tool calls "
+            f"for this step ({remaining} remain). Step scope: \"{active}\". "
+            "If the success criterion is already verified, call step_complete. "
+            "Otherwise spend the remaining calls on the highest-value concrete edit "
+            "or verification; if work still remains at the limit, close with "
+            "status='continue' and record the exact next action."
         )
 
     # ── test-runner special case ─────────────────────────────────────

@@ -45,7 +45,12 @@ from infinidev.engine.loop.critic_liaison import CriticLiaison
 from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.guardrail_runner import apply_guardrail
 from infinidev.engine.loop.guidance_handler import GuidanceHandler
-from infinidev.engine.loop.llm_caller import LLMCaller, LLMCallResult, ClassifiedCalls
+from infinidev.engine.loop.llm_caller import (
+    COMPLETION_PLAN_TOOL_NAMES,
+    ClassifiedCalls,
+    LLMCaller,
+    LLMCallResult,
+)
 from infinidev.engine.loop.loop_guard import LoopGuard
 from infinidev.engine.loop.loop_plan import (
     _MAX_CONSECUTIVE_DECOMPOSITIONS,
@@ -97,6 +102,17 @@ logger = logging.getLogger(__name__)
 # work. The step no longer advances on ``explore``, so without this the
 # model could ask for the same decomposition indefinitely.
 _MAX_EXPLORE_PER_STEP = 2
+
+# Once execution tools reach their Step fuse, the model sees only notes and
+# ``step_complete``.  Some models correctly preserve a session note first and
+# need one following turn to emit the terminal call.  Both turns are bounded
+# and cannot execute workspace tools.
+_MAX_COMPLETION_ONLY_TURNS = 2
+
+# One productive Step may consume a second local window before context is
+# compacted. Further progress is preserved in the next outer iteration rather
+# than allowing a sequence of edits to grow one conversation without bound.
+_MAX_STEP_PROGRESS_RENEWALS = 1
 
 
 def _seed_state_from_plan(state, plan) -> None:
@@ -201,7 +217,10 @@ def _task_requires_edits(ctx: ExecutionContext) -> bool:
 
 def _resource_exhaustion_reason(ctx: ExecutionContext) -> str | None:
     """Return the first reached resource fuse, without inferring success."""
-    if ctx.state.total_tool_calls >= ctx.max_total_calls:
+    if (
+        ctx.max_total_calls is not None
+        and ctx.state.total_tool_calls >= ctx.max_total_calls
+    ):
         return (
             "Step interrupted: global tool call limit reached "
             f"({ctx.state.total_tool_calls}/{ctx.max_total_calls} total calls)."
@@ -215,6 +234,64 @@ def _resource_exhaustion_reason(ctx: ExecutionContext) -> str | None:
             f"({ctx.state.total_prompt_tokens}/{ctx.max_prompt_tokens} tokens)."
         )
     return None
+
+
+def _step_progress_marker(
+    ctx: ExecutionContext,
+    tracker: BehaviorTracker,
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, tuple[str, ...]], ...]]:
+    """Return deterministic evidence that material Step state advanced."""
+    outcomes = tuple(
+        sorted(
+            (command, tuple(fingerprints))
+            for command, fingerprints in ctx.state.test_outcome_history.items()
+        )
+    )
+    file_tracker = getattr(ctx, "file_tracker", None)
+    if file_tracker is not None and hasattr(file_tracker, "change_fingerprint"):
+        changes = file_tracker.change_fingerprint()
+    else:
+        # Compatibility for narrow unit contexts and third-party engines that
+        # have not adopted FileChangeTracker. Production uses net file state.
+        changes = (
+            (("@successful-edit-calls", str(tracker.successful_edit_count)),)
+            if tracker.successful_edit_count
+            else ()
+        )
+    return changes, outcomes
+
+
+def _renew_step_tool_window(
+    ctx: ExecutionContext,
+    tracker: BehaviorTracker,
+    previous: tuple[
+        tuple[tuple[str, str], ...],
+        tuple[tuple[str, tuple[str, ...]], ...],
+    ],
+    renewals_used: int,
+) -> tuple[
+    int,
+    tuple[
+        tuple[tuple[str, str], ...],
+        tuple[tuple[str, tuple[str, ...]], ...],
+    ],
+    int,
+]:
+    """Renew one Step window after edits or genuinely new test evidence.
+
+    Reads, searches, and an identical rerun leave the marker unchanged, so a
+    stalled episode still reaches its normal boundary. The renewal changes no
+    Task-level budget and makes no model call.
+    """
+    current = _step_progress_marker(ctx, tracker)
+    if (
+        not getattr(ctx, "renew_step_budget_on_progress", False)
+        or current == previous
+        or renewals_used >= _MAX_STEP_PROGRESS_RENEWALS
+    ):
+        return ctx.step_tool_limit, current, renewals_used
+    ctx.step_tool_limit += ctx.max_per_action
+    return ctx.step_tool_limit, current, renewals_used + 1
 
 
 def _should_advance_plan(step_result: StepResult) -> bool:
@@ -232,6 +309,26 @@ def _reconcile_step_result(
 ) -> tuple[StepResult, bool]:
     """Apply Task-scope reconciliation before whole-Task completion gates."""
     step_result = step_mgr.reconcile_task_completion(ctx, step_result)
+    plan = getattr(ctx.state, "plan", None)
+    active = getattr(plan, "active_step", None)
+    pending_after_active = (
+        plan.undischarged(exclude_index=active.index)
+        if plan is not None and active is not None
+        else []
+    )
+    if (
+        step_result.status == "continue"
+        and not step_result.interrupted
+        and active is not None
+        and not pending_after_active
+    ):
+        step_result = step_result.model_copy(update={
+            "interrupted": True,
+            "summary": (
+                f"{step_result.summary.rstrip()} No follow-up Step was scheduled, "
+                "so execution remains on this Step."
+            ).strip(),
+        })
     if (
         not getattr(ctx, "allow_plan_mutation", True)
         and step_result.status == "continue"
@@ -290,12 +387,26 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     if active is None or active_phase not in {"change", "test_change"}:
         return False
     tracker = getattr(step_result, "behavior_tracker", None)
-    edited_now = bool(getattr(tracker, "files_edited", ()))
-    edited_before = any(
-        record.step_index == active.index and bool(record.changes_made)
-        for record in getattr(ctx.state, "history", ())
-    ) or active.index in getattr(ctx.state, "edited_step_indices", set())
-    if edited_now or edited_before:
+    file_tracker = getattr(ctx, "file_tracker", None)
+    entry = getattr(ctx.state, "step_entry_change_fingerprints", {}).get(
+        active.index
+    )
+    if (
+        entry is not None
+        and file_tracker is not None
+        and hasattr(file_tracker, "change_fingerprint")
+    ):
+        has_net_effect = file_tracker.change_fingerprint(reconcile=True) != entry
+    else:
+        # Backwards-compatible fallback for resumed legacy state and focused
+        # tests without a workspace tracker.
+        edited_now = bool(getattr(tracker, "files_edited", ()))
+        edited_before = any(
+            record.step_index == active.index and bool(record.changes_made)
+            for record in getattr(ctx.state, "history", ())
+        ) or active.index in getattr(ctx.state, "edited_step_indices", set())
+        has_net_effect = edited_now or edited_before
+    if has_net_effect:
         return False
 
     # A broad earlier change can already satisfy a later model-authored Step.
@@ -897,14 +1008,20 @@ class LoopEngine(AgentEngine):
             ctx.tools[:] = expanded
             ctx.tool_dispatch.clear()
             ctx.tool_dispatch.update(build_tool_dispatch(ctx.tools))
-            ctx.tool_schemas[:] = build_tool_schemas(ctx.tools, small_model=ctx.is_small)
+            ctx.tool_schemas[:] = build_tool_schemas(
+                ctx.tools,
+                small_model=ctx.compact_tool_schemas,
+            )
             if ctx.manual_tc:
                 from infinidev.engine.loop.context import build_tools_prompt_section
 
                 ctx.system_prompt += (
                     "\n\n## Newly granted capability\n"
                     + build_tools_prompt_section(
-                        build_tool_schemas(added, small_model=ctx.is_small),
+                        build_tool_schemas(
+                            added,
+                            small_model=ctx.compact_tool_schemas,
+                        ),
                         small_model=ctx.is_small,
                     )
                 )
@@ -947,6 +1064,8 @@ class LoopEngine(AgentEngine):
                 task=ctx.desc, expected=ctx.expected,
                 settings_snapshot={
                     "is_small": ctx.is_small, "manual_tc": ctx.manual_tc,
+                    "model_policy": ctx.model_policy_name,
+                    "compact_tool_schemas": ctx.compact_tool_schemas,
                     "max_iterations": ctx.max_iterations, "max_per_action": ctx.max_per_action,
                     "max_total_calls": ctx.max_total_calls, "history_window": ctx.history_window,
                     "max_context_tokens": ctx.max_context_tokens,
@@ -1187,12 +1306,45 @@ class LoopEngine(AgentEngine):
         step_result: StepResult | None = None
         action_tool_calls = 0
         saw_tool_calls = False
-        completion_turn_used = False
+        completion_turns_used = 0
 
         llm_caller.reset()
         guard.reset()
         tracker = BehaviorTracker(set(ctx.state.opened_files.keys()))
         tracker.task_has_edits = ctx.state.task_has_edits
+        active_step = ctx.state.plan.active_step
+        if active_step is not None:
+            entry_fingerprints = ctx.state.step_entry_change_fingerprints
+            file_tracker = getattr(ctx, "file_tracker", None)
+            if file_tracker is not None and hasattr(
+                file_tracker, "change_fingerprint"
+            ):
+                entry_fingerprints.setdefault(
+                    active_step.index,
+                    file_tracker.change_fingerprint(reconcile=True),
+                )
+        # Delivery notices are valid only while their source text remains in
+        # the current Step transcript. After summarization, large-file slices
+        # may no longer be model-visible, so one later read must be deliverable.
+        ctx.state.read_delivery_revisions.clear()
+        ctx.suppress_discovery_this_step = bool(
+            getattr(ctx.state, "discovery_suppression_steps", 0)
+        )
+        from infinidev.engine.loop.semantic_stagnation import (
+            SEMANTIC_RECOVERY_CONTEXT_CALLS,
+        )
+        ctx.semantic_recovery_context_calls = (
+            SEMANTIC_RECOVERY_CONTEXT_CALLS
+            if ctx.suppress_discovery_this_step
+            else 0
+        )
+        if ctx.suppress_discovery_this_step:
+            ctx.state.discovery_suppression_steps = max(
+                0, ctx.state.discovery_suppression_steps - 1
+            )
+        ctx.step_tool_limit = ctx.max_per_action
+        progress_marker = _step_progress_marker(ctx, tracker)
+        progress_renewals = 0
 
         # Tracks the wall-clock time of the previous LLM call's return
         # so we can measure the python-only gap until the next call.
@@ -1202,14 +1354,16 @@ class LoopEngine(AgentEngine):
         _last_llm_call_end: float | None = None
 
         while (
-            ctx.state.total_tool_calls < ctx.max_total_calls
-            and _resource_exhaustion_reason(ctx) is None
+            _resource_exhaustion_reason(ctx) is None
             and (
-                action_tool_calls < ctx.max_per_action
-                or (saw_tool_calls and not completion_turn_used)
+                action_tool_calls < ctx.step_tool_limit
+                or (
+                    saw_tool_calls
+                    and completion_turns_used < _MAX_COMPLETION_ONLY_TURNS
+                )
             )
         ):
-            completion_only = action_tool_calls >= ctx.max_per_action
+            completion_only = action_tool_calls >= ctx.step_tool_limit
             # Plan pseudo-tools mutate the state in this same inner loop.
             # Recompute the mode for every model turn so an ``add_step`` is
             # followed by execution tools, rather than leaving the model in
@@ -1280,7 +1434,7 @@ class LoopEngine(AgentEngine):
             if result.should_retry:
                 continue
             if completion_only:
-                completion_turn_used = True
+                completion_turns_used += 1
             if result.forced_step_result:
                 step_result = result.forced_step_result
                 break
@@ -1306,20 +1460,29 @@ class LoopEngine(AgentEngine):
 
                 if completion_only and classified.regular:
                     # Native FC providers cannot choose these because their
-                    # schemas were hidden. This guard covers manual mode and
-                    # providers that returned an out-of-schema text call.
-                    names = ", ".join(
+                    # schemas were hidden. Plan mutations are the exception:
+                    # they record the next unit of work without touching the
+                    # workspace and are bounded by the two closing turns.
+                    invalid = [
                         call.function.name for call in classified.regular
-                    )
-                    step_result = StepResult(
-                        summary=(
-                            "Step interrupted at its execution-tool budget; "
-                            f"the completion-only turn attempted: {names}."
-                        ),
-                        status="continue",
-                        interrupted=True,
-                    )
-                    break
+                        if call.function.name not in COMPLETION_PLAN_TOOL_NAMES
+                    ]
+                    if invalid:
+                        names = ", ".join(invalid)
+                        step_result = StepResult(
+                            summary=(
+                                "Step interrupted at its execution-tool budget; "
+                                f"the completion-only turn attempted: {names}."
+                            ),
+                            status="continue",
+                            interrupted=True,
+                        )
+                        break
+                    # ToolRunner normally truncates at the Step boundary. Give
+                    # exactly these state-only calls room to execute; after the
+                    # batch action_tool_calls again equals step_tool_limit, so
+                    # the following turn remains completion-only.
+                    ctx.step_tool_limit += len(classified.regular)
                 if classified.regular:
                     action_tool_calls = self._critic.review_alongside(
                         ctx, messages, classified.regular,
@@ -1331,6 +1494,12 @@ class LoopEngine(AgentEngine):
                     )
                     if self._cancel_event.is_set():
                         break
+                    _, progress_marker, progress_renewals = _renew_step_tool_window(
+                        ctx,
+                        tracker,
+                        progress_marker,
+                        progress_renewals,
+                    )
                     # Expire old thinking content to save context window
                     ContextManager.expire_thinking(messages)
                     # Check guard conditions
@@ -1396,7 +1565,10 @@ class LoopEngine(AgentEngine):
                         "Step interrupted: "
                     ).removesuffix(".")
                 else:
-                    limit_msg = f"per-step tool call limit reached ({action_tool_calls}/{ctx.max_per_action} calls)"
+                    limit_msg = (
+                        "per-step tool call limit reached "
+                        f"({action_tool_calls}/{ctx.step_tool_limit} calls)"
+                    )
                 step_result = StepResult(
                     summary=f"Step interrupted: {limit_msg}.",
                     status="continue",
@@ -1424,13 +1596,69 @@ class LoopEngine(AgentEngine):
             )
 
         tracker.on_step_end()
-        if tracker.task_has_edits:
+        active = ctx.state.plan.active_step
+        file_tracker = getattr(ctx, "file_tracker", None)
+        current_fingerprint = (
+            file_tracker.change_fingerprint(reconcile=True)
+            if file_tracker is not None
+            and hasattr(file_tracker, "change_fingerprint")
+            else None
+        )
+        entry_fingerprint = (
+            ctx.state.step_entry_change_fingerprints.get(active.index)
+            if active is not None
+            else None
+        )
+        tracker.net_workspace_changed = bool(
+            current_fingerprint != entry_fingerprint
+            if current_fingerprint is not None and entry_fingerprint is not None
+            else tracker.files_edited
+        )
+        if tracker.net_workspace_changed:
             ctx.state.task_has_edits = True
 
-        if tracker.files_edited:
-            active = ctx.state.plan.active_step
-            if active is not None:
+        if active is not None:
+            if tracker.net_workspace_changed:
                 ctx.state.edited_step_indices.add(active.index)
+            else:
+                ctx.state.edited_step_indices.discard(active.index)
+
+            if (
+                getattr(ctx, "semantic_stagnation_control", False)
+                and _step_phase(active.title) in {"change", "test_change"}
+            ):
+                test_marker = tuple(sorted(
+                    fingerprint
+                    for fingerprints in ctx.state.test_outcome_history.values()
+                    for fingerprint in fingerprints
+                ))
+                previous_tests = ctx.state.last_test_outcomes_by_step.get(
+                    active.index, ()
+                )
+                made_progress = (
+                    tracker.net_workspace_changed or test_marker != previous_tests
+                )
+                windows = (
+                    0 if made_progress
+                    else ctx.state.no_progress_windows_by_step.get(active.index, 0) + 1
+                )
+                ctx.state.no_progress_windows_by_step[active.index] = windows
+                ctx.state.last_test_outcomes_by_step[active.index] = test_marker
+                if windows >= 2:
+                    ctx.state.discovery_suppression_steps = max(
+                        ctx.state.discovery_suppression_steps, 1
+                    )
+                    ctx.state.no_progress_windows_by_step[active.index] = 0
+                    _emit_log(
+                        "warning",
+                        "Two complete implementation windows produced no net "
+                        "workspace or test-outcome change; narrowing discovery "
+                        "tools for the next Step.",
+                        project_id=ctx.project_id,
+                        agent_id=ctx.agent_id,
+                    )
+
+        if tracker.files_edited:
             warned = set(ctx.state.similarity_warned_files)
             new_paths = [p for p in tracker.files_edited if p not in warned]
             if new_paths:

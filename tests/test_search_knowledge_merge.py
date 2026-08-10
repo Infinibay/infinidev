@@ -156,6 +156,16 @@ def test_semantic_mode_is_part_of_the_canonical_tool(findings, monkeypatch):
     assert _titles(out) == {"auth uses JWT RS256"}
     assert "content" not in out["results"][0]
 
+    def _stored(conn):
+        return conn.execute(
+            "SELECT embedding, embedding_space FROM findings "
+            "WHERE session_id = 's1' ORDER BY id"
+        ).fetchall()
+
+    stored = execute_with_retry(_stored)
+    assert all(row["embedding"] is not None for row in stored)
+    assert len({row["embedding_space"] for row in stored}) == 1
+
 
 def test_old_semantic_name_is_alias_not_a_second_schema():
     from infinidev.engine.tool_dispatch import _TOOL_ALIASES

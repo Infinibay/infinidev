@@ -115,3 +115,21 @@ def test_rollback_restores_task_start_state_and_removes_new_files(
     assert str(existing) in payload["restored"]
     assert str(created) in payload["removed_new_files"]
     assert tracker.get_all_paths() == []
+
+
+def test_change_fingerprint_returns_to_entry_after_edit_is_reverted(
+    workspace_dir,
+) -> None:
+    path = workspace_dir / "sample.txt"
+    original = path.read_text()
+    tracker = FileChangeTracker(WorkspaceBaseline.capture(str(workspace_dir)))
+    entry = tracker.change_fingerprint(reconcile=True)
+
+    path.write_text("temporary agent edit\n")
+    tracker.record(str(path), original, path.read_text())
+    changed = tracker.change_fingerprint()
+    path.write_text(original)
+    tracker.record(str(path), "temporary agent edit\n", original)
+
+    assert changed != entry
+    assert tracker.change_fingerprint(reconcile=True) == entry

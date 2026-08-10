@@ -266,11 +266,14 @@ class Settings(BaseSettings):
     # so tools alone are not a sufficient fuse. Zero disables this limit.
     REACT_MAX_PROMPT_TOKENS: int = 300_000
     TASK_MAX_ITERATIONS: int = 50
-    TASK_MAX_TOOL_CALLS: int = 160
+    # A durable Task is progress-bounded, not call-count-bounded. Zero means
+    # unlimited total calls. Local Step boundaries still compact accumulated
+    # context, while the loop's non-progress guards remain independent.
+    TASK_MAX_TOOL_CALLS: int = 0
     # A rolling Task must return to its plan after a bounded amount of work.
     # ``LOOP_MAX_TOOL_CALLS_PER_ACTION=0`` intentionally means unlimited for
     # the legacy loop, but inheriting the full Task budget here lets one
-    # exploratory step consume all 160 calls before its nudge is honoured.
+    # exploratory step consume the entire Task before its nudge is honoured.
     TASK_MAX_TOOL_CALLS_PER_STEP: int = 12
     # The chat agent is a router, not a second developer loop. Its prompt
     # allows 0-3 grounding reads before a required respond/escalate decision;

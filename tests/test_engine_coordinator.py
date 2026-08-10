@@ -363,10 +363,11 @@ class TestTaskAdapter:
     def test_task_uses_one_rolling_plan_without_an_analyst(self, temp_db, patched_pipeline):
         engine = _LoopEngine("Implemented the fix.", "done")
         adapter = TaskAdapter()
+        hooks = _Hooks()
 
         result = adapter.run(
             escalation=_packet("Implement the feedback tool"), agent=_Agent(),
-            engine=engine, reviewer=None, hooks=_Hooks(), session_id="task-1",
+            engine=engine, reviewer=None, hooks=hooks, session_id="task-1",
             project_id=1, workspace_path="/workspace",
         )
 
@@ -380,12 +381,33 @@ class TestTaskAdapter:
         assert "rolling" in engine.execute_kwargs["initial_plan"].overview.lower()
         assert engine.execute_kwargs["initial_plan"].rolling_horizon_limit == 3
         assert engine.execute_kwargs["max_iterations"] == settings.TASK_MAX_ITERATIONS
-        assert engine.execute_kwargs["max_total_tool_calls"] == settings.TASK_MAX_TOOL_CALLS
+        assert engine.execute_kwargs["max_total_tool_calls"] == 0
         assert (
             engine.execute_kwargs["max_tool_calls_per_action"]
             == settings.TASK_MAX_TOOL_CALLS_PER_STEP
         )
         assert engine.execute_kwargs["allow_explore"] is False
+        assert result.metrics["max_tool_calls"] is None
+        status_messages = "\n".join(message for _level, message in hooks.statuses)
+        assert "unlimited total tool calls" in status_messages
+        assert "160 tool calls" not in status_messages
+
+    def test_task_reports_an_explicit_opt_in_total_budget(self, temp_db, patched_pipeline, monkeypatch):
+        monkeypatch.setattr(settings, "TASK_MAX_TOOL_CALLS", 240)
+        engine = _LoopEngine("Implemented the fix.", "done")
+        hooks = _Hooks()
+
+        result = TaskAdapter().run(
+            escalation=_packet("Implement the feedback tool"), agent=_Agent(),
+            engine=engine, reviewer=None, hooks=hooks, session_id="task-bounded",
+            project_id=1, workspace_path="/workspace",
+        )
+
+        assert engine.execute_kwargs["max_total_tool_calls"] == 240
+        assert result.metrics["max_tool_calls"] == 240
+        assert "240 total tool calls" in "\n".join(
+            message for _level, message in hooks.statuses
+        )
 
 
 class TestCoordinatorReactRoute:

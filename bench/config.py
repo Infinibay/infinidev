@@ -31,6 +31,9 @@ class BenchConfig:
     cache_dir: Path = Path("/tmp/infinidev-bench/.cache")
     # Resume from existing predictions (skip already-done instances)
     resume: bool = True
+    # Keep failed or incomplete checkouts for post-mortem inspection when
+    # explicitly requested by the harness CLI.
+    cleanup: bool = True
     # Settings.json to mirror into each instance's ``.infinidev/``
     # before running. Defaults to the user's home settings (the same
     # one ``infinidev`` reads when launched from $HOME). Empty string
