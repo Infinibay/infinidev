@@ -1,257 +1,118 @@
 # Infinidev
 
-A terminal-based AI programming assistant for modern coding models. It runs an autonomous agent loop that can read, write, and edit code, execute commands, manage git, search the web, and maintain a persistent knowledge base — all from your terminal.
+[![PyPI](https://img.shields.io/pypi/v/infinidev.svg)](https://pypi.org/project/infinidev/)
+[![Python](https://img.shields.io/pypi/pyversions/infinidev.svg)](https://pypi.org/project/infinidev/)
+[![Tests](https://github.com/Infinibay/infinidev/actions/workflows/tests.yml/badge.svg)](https://github.com/Infinibay/infinidev/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
-The primary target is a single configured SOTA reasoning or coding model with a long context window, including models around 1M tokens where the provider supports them. LiteLLM keeps the backend provider-agnostic; local open-weight models through [Ollama](https://ollama.com) remain a supported compatibility path.
+Infinidev is an autonomous AI coding agent for the terminal. It can inspect a
+repository, plan changes, edit code, run commands and tests, review its work,
+and keep project knowledge across sessions.
+
+It works with hosted models through LiteLLM and with local models through
+[Ollama](https://ollama.com).
 
 ![Infinidev TUI](https://raw.githubusercontent.com/Infinibay/infinidev/main/public/screenshot.png)
 
-## Features
+## Install
 
-- **Plan-execute-summarize loop** — the agent keeps context relevant through step summaries, evidence pointers, and on-demand recall instead of filling even a large window indiscriminately.
-- **Full-featured TUI** — tabbed interface with chat, file explorer, syntax-highlighted editor, sidebar with live progress, and autocomplete for commands.
-- **Live file change diffs** — collapsible widgets showing colorized unified diffs with line numbers for every file the agent modifies, updated in real time during task execution.
-- **Context window tracking** — dual progress bars showing Chat Usage (your input + session history) and Task Usage (actual prompt tokens from the LLM), with automatic budget warnings when context runs low.
-- **Settings editor** — modal settings browser with section grouping, inline editing, and save/cancel buttons. Accessible via `/settings`.
-- **Persistent knowledge base** — the agent records what it learns about your project (classes, patterns, APIs) and recalls it across steps and future sessions.
-- **Dual tool-calling modes** — auto-detects whether the LLM supports native function calling or falls back to JSON-in-text parsing.
-- **30+ built-in tools** — file operations, git, shell, web search/fetch, knowledge management with semantic dedup.
-- **Project-local state** — settings, DB, and logs live in `.infinidev/` inside your project directory.
-- **Model management** — list, switch, and interactively pick Ollama models from the TUI.
-- **Documentation management** — browse and manage cached library documentation.
-
-
-## Requirements
-
-- Python 3.11+
-- A LiteLLM-compatible model provider
-- [Ollama](https://ollama.com) when using a local open-weight model
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-
-## Quickstart
+Python 3.11 or newer is required. The recommended installation uses
+[uv](https://docs.astral.sh/uv/), which keeps Infinidev in an isolated tool
+environment:
 
 ```bash
-# Clone and install
-git clone https://github.com/Infinibay/infinidev.git
-cd infinidev
-uv sync
-
-# Local-model option: make sure Ollama is running with a model
-ollama pull qwen3-coder:30b
-
-# Launch
-uv run infinidev
+uv tool install infinidev
 ```
 
-Or install system-wide:
+Upgrade later with:
 
 ```bash
-./install.sh
+uv tool upgrade infinidev
+```
+
+You can also install it with pipx:
+
+```bash
+pipx install infinidev
+```
+
+## Start
+
+Run Infinidev from the project you want it to work on:
+
+```bash
+cd path/to/your/project
 infinidev
 ```
 
-## Usage
+Use `/models manage` to choose a provider and model, or `/settings` to edit the
+project configuration. By default, Infinidev expects Ollama at
+`http://localhost:11434`.
 
-### TUI Mode (default)
-
-```bash
-uv run infinidev
-```
-
-The TUI has three panels:
-- **Left** — File explorer (toggle with `Ctrl+E`)
-- **Center** — Tabbed area with Chat + file editor tabs
-- **Right** — Sidebar showing plan progress, active tools, and logs
-
-### Classic Mode
+Useful command-line modes:
 
 ```bash
-uv run infinidev --classic
+infinidev --no-tui                 # text-only interface
+infinidev -p "explain this repo"   # one prompt, then exit
+infinidev --continue               # resume the latest local session
+infinidev --resume                 # choose a previous session
 ```
 
-Text-only mode for minimal terminals or piping.
+## What it includes
 
-### Commands
+- A live terminal UI with task progress, diffs, files, logs, and context usage.
+- Plan-execute-summarize and staged execution for long, multi-step tasks.
+- File, shell, Git, web, code-intelligence, knowledge, and image tools.
+- Persistent, searchable working memory with recoverable tool evidence.
+- Model capability detection and native or text-based tool calling.
+- MCP server support; Ken is used for semantic project context when available.
+- Permission checks, deterministic completion gates, tests, and post-change review.
+- Image attachments, terminal image viewing, and opt-in image generation.
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show all commands and keybindings |
-| `/models` | Show current model configuration |
-| `/models list` | List available Ollama models |
-| `/models set <name>` | Change the active model |
-| `/models manage` | Interactive model picker |
-| `/settings` | Show or edit settings configuration |
-| `/settings browse` | Open settings editor modal |
-| `/findings` | Browse all knowledge base findings |
-| `/knowledge` | Browse project context knowledge |
-| `/documentation` | Browse cached library documentation |
-| `/docs` | Browse cached library documentation (alias) |
-| `/clear` | Clear chat history and panels |
+## Essential commands
+
+| Command | Purpose |
+| --- | --- |
+| `/help` | Show commands and keybindings |
+| `/models manage` | Choose the active provider and model |
+| `/settings` | View or change project settings |
+| `/engine` | Select the task execution engine |
+| `/plan <task>` | Review a plan before execution |
+| `/mcp` | Show MCP server health |
+| `/findings` | Browse saved project knowledge |
+| `/reindex` | Rebuild the local code index |
+| `/clear` | Clear the transcript |
 | `/exit` | Quit |
 
-### Keybindings
+## How it works
 
-| Key | Action |
-|-----|--------|
-| `Ctrl+S` | Save current file |
-| `Ctrl+F` | Find in current file |
-| `Ctrl+Shift+F` | Search across project |
-| `Ctrl+E` | Toggle file explorer |
-| `Ctrl+W` | Close active file tab |
-| `F2` / `F3` / `F4` | Focus: Chat / Explorer / Sidebar |
-
-### File Editor
-
-The built-in editor tracks unsaved changes with a visual indicator (`●`) on the tab and in the file explorer (highlighted in yellow). Closing a modified file prompts a Save/Discard/Cancel dialog.
-
-### Image Viewer
-
-Opening an image file (PNG, JPG, GIF, BMP, WebP, etc.) from the explorer renders it directly in the terminal using Unicode half-block characters (`▀`). Each character cell represents 2 vertical pixels with 24-bit color.
-
-Controls when viewing an image:
-
-| Key | Action |
-|-----|--------|
-| `+` / `-` | Zoom in / out |
-| `0` | Reset zoom to 100% |
-| `F` | Fit image to viewport |
-
-The info bar shows filename, dimensions, format, file size, current zoom level, and the active rendering backend (`numpy` or `cuda`).
-
-#### GPU-accelerated rendering
-
-By default, images are processed with NumPy on CPU. If you have an NVIDIA GPU, you can enable CUDA acceleration for faster rendering of large images:
-
-```bash
-# Install with CUDA support
-uv sync --extra cuda
-
-# Or add cupy manually
-uv pip install cupy-cuda12x
+```text
+request
+  -> read-only chat agent
+  -> planner (when code work is needed)
+  -> plan-execute-summarize loop
+  -> tests and objective checks
+  -> review
+  -> result
 ```
 
-The backend is auto-detected at startup — no configuration needed. The info bar in the image viewer shows `[cuda]` or `[numpy]` so you know which one is active.
-
-### Project Search
-
-`Ctrl+Shift+F` opens a project-wide search modal with:
-- Real-time results with highlighted matches
-- Preview pane with context (2 lines before/after)
-- **Skip junk** toggle (on by default) — excludes `node_modules`, `.git`, `__pycache__`, `.venv`, binary files, lock files, and other common non-source files
-- Click a result to open the file at the matching line
-
-## Configuration
-
-Settings are stored in `.infinidev/settings.json` in your project directory. They can also be set via environment variables with the `INFINIDEV_` prefix.
-
-| Setting | Default | Description |
-|--|---------|--|
-| `LLM_MODEL` | `ollama_chat/qwen3-coder:30b` | LiteLLM model identifier |
-| `LLM_BASE_URL` | `http://localhost:11434` | Ollama / LLM API base URL |
-| `LOOP_MAX_ITERATIONS` | `50` | Max planning iterations per task |
-| `LOOP_MAX_TOTAL_TOOL_CALLS` | `200` | Global tool call limit per task |
-| `LOOP_HISTORY_WINDOW` | `0` | Summaries to keep (0 = all) |
-| `COMMAND_OUTPUT_CAPTURE_ENABLED` | `false` | Opt in to private, bounded capture of command streams that exceed the normal truncation limit. See [`docs/COMMAND_OUTPUT_CAPTURE.md`](docs/COMMAND_OUTPUT_CAPTURE.md). |
-| `COMMAND_OUTPUT_AUTO_NOTES_ENABLED` | `false` | Independently create traceable closure notes for captured-output handles. |
-| `COMMAND_OUTPUT_NOTE_COMPACTION_ENABLED` | `false` | Independently compact newly created closure notes without replacing their sources. |
-| `FORGEJO_API_URL` | `""` | Forgejo API URL |
-| `FORGEJO_OWNER` | `""` | Forgejo owner |
-| `INFINIDEV_MNN_MODEL_PATH` | unset | Override for the MNN model path. Only needed to point at a custom location; leave unset to use the auto-managed default under `~/.infinidev/models/`. |
-
-## Optional: MNN-accelerated embeddings
-
-ContextRank, finding dedup, and symbol search all rely on the same
-`all-MiniLM-L6-v2` embedding model. By default this runs through
-ChromaDB's bundled ONNX Runtime on CPU, which costs ~115 ms per query
-on consumer hardware. For sessions backed by a remote LLM provider, that
-latency is visible on every pivot of the loop.
-
-Routing the same model through [MNN](https://github.com/alibaba/MNN)
-(Alibaba's inference runtime) cuts this to ~11 ms per query — roughly
-10× faster — while producing bit-compatible vectors (cosine 1.0000
-against the ONNX baseline), so embeddings already stored in the DB
-remain valid without re-indexing.
-
-### Enable
-
-```bash
-uv sync --extra mnn     # or: pip install 'infinidev[mnn]'
-uv run infinidev
-```
-
-That's it. On the first session after installing the extra, infinidev
-detects the MNN runtime, converts ChromaDB's cached ONNX model to MNN
-format (one-time, ~30 s, logged on stderr), caches it under
-`~/.infinidev/models/minilm.mnn`, and switches to the faster path for
-every subsequent session. If the extra isn't installed, nothing changes
-— infinidev keeps using the ChromaDB default embedder.
-
-The `scripts/convert_minilm_to_mnn.py` script is still available for
-pre-warming (useful in CI images or read-only deployments where the
-first-run conversion is inconvenient), but it's not required.
-
-### Notes
-
-- **CPU only today.** The MNN pip wheel does not ship with the Vulkan
-  backend compiled in, so inference runs on CPU regardless of the
-  requested backend. CPU alone is already the ~10× speedup documented
-  above; GPU would be additional.
-- **Hardened kernels.** MNN's wheel ships with an executable-stack ELF
-  flag that Arch/CachyOS/Ubuntu hardened kernels reject. The embedder
-  auto-patches the affected `.so` files on first use; no manual step
-  needed.
-- **Same model, same vectors.** The embedder produces the same 384-dim
-  output as before. Stored finding, symbol, and context embeddings
-  remain correct — no migration required.
-
-## Architecture
-
-```
-src/infinidev/
-  cli/          # TUI (Textual) and classic CLI entry points
-  engine/       # Plan-execute-summarize loop engine
-  agents/       # Agent role definitions and tool binding
-  tools/        # 30+ tools: file, git, shell, web, knowledge, documentation
-  config/       # Settings, LLM params, model capability probing
-  db/           # SQLite with FTS5, findings, artifacts, conversations
-  prompts/      # System prompts, tech-specific guidelines
-```
-
-The core loop:
-1. **Plan** — LLM produces 2-3 initial steps
-2. **Execute** — one step at a time, calling tools as needed
-3. **Summarize and archive** — the step conclusion stays on the plan while raw tool evidence moves into searchable working memory
-4. **Repeat** — the next prompt is rebuilt from the plan, durable summaries, and recalled evidence when needed
-
-This keeps context focused, attributable, and recoverable. A long context window provides headroom; it does not make every old tool result equally relevant.
-
-## Knowledge Base
-
-The agent maintains a persistent knowledge base of findings across sessions. It automatically records:
-- Project structure, key classes, and public APIs
-- Patterns, conventions, and dependencies
-- Research results and bug findings
-- Things you ask it to remember
-
-Findings are auto-injected into the prompt at the start of each task, so the agent starts every session already knowing your project.
-
-Browse the knowledge base anytime with `/findings` or `/knowledge`.
+Infinidev stores settings, history, logs, and its SQLite knowledge database in
+`.infinidev/` inside the current project. Environment variables use the
+`INFINIDEV_` prefix. Secrets and generated runtime state should not be committed.
 
 ## Development
 
 ```bash
-# Run tests
-uv run pytest tests/
-
-# Run a specific test
-uv run pytest tests/test_tui.py::test_space_inserts_space_character -v
+git clone https://github.com/Infinibay/infinidev.git
+cd infinidev
+uv sync
+uv run pytest
+uv run infinidev
 ```
 
-Prompt changes must follow [`docs/PROMPTING.md`](docs/PROMPTING.md). The current
-specification-elaboration design is documented in
-[`docs/SPEC_ELABORATION.md`](docs/SPEC_ELABORATION.md).
+Architecture and subsystem documentation live in [`docs/`](docs/). Contributor
+guidance is in [`AGENTS.md`](AGENTS.md).
 
 ## License
 
-Infinidev is distributed under the MIT License. Copyright (c) 2026 Infinibay LLC
-<andres@infinibay.net>. See [`LICENSE.md`](LICENSE.md).
+Infinidev is available under the [MIT License](LICENSE.md).
