@@ -31,7 +31,11 @@ from typing import Any, Optional
 
 from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.engine._best_effort import best_effort
-from infinidev.engine.loop.llm_caller import ThinkStreamFilter, strip_think_blocks
+from infinidev.engine.loop.llm_caller import (
+    ThinkStreamFilter,
+    normalize_message_text,
+    strip_think_blocks,
+)
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
 from infinidev.engine.token_usage import report_prompt_tokens
@@ -343,7 +347,7 @@ def _run_llm_loop(
             content = strip_think_blocks(content)
         else:
             message = response.choices[0].message
-            content = getattr(message, "content", None) or ""
+            content = normalize_message_text(getattr(message, "content", None))
             tool_calls = getattr(message, "tool_calls", None) or []
             streamed = False
 
@@ -895,7 +899,7 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
         except (AttributeError, IndexError):
             continue
 
-        delta_content = getattr(delta, "content", None)
+        delta_content = normalize_message_text(getattr(delta, "content", None))
         if delta_content:
             content_buffer += delta_content
             safe_delta = content_filter.feed(delta_content)

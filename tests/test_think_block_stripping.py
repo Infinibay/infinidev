@@ -13,9 +13,17 @@ thinking. A stripper that only removes balanced pairs cannot see that.
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 import pytest
 
-from infinidev.engine.loop.llm_caller import ThinkStreamFilter, strip_think_blocks
+from infinidev.engine.loop.llm_caller import (
+    ThinkStreamFilter,
+    normalize_message_text,
+    promote_embedded_think,
+    strip_think_blocks,
+)
 
 
 def _streamed(raw: str, chunk: int = 3) -> str:
@@ -70,3 +78,26 @@ def test_the_long_spelling_is_not_read_as_the_short_one():
     would leave a stray ``ing>`` in the transcript."""
     assert "ing>" not in _streamed("<thinking>r</thinking>ok")
     assert "ing>" not in strip_think_blocks("<thinking>r</thinking>ok")
+
+
+def test_structured_provider_content_is_normalized_before_think_promotion():
+    message = SimpleNamespace(
+        content={
+            "type": "text",
+            "text": "<thinking>new reasoning</thinking>The answer",
+        },
+        reasoning_content={"type": "text", "text": "prior reasoning"},
+    )
+
+    promote_embedded_think(message)
+
+    assert message.content == "The answer"
+    assert message.reasoning_content == "prior reasoning\n\nnew reasoning"
+
+
+def test_unknown_structured_provider_content_remains_parseable_json():
+    content = {"name": "step_complete", "arguments": {"status": "done"}}
+
+    normalized = normalize_message_text(content)
+
+    assert json.loads(normalized) == content

@@ -1667,7 +1667,7 @@ class LoopEngine(AgentEngine):
                     break
             else:
                 # Text-only response
-                content = (result.message.content or "").strip() if result.message else result.raw_content
+                content = result.raw_content
                 forced = guard.handle_text_only(ctx, messages, content)
                 if forced:
                     step_result = forced

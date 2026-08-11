@@ -80,6 +80,35 @@ _THINK_OPEN_RE = _re.compile(rf"<(?:{_THINK_TAGS})>", _re.IGNORECASE)
 _THINK_CLOSE_RE = _re.compile(rf"</(?:{_THINK_TAGS})>", _re.IGNORECASE)
 
 
+def normalize_message_text(value: Any) -> str:
+    """Return provider message content as text without losing structured data.
+
+    Chat-completion providers normally return a string, but some compatible
+    endpoints occasionally expose a single content block as a mapping (or a
+    list of blocks).  The rest of the engine deliberately operates on text,
+    so normalize that provider variance once instead of letting a later
+    ``.strip()`` fail mid-task.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = [normalize_message_text(item) for item in value]
+        return "\n".join(part for part in parts if part)
+    if isinstance(value, dict):
+        text = value.get("text")
+        if isinstance(text, str):
+            return text
+        if isinstance(text, dict) and isinstance(text.get("value"), str):
+            return text["value"]
+        try:
+            return json.dumps(value, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
+
+
 def strip_think_blocks(text: str) -> str:
     """Remove reasoning blocks — balanced or not — from free-form text.
 
@@ -244,8 +273,16 @@ def promote_embedded_think(message: Any) -> None:
     reasoning_content was already populated, merge the stray blocks
     into it so no think content is lost.
     """
-    existing = (getattr(message, "reasoning_content", None) or "").strip()
-    content = getattr(message, "content", None) or ""
+    raw_existing = getattr(message, "reasoning_content", None)
+    raw_content = getattr(message, "content", None)
+    existing = normalize_message_text(raw_existing).strip()
+    content = normalize_message_text(raw_content)
+    if not isinstance(raw_content, str):
+        with best_effort("normalize structured message content failed"):
+            message.content = content
+    if raw_existing is not None and not isinstance(raw_existing, str):
+        with best_effort("normalize structured reasoning content failed"):
+            message.reasoning_content = existing
     if not content or not _THINK_BLOCK_RE.search(content):
         return
     blocks = _THINK_BLOCK_RE.findall(content)
@@ -429,8 +466,10 @@ class LLMCaller:
         self._track_usage(ctx, response)
         choice = response.choices[0]
         message = choice.message
-        raw_content = (message.content or "").strip()
-        reasoning_content = (getattr(message, "reasoning_content", None) or "").strip()
+        raw_content = normalize_message_text(message.content).strip()
+        reasoning_content = normalize_message_text(
+            getattr(message, "reasoning_content", None)
+        ).strip()
 
         # Parse tool calls from text
         parsed = _parse_text_tool_calls(raw_content)
@@ -507,10 +546,12 @@ class LLMCaller:
         # where it belongs regardless of server-side config.
         promote_embedded_think(message)
 
-        raw = (getattr(message, "content", None) or "").strip()
+        raw = normalize_message_text(getattr(message, "content", None)).strip()
         return LLMCallResult(
             tool_calls=tool_calls, message=message, raw_content=raw,
-            reasoning_content=(getattr(message, "reasoning_content", None) or "").strip(),
+            reasoning_content=normalize_message_text(
+                getattr(message, "reasoning_content", None)
+            ).strip(),
         )
 
     @staticmethod
@@ -585,8 +626,12 @@ class LLMCaller:
         parseable content at all (caller will treat as a text-only
         response and hit the guardrail path).
         """
-        raw_content = (getattr(message, "content", None) or "").strip()
-        reasoning_content = (getattr(message, "reasoning_content", None) or "").strip()
+        raw_content = normalize_message_text(
+            getattr(message, "content", None)
+        ).strip()
+        reasoning_content = normalize_message_text(
+            getattr(message, "reasoning_content", None)
+        ).strip()
         if not raw_content and not reasoning_content:
             return None
 

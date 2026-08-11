@@ -52,7 +52,7 @@ class _FakeToolCall:
 
 @dataclass
 class _FakeMessage:
-    content: str = ""
+    content: Any = ""
     tool_calls: list[_FakeToolCall] | None = None
 
 
@@ -73,7 +73,7 @@ def _tc(name: str, args: dict[str, Any] | None = None, call_id: str = "tc-1") ->
     )
 
 
-def _response(tool_calls: list[_FakeToolCall] | None = None, content: str = "") -> _FakeResponse:
+def _response(tool_calls: list[_FakeToolCall] | None = None, content: Any = "") -> _FakeResponse:
     msg = _FakeMessage(
         content=content,
         tool_calls=tool_calls,
@@ -236,6 +236,19 @@ class TestGracefulFailureModes:
         result = run_chat_agent("hola")
         assert result.kind == "respond"
         assert "Hola" in result.reply
+
+    def test_structured_text_reply_is_normalized(self, patch_litellm):
+        patch_litellm([
+            _response(
+                content={"type": "text", "text": "Continuaré con la opción B."},
+                tool_calls=None,
+            ),
+        ])
+
+        result = run_chat_agent("continúa")
+
+        assert result.kind == "respond"
+        assert result.reply == "Continuaré con la opción B."
 
     def test_narrated_escalation_cannot_silently_end_execution(self, patch_litellm):
         patch_litellm([
