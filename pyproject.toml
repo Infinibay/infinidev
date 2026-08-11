@@ -1,12 +1,12 @@
 [project]
 name = "infinidev"
-version = "0.14.2"
+version = "0.14.3"
 description = "A terminal-based AI programming tool using agent loops."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE.md"]
-authors = [{ name = "Infinibay LLC", email = "andres@infinibay.net" }]
+authors = [{ name = "Andres Borek", email = "andres@infinibay.net" }]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

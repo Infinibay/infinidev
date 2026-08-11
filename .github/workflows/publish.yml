@@ -1,0 +1,30 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Verify tag matches package version
+        run: test "$GITHUB_REF_NAME" = "v$(uv version --short)"
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Validate distribution metadata
+        run: uvx twine check dist/*
+      - name: Publish distribution
+        run: uv publish --check-url https://pypi.org/simple --token "$PYPI_API_TOKEN"
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
