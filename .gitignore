@@ -5,6 +5,7 @@ __pycache__/
 dist/
 build/
 *.egg
+*.whl
 *.spec
 
 # Logs
@@ -37,8 +38,20 @@ Thumbs.db
 
 # Testing / coverage
 .pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
 htmlcov/
 .coverage
+.coverage.*
+coverage.xml
+
+# Local package/build caches
+.hatch/
+.uv-cache/
+.uv-tmp/
 
 # Claude code
 .claude/

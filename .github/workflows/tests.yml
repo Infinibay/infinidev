@@ -9,6 +9,20 @@ permissions:
   contents: read
 
 jobs:
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Validate distribution metadata
+        run: uvx twine check dist/*
+
   pytest:
     runs-on: ubuntu-latest
     strategy:

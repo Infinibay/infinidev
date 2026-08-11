@@ -4,7 +4,7 @@ A terminal-based AI programming assistant for modern coding models. It runs an a
 
 The primary target is a single configured SOTA reasoning or coding model with a long context window, including models around 1M tokens where the provider supports them. LiteLLM keeps the backend provider-agnostic; local open-weight models through [Ollama](https://ollama.com) remain a supported compatibility path.
 
-![Infinidev TUI](public/screenshot.png)
+![Infinidev TUI](https://raw.githubusercontent.com/Infinibay/infinidev/main/public/screenshot.png)
 
 ## Features
 
