@@ -114,6 +114,25 @@ uv run python -c 'import torch; print(torch.__version__, torch.cuda.is_available
 uv run pytest tests/test_task_policy_natural_split.py -q
 ```
 
+The candidate acquisition and split rebuild are now available as one guarded command:
+
+```bash
+uv run python -m bench.task_policy_data_bootstrap
+```
+
+It downloads or reuses all five pinned candidate queues, verifies their exact SHA-256 digests,
+requires all 37 transferred manual review ledgers, and recreates the fixed 2,901-row split. It
+will stop instead of inventing labels when those ledgers are absent. If reviews live separately:
+
+```bash
+uv run python -m bench.task_policy_data_bootstrap \
+  --review-root /PATH/TO/TRANSFERRED/external-data
+```
+
+Use `--mode acquire` to download and verify candidates without building splits, or `--mode build`
+to rebuild from existing candidates and ledgers without network access. `--force-download`
+deliberately overwrites reproducible candidate queues but never review ledgers.
+
 If the locked PyTorch build is CPU-only, install the matching CUDA wheel in the project environment
 without changing unrelated dependencies, confirm `torch.cuda.is_available()`, and record the exact
 environment command. The warning about the optional `kernels-community` 4-bit GEMM package is not
