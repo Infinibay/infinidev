@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:ropdebee__mb-userscripts-393","include":true,"policies":["refactor"],"notes":"Removes custom image maximization exceptions after the dependency gained native support."}
+{"candidate_id":"open-swe:mailgun__mailgun-go-401","include":true,"policies":["feature"],"notes":"Adds a supported API filter parameter to ListIPs."}
+{"candidate_id":"open-swe:maniacallabs__bibliopixel-1100","include":true,"policies":["feature"],"notes":"Adds validation or recovery for a common malformed-list input."}
+{"candidate_id":"open-swe:marketsquare__robotframework-robocop-1027","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Changes public rule lifecycle from removal to permanent deprecation; that maintenance/migration method is not represented by the current policies."}
+{"candidate_id":"open-swe:marpple__fxts-199","include":true,"policies":["feature"],"notes":"Extends public type inference for groupBy and indexBy."}
+{"candidate_id":"open-swe:mehcode__config-rs-255","include":true,"policies":["feature"],"notes":"The underlying request is environment-variable deserialization into sequences."}
+{"candidate_id":"open-swe:mgechev__revive-1175","include":true,"policies":["bugfix"],"notes":"An existing linter rule misses value mutations expressed with increment operators."}
+{"candidate_id":"open-swe:mgechev__revive-881","include":true,"policies":["feature"],"notes":"Adds a configurable linter rule for package alias names."}
+{"candidate_id":"open-swe:modin-project__modin-7399","include":true,"policies":["bugfix"],"notes":"Operations fail for valid non-power-of-two partition counts."}
+{"candidate_id":"open-swe:mozilla__nunjucks-1196","include":true,"policies":["feature"],"notes":"Adds direct and transitive template dependency discovery."}
+{"candidate_id":"open-swe:narwhals-dev__narwhals-2322","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Marking known backend tests xfail is test-release maintenance outside current methods."}
+{"candidate_id":"open-swe:nats-io__nats-server-2734","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for deployment configuration guidance rather than a repository change."}
+{"candidate_id":"open-swe:nats-io__nats-server-3335","include":true,"policies":["feature"],"notes":"Adds programmatic nkey configuration to leaf-node options."}
+{"candidate_id":"open-swe:nomicfoundation__hardhat-ignition-478","include":true,"policies":["feature"],"notes":"Expands accepted API values to support two additional references."}
+{"candidate_id":"open-swe:oasis-open__cti-python-stix2-25","include":true,"policies":["bugfix"],"notes":"Generated timestamps violate the required millisecond precision contract."}
+{"candidate_id":"open-swe:oasisprotocol__oasis-sdk-101","include":true,"policies":["feature"],"notes":"Implements a missing secp256k1 signer."}
+{"candidate_id":"open-swe:ocr-d__core-1243","include":true,"policies":["feature"],"notes":"Adds an existing processor option to the process CLI."}
+{"candidate_id":"open-swe:onflow__flow-cli-509","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Removes a redundant shipped default configuration as maintenance; the current policies do not model this task method cleanly."}
+{"candidate_id":"open-swe:open-telemetry__opamp-go-125","include":true,"policies":["feature"],"notes":"Adds protocol-defined gzip support to HTTP transport."}
+{"candidate_id":"open-swe:open-telemetry__opentelemetry-php-922","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Migrates tests away from deprecated PHPUnit APIs; migration is not automatically behavior-preserving refactoring."}
+{"candidate_id":"open-swe:openmined__pysyft-391","include":true,"policies":["feature"],"notes":"Adds default split behavior to the base tensor type."}
+{"candidate_id":"open-swe:ota-meshi__eslint-plugin-svelte-365","include":true,"policies":["feature"],"notes":"Adds a require-strict-events lint rule."}
+{"candidate_id":"open-swe:ota-meshi__eslint-plugin-svelte-368","include":true,"policies":["feature"],"notes":"Adds a require-slot-types lint rule."}
+{"candidate_id":"open-swe:oxc-project__oxc-resolver-572","include":true,"policies":["feature"],"notes":"Adds an opt-in non-standard directory resolution mode for compatibility."}
+{"candidate_id":"open-swe:pallets__click-1896","include":true,"policies":["bugfix"],"notes":"A common decorator mistake produces an opaque exception instead of a diagnostic."}
+{"candidate_id":"open-swe:pandas-dev__pandas-56038","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Deprecates public aliases; lifecycle and compatibility maintenance is not represented by the current policy set."}
+{"candidate_id":"open-swe:pandas-dev__pandas-58349","include":true,"policies":["feature"],"notes":"Exports reader classes through the public typing API."}
+{"candidate_id":"open-swe:pandas-dev__pandas-61257","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Documentation-only clarification has no matching task-method prompt."}
+{"candidate_id":"open-swe:petermattis__pebble-253","include":true,"policies":["performance"],"notes":"Explicitly targets a measured one-megabyte-per-second flush bottleneck."}
+{"candidate_id":"open-swe:pheature-flags__pheature-flags-168","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Renames a public implementation in preparation for sibling types; the request is migration preparation, not explicitly behavior-preserving refactoring."}
+{"candidate_id":"open-swe:phpbench__phpbench-971","include":true,"policies":["feature"],"notes":"Adds configurable number formatting that strips trailing zero padding."}
+{"candidate_id":"open-swe:pipxproject__pipx-318","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests usage guidance for upgrading an internal pip installation."}
+{"candidate_id":"open-swe:planetlabs__planet-client-python-858","include":true,"policies":["feature"],"notes":"Adds a Session factory method for constructing service clients."}
+{"candidate_id":"open-swe:playwright-community__eslint-plugin-playwright-369","include":true,"policies":["feature"],"notes":"Extends an existing lint rule to another API with the same hazard."}
+{"candidate_id":"open-swe:plexis-js__plexis-29","include":true,"policies":["feature"],"notes":"Adds a Chicago-style text transformation method."}
+{"candidate_id":"open-swe:ploomber__jupysql-681","include":true,"policies":["feature"],"notes":"Introduces a replacement command and deprecates the old command; the observable capability change is feature work, while the move is implementation detail."}
+{"candidate_id":"open-swe:polarsignals__frostdb-279","include":true,"policies":["bugfix"],"notes":"A unit test intermittently panics because aggregation indexes invalid data."}
+{"candidate_id":"open-swe:ponder-sh__ponder-1333","include":true,"policies":["bugfix"],"notes":"Code generation fails when an enum column participates in a primary key."}
+{"candidate_id":"open-swe:pravega__zookeeper-operator-201","include":true,"policies":["feature"],"notes":"Adds watching a configurable set of namespaces."}
+{"candidate_id":"open-swe:pravega__zookeeper-operator-373","include":true,"policies":["feature"],"notes":"Adds rolling restart behavior when static configuration changes."}
+{"candidate_id":"open-swe:pre-commit__pre-commit-908","include":true,"policies":["feature"],"notes":"Adds a default language-version mapping with precedence rules."}
+{"candidate_id":"open-swe:project-copacetic__copacetic-1123","include":true,"policies":["feature"],"notes":"Changes the observable summary schema so a field represents both errors and non-error explanations."}
+{"candidate_id":"open-swe:prometheus__procfs-127","include":true,"policies":["feature"],"notes":"Adds support for Linux pressure-stall information files."}
+{"candidate_id":"open-swe:pvlib__pvlib-python-2451","include":true,"policies":["bugfix"],"notes":"Valid nighttime zero inputs emit an invalid-value warning."}
+{"candidate_id":"open-swe:pycqa__bandit-798","include":true,"policies":["feature"],"notes":"Adds severity handling for an explicit non-security hash use."}
+{"candidate_id":"open-swe:pycqa__docformatter-93","include":true,"policies":["bugfix"],"notes":"The documented command promises behavior that the implementation fails to provide, so the requested implementation correction restores an existing contract."}
+{"candidate_id":"open-swe:pyjanitor-devs__pyjanitor-1029","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Changes the accepted shapes of a public kwargs API; compatibility migration is not behavior-preserving refactoring."}
+{"candidate_id":"open-swe:pypa__pipx-1171","include":true,"policies":["bugfix"],"notes":"A missing requested Python version leaks an unwieldy internal traceback."}
+{"candidate_id":"open-swe:pypa__pipx-1493","include":true,"policies":["bugfix"],"notes":"Supported global environment variables are absent from command output and docs."}
+{"candidate_id":"open-swe:pypa__setuptools-1541","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Deprecates a public configuration keyword and redirects responsibilities; lifecycle maintenance is outside the current methods."}
+{"candidate_id":"open-swe:qiskit-community__ffsim-88","include":true,"policies":["feature"],"notes":"Adds optional lower-rank reduced density matrices to the return value."}
+{"candidate_id":"open-swe:qiskit__qiskit-terra-7408","include":true,"policies":["performance"],"notes":"Identifies a parameter-checking bottleneck on circuits with many reused parameters."}
+{"candidate_id":"open-swe:rancher-sandbox__cluster-api-provider-rke2-190","include":true,"policies":["feature"],"notes":"Changes an observable CRD field from a serialized string to a structured mapping."}
+{"candidate_id":"open-swe:raviqqe__muffet-317","include":true,"policies":["bugfix"],"notes":"The existing follow-sitemap option fails to visit pages present only in the sitemap."}
+{"candidate_id":"open-swe:researchobject__ro-crate-py-183","include":true,"policies":["feature"],"notes":"Adds constructing a crate directly from an in-memory JSON object."}
+{"candidate_id":"open-swe:ripple__explorer-627","include":true,"policies":["feature"],"notes":"Adds ledger-range context to not-found error messages."}
+{"candidate_id":"open-swe:roave__betterreflection-656","include":true,"policies":["bugfix"],"notes":"Constructor prototype reflection contradicts PHP overriding semantics."}
+{"candidate_id":"open-swe:rokucommunity__brighterscript-703","include":true,"policies":["bugfix"],"notes":"Negative integer enum values are already valid language syntax, so accepting them restores the existing contract."}
+{"candidate_id":"open-swe:ropdebee__mb-userscripts-247","include":true,"policies":["feature"],"notes":"Adds MIME-specific diagnostics for unsupported fetched content."}
+{"candidate_id":"open-swe:ropdebee__mb-userscripts-337","include":true,"policies":["bugfix"],"notes":"Track numbers are sorted lexicographically instead of numerically."}

@@ -115,4 +115,7 @@ guidance is in [`AGENTS.md`](AGENTS.md).
 
 ## License
 
-Infinidev is available under the [MIT License](LICENSE.md).
+The Infinidev software and documentation are available under the [MIT License](LICENSE.md).
+The manually authored task-policy annotations in
+[`data/task-policy-reviews/`](data/task-policy-reviews/) are a separately licensed data
+component; see their [data license and attribution notice](data/task-policy-reviews/LICENSE.md).

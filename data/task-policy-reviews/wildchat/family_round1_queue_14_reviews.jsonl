@@ -1,0 +1,83 @@
+{"candidate_id":"wildchat:02a260ebd3051c628d1adc3e0ce3b7e9:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks which commands configure access to git.alt."}
+{"candidate_id":"wildchat:0365ab99c07e3c0db0ecf2abeb86c212:0","include":true,"policies":["feature","research"],"notes":"Requests Wikicode plus external municipality data for a large sortable table."}
+{"candidate_id":"wildchat:0564f6b2a690d694af03c1125807ab8c:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a sports script rather than software work."}
+{"candidate_id":"wildchat:05b85e3360a8b8cb70198d596a38ab62:0","include":true,"policies":["feature"],"notes":"Requests a Python scraper for article lists and article content from a specified site."}
+{"candidate_id":"wildchat:065d3ac09752747d8ab88c0d224b24be:0","include":true,"policies":["feature"],"notes":"Requests multiple SQL solutions for selecting the three youngest employees."}
+{"candidate_id":"wildchat:09a5c2f20efa71a69eca769fd5a5457c:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks what kernel_regression means in Pine Script."}
+{"candidate_id":"wildchat:0b01ffb78dd4e7e286d35e9907e82ac0:0","include":true,"policies":["feature"],"notes":"Requests a Python solution to a specified string-reconstruction problem."}
+{"candidate_id":"wildchat:114061c6eef1ae2fe775ad48e652cf8a:0","include":true,"policies":["bugfix"],"notes":"Reports that supplied C# code never finds the requested song."}
+{"candidate_id":"wildchat:15929d76d20d9025f9045766bdcd1952:0","include":true,"policies":["feature"],"notes":"Requests a Python scraper for article lists and article content from a specified site."}
+{"candidate_id":"wildchat:160fa26b4265c25afc6bbcf01f454ec9:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to configure Auto-GPT with GitHub and file-creation access."}
+{"candidate_id":"wildchat:16a33e7bb0bf674fba6dddcd16550e9f:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests Amazon product marketing copy from referenced listings."}
+{"candidate_id":"wildchat:16f39b58e0216088fb1e6f76405c7dab:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Describes a Node, Express, React, and SSE system and implicitly asks for mentoring design guidance."}
+{"candidate_id":"wildchat:1a1b540d6e20dfd1878cce7934dd318a:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides jailbreak persona instructions without a concrete task."}
+{"candidate_id":"wildchat:1e300568c300323c53e6911111bb9130:0","include":true,"policies":["feature"],"notes":"Requests a Firebase Realtime Database migration adding a parent node to existing data."}
+{"candidate_id":"wildchat:1edf244ffe82d7d60e135d2bdd80cd2d:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests a brief explanation of an entire supplied machine-learning notebook."}
+{"candidate_id":"wildchat:232ab13c5eb4bc21baa900907030c948:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests creative Blender add-on ideas rather than implementation."}
+{"candidate_id":"wildchat:23f217299fef4925ed37f811e9fec8b6:0","include":true,"policies":["research"],"notes":"Requests seven formatted cybersecurity-career sources and answers based on them."}
+{"candidate_id":"wildchat:2862018ae76b5e0e0352ce90cda0e49d:0","include":true,"policies":["bugfix"],"notes":"Reports a stray-character C++ compiler error caused by a malformed decrement operator."}
+{"candidate_id":"wildchat:2918fc24b91f31af00f2380ffa3ef0ca:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides a long HTML select element without a question or requested change."}
+{"candidate_id":"wildchat:2beef67a6c4eac2deeac9327cc37fc9a:0","include":true,"policies":["research"],"notes":"Requests searching Google for a usable GPT-4 API credential."}
+{"candidate_id":"wildchat:2c0a5fbfb5fde455ce9021bb4ea5d851:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests translation of power-electronics textbook prose."}
+{"candidate_id":"wildchat:3528c602086abb78c89c2af5bb555432:0","include":true,"policies":["refactor"],"notes":"Explicitly requests refactoring supplied NumPy run-length encoding code."}
+{"candidate_id":"wildchat:3739c90f03437da1d8d1194295647bad:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether Nginx can proxy two paths to different services."}
+{"candidate_id":"wildchat:39c9ccf417da5dbf9293b42102d74bd3:0","include":true,"policies":["research","review"],"notes":"Requests external SQL-injection testing and a bug-bounty assessment of a live site."}
+{"candidate_id":"wildchat:3c5407fd16ecdcbe013c611a57831433:0","include":true,"policies":["feature"],"notes":"Requests a self-contained function drawing a floor."}
+{"candidate_id":"wildchat:3e0a55edfeb6cee9bf4ba684ff14a55e:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Provides thyroid physiology study notes without a software request."}
+{"candidate_id":"wildchat:3e3a87f1de0692486394b62cb14b4870:0","include":true,"policies":["feature"],"notes":"Requests constructing a valid SQL query from shuffled fragments."}
+{"candidate_id":"wildchat:3f4ab1874d0017d65800624cf73ef5e9:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether JavaScript is case-sensitive."}
+{"candidate_id":"wildchat:42d4b3132b230a04274f745933955e17:0","include":true,"policies":["bugfix"],"notes":"Reports an invalid PyTorch reshape during character-model evaluation."}
+{"candidate_id":"wildchat:42f404473a9304dafefe57c9d2a9b44a:0","include":true,"policies":["bugfix"],"notes":"Requests correcting supplied 8086 assembly so two one-digit inputs produce a printable result."}
+{"candidate_id":"wildchat:46d64c2c5adc030b269f92e9844ebc18:0","include":true,"policies":["feature","refactor"],"notes":"Requests reformatting HTML and adding labeler-name persistence to its CSV workflow."}
+{"candidate_id":"wildchat:4a285ca3b5e7838d510f4025ec96b226:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests a concise detailed explanation of a supplied Java JPA query method."}
+{"candidate_id":"wildchat:4fb402c16772a0431d7120db54707584:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a fictional sports script."}
+{"candidate_id":"wildchat:54026f3008347fb757dc59770f8000ad:0","include":true,"policies":["performance"],"notes":"Explicitly requests optimizing a slow VB.NET data-loading function."}
+{"candidate_id":"wildchat:54512bbd88aa950e49dea434f28f7e39:0","include":true,"policies":["bugfix"],"notes":"Reports trouble displaying Firebase data in an Android RecyclerView and supplies code."}
+{"candidate_id":"wildchat:5a178cd337b071a9ce920187c1fea8fd:0","include":true,"policies":["feature"],"notes":"Requests a function extracting a video's audio, transcribing it, and returning text."}
+{"candidate_id":"wildchat:5a7f9046bf1e1c92f1a650daf0d504ce:0","include":true,"policies":["feature"],"notes":"Requests a JavaScript platform game with hostile bots."}
+{"candidate_id":"wildchat:5d6e0ae29b81e7f022764740c71ae5b1:0","include":true,"policies":["feature"],"notes":"Requests a PHP and MySQL login system with public, administrator, and editor roles."}
+{"candidate_id":"wildchat:5df74287ca6b056d01c831426c32cbef:0","include":true,"policies":["bugfix"],"notes":"Reports Python cannot find a file that appears to exist in the current directory."}
+{"candidate_id":"wildchat:5f6ca1caeef924f721eab9c61f164056:0","include":true,"policies":["feature"],"notes":"Requests code for an AI demo on Hugging Face Spaces."}
+{"candidate_id":"wildchat:626c0047a490e176a75edc53f2c73aa7:0","include":true,"policies":["bugfix"],"notes":"Reports a stray-character C++ compiler error caused by a malformed decrement operator."}
+{"candidate_id":"wildchat:67c5dc48a256d5ed288c53d825adbd1c:0","include":true,"policies":["feature"],"notes":"Requests a Java scraper for article lists and article content from a specified site."}
+{"candidate_id":"wildchat:6bef71c4b60b637b7c75e8184ccd25a3:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a YouTube video script about a mountain hike."}
+{"candidate_id":"wildchat:6fb455c7f0cc4f12f87e1c6e2e40a224:0","include":true,"policies":["feature"],"notes":"Requests a Python script automating login to a specified website."}
+{"candidate_id":"wildchat:76ae116592fc2375430da8a714661b72:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a sports script."}
+{"candidate_id":"wildchat:77868c0b40b0a3769c4e8d56ef56ac78:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to run VBA when a cell value changes."}
+{"candidate_id":"wildchat:7c41512a6fa16edb6054df0ff39f69f3:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks what semantic HTML is and why it is useful."}
+{"candidate_id":"wildchat:8cf5fab0d753ea226fb968d4ff1fbf1e:0","include":true,"policies":["feature"],"notes":"Requests a Colab script uploading a Drive file to a Hugging Face repository."}
+{"candidate_id":"wildchat:8e939d65b8d4a288cc70d82f1658de3d:0","include":true,"policies":["feature"],"notes":"Requests PHP code splitting a string on spaces."}
+{"candidate_id":"wildchat:8fcb1372628b4da05486498f31ac2b1f:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests contextualization and a process flow for supplied audit guidance."}
+{"candidate_id":"wildchat:916944441e07d352bfed8e56d7cd805d:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Provides thyroid physiology study notes without a software request."}
+{"candidate_id":"wildchat:997ac259b45ae3b6c46b865ca7f511a6:0","include":true,"policies":["feature"],"notes":"Requests an Ocstore 3 module integrating with an inventory-service API."}
+{"candidate_id":"wildchat:9b892e1d59046c863461e3ef50a508e4:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to concatenate two columns in Power Query."}
+{"candidate_id":"wildchat:9bf8251a20ec5b6573db62269603600d:0","include":true,"policies":["feature"],"notes":"Requests an HTML and CSS Grid landing-page template with image slots."}
+{"candidate_id":"wildchat:9cbe37c657717465b16467240ffc8827:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks about Python web-scraping packages, advantages, and applications."}
+{"candidate_id":"wildchat:a7e54b4a0b0c1b175b2be31984a0050d:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether VS Code can be used for 1C development."}
+{"candidate_id":"wildchat:a8306ab61a5f75f015a27622b4130e22:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests a detailed React and Next.js learning schedule with resources."}
+{"candidate_id":"wildchat:a851e95d67bd91f534eba349176531f7:0","include":true,"policies":["bugfix"],"notes":"Provides Maven build warnings and a build failure for diagnosis."}
+{"candidate_id":"wildchat:b9f4e72b42e1700a980d3ed9bb568df0:0","include":true,"policies":["feature"],"notes":"Requests a Google Apps Script editing and restoring Instagram captions with logging."}
+{"candidate_id":"wildchat:c166c95b19ecc5b8affef5d21f12e725:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests formatting supplied microkernel information as a table."}
+{"candidate_id":"wildchat:c5db27fa49eb7c048fd442ee1c36896f:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks tersely how a Python parser receives dictionary parameters."}
+{"candidate_id":"wildchat:c85c592051e4776c1ab3c1b483f783f4:0","include":true,"policies":["performance","review"],"notes":"Requests reviewing a Roblox flags file and retaining only graphics lines that truly improve performance."}
+{"candidate_id":"wildchat:c87d038f0e6be2f4e03c7c2db7551ec6:0","include":true,"policies":["performance","refactor"],"notes":"Explicitly requests both optimizing and refactoring a supplied JavaScript function."}
+{"candidate_id":"wildchat:ca9ef3283145b487efc707627bfc5118:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests expert guidance for a Flutter upgrade and Git backup workflow."}
+{"candidate_id":"wildchat:cb88fd61b34cc6d1860e18e460421db1:0","include":true,"policies":["bugfix"],"notes":"Reports that a VBA selected-range field does not track the worksheet selection."}
+{"candidate_id":"wildchat:cd993263480a1abcfa2aecc37c02a4ae:0","include":true,"policies":["feature"],"notes":"Requests adding point interpolation to supplied Python plotting code."}
+{"candidate_id":"wildchat:cda6a8648d5164da829aed80c9087352:0","include":true,"policies":["refactor"],"notes":"Requests combining separate Python link-generation and checking scripts into one pipeline."}
+{"candidate_id":"wildchat:cfe947ad098fa4c8ca622ac6dc9435f7:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a long fictional film scene."}
+{"candidate_id":"wildchat:d964d8c64236b3f41dac26ce9dd87899:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides a long microkernel catalog without a question or desired change."}
+{"candidate_id":"wildchat:da3ebc7f4781965301740093da49dae0:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Asks whether the assistant can learn unfinished code but does not provide it."}
+{"candidate_id":"wildchat:dda64af3ec4aab7dd22d3ebe815537a7:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how FastAPI and SQLAlchemy can limit a query to three records."}
+{"candidate_id":"wildchat:ddb9a54d5091e227355609dc4bfcbe2e:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a sports script."}
+{"candidate_id":"wildchat:e0aee70ad7e60e590394e063597dcb47:0","include":true,"policies":["bugfix"],"notes":"Reports delayed Caps Lock behavior on EndeavourOS."}
+{"candidate_id":"wildchat:eea2c1f6002b2902207e5460ac4bf13d:0","include":true,"policies":["feature"],"notes":"Requests a Windows Python program enabling and disabling network adapters."}
+{"candidate_id":"wildchat:ef36e375904391bab2a93f080ae66a83:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to execute a CloudFormation web-console operation with CDK v2 and boto3."}
+{"candidate_id":"wildchat:f142c7093e7f8f5623fa561aca2d6fe4:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests dataset-correction guidance for a Haar cascade with many false positives."}
+{"candidate_id":"wildchat:f6164bf296ac1f224da0163c4aa0ecf1:0","include":true,"policies":["feature"],"notes":"Requests Python boto3 code equivalent to a CloudFormation console command."}
+{"candidate_id":"wildchat:f894e3c7ce6b94f79d1ce585add6509c:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to read only the first numeric column from a file in Python."}
+{"candidate_id":"wildchat:f8d92a450e801813eb0a8e19a07e74d2:0","include":true,"policies":["feature"],"notes":"Requests Python code asking AWS CloudFormer to create a resource template."}
+{"candidate_id":"wildchat:fc2d4334ac39ca31f9f589cf92126335:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests answering a supply-chain multiple-choice question."}
+{"candidate_id":"wildchat:fc5b7685bb0aedc8d02e6411695dec36:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests professional rewriting of an email to a manager."}
+{"candidate_id":"wildchat:fd47468c86e584705842c31a7c2d6318:0","include":true,"policies":["feature"],"notes":"Requests Python code generating wallet seed phrases and checking balances."}
+{"candidate_id":"wildchat:feaafdcfa0cf1f1683f18ef560d29267:0","include":true,"policies":["feature"],"notes":"Requests a Python script loading a specified Hugging Face Space website."}

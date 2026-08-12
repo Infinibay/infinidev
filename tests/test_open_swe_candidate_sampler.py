@@ -139,3 +139,5 @@ def test_write_candidate_queue_records_hash_and_provenance(tmp_path) -> None:
     assert manifest["source"]["revision"] == SOURCE_REVISION
     assert manifest["source"]["license"] == "CC-BY-4.0"
     assert manifest["review_contract"]["individual_manual_review_required"] is True
+    assert manifest["review_contract"]["source_text_remains_external"] is True
+    assert manifest["review_contract"]["reviewed_annotations_license"] == "CC-BY-4.0"

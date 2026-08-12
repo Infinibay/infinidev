@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:algesten__ureq-916","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for clarification of existing redirect behavior and documentation rather than a defined code change."}
+{"candidate_id":"open-swe:astropenguin__xarray-dataclasses-84","include":true,"policies":["bugfix"],"notes":"Parsing fails for valid postponed annotations and must resolve their runtime type hints."}
+{"candidate_id":"open-swe:benhoyt__goawk-239","include":true,"policies":["bugfix"],"notes":"A valid configured header mode produces an error falsely claiming header parsing is disabled."}
+{"candidate_id":"open-swe:bluss__arrayvec-197","include":true,"policies":["feature"],"notes":"Adds an infallible fully filled ArrayString constructor for buffer-oriented libraries."}
+{"candidate_id":"open-swe:chipsalliance__caliptra-sw-1190","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Only adds a runtime-feature layout test for existing behavior."}
+{"candidate_id":"open-swe:cloudwego__hertz-269","include":true,"policies":["feature"],"notes":"Adds a configuration option controlling route debug output."}
+{"candidate_id":"open-swe:cloudykit__jet-156","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether integer ranges are already supported or merely undocumented."}
+{"candidate_id":"open-swe:coder__envbuilder-381","include":true,"policies":["bugfix"],"notes":"Branch URLs violate the normal project-directory layout and break valid devcontainer scripts."}
+{"candidate_id":"open-swe:cosmwasm__cosmwasm-972","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Renames public response types and files as an API migration."}
+{"candidate_id":"open-swe:dbt-labs__dbt-snowflake-1110","include":true,"policies":["performance"],"notes":"Explicitly profiles and reduces a measured key-pair authentication slowdown."}
+{"candidate_id":"open-swe:dmitrysoshnikov__regexp-tree-31","include":true,"policies":["feature"],"notes":"Adds decoded symbols to character-code AST nodes."}
+{"candidate_id":"open-swe:dr-leo__pandasdmx-96","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Replaces or removes a public classmethod with a convenience function; API migration is outside current methods."}
+{"candidate_id":"open-swe:ecadlabs__taquito-1557","include":true,"policies":["performance"],"notes":"Replaces an equivalent POST read with a cacheable GET specifically to enable HTTP caching."}
+{"candidate_id":"open-swe:ember-cli__ember-cli-10577","include":true,"policies":["refactor"],"notes":"Removes an obsolete blueprint dependency while retaining generated application behavior."}
+{"candidate_id":"open-swe:ember-cli__ember-cli-9906","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Drops an end-of-life supported runtime baseline."}
+{"candidate_id":"open-swe:geopy__geopy-339","include":true,"policies":["bugfix"],"notes":"A normal timezone lookup response path dereferences a missing field and raises KeyError."}
+{"candidate_id":"open-swe:go-gorm__gorm-6844","include":true,"policies":["bugfix"],"notes":"A regression changes NOT over combined predicates into different SQL logic."}
+{"candidate_id":"open-swe:go-sprout__sprout-75","include":true,"policies":["feature"],"notes":"Adds one-call registration of all supported registries."}
+{"candidate_id":"open-swe:grafana__dskit-365","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Moves test-only metric helpers between repositories."}
+{"candidate_id":"open-swe:grafana__dskit-445","include":true,"policies":["refactor"],"notes":"Eliminates mutable global resolver state by making tenant resolution dependencies explicit."}
+{"candidate_id":"open-swe:hashgraph__hedera-local-node-659","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Removes shipped network configurations as product lifecycle maintenance."}
+{"candidate_id":"open-swe:helm__helm-11569","include":true,"policies":["bugfix"],"notes":"A supported uninstall-history then upgrade-install workflow fails claiming no deployed release."}
+{"candidate_id":"open-swe:hetznercloud__hcloud-go-45","include":true,"policies":["feature"],"notes":"Adds the documented image update API."}
+{"candidate_id":"open-swe:hipparchus-math__hipparchus-117","include":true,"policies":["feature"],"notes":"Adds Møller's 2Sum algorithm."}
+{"candidate_id":"open-swe:humbug__php-scoper-882","include":true,"policies":["feature"],"notes":"Adds private visibility metadata for scoped third-party symbols."}
+{"candidate_id":"open-swe:inovex__scrumlr.io-2940","include":true,"policies":["feature"],"notes":"Adds a user preference for hotkey notifications."}
+{"candidate_id":"open-swe:jazzband__tablib-497","include":true,"policies":["feature"],"notes":"Adds skipping an arbitrary number of leading file rows."}
+{"candidate_id":"open-swe:joke2k__faker-2186","include":true,"policies":["bugfix"],"notes":"Adding the supported date-time provider shadows timezone with the stdlib callable and breaks it."}
+{"candidate_id":"open-swe:junegunn__fzf-4231","include":true,"policies":["feature"],"notes":"Adds an action that removes invalidated entries without full reload."}
+{"candidate_id":"open-swe:kennethreitz__pipenv-1114","include":true,"policies":["bugfix"],"notes":"Editable installation silently omits paths from easy-install.pth."}
+{"candidate_id":"open-swe:keon__algorithms-432","include":true,"policies":["bugfix"],"notes":"plus_one_v3 treats an enumerate pair as a numeric index and breaks the test suite."}
+{"candidate_id":"open-swe:knative-sandbox__eventing-kafka-446","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Changes the persisted CRD storage version as schema migration work."}
+{"candidate_id":"open-swe:lambda-fairy__maud-219","include":true,"policies":["feature"],"notes":"Adds automatic compiler-capability detection in place of manual unstable configuration."}
+{"candidate_id":"open-swe:line__line-bot-sdk-go-319","include":true,"policies":["feature"],"notes":"Adds rich-menu validation through the newly documented Messaging API endpoint."}
+{"candidate_id":"open-swe:litestar-org__polyfactory-417","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Deprecates public collection parameters ahead of removal."}
+{"candidate_id":"open-swe:luser__rust-minidump-504","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Publishes and potentially renames a development crate to repair release packaging."}
+{"candidate_id":"open-swe:maskingtechnology__jitar-319","include":true,"policies":["refactor"],"notes":"Removes obsolete import maps after bundling while restoring equivalent import rewriting."}
+{"candidate_id":"open-swe:maxcountryman__flask-login-746","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Migrates away from a dependency API scheduled for removal."}
+{"candidate_id":"open-swe:microsoft__kafka-connect-cosmosdb-197","include":true,"policies":["feature"],"notes":"Adds configurable upsert semantics alongside existing create behavior."}
+{"candidate_id":"open-swe:mozilla__cargo-vet-368","include":true,"policies":["feature"],"notes":"Adds a configuration diagnostic for redundant audit-as-crates-io settings."}
+{"candidate_id":"open-swe:mpmath__mpmath-847","include":true,"policies":["feature"],"notes":"Adds percent presentation formatting for arbitrary-precision floats."}
+{"candidate_id":"open-swe:mpmath__mpmath-966","include":true,"policies":["bugfix"],"notes":"A standard fixed-point format string is rejected for mpf values."}
+{"candidate_id":"open-swe:ontodev__robot-1225","include":true,"policies":["feature"],"notes":"Adds support for ignoring curator-only columns without breaking adjacent axiom annotations."}
+{"candidate_id":"open-swe:openyurtio__openyurt-950","include":true,"policies":["bugfix"],"notes":"Fork CI always attempts an unauthorized Codecov post and fails otherwise valid runs."}
+{"candidate_id":"open-swe:ota-meshi__eslint-plugin-astro-324","include":true,"policies":["feature"],"notes":"Adds ESLint flat-configuration support."}
+{"candidate_id":"open-swe:pbiswas101__mathball-103","include":true,"policies":["feature"],"notes":"Adds Kaprekar-number detection with an input-validation contract."}
+{"candidate_id":"open-swe:phpactor__phpactor-2440","include":true,"policies":["feature"],"notes":"Adds generation of enum match arms."}
+{"candidate_id":"open-swe:pions__webrtc-426","include":true,"policies":["feature"],"notes":"Expands ICE candidate input to the standards-defined structured object with compatibility handling."}
+{"candidate_id":"open-swe:pythainlp__pythainlp-1062","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Explicitly requests an explanation for differing tokenizer space behavior."}
+{"candidate_id":"open-swe:python__bedevere-641","include":true,"policies":["feature"],"notes":"Adds topic-label propagation to generated backport pull requests."}
+{"candidate_id":"open-swe:rust-lang__annotate-snippets-rs-54","include":true,"policies":["bugfix"],"notes":"Undocumented label markup silently removes literal double underscores with no escape path."}
+{"candidate_id":"open-swe:searchbox-io__jest-376","include":true,"policies":["bugfix"],"notes":"Initial discovery against an unavailable cluster dereferences missing node state and crashes."}
+{"candidate_id":"open-swe:semantic-release__github-887","include":true,"policies":["bugfix"],"notes":"A recent change rejects an unchanged valid Enterprise GitHub URL and breaks releases."}
+{"candidate_id":"open-swe:sharkdp__fd-826","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for clarification of two existing ignore flags and their documented scope."}
+{"candidate_id":"open-swe:skupperproject__skupper-1881","include":true,"policies":["refactor"],"notes":"Moves an explicitly internal platform file under the internal runtime path without new behavior."}
+{"candidate_id":"open-swe:soofstad__react-oauth2-pkce-27","include":true,"policies":["bugfix"],"notes":"Logout clears only local state and violates its configured provider logout contract."}
+{"candidate_id":"open-swe:source-academy__js-slang-66","include":true,"policies":["feature"],"notes":"Intentionally introduces clearer undeclared-name diagnostic wording."}
+{"candidate_id":"open-swe:triggermesh__aws-event-sources-152","include":true,"policies":["performance"],"notes":"Throttles aggressive polling specifically to prevent API rate-limit saturation."}
+{"candidate_id":"open-swe:vmware__govmomi-3277","include":true,"policies":["bugfix"],"notes":"Datastore URLs use an inventory path instead of the required datastore name."}
+{"candidate_id":"open-swe:yargs__yargs-1080","include":true,"policies":["feature"],"notes":"Extends configuration inheritance to conventional extensionless rc files."}

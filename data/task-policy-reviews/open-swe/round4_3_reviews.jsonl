@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:acloudguru__serverless-plugin-aws-alerts-149","include":true,"policies":["bugfix"],"notes":"A valid CloudFormation SNS topic expression using AWS pseudo parameters is rejected by the plugin."}
+{"candidate_id":"open-swe:allegro__marathon-consul-123","include":true,"policies":["performance"],"notes":"Marks a Marathon-healthy service initially passing to reduce the avoidable Consul unavailability interval after registration."}
+{"candidate_id":"open-swe:allegro__marathon-consul-150","include":true,"policies":["performance"],"notes":"Eliminates recomputing immutable ignored-health-check configuration for every task."}
+{"candidate_id":"open-swe:altair-viz__altair-518","include":true,"policies":["feature"],"notes":"Intentionally changes chart sizing defaults so facets and rangeStep can determine their own dimensions."}
+{"candidate_id":"open-swe:amoffat__sh-598","include":true,"policies":["feature"],"notes":"Adds pathlib.Path as a supported output and error destination type."}
+{"candidate_id":"open-swe:armadaproject__armada-3197","include":true,"policies":["feature"],"notes":"Adds scheduler ingestion, persistence, and metrics state for assigned and preempted job-run events."}
+{"candidate_id":"open-swe:atlassian__gostatsd-309","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"The user asks how to retain a prior gauge value across a flush with the existing system."}
+{"candidate_id":"open-swe:auth0__nextjs-auth0-1342","include":true,"policies":["feature"],"notes":"Adds returnTo support to the middleware authentication factory."}
+{"candidate_id":"open-swe:auth0__nextjs-auth0-298","include":true,"policies":["bugfix"],"notes":"A wildcard callback base URL that worked before the 1.0 upgrade is percent-encoded into an unusable host."}
+{"candidate_id":"open-swe:bahmutov__cypress-map-245","include":true,"policies":["feature"],"notes":"Adds a property assertion that preserves the original Cypress subject."}
+{"candidate_id":"open-swe:bitcoin-core__secp256k1-587","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"The request seeks help diagnosing a Lisp FFI invocation and does not identify a repository behavior change."}
+{"candidate_id":"open-swe:buttercup__buttercup-core-339","include":true,"policies":["feature"],"notes":"Adds tags and multi-tag entry filtering alongside folders."}
+{"candidate_id":"open-swe:cdimascio__express-openapi-validator-863","include":true,"policies":["bugfix"],"notes":"Request-body content types with valid custom parameters are compared incorrectly instead of through their normalized equivalents."}
+{"candidate_id":"open-swe:clouditor__clouditor-482","include":true,"policies":["feature"],"notes":"Makes assessment and collector gRPC target addresses configurable."}
+{"candidate_id":"open-swe:d5__tengo-316","include":true,"policies":["bugfix"],"notes":"An invalid or shadowed function call can crash the VM with a host SIGSEGV instead of producing a language error."}
+{"candidate_id":"open-swe:dcastil__tailwind-merge-559","include":true,"policies":["bugfix"],"notes":"The class merger misclassifies an explicitly typed length variable as a color utility."}
+{"candidate_id":"open-swe:dcastil__tailwind-merge-565","include":true,"policies":["feature"],"notes":"Adds compatibility for Tailwind CSS 4.1 variants and utilities."}
+{"candidate_id":"open-swe:dedoc__scramble-343","include":true,"policies":["feature"],"notes":"Adds tuple typing and @example extraction to generated response schemas."}
+{"candidate_id":"open-swe:deepjavalibrary__djl-1809","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"The user asks whether and how existing DJL can load ONNX Runtime extensions."}
+{"candidate_id":"open-swe:eclipse__microprofile-open-api-677","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The proposed change only removes warnings from TCK test lifecycle setup."}
+{"candidate_id":"open-swe:eventstore__eventstoredb-client-java-254","include":true,"policies":["feature"],"notes":"Adds handling for EventStore's new CaughtUp subscription control message."}
+{"candidate_id":"open-swe:facile-it__paraunit-194","include":true,"policies":["feature"],"notes":"Adds a passthrough option forwarding unsupported Paraunit flags to PHPUnit."}
+{"candidate_id":"open-swe:fgnass__node-dev-227","include":true,"policies":["bugfix"],"notes":"A newer node-dev release unexpectedly overwrites caller environment semantics by setting NODE_ENV."}
+{"candidate_id":"open-swe:fgnass__node-dev-230","include":true,"policies":["bugfix"],"notes":"An undefined CLI option overwrites a valid notify value loaded from .node-dev.json."}
+{"candidate_id":"open-swe:go-go-golems__glazed-348","include":true,"policies":["feature"],"notes":"Adds generated Cobra usage argument documentation instead of emitting only the program name."}
+{"candidate_id":"open-swe:goccy__go-yaml-147","include":true,"policies":["bugfix"],"notes":"Validation of a missing required field in a present nested object crashes rather than returning a validation error."}
+{"candidate_id":"open-swe:jmrozanec__cron-utils-516","include":true,"policies":["feature"],"notes":"Adds value equality and hash semantics to CronDefinition."}
+{"candidate_id":"open-swe:keichi__binary-parser-202","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Correcting the spelling in public method names requires an API rename migration as well as documentation edits."}
+{"candidate_id":"open-swe:kubernetes-sigs__kube-scheduler-simulator-418","include":true,"policies":["bugfix"],"notes":"Scheduler result recording exceeds Kubernetes' annotation limit on a valid large-node setup and cannot update the pod."}
+{"candidate_id":"open-swe:labstack__echo-1667","include":true,"policies":["bugfix"],"notes":"On dual-stack systems the server binds only IPv6 despite the expected IPv4 listener."}
+{"candidate_id":"open-swe:marcoieni__release-plz-1588","include":true,"policies":["feature"],"notes":"Adds configuration preventing library releases from replacing a repository's intended latest binary release."}
+{"candidate_id":"open-swe:nicoespeon__abracadabra-174","include":true,"policies":["review"],"notes":"Requests evaluation of whether the existing extraction transformation should always choose destructuring before changing it."}
+{"candidate_id":"open-swe:not-fl3__nanoserde-65","include":true,"policies":["feature"],"notes":"Adds borrowed string slice support to JSON serialization."}
+{"candidate_id":"open-swe:novifinancial__opaque-ke-140","include":true,"policies":["refactor"],"notes":"Makes related public protocol object generics consistently derive from the same Ciphersuite abstraction."}
+{"candidate_id":"open-swe:novifinancial__opaque-ke-168","include":true,"policies":["feature"],"notes":"Adds a common serialization trait or standard serde implementation for generic use across structures."}
+{"candidate_id":"open-swe:octokit__oauth-app.js-206","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This is a staged public API deprecation and rename migration."}
+{"candidate_id":"open-swe:pgmpy__pgmpy-878","include":true,"policies":["bugfix"],"notes":"Removing nodes without CPDs calls an accessor that raises precisely when the CPD is absent."}
+{"candidate_id":"open-swe:projectevergreen__greenwood-1239","include":true,"policies":["feature"],"notes":"Extends CSS optimization to all supported functional pseudo-classes and pseudo-elements after auditing the missing set."}
+{"candidate_id":"open-swe:projectevergreen__greenwood-778","include":true,"policies":["feature"],"notes":"Adds init and template scaffold commands for minimal and user-defined Greenwood projects."}
+{"candidate_id":"open-swe:pytest-dev__pyfakefs-1015","include":true,"policies":["bugfix"],"notes":"additional_skip_names works through open variants but is ignored when the same target uses Path.open."}
+{"candidate_id":"open-swe:pytest-dev__pyfakefs-1039","include":true,"policies":["feature"],"notes":"Adds create_dir apply_umask control matching create_file and allowing exact fake permissions."}
+{"candidate_id":"open-swe:quantecon__quantecon.py-736","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The requested deliverable is an additional CI compatibility workflow."}
+{"candidate_id":"open-swe:quantecon__quantecon.py-770","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This only updates and removes README status badges."}
+{"candidate_id":"open-swe:rollbar__rollbar-go-8","include":true,"policies":["feature"],"notes":"Adds a pre-send checkIgnore customization hook."}
+{"candidate_id":"open-swe:sappelhoff__pyprep-62","include":true,"policies":["feature"],"notes":"Adds MATLAB-compatible seeded channel sampling for reproducible cross-implementation RANSAC picks."}
+{"candidate_id":"open-swe:sasstools__sass-lint-113","include":true,"policies":["feature"],"notes":"Adds named property ordering presets beyond alphabetical order."}
+{"candidate_id":"open-swe:sasstools__sass-lint-681","include":true,"policies":["feature"],"notes":"Adds PascalCase as a supported class-name lint convention."}
+{"candidate_id":"open-swe:score-spec__score-compose-273","include":true,"policies":["feature"],"notes":"Adds a description field to provisioner schemas and generated command output."}
+{"candidate_id":"open-swe:silx-kit__silx-4090","include":true,"policies":["refactor"],"notes":"Replaces a private compatibility class with the equivalent standard-library MappingProxyType."}
+{"candidate_id":"open-swe:single-spa__single-spa-layout-24","include":true,"policies":["feature"],"notes":"Adds route parameter matching to constructed layouts."}
+{"candidate_id":"open-swe:stravalib__stravalib-522","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This is an explicit dependency API substitution made to enable a Pydantic 2 migration."}
+{"candidate_id":"open-swe:tafia__quick-xml-102","include":true,"policies":["bugfix"],"notes":"A malicious or oversized numeric XML entity triggers unchecked integer overflow and panics the parser."}
+{"candidate_id":"open-swe:tafia__quick-xml-516","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The defect and requested correction are confined to a read_text documentation example."}
+{"candidate_id":"open-swe:teddriggs__darling-318","include":true,"policies":["feature"],"notes":"Adds a targeted compile-time diagnostic when attrs is used without forward_attrs."}
+{"candidate_id":"open-swe:teddriggs__darling-337","include":true,"policies":["feature"],"notes":"Adds a compile-time diagnostic for mutually exclusive parsing and forwarding of the same attribute."}
+{"candidate_id":"open-swe:tikv__pd-5480","include":true,"policies":["performance"],"notes":"Replaces an expensive Proto.Clone path with measured faster marshal and unmarshal copying."}
+{"candidate_id":"open-swe:tobie__specref-649","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This updates external specification reference records to newer ISO revisions."}
+{"candidate_id":"open-swe:vendure-ecommerce__ngx-translate-extract-55","include":true,"policies":["bugfix"],"notes":"The service parser misses valid translation calls through JavaScript private fields."}
+{"candidate_id":"open-swe:victools__jsonschema-generator-460","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"The user asks whether a Jackson deserialization setting can already be configured in the Maven plugin."}
+{"candidate_id":"open-swe:vincentlanglet__twig-cs-fixer-236","include":true,"policies":["feature"],"notes":"Adds a whitespace indentation style that converts leading spaces to tabs."}

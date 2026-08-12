@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:argoproj__argo-rollouts-1128","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This corrects obsolete Analysis resource names in documentation only."}
+{"candidate_id":"open-swe:arve0__markdown-it-attrs-89","include":true,"policies":["bugfix"],"notes":"Providing only allowedAttributes crashes because unspecified options are not filled with their defaults."}
+{"candidate_id":"open-swe:auth0__auth0-spa-js-369","include":true,"policies":["feature"],"notes":"Changes createAuth0Client initialization to surface explicit errors and optional setup guidance instead of timing out and returning an object."}
+{"candidate_id":"open-swe:auth0__auth0-spa-js-465","include":true,"policies":["feature"],"notes":"Adds propagation of configured custom parameters to refresh-token requests."}
+{"candidate_id":"open-swe:bombsimon__wsl-173","include":true,"policies":["feature"],"notes":"Extends variable-intersection analysis to switch arms, anonymous switches, and select cases."}
+{"candidate_id":"open-swe:caikit__caikit-233","include":true,"policies":["bugfix"],"notes":"A schema-preserving DataObjectBase subclass that only overrides behavior is rejected despite valid inherited dataclass fields."}
+{"candidate_id":"open-swe:caikit__caikit-388","include":true,"policies":["feature"],"notes":"Adds spawn as a supported training subprocess start mode for libraries that cannot safely run after fork."}
+{"candidate_id":"open-swe:canjs__can-zone-138","include":true,"policies":["feature"],"notes":"Adds an array-only shorthand constructor for zones configured solely with plugins."}
+{"candidate_id":"open-swe:cinar__indicatorts-92","include":true,"policies":["feature"],"notes":"Adds the Percentage Price Oscillator technical indicator."}
+{"candidate_id":"open-swe:dbrgn__tealdeer-238","include":true,"policies":["bugfix"],"notes":"Headerless custom patches lose their first line because they are incorrectly tokenized as complete pages."}
+{"candidate_id":"open-swe:devexpress__devextreme-react-313","include":true,"policies":["bugfix"],"notes":"A supported DxLookup FieldComponent renders incorrectly in the specified package versions."}
+{"candidate_id":"open-swe:djc__askama-1097","include":true,"policies":["feature"],"notes":"Extends template-expression array grammar to allow trailing commas."}
+{"candidate_id":"open-swe:duartegroup__autode-303","include":true,"policies":["refactor"],"notes":"Resolves an internal Distance type-name collision and consolidates optimizer radii on the existing value type without requesting changed calculations."}
+{"candidate_id":"open-swe:dvajs__dva-158","include":true,"policies":["bugfix"],"notes":"One routerRedux.push triggers subscriptions repeatedly and duplicates their requests."}
+{"candidate_id":"open-swe:dynaconf__dynaconf-1237","include":true,"policies":["feature"],"notes":"Adds a raw_dict option to populate_obj so boxed settings can be assigned as ordinary dictionaries."}
+{"candidate_id":"open-swe:echolabsdev__prism-25","include":true,"policies":["feature"],"notes":"Adds object and array JSON-schema parameter support for model tools."}
+{"candidate_id":"open-swe:evcc-io__evcc-6309","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The request clarifies in documentation that the integration user requires administrator rights."}
+{"candidate_id":"open-swe:geofileops__geofileops-649","include":true,"policies":["bugfix"],"notes":"copy_layer and append_to contradict their documented default destination-layer naming contract."}
+{"candidate_id":"open-swe:govuk-react__govuk-react-1118","include":true,"policies":["feature"],"notes":"Adds per-field IDs to DateField so error summaries can link to a particular invalid input."}
+{"candidate_id":"open-swe:harrisiirak__cron-parser-374","include":true,"policies":["bugfix"],"notes":"includesDate treats nonmatching dates as matches for supported nth-day and last-day cron expressions."}
+{"candidate_id":"open-swe:harttle__liquidjs-701","include":true,"policies":["bugfix"],"notes":"isComparable falsely classifies any object with equals as the full interface and then calls missing ordering methods."}
+{"candidate_id":"open-swe:hyperjumptech__monika-1179","include":true,"policies":["bugfix"],"notes":"An invalid alert assertion crashes the process instead of producing the documented validation outcome or skipping only that probe in Symon mode."}
+{"candidate_id":"open-swe:influxdata__influxdb-client-java-717","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"The user asks how to express an existing Flux regular-expression filter and shows an unsuccessful attempt, without selecting a library change."}
+{"candidate_id":"open-swe:istio__fortio-136","include":true,"policies":["feature"],"notes":"Adds build SHA or date to long version and debug output so deployments can identify the exact build."}
+{"candidate_id":"open-swe:istio__fortio-206","include":true,"policies":["bugfix"],"notes":"Library helpers terminate the entire host process through Fatalf instead of returning their errors to the caller."}
+{"candidate_id":"open-swe:jetstack__cert-manager-4640","include":true,"policies":["bugfix"],"notes":"A timestamp is exported as a counter although its Prometheus semantics and sibling timestamp metrics require a gauge."}
+{"candidate_id":"open-swe:jhipster__jhipster-vuejs-496","include":true,"policies":["refactor"],"notes":"Splits one growing Vuex store into responsibility-specific modules while preserving the application's state capabilities."}
+{"candidate_id":"open-swe:jneen__parsimmon-250","include":true,"policies":["feature"],"notes":"Adds an optional separator argument to tie."}
+{"candidate_id":"open-swe:jsonata-js__jsonata-373","include":true,"policies":["feature"],"notes":"Expands $number string conversion beyond strict JSON-number syntax to accept leading zeroes."}
+{"candidate_id":"open-swe:kelektiv__node-cron-957","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This is an explicitly breaking runtime support and CI baseline migration for the v4 roadmap."}
+{"candidate_id":"open-swe:klothoplatform__klotho-155","include":true,"policies":["bugfix"],"notes":"Topology and configuration resource types can drift because their existing representations are never synchronized."}
+{"candidate_id":"open-swe:klothoplatform__klotho-289","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This migrates a deprecated GitHub Actions command to its replacement environment-file mechanism."}
+{"candidate_id":"open-swe:kozea__weasyprint-2252","include":true,"policies":["feature"],"notes":"Adds CSS GCPM page-group selectors needed to format the first page of every named chapter."}
+{"candidate_id":"open-swe:learningequality__studio-5156","include":true,"policies":["feature"],"notes":"Introduces the CommunityLibrarySubmission data model and its metadata contract."}
+{"candidate_id":"open-swe:liskhq__lisk-core-788","include":true,"policies":["bugfix"],"notes":"RegisterKeysCommand validates parameters during execution instead of its required verify phase."}
+{"candidate_id":"open-swe:microsoft__applicationinsights-node.js-588","include":true,"policies":["bugfix"],"notes":"Exception autocollection rethrows outside the expected handler, crashes the process, and prevents the Redis retry strategy."}
+{"candidate_id":"open-swe:mogztter__asciidoctor-pdf.js-108","include":true,"policies":["feature"],"notes":"Adds semicolon-separated multiple stylesheet support for composable PDF styling."}
+{"candidate_id":"open-swe:neet__masto.js-55","include":true,"policies":["feature"],"notes":"Adds the account identity-proofs endpoint to the API client."}
+{"candidate_id":"open-swe:onedr0p__exportarr-162","include":true,"policies":["feature"],"notes":"Adds a dedicated unavailable_indexers metric derived from Prowlarr health errors."}
+{"candidate_id":"open-swe:openebs__node-disk-manager-678","include":true,"policies":["bugfix"],"notes":"Valid OpenSUSE NVMe sysfs paths do not match the hardcoded layout and mount points are not excluded correctly."}
+{"candidate_id":"open-swe:openmdao__dymos-1184","include":true,"policies":["refactor"],"notes":"Consolidates Dymos sentinel arguments and checks on OpenMDAO's MPI-safe existing implementation."}
+{"candidate_id":"open-swe:patrick-kidger__equinox-993","include":true,"policies":["bugfix"],"notes":"A valid jaxtyping-annotated module can change PyTree structure after a pickle round trip."}
+{"candidate_id":"open-swe:pulumi__pulumi-19952","include":true,"policies":["bugfix"],"notes":"Destroy preview omits child-view delete steps and can misleadingly show refresh without the deletion that execution will perform."}
+{"candidate_id":"open-swe:pycqa__pyflakes-451","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This only corrects a README link so it resolves on PyPI."}
+{"candidate_id":"open-swe:pycqa__pyflakes-668","include":true,"policies":["feature"],"notes":"Adds unused-variable diagnostics for annotation-only local declarations."}
+{"candidate_id":"open-swe:pydata__sparse-887","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This adjusts Codecov workflow ordering and does not introduce a modeled product implementation method."}
+{"candidate_id":"open-swe:python-cmd2__cmd2-681","include":true,"policies":["feature"],"notes":"Adds a supported way to supply a custom argparse Namespace through with_argparser while retaining completion."}
+{"candidate_id":"open-swe:quartiq__minimq-54","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The requested work updates documentation examples and adds doctest coverage only."}
+{"candidate_id":"open-swe:remind101__stacker-589","include":true,"policies":["bugfix"],"notes":"Status.__cmp__ returns False, which equals zero, for unrelated objects and therefore reports them as equal."}
+{"candidate_id":"open-swe:salsita__node-pg-migrate-671","include":true,"policies":["feature"],"notes":"Adds per-column ASC and DESC ordering to index creation."}
+{"candidate_id":"open-swe:sebrut__pygrocy-181","include":true,"policies":["feature"],"notes":"Makes done time optional on the relevant chore operation, matching execute_chore's public flexibility."}
+{"candidate_id":"open-swe:sebrut__pygrocy-78","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The request is a test-only assertion-style conversion."}
+{"candidate_id":"open-swe:smithy-lang__smithy-2283","include":true,"policies":["bugfix"],"notes":"Running the formatter repeatedly duplicates comments, violating formatter idempotence."}
+{"candidate_id":"open-swe:solidjs-community__solid-primitives-787","include":true,"policies":["bugfix"],"notes":"Repeat ignores reactive changes to times except when it reaches zero."}
+{"candidate_id":"open-swe:speee__jsx-slack-185","include":true,"policies":["feature"],"notes":"Adds the new Slack Header layout block and intrinsic alias."}
+{"candidate_id":"open-swe:thephpleague__oauth2-client-1032","include":true,"policies":["feature"],"notes":"Generalizes the OAuth client to accept any PSR-18 implementation instead of requiring Guzzle."}
+{"candidate_id":"open-swe:toml-rs__toml-631","include":true,"policies":["bugfix"],"notes":"The date parser accepts impossible calendar dates after validation was dropped."}
+{"candidate_id":"open-swe:vgteam__sequencetubemap-399","include":true,"policies":["refactor"],"notes":"Removes obsolete per-view dataPath references from examples and tests in favor of the already used global field."}
+{"candidate_id":"open-swe:websockets__ws-1471","include":true,"policies":["performance"],"notes":"Stops needless compression, framing, and write attempts for queued messages after the peer has already closed the socket."}
+{"candidate_id":"open-swe:xataio__client-ts-34","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The requested deliverable is test-only coverage for code generation."}

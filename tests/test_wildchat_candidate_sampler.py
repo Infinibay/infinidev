@@ -148,3 +148,8 @@ def test_write_candidate_queue_records_privacy_and_license_boundary(tmp_path) ->
     assert manifest["source"]["license"] == "ODC-BY-1.0"
     assert manifest["privacy_filters"]["conversation_redacted_must_be_false"] is True
     assert manifest["review_contract"]["selection_hint_is_policy_label"] is False
+    assert manifest["review_contract"]["source_text_remains_external"] is True
+    assert (
+        manifest["review_contract"]["reviewed_annotations_license"]
+        == "CC-BY-4.0 AND ODC-By-1.0"
+    )

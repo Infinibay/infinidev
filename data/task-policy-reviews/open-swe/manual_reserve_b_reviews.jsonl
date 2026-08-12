@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:magefile__mage-63","include":true,"policies":["feature"],"notes":"Adds standard-input passthrough for interactive child commands."}
+{"candidate_id":"open-swe:roskakori__pygount-43","include":true,"policies":["feature"],"notes":"Adds file counts and percentages to summary output."}
+{"candidate_id":"open-swe:rust-itertools__itertools-866","include":true,"policies":["feature"],"notes":"Requests a public API rename plus a compatibility alias, which changes the observable API rather than only its documentation."}
+{"candidate_id":"open-swe:rust-lang__cc-rs-914","include":true,"policies":["feature"],"notes":"Exposes direct compilation to an object file."}
+{"candidate_id":"open-swe:rust-lang__rust-analyzer-14863","include":true,"policies":["bugfix"],"notes":"Function extraction omits a required function parameter."}
+{"candidate_id":"open-swe:rust-lang__rustfmt-5883","include":true,"policies":["bugfix"],"notes":"Formatting a macro leaves trailing whitespace and fails its own check."}
+{"candidate_id":"open-swe:s-knibbs__dataclasses-jsonschema-157","include":true,"policies":["feature"],"notes":"Adds optional Python module metadata to generated schemas."}
+{"candidate_id":"open-swe:s-knibbs__dataclasses-jsonschema-93","include":true,"policies":["feature"],"notes":"Adds JSON serialization convenience methods."}
+{"candidate_id":"open-swe:sage__carbon-7025","include":true,"policies":["bugfix"],"notes":"Typography line height differs from the design-system contract."}
+{"candidate_id":"open-swe:salsa-rs__salsa-859","include":true,"policies":["feature"],"notes":"Adds tracked type-level associated functions."}
+{"candidate_id":"open-swe:samuelcolvin__pydantic-3543","include":true,"policies":["bugfix"],"notes":"The smart-union configuration fails for TypedDict inputs."}
+{"candidate_id":"open-swe:sanctuary-js__sanctuary-344","include":true,"policies":["feature"],"notes":"Adds a complement function to the public functional API."}
+{"candidate_id":"open-swe:scrapy__scrapy-1728","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Deprecates a public convenience method; API lifecycle maintenance is not behavior-preserving refactoring."}
+{"candidate_id":"open-swe:seldaek__monolog-1759","include":true,"policies":["bugfix"],"notes":"Formatted timestamps are not honored by the target Cloud Run logging path."}
+{"candidate_id":"open-swe:shapesecurity__salvation-192","include":true,"policies":["feature"],"notes":"Adds support for a CSP navigation directive."}
+{"candidate_id":"open-swe:sharkdp__numbat-244","include":true,"policies":["feature"],"notes":"Adds readable pretty-printing for very large numbers."}
+{"candidate_id":"open-swe:sharksforarms__deku-99","include":true,"policies":["performance"],"notes":"Explicitly proposes a dependency substitution for faster tests."}
+{"candidate_id":"open-swe:sid88in__serverless-appsync-plugin-513","include":true,"policies":["bugfix"],"notes":"A valid CloudFormation reference is rejected as a non-string configuration."}
+{"candidate_id":"open-swe:sindresorhus__got-2059","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests basic API documentation rather than an implementation method."}
+{"candidate_id":"open-swe:sindresorhus__got-301","include":true,"policies":["bugfix"],"notes":"A malformed JSON error masks the more important HTTP failure."}
+{"candidate_id":"open-swe:spatie__laravel-permission-1959","include":true,"policies":["bugfix"],"notes":"A generated migration fails after a supported major-version upgrade."}
+{"candidate_id":"open-swe:spidernet-io__spiderpool-1762","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"This is an operational request to resolve a particular cherry-pick conflict."}
+{"candidate_id":"open-swe:stellar__rs-soroban-env-1407","include":true,"policies":["bugfix"],"notes":"Decouples encoded lengths from compile-time enums so the implementation follows the external protocol contract."}
+{"candidate_id":"open-swe:stephenh__ts-proto-482","include":true,"policies":["bugfix"],"notes":"Snake-to-camel conversion yields incorrect names for unusual underscores."}
+{"candidate_id":"open-swe:stfc__psyclone-2493","include":true,"policies":["bugfix"],"notes":"A transformation selects the wrong nested array reference and fails."}
+{"candidate_id":"open-swe:streamich__memfs-941","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Migrates scheduling semantics from a Node-specific primitive to queueMicrotask; compatibility migration is not automatically a refactor."}
+{"candidate_id":"open-swe:sveltejs__eslint-plugin-svelte-864","include":true,"policies":["bugfix"],"notes":"The indentation rule reports valid child and snippet closing layout incorrectly."}
+{"candidate_id":"open-swe:sveltejs__kit-7207","include":true,"policies":["bugfix"],"notes":"Enhanced forms fail to preserve the documented native reset behavior."}
+{"candidate_id":"open-swe:swaggest__rest-125","include":true,"policies":["bugfix"],"notes":"HTTP header lookup incorrectly treats header names as case-sensitive."}
+{"candidate_id":"open-swe:swc-project__swc-3047","include":true,"policies":["bugfix"],"notes":"Valid TypeScript assignment assertions crash compilation."}
+{"candidate_id":"open-swe:swc-project__swc-4777","include":true,"policies":["bugfix"],"notes":"Nested labeled break and continue semantics are corrupted in ES5 output."}
+{"candidate_id":"open-swe:swellaby__rusty-hook-143","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Documentation-only clarification has no matching task-method prompt."}
+{"candidate_id":"open-swe:taiki-e__cargo-hack-36","include":true,"policies":["bugfix"],"notes":"A documented flag regressed when no subcommand is supplied."}
+{"candidate_id":"open-swe:tencent__tdesign-mobile-vue-677","include":true,"policies":["feature"],"notes":"Adds observable properties, events, DOM structure, and styles; internal asset alignment is not an independent refactor outcome."}
+{"candidate_id":"open-swe:theacodes__nox-482","include":true,"policies":["feature"],"notes":"Adds warning-level session logging."}
+{"candidate_id":"open-swe:thealgorithms__java-6333","include":true,"policies":["bugfix"],"notes":"A matrix search initializes its column pointer from the row count."}
+{"candidate_id":"open-swe:thomasdezeeuw__a10-117","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Moves publicly named signal types to another module path; API migration is not behavior-preserving refactoring."}
+{"candidate_id":"open-swe:tmc__langchaingo-199","include":true,"policies":["feature"],"notes":"Adds a FewShotPromptTemplate abstraction."}
+{"candidate_id":"open-swe:tobikodata__sqlmesh-2547","include":true,"policies":["feature"],"notes":"Changes the public configuration representation to controlled dictionary settings."}
+{"candidate_id":"open-swe:tochemey__goakt-617","include":true,"policies":["feature"],"notes":"Adds per-actor passivation configuration instead of one global value."}
+{"candidate_id":"open-swe:typescript-eslint__tslint-to-eslint-config-424","include":true,"policies":["feature"],"notes":"Adds dependency-aware filtering to generated install guidance."}
+{"candidate_id":"open-swe:unjs__h3-577","include":true,"policies":["bugfix"],"notes":"Returning null incorrectly overwrites an explicitly selected response status."}
+{"candidate_id":"open-swe:vackosar__gitflow-incremental-builder-168","include":true,"policies":["feature"],"notes":"Adds writing impacted module names to a configurable file."}
+{"candidate_id":"open-swe:validatorjs__validator.js-1844","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The request only adds CDN usage instructions to the README."}
+{"candidate_id":"open-swe:vaskoz__dailycodingproblem-go-131","include":true,"policies":["feature"],"notes":"Implements a new equal-subset partition algorithm exercise."}
+{"candidate_id":"open-swe:vaskoz__dailycodingproblem-go-597","include":true,"policies":["feature"],"notes":"Implements a new minimum-rescue-boats algorithm exercise."}
+{"candidate_id":"open-swe:vaskoz__dailycodingproblem-go-786","include":true,"policies":["feature"],"notes":"Implements a new longest-common-clickstream algorithm exercise."}
+{"candidate_id":"open-swe:victoriametrics__victoriametrics-8938","include":true,"policies":["bugfix"],"notes":"The hash implementation calls a non-mutating method and produces a constant digest."}
+{"candidate_id":"open-swe:vmware__tern-359","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Reports an installation problem and insufficient guidance without a defined code change."}
+{"candidate_id":"open-swe:w3c__webidl2.js-106","include":true,"policies":["bugfix"],"notes":"Removes obsolete parser syntax so behavior conforms to the governing WebIDL specification."}
+{"candidate_id":"open-swe:wikidata__wikidata-toolkit-866","include":true,"policies":["feature"],"notes":"Adds control over transitive dependency versions by changing the observable Maven dependency-management behavior."}
+{"candidate_id":"open-swe:wntrblm__nox-815","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Removes a legacy public run path as compatibility maintenance; the current policies do not model that method cleanly."}
+{"candidate_id":"open-swe:worksapplications__sudachi.rs-62","include":true,"policies":["refactor"],"notes":"Consolidates analyzer and lattice internals into one analysis package."}
+{"candidate_id":"open-swe:xataio__pgstream-315","include":true,"policies":["feature"],"notes":"Adds a domain-specific diagnostic for a missing replication slot."}
+{"candidate_id":"open-swe:xknx__xknx-1663","include":true,"policies":["feature"],"notes":"Adds an explicit timezone option to localtime-based datetime devices."}
+{"candidate_id":"open-swe:yuin__gopher-lua-427","include":true,"policies":["bugfix"],"notes":"Write mode fails to truncate files as required by Lua semantics."}
+{"candidate_id":"open-swe:yukinarit__pyserde-249","include":true,"policies":["bugfix"],"notes":"Migrates TOML handling so serialization conforms to the current external standard."}
+{"candidate_id":"open-swe:zegl__kube-score-294","include":true,"policies":["bugfix"],"notes":"A valid empty pod selector produces a NetworkPolicy false positive."}
+{"candidate_id":"open-swe:zhiburt__tabled-233","include":true,"policies":["feature"],"notes":"Adds shadow rendering support to tables."}
+{"candidate_id":"open-swe:zulip__zulip-terminal-1448","include":true,"policies":["bugfix"],"notes":"The client ignores server-provided typing durations on newer feature levels."}

@@ -1,0 +1,83 @@
+{"candidate_id":"wildchat:00a0ecac4dc532f972831f9d87cf4b53:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Defines a proposed lexical vector but states no requested outcome."}
+{"candidate_id":"wildchat:05beadfe7d339fcc2ea352cc2705682f:0","include":true,"policies":["feature"],"notes":"Requests completing a JavaScript function that emulates array push."}
+{"candidate_id":"wildchat:067e77740ae7e1a1be1285d7b7e5e82b:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Presents a programming puzzle as a numerical question without requesting an implementation."}
+{"candidate_id":"wildchat:0a8ef8bfc6678c79256cd7d53904e691:0","include":true,"policies":["feature"],"notes":"Requests a Python Streamlit analytics application backed by the Instagram Graph API."}
+{"candidate_id":"wildchat:10263f8fa1bbccac71e4e0ab37d53cd2:0","include":true,"policies":["review"],"notes":"Asks for a logic and general-quality review of supplied Python scraping code."}
+{"candidate_id":"wildchat:12f94198a6c5172a2d76aa3357ec75b6:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Starts a one-back memory game rather than a software task."}
+{"candidate_id":"wildchat:14fd51f0f7b730bbaa689a61fb3e2b26:0","include":true,"policies":["feature"],"notes":"Requests a C++ kilogram-to-pound conversion program."}
+{"candidate_id":"wildchat:17f198a61bcbdfec40844348adaf313c:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests product-management roadmaps rather than software work."}
+{"candidate_id":"wildchat:1b7eae80b42cf918e4c6e426aca7a137:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a personal internship-application response."}
+{"candidate_id":"wildchat:1d4544a6efb8c265907b16e4f9e3fbcd:0","include":true,"policies":["feature"],"notes":"Requests completing two missing Unity spline operations."}
+{"candidate_id":"wildchat:1d71e0a2f3cdc0a40dd1caf0c641e996:0","include":true,"policies":["feature"],"notes":"Requests JavaScript dictionaries containing game events and exchange-rate effects."}
+{"candidate_id":"wildchat:2d79347d85e9f6c1a165e368998c8ef9:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to draw a schema diagram in TypeDB Studio."}
+{"candidate_id":"wildchat:326cb7563f3b18bdd01d13c33490c161:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a marketing-opportunity report for an academic case study."}
+{"candidate_id":"wildchat:33702a490a84c049d776d7c3fd88ae66:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to customize table-header filtering in Element UI."}
+{"candidate_id":"wildchat:362a1343f6e588d7f3999658b7e90b46:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests product-listing copy for a T-shirt."}
+{"candidate_id":"wildchat:3a9738a2c74b8c945579dc61d6231d08:0","include":true,"policies":["bugfix"],"notes":"Reports a Docker Desktop installation failure caused by a locked file."}
+{"candidate_id":"wildchat:3c4c268dd1cbcadf80cd43f0bee6c8be:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Sets up a staged SEO article-writing task rather than software work."}
+{"candidate_id":"wildchat:3ec816015cb9e4f2410e60a90948ae07:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to update a cloned repository with its latest packages."}
+{"candidate_id":"wildchat:3ecebcea9229d61511b82b352b1204cd:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a tree diagram of an experiment plan rather than software changes."}
+{"candidate_id":"wildchat:3f1e703c999066a32a36f19796c42ea8:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides Python scraping code with embedded credentials but no request."}
+{"candidate_id":"wildchat:4244cd63349383b8758f578165928822:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether Windows installers can be used for all programs on Arch Linux."}
+{"candidate_id":"wildchat:477fc9c0ed781ef8d38047f8cf7fb4de:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a marketing-opportunity report for an academic case study."}
+{"candidate_id":"wildchat:4afff2eedc8ffd8b44a410c16a510cfe:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides an image-downloader script but states no requested outcome."}
+{"candidate_id":"wildchat:4dd78d1eff679dfd301b65c455c5f8b8:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Asks a multiple-choice IoT question."}
+{"candidate_id":"wildchat:53a00bd22901f3a34cc32cae2693ffb6:0","include":true,"policies":["research"],"notes":"Requests research and a comparison of file management across five operating systems."}
+{"candidate_id":"wildchat:583fb6c96bbf78a17b803525979039aa:0","include":true,"policies":["feature"],"notes":"Requests a new Compiz 0.8 plugin in C."}
+{"candidate_id":"wildchat:5d66913175c5d7518ebebd1236f7e237:0","include":true,"policies":["feature"],"notes":"Requests a new GTA V script, albeit without detailed requirements."}
+{"candidate_id":"wildchat:5da81846d6c0ced5097e3ee519d45be6:0","include":true,"policies":["feature"],"notes":"Requests code-block detection and styled rendering in an existing Vue chat page."}
+{"candidate_id":"wildchat:642680666cda6cde7cff28c7c3cb3019:0","include":true,"policies":["feature"],"notes":"Requests JavaScript regular-expression validation for a supplied HTML form."}
+{"candidate_id":"wildchat:64e51036f9469820fd0d2b14319aa1d1:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests prose polishing for an academic cybersecurity passage."}
+{"candidate_id":"wildchat:6828abb1e28c2eca016fa2a8ef6c65d7:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests continuation of a fictional television screenplay."}
+{"candidate_id":"wildchat:696793b574e72b25371a7c93ddf0d52d:0","include":true,"policies":["refactor"],"notes":"Requests moving existing procedural Python GUI code into a class."}
+{"candidate_id":"wildchat:6f0c138180bad217e331ed9b4a425597:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a fictional character script rather than software work."}
+{"candidate_id":"wildchat:7a8d38a9e83c633c1e88dd125afc0616:0","include":true,"policies":["feature"],"notes":"Requests FastAPI and SQLAlchemy code to export a queried table as CSV."}
+{"candidate_id":"wildchat:7b83c83205886227dcd1096dda57214d:0","include":true,"policies":["feature"],"notes":"Requests Python automation for creating a Word table of contents."}
+{"candidate_id":"wildchat:7bd6287b817f8919d33052c2389ec06c:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Asks a multiple-choice linear-programming question."}
+{"candidate_id":"wildchat:7f7423bd107ca39e673d5bf94127b53e:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests product-management complexity ranking rather than software work."}
+{"candidate_id":"wildchat:8096cbff146ccb64419a307c2bb6e479:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to export one bookmarks folder from Firefox."}
+{"candidate_id":"wildchat:84c10c3b96029292cd7b751491879e11:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for general principles for maintainable CSS styles."}
+{"candidate_id":"wildchat:8644c8bd3198a58bcb75b50e85f334ab:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a clinical-study risk-of-bias assessment."}
+{"candidate_id":"wildchat:88dc67f59fefce4890dd1cb63c0a87ae:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether the assistant can later beautify a page once code is provided."}
+{"candidate_id":"wildchat:89232ec5d4f1a2cee9708f1cebbfd6f6:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides a large MATLAB callback without asking for a change or assessment."}
+{"candidate_id":"wildchat:8aa46705abbe1aafdc131980204a2b63:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides a ReAct demonstration ending in a blank question."}
+{"candidate_id":"wildchat:8bf3d8ed89bc88549302448dfc1d5dba:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to add the latest packages to a cloned repository."}
+{"candidate_id":"wildchat:90261c5e2952f785ee38acc756d009e5:0","include":true,"policies":["feature"],"notes":"Requests changing a pytube script so it downloads playlists."}
+{"candidate_id":"wildchat:9126a6a964637848880ba64a2d7056c9:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks where it is best to learn JavaScript."}
+{"candidate_id":"wildchat:91af47399fc5519f5eb8d330b9d0b2ff:0","include":true,"policies":["feature"],"notes":"Requests Python code for an AI companion chatbot."}
+{"candidate_id":"wildchat:941fa1208f3724cb5968f31b1c98d907:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests bibliography formatting for a thesis."}
+{"candidate_id":"wildchat:966877d7a6270402ac9fe92c9e14f5ca:0","include":true,"policies":["feature"],"notes":"Requests a Unity C# tool that exports tiled terrain heightmaps."}
+{"candidate_id":"wildchat:983c07a110db106a2ab4806868ffe014:0","include":true,"policies":["bugfix"],"notes":"Reports a missing Spring bean error despite the class being present."}
+{"candidate_id":"wildchat:9984c3c132cb6d5a1d37d30b9838711f:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests summarization of a technical thesis section, not software work."}
+{"candidate_id":"wildchat:9bc912bd3056a5cb065019ce950272f5:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests a prose description of supplied registration-submission code."}
+{"candidate_id":"wildchat:9ca2bcab9da1a575dacf6fa04716515c:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a humorous movie screenplay."}
+{"candidate_id":"wildchat:9fe63b7f3357f548462797b4b8e55263:0","include":true,"policies":["feature"],"notes":"Requests a new HTML frontend for IPFS."}
+{"candidate_id":"wildchat:a1d996f7f1698a4b0a10c71bcd329404:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to use Postman with PostgreSQL and Rust."}
+{"candidate_id":"wildchat:a78d6785a68701febfc59547f16b2906:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests a detailed explanation of supplied Python scraping code."}
+{"candidate_id":"wildchat:a79e86e14eb2758e2f68d1f4b672954a:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a sports-themed script rather than software work."}
+{"candidate_id":"wildchat:a9a4892607e22ff157676f2b46f6aea1:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests market-research ranking of education product ideas."}
+{"candidate_id":"wildchat:bc576488729d871eb9da497355d7fc89:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a personal response to an internship prompt."}
+{"candidate_id":"wildchat:bc7670e8be0bd176f3f083d9f2f84d9e:0","include":true,"policies":["feature"],"notes":"Requests implementation of a Node and Express CRUD API for sports activities."}
+{"candidate_id":"wildchat:bfb1a030d6f3ae63f5cdd4a4b3989f59:0","include":true,"policies":["performance"],"notes":"Explicitly requests optimizing a C++ function for CPU cycles and cache misses."}
+{"candidate_id":"wildchat:c7212eb156ed48297cbb7b0f77bd23b5:0","include":true,"policies":["feature"],"notes":"Requests an HTML, CSS, and Vue implementation of a left navigation menu."}
+{"candidate_id":"wildchat:cbd62b40de6745be97592dc0666c8d65:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to install PHP and FTP dependencies on CentOS 7."}
+{"candidate_id":"wildchat:ccfceed1ed573815fdf4c7209b434bfb:0","include":true,"policies":["feature"],"notes":"Requests a JavaScript implementation that visibly eases one number toward another."}
+{"candidate_id":"wildchat:d70a0a29ca995ea893ae8d4afdc10aff:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Starts a one-back memory game rather than a software task."}
+{"candidate_id":"wildchat:d7237678378c77856f44aaa7c693e646:0","include":true,"policies":["bugfix"],"notes":"Reports an unexpected PHP version change caused by an nginx directive."}
+{"candidate_id":"wildchat:da330243a6f7532cfdc03998e987cc38:0","include":true,"policies":["feature"],"notes":"Requests Python code for an AI predictor for a crash-style game."}
+{"candidate_id":"wildchat:dc00d550c8de8b315cc16879e16be076:0","include":true,"policies":["feature"],"notes":"Requests a CSS implementation that scales font size with a grid cell."}
+{"candidate_id":"wildchat:dd0ecd9f00b0e85f0f333ddc07eafe59:0","include":true,"policies":["refactor"],"notes":"Explicitly requests simplifying repetitive JavaScript conversion code."}
+{"candidate_id":"wildchat:e326f44642be324972fc457344b64f2a:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests marketing analysis for an academic case study."}
+{"candidate_id":"wildchat:e4196cae93c43ae9055724493ed8daa1:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides only a curl API request with no stated question or outcome."}
+{"candidate_id":"wildchat:e8627318538ece947db4dfaf5a6c02c7:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to upload and run a Python script on AWS Lambda."}
+{"candidate_id":"wildchat:e88880f65a5a38a0b9598a14d25f0d7e:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to measure a Python dictionary correctly."}
+{"candidate_id":"wildchat:e8aa41a15e8a97e6e83b6e18f96fe074:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests translation of advertising copy into English."}
+{"candidate_id":"wildchat:e8e01f5d7e996fb7d900ee83eb6c5092:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks how to declare an Azure DevOps Feed dependency in setup.cfg."}
+{"candidate_id":"wildchat:ec1cd823d988d87ad02ac296b734b530:0","include":true,"policies":["feature"],"notes":"Requests Python code for a specified greedy scheduling problem."}
+{"candidate_id":"wildchat:efeba0f68482872c4669891b5bb373b8:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests detailed guidance for an academic project-management presentation."}
+{"candidate_id":"wildchat:f012a78dd14649ad7d6396cbcb95fa73:0","include":true,"policies":["feature"],"notes":"Requests JavaScript code that types hello."}
+{"candidate_id":"wildchat:f51bcc44753e70364f4828e034eb325b:0","include":true,"policies":["feature"],"notes":"Requests a PHP calendar application using TMDB and SQL with release notifications."}
+{"candidate_id":"wildchat:f9629e3c0cc90293362eb57a41f41bd4:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests professional rewriting of an email to a colleague."}
+{"candidate_id":"wildchat:fb45d96c6f719001495620fb280e4acb:0","include":true,"policies":["bugfix"],"notes":"Reports a Docker bind-mount ownership permission failure and provides reproduction commands."}
+{"candidate_id":"wildchat:fc9415a19df5c664edb07bd2d827295b:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a sports-themed script rather than software work."}
+{"candidate_id":"wildchat:fe5e3b63431af4c085654cb43d2e4d7f:0","include":true,"policies":["feature"],"notes":"Requests a password-protected HTML page."}

@@ -11,9 +11,10 @@ Two sources serve different parts of the distribution:
   requests, questions, ambiguity, multilingual phrasing, and read-only requests that issue-based
   benchmarks rarely contain.
 
-Neither downloaded text nor its reviewed derivative is committed or relicensed as part of
-Infinidev. Only the acquisition, validation, training, and evaluation code belongs to this MIT
-repository.
+Downloaded candidate text is not committed or relicensed as part of Infinidev. The minimized
+human annotation ledgers (candidate IDs, labels, zero-label reasons, and short decision notes) are
+committed under `data/task-policy-reviews/` as a separately licensed data component. The software
+remains MIT licensed; see the data directory's license and upstream attribution notice.
 
 ## Acquire WildChat candidates
 
@@ -31,9 +32,10 @@ duplicates, and records source provenance. Coarse lexical signals create a diver
 the manifest explicitly records that these are selection hints rather than labels.
 
 WildChat is distributed under ODC-By. That license governs database rights but does not necessarily
-grant independent rights in every piece of content. Consequently, `.infinidev/external-data/`
-remains ignored, source attribution stays attached to every row, and a release-specific legal and
-privacy review is required before distributing text or a derived model artifact.
+grant independent rights in every piece of content. Consequently, downloaded conversation text in
+`.infinidev/external-data/` remains ignored, source attribution stays attached to every row, and a
+release-specific legal and privacy review is required before distributing text or a derived model
+artifact. The committed ledgers omit conversation text and retain the applicable ODC-By notice.
 
 ## Freeze before reviewing
 

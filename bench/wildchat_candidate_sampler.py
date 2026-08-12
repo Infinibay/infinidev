@@ -320,7 +320,9 @@ def write_candidate_queue(
         "review_contract": {
             "selection_hint_is_policy_label": False,
             "individual_manual_review_required": True,
-            "reviewed_derivatives_remain_external": True,
+            "source_text_remains_external": True,
+            "reviewed_annotations_path": "data/task-policy-reviews/wildchat",
+            "reviewed_annotations_license": "CC-BY-4.0 AND ODC-By-1.0",
         },
     }
     manifest_path.write_text(

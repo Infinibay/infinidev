@@ -2,8 +2,9 @@
 
 This file is the operational handoff for continuing the active mini-model work on the GPU
 server. The repository snapshot intentionally includes all current source, benchmark, test, and
-documentation changes. Downloaded datasets, human review ledgers, generated splits, model caches,
-and checkpoints remain outside Git for licensing and size reasons.
+documentation changes. Downloaded candidate text, generated splits, model caches, and checkpoints
+remain outside Git for licensing and size reasons. The minimized human review ledgers are committed
+under `data/task-policy-reviews/` with separate data licensing and attribution.
 
 ## Objective
 
@@ -76,18 +77,16 @@ with `.detach().cpu().numpy()`. Add focused CPU/default and CUDA-selection tests
 
 ## External state to copy to the server
 
-Git deliberately excludes the natural source text and human review ledgers. Copy both directories
-from this machine after cloning/pulling the commit on the server. Replace the destination path and
-host as appropriate:
+Git deliberately excludes the natural source text, but the minimized human review ledgers now ship
+under `data/task-policy-reviews/`. After cloning or pulling, the server only needs the candidates;
+the bootstrap can download them reproducibly. Direct transfer remains an optional faster path:
 
 ```bash
 rsync -a --info=progress2 \
   /home/andres/infinidev/.infinidev/external-data/ \
   USER@SERVER:/PATH/TO/infinidev/.infinidev/external-data/
 
-rsync -a --info=progress2 \
-  /home/andres/tmp/task-policy-natural-split-v1/ \
-  USER@SERVER:/home/andres/tmp/task-policy-natural-split-v1/
+uv run python -m bench.task_policy_data_bootstrap
 ```
 
 If the server uses a different home, update all `/home/andres/tmp` arguments below. Do not place
@@ -121,8 +120,9 @@ uv run python -m bench.task_policy_data_bootstrap
 ```
 
 It downloads or reuses all five pinned candidate queues, verifies their exact SHA-256 digests,
-requires all 37 transferred manual review ledgers, and recreates the fixed 2,901-row split. It
-will stop instead of inventing labels when those ledgers are absent. If reviews live separately:
+loads the 37 separately licensed manual review ledgers committed under
+`data/task-policy-reviews/`, and recreates the fixed 2,901-row split. It will stop instead of
+inventing labels when those ledgers are absent. If reviews live separately:
 
 ```bash
 uv run python -m bench.task_policy_data_bootstrap \

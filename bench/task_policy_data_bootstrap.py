@@ -1,8 +1,8 @@
 """Acquire natural task requests and rebuild the reviewed policy splits.
 
 Candidate text is reproducibly downloaded from pinned public datasets. Human
-review ledgers are inputs, never generated labels: pass a transferred review
-root or keep the ledgers beside the downloaded candidates.
+review ledgers are inputs, never generated labels: the separately licensed
+tracked ledgers are used by default, with an override for another review root.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from bench.task_policy_natural_split import write_natural_splits
 
 OPEN_SWE_DIRECTORY = "open-swe"
 WILDCHAT_DIRECTORY = "wildchat"
+TRACKED_REVIEW_ROOT = Path(__file__).resolve().parents[1] / "data" / "task-policy-reviews"
 EXPECTED_ROWS = 2_901
 EXPECTED_FAMILIES = 2_336
 EXPECTED_SPLIT_ROWS = {
@@ -119,6 +120,13 @@ def review_ledger_paths(review_root: Path) -> tuple[Path, ...]:
     )
 
 
+def default_review_root(data_root: Path) -> Path:
+    """Prefer the separately licensed tracked annotations when available."""
+    if all(path.is_file() for path in review_ledger_paths(TRACKED_REVIEW_ROOT)):
+        return TRACKED_REVIEW_ROOT
+    return data_root
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -165,7 +173,7 @@ def _validate_review_ledgers(paths: tuple[Path, ...]) -> None:
         remainder = len(missing) - min(10, len(missing))
         suffix = f"\n  - ... and {remainder} more" if remainder else ""
         raise RuntimeError(
-            "manual review ledgers cannot be regenerated; transfer them and rerun:\n"
+            "manual review ledgers cannot be regenerated; restore or provide them and rerun:\n"
             f"{preview}{suffix}"
         )
 
@@ -240,7 +248,10 @@ def main() -> None:
     parser.add_argument(
         "--review-root",
         type=Path,
-        help="Root containing transferred open-swe/ and wildchat/ review ledgers.",
+        help=(
+            "Root containing open-swe/ and wildchat/ review ledgers. Defaults to the "
+            "separately licensed tracked annotations, then the external-data root."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -255,7 +266,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     data_root = args.data_root.resolve()
-    review_root = (args.review_root or args.data_root).resolve()
+    review_root = (args.review_root or default_review_root(data_root)).resolve()
     if args.mode in {"all", "acquire"}:
         acquired = acquire_candidates(data_root, force=args.force_download)
         print(json.dumps({"verified_candidates": [str(path) for path in acquired]}, indent=2))
@@ -273,5 +284,6 @@ __all__ = [
     "acquire_candidates",
     "build_splits",
     "candidate_acquisitions",
+    "default_review_root",
     "review_ledger_paths",
 ]

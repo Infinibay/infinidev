@@ -1,5 +1,11 @@
 MIT License
 
+This license applies to the Infinidev software and documentation except where a file or
+directory contains a more specific license notice. In particular, the manually authored task
+policy annotation data under `data/task-policy-reviews/` is not licensed under the MIT License;
+its licensing and upstream attribution are documented in
+`data/task-policy-reviews/LICENSE.md`.
+
 Copyright (c) 2026 Infinibay LLC <andres@infinibay.net>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

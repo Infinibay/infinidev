@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:11ty__eleventy-3430","include":true,"policies":["bugfix"],"notes":"The plugin emits duplicate HTML IDs because it fails to honor IDs already present in valid markup."}
+{"candidate_id":"open-swe:alibaba__sentinel-golang-354","include":true,"policies":["bugfix","performance"],"notes":"The request independently restores rollback after a panic and reduces excessive write-lock duration in rule loading."}
+{"candidate_id":"open-swe:amacneil__dbmate-145","include":true,"policies":["bugfix"],"notes":"Malformed URLs leak credentials through an existing error path, violating the security expectations of credential handling."}
+{"candidate_id":"open-swe:apache__incubator-seata-go-739","include":true,"policies":["feature"],"notes":"Adds automatic TableMetaCache refresh behavior that the Go implementation does not currently provide."}
+{"candidate_id":"open-swe:atlassian__changesets-281","include":true,"policies":["research","feature"],"notes":"The request explicitly requires recovering Yarn's supported range evidence and then expanding Changesets to match it."}
+{"candidate_id":"open-swe:bytecodealliance__wasm-tools-1688","include":true,"policies":["bugfix"],"notes":"A valid module is round-tripped incorrectly by naming block parameters as locals."}
+{"candidate_id":"open-swe:chezou__tabula-py-151","include":true,"policies":["feature"],"notes":"Adds configurable User-Agent handling when localizing remote files."}
+{"candidate_id":"open-swe:codypearce__material-bread-173","include":true,"policies":["feature"],"notes":"Introduces a new bottom-sheet component and its tests and documentation."}
+{"candidate_id":"open-swe:csml-by-clevy__csml-engine-267","include":true,"policies":["feature"],"notes":"Adds iterator index access as a new optional callback parameter."}
+{"candidate_id":"open-swe:dbt-labs__dbt-redshift-258","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Replaces deprecated exception APIs ahead of a release; dependency migration maintenance is outside the current six methods."}
+{"candidate_id":"open-swe:edgi-govdata-archiving__wayback-140","include":true,"policies":["bugfix"],"notes":"Existing defaults and 429 handling violate the documented service limit and cause client IP blocking; the request restores reliable behavior."}
+{"candidate_id":"open-swe:ember-cli__ember-try-173","include":true,"policies":["feature"],"notes":"Adds support for promise-valued scenario dependencies."}
+{"candidate_id":"open-swe:encode__httpx-1800","include":true,"policies":["feature"],"notes":"Adds explicit client lifecycle validation and new RuntimeError contracts for previously unguarded misuse."}
+{"candidate_id":"open-swe:endojs__endo-2597","include":true,"policies":["bugfix"],"notes":"A valid subset test and resulting ERTP withdrawal fail despite the set contract requiring true."}
+{"candidate_id":"open-swe:florianholzapfel__express-restify-mongoose-360","include":true,"policies":["feature"],"notes":"Adds asynchronous output hooks while retaining compatibility with synchronous hooks."}
+{"candidate_id":"open-swe:gcanti__fp-ts-1066","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Only rewrites a tutorial example for readability; documentation maintenance has no matching task-method policy."}
+{"candidate_id":"open-swe:gin-gonic__gin-2487","include":true,"policies":["feature"],"notes":"Adds a missing uint64 context accessor to the public API."}
+{"candidate_id":"open-swe:gin-gonic__gin-4240","include":true,"policies":["feature"],"notes":"Changes the public cookie-setting API to accept a full http.Cookie and expose more cookie properties."}
+{"candidate_id":"open-swe:go-acme__lego-2574","include":true,"policies":["bugfix"],"notes":"Renewal logic repeatedly renews short-lived certificates despite available ARI timing and must derive an appropriate renewal window."}
+{"candidate_id":"open-swe:hetznercloud__hcloud-cloud-controller-manager-55","include":true,"policies":["bugfix"],"notes":"A duration annotation is parsed as an integer, rejecting its valid documented duration value."}
+{"candidate_id":"open-swe:honeycombio__beeline-nodejs-514","include":true,"policies":["feature"],"notes":"Adds simultaneous inbound support for two propagation-header formats to enable incremental migration."}
+{"candidate_id":"open-swe:huge-success__sanic-1539","include":true,"policies":["feature"],"notes":"Adds configurable proxy-header handling for request IPs and logging."}
+{"candidate_id":"open-swe:igorbenav__fastcrud-35","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether and how the existing JoinConfig supports a many-to-many query rather than requesting a defined implementation."}
+{"candidate_id":"open-swe:influxdata__influxdb-java-685","include":true,"policies":["bugfix"],"notes":"A race publishes an incomplete cache and produces null fields from otherwise valid concurrent conversions."}
+{"candidate_id":"open-swe:istio__istio-32383","include":true,"policies":["feature"],"notes":"Adds an explicit workload-IP option for separate-network deployments."}
+{"candidate_id":"open-swe:jeremydaly__dynamodb-toolbox-278","include":true,"policies":["bugfix"],"notes":"PutItem typing rejects null for optional attributes although the corresponding optional-attribute contract permits it."}
+{"candidate_id":"open-swe:karen-irc__option-t-1038","include":true,"policies":["feature"],"notes":"Introduces a new mapOrElseAsync operation for PlainOption."}
+{"candidate_id":"open-swe:keras-team__keras-nlp-214","include":true,"policies":["feature"],"notes":"Introduces a new random-deletion data-augmentation layer."}
+{"candidate_id":"open-swe:keras-team__keras-nlp-64","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Adds CRLF troubleshooting sentences to contributor documentation; documentation maintenance is outside the task-method policies."}
+{"candidate_id":"open-swe:kubernetes-sigs__security-profiles-operator-1600","include":true,"policies":["feature"],"notes":"Adds automatic OS-specific selinuxd image selection and its configuration contract."}
+{"candidate_id":"open-swe:materials-consortia__optimade-python-tools-1134","include":true,"policies":["bugfix"],"notes":"Equivalent inequality forms return inconsistent entries when a property is null."}
+{"candidate_id":"open-swe:meltano__sdk-1283","include":true,"policies":["feature"],"notes":"Adds automatic catalog selection metadata for replication keys."}
+{"candidate_id":"open-swe:mheap__pin-github-action-158","include":true,"policies":["feature"],"notes":"Adds an output-format compatibility behavior for Prettier-formatted YAML."}
+{"candidate_id":"open-swe:mondeja__mkdocs-include-markdown-plugin-214","include":true,"policies":["feature"],"notes":"Adds diagnostics for invalid directive arguments that currently fail silently."}
+{"candidate_id":"open-swe:moov-io__customers-236","include":true,"policies":["feature"],"notes":"Adds customer-ID filtering to the repository search method."}
+{"candidate_id":"open-swe:octokit__webhooks.js-586","include":true,"policies":["feature"],"notes":"Expands verifyAndReceive to accept raw string payloads in addition to parsed objects."}
+{"candidate_id":"open-swe:okteto__okteto-4722","include":true,"policies":["feature"],"notes":"Adds machine-readable JSON and YAML formats to namespace-list output."}
+{"candidate_id":"open-swe:openrefine__openrefine-6503","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Proposes moving an extension across repositories or merging it into core; repository and compatibility migration is not behavior-preserving refactoring."}
+{"candidate_id":"open-swe:openrefine__openrefine-6962","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Adds a reusable Cypress fixture solely as test-infrastructure maintenance, which the current methods do not represent."}
+{"candidate_id":"open-swe:osmlab__maproulette3-1832","include":true,"policies":["bugfix"],"notes":"Every route incorrectly shares one page title, breaking tab and history identification expected from route-specific headings."}
+{"candidate_id":"open-swe:pallets__werkzeug-2882","include":true,"policies":["bugfix"],"notes":"Cache-Control parsing and type stubs contradict RFC directive semantics and actual return contracts."}
+{"candidate_id":"open-swe:pallets__werkzeug-2975","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Deprecates a public collection type as API lifecycle maintenance, not a behavior-preserving refactor."}
+{"candidate_id":"open-swe:php__pie-173","include":true,"policies":["performance"],"notes":"Adds post-install cleanup to reduce substantial persistent disk consumption, with viability and impact measurement required."}
+{"candidate_id":"open-swe:pion__interceptor-132","include":true,"policies":["bugfix"],"notes":"A packet arriving after closure sends on a closed channel and panics."}
+{"candidate_id":"open-swe:plexsystems__konstraint-251","include":true,"policies":["feature"],"notes":"Adds matchExpressions support for per-constraint namespace and label exclusion."}
+{"candidate_id":"open-swe:plexsystems__konstraint-255","include":true,"policies":["feature"],"notes":"Adds excludedNamespaces generation in match blocks according to the Gatekeeper specification."}
+{"candidate_id":"open-swe:primefaces__primefaces-11594","include":true,"policies":["bugfix"],"notes":"Server validation rejects escaped mask characters already supported by the component's input-mask contract."}
+{"candidate_id":"open-swe:radioastronomysoftwaregroup__pyuvdata-658","include":true,"policies":["bugfix"],"notes":"Redundancy grouping splits equivalent north-south baselines into an extra group."}
+{"candidate_id":"open-swe:roboll__helmfile-2064","include":true,"policies":["feature"],"notes":"Expands release-selector labels to accept version characters currently excluded by an unnecessary restriction."}
+{"candidate_id":"open-swe:scikit-build__scikit-build-core-602","include":true,"policies":["feature"],"notes":"Expands CMake and Ninja configuration from minimum versions to full version specifications."}
+{"candidate_id":"open-swe:sktime__sktime-5615","include":true,"policies":["bugfix"],"notes":"A supported one-level hierarchy produces incorrect node-specific predictions."}
+{"candidate_id":"open-swe:solid__community-server-71","include":true,"policies":["refactor"],"notes":"Explicitly separates initialization and runtime configuration behind an internal RuntimeConfig boundary while retaining CLI override behavior."}
+{"candidate_id":"open-swe:solid__community-server-925","include":true,"policies":["feature"],"notes":"Adds MIME-type allow and deny configuration to data-browser conversion."}
+{"candidate_id":"open-swe:streamlink__streamlink-2654","include":true,"policies":["feature"],"notes":"Adds a new ViuTV streaming-site plugin."}
+{"candidate_id":"open-swe:strimzi__strimzi-kafka-bridge-858","include":true,"policies":["feature"],"notes":"Adds a new embedded string format for raw message keys and values."}
+{"candidate_id":"open-swe:tektoncd__operator-1171","include":true,"policies":["feature"],"notes":"Adds external dashboard-log URL configuration to the TektonConfig CRD."}
+{"candidate_id":"open-swe:toblerity__fiona-1352","include":true,"policies":["feature"],"notes":"Adds a name keyword to public dataset and collection constructors and forwards it to GDAL."}
+{"candidate_id":"open-swe:tox-dev__sphinx-autodoc-typehints-538","include":true,"policies":["bugfix"],"notes":"The documentation generator emits an unwanted rtype field for functions explicitly returning None."}
+{"candidate_id":"open-swe:ubilabs__react-geosuggest-509","include":true,"policies":["bugfix"],"notes":"Matched suggestion text is highlighted inconsistently with the referenced autocomplete behavior."}
+{"candidate_id":"open-swe:virtuslab__git-machete-353","include":true,"policies":["feature"],"notes":"Adds a new short command alias for traverse."}

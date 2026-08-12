@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:ably__ably-go-294","include":true,"policies":["bugfix"],"notes":"Existing dispatch behavior violates the referenced protocol requirement."}
+{"candidate_id":"open-swe:aeye-lab__pymovements-1029","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Deprecates exposed utility modules and changes import paths; public API lifecycle maintenance is not behavior-preserving refactoring."}
+{"candidate_id":"open-swe:aeye-lab__pymovements-1032","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Deprecates exposed utility modules and changes import paths; public API lifecycle maintenance is not behavior-preserving refactoring."}
+{"candidate_id":"open-swe:agnostiqhq__covalent-1392","include":true,"policies":["bugfix"],"notes":"Reproduced exception in Result string rendering has a proposed correction."}
+{"candidate_id":"open-swe:andygrunwald__go-jira-584","include":true,"policies":["bugfix"],"notes":"The Cloud-specific client exposes endpoints for the wrong product and must restore its product boundary."}
+{"candidate_id":"open-swe:ansible__tower-cli-367","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Removing compatibility code after a supported-version change is maintenance, not a behavior-preserving refactor."}
+{"candidate_id":"open-swe:apache__dubbo-go-hessian2-212","include":true,"policies":["feature"],"notes":"Adds serialization types for previously unsupported JDK time classes."}
+{"candidate_id":"open-swe:apache__pulsar-client-go-799","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"License-document maintenance does not benefit from any current task method."}
+{"candidate_id":"open-swe:aristanetworks__anta-1250","include":true,"policies":["bugfix"],"notes":"An existing test rejects a valid DPS source interface."}
+{"candidate_id":"open-swe:asyncapi__modelina-1800","include":true,"policies":["feature"],"notes":"Adds generator support for a TypeScript compiler mode."}
+{"candidate_id":"open-swe:asyncapi__modelina-511","include":true,"policies":["bugfix"],"notes":"Generated Java fails compilation because a required import is omitted."}
+{"candidate_id":"open-swe:aws__aws-xray-sdk-node-102","include":true,"policies":["bugfix"],"notes":"Automatic tracing emits erroneous failures for SDK sampling calls."}
+{"candidate_id":"open-swe:awslabs__aws-ddk-264","include":true,"policies":["feature"],"notes":"Requests bringing a stage capability from another branch into the target branch."}
+{"candidate_id":"open-swe:blitz-js__superjson-31","include":true,"policies":["feature"],"notes":"Adds serialization support for circular references."}
+{"candidate_id":"open-swe:bluesky__bluesky-1627","include":true,"policies":["bugfix"],"notes":"Documents a reproducible control-flow failure after interrupt and stop or abort."}
+{"candidate_id":"open-swe:bluesky__bluesky-1850","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The actionable request is documentation or naming discussion, outside current methods."}
+{"candidate_id":"open-swe:busyorg__busy-989","include":true,"policies":["bugfix"],"notes":"Long topics visibly break an existing responsive layout."}
+{"candidate_id":"open-swe:cargo-generate__cargo-generate-671","include":true,"policies":["feature"],"notes":"Adds a new CLI option for selecting tagged templates."}
+{"candidate_id":"open-swe:ceph__go-ceph-221","include":true,"policies":["feature"],"notes":"Adds wrappers for librados manager commands."}
+{"candidate_id":"open-swe:ceph__go-ceph-795","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Promoting preview APIs to stable status is release lifecycle maintenance, not an internal refactor."}
+{"candidate_id":"open-swe:cerbos__cerbos-1717","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"A dependency upgrade with changed upstream behavior is migration work, not a behavior-preserving refactor."}
+{"candidate_id":"open-swe:chanind__hanzi-writer-74","include":true,"policies":["feature"],"notes":"Adds independent configuration for the completion highlight color."}
+{"candidate_id":"open-swe:chanind__hanzi-writer-86","include":true,"policies":["feature"],"notes":"Changes public construction semantics and adds a factory; the observable API change is not an independent behavior-preserving refactor."}
+{"candidate_id":"open-swe:char0n__ramda-adjunct-826","include":true,"policies":["bugfix"],"notes":"Corrects a demonstrably wrong documentation example."}
+{"candidate_id":"open-swe:christophebougere__asl-validator-139","include":true,"policies":["bugfix"],"notes":"Schema rejects a valid document when an optional field is absent."}
+{"candidate_id":"open-swe:cloudflare__cfssl-1249","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Adds CI coverage rather than changing the product behavior addressed by current methods."}
+{"candidate_id":"open-swe:containrrr__watchtower-1784","include":true,"policies":["feature"],"notes":"Adds a new non-label container exclusion mechanism."}
+{"candidate_id":"open-swe:copier-org__copier-1886","include":true,"policies":["bugfix"],"notes":"A reproducible upgrade path fails to force-add a newly unignored file."}
+{"candidate_id":"open-swe:core-gatech-group__serpent-tools-85","include":true,"policies":["refactor"],"notes":"Removes debug entry points and cleanup leftovers without new behavior."}
+{"candidate_id":"open-swe:crawler-commons__crawler-commons-252","include":true,"policies":["feature"],"notes":"Adds strict RFC length validation not previously implemented."}
+{"candidate_id":"open-swe:crossgl__crosstl-41","include":true,"policies":["feature"],"notes":"Adds else-if syntax support across lexer, parser, and generator."}
+{"candidate_id":"open-swe:cs-si__eodag-1338","include":true,"policies":["bugfix"],"notes":"Provider request failures are currently hidden instead of surfaced."}
+{"candidate_id":"open-swe:cs-si__eodag-249","include":true,"policies":["feature"],"notes":"Requests a defined default extraction behavior across providers."}
+{"candidate_id":"open-swe:cta-observatory__ctapipe-2403","include":true,"policies":["bugfix"],"notes":"Two implementations return incompatible physical meanings for the same field."}
+{"candidate_id":"open-swe:cyclonedx__cyclonedx-core-java-339","include":true,"policies":["bugfix"],"notes":"Valid XML with multiple legacy tools fails deserialization."}
+{"candidate_id":"open-swe:dadoonet__elasticsearch-beyonder-170","include":true,"policies":["refactor"],"notes":"Renames an internal directory without a stated behavior addition."}
+{"candidate_id":"open-swe:datreeio__datree-827","include":true,"policies":["feature"],"notes":"Adds a non-strict schema-validation mode and CLI control."}
+{"candidate_id":"open-swe:davidlattimore__wild-452","include":true,"policies":["feature"],"notes":"Adds linker support for the whole-archive modifier."}
+{"candidate_id":"open-swe:davidlattimore__wild-619","include":true,"policies":["bugfix"],"notes":"A concrete Rust run-make test fails due to linker start-symbol handling."}
+{"candidate_id":"open-swe:decorators-squad__eo-yaml-274","include":true,"policies":["refactor"],"notes":"Consolidates duplicated line-skipping implementations into one abstraction."}
+{"candidate_id":"open-swe:designliquido__delegua-647","include":true,"policies":["bugfix"],"notes":"Logging non-primitive values inside vectors produces malformed output."}
+{"candidate_id":"open-swe:docker__compose-8620","include":true,"policies":["bugfix"],"notes":"Scale zero leaves a service running instead of removing all replicas."}
+{"candidate_id":"open-swe:doctrine__orm-11646","include":true,"policies":["bugfix"],"notes":"Rollback handling masks the original transaction exception with a second exception."}
+{"candidate_id":"open-swe:dtolnay__cxx-182","include":true,"policies":["feature"],"notes":"Adds a public conversion path from generated enum wrappers to integers."}
+{"candidate_id":"open-swe:dtolnay__thiserror-337","include":true,"policies":["bugfix"],"notes":"A name collision incorrectly makes valid derive input fail compilation."}
+{"candidate_id":"open-swe:elastic__go-sysinfo-115","include":true,"policies":["feature"],"notes":"Adds Oracle Linux identification to the Red Hat OS family."}
+{"candidate_id":"open-swe:elastic__go-sysinfo-140","include":true,"policies":["feature"],"notes":"Requests the missing public load-average interface."}
+{"candidate_id":"open-swe:elastic__synthetics-261","include":true,"policies":["bugfix"],"notes":"The public callback type contradicts the established execution model and must be corrected, not structurally reorganized."}
+{"candidate_id":"open-swe:elastic__synthetics-311","include":true,"policies":["feature","performance"],"notes":"Adds screenshot modes specifically to reduce storage volume and cost."}
+{"candidate_id":"open-swe:ericmjl__pyjanitor-706","include":true,"policies":["feature"],"notes":"Adds detection and filling of missing timestamps."}
+{"candidate_id":"open-swe:ericmjl__pyjanitor-735","include":true,"policies":["feature"],"notes":"Adds a new dataframe chaining method."}
+{"candidate_id":"open-swe:eslint__eslint-11463","include":true,"policies":["feature"],"notes":"Requests improved crash-reporting behavior rather than a known reporting defect."}
+{"candidate_id":"open-swe:eslint__eslint-12410","include":true,"policies":["bugfix"],"notes":"Corrects documentation that describes an option incorrectly."}
+{"candidate_id":"open-swe:eslint__eslint-8706","include":true,"policies":["performance"],"notes":"Targets redundant filesystem work and should be measured as an optimization."}
+{"candidate_id":"open-swe:ethereum__web3.py-2023","include":true,"policies":["bugfix"],"notes":"An advertised environment variable is ignored by an existing provider."}
+{"candidate_id":"open-swe:ethereum__web3.py-3622","include":true,"policies":["feature"],"notes":"Adds client support for a newly available RPC endpoint."}
+{"candidate_id":"open-swe:external-secrets__external-secrets-2899","include":true,"policies":["bugfix"],"notes":"Escaped JSON strings crash an existing webhook provider."}
+{"candidate_id":"open-swe:fhir__sushi-1193","include":true,"policies":["feature"],"notes":"Adds a new configuration consistency warning."}
+{"candidate_id":"open-swe:fhir__sushi-1462","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Updates generated explanatory configuration text, outside current methods."}
+{"candidate_id":"open-swe:fluxcd__flagger-1408","include":true,"policies":["bugfix"],"notes":"Controller interaction prevents canary deployment from leaving initialization."}

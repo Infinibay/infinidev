@@ -2,8 +2,8 @@
 
 Infinidev uses a source-data boundary for candidate requests taken from
 [NVIDIA Open-SWE-Traces](https://huggingface.co/datasets/nvidia/Open-SWE-Traces).
-The repository contains the MIT-licensed extraction code, but it does not contain copied issue
-texts, reviewed derivatives, or generated training artifacts.
+The repository contains the MIT-licensed extraction code and separately licensed minimized human
+annotations. It does not contain copied issue texts or generated training artifacts.
 
 ## Download and extract
 
@@ -26,12 +26,14 @@ The extractor retains only the original `<issue_description>` body. It does not 
 upstream category such as `bug-fix` or `feature-request` as an Infinidev label. Every candidate
 must be reviewed individually, including exclusion and `uncategorized` decisions.
 
-The local review ledger is external data too. A review row records a candidate ID, an explicit
-`include` decision, zero to three short policy names, and a rationale. A row with no policy must
-also record `uncategorized_reason`; a labeled row must not. Accepted reasons are `answer_only`,
-`out_of_domain`, `unsupported_method`, and `ambiguous_method`. The loader resolves short names to
-canonical policy IDs and rejects repeated labels, more than three labels, unknown labels, missing
-rationales, invalid uncategorized reasons, and source rows without provenance.
+The minimized review ledgers are committed under `data/task-policy-reviews/open-swe/` with their
+own CC BY 4.0 data notice and upstream attribution; they are excluded from the software's MIT
+license. A review row records a candidate ID, an explicit `include` decision, zero to three short
+policy names, and a rationale. A row with no policy must also record `uncategorized_reason`; a
+labeled row must not. Accepted reasons are `answer_only`, `out_of_domain`, `unsupported_method`,
+and `ambiguous_method`. The loader resolves short names to canonical policy IDs and rejects
+repeated labels, more than three labels, unknown labels, missing rationales, invalid uncategorized
+reasons, and source rows without provenance.
 
 ## Semantic review contract
 
@@ -125,9 +127,10 @@ uv run python -m bench.open_swe_candidate_sampler \
 ## License boundary
 
 Open-SWE-Traces declares `CC-BY-4.0`; individual rows also carry source-repository license
-metadata. Downloaded text remains external data and is not silently relicensed under
-Infinidev's MIT license. Keep both levels of provenance with reviewed datasets and derived
-artifacts, and perform a release-specific license review before distributing any such artifact.
+metadata. Downloaded text remains external data and is not silently relicensed under Infinidev's
+MIT license. The committed minimized annotations have a separate data license; keep both levels of
+provenance with derived artifacts and perform a release-specific license review before
+distributing candidate text or trained model artifacts.
 
 The dataset revision is intentionally pinned in the script. Updating it is a deliberate source
 change: inspect the new dataset card and schema, update the constant, rerun tests, and regenerate

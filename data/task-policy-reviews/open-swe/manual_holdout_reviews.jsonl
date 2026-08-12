@@ -1,0 +1,60 @@
+{"candidate_id":"open-swe:focus-shift__jollyday-404","include":true,"policies":["bugfix"],"notes":"An existing regional holiday calendar omits a documented public holiday."}
+{"candidate_id":"open-swe:friendsofphp__php-cs-fixer-6440","include":true,"policies":["bugfix"],"notes":"The static-lambda fixer produces invalid behavior for a concrete closure case."}
+{"candidate_id":"open-swe:gardener__external-dns-management-481","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"A dependency version update is maintenance and does not request an internal behavior-preserving restructuring."}
+{"candidate_id":"open-swe:gcanti__io-ts-types-86","include":true,"policies":["feature"],"notes":"Adds new observable JSON encodings and round-trip behavior; the title's word refactor is not a separate structural outcome."}
+{"candidate_id":"open-swe:geal__nom-1354","include":true,"policies":["bugfix"],"notes":"A regression imposes an unnecessary Clone bound on existing combinators."}
+{"candidate_id":"open-swe:getgauge__gauge-2433","include":true,"policies":["feature"],"notes":"Adds a CLI capability to list registered steps."}
+{"candidate_id":"open-swe:getkin__kin-openapi-237","include":true,"policies":["bugfix"],"notes":"A converted valid Swagger document still contains a resolvable reference that the existing parser incorrectly rejects."}
+{"candidate_id":"open-swe:getmoto__moto-7393","include":true,"policies":["feature"],"notes":"Adds configuration options to server mode."}
+{"candidate_id":"open-swe:gitify-app__gitify-1232","include":true,"policies":["refactor"],"notes":"Replaces a deprecated animation dependency while preserving the feature."}
+{"candidate_id":"open-swe:gleam-lang__gleam-3393","include":true,"policies":["bugfix"],"notes":"An existing diagnostic prints syntax incorrectly for the current module."}
+{"candidate_id":"open-swe:go-bdd__gobdd-140","include":true,"policies":["feature"],"notes":"Adds test, scenario, and step metadata to execution context."}
+{"candidate_id":"open-swe:go-co-op__gocron-811","include":true,"policies":["feature"],"notes":"Adds per-job control for disabling the global locker."}
+{"candidate_id":"open-swe:google__exposure-notifications-server-1527","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Moving to a maintained dependency fork is migration maintenance, not a behavior-preserving refactor request."}
+{"candidate_id":"open-swe:google__go-github-1431","include":true,"policies":["feature"],"notes":"Updates the public client surface to expose the current endpoint forms, an observable API contract change."}
+{"candidate_id":"open-swe:google__go-github-2235","include":true,"policies":["bugfix"],"notes":"A wrong field type causes JSON unmarshalling to fail."}
+{"candidate_id":"open-swe:google__yamlfmt-159","include":true,"policies":["feature"],"notes":"Adds configurable retention of selected empty lines."}
+{"candidate_id":"open-swe:googleapis__java-spanner-jdbc-397","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Changing the supported Java/JDBC baseline is a platform migration, not a behavior-preserving refactor."}
+{"candidate_id":"open-swe:googleapis__java-storage-214","include":true,"policies":["feature"],"notes":"Extends the public storage interface with direct upload methods."}
+{"candidate_id":"open-swe:googlechrome__lighthouse-11099","include":true,"policies":["bugfix"],"notes":"An existing report contains duplicated wording."}
+{"candidate_id":"open-swe:googlechrome__lighthouse-11332","include":true,"policies":["bugfix"],"notes":"The release test script fails because a required module cannot be resolved."}
+{"candidate_id":"open-swe:googlechromelabs__ps-analysis-tool-83","include":true,"policies":["feature"],"notes":"Adds frame-based cookie filtering to the UI."}
+{"candidate_id":"open-swe:gotenberg__gotenberg-755","include":true,"policies":["bugfix"],"notes":"Upstream generation failures are incorrectly returned as successful PDF content."}
+{"candidate_id":"open-swe:grafana__tanka-140","include":true,"policies":["feature"],"notes":"Makes project initialization install the expected Kubernetes library."}
+{"candidate_id":"open-swe:grafana__tanka-170","include":true,"policies":["bugfix"],"notes":"Release instructions point to an obsolete repository location."}
+{"candidate_id":"open-swe:hacker0x01__react-datepicker-4457","include":true,"policies":["bugfix"],"notes":"Keyboard navigation contradicts the applicable accessibility contract."}
+{"candidate_id":"open-swe:hazelcast__hazelcast-kubernetes-134","include":true,"policies":["feature"],"notes":"Adds a configurable retry count and changes its default."}
+{"candidate_id":"open-swe:hazelcast__hazelcast-kubernetes-137","include":true,"policies":["feature"],"notes":"Adds input validation for configuration properties and incompatible modes."}
+{"candidate_id":"open-swe:hideoo__starlight-links-validator-58","include":true,"policies":["feature"],"notes":"Adds a configuration option to skip anchor-link checks."}
+{"candidate_id":"open-swe:honeycombio__honeycomb-kubernetes-agent-62","include":true,"policies":["feature"],"notes":"Requests support for a processor present in the related product."}
+{"candidate_id":"open-swe:hub4j__github-api-1247","include":true,"policies":["feature"],"notes":"Adds auto-merge information to pull-request objects."}
+{"candidate_id":"open-swe:import-js__eslint-plugin-import-2387","include":true,"policies":["feature"],"notes":"Adds a rule option for cycles that involve dynamic imports."}
+{"candidate_id":"open-swe:interledger__web-monetization-extension-96","include":true,"policies":["feature"],"notes":"Adds a UI container for displaying and copying a public key."}
+{"candidate_id":"open-swe:intuit__auto-2115","include":true,"policies":["feature"],"notes":"The underlying method request is publishing from a configurable directory."}
+{"candidate_id":"open-swe:irasoro__peri-84","include":true,"policies":["refactor"],"notes":"Moves calculation logic out of React hooks to improve separation and testability."}
+{"candidate_id":"open-swe:iver56__audiomentations-394","include":true,"policies":["bugfix"],"notes":"Current defaults apply an excessive mask and need behavior correction."}
+{"candidate_id":"open-swe:jenkins-x__lighthouse-1015","include":true,"policies":["refactor"],"notes":"Replaces repeated implicit registration with one explicit registration boundary."}
+{"candidate_id":"open-swe:jhipster__generator-jhipster-11765","include":true,"policies":["feature"],"notes":"Adds Angular strict-template support to generated projects."}
+{"candidate_id":"open-swe:jhipster__generator-jhipster-7311","include":true,"policies":["refactor"],"notes":"Removes duplicated generated routes and conversion methods."}
+{"candidate_id":"open-swe:jhipster__generator-jhipster-9710","include":true,"policies":["bugfix"],"notes":"An OAuth2 path fails because the expected username is unavailable."}
+{"candidate_id":"open-swe:joinmarket-webui__jam-738","include":true,"policies":["feature"],"notes":"The actionable coding request is a new explanatory connection-error UI, not a repair of the user's backend configuration."}
+{"candidate_id":"open-swe:joinmarket-webui__joinmarket-webui-284","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Removing a release feature flag is lifecycle maintenance rather than an internal behavior-preserving refactor."}
+{"candidate_id":"open-swe:joshuakgoldberg__create-typescript-app-2100","include":true,"policies":["bugfix"],"notes":"Transition mode incorrectly downgrades an existing action runtime."}
+{"candidate_id":"open-swe:keats__tera-337","include":true,"policies":["bugfix"],"notes":"A set_global value is inaccessible from the macro that created it."}
+{"candidate_id":"open-swe:kedacore__http-add-on-1307","include":true,"policies":["feature"],"notes":"Adds an opt-in TLS verification bypass for upstream connections."}
+{"candidate_id":"open-swe:keikoproj__instance-manager-161","include":true,"policies":["feature"],"notes":"Adds an IOPS configuration field for io1 volumes."}
+{"candidate_id":"open-swe:keikoproj__instance-manager-344","include":true,"policies":["bugfix"],"notes":"Duplicate subnet inputs cause reconciliation failure instead of being normalized."}
+{"candidate_id":"open-swe:keras-team__keras-19915","include":true,"policies":["bugfix"],"notes":"Reloaded models cannot be exported because shape types change unexpectedly."}
+{"candidate_id":"open-swe:kestra-io__kestra-6199","include":true,"policies":["feature"],"notes":"Makes a flow pause timeout dynamically configurable."}
+{"candidate_id":"open-swe:knative__client-1150","include":true,"policies":["feature"],"notes":"Adds machine-readable output to source binding describe."}
+{"candidate_id":"open-swe:knative__client-682","include":true,"policies":["feature"],"notes":"Adds wait and no-wait controls across delete operations."}
+{"candidate_id":"open-swe:knative__client-859","include":true,"policies":["feature"],"notes":"Adds GPU resource requests to the service CLI."}
+{"candidate_id":"open-swe:kroxylicious__kroxylicious-2163","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Removing a deprecated public property is migration maintenance, not behavior-preserving refactoring."}
+{"candidate_id":"open-swe:kubernetes-sigs__aws-ebs-csi-driver-830","include":true,"policies":["feature"],"notes":"Adds a deep health check to the driver probe."}
+{"candidate_id":"open-swe:kubernetes-sigs__controller-runtime-2905","include":true,"policies":["feature"],"notes":"Changes panic recovery to be enabled by default."}
+{"candidate_id":"open-swe:kubernetes__klog-237","include":true,"policies":["bugfix"],"notes":"Structured logging renders byte slices numerically instead of as the expected string."}
+{"candidate_id":"open-swe:laravel-shift__blueprint-522","include":true,"policies":["feature"],"notes":"Adds generated many-to-many polymorphic relationships."}
+{"candidate_id":"open-swe:laravel__framework-40278","include":true,"policies":["bugfix"],"notes":"Numeric digit validation incorrectly rejects fractional values allowed by its contract."}
+{"candidate_id":"open-swe:laravel__framework-40967","include":true,"policies":["bugfix"],"notes":"Relation detection returns true for an accessor that is not a relation."}
+{"candidate_id":"open-swe:linkedin__cruise-control-2171","include":true,"policies":["bugfix"],"notes":"Provisioning analysis omits a replication constraint and can recommend unsafe removal."}
+{"candidate_id":"open-swe:maciejhirsz__json-rust-12","include":true,"policies":["feature"],"notes":"Adds public user-controlled pretty-print serialization."}

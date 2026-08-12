@@ -1,0 +1,83 @@
+{"candidate_id":"wildchat:007e99eb9c2d73ce2c2c39f70a3462fb:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests answers to a cross-cultural management case study rather than software work."}
+{"candidate_id":"wildchat:0411a089b3fa22d7f8a2cbcaa055a9e9:0","include":true,"policies":["feature"],"notes":"Requests an Arduino Nano USB mass-storage host implementation."}
+{"candidate_id":"wildchat:0dde546deb5ff429fd9224f1668d7382:0","include":true,"policies":["feature"],"notes":"Requests Python code to derive a political-party column from CSV article text using specified rules."}
+{"candidate_id":"wildchat:11a688fc18f94f157752fa832b822ed0:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks which Python version ships with a particular macOS release."}
+{"candidate_id":"wildchat:1349b8efe94389a5dc845ac0563ec36b:0","include":true,"policies":["refactor"],"notes":"Requests help translating an existing PHP function to Python."}
+{"candidate_id":"wildchat:15f36cc3caac50cf975cafef1e36207f:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for an explanation of how Linux drivers are written."}
+{"candidate_id":"wildchat:17eb3a0dbe65d2009a5a29ca1aaa8859:0","include":true,"policies":["refactor"],"notes":"Requests restructuring an existing NestJS edit handler to make conditional partial edits manageable."}
+{"candidate_id":"wildchat:18c3acb3de51c90b58afc37abc10c0f0:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether PuTTY can execute batch-script commands on a server."}
+{"candidate_id":"wildchat:1b9d75d48a4c5848adb1c129bbc61df0:0","include":true,"policies":["bugfix"],"notes":"Reports that a supplied pthread ring-buffer consumer eventually blocks and asks why."}
+{"candidate_id":"wildchat:1cbb0be2fb819cf603950fc13727534d:0","include":true,"policies":["feature"],"notes":"Requests a Discord bot that infers a player's first Sea of Thieves session from Xbox achievements."}
+{"candidate_id":"wildchat:1d501da077918d6b1c80efc38d6445fe:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Asks how to assess intelligence without an IQ test."}
+{"candidate_id":"wildchat:1e050a15d63d2d80b7f3e04f94c13aaf:0","include":true,"policies":["bugfix"],"notes":"Reports invalid MATLAB operators in supplied inverse-kinematics code and requests a correction."}
+{"candidate_id":"wildchat:1e4d0da4cfd0f9b5e3ac055a5cddcc22:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks whether a Kaggle shoe dataset is suitable for a TensorFlow training objective."}
+{"candidate_id":"wildchat:276a69e4b0dd9868cc63fa2492c9cfb9:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks generally how to use the Stable Diffusion API."}
+{"candidate_id":"wildchat:3227525d261ed37f729a7ab817f34a26:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests prose for a relational-database laboratory report rather than software work."}
+{"candidate_id":"wildchat:372cc467975b076fbd6444644fcc7b7b:0","include":true,"policies":["feature"],"notes":"Requests a Kotlin Android application integrating ChatGPT, visual recognition, and voice assistants."}
+{"candidate_id":"wildchat:3b3801813862860fc01c815416de01ba:0","include":true,"policies":["refactor"],"notes":"Requests help translating an existing PHP function to Python."}
+{"candidate_id":"wildchat:3ca69c2b202e22b2683bede65559c657:0","include":true,"policies":["feature"],"notes":"Requests a modular Python VK matchmaking bot with PostgreSQL persistence and interactive controls."}
+{"candidate_id":"wildchat:3cda01ccebb4ccf2fe637396892f53fd:0","include":true,"policies":["feature"],"notes":"Requests a Python MD5 brute-force program."}
+{"candidate_id":"wildchat:3ce158e3fa8921304bb2672502339183:0","include":true,"policies":["refactor"],"notes":"Requests translating supplied Python matrix multiplication code to C++."}
+{"candidate_id":"wildchat:4be8b7a1e196ee8c710d9908349e1a01:0","include":true,"policies":["bugfix"],"notes":"Reports an undefined data_item error in supplied C simulation code and requests a focused fix."}
+{"candidate_id":"wildchat:4c81b3d267f2b4521a6115363572d65a:0","include":true,"policies":["review"],"notes":"Requests analysis and naming of supplied MS-DOS disassembly functions and globals."}
+{"candidate_id":"wildchat:4e9f56a6f5ae8d38e4fed2d940dc324d:0","include":true,"policies":["feature"],"notes":"Requests adding real-time script output to an existing R Shiny UI."}
+{"candidate_id":"wildchat:4eb3c4186fa4cda61aa4443e82324619:0","include":true,"policies":["feature"],"notes":"Requests HTML, CSS, and JavaScript for a payment, geolocation, and PDF interface."}
+{"candidate_id":"wildchat:5192bb39c3397cfb3065c8d3def92071:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a sports-drama script rather than software work."}
+{"candidate_id":"wildchat:58c3d6a0902eef74f5d38e8390afed29:0","include":true,"policies":["research"],"notes":"Requests discovery of synthesis libraries available in the Rust ecosystem."}
+{"candidate_id":"wildchat:58f4a50265919083ad439c646d194c2e:0","include":true,"policies":["feature"],"notes":"Requests C++ OpenGL code that displays a cube using GLFW and GLEW."}
+{"candidate_id":"wildchat:61141fe447f70ec4d7e787695b0e1bd5:0","include":true,"policies":["review","performance"],"notes":"Requests a thorough review of a neural-network implementation and changes to improve its accuracy."}
+{"candidate_id":"wildchat:62090226ceffea44ab32515a88159034:0","include":true,"policies":["bugfix"],"notes":"Reports a failed WebSocket connection and asks for help with the code error."}
+{"candidate_id":"wildchat:66840a118b92923725f27f26ed4730ac:0","include":true,"policies":["feature"],"notes":"Requests Go code to validate and normalize Romanian phone numbers."}
+{"candidate_id":"wildchat:68515ae542f8d8c04e19e6ad98055a5d:0","include":true,"policies":["feature"],"notes":"Requests a FastAPI endpoint accepting a multi-select list of table names."}
+{"candidate_id":"wildchat:6883a5caaefbf32da32e14bbc9d0eae9:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Asks a finance-theory question unrelated to software work."}
+{"candidate_id":"wildchat:69a763fe185d6d3e9cd6522b5bee8220:0","include":true,"policies":["feature"],"notes":"Requests a C# SQL CRUD application and HTML/JQuery interface for supplied schemas."}
+{"candidate_id":"wildchat:6d45327d60c261a23f2826b98851e020:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for setup steps to use Python with VS Code on a MacBook."}
+{"candidate_id":"wildchat:6f53d5eb965cc81107cc97bb767fc38a:0","include":true,"policies":["feature"],"notes":"Requests a program that parses and pretty-prints a supplied nested string format."}
+{"candidate_id":"wildchat:7308de80d4e38341b386015bd9aa37c8:0","include":true,"policies":["review"],"notes":"Asks whether a supplied pymavlink multi-drone program is correct."}
+{"candidate_id":"wildchat:75f8c9938a4a68fc6fa64c7f3a841514:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks about V8 eager compilation behavior when lazy compilation is disabled."}
+{"candidate_id":"wildchat:773c930894abc506754aa1e9ec1a2742:0","include":true,"policies":["feature"],"notes":"Requests Java code for an application running ten simultaneous timers."}
+{"candidate_id":"wildchat:78ecd55a1df1dc9918e7277169ae6c4a:0","include":true,"policies":["bugfix"],"notes":"Reports implausibly large interpolation integrals in supplied Python code and asks for the issue."}
+{"candidate_id":"wildchat:7c6e6cbbc2ed487d542af8585033f0c2:0","include":true,"policies":["feature"],"notes":"Requests adding and sizing a CSS-only night-mode control in an existing multilingual page."}
+{"candidate_id":"wildchat:7e246abbced54d0331f5ae21516b2f59:0","include":true,"policies":["feature"],"notes":"Requests HTML and CSS recreating a referenced site's header and navigation."}
+{"candidate_id":"wildchat:7f626df9af6482de0d9185d871243414:0","include":true,"policies":["refactor"],"notes":"Requests help translating an existing PHP function to Python."}
+{"candidate_id":"wildchat:82f6366d03a7249958ece078cdeec2e6:0","include":true,"policies":["feature"],"notes":"Requests a substantial Streamlit Instagram analytics implementation based on supplied starter code."}
+{"candidate_id":"wildchat:8690d02b3276013399530e7f74aacf5b:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks to see the syntax of an if-then-else statement in a shell script."}
+{"candidate_id":"wildchat:87c57b0fa657b9635e6d8d4d44d68ec7:0","include":true,"policies":["feature","performance"],"notes":"Requests expanding a sentiment model from two to three labels and explicitly optimizing its components."}
+{"candidate_id":"wildchat:8be2182ec963f4f6ea8a1990f9232323:0","include":true,"policies":["feature"],"notes":"Requests Python code comparing two lists and returning their differing values."}
+{"candidate_id":"wildchat:93d9510aa2989b6f664c248e25f68ee7:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for the SQL Server command used to change databases."}
+{"candidate_id":"wildchat:960d9fe097c4c5dd71daab9d01eee087:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests rewriting and summarizing an article as editorial prose."}
+{"candidate_id":"wildchat:96d31fa152ea384977a165b69e31158d:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a role-playing medical training plan and lecture script for GTA 5."}
+{"candidate_id":"wildchat:9964ea49b86e3ed65cae7eb316f5e55b:0","include":true,"policies":["research"],"notes":"Requests discovery of a program or technique for inspecting browser network traffic."}
+{"candidate_id":"wildchat:9e77b95cd1253b703ce457dd17f33d0b:0","include":true,"policies":["feature"],"notes":"Requests a Python program that validates employee records and generates unique email addresses."}
+{"candidate_id":"wildchat:a0977afa4d972841d1ceb7d8778e05fb:0","include":true,"policies":["bugfix"],"notes":"Asks how to filter an unexpected protocol prefix from Python Redis data."}
+{"candidate_id":"wildchat:a60972ef1d2195d9ef9e5a18f3f6b29d:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests combining two Dutch appraisal passages rather than software work."}
+{"candidate_id":"wildchat:a7bd5994d01ad6ace13d4144c8e37394:0","include":true,"policies":["feature"],"notes":"Requests implementation guidance for a Garry's Mod shapeshifting NPC and detection mechanics."}
+{"candidate_id":"wildchat:aa5646bb0d679e05fb420d57abb799f6:0","include":true,"policies":["feature"],"notes":"Requests a batch script that runs privileged commands remotely through PuTTY."}
+{"candidate_id":"wildchat:aa5f2db44b16c129235d6e4867c9391d:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests thirty comments for an external productivity article."}
+{"candidate_id":"wildchat:b1937b3a6797c1fff6bd6fd3c3d7b333:0","include":true,"policies":["feature"],"notes":"Requests pseudocode simulating operational control of an urban heating network."}
+{"candidate_id":"wildchat:b45d170379167b70c8129ee1b0c7a9fb:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests improving product-description prose rather than software work."}
+{"candidate_id":"wildchat:b8f00fc619efe50b9ae0a896598ec852:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Requests a catalog and explanation of JavaFX Canvas drawing APIs."}
+{"candidate_id":"wildchat:ba1522ab46854dc674672ccacfdd5d57:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a digital-marketing sales script rather than software work."}
+{"candidate_id":"wildchat:bb4b671ffed0e2303d7318cdf25df93b:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks why API Gateway authorizer failures reach the client differently from API errors."}
+{"candidate_id":"wildchat:bb6faa9695f96ed4748a398d164666cd:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Only asks the agent to become familiar with an external repository and states no desired outcome."}
+{"candidate_id":"wildchat:c49d2f30eddbca0db0c5e27ff7a102dd:0","include":true,"policies":["feature"],"notes":"Requests Python Maya logic constraining one locator channel from two other channels."}
+{"candidate_id":"wildchat:d11813132a0eac1aa85765b475c31bc1:0","include":true,"policies":["feature"],"notes":"Requests an Arduino Nano USB mass-storage host implementation."}
+{"candidate_id":"wildchat:d52868e05952c3bc73a243b057c63b8d:0","include":true,"policies":["feature"],"notes":"Requests C++ bitmap-scaling code using StretchBlt."}
+{"candidate_id":"wildchat:d5e4614fc048ba1645c0db5279cd9bb0:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a script about a sports team rather than software work."}
+{"candidate_id":"wildchat:d6a1895ff1b08723f4a45abb2a147cca:0","include":true,"policies":["feature"],"notes":"Requests JavaScript code for the Love Letter board game."}
+{"candidate_id":"wildchat:d8eb0d6d0f9d6b6193bdf349d2141ed9:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests fifty comments for an external news article."}
+{"candidate_id":"wildchat:da9f4b7299eb66e0ce4ee637e5b693e2:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a prose script based on a basketball season schedule."}
+{"candidate_id":"wildchat:db0f1b919d40c4b0bee6c7d9e5addf46:0","include":true,"policies":["feature"],"notes":"Requests an HbbTV website that streams an M3U8 source."}
+{"candidate_id":"wildchat:db47f1b9c3db60f36cc2d121b7f2f0cc:0","include":true,"policies":["feature"],"notes":"Requests a one-line Python implementation for handling Ctrl+C."}
+{"candidate_id":"wildchat:de27580df56fafa092aab11860f84dff:0","include":true,"policies":[],"uncategorized_reason":"out_of_domain","notes":"Requests a long fictional screenplay scene rather than software work."}
+{"candidate_id":"wildchat:de2891c509e455961085a40177ac15be:0","include":true,"policies":["feature"],"notes":"Requests Python code converting an image to ASCII art."}
+{"candidate_id":"wildchat:eb327b09a69b119445e6be26afebe64c:0","include":true,"policies":["feature"],"notes":"Requests a Discord bot that infers a player's first Sea of Thieves session from Xbox achievements."}
+{"candidate_id":"wildchat:f1acd9bb7ea04192d847803e08a80317:0","include":true,"policies":[],"uncategorized_reason":"ambiguous_method","notes":"Provides an AJAX request snippet without a question, failure report, or requested outcome."}
+{"candidate_id":"wildchat:f2610fc3133b95098fc189a8f1438152:0","include":true,"policies":["feature"],"notes":"Requests adding fenced-code recognition and rendering to an existing Vue chat interface."}
+{"candidate_id":"wildchat:f2f856ae5efa9f32c6accaae4bd2899d:0","include":true,"policies":["feature"],"notes":"Requests a substantial Streamlit Instagram analytics implementation based on supplied starter code."}
+{"candidate_id":"wildchat:f3e7058a1a88d820b02d740bc64a82c2:0","include":true,"policies":["feature"],"notes":"Requests a progressive piece-upgrade system for a Python match-three game."}
+{"candidate_id":"wildchat:f50f376e94764235100511edb3fdc4ee:0","include":true,"policies":["feature"],"notes":"Requests the index.js code for an Xbox-achievement Discord bot."}
+{"candidate_id":"wildchat:f52339b0a864c2d6e20c68e8d79fef69:0","include":true,"policies":["feature"],"notes":"Requests a Python implementation of beta-weighted investment returns from a supplied description."}
+{"candidate_id":"wildchat:f65b3351274b9616e9eee60c4dba1867:0","include":true,"policies":["feature"],"notes":"Requests stub methods for a supplied Spring payment endpoint signature."}
+{"candidate_id":"wildchat:fa0796c74368c479f5a5097dd7a599da:0","include":true,"policies":[],"uncategorized_reason":"answer_only","notes":"Asks for the default PHP SQLite directory location."}
+{"candidate_id":"wildchat:fe1612c3b66344f998502535953c8ac8:0","include":true,"policies":["feature"],"notes":"Requests modifying an existing sentiment model to use Indonesian Word2Vec vectors."}
