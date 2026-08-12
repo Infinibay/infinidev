@@ -171,10 +171,16 @@ class ToolRunner:
         conversation.
         """
         message = llm_result.message
+        from infinidev.engine.behavior.reasoning_content import (
+            reasoning_history_fields,
+        )
+
+        history_fields = reasoning_history_fields(message)
         if ctx.manual_tc:
             messages.append({
                 "role": "assistant",
                 "content": getattr(message, "content", "") or llm_result.raw_content,
+                **history_fields,
             })
             return
 
@@ -185,6 +191,7 @@ class ToolRunner:
         messages.append({
             "role": "assistant",
             "content": message.content or "",
+            **history_fields,
             "tool_calls": [
                 {
                     "id": tc.id,

@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from infinidev.engine.task_policies.models import TaskProfile
+
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
@@ -29,6 +31,7 @@ class GoalSpec(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     planning_context: str = ""
     intent: Literal["informational", "implementation", "mixed"] = "mixed"
+    task_profile: TaskProfile | None = None
 
 
 class StageTaskSpec(BaseModel):

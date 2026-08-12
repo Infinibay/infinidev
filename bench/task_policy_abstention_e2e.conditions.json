@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "purpose": "Prompt-only E2E check for a learned uncategorized abstention",
+  "dataset_sha256": "f38d2bc463932360d0baf8c14482ca43442ca6b910b0a0977917e531a06590e8",
+  "task_split": "validation",
+  "task_ids": [
+    "neutral-ack"
+  ],
+  "task_count": 1,
+  "conditions_per_task": 2,
+  "repetitions": 1,
+  "planned_executions": 2,
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3:api-observed-2026-08-11",
+  "treatment": "task_policy",
+  "utility_profile_sha256": "3ec6e54d7ffc7bdc390430ec045c343e18c2bd79f3c432486b86529498cf0ab5",
+  "utility_profile": {
+    "schema_version": 1,
+    "provenance": "explicit_user",
+    "name": "task-policy-abstention-e2e",
+    "description": "Prefer a literal concise response with no repository side effects.",
+    "weights": {
+      "quality": 1.0
+    }
+  },
+  "conditions": {
+    "baseline": null,
+    "candidate": {
+      "system_prompt": "runtime:conditional-task-policies-v1"
+    }
+  },
+  "execution_contract": {
+    "fresh_workspace_per_execution": true,
+    "fresh_agent_session_per_execution": true,
+    "parallel_requests": false,
+    "minimum_llm_request_interval_seconds": 2.0,
+    "automatic_llm_retries": false,
+    "stop_on_first_runtime_or_provider_error": true,
+    "semantic_routing_enabled": true,
+    "llm_classifier_enabled": false
+  },
+  "interpretation_boundary": "This pair verifies abstention wiring and no prompt intervention; it does not measure coding quality."
+}

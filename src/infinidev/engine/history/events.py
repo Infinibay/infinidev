@@ -33,6 +33,7 @@ VISIBILITY_ARCHIVE_ONLY: str = "archive_only"
 # ── Run lifecycle ────────────────────────────────────────────────────────────
 RUN_STARTED = "run_started"
 ENGINE_SELECTED = "engine_selected"
+TASK_PROFILE_RESOLVED = "task_profile_resolved"
 ENGINE_SWITCHED = "engine_switched"
 RUN_PAUSED = "run_paused"
 RUN_RESUMED = "run_resumed"
@@ -71,7 +72,7 @@ DIGEST_CREATED = "digest_created"
 #: Every event type the current build may write. Readers use this to validate
 #: filters; writers are not restricted to it (forward compatibility).
 KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
-    RUN_STARTED, ENGINE_SELECTED, ENGINE_SWITCHED,
+    RUN_STARTED, ENGINE_SELECTED, ENGINE_SWITCHED, TASK_PROFILE_RESOLVED,
     RUN_PAUSED, RUN_RESUMED, RUN_CANCELLED,
     RUN_COMPLETED, RUN_BLOCKED, RUN_FAILED,
     GOAL_REVISED, GOAL_RESOLVED,
@@ -118,6 +119,7 @@ __all__ = [
     "DIGEST_CREATED",
     "ENGINE_SELECTED",
     "ENGINE_SWITCHED",
+    "TASK_PROFILE_RESOLVED",
     "EVIDENCE_ATTACHED",
     "ExecutionEvent",
     "GOAL_RESOLVED",

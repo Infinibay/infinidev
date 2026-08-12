@@ -1,4 +1,4 @@
-"""Typed boundaries for behavior, execution, objective, and evidence prompts."""
+"""Typed boundaries for behavior, execution, task policy, objective, and evidence."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ from enum import StrEnum
 
 
 class PromptLayerKind(StrEnum):
-    """The four prompt responsibilities that must not be calibrated together."""
+    """Prompt responsibilities that must not be calibrated together."""
 
     BEHAVIOR = "behavior"
     EXECUTION_POLICY = "execution-policy"
+    TASK_POLICY = "task-policy"
     OBJECTIVE = "objective"
     CONTEXT_EVIDENCE = "context-evidence"
 
@@ -18,6 +19,7 @@ class PromptLayerKind(StrEnum):
 _TAGS = {
     PromptLayerKind.BEHAVIOR: "behavior-layer",
     PromptLayerKind.EXECUTION_POLICY: "execution-policy-layer",
+    PromptLayerKind.TASK_POLICY: "task-policy-layer",
     PromptLayerKind.OBJECTIVE: "objective-layer",
     PromptLayerKind.CONTEXT_EVIDENCE: "context-evidence-layer",
 }

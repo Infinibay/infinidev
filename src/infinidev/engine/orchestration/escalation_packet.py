@@ -72,3 +72,6 @@ class EscalationPacket:
     # Set by an enrichment phase when execution must stop until the user
     # supplies authority for a costly, external, or destructive decision.
     execution_blocked_reason: str = ""
+    # Resolved once from the literal request after enrichment and reused by
+    # every engine. Typed loosely to keep this handoff module cycle-free.
+    task_profile: Any | None = None

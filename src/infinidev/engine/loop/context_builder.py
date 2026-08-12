@@ -64,6 +64,26 @@ def _normalize_total_tool_budget(value: int) -> int | None:
     return budget if budget > 0 else None
 
 
+def _resolve_identity_override(
+    agent: Any,
+    tools: list[Any],
+    explicit_override: str | None,
+) -> str | None:
+    """Keep the developer core tool-aware without replacing custom identities."""
+    if explicit_override is not None:
+        return explicit_override
+
+    existing = getattr(agent, "_system_prompt_identity", None)
+    if getattr(agent, "role", "") != "developer":
+        return existing
+
+    from infinidev.prompts.flows.develop import DEVELOP_IDENTITY, get_develop_identity
+
+    if existing not in {None, DEVELOP_IDENTITY}:
+        return existing
+    return get_develop_identity({tool.name for tool in tools})
+
+
 def build_execution_context(
     engine: Any, agent: Any, task_prompt: tuple[str, str], **kwargs: Any,
 ) -> ExecutionContext:
@@ -167,14 +187,18 @@ def build_execution_context(
     )
     tool_dispatch = build_tool_dispatch(tools) if tools else {}
 
+    task_profile = getattr(kwargs.get("task"), "task_profile", None)
+    identity_override = _resolve_identity_override(
+        agent,
+        tools,
+        kwargs.get("identity_override"),
+    )
+
     system_prompt = build_system_prompt(
         agent.backstory,
         tech_hints=getattr(agent, "_tech_hints", None),
         session_summaries=getattr(agent, "_session_summaries", None),
-        identity_override=(
-            kwargs.get("identity_override")
-            or getattr(agent, "_system_prompt_identity", None)
-        ),
+        identity_override=identity_override,
         protocol_override=getattr(agent, "_system_prompt_protocol", None),
         small_model=is_small,
         workspace_path=getattr(agent, "workspace_path", None),
@@ -184,6 +208,18 @@ def build_execution_context(
     from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
     system_prompt = apply_calibrated_guidance(system_prompt, "developer")
+    from infinidev.engine.task_policies.rendering import (
+        compose_task_aware_system_prompt,
+    )
+
+    system_prompt = compose_task_aware_system_prompt(
+        system_prompt,
+        task_profile,
+        role="developer",
+        phase="execute",
+        max_utf8_bytes=settings.TASK_POLICIES_MAX_UTF8_BYTES,
+        cache_boundary=True,
+    )
     if manual_tc:
         # No function-calling support: the schemas have to be described in
         # prose, because there is no channel to pass them through.
@@ -262,6 +298,7 @@ def _resolve_tools(
     *,
     description: str = "",
     initial_plan: Any | None = None,
+    task_profile: Any | None = None,
 ) -> list:
     """Pick the toolset and make sure it is bound to this agent.
 
@@ -302,7 +339,9 @@ def _resolve_tools(
     if settings.DYNAMIC_TOOL_ROUTING_ENABLED:
         from infinidev.engine.tool_routing import select_developer_tools
 
-        tools = select_developer_tools(tools, description, initial_plan)
+        tools = select_developer_tools(
+            tools, description, initial_plan, task_profile=task_profile,
+        )
 
         # Dynamic routing may be handed a partial external toolbox containing
         # only MCP tools. The developer loop cannot inspect or verify a Task
@@ -319,6 +358,7 @@ def _resolve_tools(
                 get_tools_for_role("developer", small_model=False),
                 description,
                 initial_plan,
+                task_profile=task_profile,
             )
             known = {getattr(tool, "name", "") for tool in tools}
             tools.extend(

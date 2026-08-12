@@ -24,7 +24,6 @@ from infinidev.engine.orchestration.task_schema import (
     Task,
     is_synthesised,
 )
-
 _AUTO_NOTE = (
     'This task was auto-generated from raw user free-text. The '
     '<acceptance-criteria> below is a placeholder, not user-authored. '

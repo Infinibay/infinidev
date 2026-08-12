@@ -1,0 +1,14 @@
+{
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3:api-observed-2026-08-11",
+  "base_url": "https://api.minimax.io/v1",
+  "api_key_env": "MINIMAX_API_KEY",
+  "repetitions": 1,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 16,
+  "max_total_tool_calls": 80,
+  "max_tool_calls_per_action": 20,
+  "verify_timeout_seconds": 120.0,
+  "treatment": "task_policy"
+}

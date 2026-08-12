@@ -18,8 +18,9 @@ from infinidev.engine.engine_logging import (
     RED as _RED,
     RESET as _RESET,
 )
-from infinidev.engine.loop.context import build_system_prompt, build_tools_prompt_section
+from infinidev.engine.loop.context import build_tools_prompt_section
 from infinidev.engine.loop.models import StepResult
+from infinidev.engine.behavior.reasoning_content import extract_reasoning
 from infinidev.engine.formats.tool_call_parser import (
     ManualToolCall as _ManualToolCall,
     parse_text_tool_calls as _parse_text_tool_calls,
@@ -467,9 +468,7 @@ class LLMCaller:
         choice = response.choices[0]
         message = choice.message
         raw_content = normalize_message_text(message.content).strip()
-        reasoning_content = normalize_message_text(
-            getattr(message, "reasoning_content", None)
-        ).strip()
+        reasoning_content = extract_reasoning(message).text
 
         # Parse tool calls from text
         parsed = _parse_text_tool_calls(raw_content)
@@ -549,9 +548,7 @@ class LLMCaller:
         raw = normalize_message_text(getattr(message, "content", None)).strip()
         return LLMCallResult(
             tool_calls=tool_calls, message=message, raw_content=raw,
-            reasoning_content=normalize_message_text(
-                getattr(message, "reasoning_content", None)
-            ).strip(),
+            reasoning_content=extract_reasoning(message).text,
         )
 
     @staticmethod
@@ -629,9 +626,7 @@ class LLMCaller:
         raw_content = normalize_message_text(
             getattr(message, "content", None)
         ).strip()
-        reasoning_content = normalize_message_text(
-            getattr(message, "reasoning_content", None)
-        ).strip()
+        reasoning_content = extract_reasoning(message).text
         if not raw_content and not reasoning_content:
             return None
 
@@ -714,18 +709,18 @@ class LLMCaller:
             )
             ctx.manual_tc = True
             tools_section = build_tools_prompt_section(ctx.tool_schemas, small_model=ctx.is_small)
-            ctx.system_prompt = build_system_prompt(
-                ctx.agent.backstory,
-                tech_hints=getattr(ctx.agent, '_tech_hints', None),
-                session_summaries=getattr(ctx.agent, '_session_summaries', None),
-                identity_override=getattr(ctx.agent, '_system_prompt_identity', None),
+            # Preserve the already composed model, task, role, project, and
+            # cache-boundary layers. Rebuilding from the agent identity here
+            # used to silently drop conditional task guidance on FC fallback.
+            from infinidev.engine.prompt_composition import (
+                append_dynamic_system_layer,
             )
-            from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
-            ctx.system_prompt = apply_calibrated_guidance(
-                ctx.system_prompt, "developer"
+            ctx.system_prompt = append_dynamic_system_layer(
+                ctx.system_prompt,
+                tools_section,
+                cache_boundary=True,
             )
-            ctx.system_prompt = f"{ctx.system_prompt}\n\n{tools_section}"
             messages[0] = {"role": "system", "content": ctx.system_prompt}
             return LLMCallResult(should_retry=True)
 

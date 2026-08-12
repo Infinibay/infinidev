@@ -200,6 +200,35 @@ class Settings(BaseSettings):
     # exhaustion is terminal and reported with the concrete Task evidence.
     STAGED_MAX_TASK_ATTEMPTS: int = 2
     DYNAMIC_TOOL_ROUTING_ENABLED: bool = True
+    # Conditional task policies derive one shared, multi-label TaskProfile.
+    # Semantic and LLM stages may suggest methods but never write authority.
+    TASK_POLICIES_ENABLED: bool = True
+    # The trained mini-head is active only behind literal/contrastive agreement;
+    # it can choose method guidance but cannot grant write or release authority.
+    TASK_POLICIES_SHADOW_MODE: bool = False
+    TASK_POLICIES_EMBEDDINGS_ENABLED: bool = True
+    TASK_POLICIES_LLM_FALLBACK_ENABLED: bool = False
+    TASK_POLICIES_EMBEDDING_MIN_SCORE: float = 0.18
+    TASK_POLICIES_EMBEDDING_MIN_MARGIN: float = 0.04
+    TASK_POLICIES_MAX_SELECTED: int = 3
+    TASK_POLICIES_MAX_UTF8_BYTES: int = 3600
+    TASK_POLICIES_SHOW_SELECTION: bool = False
+    # Known model routes inject only fragment versions that passed a clean
+    # paired E2E gate. Classification and telemetry remain active for shadowed
+    # fragments, so one harmful method does not disable the whole router.
+    TASK_POLICIES_EVIDENCE_GATED: bool = True
+    # Runtime behavior detection is local and observable-only. Production
+    # defaults record labels without changing prompts until repeated E2E gates
+    # establish a causal improvement across models and project families.
+    ADAPTIVE_RUNTIME_BEHAVIOR_ENABLED: bool = True
+    ADAPTIVE_RUNTIME_BEHAVIOR_SHADOW_MODE: bool = True
+    ADAPTIVE_RUNTIME_SEMANTIC_SHADOW_ENABLED: bool = False
+    ADAPTIVE_RUNTIME_REASONING_ENABLED: bool = True
+    # The mini-head may guide the next turn only after a separate observable
+    # gate agrees; it cannot grant tools, permissions, scope, or release rights.
+    ADAPTIVE_RUNTIME_REASONING_SHADOW_MODE: bool = False
+    ADAPTIVE_RUNTIME_MAX_INTERVENTIONS: int = 2
+    ADAPTIVE_RUNTIME_OPENED_FILES_MAX_CHARS: int = 16_000
     LOOP_HISTORY_WINDOW: int = 0  # 0 = keep all
     LOOP_STEP_NUDGE_THRESHOLD: int = 6  # Nudge agent to call step_complete after N tool calls
     LOOP_SUMMARIZER_ENABLED: bool = True  # Use dedicated LLM call for step summaries

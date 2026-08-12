@@ -28,6 +28,7 @@ import threading
 import time
 from typing import Any
 
+from infinidev.config.settings import settings
 from infinidev.engine.base import AgentEngine
 from infinidev.engine.hooks.hooks import (
     hook_manager as _hook_manager,
@@ -529,16 +530,38 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     verified_by_current_test = bool(
         getattr(tracker, "successful_test_commands", ())
     )
+    verified_by_persisted_test = False
+    if (
+        file_tracker is not None
+        and hasattr(file_tracker, "change_fingerprint")
+        and getattr(ctx.state, "last_test_exit_code", None) == 0
+        and getattr(ctx.state, "last_test_command", "")
+    ):
+        from infinidev.engine.guidance import normalize_test_command
+
+        test_key = normalize_test_command(ctx.state.last_test_command)
+        verified_by_persisted_test = (
+            ctx.state.test_workspace_fingerprints.get(test_key)
+            == file_tracker.change_fingerprint(reconcile=True)
+        )
     verified_existing_effect = (
         not active.user_approved
         and ctx.state.task_has_edits
-        and (verified_by_declared_check or verified_by_current_test)
+        and (
+            verified_by_declared_check
+            or verified_by_current_test
+            or verified_by_persisted_test
+        )
     )
     if verified_existing_effect:
         evidence = (
             "its deterministic declared verification"
             if verified_by_declared_check
-            else "a successful test command in this Step"
+            else (
+                "a successful test command in this Step"
+                if verified_by_current_test
+                else "a persisted green test for the unchanged workspace"
+            )
         )
         step_result.summary = (
             f"{step_result.summary.rstrip()} "
@@ -1426,8 +1449,14 @@ class LoopEngine(AgentEngine):
         tracker = BehaviorTracker(set(ctx.state.opened_files.keys()))
         tracker.task_has_edits = ctx.state.task_has_edits
         file_tracker = getattr(ctx, "file_tracker", None)
+        step_start_fingerprint = (
+            file_tracker.change_fingerprint(reconcile=True)
+            if file_tracker is not None
+            and hasattr(file_tracker, "change_fingerprint")
+            else None
+        )
         if file_tracker is not None and hasattr(file_tracker, "change_fingerprint"):
-            guard.seed_workspace_fingerprint(file_tracker.change_fingerprint())
+            guard.seed_workspace_fingerprint(step_start_fingerprint)
         active_step = ctx.state.plan.active_step
         if active_step is not None:
             entry_fingerprints = ctx.state.step_entry_change_fingerprints
@@ -1547,6 +1576,10 @@ class LoopEngine(AgentEngine):
             except Exception as _trace_err:
                 logger.warning("reasoning trace emit failed: %s", _trace_err)
 
+            observe_reasoning = getattr(self._guidance, "observe_reasoning", None)
+            if callable(observe_reasoning):
+                observe_reasoning(ctx, messages[step_messages_start:], result)
+
             if result.should_retry:
                 continue
             if completion_only:
@@ -1639,6 +1672,9 @@ class LoopEngine(AgentEngine):
                     # Only pseudo-tools, no regular tools
                     self._build_pseudo_only_messages(ctx, classified, messages, result)
                     ContextManager.expire_thinking(messages)
+                    inject_pending = getattr(self._guidance, "inject_pending", None)
+                    if callable(inject_pending):
+                        inject_pending(ctx, messages)
                     # A turn that closes the step is going somewhere; one
                     # that only thinks is the case that can spin forever,
                     # because nothing here spends the step's budget.
@@ -1669,6 +1705,9 @@ class LoopEngine(AgentEngine):
                 # Text-only response
                 content = result.raw_content
                 forced = guard.handle_text_only(ctx, messages, content)
+                inject_pending = getattr(self._guidance, "inject_pending", None)
+                if callable(inject_pending):
+                    inject_pending(ctx, messages)
                 if forced:
                     step_result = forced
                     break
@@ -1697,12 +1736,14 @@ class LoopEngine(AgentEngine):
         return self._finalize_inner_loop(
             ctx, step_result, action_tool_calls, tracker,
             saw_tool_calls=saw_tool_calls,
+            step_start_fingerprint=step_start_fingerprint,
         )
 
     def _finalize_inner_loop(
         self, ctx: ExecutionContext, step_result: StepResult | None,
         action_tool_calls: int, tracker: BehaviorTracker,
         *, saw_tool_calls: bool = False,
+        step_start_fingerprint: tuple[tuple[str, str], ...] | None = None,
     ) -> StepResult:
         """Default step_result, propagate edit state, attach metadata."""
         if step_result is None:
@@ -1715,6 +1756,16 @@ class LoopEngine(AgentEngine):
         tracker.on_step_end()
         active = ctx.state.plan.active_step
         file_tracker = getattr(ctx, "file_tracker", None)
+        if active is not None and step_start_fingerprint is not None:
+            # A model may create its first Step and edit inside the same tool
+            # window. There was no active Step when the window began, so seed
+            # its entry from the pre-window workspace. Seeding on the next
+            # iteration would capture the post-edit state and erase evidence
+            # of the successful change, trapping the Step forever.
+            ctx.state.step_entry_change_fingerprints.setdefault(
+                active.index,
+                step_start_fingerprint,
+            )
         current_fingerprint = (
             file_tracker.change_fingerprint(reconcile=True)
             if file_tracker is not None

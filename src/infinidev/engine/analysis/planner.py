@@ -105,6 +105,18 @@ def run_planner(
     planner_prompt = apply_calibrated_guidance(
         TASK_PLANNER_SYSTEM_PROMPT, "planner"
     )
+    from infinidev.config.settings import settings
+    from infinidev.engine.task_policies.rendering import (
+        compose_task_aware_system_prompt,
+    )
+
+    planner_prompt = compose_task_aware_system_prompt(
+        planner_prompt,
+        escalation.task_profile,
+        role="planner",
+        phase="plan",
+        max_utf8_bytes=settings.TASK_POLICIES_MAX_UTF8_BYTES,
+    )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": planner_prompt},
         {"role": "user", "content": _user_content},

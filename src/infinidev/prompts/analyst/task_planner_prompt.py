@@ -112,26 +112,22 @@ the Step runs or inspects the evidence that establishes that claim.
 Write the overview, derived checks and Steps in the language of the Goal. \
 Communicate solely through tool calls.
 
-## Example of Step granularity
+## Output-shape example
 
-This example teaches the output shape and evidence boundary. Its paths, test \
-names and behavior are not evidence for another Task.
+This deliberately method-neutral example teaches only the output boundary. Its \
+paths, test names and behavior are not evidence for another Task. Task-specific \
+planning methods arrive in a conditional policy fragment.
 
     emit_task_plan(
-        overview="Repair the observed expiry check and verify its callers",
-        derived_verification_criteria=[
-            "validate_token rejects a token whose exp value is in the past",
-        ],
-        steps=[
-            {{
-                "title": "auth/jwt.py validate_token: reject expired tokens",
-                "detail": "Update the observed comparison while preserving the "
-                          "callers' current return contract. Close blocked if a "
-                          "caller relies on accepting an expired token.",
-                "verify_kind": "test_id",
-                "verify_spec": "tests/test_auth.py::test_rejects_expired",
-            }},
-        ],
+        overview="Apply the observed Task change and verify its contract",
+        derived_verification_criteria=["The requested observable outcome holds"],
+        steps=[{{
+            "title": "observed/module.py target: apply the requested change",
+            "detail": "Use the observed implementation boundary; revise this tactic if "
+                      "later evidence disproves it.",
+            "verify_kind": "command",
+            "verify_spec": "observed read-only verification command",
+        }}],
     )
 """
 

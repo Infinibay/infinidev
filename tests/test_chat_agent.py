@@ -159,6 +159,36 @@ class TestEscalateTerminator:
         assert "algorithmic route" in result.escalation.user_signal
         assert scripted.calls == []
 
+    def test_mini_head_and_literal_authority_bypass_sol_empty_router(self, patch_litellm):
+        scripted = patch_litellm([])
+
+        result = run_chat_agent(
+            "Fix pages_needed so a partial final page is included, exact multiples stay "
+            "unchanged, zero items need zero pages, and invalid page sizes keep raising "
+            "ValueError. Change only the implementation and run the relevant tests."
+        )
+
+        assert result.kind == "escalate"
+        assert result.escalation is not None
+        assert "mini-head method" in result.escalation.user_signal
+        assert scripted.calls == []
+
+    def test_literal_bugfix_bypasses_chat_when_mini_head_abstains(self, patch_litellm):
+        scripted = patch_litellm([])
+
+        result = run_chat_agent(
+            "Fix retry scheduling so Retry-After accepts both delta-seconds and HTTP "
+            "dates relative to the injected clock, past dates clamp to zero, and "
+            "exhausted requests never sleep after the final attempt. Preserve the "
+            "public API and exponential fallback, change only implementation files, "
+            "do not edit tests, and run the full suite."
+        )
+
+        assert result.kind == "escalate"
+        assert result.escalation is not None
+        assert "literal task method" in result.escalation.user_signal
+        assert scripted.calls == []
+
     def test_referenced_continuation_bypasses_llm_router(self, patch_litellm):
         scripted = patch_litellm([])
 
@@ -179,7 +209,8 @@ class TestEscalateTerminator:
             "Do not change unrelated behavior."
         ) >= 4
 
-    def test_escalate_populates_packet(self, patch_litellm):
+    def test_escalate_populates_packet(self, patch_litellm, monkeypatch):
+        monkeypatch.setattr(settings, "TASK_POLICIES_ENABLED", False)
         patch_litellm([
             _response([_tc("escalate", {
                 "understanding": "Fix JWT validation bug in auth.py",
@@ -250,7 +281,10 @@ class TestGracefulFailureModes:
         assert result.kind == "respond"
         assert result.reply == "Continuaré con la opción B."
 
-    def test_narrated_escalation_cannot_silently_end_execution(self, patch_litellm):
+    def test_narrated_escalation_cannot_silently_end_execution(
+        self, patch_litellm, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "TASK_POLICIES_ENABLED", False)
         patch_litellm([
             _response(
                 content=(

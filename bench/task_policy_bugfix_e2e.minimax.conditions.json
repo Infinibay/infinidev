@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "purpose": "Prompt-only bugfix policy evaluation of the generic core on MiniMax M3",
+  "dataset_sha256": "21e2265c7e1a0c1b1024898f939b7e88c2e134ce883323aaf7b3897ddd753b43",
+  "task_split": "validation",
+  "task_ids": ["pagination-boundary"],
+  "task_count": 1,
+  "conditions_per_task": 2,
+  "repetitions": 1,
+  "planned_executions": 2,
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3:api-observed-2026-08-11",
+  "treatment": "task_policy",
+  "utility_profile_sha256": "f60776185b688a301ab4c361dd7b2b37706bdcda1dca73291bddb45d404e41f8",
+  "utility_profile": {
+    "schema_version": 1,
+    "provenance": "explicit_user",
+    "name": "task-policy-e2e-neutral",
+    "description": "Prefer correct, scoped repository work with concrete verification. The paired treatment must vary only conditional task policies.",
+    "weights": {"quality": 1.0}
+  },
+  "conditions": {
+    "baseline": null,
+    "candidate": {"system_prompt": "runtime:conditional-task-policies-v1"}
+  },
+  "interpretation_boundary": "One pair can reject a harmful prompt but cannot establish broad bugfix quality."
+}

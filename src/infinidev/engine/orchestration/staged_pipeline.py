@@ -358,6 +358,7 @@ def _execute_stage(
             ),
             acceptance_criteria=list(state.goal.acceptance_criteria) or None,
             derived_verification_criteria=task_checks,
+            task_profile=state.goal.task_profile,
         )
         task_prompt = pipeline_mod._run_gather_phase(
             user_input=task.spec.title,
@@ -559,6 +560,7 @@ def _goal_from_escalation(escalation: EscalationPacket) -> GoalSpec:
         constraints=confirmed_constraints,
         planning_context="\n\n".join(planning_context),
         intent=_infer_goal_intent(escalation),
+        task_profile=escalation.task_profile,
     )
 
 

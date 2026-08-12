@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-11",
+  "review_scope": "Observable tool-call and tool-result trace only; no private chain-of-thought",
+  "condition_manifest_sha256": "54207734543a29f4f14a68e9cb83459b36eb613dc0f520734fe4cc7e6bc9b477",
+  "reviews": [
+    {
+      "task_id": "pmap-stop-on-error-type",
+      "condition": "candidate",
+      "label": "excessive_discovery",
+      "verdict": "true_positive",
+      "evidence": "At the queued event the Step had 8 calls, at least 4 discovery calls and 2 reads, with no file edit and no parsed test outcome. The intervention did not widen scope or authority."
+    }
+  ]
+}

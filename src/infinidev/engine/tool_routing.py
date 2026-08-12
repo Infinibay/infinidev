@@ -115,7 +115,12 @@ def _routing_description(description: str) -> str:
     return _RESULT_KIND_SUFFIX_RE.sub("", match.group(1)).strip()
 
 
-def task_capabilities(description: str, initial_plan: Any | None = None) -> set[str]:
+def task_capabilities(
+    description: str,
+    initial_plan: Any | None = None,
+    *,
+    task_profile: Any | None = None,
+) -> set[str]:
     """Infer optional capabilities from user text plus planner decomposition."""
 
     parts = [_routing_description(description)]
@@ -127,22 +132,37 @@ def task_capabilities(description: str, initial_plan: Any | None = None) -> set[
                 for field in ("title", "detail", "expected_output")
             )
     corpus = "\n".join(parts)
-    return {
+    capabilities = {
         capability
         for capability, pattern in _CAPABILITY_PATTERNS.items()
         if pattern.search(corpus)
     }
+    operations = set(getattr(task_profile, "operations", ()) or ())
+    authority = set(getattr(task_profile, "authority", ()) or ())
+    if "refactor" in operations:
+        capabilities.add("advanced_refactor")
+    if "research" in operations:
+        capabilities.add("knowledge")
+    if "docs" in operations:
+        capabilities.add("docs")
+    if authority & {"commit", "publish"}:
+        capabilities.add("git_mutation")
+    return capabilities
 
 
 def select_developer_tools(
     tools: list[Any],
     description: str,
     initial_plan: Any | None = None,
+    *,
+    task_profile: Any | None = None,
 ) -> list[Any]:
     """Return the smallest toolbox that preserves the task's inferred capabilities."""
 
     enabled_names = set(_CORE)
-    for capability in task_capabilities(description, initial_plan):
+    for capability in task_capabilities(
+        description, initial_plan, task_profile=task_profile,
+    ):
         enabled_names.update(_CAPABILITY_TOOLS[capability])
 
     selected: list[Any] = []

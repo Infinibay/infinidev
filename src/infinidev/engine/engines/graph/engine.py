@@ -480,6 +480,7 @@ class GraphEngineAdapter:
                     else []
                 ),
             ],
+            task_profile=escalation.task_profile,
         )
         leaf_plan = Plan(
             overview=(

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "task_ids": ["pagination-boundary"],
+  "expected_candidate_fragments": {
+    "pagination-boundary": ["bugfix.developer"]
+  },
+  "gates": {
+    "success_regressions": 0,
+    "scope_regressions": 0,
+    "stable_system_char_delta_max": 2,
+    "aggregate_prompt_token_ratio_max": 1.0,
+    "aggregate_completion_token_ratio_max": 1.0,
+    "aggregate_tool_call_ratio_max": 1.0,
+    "aggregate_latency_ratio_max": 1.1,
+    "meaningful_reduction_ratio_max": 0.95,
+    "minimum_meaningfully_improved_metrics": 2
+  },
+  "interpretation_boundary": "One GPT-5.6 Terra pair supports route-specific rollout of bugfix.developer@3, not a family-wide or model-wide quality claim."
+}

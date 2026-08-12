@@ -10,10 +10,11 @@ from infinidev.engine.prompt_layers import (
 )
 
 
-def test_four_layer_kinds_are_distinct() -> None:
+def test_prompt_layer_kinds_are_distinct() -> None:
     assert {kind.value for kind in PromptLayerKind} == {
         "behavior",
         "execution-policy",
+        "task-policy",
         "objective",
         "context-evidence",
     }

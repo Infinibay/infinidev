@@ -30,8 +30,30 @@ from bench.agent_task_eval import (
 
 
 MIN_REQUEST_INTERVAL_SECONDS = 2.0
-_IGNORED_PARTS = frozenset({".git", ".infinidev", ".pytest_cache", "__pycache__"})
+_IGNORED_PARTS = frozenset(
+    {
+        ".git",
+        ".infinidev",
+        ".pytest_cache",
+        "__pycache__",
+        "build",
+        "node_modules",
+        "target",
+    }
+)
+_IGNORED_PART_SUFFIXES = (".egg-info",)
+_IGNORED_GENERATED_PATHS = frozenset(
+    {
+        "test/test_default",
+        "test/test_links",
+        "test/test_strict",
+        "test/test_strict_links",
+    }
+)
 _CONDITIONS = ("baseline", "candidate")
+_TREATMENTS = ("adaptive_behavior", "prompt_calibration", "task_policy")
+TASK_POLICY_TREATMENT_MARKER = "runtime:conditional-task-policies-v1"
+ADAPTIVE_BEHAVIOR_TREATMENT_MARKER = "runtime:adaptive-observable-behavior-v1"
 
 
 @dataclass(frozen=True)
@@ -49,6 +71,7 @@ class AgentTaskRunConfig:
     max_total_tool_calls: int = 80
     max_tool_calls_per_action: int = 20
     verify_timeout_seconds: float = 120.0
+    treatment: str = "prompt_calibration"
 
     @classmethod
     def from_path(cls, path: Path) -> AgentTaskRunConfig:
@@ -69,6 +92,7 @@ class AgentTaskRunConfig:
             max_total_tool_calls=int(value.get("max_total_tool_calls", 80)),
             max_tool_calls_per_action=int(value.get("max_tool_calls_per_action", 20)),
             verify_timeout_seconds=float(value.get("verify_timeout_seconds", 120.0)),
+            treatment=str(value.get("treatment", "prompt_calibration")).strip(),
         )
         if not all((config.provider, config.model, config.model_identity)):
             raise ValueError("agent task config needs provider, model, and immutable identity")
@@ -88,6 +112,8 @@ class AgentTaskRunConfig:
             raise ValueError("agent task loop budgets must be positive")
         if config.verify_timeout_seconds <= 0:
             raise ValueError("agent task verifier timeout must be positive")
+        if config.treatment not in _TREATMENTS:
+            raise ValueError(f"unsupported agent task treatment: {config.treatment}")
         return config
 
 
@@ -105,6 +131,25 @@ def _workspace(path: Path) -> Iterator[None]:
             os.environ.pop("INFINIDEV_WORKSPACE", None)
         else:
             os.environ["INFINIDEV_WORKSPACE"] = previous_workspace
+
+
+def copy_workspace(source: Path, destination: Path) -> None:
+    """Copy an evaluation checkout without expanding repository symlinks."""
+    shutil.copytree(source, destination, symlinks=True)
+
+
+def _structured_evaluation_task(task: AgentTask, task_profile: object | None) -> object:
+    """Build the runtime Task with the benchmark's declared verifier visible."""
+    from infinidev.engine.orchestration.task_schema import task_from_free_text
+
+    return task_from_free_text(
+        task.request,
+        kind=task.category,
+        derived_verification_criteria=[
+            f"Run `{task.verify_command}` and require exit code 0 before completion."
+        ],
+        task_profile=task_profile,
+    )
 
 
 def _canonical_profile_sha(profile: Mapping[str, object]) -> str:
@@ -165,6 +210,16 @@ def configured_evaluation_runtime(
         "PROMPT_CALIBRATION_MODEL_IDENTITY",
         "PROMPT_CALIBRATION_UTILITY_PROFILE",
         "PROMPT_CALIBRATION_UTILITY_PROFILE_SHA256",
+        "TASK_POLICIES_ENABLED",
+        "TASK_POLICIES_SHADOW_MODE",
+        "TASK_POLICIES_EMBEDDINGS_ENABLED",
+        "TASK_POLICIES_LLM_FALLBACK_ENABLED",
+        "TASK_POLICIES_EVIDENCE_GATED",
+        "ADAPTIVE_RUNTIME_BEHAVIOR_ENABLED",
+        "ADAPTIVE_RUNTIME_BEHAVIOR_SHADOW_MODE",
+        "ADAPTIVE_RUNTIME_SEMANTIC_SHADOW_ENABLED",
+        "ADAPTIVE_RUNTIME_REASONING_ENABLED",
+        "ADAPTIVE_RUNTIME_REASONING_SHADOW_MODE",
     )
     previous = {name: getattr(settings, name) for name in setting_names}
     provider = get_provider(config.provider)
@@ -197,7 +252,46 @@ def configured_evaluation_runtime(
         settings.PROMPT_CALIBRATION_MODEL_IDENTITY = config.model_identity
         settings.PROMPT_CALIBRATION_UTILITY_PROFILE = profile["name"]
         settings.PROMPT_CALIBRATION_UTILITY_PROFILE_SHA256 = profile_sha
-        if condition == "candidate":
+        if config.treatment == "task_policy":
+            candidate = conditions.get("candidate")
+            marker = (
+                str(candidate.get("system_prompt", ""))
+                if isinstance(candidate, dict)
+                else ""
+            )
+            if marker != TASK_POLICY_TREATMENT_MARKER:
+                raise ValueError(
+                    "task-policy evaluation manifest has the wrong treatment marker"
+                )
+            settings.TASK_POLICIES_ENABLED = condition == "candidate"
+            settings.TASK_POLICIES_SHADOW_MODE = False
+            # Candidate exercises the deployed local mini-head. Authority,
+            # permissions, and external effects still come only from literals.
+            # Evidence gating belongs to production rollout; an evaluation
+            # candidate must be able to measure an unapproved fragment without
+            # silently turning into the baseline.
+            settings.TASK_POLICIES_EMBEDDINGS_ENABLED = condition == "candidate"
+            settings.TASK_POLICIES_LLM_FALLBACK_ENABLED = False
+            settings.TASK_POLICIES_EVIDENCE_GATED = False
+            settings.ADAPTIVE_RUNTIME_BEHAVIOR_ENABLED = False
+        elif config.treatment == "adaptive_behavior":
+            candidate = conditions.get("candidate")
+            marker = (
+                str(candidate.get("system_prompt", ""))
+                if isinstance(candidate, dict)
+                else ""
+            )
+            if marker != ADAPTIVE_BEHAVIOR_TREATMENT_MARKER:
+                raise ValueError(
+                    "adaptive-behavior evaluation manifest has the wrong treatment marker"
+                )
+            settings.TASK_POLICIES_ENABLED = False
+            settings.ADAPTIVE_RUNTIME_BEHAVIOR_ENABLED = True
+            settings.ADAPTIVE_RUNTIME_BEHAVIOR_SHADOW_MODE = condition == "baseline"
+            settings.ADAPTIVE_RUNTIME_SEMANTIC_SHADOW_ENABLED = True
+            settings.ADAPTIVE_RUNTIME_REASONING_ENABLED = True
+            settings.ADAPTIVE_RUNTIME_REASONING_SHADOW_MODE = condition == "baseline"
+        elif condition == "candidate":
             raw_candidate = conditions[condition]
             if not isinstance(raw_candidate, dict):
                 raise ValueError("candidate evaluation condition is invalid")
@@ -249,7 +343,11 @@ def _files(root: Path) -> dict[str, str]:
         if not path.is_file():
             continue
         relative = path.relative_to(root)
-        if _IGNORED_PARTS & set(relative.parts):
+        if relative.as_posix() in _IGNORED_GENERATED_PATHS:
+            continue
+        if _IGNORED_PARTS & set(relative.parts) or any(
+            part.endswith(_IGNORED_PART_SUFFIXES) for part in relative.parts
+        ):
             continue
         result[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
@@ -263,9 +361,17 @@ def changed_paths(source: Path, result: Path) -> tuple[str, ...]:
 
 
 def _verify(command: str, cwd: Path, timeout: float) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    source_root = (cwd / "src").resolve()
+    if source_root.is_dir():
+        existing = environment.get("PYTHONPATH", "")
+        environment["PYTHONPATH"] = os.pathsep.join(
+            part for part in (str(source_root), existing) if part
+        )
     return subprocess.run(
         shlex.split(command.replace("{python}", sys.executable)),
         cwd=cwd,
+        env=environment,
         text=True,
         capture_output=True,
         timeout=timeout,
@@ -293,6 +399,16 @@ def capture_tool_trace(
         if agent_id and ctx.agent_id != agent_id:
             return
         result = ctx.result or ""
+        failed = '"error"' in result.lower() or "failed:" in result.lower()
+        try:
+            result_payload = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            result_payload = None
+        if isinstance(result_payload, dict):
+            exit_code = result_payload.get("exit_code")
+            failed = failed or (
+                isinstance(exit_code, int) and exit_code != 0
+            ) or result_payload.get("success") is False
         records.append(
             {
                 "tool_run_id": str(ctx.metadata.get("tool_run_id", "")),
@@ -300,7 +416,7 @@ def capture_tool_trace(
                 "arguments": dict(ctx.arguments),
                 "result": result[:20_000],
                 "result_truncated": len(result) > 20_000,
-                "failed": '"error"' in result.lower() or "failed:" in result.lower(),
+                "failed": failed,
             }
         )
 
@@ -354,10 +470,11 @@ def run_one(
     tool_trace: list[dict[str, object]] = []
     engine: LoopEngine | None = None
     agent: InfinidevAgent | None = None
+    resolved_profile = None
     with tempfile.TemporaryDirectory(prefix="infinidev-agent-task-") as temp:
         temp_root = Path(temp)
         run_workspace = temp_root / "repo"
-        shutil.copytree(source, run_workspace)
+        copy_workspace(source, run_workspace)
         seed = f"{run_name}:{run_workspace.resolve()}"
         project_id = int.from_bytes(hashlib.sha256(seed.encode()).digest()[:4], "big")
         instance_id = f"agent-task-{project_id:08x}-{repetition}"
@@ -380,6 +497,23 @@ def run_one(
                         agent_id=agent.agent_id,
                     ),
                 ):
+                    structured_task = None
+                    if config.treatment in {"adaptive_behavior", "task_policy"}:
+                        from infinidev.engine.task_policies import resolve_task_profile
+                        from infinidev.config.settings import settings
+
+                        if config.treatment == "task_policy" and condition == "candidate":
+                            resolved_profile = resolve_task_profile(
+                                task.request,
+                                enable_embeddings=settings.TASK_POLICIES_EMBEDDINGS_ENABLED,
+                                enable_llm_fallback=settings.TASK_POLICIES_LLM_FALLBACK_ENABLED,
+                                embedding_threshold=settings.TASK_POLICIES_EMBEDDING_MIN_SCORE,
+                                embedding_margin=settings.TASK_POLICIES_EMBEDDING_MIN_MARGIN,
+                                max_policies=settings.TASK_POLICIES_MAX_SELECTED,
+                            )
+                        structured_task = _structured_evaluation_task(
+                            task, resolved_profile
+                        )
                     agent.activate_context(session_id=instance_id)
                     final_answer = engine.execute(
                         agent,
@@ -393,6 +527,10 @@ def run_one(
                         max_total_tool_calls=config.max_total_tool_calls,
                         max_tool_calls_per_action=config.max_tool_calls_per_action,
                         allow_llm_retries=False,
+                        # TreeEngine owns separate budgets and would let one
+                        # benchmark action escape this runner's declared cap.
+                        allow_explore=False,
+                        task=structured_task,
                     )
                     verified = _verify(
                         task.verify_command,
@@ -423,7 +561,7 @@ def run_one(
             json.dumps(tool_trace, ensure_ascii=False, sort_keys=True),
         )
         changed_dir = artifact_dir / "workspace"
-        shutil.copytree(run_workspace, changed_dir)
+        copy_workspace(run_workspace, changed_dir)
 
     success = (
         not error
@@ -440,6 +578,10 @@ def run_one(
         "condition_sha256": condition_sha256,
         "task": asdict(task),
         "condition": condition,
+        "treatment": config.treatment,
+        "task_profile": (
+            resolved_profile.event_payload() if resolved_profile is not None else None
+        ),
         "repetition": repetition,
         "provider": config.provider,
         "model": config.model,
@@ -460,6 +602,10 @@ def run_one(
         "action_pattern_checks": action_checks,
         "prompt_composition_history": list(getattr(state, "prompt_composition_history", ())),
         "request_payload_history": list(getattr(state, "request_payload_history", ())),
+        "runtime_behavior_events": list(getattr(state, "runtime_behavior_events", ())),
+        "runtime_interventions_given": list(
+            getattr(state, "runtime_interventions_given", ())
+        ),
         "changed_files_summary": engine.get_changed_files_summary() if engine else "",
         "file_change_reasons": engine.get_file_change_reasons() if engine else {},
         "verify_exit_code": verify_exit,

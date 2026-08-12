@@ -72,7 +72,46 @@ def _direct_execution_route(
 ) -> ChatAgentResult | None:
     """Bypass conversational routing only for high-confidence work intent."""
     direct_signal = "explicit execution request"
-    should_route = _explicit_execution_score(user_input) >= 4
+    execution_score = _explicit_execution_score(user_input)
+    should_route = execution_score >= 4
+    if not should_route and execution_score >= 3:
+        try:
+            from infinidev.config.settings import settings
+            from infinidev.engine.task_policies import resolve_task_profile
+
+            if settings.TASK_POLICIES_ENABLED and settings.TASK_POLICIES_EMBEDDINGS_ENABLED:
+                profile = resolve_task_profile(
+                    user_input,
+                    enable_embeddings=True,
+                    enable_llm_fallback=False,
+                    max_policies=1,
+                )
+                modifying_methods = {
+                    "bugfix.root_cause",
+                    "feature.contract_first",
+                    "refactor.preserve_behavior",
+                    "performance.measure_first",
+                }
+                modifying_operations = {
+                    "bugfix", "feature", "refactor", "performance",
+                }
+                method_agreement = bool(
+                    modifying_operations.intersection(profile.operations)
+                )
+                if method_agreement and "modify" in profile.authority:
+                    should_route = True
+                    used_mini_head = any(
+                        selection.source == "embedding"
+                        and selection.id in modifying_methods
+                        for selection in profile.selected_policies
+                    )
+                    direct_signal = (
+                        "mini-head method with literal modify authority"
+                        if used_mini_head
+                        else "literal task method with literal modify authority"
+                    )
+        except Exception:
+            logger.debug("Mini-head direct routing failed closed", exc_info=True)
     if is_referenced_continuation_request(user_input):
         should_route = True
         direct_signal = "referenced continuation"

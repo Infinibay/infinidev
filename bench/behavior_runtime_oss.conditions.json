@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "purpose": "Paired E2E evaluation of observable behavior detection and minimal runtime interventions on real OSS repositories",
+  "dataset_sha256": "e01a56dc4f8a2ed143349ff9513d139f4022e51984aeeca1b2a3d287db3443bf",
+  "task_split": "validation",
+  "task_ids": [
+    "requests-key-type",
+    "pmap-stop-on-error-type",
+    "ripgrep-lowercase-size"
+  ],
+  "task_count": 3,
+  "conditions_per_task": 2,
+  "repetitions": 1,
+  "planned_executions": 6,
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3:behavior-runtime-oss-2026-08-11",
+  "treatment": "adaptive_behavior",
+  "utility_profile_sha256": "d42960e44f1b2e19adccf27a4c45235714d9f19edcd7a4f69954e1aadcefd6db",
+  "utility_profile": {
+    "schema_version": 1,
+    "provenance": "explicit_user",
+    "name": "quality-under-efficiency-gates",
+    "description": "Improve execution quality while keeping prompt/completion tokens and tool calls at or below baseline.",
+    "weights": {
+      "quality": 1.0
+    }
+  },
+  "conditions": {
+    "baseline": null,
+    "candidate": {
+      "system_prompt": "runtime:adaptive-observable-behavior-v1"
+    }
+  },
+  "deployment_gates": {
+    "success_regressions": 0,
+    "scope_regressions": 0,
+    "aggregate_prompt_token_ratio_max": 1.0,
+    "aggregate_completion_token_ratio_max": 1.0,
+    "aggregate_tool_call_ratio_max": 1.0,
+    "per_task_tool_call_increase_max": 1,
+    "aggregate_latency_ratio_max": 1.1,
+    "detector_false_intervention_rate_max": 0.01
+  },
+  "execution_contract": {
+    "fresh_copy_per_execution": true,
+    "source_clones_are_read_only_inputs": true,
+    "fresh_agent_session_per_execution": true,
+    "parallel_requests": false,
+    "minimum_llm_request_interval_seconds": 2.0,
+    "automatic_llm_retries": false,
+    "stop_on_first_runtime_or_provider_error": true,
+    "private_chain_of_thought_is_not_collected": true,
+    "observable_signals_only": [
+      "assistant_messages",
+      "tool_calls",
+      "tool_results",
+      "action_records",
+      "workspace_change_fingerprints",
+      "test_outcome_fingerprints",
+      "token_usage"
+    ]
+  },
+  "interpretation_boundary": "Three project tasks are exploratory falsification evidence, not a production deployment proof."
+}

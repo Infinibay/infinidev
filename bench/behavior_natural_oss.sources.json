@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-11",
+  "fixture_root": "/home/andres/tmp",
+  "copy_before_execution": true,
+  "purpose": "Untouched C and C++ project-family holdout for natural behavior trajectories",
+  "sources": [
+    {
+      "fixture": "jsmn",
+      "url": "https://github.com/zserge/jsmn",
+      "commit": "25647e692c7906b96ffd2b05ca54c097948e879c",
+      "language": "C",
+      "license": "MIT",
+      "holdout": true
+    },
+    {
+      "fixture": "cxxopts",
+      "url": "https://github.com/jarro2783/cxxopts",
+      "commit": "b6135315a54deb2b556219906eda8346f69bf703",
+      "language": "C++",
+      "license": "MIT",
+      "holdout": true
+    }
+  ]
+}

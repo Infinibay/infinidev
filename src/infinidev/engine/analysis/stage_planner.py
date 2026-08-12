@@ -68,12 +68,25 @@ def run_stage_planner(
     )
     dispatch = build_tool_dispatch(tools)
     tool_schemas = [tool_to_openai_schema(tool) for tool in tools]
+    stage_planner_prompt = apply_calibrated_guidance(
+        STAGE_PLANNER_SYSTEM_PROMPT, "planner"
+    )
+    from infinidev.config.settings import settings
+    from infinidev.engine.task_policies.rendering import (
+        compose_task_aware_system_prompt,
+    )
+
+    stage_planner_prompt = compose_task_aware_system_prompt(
+        stage_planner_prompt,
+        state.goal.task_profile,
+        role="planner",
+        phase="plan",
+        max_utf8_bytes=settings.TASK_POLICIES_MAX_UTF8_BYTES,
+    )
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": apply_calibrated_guidance(
-                STAGE_PLANNER_SYSTEM_PROMPT, "planner"
-            ),
+            "content": stage_planner_prompt,
         },
         {
             "role": "user",

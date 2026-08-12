@@ -31,6 +31,7 @@ _EXCLUDED_DIRS = {
     "node_modules",
     "target",
 }
+_EXCLUDED_DIR_PREFIXES = ("pytest-cache-files-",)
 
 
 def _metadata_digest(stat_result: os.stat_result) -> str:
@@ -96,25 +97,43 @@ def _workspace_paths(root: str, *, prefer_git: bool = True) -> tuple[list[str], 
                 timeout=5,
             )
             if probe.returncode == 0 and probe.stdout.strip() == "true":
-                listed = subprocess.run(
-                    ["git", "ls-files", "-co", "--exclude-standard", "-z"],
+                tracked = subprocess.run(
+                    ["git", "ls-files", "-c", "-z"],
                     cwd=root,
                     capture_output=True,
                     timeout=10,
                     check=False,
                 )
-                if listed.returncode == 0:
-                    git_paths = sorted({
+                untracked = subprocess.run(
+                    ["git", "ls-files", "-o", "--exclude-standard", "-z"],
+                    cwd=root,
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                )
+                if tracked.returncode == 0 and untracked.returncode == 0:
+                    tracked_paths = sorted({
                         item.decode(errors="surrogateescape")
-                        for item in listed.stdout.split(b"\0")
+                        for item in tracked.stdout.split(b"\0")
                         if item
+                    })
+                    untracked_paths = sorted({
+                        item.decode(errors="surrogateescape")
+                        for item in untracked.stdout.split(b"\0")
+                        if item and not _excluded_generated_path(
+                            item.decode(errors="surrogateescape")
+                        )
                     })
                     # Git's exclude rules intentionally hide generated and
                     # ignored files. They still belong to the task's observed
-                    # workspace state: a build script can create or mutate one,
-                    # and review/rollback must see it. Preserve Git's accurate
-                    # tracked set first, then add a bounded filesystem walk.
-                    return _merge_paths(git_paths, _walk_workspace(root)), True
+                    # workspace state when they are not runtime-private. Keep
+                    # tracked files even below an excluded directory, omit
+                    # untracked caches/private state, then add the bounded walk.
+                    return _merge_paths(
+                        tracked_paths,
+                        untracked_paths,
+                        _walk_workspace(root),
+                    ), True
         except (OSError, subprocess.SubprocessError):
             pass
 
@@ -126,7 +145,11 @@ def _walk_workspace(root: str) -> list[str]:
 
     paths: list[str] = []
     for current_root, dirs, files in os.walk(root):
-        dirs[:] = sorted(directory for directory in dirs if directory not in _EXCLUDED_DIRS)
+        dirs[:] = sorted(
+            directory
+            for directory in dirs
+            if not _excluded_generated_dir(directory)
+        )
         for filename in sorted(files):
             absolute = os.path.join(current_root, filename)
             paths.append(os.path.relpath(absolute, root))
@@ -135,12 +158,20 @@ def _walk_workspace(root: str) -> list[str]:
     return paths
 
 
-def _merge_paths(primary: list[str], secondary: list[str]) -> list[str]:
+def _excluded_generated_dir(name: str) -> bool:
+    return name in _EXCLUDED_DIRS or name.startswith(_EXCLUDED_DIR_PREFIXES)
+
+
+def _excluded_generated_path(path: str) -> bool:
+    return any(_excluded_generated_dir(part) for part in path.split("/"))
+
+
+def _merge_paths(*path_groups: list[str]) -> list[str]:
     """Return a stable, bounded union while prioritising Git-visible files."""
 
     merged: list[str] = []
     seen: set[str] = set()
-    for paths in (primary, secondary):
+    for paths in path_groups:
         for path in paths:
             if path in seen:
                 continue

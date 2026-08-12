@@ -850,6 +850,66 @@ def test_prior_edit_and_current_green_test_can_close_model_step():
     assert "successful test command" in result.summary
 
 
+def test_prior_edit_and_persisted_green_workspace_can_close_model_step(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.guidance import normalize_test_command
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    path = tmp_path / "tags.py"
+    path.write_text("fixed = True\n")
+    ctx = _ctx()
+    ctx.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    ctx.state.task_has_edits = True
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Fix normalize_tags", status="active"),
+    ]
+    ctx.state.last_test_command = "python -m pytest -q"
+    ctx.state.last_test_exit_code = 0
+    test_key = normalize_test_command(ctx.state.last_test_command)
+    ctx.state.test_workspace_fingerprints[test_key] = (
+        ctx.file_tracker.change_fingerprint(reconcile=True)
+    )
+    result = StepResult(summary="The unchanged workspace is still green", status="continue")
+    result.behavior_tracker = SimpleNamespace(
+        files_edited=set(),
+        successful_test_commands=[],
+    )
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert _should_advance_plan(result) is True
+    assert "persisted green test" in result.summary
+
+
+def test_persisted_green_test_for_an_older_workspace_cannot_close_step(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.guidance import normalize_test_command
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    path = tmp_path / "tags.py"
+    path.write_text("before\n")
+    ctx = _ctx()
+    ctx.file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    ctx.state.task_has_edits = True
+    ctx.state.plan.steps = [
+        PlanStep(index=4, title="Fix normalize_tags", status="active"),
+    ]
+    ctx.state.last_test_command = "python -m pytest -q"
+    ctx.state.last_test_exit_code = 0
+    test_key = normalize_test_command(ctx.state.last_test_command)
+    ctx.state.test_workspace_fingerprints[test_key] = ()
+    path.write_text("after\n")
+    ctx.file_tracker.record(str(path), "before\n", "after\n")
+    result = StepResult(summary="The test predates the latest edit", status="continue")
+    result.behavior_tracker = SimpleNamespace(
+        files_edited=set(),
+        successful_test_commands=[],
+    )
+
+    assert _enforce_step_effect(ctx, result) is True
+
+
 def test_green_test_without_any_task_edit_cannot_skip_implementation():
     from infinidev.engine.loop.plan_step import PlanStep
 
@@ -1242,6 +1302,47 @@ def test_finalize_inner_loop_persists_current_step_edit_evidence():
     )
 
     assert ctx.state.edited_step_indices == {4}
+
+
+def test_step_created_and_edited_in_one_window_keeps_pre_edit_entry(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    path = tmp_path / "tags.py"
+    path.write_text("case_sensitive = True\n")
+    file_tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    before_step = file_tracker.change_fingerprint(reconcile=True)
+    ctx = _ctx()
+    ctx.file_tracker = file_tracker
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Fix normalize_tags", status="active"),
+    ]
+    tracker = BehaviorTracker(set())
+    tracker.task_has_edits = True
+    tracker.files_edited.add(str(path))
+    path.write_text("case_sensitive = False\n")
+    file_tracker.record(
+        str(path),
+        "case_sensitive = True\n",
+        "case_sensitive = False\n",
+    )
+
+    LoopEngine()._finalize_inner_loop(
+        ctx,
+        StepResult(summary="Implemented and verified", status="continue"),
+        action_tool_calls=2,
+        tracker=tracker,
+        saw_tool_calls=True,
+        step_start_fingerprint=before_step,
+    )
+
+    assert ctx.state.step_entry_change_fingerprints[1] == before_step
+    next_result = StepResult(summary="Close completed Step", status="continue")
+    next_result.behavior_tracker = SimpleNamespace(files_edited=set())
+    assert _enforce_step_effect(ctx, next_result) is False
 
 
 def test_finalize_inner_loop_rejects_edit_then_revert_as_step_effect(tmp_path):

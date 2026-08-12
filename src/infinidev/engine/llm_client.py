@@ -118,7 +118,13 @@ def _stream_and_assemble(
     kwargs_stream = {**kwargs, "stream": True}
     stream = litellm_mod.completion(**kwargs_stream)
 
+    from infinidev.engine.behavior.reasoning_content import (
+        ReasoningStreamAccumulator,
+        extract_reasoning,
+    )
+
     chunks = []
+    reasoning_stream = ReasoningStreamAccumulator()
     content_buffer = ""
     token_count = 0
     stream_text_bytes = 0
@@ -135,9 +141,10 @@ def _stream_and_assemble(
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta:
                     continue
-                reasoning = getattr(delta, "reasoning_content", None) or ""
+                reasoning_envelope = extract_reasoning(delta)
+                reasoning = reasoning_stream.consume(delta)
                 content = getattr(delta, "content", None) or ""
-                stream_text_bytes += len(reasoning.encode("utf-8"))
+                stream_text_bytes += len(reasoning_envelope.text.encode("utf-8"))
                 stream_text_bytes += len(content.encode("utf-8"))
 
                 tc_deltas = getattr(delta, "tool_calls", None)

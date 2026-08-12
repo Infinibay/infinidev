@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from infinidev.engine.tool_routing import select_developer_tools, task_capabilities
+from infinidev.engine.task_policies.router import resolve_task_profile
 from infinidev.engine.loop.context_builder import (
     _filter_plan_free_tools,
     _resolve_tools,
@@ -33,6 +34,16 @@ def test_routine_code_task_gets_core_not_every_specialist_tool() -> None:
     assert "write_report" not in names
     assert "run_in_background" not in names
     assert "request_capability" in names
+
+
+def test_task_profile_enables_semantic_capability_without_reparsing_prompt() -> None:
+    profile = resolve_task_profile("Refactoriza el módulo de configuración.")
+
+    capabilities = task_capabilities(
+        "Opaque structured handoff", task_profile=profile,
+    )
+
+    assert "advanced_refactor" in capabilities
 
 
 def test_small_model_keeps_prompt_required_communication_tools() -> None:
@@ -152,6 +163,13 @@ def test_request_capability_does_not_claim_effect_permission(bound_tool) -> None
 
     assert result["capability"] == "web"
     assert result["permission_granted"] is False
+
+
+def test_loop_capability_requester_has_runtime_settings_available() -> None:
+    from infinidev.config.settings import settings
+    from infinidev.engine.loop import engine as loop_engine
+
+    assert loop_engine.settings is settings
 
 
 def test_empty_agent_toolbox_restores_local_developer_core() -> None:

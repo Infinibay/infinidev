@@ -8,6 +8,7 @@ from typing import Any
 
 from infinidev.config.settings import settings
 from infinidev.engine._best_effort import best_effort
+from infinidev.engine.prompt_composition import CACHE_BREAKPOINT_MARKER
 from infinidev.engine.loop.models import LoopState
 from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.prompt.tools_section import (
@@ -33,7 +34,6 @@ __all__ = [
 # as session_summaries grows. For providers without explicit cache
 # breakpoints, the marker is stripped before the LLM call. Looks like a
 # benign HTML comment if ever leaked.
-CACHE_BREAKPOINT_MARKER = "<!--__INFINIDEV_CACHE_BREAK__-->"
 _STRUCTURED_TASK_COPY_RE = re.compile(
     r"<task\b[^>]*>.*?</task>|<goal\b[^>]*>.*?</goal>",
     re.DOTALL,
@@ -271,6 +271,13 @@ def build_iteration_prompt(
         guidance_text = drain_pending_guidance(state)
         if guidance_text:
             parts.append(guidance_text)
+
+    with best_effort("runtime intervention render failed"):
+        from infinidev.engine.behavior.runtime_policy import drain_runtime_intervention
+
+        runtime_intervention = drain_runtime_intervention(state)
+        if runtime_intervention:
+            parts.append(runtime_intervention)
 
     # File integrity notifications — the single source of truth for
     # "some file on disk is now syntactically broken". Populated by
@@ -870,6 +877,10 @@ def _render_opened_files(state: LoopState) -> str:
 
     from infinidev.engine.loop.loop_state import OPENED_FILES_PROMPT_MAX_CHARS
 
+    prompt_budget = int(getattr(state, "opened_files_prompt_max_chars", 0) or 0)
+    if prompt_budget <= 0:
+        prompt_budget = OPENED_FILES_PROMPT_MAX_CHARS
+
     active = state.plan.active_step
     active_text = " ".join(
         part for part in (
@@ -894,7 +905,7 @@ def _render_opened_files(state: LoopState) -> str:
     used_chars = 0
     for path, opened in ranked:
         size = len(opened.content)
-        if selected and used_chars + size > OPENED_FILES_PROMPT_MAX_CHARS:
+        if selected and used_chars + size > prompt_budget:
             omitted.append(path)
             continue
         selected.append((path, opened))
@@ -976,7 +987,9 @@ def _render_note_nudge(state: LoopState, small_model: bool) -> str:
 
     if state.history and not state.notes and state.total_tool_calls >= 4:
         if small_model:
-            blocks.append("⚠ WARNING: ZERO notes saved. Call add_note NOW or you will lose all context.")
+            blocks.append(
+                "⚠ WARNING: ZERO notes saved. Call add_note NOW or you will lose all context."
+            )
         else:
             blocks.append(
                 "<note-warning>\n"

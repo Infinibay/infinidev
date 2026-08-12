@@ -1083,6 +1083,26 @@ def run_task(
         hooks=hooks,
     )
 
+    # Resolve task method once from the literal request. Semantic stages may
+    # add method labels, but the router derives write authority exclusively
+    # from explicit user text.
+    from infinidev.config.settings import settings as _settings
+    from infinidev.engine.task_policies import resolve_task_profile
+
+    if _settings.TASK_POLICIES_ENABLED:
+        task_profile = resolve_task_profile(
+            escalation.user_request,
+            enable_embeddings=_settings.TASK_POLICIES_EMBEDDINGS_ENABLED,
+            enable_llm_fallback=_settings.TASK_POLICIES_LLM_FALLBACK_ENABLED,
+            embedding_threshold=_settings.TASK_POLICIES_EMBEDDING_MIN_SCORE,
+            embedding_margin=_settings.TASK_POLICIES_EMBEDDING_MIN_MARGIN,
+            max_policies=_settings.TASK_POLICIES_MAX_SELECTED,
+        )
+        escalation = _dc_replace(escalation, task_profile=task_profile)
+        if _settings.TASK_POLICIES_SHOW_SELECTION:
+            selected = ", ".join(item.id for item in task_profile.selected_policies)
+            hooks.on_status("info", f"Task policies: {selected or 'none'}")
+
     # Configure agent identity once before the selected engine executes the
     # durable Task under the develop contract.
     from infinidev.engine.flows import get_flow_config

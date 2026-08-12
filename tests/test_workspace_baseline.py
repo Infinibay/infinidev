@@ -142,6 +142,21 @@ def test_git_tracked_file_under_excluded_directory_is_kept(tmp_path) -> None:
     assert baseline.files["target/tracked.rs"].text == "pub fn tracked() {}\n"
 
 
+def test_git_untracked_runtime_state_is_excluded_without_gitignore(tmp_path) -> None:
+    root = _repo(tmp_path)
+    tracker = FileChangeTracker(WorkspaceBaseline.capture(str(root)))
+    generated = (
+        root / ".infinidev" / "infinidev.db-wal",
+        root / "src" / "__pycache__" / "module.pyc",
+        root / "pytest-cache-files-example" / "README.md",
+    )
+    for path in generated:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"runtime")
+
+    assert tracker.get_all_paths() == []
+
+
 def test_total_text_retention_is_bounded(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(workspace_baseline_module, "_MAX_TOTAL_CAPTURE_BYTES", 5)
     for name in ("a.txt", "b.txt", "c.txt"):

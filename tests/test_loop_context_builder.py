@@ -7,6 +7,34 @@ from types import SimpleNamespace
 from infinidev.engine.loop import context_builder
 
 
+def test_developer_identity_is_tool_aware_independent_of_task_policy() -> None:
+    agent = SimpleNamespace(role="developer")
+    tools = [SimpleNamespace(name="read_file"), SimpleNamespace(name="edit_file")]
+
+    without_profile = context_builder._resolve_identity_override(agent, tools, None)
+    agent.task_profile = SimpleNamespace(operations=("refactor",))
+    with_profile = context_builder._resolve_identity_override(agent, tools, None)
+
+    assert without_profile == with_profile
+    assert "**read_file**" in without_profile
+    assert "**edit_file**" in without_profile
+    assert "**run_in_background**" not in without_profile
+
+
+def test_developer_identity_preserves_explicit_and_custom_overrides() -> None:
+    tools = [SimpleNamespace(name="read_file")]
+    custom_agent = SimpleNamespace(role="developer", _system_prompt_identity="custom")
+
+    assert (
+        context_builder._resolve_identity_override(custom_agent, tools, None)
+        == "custom"
+    )
+    assert (
+        context_builder._resolve_identity_override(custom_agent, tools, "explicit")
+        == "explicit"
+    )
+
+
 def test_zero_total_tool_budget_reaches_the_loop_as_unlimited(
     tmp_path, monkeypatch
 ) -> None:

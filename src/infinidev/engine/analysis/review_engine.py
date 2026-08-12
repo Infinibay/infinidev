@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from infinidev.engine.task_policies.models import TaskProfile
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,25 @@ class ReviewEngine:
         """Reset state for a new task."""
         self._review_count = 0
 
+    @staticmethod
+    def _compose_system_prompt(
+        stable_prompt: str,
+        task_profile: "TaskProfile | None",
+    ) -> str:
+        """Attach only reviewer fragments selected for the current task."""
+        from infinidev.config.settings import settings
+        from infinidev.engine.task_policies.rendering import (
+            compose_task_aware_system_prompt,
+        )
+
+        return compose_task_aware_system_prompt(
+            stable_prompt,
+            task_profile,
+            role="reviewer",
+            phase="review",
+            max_utf8_bytes=settings.TASK_POLICIES_MAX_UTF8_BYTES,
+        )
+
     def review(
         self,
         task_description: str,
@@ -74,6 +96,7 @@ class ReviewEngine:
         plan_steps: list[dict] | None = None,
         automated_checks: dict[str, Any] | None = None,
         pre_extraction: dict | None = None,
+        task_profile: "TaskProfile | None" = None,
     ) -> ReviewResult:
         """Review code changes and return a ReviewResult.
 
@@ -96,6 +119,8 @@ class ReviewEngine:
                 reviewer skips its own extraction call and goes straight to
                 judgment. Used by run_review_rework_loop to parallelize
                 Pass A with ``collect_automated_checks``.
+            task_profile: Vetted task-method profile used only to compose
+                reviewer system guidance; it cannot expand the original task.
 
         Returns:
             ReviewResult with verdict and feedback.
@@ -150,6 +175,7 @@ class ReviewEngine:
                     file_changes_summary=file_changes_summary,
                     file_contents=file_contents,
                     plan_steps=plan_steps,
+                    task_profile=task_profile,
                 )
             if extraction is not None:
                 # Symbol grounding runs here (not inside extraction) because
@@ -167,6 +193,7 @@ class ReviewEngine:
                     automated_checks=automated_checks,
                     previous_feedback=previous_feedback,
                     recent_messages=recent_messages,
+                    task_profile=task_profile,
                 )
             else:
                 logger.info("ReviewEngine: extraction pass failed, falling back to single-pass")
@@ -183,6 +210,7 @@ class ReviewEngine:
                 recent_messages=recent_messages,
                 plan_steps=plan_steps,
                 automated_checks=automated_checks,
+                task_profile=task_profile,
             )
 
         # Ground every issue in the diff/file before anyone downstream
@@ -254,6 +282,7 @@ class ReviewEngine:
         file_changes_summary: str,
         file_contents: dict[str, str],
         plan_steps: list[dict],
+        task_profile: "TaskProfile | None" = None,
     ) -> dict | None:
         """Call Pass A LLM. Returns parsed JSON, or None on failure.
 
@@ -277,8 +306,11 @@ class ReviewEngine:
             file_contents=file_contents,
             plan_steps=plan_steps,
         )
+        system_prompt = self._compose_system_prompt(
+            EXTRACTOR_SYSTEM_PROMPT, task_profile,
+        )
         messages = [
-            {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
@@ -299,7 +331,13 @@ class ReviewEngine:
                 return None
             # Retry once with an explicit reminder.
             messages = messages + [
-                {"role": "user", "content": "Your previous reply was not valid JSON. Return ONLY the JSON object specified in the schema."},
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous reply was not valid JSON. Return ONLY the JSON "
+                        "object specified in the schema."
+                    ),
+                },
             ]
 
         return None
@@ -504,6 +542,7 @@ class ReviewEngine:
         automated_checks: dict,
         previous_feedback: str,
         recent_messages: list[str],
+        task_profile: "TaskProfile | None" = None,
     ) -> ReviewResult:
         """Call Pass B LLM with the extraction + checks (no diffs)."""
         from infinidev.prompts.reviewer.judge_system import JUDGE_SYSTEM_PROMPT
@@ -517,8 +556,11 @@ class ReviewEngine:
             previous_feedback=previous_feedback,
             recent_messages=recent_messages,
         )
+        system_prompt = self._compose_system_prompt(
+            JUDGE_SYSTEM_PROMPT, task_profile,
+        )
         messages = [
-            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
@@ -618,6 +660,7 @@ class ReviewEngine:
         recent_messages: list[str],
         plan_steps: list[dict],
         automated_checks: dict,
+        task_profile: "TaskProfile | None" = None,
     ) -> ReviewResult:
         """Classic one-shot reviewer. Also used as fallback from multi-pass."""
         from infinidev.prompts.reviewer.system import REVIEWER_SYSTEM_PROMPT
@@ -631,8 +674,11 @@ class ReviewEngine:
             plan_steps=plan_steps,
             automated_checks=automated_checks,
         )
+        system_prompt = self._compose_system_prompt(
+            REVIEWER_SYSTEM_PROMPT, task_profile,
+        )
         messages = [
-            {"role": "system", "content": REVIEWER_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
         try:
@@ -731,7 +777,10 @@ class ReviewEngine:
                     # Truncate very large files
                     max_chars = 50_000
                     if len(content) > max_chars:
-                        content = content[:max_chars] + f"\n... (truncated, {len(content)} total chars)"
+                        content = (
+                            content[:max_chars]
+                            + f"\n... (truncated, {len(content)} total chars)"
+                        )
                     ext = path.rsplit(".", 1)[-1] if "." in path else ""
                     file_part.append(f"**Current content:**\n```{ext}\n{content}\n```")
                 parts.append("\n".join(file_part))
@@ -1360,6 +1409,7 @@ def run_review_rework_loop(
     # User criteria define acceptance. Planner-derived criteria are useful
     # verification leads, but cannot expand scope or become user authority.
     review_task_description = task_prompt[0]
+    task_profile = getattr(task, "task_profile", None) if task is not None else None
     _criteria = [c.strip() for c in (acceptance_criteria or []) if c and c.strip()]
     if _criteria:
         review_task_description += (
@@ -1401,6 +1451,7 @@ def run_review_rework_loop(
                     file_changes_summary=file_changes_summary,
                     file_contents=file_contents,
                     plan_steps=plan_steps,
+                    task_profile=task_profile,
                 )
                 checks_future = ex.submit(
                     collect_automated_checks,
@@ -1430,6 +1481,7 @@ def run_review_rework_loop(
             plan_steps=plan_steps,
             automated_checks=automated,
             pre_extraction=pre_extraction,
+            task_profile=task_profile,
         )
 
         if review.is_approved:

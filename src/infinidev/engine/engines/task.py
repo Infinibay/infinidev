@@ -132,6 +132,7 @@ class TaskAdapter:
             out_of_scope=list(getattr(escalation.grounded_spec, "out_of_scope", []) or []),
             constraints=list(goal.constraints),
             references=list(escalation.opened_files),
+            task_profile=escalation.task_profile,
         )
         task_prompt = pipeline_mod._run_gather_phase(
             user_input=goal.user_request,

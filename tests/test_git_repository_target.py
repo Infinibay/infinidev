@@ -33,6 +33,27 @@ def test_git_status_uses_only_nested_repository(tmp_path):
     assert all(call.kwargs["cwd"] == str(repository) for call in run.call_args_list)
 
 
+def test_git_status_ignores_repository_above_workspace(tmp_path):
+    outer = tmp_path / "outer"
+    (outer / ".git").mkdir(parents=True)
+    workspace = outer / "workspace"
+    repository = workspace / "infinigpu"
+    (repository / ".git").mkdir(parents=True)
+    tool = GitStatusTool()
+    _bind(tool, workspace)
+
+    status = SimpleNamespace(stdout="", stderr="", returncode=0)
+    branch = SimpleNamespace(stdout="main\n", stderr="", returncode=0)
+    with patch(
+        "infinidev.tools.git.git_status_tool.run_git",
+        side_effect=[status, branch],
+    ) as run:
+        result = json.loads(tool._run())
+
+    assert result["branch"] == "main"
+    assert all(call.kwargs["cwd"] == str(repository) for call in run.call_args_list)
+
+
 def test_git_status_requires_path_when_nested_target_is_ambiguous(tmp_path):
     for name in ("infinigpu", "other"):
         (tmp_path / name / ".git").mkdir(parents=True)

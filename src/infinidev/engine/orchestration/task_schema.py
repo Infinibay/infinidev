@@ -35,8 +35,9 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
-logger = logging.getLogger(__name__)
+from infinidev.engine.task_policies.models import TaskProfile
 
+logger = logging.getLogger(__name__)
 
 SUGGESTED_TASK_KINDS: dict[str, str] = {
     "feature":       "Adds new user-visible behavior or capability.",
@@ -161,6 +162,14 @@ class Task(BaseModel):
         ),
     )
 
+    task_profile: TaskProfile | None = Field(
+        default=None,
+        description=(
+            "Derived task method and literal authority, resolved once by orchestration "
+            "and reused by every engine role."
+        ),
+    )
+
     # --- Validators ---------------------------------------------------------
 
     @field_validator("title")
@@ -230,6 +239,7 @@ def task_from_free_text(
     out_of_scope: list[str] | None = None,
     constraints: list[str] | None = None,
     references: list[str] | None = None,
+    task_profile: TaskProfile | None = None,
 ) -> Task:
     """Build a :class:`Task` from raw user text.
 
@@ -283,6 +293,7 @@ def task_from_free_text(
         out_of_scope=[item.strip() for item in (out_of_scope or []) if item and item.strip()],
         constraints=[item.strip() for item in (constraints or []) if item and item.strip()],
         references=[item.strip() for item in (references or []) if item and item.strip()],
+        task_profile=task_profile,
     )
 
 

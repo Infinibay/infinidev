@@ -291,6 +291,11 @@ def run_selected_engine(
             run_id, session_id, ev.ENGINE_SELECTED,
             selection.to_payload(),
         )
+        if escalation.task_profile is not None:
+            store.append_event(
+                run_id, session_id, ev.TASK_PROFILE_RESOLVED,
+                escalation.task_profile.event_payload(),
+            )
 
     dispatch["run_id"] = run_id
 

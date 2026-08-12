@@ -125,6 +125,32 @@ def assert_tool_block_contiguous(messages: list[dict]) -> None:
         )
 
 
+def test_assistant_history_preserves_provider_reasoning_protocol_fields() -> None:
+    messages: list[dict] = []
+    message = SimpleNamespace(
+        content="",
+        reasoning_content="visible summary",
+        thinking_blocks=[
+            {"type": "thinking", "thinking": "visible summary", "signature": "sig"}
+        ],
+        provider_specific_fields={"thought_signatures": ["opaque"]},
+    )
+    result = SimpleNamespace(message=message, raw_content="", reasoning_content="")
+
+    ToolRunner.append_assistant_message(
+        _ctx(),
+        ClassifiedCalls(regular=[_call("c1", "read_file")]),
+        messages,
+        result,
+    )
+
+    assistant = messages[0]
+    assert assistant["reasoning_content"] == "visible summary"
+    assert assistant["thinking_blocks"][0]["signature"] == "sig"
+    assert assistant["provider_specific_fields"]["thought_signatures"] == ["opaque"]
+    assert assistant["tool_calls"][0]["id"] == "c1"
+
+
 def test_tool_runner_defers_compaction_until_context_pressure(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("tool-round compaction bypassed context pressure")

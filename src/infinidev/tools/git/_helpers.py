@@ -18,11 +18,17 @@ def _inside(root: str, candidate: str) -> bool:
         return False
 
 
-def _has_git_ancestor(path: str) -> bool:
+def _has_git_ancestor(path: str, boundary: str | None = None) -> bool:
+    """Return whether ``path`` has a Git ancestor within an optional boundary."""
     current = os.path.realpath(path)
+    boundary_real = os.path.realpath(boundary) if boundary else None
+    if boundary_real and not _inside(boundary_real, current):
+        return False
     while True:
         if os.path.exists(os.path.join(current, ".git")):
             return True
+        if boundary_real and current == boundary_real:
+            return False
         parent = os.path.dirname(current)
         if parent == current:
             return False
@@ -45,16 +51,20 @@ def resolve_git_cwd(tool: Any, path: str | None = None) -> str:
             )
         if not os.path.isdir(candidate):
             raise GitToolError(f"Git path is not a directory: {path}")
-        if not _has_git_ancestor(candidate):
+        if not _has_git_ancestor(candidate, workspace_real):
             raise GitToolError(f"Path is not inside a Git repository: {path}")
         return candidate
 
     repository = tool.repository_path
-    if repository and os.path.isdir(repository) and _has_git_ancestor(repository):
+    if (
+        repository
+        and os.path.isdir(repository)
+        and _has_git_ancestor(repository, workspace_real)
+    ):
         return os.path.realpath(repository)
 
     if workspace_real and os.path.isdir(workspace_real):
-        if _has_git_ancestor(workspace_real):
+        if _has_git_ancestor(workspace_real, workspace_real):
             return workspace_real
         nested = sorted(
             os.path.realpath(os.path.join(workspace_real, name))

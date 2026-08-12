@@ -101,6 +101,7 @@ class ReactAdapter:
             title=_schema_safe_title(goal.title),
             acceptance_criteria=list(goal.acceptance_criteria) or None,
             derived_verification_criteria=list(goal.derived_verification_criteria),
+            task_profile=escalation.task_profile,
         )
 
         hooks.on_phase("execute")

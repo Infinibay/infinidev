@@ -51,6 +51,14 @@ class LoopState(BaseModel):
     # This diagnoses prompt bloat by section without duplicating prompt text.
     prompt_composition_history: list[dict[str, object]] = Field(default_factory=list)
     request_payload_history: list[dict[str, object]] = Field(default_factory=list)
+    # Observable runtime labels and one-shot interventions. Provider-visible
+    # reasoning is classified by a tiny Qwen head and still needs an
+    # observable safety veto before it can alter the next prompt.
+    runtime_behavior_events: list[dict[str, object]] = Field(default_factory=list)
+    runtime_behavior_seen: list[str] = Field(default_factory=list)
+    pending_runtime_intervention: str = ""
+    runtime_interventions_given: list[str] = Field(default_factory=list)
+    opened_files_prompt_max_chars: int = 0
     tool_calls_since_last_note: int = 0  # For gentle note-taking nudge
     task_has_edits: bool = False  # Set once when any edit tool succeeds
     # Successful edit evidence keyed by the active Step. Unlike an LLM

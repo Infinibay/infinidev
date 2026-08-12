@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "purpose": "End-to-end validation of the deployed task-policy mini-head",
+  "dataset_sha256": "bd73540aff87b7e9b58fb69cd9c1c3c88bb1cedd92aef5549be8519c5d7ad65d",
+  "task_split": "validation",
+  "task_ids": [
+    "semantic-warning-style"
+  ],
+  "task_count": 1,
+  "conditions_per_task": 2,
+  "repetitions": 1,
+  "planned_executions": 2,
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3:api-observed-2026-08-11",
+  "treatment": "task_policy",
+  "utility_profile_sha256": "6860ee403ea4cb7e4594ceb1684b7be87cb5bb57ea5619b3e579f267dc0253c7",
+  "utility_profile": {
+    "schema_version": 1,
+    "provenance": "explicit_user",
+    "name": "task-policy-mini-e2e",
+    "description": "Prefer correct, scoped repository work with concrete verification. The candidate adds only locally classified conditional task guidance.",
+    "weights": {
+      "quality": 1.0
+    }
+  },
+  "conditions": {
+    "baseline": null,
+    "candidate": {
+      "system_prompt": "runtime:conditional-task-policies-v1"
+    }
+  },
+  "execution_contract": {
+    "fresh_workspace_per_execution": true,
+    "fresh_agent_session_per_execution": true,
+    "parallel_requests": false,
+    "minimum_llm_request_interval_seconds": 2.0,
+    "automatic_llm_retries": false,
+    "stop_on_first_runtime_or_provider_error": true,
+    "semantic_routing_enabled": true,
+    "llm_classifier_enabled": false
+  },
+  "interpretation_boundary": "One candidate execution validates wiring and can expose failures; it cannot establish causal improvement."
+}
