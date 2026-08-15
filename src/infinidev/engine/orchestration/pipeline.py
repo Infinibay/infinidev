@@ -1094,9 +1094,15 @@ def run_task(
             escalation.user_request,
             enable_embeddings=_settings.TASK_POLICIES_EMBEDDINGS_ENABLED,
             enable_llm_fallback=_settings.TASK_POLICIES_LLM_FALLBACK_ENABLED,
+            llm_classifier_mode=_settings.TASK_POLICIES_LLM_CLASSIFIER_MODE,
+            llm_classifier_max_tokens=(
+                _settings.TASK_POLICIES_LLM_CLASSIFIER_MAX_TOKENS
+            ),
             embedding_threshold=_settings.TASK_POLICIES_EMBEDDING_MIN_SCORE,
             embedding_margin=_settings.TASK_POLICIES_EMBEDDING_MIN_MARGIN,
             max_policies=_settings.TASK_POLICIES_MAX_SELECTED,
+            encoder_checkpoint=_settings.TASK_POLICIES_ENCODER_PATH or None,
+            encoder_device=_settings.TASK_POLICIES_ENCODER_DEVICE,
         )
         escalation = _dc_replace(escalation, task_profile=task_profile)
         if _settings.TASK_POLICIES_SHOW_SELECTION:

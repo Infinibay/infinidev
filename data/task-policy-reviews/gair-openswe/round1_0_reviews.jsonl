@@ -1,0 +1,100 @@
+{"candidate_id":"gair-openswe:AI-SDC__SACRO-ML-9","include":true,"policies":["feature"],"notes":"Adds a new preprocessing capability for using existing datasets."}
+{"candidate_id":"gair-openswe:AlexandrePTJ__mopidy-somafm-29","include":true,"policies":["feature"],"notes":"Adds a new ordered fallback behavior for unsupported encoding and quality combinations."}
+{"candidate_id":"gair-openswe:Almas-Ali__envist-9","include":true,"policies":["feature"],"notes":"Extends the accepted configuration syntax with inline comments."}
+{"candidate_id":"gair-openswe:CPJKU__madmom-409","include":true,"policies":["feature"],"notes":"Adds an explicit channel-selection parameter that does not currently exist."}
+{"candidate_id":"gair-openswe:ConnorStoneAstro__pted-7","include":true,"policies":["feature"],"notes":"Changes the public return contract to expose an additional p-value."}
+{"candidate_id":"gair-openswe:ESMCI__manage_externals-143","include":true,"policies":["feature"],"notes":"Adds a new command-line exclusion mode."}
+{"candidate_id":"gair-openswe:GiPHouse__Website-477","include":true,"policies":["feature"],"notes":"Adds a new CSV export capability for registration data."}
+{"candidate_id":"gair-openswe:LucasFonts__vfbLib-24","include":true,"policies":["bugfix"],"notes":"Export currently loses meaningful kerning group-name information that should be preserved."}
+{"candidate_id":"gair-openswe:MAA1999__M9A-610","include":true,"policies":["bugfix"],"notes":"Requests restoration of an existing game feature broken by an upstream event change."}
+{"candidate_id":"gair-openswe:MasterCruelty__robbot-166","include":true,"policies":["feature"],"notes":"Adds selection of a specific Wikipedia page section."}
+{"candidate_id":"gair-openswe:Pyomo__pyomo-2493","include":true,"policies":["bugfix"],"notes":"A normal in-place expression operation creates an invalid self-reference instead of the expected sum."}
+{"candidate_id":"gair-openswe:Pyomo__pyomo-2901","include":true,"policies":["feature"],"notes":"Introduces a specific catchable evaluation-error API and optional constraint details."}
+{"candidate_id":"gair-openswe:Qiskit__qiskit-addon-cutting-507","include":true,"policies":["feature"],"notes":"Extends post-processing to support the new SamplerV2 result interface."}
+{"candidate_id":"gair-openswe:adbar__trafilatura-561","include":true,"policies":["feature"],"notes":"Adds a new download or processing date metadata field."}
+{"candidate_id":"gair-openswe:aio-libs__aiodns-162","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"Requests a typing-only correction with no runtime task-policy method."}
+{"candidate_id":"gair-openswe:alex9smith__gdelt-doc-api-16","include":true,"policies":["bugfix"],"notes":"A supported multi-repeat OR query consistently fails at runtime."}
+{"candidate_id":"gair-openswe:alex9smith__gdelt-doc-api-62","include":true,"policies":["bugfix"],"notes":"A documented timeline query raises an internal KeyError instead of returning its result."}
+{"candidate_id":"gair-openswe:allenporter__flux-local-843","include":true,"policies":["bugfix"],"notes":"A supported flag combination fails with repository lookup and cleanup errors."}
+{"candidate_id":"gair-openswe:astronomer__astronomer-providers-749","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The only concrete request is adding integration-test coverage."}
+{"candidate_id":"gair-openswe:astronomy-commons__lsdb-1065","include":true,"policies":["feature"],"notes":"Adds a convenient API for loading default columns plus requested additions."}
+{"candidate_id":"gair-openswe:autoscrape-labs__pydoll-231","include":true,"policies":["feature","refactor"],"notes":"Adds Options.headless as a public configuration path while centralizing existing browser configuration."}
+{"candidate_id":"gair-openswe:autoscrape-labs__pydoll-47","include":true,"policies":["bugfix"],"notes":"The documented quick-start flow fails instead of starting the browser."}
+{"candidate_id":"gair-openswe:azuline__rose-87","include":true,"policies":["feature"],"notes":"Adds a new rule option for excluding specified values."}
+{"candidate_id":"gair-openswe:azuline__rose-90","include":true,"policies":["feature"],"notes":"Changes the user-visible rules grammar and escaping contract."}
+{"candidate_id":"gair-openswe:bliutech__mbased-32","include":true,"policies":["feature"],"notes":"Implements the missing parser and AST-building capability."}
+{"candidate_id":"gair-openswe:c4deszes__ldfparser-27","include":true,"policies":["bugfix"],"notes":"Restores conformance by rejecting invalid PID cardinalities and filling the allowed omitted form."}
+{"candidate_id":"gair-openswe:crossplane__function-sdk-python-170","include":true,"policies":["bugfix"],"notes":"An existing credentials accessor raises on a present field instead of returning its data."}
+{"candidate_id":"gair-openswe:dateutil__dateutil-624","include":true,"policies":["bugfix"],"notes":"The parser rejects a standards-defined TZID form that its recurrence interface should accept."}
+{"candidate_id":"gair-openswe:davidjkrause__sportsipy-6","include":true,"policies":["feature"],"notes":"Adds missing NBA statistics fields already exposed for other sports."}
+{"candidate_id":"gair-openswe:django-oauth__django-oauth-toolkit-1108","include":true,"policies":["bugfix"],"notes":"Existing OIDC behavior cannot honor the standard scope-to-claims contract."}
+{"candidate_id":"gair-openswe:django-oauth__django-oauth-toolkit-1337","include":true,"policies":["bugfix"],"notes":"An invalidated refresh token returns an internal 500 instead of the required 401 response."}
+{"candidate_id":"gair-openswe:dlce-eva__python-nexus-22","include":true,"policies":["feature"],"notes":"Adds parsing support for a currently unsupported Nexus representation."}
+{"candidate_id":"gair-openswe:dplocki__podcast-downloader-48","include":true,"policies":["bugfix","feature"],"notes":"Combines restoration of failing filename and accent cases with new metadata and date-format capabilities."}
+{"candidate_id":"gair-openswe:elastic__connectors-139","include":true,"policies":["bugfix"],"notes":"A misleading negative-time log should accurately report that synchronization is disabled."}
+{"candidate_id":"gair-openswe:elastic__connectors-2731","include":true,"policies":["feature"],"notes":"Adds mime-type indexing to the OneDrive connector output."}
+{"candidate_id":"gair-openswe:enthought__pyface-1038","include":true,"policies":["bugfix"],"notes":"An editor name change fails to update the corresponding unfocused split tab."}
+{"candidate_id":"gair-openswe:enthought__pyface-409","include":true,"policies":["bugfix"],"notes":"A timer API change broke the documented IsRunning call on current master."}
+{"candidate_id":"gair-openswe:epam__ai-dial-adapter-openai-298","include":true,"policies":["feature"],"notes":"Adds a new supported deployment architecture and image variants."}
+{"candidate_id":"gair-openswe:equinor__cwrap-47","include":true,"policies":["bugfix"],"notes":"Existing enum-to-ctypes behavior regressed under Python 3.11 type enforcement."}
+{"candidate_id":"gair-openswe:explodinglabs__jsonrpcclient-183","include":true,"policies":["bugfix"],"notes":"An internal parameter name prevents callers from passing a common valid request_id argument."}
+{"candidate_id":"gair-openswe:ezyang__ghstack-231","include":true,"policies":["feature"],"notes":"Adds more descriptive generated commit-message behavior."}
+{"candidate_id":"gair-openswe:fedora-infra__tahrir-api-233","include":true,"policies":["feature"],"notes":"Implements CRUD operations that are currently missing from the authorizations API."}
+{"candidate_id":"gair-openswe:fib-international__structuralcodes-296","include":true,"policies":["feature","research"],"notes":"Requests investigation of an API design followed by easier integrator access as a new public capability."}
+{"candidate_id":"gair-openswe:flatpak__flatpak-builder-tools-67","include":true,"policies":["bugfix"],"notes":"The cargo generator crashes on a valid lock file containing a git dependency."}
+{"candidate_id":"gair-openswe:google__timesketch-2389","include":true,"policies":["bugfix"],"notes":"A fresh sketch with no history triggers an unhandled None access."}
+{"candidate_id":"gair-openswe:ideonate__cdsdashboards-52","include":true,"policies":["feature"],"notes":"Extends returned hub user information with auth_state."}
+{"candidate_id":"gair-openswe:insanum__gcalcli-758","include":true,"policies":["bugfix"],"notes":"A global calendar option is rejected solely because it follows the subcommand."}
+{"candidate_id":"gair-openswe:iolanta-tech__iolanta-296","include":true,"policies":["bugfix"],"notes":"An existing class view renders a skeleton but omits its instances."}
+{"candidate_id":"gair-openswe:iterative__dvc-studio-client-29","include":true,"policies":["feature"],"notes":"Adds an optional programmatic studio_token argument."}
+{"candidate_id":"gair-openswe:jeremyjordan__flower-classifier-21","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The concrete outcome is test coverage only."}
+{"candidate_id":"gair-openswe:jonpecar__qrCodeImageSorter-40","include":true,"policies":["feature"],"notes":"Adds a new date-based file sorting mode."}
+{"candidate_id":"gair-openswe:jupyterhub__nativeauthenticator-121","include":true,"policies":["feature"],"notes":"Adds a UI and database operation for permanently deleting unauthorized users."}
+{"candidate_id":"gair-openswe:leshchenko1979__perscache-10","include":true,"policies":["feature"],"notes":"Adds a backward-compatible shorthand decorator API."}
+{"candidate_id":"gair-openswe:linkml__linkml-1710","include":true,"policies":["bugfix"],"notes":"Java generation maps date slots to String because of erroneous type-map keys."}
+{"candidate_id":"gair-openswe:linkml__linkml-1926","include":true,"policies":["feature"],"notes":"Defines a new explicit warning and strict-error contract for rules without usable preconditions."}
+{"candidate_id":"gair-openswe:martinmladenov__RankingBot-10","include":true,"policies":["feature"],"notes":"Adds a source field to storage and the rank service API."}
+{"candidate_id":"gair-openswe:mckinsey__vizro-511","include":true,"policies":["bugfix"],"notes":"Changing mobile theme causes an existing graph to disappear."}
+{"candidate_id":"gair-openswe:metomi__rose-2818","include":true,"policies":["bugfix"],"notes":"A basic app-run command crashes when an optional external executable is absent."}
+{"candidate_id":"gair-openswe:milana2__ParallelizationForMPC-14","include":true,"policies":["refactor"],"notes":"Changes the internal AST representation of subscript expressions without requesting a new observable outcome."}
+{"candidate_id":"gair-openswe:mosdef-hub__mbuild-1225","include":true,"policies":["feature"],"notes":"Adds a new compound-overlap checking function for self-avoiding construction."}
+{"candidate_id":"gair-openswe:nardew__talipp-57","include":true,"policies":["feature"],"notes":"Adds timestamp data or a new dataframe input representation to OHLCV."}
+{"candidate_id":"gair-openswe:nautiluslabsco__ergo-44","include":true,"policies":["feature"],"notes":"Introduces a new structured error and traceback logging contract."}
+{"candidate_id":"gair-openswe:nawendt__SPCartopy-7","include":true,"policies":["bugfix"],"notes":"Insufficient cache identity returns the wrong outlook for valid requests."}
+{"candidate_id":"gair-openswe:nogula__FigureForge-47","include":true,"policies":["feature"],"notes":"Adds startup from a figure object or figure path."}
+{"candidate_id":"gair-openswe:oils-for-unix__oils-2444","include":true,"policies":["bugfix"],"notes":"Command resolution incorrectly selects a directory instead of the later executable on PATH."}
+{"candidate_id":"gair-openswe:open-iscsi__targetcli-fb-167","include":true,"policies":["feature","refactor"],"notes":"Separates daemon and batch behavior while restructuring the daemon-client boundary."}
+{"candidate_id":"gair-openswe:openedx__openedx-learning-356","include":true,"policies":["feature"],"notes":"Extends export to include multiple actively referenced entity versions."}
+{"candidate_id":"gair-openswe:openedx__openedx-learning-448","include":true,"policies":["feature"],"notes":"Adds actor identity to the restore audit record."}
+{"candidate_id":"gair-openswe:osm-fr__osm-polygons-generation-29","include":true,"policies":["bugfix"],"notes":"Generated polygon whitespace is incompatible with a consumer and the stated format contract."}
+{"candidate_id":"gair-openswe:pallets__flask-4666","include":true,"policies":["bugfix"],"notes":"The threaded debugger displays an unrelated or stale request object."}
+{"candidate_id":"gair-openswe:pallets__flask-5818","include":true,"policies":["performance","refactor"],"notes":"Reworks context propagation specifically to remove contextvar overhead while preserving compatible dispatch."}
+{"candidate_id":"gair-openswe:pcdshub__pytmc-332","include":true,"policies":["feature"],"notes":"Adds handling for arrays of strings, a representation intentionally unsupported today."}
+{"candidate_id":"gair-openswe:presstab__jrdev-101","include":true,"policies":["feature"],"notes":"Adds dependency detection and an installation guidance state to the tools page."}
+{"candidate_id":"gair-openswe:pycontribs__jira-1825","include":true,"policies":["bugfix"],"notes":"Version 3.6 regressed Retry-After handling and now retries too early or not at all."}
+{"candidate_id":"gair-openswe:rafalp__Misago-1818","include":true,"policies":["bugfix"],"notes":"A broken admin tree produces an uninformative generic error instead of actionable validation."}
+{"candidate_id":"gair-openswe:rafalp__Misago-1939","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The concrete requested artifact is unit-test coverage for escaping behavior."}
+{"candidate_id":"gair-openswe:rice-solar-physics__pydrad-183","include":true,"policies":["feature"],"notes":"Adds parsing support for a currently unsupported file type."}
+{"candidate_id":"gair-openswe:rohanpm__more-executors-316","include":true,"policies":["bugfix"],"notes":"Iterating a failed proxy future recurses forever instead of raising its underlying exception."}
+{"candidate_id":"gair-openswe:rottytooth__Rivulet-30","include":true,"policies":["feature"],"notes":"Adds parameterized command-line input to the language runtime."}
+{"candidate_id":"gair-openswe:saritasa-nest__saritasa-invocations-153","include":true,"policies":["feature"],"notes":"Replaces two filename settings with a new placeholder-capable template contract."}
+{"candidate_id":"gair-openswe:scipp__scippneutron-408","include":true,"policies":["feature"],"notes":"Adds a family of event-time transformations and metadata correlation behavior."}
+{"candidate_id":"gair-openswe:skalenetwork__node-cli-906","include":true,"policies":["feature"],"notes":"Adds a set-domain API and command to FAIR."}
+{"candidate_id":"gair-openswe:skjerns__mat7.3-26","include":true,"policies":["feature"],"notes":"Adds selective variable loading from MAT files."}
+{"candidate_id":"gair-openswe:skorokithakis__tbvaccine-29","include":true,"policies":["feature"],"notes":"Adds an environment-controlled force-enable mode for non-TTY execution."}
+{"candidate_id":"gair-openswe:smokin-salmon__smoked-salmon-86","include":true,"policies":["bugfix"],"notes":"Remix title parsing incorrectly invents an additional guest artist."}
+{"candidate_id":"gair-openswe:sotetsuk__pgx-906","include":true,"policies":["feature"],"notes":"Changes the public observation tensor layout to align with other environments."}
+{"candidate_id":"gair-openswe:strinking__futaba-297","include":true,"policies":["refactor"],"notes":"Replaces ad-hoc configuration checks with a modular validator while retaining validation purpose."}
+{"candidate_id":"gair-openswe:swvanbuuren__simple-cdd-yaml-5","include":true,"policies":["feature"],"notes":"Adds a command argument for overriding recipe variables."}
+{"candidate_id":"gair-openswe:sylhare__nprime-33","include":true,"policies":["feature"],"notes":"Adds a coprime-detection algorithm as a new library function."}
+{"candidate_id":"gair-openswe:tarantool__tarantool-python-251","include":true,"policies":[],"uncategorized_reason":"unsupported_method","notes":"The concrete request is removal of warnings from the unit-test run."}
+{"candidate_id":"gair-openswe:tarantool__tarantool-python-296","include":true,"policies":["feature"],"notes":"Extends protocol negotiation with separate feature state and connect-time requirements."}
+{"candidate_id":"gair-openswe:tomplus__kubernetes_asyncio-258","include":true,"policies":["bugfix"],"notes":"Long-lived clients keep expired exec credentials instead of refreshing them."}
+{"candidate_id":"gair-openswe:tomplus__kubernetes_asyncio-331","include":true,"policies":["feature"],"notes":"Adds the convenience load_config API available in the related client."}
+{"candidate_id":"gair-openswe:tracetronic__ecu-test_custom-checks-17","include":true,"policies":["bugfix"],"notes":"Requests removal of incorrect case-dependent variable sorting."}
+{"candidate_id":"gair-openswe:tskit-dev__tsconvert-41","include":true,"policies":["feature"],"notes":"Adds a sequence-length option to the Newick conversion API."}
+{"candidate_id":"gair-openswe:wagtail__wagtail-10189","include":true,"policies":["feature","refactor"],"notes":"Migrates rigid slug syncing to a reusable controller while adding multi-target, check, and debounce behavior."}
+{"candidate_id":"gair-openswe:wagtail__wagtail-9056","include":true,"policies":["bugfix"],"notes":"The chooser exposes a meaningless locale filter when internationalization is disabled."}
+{"candidate_id":"gair-openswe:wazuh__wazuh-virtual-machines-309","include":true,"policies":["bugfix"],"notes":"The OVA build workflow fails because a required executable is absent from its environment."}
+{"candidate_id":"gair-openswe:wazuh__wazuh-virtual-machines-474","include":true,"policies":["bugfix"],"notes":"Ports existing OVA fixes into the new generation path to restore Vagrant behavior."}
+{"candidate_id":"gair-openswe:yezz123__ormdantic-50","include":true,"policies":["feature"],"notes":"Adds a native count query to the existing query API."}

@@ -128,7 +128,8 @@ class Settings(BaseSettings):
     LLM_REMOTE_TIMEOUT: int = 300
     LLM_NUM_RETRIES: int = 3  # Retry transient provider errors (OpenRouter mid-stream drops, 5xx, timeouts)
     LLM_TEMPERATURE: float = 0.2  # Default temp for the developer loop. Low values favour reliable tool-calling and deterministic edits. Set < 0 to defer to the model/provider default.
-    OLLAMA_NUM_CTX: int = 16384  # Context window for Ollama models (0 = use model default)
+    # Zero leaves context allocation to Ollama; a positive value pins num_ctx.
+    OLLAMA_NUM_CTX: int = 0
     # Opt-in, release-gated guidance selected by the behavioral calibration lab.
     # The profile must match provider/model, immutable model identity, and the
     # active utility profile exactly, and carry an approved guidance hash.
@@ -208,11 +209,23 @@ class Settings(BaseSettings):
     TASK_POLICIES_SHADOW_MODE: bool = False
     TASK_POLICIES_EMBEDDINGS_ENABLED: bool = True
     TASK_POLICIES_LLM_FALLBACK_ENABLED: bool = False
+    # "preferred" asks the user's selected main model for task methods before
+    # composing the main prompt. "fallback" uses it only when local routing
+    # has no method; "off" avoids the extra request.
+    TASK_POLICIES_LLM_CLASSIFIER_MODE: str = "preferred"
+    TASK_POLICIES_LLM_CLASSIFIER_MAX_TOKENS: int = 256
     TASK_POLICIES_EMBEDDING_MIN_SCORE: float = 0.18
     TASK_POLICIES_EMBEDDING_MIN_MARGIN: float = 0.04
     TASK_POLICIES_MAX_SELECTED: int = 3
-    TASK_POLICIES_MAX_UTF8_BYTES: int = 3600
+    # Temporary self-routing mode: expose every role/phase method as an
+    # explicit <if reason="..."> block instead of profile-gating its prompt.
+    TASK_POLICIES_RENDER_ALL_CONDITIONAL: bool = True
+    TASK_POLICIES_MAX_UTF8_BYTES: int = 12000
     TASK_POLICIES_SHOW_SELECTION: bool = False
+    # Optional fine-tuned multi-label checkpoint. Empty keeps the bundled
+    # static mini-head, so base installs do not require torch/transformers.
+    TASK_POLICIES_ENCODER_PATH: str = ""
+    TASK_POLICIES_ENCODER_DEVICE: str = "auto"
     # Known model routes inject only fragment versions that passed a clean
     # paired E2E gate. Classification and telemetry remain active for shadowed
     # fragments, so one harmful method does not disable the whole router.

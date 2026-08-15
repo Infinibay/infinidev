@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from infinidev.engine.orchestration.task_renderer import render_task_xml
 from infinidev.engine.orchestration.task_schema import task_from_free_text
 from infinidev.engine.task_policies.models import ClassifierResult, TaskProfile
@@ -11,6 +15,7 @@ from infinidev.engine.task_policies.linear_classifier import (
 from infinidev.engine.task_policies.registry import POLICY_BY_ID
 from infinidev.engine.task_policies.rendering import (
     compose_task_aware_system_prompt,
+    render_all_conditional_task_policy_layer,
     render_task_policy_layer,
     select_task_policy_fragments,
 )
@@ -163,6 +168,118 @@ def test_llm_fallback_cannot_grant_modify_authority() -> None:
     assert profile.rejected_candidates[0].reason.startswith("literal request")
 
 
+def test_preferred_main_model_classifier_runs_before_and_skips_local_encoder(
+    monkeypatch,
+) -> None:
+    from infinidev.engine.task_policies import router
+
+    calls = []
+
+    def classify(text: str) -> ClassifierResult:
+        calls.append(text)
+        return ClassifierResult(operations=["feature"], confidence=0.93)
+
+    monkeypatch.setattr(
+        router,
+        "classify_task_methods",
+        lambda *args, **kwargs: pytest.fail("local encoder should not run"),
+    )
+
+    profile = resolve_task_profile(
+        "Please improve this component.",
+        enable_embeddings=True,
+        classifier=classify,
+        encoder_checkpoint="/unused/checkpoint",
+        llm_classifier_mode="preferred",
+    )
+
+    assert calls == ["Please improve this component."]
+    assert profile.llm_classifier_used
+    assert not profile.llm_fallback_used
+    assert _selected(profile) == {"feature.contract_first"}
+    assert profile.selected_policies[0].source == "llm"
+    assert profile.selected_policies[0].score == 0.93
+    rendered = render_task_policy_layer(
+        profile,
+        role="developer",
+        phase="execute",
+        force=True,
+    )
+    assert 'id="feature.developer"' in rendered
+
+
+def test_preferred_main_model_classifier_still_cannot_grant_authority() -> None:
+    profile = resolve_task_profile(
+        "What would be a useful capability here?",
+        classifier=lambda _: ClassifierResult(
+            operations=["feature"], confidence=0.9,
+        ),
+        llm_classifier_mode="preferred",
+    )
+
+    assert profile.operations == ("feature",)
+    assert profile.authority == ("answer",)
+    assert not profile.selected_policies
+    assert profile.rejected_candidates[0].id == "feature.contract_first"
+
+
+def test_preferred_main_model_replaces_literal_method_but_keeps_authority() -> None:
+    profile = resolve_task_profile(
+        "Implement the requested feature.",
+        classifier=lambda _: ClassifierResult(
+            operations=["bugfix"], confidence=0.91,
+        ),
+        llm_classifier_mode="preferred",
+    )
+
+    assert profile.operations == ("bugfix",)
+    assert "modify" in profile.authority
+    assert _selected(profile) == {"bugfix.root_cause"}
+    assert profile.selected_policies[0].source == "llm"
+
+
+def test_llm_classifier_mode_validation() -> None:
+    with pytest.raises(ValueError, match="llm_classifier_mode"):
+        resolve_task_profile("test", llm_classifier_mode="sometimes")
+
+
+def test_default_classifier_uses_selected_main_model_params(monkeypatch) -> None:
+    from infinidev.config import llm
+    from infinidev.engine import llm_client
+    from infinidev.engine.task_policies import router
+
+    captured = {}
+    monkeypatch.setattr(
+        llm,
+        "get_litellm_params",
+        lambda: {"model": "selected/main-model", "api_base": "https://example.test"},
+    )
+
+    def call(params, messages, **kwargs):
+        captured.update({"params": params, "messages": messages, "kwargs": kwargs})
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content='{"operations":["research","performance"],"confidence":0.94}',
+        ))])
+
+    monkeypatch.setattr(llm_client, "call_llm", call)
+
+    result = router._default_llm_classifier("Investigate the slow path.", max_tokens=73)
+
+    assert result is not None
+    assert result.operations == ["research", "performance"]
+    assert result.confidence == 0.94
+    assert captured["params"] == {
+        "model": "selected/main-model",
+        "api_base": "https://example.test",
+        "max_tokens": 73,
+    }
+    assert captured["messages"][-1]["content"] == "Investigate the slow path."
+    assert captured["kwargs"] == {
+        "thinking_enabled": False,
+        "use_json_mode": False,
+    }
+
+
 def test_embedding_double_agreement_can_suggest_method_but_not_write_authority(
     monkeypatch,
 ) -> None:
@@ -210,6 +327,75 @@ def test_embedding_double_agreement_can_suggest_method_but_not_write_authority(
     assert _selected(profile) == {"research.evidence_first"}
     assert profile.semantic_classifier_version == LINEAR_CLASSIFIER_VERSION
     assert profile.semantic_space_id == "ken/static-qwen3-r512-v2:1024:test"
+
+
+def test_fine_tuned_encoder_selects_multiple_methods_without_granting_authority(
+    monkeypatch,
+) -> None:
+    from infinidev.engine.task_policies import router
+    from infinidev.engine.task_policies.encoder_classifier import (
+        EncoderTaskPrediction,
+        PolicyScore,
+    )
+
+    monkeypatch.setattr(
+        router,
+        "classify_task_methods",
+        lambda *args, **kwargs: EncoderTaskPrediction(
+            scores=(
+                PolicyScore("performance.measure_first", 0.92, 0.7, True),
+                PolicyScore("research.evidence_first", 0.88, 0.8, True),
+            ),
+            task_score=0.97,
+            task_threshold=0.5,
+            classifier_version="fine-tuned-test-v1",
+            space_id="infinidev/task-policy-encoder:test",
+        ),
+    )
+
+    profile = resolve_task_profile(
+        "Please improve this component.",
+        enable_embeddings=True,
+        encoder_checkpoint="/unused/checkpoint",
+    )
+
+    assert _selected(profile) == {
+        "performance.measure_first",
+        "research.evidence_first",
+    }
+    assert profile.operations == ("research", "performance")
+    assert profile.authority == ("answer", "modify")
+    assert profile.semantic_classifier_version == "fine-tuned-test-v1"
+
+
+def test_fine_tuned_encoder_cannot_grant_modify_authority(monkeypatch) -> None:
+    from infinidev.engine.task_policies import router
+    from infinidev.engine.task_policies.encoder_classifier import (
+        EncoderTaskPrediction,
+        PolicyScore,
+    )
+
+    monkeypatch.setattr(
+        router,
+        "classify_task_methods",
+        lambda *args, **kwargs: EncoderTaskPrediction(
+            scores=(PolicyScore("refactor.preserve_behavior", 0.95, 0.8, True),),
+            task_score=0.99,
+            task_threshold=0.5,
+            classifier_version="fine-tuned-test-v1",
+            space_id="infinidev/task-policy-encoder:test",
+        ),
+    )
+
+    profile = resolve_task_profile(
+        "Tell me what approach would make this component easier to maintain.",
+        enable_embeddings=True,
+        encoder_checkpoint="/unused/checkpoint",
+    )
+
+    assert "modify" not in profile.authority
+    assert "refactor.preserve_behavior" not in _selected(profile)
+    assert profile.rejected_candidates[0].reason.startswith("literal request")
 
 
 def test_bundled_static_router_handles_action_paraphrases() -> None:
@@ -323,6 +509,66 @@ def test_semantic_router_abstains_for_quoted_action_explanation() -> None:
     assert not profile.selected_policies
     assert profile.semantic_abstained
     assert profile.semantic_abstention_reason == "quoted action is explanatory context"
+
+
+def test_all_conditional_layer_contains_every_developer_method(monkeypatch) -> None:
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "TASK_POLICIES_SHADOW_MODE", False)
+    layer = render_all_conditional_task_policy_layer(
+        role="developer",
+        phase="execute",
+        max_utf8_bytes=12_000,
+    )
+
+    expected = (
+        "compatibility.developer",
+        "review.developer",
+        "bugfix.developer",
+        "refactor.developer",
+        "feature.developer",
+        "performance.developer",
+        "research.developer",
+    )
+    assert all(f'id="{fragment_id}"' in layer for fragment_id in expected)
+    assert layer.count("<if reason=") == len(expected)
+    assert "not a claim that its reason is true" in layer
+    assert "never grants permission" in layer
+    assert "feature.planner" not in layer
+    assert 'provenance="all-conditional-v1:developer:execute"' in layer
+
+
+def test_default_composer_uses_all_conditions_without_profile_gating(monkeypatch) -> None:
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "TASK_POLICIES_RENDER_ALL_CONDITIONAL", True)
+    monkeypatch.setattr(settings, "TASK_POLICIES_SHADOW_MODE", False)
+    profile = resolve_task_profile("Implementa una nueva opción para los usuarios.")
+
+    prompt = compose_task_aware_system_prompt(
+        "stable identity and protocol",
+        profile,
+        role="developer",
+        phase="execute",
+        max_utf8_bytes=12_000,
+    )
+
+    assert 'id="feature.developer"' in prompt
+    assert 'id="bugfix.developer"' in prompt
+    assert 'id="review.developer"' in prompt
+
+
+def test_selected_fragment_mode_remains_available(monkeypatch) -> None:
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "TASK_POLICIES_RENDER_ALL_CONDITIONAL", False)
+    profile = resolve_task_profile("Implementa una nueva opción para los usuarios.")
+    prompt = compose_task_aware_system_prompt(
+        "stable", profile, role="developer", phase="execute", force=True,
+    )
+
+    assert 'id="feature.developer"' in prompt
+    assert 'id="bugfix.developer"' not in prompt
 
 
 def test_policy_rendering_is_role_phase_filtered_and_bounded(monkeypatch) -> None:

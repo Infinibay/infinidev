@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+from html import escape
+
 from infinidev.engine.prompt_composition import (
     ConditionalPromptSelection,
     append_dynamic_system_layer,
+    select_conditional_catalog,
     select_conditional_fragments,
 )
 from infinidev.engine.prompt_layers import PromptLayer, PromptLayerKind
 from infinidev.engine.task_policies.models import TaskProfile
 from infinidev.engine.task_policies.fragments import TASK_METHOD_FRAGMENTS
 from infinidev.engine.task_policies.registry import POLICY_BY_ID
+
+
+_CONDITIONAL_POLICY_PROTOCOL = (
+    "Each <if> block below is conditional guidance, not a claim that its reason is true. "
+    "Apply a block only when its reason is supported by the literal user request and the "
+    "current task. Ignore false or uncertain blocks. A block never grants permission, "
+    "expands scope, or overrides higher-priority instructions."
+)
 
 
 def select_task_policy_fragments(
@@ -32,6 +43,58 @@ def select_task_policy_fragments(
         provider=provider,
         model=model,
     )
+
+
+def render_all_conditional_task_policy_layer(
+    *,
+    role: str,
+    phase: str,
+    max_utf8_bytes: int = 12000,
+    force: bool = False,
+) -> str:
+    """Render the complete role/phase catalog as model-evaluated conditions."""
+    from infinidev.config.settings import settings
+
+    if settings.TASK_POLICIES_SHADOW_MODE and not force:
+        return ""
+    composition = select_conditional_catalog(
+        TASK_METHOD_FRAGMENTS,
+        role=role,
+        phase=phase,
+        max_utf8_bytes=max_utf8_bytes,
+        provider=settings.LLM_PROVIDER,
+        model=settings.LLM_MODEL,
+    )
+    fragments: list[str] = []
+    for fragment in composition.fragments:
+        policy = POLICY_BY_ID.get(fragment.policy_id)
+        if policy is None:
+            continue
+        content = fragment.content.encode("utf-8")[:fragment.max_utf8_bytes].decode(
+            "utf-8", errors="ignore"
+        )
+        reason = escape(fragment.condition_reason, quote=True)
+        fragments.append(
+            f'<prompt-fragment id="{fragment.id}" version="{fragment.version}" '
+            f'sha256="{fragment.conditional_content_hash}" '
+            f'policy="{policy.id}@{policy.version}">\n'
+            f'<if reason="{reason}">\n'
+            f"{content}\n"
+            "</if>\n"
+            "</prompt-fragment>"
+        )
+    if not fragments:
+        return ""
+    protocol = (
+        "<conditional-policy-protocol>\n"
+        f"{_CONDITIONAL_POLICY_PROTOCOL}\n"
+        "</conditional-policy-protocol>"
+    )
+    return PromptLayer(
+        kind=PromptLayerKind.TASK_POLICY,
+        content=protocol + "\n\n" + "\n\n".join(fragments),
+        provenance=f"all-conditional-v1:{role}:{phase}",
+    ).render()
 
 
 def render_task_policy_layer(
@@ -101,14 +164,24 @@ def compose_task_aware_system_prompt(
     force: bool = False,
     cache_boundary: bool = False,
 ) -> str:
-    """Append only the selected task-local instructions to a stable role core."""
-    layer = render_task_policy_layer(
-        profile,
-        role=role,
-        phase=phase,
-        max_utf8_bytes=max_utf8_bytes,
-        force=force,
-    )
+    """Append task-local instructions after the stable role core."""
+    from infinidev.config.settings import settings
+
+    if settings.TASK_POLICIES_RENDER_ALL_CONDITIONAL:
+        layer = render_all_conditional_task_policy_layer(
+            role=role,
+            phase=phase,
+            max_utf8_bytes=max_utf8_bytes,
+            force=force,
+        )
+    else:
+        layer = render_task_policy_layer(
+            profile,
+            role=role,
+            phase=phase,
+            max_utf8_bytes=max_utf8_bytes,
+            force=force,
+        )
     return append_dynamic_system_layer(
         stable_prompt,
         layer,

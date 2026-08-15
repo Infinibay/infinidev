@@ -20,6 +20,55 @@ Then validate the resulting agent behavior end to end with MiniMax M3 and GPT su
 measuring quality, tokens, tool calls, and errors. Before any Infinidev E2E, run
 `uv run ken install . --embed`.
 
+## Main-model classifier decision (2026-08-13)
+
+The user chose to pay for one small call to the same selected main model before
+the main task prompt rather than depend exclusively on the local classifier.
+The runtime now defaults `TASK_POLICIES_LLM_CLASSIFIER_MODE` to `preferred`.
+It obtains the normal selected provider/model dynamically, requests only the
+six method labels plus confidence, and then injects the matching conditional
+prompt fragments. The response replaces local method categories in preferred
+mode, but it cannot grant modify, commit, publish, or any other authority.
+
+For Z.AI GLM models, the helper call sends the official per-request
+`thinking: {type: disabled}` switch through `extra_body`. This matters because
+the installed LiteLLM 1.82.2 adapter otherwise rejects or misroutes the field.
+The normal task call is unchanged and retains the user's reasoning setting.
+
+The final GLM-5.2 pilot used 26 deterministic, length-stratified rows from the
+already-open natural evaluation split: three single-label examples per method,
+four zero-label examples, and four compound examples. Results were:
+
+- exact match: 21/26, **80.77%**;
+- no request or JSON failures at 256 output tokens;
+- F1: bugfix 100%, feature 75%, performance 100%, refactor 75%, research 100%,
+  review 75%;
+- latency: 1,788 ms p50, 2,498 ms p95, 6,237 ms maximum/cold first call.
+
+On those same 26 rows, the warmed local Qwen encoder reached 61.54% exact
+match, with 46 ms p50 and 68 ms p95 after a 6,264 ms cold model load. On its
+much larger 586-row evaluation, its selected epoch 3 reached 83.94% exact
+match, so do not compare that aggregate directly with the deliberately small,
+rare-label-heavy GLM pilot. The GLM prompt was tuned after inspecting this
+development split; these numbers are development evidence, not sealed holdout
+performance.
+
+The outcome is mixed but actionable: using the main model improved the
+identical hard pilot by 19.23 exact-match points and substantially improved rare
+`research`/`review` recognition, while its 1.8-second median does not meet the
+earlier 300 ms target. The default follows the user's later preference for
+quality over that latency target. Set the mode to `off` to avoid the extra call,
+or `fallback` to keep it only for unresolved local routing.
+
+Reproduce the live pilot without storing prompt text or credentials:
+
+```bash
+uv run python -m bench.task_policy_main_model_classifier_eval \
+  --data-root /home/andres/tmp/task-policy-natural-split-v1 \
+  --partition evaluation --per-label 3 --zero-label 4 --compound 4 \
+  --max-tokens 256 --output /tmp/task-policy-main-model-pilot.json
+```
+
 ## Current state
 
 - All natural annotation queues are complete: **2,901 manually reviewed requests**.
@@ -68,12 +117,78 @@ checkpoint and no new accuracy result**. Do not describe the enlarged dataset or
 process as measured improvement. The older natural 600/60 pilot had only about 81.7% bugfix and
 80.0% feature accuracy and is not evidence for the current corpus.
 
-Important: `bench/task_policy_manual_finetune_cv.py` currently runs on CPU. It does not move the
-model, encoded batches, or targets to CUDA, and it converts tensors directly with `.numpy()`.
-Before rerunning on the A500, add an explicit `--device` option (`auto`, `cpu`, `cuda`, or a normal
-PyTorch device string), move the model/batches/targets consistently, and convert reported outputs
-with `.detach().cpu().numpy()`. Add focused CPU/default and CUDA-selection tests. Do not assume that
-`CUDA_VISIBLE_DEVICES=0` alone enables GPU execution.
+At the time of this handoff, `bench/task_policy_manual_finetune_cv.py` still ran only on CPU: it
+did not move the model, encoded batches, or targets to CUDA, and converted tensors directly with
+`.numpy()`. The GPU server progress below records the completed fix and its validation. Do not
+assume that `CUDA_VISIBLE_DEVICES=0` alone enables GPU execution.
+
+## GPU server progress (2026-08-12)
+
+CUDA plumbing is now implemented in `bench/task_policy_manual_finetune_cv.py`. The CLI accepts
+`--device`, defaults to `auto`, rejects unavailable explicit CUDA devices, moves every encoded
+batch and target batch to the resolved device, places model and loss weights on that device, and
+moves inference outputs back through `.detach().cpu().numpy()`. The selected device is recorded in
+partial, fold, and final reports.
+
+The exact environment command used on this server was:
+
+```bash
+uv sync --extra finetune
+```
+
+It installed PyTorch 2.10.0+cu128. Runtime validation reports CUDA available on one NVIDIA RTX
+A5000 (24,564 MiB, compute capability 8.6). The focused suite passes 20/20, including a real
+CPU-to-CUDA batch transfer and CUDA-to-NumPy output test:
+
+```bash
+uv run pytest tests/test_task_policy_manual_finetune_cv.py -q
+```
+
+A one-epoch smoke run completed the full E5-small + LoRA +
+`label_attention_lexical` training/inference path on CUDA in 5.32 seconds and wrote
+`/home/andres/tmp/infinidev-e5small-cuda-smoke.json`. Its quality metrics are not evidence for
+the requested classifier gate: it intentionally used only one epoch and the repository corpus,
+not the 2,901-row natural split.
+
+The five candidate queues are present under
+`/home/andres/infinidev/.infinidev/external-data/`; acquisition verified all pinned SHA-256
+digests and exact row counts (240/240/240/600 Open-SWE and 2,000 WildChat). After pulling commit
+`c35219a`, the bootstrap consumed the 37 tracked review ledgers and rebuilt
+`/home/andres/tmp/task-policy-natural-split-v1`. The manifest reports exactly 2,901 rows and 2,336
+families, and all six split hashes match the fixed values below.
+
+Threshold and checkpoint selection also had a degenerate rare-label path: when the accuracy gate
+was unreachable, predicting no positives could win on accuracy and count as meeting the checkpoint
+target despite zero recall. Selection now requires positive recall for a label to count toward the
+checkpoint target and prefers supported recall before fallback accuracy. Focused regression tests
+cover both the individual and natural-domain selectors.
+
+### GPU development measurements
+
+Three controlled fold-0 runs used the fixed natural split, CUDA, the same
+`label_attention_lexical` head, 192-token maximum, seed 41, 16-epoch maximum, and patience 4. The
+development evaluation split has now influenced model selection and remains development evidence;
+the sealed 120-row reserve was not opened.
+
+| Encoder/tuning | Epochs run | Best epoch | Time | Exact match | bugfix | feature | refactor | research | review | performance |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| E5-base, LoRA 8 | 10 | 6 | 224.1 s | 67.92% | 91.30% | 81.23% | 95.05% | 98.29% | 94.71% | 96.76% |
+| E5-base, last 4 layers | 6 | 2 | 111.5 s | **71.33%** | 90.78% | **83.11%** | **96.08%** | **99.15%** | **98.12%** | **96.93%** |
+| BGE-M3, LoRA 8 | 10 | 6 | 629.8 s | 63.65% | 90.61% | 82.76% | 94.88% | 98.12% | 88.57% | 97.95% |
+
+All six policies have positive predictions and non-zero recall in these corrected runs. None passes
+the required 95% binary accuracy for every label: bugfix and feature remain the stable failures.
+Oracle threshold scans on E5-base LoRA reach only 91.98% bugfix and 82.94% feature accuracy, so
+recalibration cannot close the gap. A separate E5-small 512-token run was worse than its 192-token
+counterpart, so instruction truncation is not the current explanation either. Do not spend more
+runs on thresholds, length, or epochs without new evidence; the next iteration needs a deliberate
+family-generalization/data-boundary change or a materially different classifier design.
+
+The full repository suite also passes after the CUDA and evaluation-corpus fixes:
+
+```text
+3788 passed, 1 skipped, 1 warning in 181.28s
+```
 
 ## External state to copy to the server
 
@@ -219,12 +334,15 @@ Do not open the sealed reserve while making these decisions.
 - The last apparent within-family conflict was legitimate: near-identical scraper code was asked
   once for read-only review and once for explanation only.
 - `uv run pytest tests/test_task_policy_natural_split.py -q` passed: **3 passed**.
+- Bootstrap plus natural-split focused tests passed: **7 passed**.
+- All five acquired candidate queues match their pinned hashes and expected row counts.
 - The natural split manifest successfully enforces at least five positives for every label in all
   three splits.
 - `git diff --check` was clean before this handoff.
 
-The full test suite has not been rerun after the entire accumulated conditional-prompting work.
-Run focused tests after CUDA plumbing, then `uv run pytest` before release or push.
+The full suite was rerun after the CUDA plumbing and passed as recorded in the GPU server progress
+section. Rerun the focused training tests after further classifier changes and `uv run pytest`
+again before release or push.
 
 ## Remaining work after the classifier gate
 

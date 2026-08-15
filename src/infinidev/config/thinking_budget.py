@@ -181,6 +181,8 @@ def apply_thinking_budget(
     kwargs: dict[str, Any],
     provider_id: str,
     model: str,
+    *,
+    enabled: bool | None = None,
 ) -> None:
     """Mutate *kwargs* in-place to apply the thinking budget.
 
@@ -188,7 +190,8 @@ def apply_thinking_budget(
     before the LLM call is made.
     """
     # ── Master toggle ────────────────────────────────────────────
-    if not settings.THINKING_ENABLED:
+    thinking_enabled = settings.THINKING_ENABLED if enabled is None else enabled
+    if not thinking_enabled:
         return _disable_thinking(kwargs, provider_id, model)
 
     # ── Small models: force low thinking to prevent reasoning bloat ──
@@ -348,6 +351,17 @@ def _disable_thinking(
     # Gemini: set budget to 0 (disabled)
     if provider_id == "gemini":
         kwargs["thinking"] = {"thinking_budget": 0}
+        return
+
+    # Z.AI GLM-4.5+ exposes an explicit per-request switch. Unlike a prompt
+    # tag, this prevents the provider from generating hidden reasoning tokens
+    # and is therefore important for latency-sensitive helper calls.
+    if provider_id in ("zai", "zai_coding"):
+        extra_body = kwargs.get("extra_body")
+        if not isinstance(extra_body, dict):
+            extra_body = {}
+            kwargs["extra_body"] = extra_body
+        extra_body["thinking"] = {"type": "disabled"}
         return
 
     # Ollama / llama.cpp / vLLM / OpenRouter / compatible / others:

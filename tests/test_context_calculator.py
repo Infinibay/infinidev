@@ -136,7 +136,7 @@ class TestContextWindowCalculator:
         calc.update_chat(2800)
         assert calc.chat_window["current_tokens"] == 2800
 
-    def test_resolve_model_context_works_inside_a_running_loop(self):
+    def test_resolve_model_context_works_inside_a_running_loop(self, monkeypatch):
         """Regression: asyncio.run here raised, and the raise was swallowed.
 
         Startup runs inside prompt_toolkit's loop, so every model displayed
@@ -144,9 +144,18 @@ class TestContextWindowCalculator:
         """
         import asyncio
 
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(settings, "LLM_MODEL", "ollama_chat/test-model")
+        monkeypatch.setattr(
+            "infinidev.engine.loop.model_context._fetch_ollama_trained_context",
+            lambda *_args: 262_144,
+        )
+
         async def main():
             calc = ContextWindowCalculator()
             calc.resolve_model_context()
             return calc.max_context
 
-        assert asyncio.run(main()) is not None
+        assert asyncio.run(main()) == 262_144

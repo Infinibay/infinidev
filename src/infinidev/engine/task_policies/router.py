@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import json
 import logging
 import re
-from typing import Any
+from typing import Any, Literal
 
+from infinidev.engine.task_policies.encoder_classifier import classify_task_methods
 from infinidev.engine.task_policies.linear_classifier import (
     CLASSIFIER_VERSION as LINEAR_CLASSIFIER_VERSION,
     classify_task_method,
@@ -18,7 +18,7 @@ from infinidev.engine.task_policies.models import (
     RejectedPolicyCandidate,
     TaskProfile,
 )
-from infinidev.engine.task_policies.registry import POLICIES, TaskPolicy
+from infinidev.engine.task_policies.registry import POLICY_BY_ID, POLICIES, TaskPolicy
 from infinidev.engine.task_policies.semantic import (
     SemanticRetrieval,
     retrieve_policy_candidates,
@@ -122,6 +122,9 @@ _QUOTED_EXPLANATION = re.compile(
 )
 
 _OPERATION_ORDER = tuple(_OPERATION_PATTERNS)
+_CLASSIFIED_OPERATIONS = frozenset({
+    "bugfix", "feature", "performance", "refactor", "research", "review",
+})
 _AUTHORITY_ORDER = ("answer", "diagnose", "modify", "commit", "publish")
 _SEQUENCE_BY_OPERATION = {
     "research": "investigate", "review": "review", "bugfix": "implement",
@@ -197,34 +200,72 @@ def _literal_signals(text: str) -> tuple[set[str], set[str], set[str], set[str],
     return operations, authority, constraints, risks, result
 
 
-def _default_llm_classifier(text: str) -> ClassifierResult | None:
-    """Run the single structured fallback. Any provider failure abstains."""
+def _default_llm_classifier(
+    text: str,
+    *,
+    max_tokens: int = 256,
+) -> ClassifierResult | None:
+    """Ask the user's selected main model for methods only."""
     try:
-        import litellm
+        from pydantic import BaseModel, ConfigDict, Field
 
-        from infinidev.config.llm import get_litellm_params_for_behavior
+        from infinidev.config.llm import get_litellm_params
+        from infinidev.engine.llm_client import call_llm
 
-        schema = ClassifierResult.model_json_schema()
-        params = get_litellm_params_for_behavior()
-        response = litellm.completion(
-            **params,
+        class MethodDecision(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
+            operations: list[
+                Literal[
+                    "bugfix", "feature", "refactor", "research", "review", "performance",
+                ]
+            ] = Field(default_factory=list)
+            confidence: float = Field(ge=0.0, le=1.0)
+
+        params = get_litellm_params()
+        params["max_tokens"] = max_tokens
+        response = call_llm(
+            params,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "Classify task method, never authority. Return JSON matching this schema: "
-                        + json.dumps(schema, ensure_ascii=False)
+                        "Classify the intended software-work method. Return JSON only as "
+                        '{"operations":[...],"confidence":0.0}. Choose zero or more of: '
+                        "bugfix=restore incorrect existing behavior; feature=add a capability; "
+                        "refactor=restructure while preserving behavior; research=evidence-backed "
+                        "investigation without implementation; review=read-only assessment; "
+                        "performance=measure and improve latency, throughput, or resources. "
+                        "Select only independently requested goals, not incidental implementation "
+                        "steps. Retry or resilience for a failing existing operation is bugfix. "
+                        "Do not add refactor merely because an optimization rewrites code. A question "
+                        "about whether to adopt or migrate is research. Assessing, selecting, or "
+                        "filtering existing code/config is review; combine it with research for a "
+                        "deep evidence-backed project assessment. Use [] for how-to questions, raw "
+                        "code with no instruction, conversation, explanation, or translation. "
+                        "Examples: 'Optimize it, same behavior'=[performance]; 'Which flags actually "
+                        "improve speed? Extract only those'=[performance,review]; 'Should we replace "
+                        "this dependency?'=[research]. Never infer permissions."
                     ),
                 },
                 {"role": "user", "content": text},
             ],
-            temperature=0,
-            response_format={"type": "json_object"},
+            use_json_mode=False,
+            thinking_enabled=False,
         )
         content = response.choices[0].message.content
-        return ClassifierResult.model_validate_json(content)
+        if not isinstance(content, str):
+            return None
+        start, end = content.find("{"), content.rfind("}")
+        if start < 0 or end < start:
+            return None
+        decision = MethodDecision.model_validate_json(content[start:end + 1])
+        return ClassifierResult(
+            operations=list(dict.fromkeys(decision.operations)),
+            confidence=decision.confidence,
+        )
     except Exception:
-        logger.debug("Task-policy LLM fallback failed", exc_info=True)
+        logger.debug("Task-policy main-model classification failed", exc_info=True)
         return None
 
 
@@ -245,13 +286,59 @@ def resolve_task_profile(
     embedding_margin: float = 0.08,
     max_policies: int = 3,
     classifier: Callable[[str], ClassifierResult | None] | None = None,
+    encoder_checkpoint: str | None = None,
+    encoder_device: str = "auto",
+    llm_classifier_mode: str = "off",
+    llm_classifier_max_tokens: int = 256,
 ) -> TaskProfile:
     """Resolve one reusable profile without granting semantic write authority."""
+    if llm_classifier_mode not in {"off", "preferred", "fallback"}:
+        raise ValueError("llm_classifier_mode must be off, preferred, or fallback")
+    if llm_classifier_max_tokens < 1:
+        raise ValueError("llm_classifier_max_tokens must be positive")
     operations, authority, constraints, risks, result = _literal_signals(text)
     evidence_by_policy: dict[str, tuple[str, str, float | None]] = {}
     for policy in POLICIES:
         if _policy_matches(policy, operations, constraints):
             evidence_by_policy[policy.id] = ("deterministic", "literal-signal", 1.0)
+
+    quoted_explanation = bool(_QUOTED.search(text) and _QUOTED_EXPLANATION.search(text))
+    llm_used = False
+    llm_fallback_used = False
+    llm_sequence: set[str] = set()
+
+    def run_llm_classifier() -> ClassifierResult | None:
+        if classifier is not None:
+            return classifier(text)
+        return _default_llm_classifier(text, max_tokens=llm_classifier_max_tokens)
+
+    def merge_llm_result(
+        llm_result: ClassifierResult,
+        *,
+        replace_classified_operations: bool = False,
+    ) -> None:
+        if replace_classified_operations:
+            operations.difference_update(_CLASSIFIED_OPERATIONS)
+            for policy in POLICIES:
+                if policy.operations & _CLASSIFIED_OPERATIONS:
+                    evidence_by_policy.pop(policy.id, None)
+        operations.update(llm_result.operations)
+        llm_sequence.update(llm_result.sequence)
+        for policy in POLICIES:
+            if policy.operations & set(llm_result.operations):
+                evidence_by_policy.setdefault(
+                    policy.id,
+                    ("llm", "selected-main-model", llm_result.confidence),
+                )
+
+    if llm_classifier_mode == "preferred" and not quoted_explanation:
+        preferred_result = run_llm_classifier()
+        if preferred_result is not None:
+            llm_used = True
+            merge_llm_result(
+                preferred_result,
+                replace_classified_operations=True,
+            )
 
     semantic = SemanticRetrieval(
         candidates=(), space_id=None,
@@ -262,14 +349,49 @@ def resolve_task_profile(
     # retained for authority, negation, and high-confidence conflict vetoes.
     # Ambiguous paraphrases require agreement with the independent contrastive
     # retriever before a prompt layer becomes active.
-    quoted_explanation = bool(_QUOTED.search(text) and _QUOTED_EXPLANATION.search(text))
+    encoder_applied = False
     if enable_embeddings and not operations and quoted_explanation:
         semantic = SemanticRetrieval(
             candidates=(), space_id=None,
             classifier_version=LINEAR_CLASSIFIER_VERSION,
             abstained=True, reason="quoted action is explanatory context",
         )
-    if enable_embeddings and not quoted_explanation:
+    if (
+        enable_embeddings
+        and not quoted_explanation
+        and not llm_used
+        and encoder_checkpoint
+    ):
+        encoder_prediction = classify_task_methods(
+            _QUOTED.sub(" ", text),
+            checkpoint=encoder_checkpoint,
+            device=encoder_device,
+        )
+        encoder_applied = bool(encoder_prediction.classifier_version)
+        if encoder_applied:
+            semantic = SemanticRetrieval(
+                candidates=(),
+                space_id=encoder_prediction.space_id,
+                classifier_version=encoder_prediction.classifier_version,
+                abstained=not encoder_prediction.selected,
+                reason=encoder_prediction.abstention_reason,
+            )
+            for predicted in encoder_prediction.selected:
+                policy = POLICY_BY_ID.get(predicted.policy_id)
+                if policy is None:
+                    continue
+                operations.update(policy.operations)
+                constraints.update(policy.constraints)
+                evidence_by_policy.setdefault(
+                    policy.id,
+                    ("embedding", "fine-tuned-multilabel-encoder", predicted.score),
+                )
+    if (
+        enable_embeddings
+        and not quoted_explanation
+        and not llm_used
+        and not encoder_applied
+    ):
         prediction = classify_task_method(_QUOTED.sub(" ", text))
         semantic = SemanticRetrieval(
             candidates=(),
@@ -365,21 +487,13 @@ def resolve_task_profile(
         # relaxed tier remains unusable unless literal or contrastive evidence
         # independently chooses that same policy.
 
-    llm_used = False
-    llm_sequence: set[str] = set()
     ambiguous = not operations
-    if enable_llm_fallback and ambiguous:
-        llm_result = (classifier or _default_llm_classifier)(text)
+    if (enable_llm_fallback or llm_classifier_mode == "fallback") and ambiguous:
+        llm_result = run_llm_classifier()
         if llm_result is not None:
             llm_used = True
-            operations.update(llm_result.operations)
-            constraints.update(llm_result.constraints)
-            risks.update(llm_result.risks)
-            result.update(llm_result.result)
-            llm_sequence.update(llm_result.sequence)
-            for policy in POLICIES:
-                if _policy_matches(policy, operations, constraints):
-                    evidence_by_policy.setdefault(policy.id, ("llm", "structured-profile", None))
+            llm_fallback_used = True
+            merge_llm_result(llm_result)
 
     if not result:
         modifying_operations = {
@@ -486,7 +600,8 @@ def resolve_task_profile(
         sequence=_ordered(sequence, sequence_order),
         selected_policies=chosen,
         rejected_candidates=tuple(rejected),
-        llm_fallback_used=llm_used,
+        llm_classifier_used=llm_used,
+        llm_fallback_used=llm_fallback_used,
         semantic_space_id=semantic.space_id,
         semantic_classifier_version=(
             semantic.classifier_version if enable_embeddings else None

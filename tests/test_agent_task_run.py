@@ -10,6 +10,7 @@ from bench.agent_task_run import (
     ADAPTIVE_BEHAVIOR_TREATMENT_MARKER,
     AgentTaskRunConfig,
     TASK_POLICY_TREATMENT_MARKER,
+    _frozen_task_policy_profile,
     _verify,
     _canonical_profile_sha,
     capture_tool_trace,
@@ -18,7 +19,7 @@ from bench.agent_task_run import (
     copy_workspace,
     select_agent_tasks,
 )
-from bench.agent_task_eval import load_tasks
+from bench.agent_task_eval import file_sha256, load_tasks
 
 
 @pytest.mark.parametrize(
@@ -63,6 +64,57 @@ def test_run_config_rejects_unsafe_request_pacing(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="at least 2 seconds"):
         AgentTaskRunConfig.from_path(path)
+
+
+def test_run_config_requires_complete_prediction_report_identity(tmp_path: Path) -> None:
+    path = tmp_path / "run.json"
+    path.write_text(
+        json.dumps({
+            "provider": "minimax",
+            "model": "MiniMax-M3",
+            "model_identity": "minimax:MiniMax-M3@revision",
+            "treatment": "task_policy",
+            "task_policy_prediction_report": "/tmp/report.json",
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="path and SHA-256"):
+        AgentTaskRunConfig.from_path(path)
+
+
+def test_frozen_task_policy_profile_uses_scores_without_granting_authority(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "nemotron.json"
+    report.write_text(
+        json.dumps({
+            "model": "nvidia/Nemotron-3-Embed-1B-BF16",
+            "version": "manual-task-policy-e5-finetune-cv-v4",
+            "folds": [{
+                "prediction_only": {
+                    "ids": ["bug-task"],
+                    "predictions": [["bugfix.root_cause"]],
+                    "method_scores": [[0.91, 0.02, 0.03, 0.04, 0.05, 0.06]],
+                }
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    profile = _frozen_task_policy_profile(
+        "Fix the broken parser.",
+        "bug-task",
+        report_path=str(report),
+        expected_sha256=file_sha256(report),
+    )
+
+    assert profile.operations == ("bugfix",)
+    assert profile.authority == ("answer", "diagnose", "modify")
+    assert [item.id for item in profile.selected_policies] == ["bugfix.root_cause"]
+    assert profile.selected_policies[0].source == "embedding"
+    assert profile.selected_policies[0].score == pytest.approx(0.91)
+    assert not profile.semantic_abstained
 
 
 def test_changed_paths_ignores_runtime_caches(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -72,6 +73,8 @@ class AgentTaskRunConfig:
     max_tool_calls_per_action: int = 20
     verify_timeout_seconds: float = 120.0
     treatment: str = "prompt_calibration"
+    task_policy_prediction_report: str = ""
+    task_policy_prediction_report_sha256: str = ""
 
     @classmethod
     def from_path(cls, path: Path) -> AgentTaskRunConfig:
@@ -93,6 +96,12 @@ class AgentTaskRunConfig:
             max_tool_calls_per_action=int(value.get("max_tool_calls_per_action", 20)),
             verify_timeout_seconds=float(value.get("verify_timeout_seconds", 120.0)),
             treatment=str(value.get("treatment", "prompt_calibration")).strip(),
+            task_policy_prediction_report=str(
+                value.get("task_policy_prediction_report", "")
+            ).strip(),
+            task_policy_prediction_report_sha256=str(
+                value.get("task_policy_prediction_report_sha256", "")
+            ).strip(),
         )
         if not all((config.provider, config.model, config.model_identity)):
             raise ValueError("agent task config needs provider, model, and immutable identity")
@@ -114,6 +123,14 @@ class AgentTaskRunConfig:
             raise ValueError("agent task verifier timeout must be positive")
         if config.treatment not in _TREATMENTS:
             raise ValueError(f"unsupported agent task treatment: {config.treatment}")
+        has_prediction_report = bool(config.task_policy_prediction_report)
+        has_prediction_sha = bool(config.task_policy_prediction_report_sha256)
+        if has_prediction_report != has_prediction_sha:
+            raise ValueError(
+                "task-policy prediction report path and SHA-256 must be provided together"
+            )
+        if has_prediction_report and config.treatment != "task_policy":
+            raise ValueError("a task-policy prediction report requires task_policy treatment")
         return config
 
 
@@ -150,6 +167,147 @@ def _structured_evaluation_task(task: AgentTask, task_profile: object | None) ->
         ],
         task_profile=task_profile,
     )
+
+
+@lru_cache(maxsize=4)
+def _frozen_task_policy_predictions(
+    report_path: str,
+    expected_sha256: str,
+) -> tuple[dict[str, tuple[tuple[str, float], ...]], str, str]:
+    """Load thresholded multi-label predictions from one immutable training report."""
+    from bench.task_policy_multilabel_head import METHOD_LABELS
+
+    path = Path(report_path)
+    actual_sha256 = file_sha256(path)
+    if actual_sha256 != expected_sha256:
+        raise ValueError(
+            "task-policy prediction report SHA-256 mismatch: "
+            f"expected {expected_sha256}, got {actual_sha256}"
+        )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    folds = payload.get("folds")
+    if not isinstance(folds, list) or len(folds) != 1 or not isinstance(folds[0], dict):
+        raise ValueError("task-policy prediction report must contain exactly one fold")
+    prediction_only = folds[0].get("prediction_only")
+    if not isinstance(prediction_only, dict):
+        raise ValueError("task-policy prediction report has no frozen predictions")
+    ids = prediction_only.get("ids")
+    predictions = prediction_only.get("predictions")
+    method_scores = prediction_only.get("method_scores")
+    if not all(isinstance(value, list) for value in (ids, predictions, method_scores)):
+        raise ValueError("task-policy frozen prediction arrays are invalid")
+    if not (len(ids) == len(predictions) == len(method_scores)):
+        raise ValueError("task-policy frozen prediction arrays have different lengths")
+    result: dict[str, tuple[tuple[str, float], ...]] = {}
+    positions = {label: index for index, label in enumerate(METHOD_LABELS)}
+    for candidate_id, labels, scores in zip(ids, predictions, method_scores, strict=True):
+        identifier = str(candidate_id)
+        if identifier in result or not isinstance(labels, list) or not isinstance(scores, list):
+            raise ValueError("task-policy frozen prediction row is invalid")
+        if len(scores) != len(METHOD_LABELS):
+            raise ValueError("task-policy frozen score width changed")
+        try:
+            result[identifier] = tuple(
+                (str(label), float(scores[positions[str(label)]])) for label in labels
+            )
+        except KeyError as exc:
+            raise ValueError(f"task-policy frozen prediction has unknown label: {exc.args[0]}") from exc
+    model = str(payload.get("model", "")).strip()
+    version = str(payload.get("version", "")).strip()
+    if not model or not version:
+        raise ValueError("task-policy prediction report lacks model identity")
+    return result, model, version
+
+
+def _frozen_task_policy_profile(
+    text: str,
+    task_id: str,
+    *,
+    report_path: str,
+    expected_sha256: str,
+) -> object:
+    """Apply frozen mini-model methods while retaining literal authority boundaries."""
+    from infinidev.engine.task_policies import resolve_task_profile
+    from infinidev.engine.task_policies.models import PolicySelection
+    from infinidev.engine.task_policies.registry import POLICIES
+
+    base = resolve_task_profile(text, enable_embeddings=False, enable_llm_fallback=False)
+    predictions, model, version = _frozen_task_policy_predictions(
+        report_path,
+        expected_sha256,
+    )
+    if task_id not in predictions:
+        raise ValueError(f"task-policy prediction report lacks task id: {task_id}")
+    policy_by_id = {policy.id: policy for policy in POLICIES}
+    selected = []
+    rejected = []
+    operations = {
+        operation
+        for operation in base.operations
+        if operation not in {
+            "bugfix", "feature", "refactor", "research", "review", "performance",
+        }
+    }
+    for policy_id, score in predictions[task_id]:
+        policy = policy_by_id.get(policy_id)
+        if policy is None:
+            raise ValueError(f"task-policy prediction references unknown policy: {policy_id}")
+        if policy.requires_modify and "modify" not in base.authority:
+            from infinidev.engine.task_policies.models import RejectedPolicyCandidate
+
+            rejected.append(RejectedPolicyCandidate(
+                id=policy.id,
+                reason="frozen mini-model method lacks literal modify authority",
+                score=score,
+            ))
+            continue
+        operations.update(policy.operations)
+        selected.append(PolicySelection(
+            id=policy.id,
+            version=policy.version,
+            source="embedding",
+            evidence=("nemotron-frozen-prediction",),
+            score=score,
+            policy_hash=policy.content_hash,
+        ))
+    sequence = set()
+    if operations & {"research"}:
+        sequence.add("investigate")
+    if "modify" in base.authority and operations & {
+        "bugfix", "feature", "refactor", "performance", "docs", "migration",
+    }:
+        sequence.update(("implement", "verify"))
+    if "review" in operations:
+        sequence.add("review")
+    result = set()
+    if "modify" in base.authority and "implement" in sequence:
+        result.add("code")
+    elif operations & {"research", "review", "performance"}:
+        result.add("report")
+    ordered_operations = tuple(
+        operation
+        for operation in (
+            "bugfix", "feature", "refactor", "research", "review", "performance",
+            "docs", "migration", "security",
+        )
+        if operation in operations
+    )
+    ordered_sequence = tuple(
+        step
+        for step in ("investigate", "implement", "verify", "review", "commit", "publish")
+        if step in sequence
+    )
+    return base.model_copy(update={
+        "operations": ordered_operations,
+        "result": tuple(value for value in ("code", "report") if value in result),
+        "sequence": ordered_sequence,
+        "selected_policies": tuple(selected),
+        "rejected_candidates": tuple(rejected),
+        "semantic_space_id": f"{model}:{expected_sha256[:16]}",
+        "semantic_classifier_version": version,
+        "semantic_abstained": not bool(selected),
+        "semantic_abstention_reason": "" if selected else "frozen prediction abstained",
+    })
 
 
 def _canonical_profile_sha(profile: Mapping[str, object]) -> str:
@@ -503,14 +661,24 @@ def run_one(
                         from infinidev.config.settings import settings
 
                         if config.treatment == "task_policy" and condition == "candidate":
-                            resolved_profile = resolve_task_profile(
-                                task.request,
-                                enable_embeddings=settings.TASK_POLICIES_EMBEDDINGS_ENABLED,
-                                enable_llm_fallback=settings.TASK_POLICIES_LLM_FALLBACK_ENABLED,
-                                embedding_threshold=settings.TASK_POLICIES_EMBEDDING_MIN_SCORE,
-                                embedding_margin=settings.TASK_POLICIES_EMBEDDING_MIN_MARGIN,
-                                max_policies=settings.TASK_POLICIES_MAX_SELECTED,
-                            )
+                            if config.task_policy_prediction_report:
+                                resolved_profile = _frozen_task_policy_profile(
+                                    task.request,
+                                    task.id,
+                                    report_path=config.task_policy_prediction_report,
+                                    expected_sha256=(
+                                        config.task_policy_prediction_report_sha256
+                                    ),
+                                )
+                            else:
+                                resolved_profile = resolve_task_profile(
+                                    task.request,
+                                    enable_embeddings=settings.TASK_POLICIES_EMBEDDINGS_ENABLED,
+                                    enable_llm_fallback=settings.TASK_POLICIES_LLM_FALLBACK_ENABLED,
+                                    embedding_threshold=settings.TASK_POLICIES_EMBEDDING_MIN_SCORE,
+                                    embedding_margin=settings.TASK_POLICIES_EMBEDDING_MIN_MARGIN,
+                                    max_policies=settings.TASK_POLICIES_MAX_SELECTED,
+                                )
                         structured_task = _structured_evaluation_task(
                             task, resolved_profile
                         )

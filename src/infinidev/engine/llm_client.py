@@ -267,6 +267,8 @@ def call_llm(
     on_thinking_chunk: Any | None = None,
     on_stream_status: "Callable[[str, int, str | None], None] | None" = None,
     retry_attempts: int | None = None,
+    use_json_mode: bool = True,
+    thinking_enabled: bool | None = None,
 ) -> Any:
     """Call litellm.completion with retry for transient errors.
 
@@ -311,12 +313,17 @@ def call_llm(
     # and similar backends, the JSON grammar constraint conflicts with the
     # function calling grammar, causing the model to intermittently return
     # JSON text instead of tool calls.
-    if caps.supports_json_mode and not tools:
+    if use_json_mode and caps.supports_json_mode and not tools:
         kwargs["response_format"] = {"type": "json_object"}
 
     # --- Apply thinking budget ---
     from infinidev.config.thinking_budget import apply_thinking_budget
-    apply_thinking_budget(kwargs, settings.LLM_PROVIDER, kwargs["model"])
+    apply_thinking_budget(
+        kwargs,
+        settings.LLM_PROVIDER,
+        kwargs["model"],
+        enabled=thinking_enabled,
+    )
 
     # --- Apply prompt caching ---
     from infinidev.config.prompt_cache import apply_prompt_caching

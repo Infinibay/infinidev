@@ -767,8 +767,8 @@ def get_litellm_params() -> dict[str, Any]:
         params["num_retries"] = settings.LLM_NUM_RETRIES
         params["retry_strategy"] = "exponential_backoff_retry"
 
-    # Pass num_ctx for Ollama to control KV cache allocation.
-    # Models like gemma4 default to 262k context which hangs on consumer GPUs.
+    # A positive override pins Ollama's KV-cache allocation. Zero deliberately
+    # omits num_ctx so the server can apply its own model/runtime policy.
     if settings.LLM_PROVIDER == "ollama" and settings.OLLAMA_NUM_CTX > 0:
         params["num_ctx"] = settings.OLLAMA_NUM_CTX
 

@@ -169,6 +169,18 @@ para estados como progreso sano o exploración excesiva.
 
 ## Compositor de prompts
 
+El runtime usa temporalmente un modo de auto-routing explícito: todos los
+fragmentos del rol y fase se incluyen como `<if reason="...">`. El modelo
+principal evalúa cada razón contra la petición literal. Una cabecera invariante
+aclara que la condición no es evidencia ni autoridad, y los permisos de tools
+continúan siendo el límite operativo.
+
+La clasificación y el `TaskProfile` permanecen activos para telemetría,
+secuencia, routing y comparación offline, pero no deciden qué fragmento de
+método ve el modelo mientras
+`INFINIDEV_TASK_POLICIES_RENDER_ALL_CONDITIONAL=true`. Desactivar ese flag
+restaura el compositor seleccionado y sus gates de rollout.
+
 Una política no tiene que elegir entre un prompt universal y uno específico.
 La composición es aditiva:
 

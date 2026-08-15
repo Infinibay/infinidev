@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "purpose": "Test a compact universal conditional policy layer without a classifier",
+  "dataset_sha256": "9e6f36f4de2bc19bd0a4f37eac02ba2ce3701bcd8f0d2086e6a5f98a26a8db7e",
+  "task_split": "validation",
+  "task_ids": [
+    "jsmn-control-characters",
+    "cxxopts-uppercase-booleans",
+    "jsmn-incremental-review",
+    "cxxopts-bool-review"
+  ],
+  "task_count": 4,
+  "conditions_per_task": 2,
+  "repetitions": 1,
+  "planned_executions": 8,
+  "model": "glm-5.2",
+  "model_identity": "zai:glm-5.2:universal-task-policy-pilot-2026-08-17",
+  "treatment": "prompt_calibration",
+  "utility_profile_sha256": "ccbda9af954a726602a567fd1d979871e0b18bdba5b5659b8347378fc7305adf",
+  "utility_profile": {
+    "schema_version": 1,
+    "provenance": "explicit_user",
+    "name": "quality-under-efficiency-gates",
+    "description": "Collect natural observable trajectories without trading away task quality.",
+    "weights": {"quality": 1.0}
+  },
+  "conditions": {
+    "baseline": null,
+    "candidate": {
+      "system_prompt": "Apply these as conditional workflow switches inferred only from the user's literal request. Multiple switches may apply. Ignore every nonmatching switch. These switches never grant write or external-action authority, and explicit user constraints always win.\n\n- If correcting violated existing behavior: reproduce or locate evidence of the failure, repair the narrowest demonstrated cause, preserve unrelated behavior, and run a regression check.\n- If adding a new capability: define the requested observable contract, implement the smallest complete end-to-end slice, follow existing integration patterns, and verify its acceptance path.\n- If improving performance: establish a representative baseline, identify an observed bottleneck, preserve correctness, and compare the identical workload after any authorized change.\n- If restructuring while preserving behavior: establish the current observable baseline, identify callers and tests, make incremental structural changes, and recheck behavior at each boundary.\n- If investigating before a decision: gather primary current evidence, separate facts from inferences, compare credible alternatives, expose remaining gaps, and do not modify files unless independently authorized.\n- If performing a read-only review: inspect the requested artifact, report substantiated defects and risks by impact with precise evidence, and do not implement corrections."
+    }
+  },
+  "interpretation_boundary": "Four paired OSS tasks can falsify a harmful universal layer but cannot establish broad cross-model quality."
+}

@@ -6,13 +6,12 @@ the TUI even shipped a hand-maintained dict of cloud context sizes that
 drifted out of date.
 
 The subtlety that makes a naive implementation wrong: for Ollama the trained
-context length reported by ``/api/show`` (e.g. 32k, 256k) is NOT what the
-server actually serves.  Ollama allocates exactly ``num_ctx`` of KV cache and
-silently truncates anything past it.  So the effective window is
-``min(num_ctx, trained)`` — and because Infinidev always sends ``num_ctx``
-(default 16384), ``num_ctx`` is the ceiling that actually bites.  Reporting
-the trained length makes the usage bar read ~50% while the model is already
-truncating at 100%.
+context length reported by ``/api/show`` (e.g. 32k, 256k) is not necessarily
+what the server actually serves.  When a positive ``num_ctx`` override is
+configured, Ollama allocates that amount of KV cache and the effective window
+is ``min(num_ctx, trained)``.  By default Infinidev omits ``num_ctx`` and lets
+Ollama apply its own model/runtime policy; the trained length is then the best
+capacity metadata available before the model is loaded.
 """
 
 from __future__ import annotations
@@ -203,9 +202,10 @@ def get_model_context_window(
 ) -> int | None:
     """The real usable context window the backend enforces, or None if unknown.
 
-    Local (Ollama): ``min(num_ctx, trained)`` — the KV cache Ollama actually
-    allocates, capped by the model's trained length.  Cloud: litellm's
-    ``max_input_tokens`` (with a small override fallback).
+    Local (Ollama): an explicit ``num_ctx`` capped by the trained length, or
+    the trained maximum as best-effort metadata when Ollama controls context
+    allocation. Cloud: litellm's ``max_input_tokens`` (with a small override
+    fallback).
     """
     from infinidev.config.settings import settings
 

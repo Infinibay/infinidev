@@ -4,6 +4,20 @@ from __future__ import annotations
 
 from infinidev.engine.prompt_composition import ConditionalPromptFragment
 
+_CONDITION_REASONS = {
+    "preserve_public_api": "the literal user request requires preserving the public API",
+    "review": "the literal user request asks for a read-only review or audit",
+    "bugfix": (
+        "the literal user request authorizes modifying code to fix incorrect existing behavior"
+    ),
+    "refactor": (
+        "the literal user request authorizes restructuring code while preserving behavior"
+    ),
+    "feature": "the literal user request authorizes implementing a new capability",
+    "performance": "the literal user request asks to measure or improve performance",
+    "research": "the literal user request asks for evidence-backed investigation or comparison",
+}
+
 
 def _fragment(
     id: str,
@@ -27,6 +41,7 @@ def _fragment(
         roles=frozenset({role}),
         phases=frozenset({phase}),
         priority=priority,
+        condition_reason=_CONDITION_REASONS[operation or constraint],
         requires_operations=frozenset({operation}) if operation else frozenset(),
         requires_constraints=frozenset({constraint}) if constraint else frozenset(),
         requires_authority=frozenset({authority}) if authority else frozenset(),

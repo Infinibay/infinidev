@@ -1,8 +1,10 @@
 # Conditional Task Policies
 
-Estado: clasificación activa e inyección evidence-gated. La intención usa el
-embedding `ken/static-qwen3-r512-v2`, un head jerárquico empaquetado y acuerdo
-contrastivo. El fallback LLM sigue desactivado.
+Estado: clasificación activa y compositor temporal de catálogo completo. La
+intención sigue usando el perfil híbrido para telemetría y estado de tarea,
+pero los prompts de método ya no dependen de esa selección: cada rol recibe
+todos sus fragmentos dentro de bloques `<if reason="...">`. El modo anterior,
+seleccionado y evidence-gated, sigue disponible mediante configuración.
 
 La arquitectura unificada y el procedimiento para ampliarla están en
 [`MINI_MODEL_CONDITIONAL_PROMPTING_ARCHITECTURE.md`][architecture]
@@ -51,7 +53,33 @@ recuperador contrastivo independiente coinciden. Una abstención del gate
 discursivo es final. Una candidata de método del tier relajado tampoco puede
 activarse sola: necesita evidencia literal o contrastiva coincidente.
 
-## Compositor condicional activo
+## Compositor condicional activo: catálogo completo
+
+El modo predeterminado actual entrega al planner, developer, researcher o
+reviewer todos los fragmentos que pertenecen a su rol y fase. Cada uno conserva
+su identidad y hash, pero su contenido queda envuelto de esta forma:
+
+```xml
+<prompt-fragment id="bugfix.developer" ...>
+<if reason="the literal user request authorizes modifying code to fix incorrect existing behavior">
+Repair the narrowest demonstrated contract violation...
+</if>
+</prompt-fragment>
+```
+
+Una cabecera común obliga al modelo a tratar el atributo `reason` como una
+condición que debe comprobar contra la petición literal, no como un hecho. Los
+bloques falsos o dudosos se ignoran y ningún `<if>` concede permisos, amplía
+scope ni reemplaza instrucciones superiores. Los filtros deterministas de rol,
+fase y ruta de modelo permanecen; lo que se omite temporalmente es el gate por
+perfil y rollout para los fragmentos genéricos de método.
+
+El catálogo developer actual contiene siete condiciones: compatibilidad,
+review, bugfix, refactor, feature, performance y research. Renderizado completo
+ocupa aproximadamente 3,7 KB, por lo que el presupuesto predeterminado subió a
+12 KB para garantizar que ninguna condición de un rol quede fuera por budget.
+
+## Compositor seleccionado disponible
 
 La clasificación ya no agrega el mismo párrafo a todos los agentes. El runtime
 mantiene un núcleo estable y selecciona entre 22 fragmentos de método:
@@ -444,6 +472,13 @@ Cada run debería registrar algo equivalente a:
 Los scores sirven para análisis y replay, no para presentarlos al modelo como
 certeza ni para conceder permisos.
 
+En modo `preferred`, la respuesta del modelo reemplaza las seis categorías de
+método (`bugfix`, `feature`, `performance`, `refactor`, `research`, `review`).
+No reemplaza autoridad, restricciones ni riesgos: esos campos siguen saliendo
+exclusivamente de la petición literal. La microclasificación desactiva el
+razonamiento por llamada cuando el proveedor lo permite; la tarea principal
+conserva el presupuesto de razonamiento elegido por el usuario.
+
 ## Rollout y feature flags
 
 - `INFINIDEV_TASK_POLICIES_ENABLED`: calcula y transporta el perfil.
@@ -453,10 +488,20 @@ certeza ni para conceder permisos.
   semántica de candidatas.
 - `INFINIDEV_TASK_POLICIES_LLM_FALLBACK_ENABLED`: habilita una sola
   clasificación estructurada para ambigüedad real.
+- `INFINIDEV_TASK_POLICIES_LLM_CLASSIFIER_MODE`: `preferred` (por defecto)
+  consulta primero al mismo modelo seleccionado por el usuario, `fallback`
+  sólo consulta si el routing local no resolvió un método y `off` evita la
+  llamada adicional.
+- `INFINIDEV_TASK_POLICIES_LLM_CLASSIFIER_MAX_TOKENS`: limita la salida de esa
+  microclasificación; 256 fue el menor límite robusto en el piloto con GLM-5.2.
 - `INFINIDEV_TASK_POLICIES_EMBEDDING_MIN_SCORE` y
   `INFINIDEV_TASK_POLICIES_EMBEDDING_MIN_MARGIN`: thresholds congelables.
-- `INFINIDEV_TASK_POLICIES_MAX_SELECTED` y
-  `INFINIDEV_TASK_POLICIES_MAX_UTF8_BYTES`: límites de composición.
+- `INFINIDEV_TASK_POLICIES_RENDER_ALL_CONDITIONAL`: entrega por defecto el
+  catálogo completo del rol/fase como bloques `<if reason="...">`; en `false`
+  restaura la inyección seleccionada por perfil y rollout.
+- `INFINIDEV_TASK_POLICIES_MAX_SELECTED`: límite del modo seleccionado.
+- `INFINIDEV_TASK_POLICIES_MAX_UTF8_BYTES`: presupuesto de composición; 12 KB
+  en el modo de catálogo completo.
 - `INFINIDEV_TASK_POLICIES_SHOW_SELECTION`: muestra una línea de estado
   opcional en la UI.
 - `INFINIDEV_TASK_POLICIES_EVIDENCE_GATED`: exige aprobación exacta de modelo,

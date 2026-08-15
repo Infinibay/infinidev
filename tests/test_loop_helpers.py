@@ -95,6 +95,58 @@ class TestLLMRetryBudget:
         assert "retry_strategy" not in seen
         assert params["num_retries"] == 3
 
+    def test_call_can_skip_json_mode_for_incompatible_provider(self, monkeypatch):
+        caps = SimpleNamespace(
+            supports_json_mode=True,
+            supports_tool_choice_required=True,
+        )
+        monkeypatch.setattr(
+            "infinidev.config.model_capabilities.get_model_capabilities",
+            lambda: caps,
+        )
+        seen = {}
+        response = object()
+        monkeypatch.setattr(
+            "litellm.completion",
+            lambda **kwargs: seen.update(kwargs) or response,
+        )
+
+        result = call_llm(
+            {"model": "zai/glm-5.2"},
+            [{"role": "user", "content": "return json"}],
+            retry_attempts=1,
+            use_json_mode=False,
+        )
+
+        assert result is response
+        assert "response_format" not in seen
+
+    def test_call_can_disable_zai_thinking_per_request(self, monkeypatch):
+        from infinidev.config.settings import settings
+
+        self._stub_capabilities(monkeypatch)
+        seen = {}
+        response = object()
+        monkeypatch.setattr(settings, "LLM_PROVIDER", "zai_coding")
+        monkeypatch.setattr(settings, "THINKING_ENABLED", True)
+        monkeypatch.setattr(
+            "litellm.completion",
+            lambda **kwargs: seen.update(kwargs) or response,
+        )
+
+        result = call_llm(
+            {"model": "zai/glm-5.2", "max_tokens": 256},
+            [{"role": "user", "content": "classify this"}],
+            retry_attempts=1,
+            thinking_enabled=False,
+        )
+
+        assert result is response
+        assert seen["extra_body"]["thinking"] == {"type": "disabled"}
+        assert "thinking" not in seen
+        assert seen["max_tokens"] == 256
+        assert seen["messages"][-1]["content"] == "classify this"
+
     def test_configured_retries_are_total_outer_budget(self, monkeypatch):
         """N configured retries mean one initial call plus exactly N retries."""
         from infinidev.config.settings import settings

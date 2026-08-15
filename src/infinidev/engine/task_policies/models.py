@@ -56,6 +56,7 @@ class TaskProfile(BaseModel):
     sequence: tuple[SequenceStep, ...] = ()
     selected_policies: tuple[PolicySelection, ...] = ()
     rejected_candidates: tuple[RejectedPolicyCandidate, ...] = ()
+    llm_classifier_used: bool = False
     llm_fallback_used: bool = False
     semantic_space_id: str | None = None
     semantic_classifier_version: str | None = None
@@ -76,6 +77,7 @@ class TaskProfile(BaseModel):
             "sequence": list(self.sequence),
             "selected_policies": [item.model_dump() for item in self.selected_policies],
             "rejected_candidates": [item.model_dump() for item in self.rejected_candidates],
+            "llm_classifier_used": self.llm_classifier_used,
             "llm_fallback_used": self.llm_fallback_used,
             "semantic_space_id": self.semantic_space_id,
             "semantic_classifier_version": self.semantic_classifier_version,
@@ -85,7 +87,7 @@ class TaskProfile(BaseModel):
 
 
 class ClassifierResult(BaseModel):
-    """Closed schema accepted from the optional single-call LLM fallback."""
+    """Closed method schema accepted from an optional single-call LLM classifier."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -94,3 +96,4 @@ class ClassifierResult(BaseModel):
     risks: list[Risk] = Field(default_factory=list)
     result: list[ResultKind] = Field(default_factory=list)
     sequence: list[SequenceStep] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)

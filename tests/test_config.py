@@ -31,6 +31,8 @@ class TestSettings:
         assert s.DEDUP_SIMILARITY_THRESHOLD == 0.82
         assert s.LLM_REMOTE_TIMEOUT == 300
         assert s.KEN_SESSION_ENABLED is True
+        assert s.TASK_POLICIES_LLM_CLASSIFIER_MODE == "preferred"
+        assert s.TASK_POLICIES_LLM_CLASSIFIER_MAX_TOKENS == 256
 
     def test_load_from_json_file(self, tmp_path):
         """Settings loaded from JSON file."""

@@ -40,9 +40,9 @@ class ContextWindowCalculator:
         """Resolve the model's *effective* context window, blocking.
 
         Delegates to :func:`get_model_context_window`, the single source of
-        truth shared with the LoopEngine.  For Ollama that is the real ceiling
-        (``num_ctx``, capped by the trained length) — NOT the trained length,
-        which the server ignores and truncates past.  Sets ``self.max_context``
+        truth shared with the LoopEngine. For Ollama, an explicit ``num_ctx``
+        is capped by the trained length. When it is omitted, the trained maximum
+        is shown while Ollama controls the actual allocation. Sets ``self.max_context``
         to ``None`` when unknown; the TUI renders ``None`` as ``?``.
 
         Synchronous on purpose. The TUI resolves this during startup, which

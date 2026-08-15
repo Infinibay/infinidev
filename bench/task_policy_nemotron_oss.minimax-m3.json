@@ -1,0 +1,16 @@
+{
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3:nemotron-task-policy-oss-2026-08-13",
+  "base_url": "https://api.minimax.io/v1",
+  "api_key_env": "MINIMAX_API_KEY",
+  "repetitions": 1,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 16,
+  "max_total_tool_calls": 80,
+  "max_tool_calls_per_action": 20,
+  "verify_timeout_seconds": 180.0,
+  "treatment": "task_policy",
+  "task_policy_prediction_report": "/home/andres/tmp/infinidev-natural2901-nemotron3embed1b-lora8-oss-predictions-fold0.json",
+  "task_policy_prediction_report_sha256": "94dbe2fb59f6c5c85e3c357e9204568944679d91fe72182b1f4bc4b2a71a0931"
+}

@@ -1,0 +1,12 @@
+{
+  "provider": "zai_coding",
+  "model": "glm-5.2",
+  "model_identity": "zai:glm-5.2:universal-task-policy-pilot-2026-08-17",
+  "repetitions": 1,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 10,
+  "max_total_tool_calls": 30,
+  "max_tool_calls_per_action": 10,
+  "verify_timeout_seconds": 180.0,
+  "treatment": "prompt_calibration"
+}

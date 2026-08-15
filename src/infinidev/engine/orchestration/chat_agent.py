@@ -85,6 +85,8 @@ def _direct_execution_route(
                     enable_embeddings=True,
                     enable_llm_fallback=False,
                     max_policies=1,
+                    encoder_checkpoint=settings.TASK_POLICIES_ENCODER_PATH or None,
+                    encoder_device=settings.TASK_POLICIES_ENCODER_DEVICE,
                 )
                 modifying_methods = {
                     "bugfix.root_cause",

@@ -45,7 +45,7 @@ from bench.task_policy_manual_cv import (
 from bench.task_policy_multilabel_head import METHOD_LABELS, _targets
 
 
-FINETUNE_CV_VERSION = "manual-task-policy-e5-finetune-cv-v2"
+FINETUNE_CV_VERSION = "manual-task-policy-e5-finetune-cv-v4"
 LEXICAL_FEATURE_DIMENSIONS = 2048
 _LEXICAL_TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 
@@ -92,7 +92,7 @@ def _hashed_lexical_features(
 
 @dataclass(frozen=True)
 class ManualFinetuneParameters:
-    """CPU-friendly parameters fixed before cross-validation."""
+    """Fine-tuning parameters fixed before cross-validation."""
 
     max_length: int = 96
     batch_size: int = 16
@@ -100,6 +100,9 @@ class ManualFinetuneParameters:
     unfrozen_layers: int = 4
     hidden_size: int = 128
     architecture: str = "shared_mean"
+    pooling: str = "mean"
+    query_instruction: str | None = None
+    load_in_4bit: bool = False
     threshold_calibration: str = "independent"
     encoder_learning_rate: float = 2e-5
     head_learning_rate: float = 5e-4
@@ -139,15 +142,20 @@ def _individual_accuracy_checkpoint_key(
     accuracies = [float(per_label[label]["accuracy"]) for label in METHOD_LABELS]
     precisions = [float(per_label[label]["precision"]) for label in METHOD_LABELS]
     recalls = [float(per_label[label]["recall"]) for label in METHOD_LABELS]
-    labels_at_target = sum(value >= accuracy_target for value in accuracies)
+    labels_with_recall = sum(value > 0.0 for value in recalls)
+    labels_at_target = sum(
+        accuracy >= accuracy_target and recall > 0.0
+        for accuracy, recall in zip(accuracies, recalls, strict=True)
+    )
     return (
         float(labels_at_target == len(METHOD_LABELS)),
         labels_at_target / len(METHOD_LABELS),
+        labels_with_recall / len(METHOD_LABELS),
         min(accuracies),
         float(np.mean(accuracies)),
-        float(np.mean(precisions)),
         min(recalls),
         float(np.mean(recalls)),
+        float(np.mean(precisions)),
         float(report["exact_match"]),
     )
 
@@ -238,8 +246,11 @@ def _select_natural_accuracy_threshold(
             and precision >= minimum_precision
             and recall >= minimum_recall
         )
+        satisfies_recall = recall >= minimum_recall
         key = (
             float(satisfies_quality),
+            float(satisfies_recall),
+            float(recall > 0.0),
             accuracy,
             f1,
             precision,
@@ -318,15 +329,20 @@ def _domain_checkpoint_key(
     accuracies = [float(metrics["accuracy"]) for metrics in selected]
     precisions = [float(metrics["precision"]) for metrics in selected]
     recalls = [float(metrics["recall"]) for metrics in selected]
-    labels_at_target = sum(value >= accuracy_target for value in accuracies)
+    labels_with_recall = sum(value > 0.0 for value in recalls)
+    labels_at_target = sum(
+        accuracy >= accuracy_target and recall > 0.0
+        for accuracy, recall in zip(accuracies, recalls, strict=True)
+    )
     return (
         float(labels_at_target == len(METHOD_LABELS)),
         labels_at_target / len(METHOD_LABELS),
+        labels_with_recall / len(METHOD_LABELS),
         min(accuracies),
         float(np.mean(accuracies)),
-        float(np.mean(precisions)),
         min(recalls),
         float(np.mean(recalls)),
+        float(np.mean(precisions)),
         float(natural_report["exact_match"]),
     )
 
@@ -335,11 +351,93 @@ def _encoded_subset(encoded: dict[str, object], indices: np.ndarray) -> dict[str
     return {name: value[indices] for name, value in encoded.items()}  # type: ignore[index]
 
 
+def _resolve_device(device: str) -> object:
+    """Resolve an explicit PyTorch device, preferring CUDA for auto."""
+    import torch
+
+    if device.casefold() == "auto":
+        requested = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        requested = device
+    try:
+        resolved = torch.device(requested)
+    except (RuntimeError, ValueError) as exc:
+        raise ValueError(f"invalid PyTorch device {device!r}: {exc}") from exc
+    if resolved.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"CUDA device {device!r} was requested, but torch.cuda.is_available() is false"
+            )
+        if resolved.index is not None and resolved.index >= torch.cuda.device_count():
+            raise ValueError(
+                f"CUDA device index {resolved.index} is unavailable; "
+                f"found {torch.cuda.device_count()} CUDA device(s)"
+            )
+    return resolved
+
+
+def _batch_to_device(batch: dict[str, object], device: object) -> dict[str, object]:
+    """Move one encoded batch to the selected accelerator."""
+    return {
+        name: value.to(device)  # type: ignore[attr-defined]
+        for name, value in batch.items()
+    }
+
+
+def _format_model_input(text: str, instruction: str | None) -> str:
+    """Format one request using the selected embedding model's query convention."""
+    if instruction is not None:
+        normalized = instruction.strip()
+        if not normalized:
+            raise ValueError("query_instruction must not be blank")
+        return f"Instruct: {normalized}\nQuery:{text}"
+    return f"query: {text}"
+
+
+def _pool_hidden_state(
+    hidden_state: object,
+    attention_mask: object,
+    pooling: str,
+) -> object:
+    """Pool token states with either encoder mean or decoder last-token pooling."""
+    import torch
+
+    mask = attention_mask.bool()  # type: ignore[attr-defined]
+    if pooling == "mean":
+        expanded = mask[..., None]
+        pooled = hidden_state.masked_fill(~expanded, 0.0).sum(dim=1)  # type: ignore[attr-defined]
+        return pooled / expanded.sum(dim=1).clamp(min=1)
+    if pooling == "last":
+        positions = torch.arange(mask.shape[1], device=mask.device)[None, :]
+        last_positions = positions.expand_as(mask).masked_fill(~mask, -1).max(dim=1).values
+        if bool((last_positions < 0).any()):
+            raise ValueError("cannot last-pool an input with no unmasked tokens")
+        rows = torch.arange(mask.shape[0], device=mask.device)
+        return hidden_state[rows, last_positions]  # type: ignore[index]
+    raise ValueError("pooling must be 'mean' or 'last'")
+
+
+def _lora_target_modules(encoder: object) -> tuple[str, str]:
+    """Select the attention projection names exposed by an encoder family."""
+    available = {
+        name.rsplit(".", 1)[-1]
+        for name, _module in encoder.named_modules()  # type: ignore[attr-defined]
+    }
+    for candidates in (("query", "value"), ("q_proj", "v_proj")):
+        if all(candidate in available for candidate in candidates):
+            return candidates
+    raise ValueError(
+        "unsupported encoder attention projections for LoRA; expected "
+        "query/value or q_proj/v_proj modules"
+    )
+
+
 def _model_scores(
     model: object,
     encoded: dict[str, object],
     *,
     batch_size: int,
+    device: object = "cpu",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run a token-level model in bounded inference batches."""
     import torch
@@ -350,13 +448,16 @@ def _model_scores(
     example_count = len(encoded["input_ids"])  # type: ignore[arg-type]
     with torch.inference_mode():
         for start in range(0, example_count, batch_size):
-            batch = {
-                name: value[start:start + batch_size]  # type: ignore[index]
-                for name, value in encoded.items()
-            }
+            batch = _batch_to_device(
+                {
+                    name: value[start:start + batch_size]  # type: ignore[index]
+                    for name, value in encoded.items()
+                },
+                device,
+            )
             method_logits, task_logits = model(**batch)  # type: ignore[operator]
-            method_chunks.append(method_logits.sigmoid().numpy())
-            task_chunks.append(task_logits.sigmoid().numpy())
+            method_chunks.append(method_logits.sigmoid().detach().cpu().numpy())
+            task_chunks.append(task_logits.sigmoid().detach().cpu().numpy())
     return np.concatenate(method_chunks), np.concatenate(task_chunks)
 
 
@@ -365,6 +466,7 @@ def _model_outputs(
     encoded: dict[str, object],
     *,
     batch_size: int,
+    device: object = "cpu",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Run inference and retain optional cardinality probabilities."""
     import torch
@@ -376,16 +478,21 @@ def _model_outputs(
     example_count = len(encoded["input_ids"])  # type: ignore[arg-type]
     with torch.inference_mode():
         for start in range(0, example_count, batch_size):
-            batch = {
-                name: value[start:start + batch_size]  # type: ignore[index]
-                for name, value in encoded.items()
-            }
+            batch = _batch_to_device(
+                {
+                    name: value[start:start + batch_size]  # type: ignore[index]
+                    for name, value in encoded.items()
+                },
+                device,
+            )
             outputs = model(**batch)  # type: ignore[operator]
             method_logits, task_logits = outputs[:2]
-            method_chunks.append(method_logits.sigmoid().numpy())
-            task_chunks.append(task_logits.sigmoid().numpy())
+            method_chunks.append(method_logits.sigmoid().detach().cpu().numpy())
+            task_chunks.append(task_logits.sigmoid().detach().cpu().numpy())
             if len(outputs) == 3:
-                cardinality_chunks.append(outputs[2].softmax(dim=1).numpy())
+                cardinality_chunks.append(
+                    outputs[2].softmax(dim=1).detach().cpu().numpy()
+                )
     cardinality_scores = (
         np.concatenate(cardinality_chunks) if cardinality_chunks else None
     )
@@ -461,6 +568,7 @@ def _run_fold(
     test_indices: np.ndarray,
     parameters: ManualFinetuneParameters,
     fold: int,
+    device: object,
     calibration_encoded: dict[str, object] | None = None,
     calibration_examples: list[object] | None = None,
     external_encoded: dict[str, object] | None = None,
@@ -478,17 +586,39 @@ def _run_fold(
     class TaskPolicyModel(nn.Module):
         def __init__(self) -> None:
             super().__init__()
-            self.encoder = AutoModel.from_pretrained(model_name)
-            if parameters.lora_rank:
-                from peft import LoraConfig, get_peft_model
+            model_kwargs: dict[str, object] = {}
+            if parameters.load_in_4bit:
+                from transformers import BitsAndBytesConfig
 
+                model_kwargs.update({
+                    "attn_implementation": "sdpa",
+                    "device_map": {"": device},
+                    "quantization_config": BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_use_double_quant=True,
+                    ),
+                })
+            self.encoder = AutoModel.from_pretrained(model_name, **model_kwargs)
+            self.encoder.config.use_cache = False
+            if parameters.lora_rank:
+                from peft import (
+                    LoraConfig,
+                    get_peft_model,
+                    prepare_model_for_kbit_training,
+                )
+
+                if parameters.load_in_4bit:
+                    self.encoder = prepare_model_for_kbit_training(self.encoder)
+                target_modules = _lora_target_modules(self.encoder)
                 self.encoder = get_peft_model(
                     self.encoder,
                     LoraConfig(
                         r=parameters.lora_rank,
                         lora_alpha=parameters.lora_alpha,
                         lora_dropout=0.05,
-                        target_modules=("query", "value"),
+                        target_modules=target_modules,
                     ),
                 )
             encoder_size = int(self.encoder.config.hidden_size)
@@ -527,6 +657,18 @@ def _run_fold(
                     "'label_attention_cardinality', or 'label_attention_lexical'"
                 )
 
+        def move_head_to(self, selected_device: object) -> None:
+            """Move classifier-owned modules without recasting a quantized encoder."""
+            for name, module in self.named_children():
+                if name != "encoder":
+                    module.to(selected_device)
+            for name, parameter in tuple(self._parameters.items()):
+                if parameter is not None:
+                    self._parameters[name] = nn.Parameter(
+                        parameter.to(selected_device),
+                        requires_grad=parameter.requires_grad,
+                    )
+
         def _body(self, encoder_size: int) -> nn.Sequential:
             return nn.Sequential(
                 nn.Linear(encoder_size, parameters.hidden_size),
@@ -537,10 +679,10 @@ def _run_fold(
 
         def forward(self, **batch: object) -> tuple[object, object]:
             lexical_features = batch.pop("lexical_features", None)
-            output = self.encoder(**batch).last_hidden_state
-            mask = batch["attention_mask"][..., None].bool()  # type: ignore[index]
-            pooled = output.masked_fill(~mask, 0.0).sum(dim=1)
-            pooled = pooled / mask.sum(dim=1).clamp(min=1)
+            output = self.encoder(**batch).last_hidden_state.float()
+            attention_mask = batch["attention_mask"]  # type: ignore[index]
+            mask = attention_mask[..., None].bool()
+            pooled = _pool_hidden_state(output, attention_mask, parameters.pooling)
             if parameters.architecture == "shared_mean":
                 hidden = self.body(pooled)
                 return self.methods(hidden), self.task(hidden).squeeze(1)
@@ -584,6 +726,10 @@ def _run_fold(
     cardinality_targets = torch.from_numpy(cardinality_targets_np)
 
     model = TaskPolicyModel()
+    if parameters.load_in_4bit:
+        model.move_head_to(device)
+    else:
+        model.to(device)
     if parameters.lora_rank:
         trainable_encoder = sum(
             parameter.numel()
@@ -626,23 +772,25 @@ def _run_fold(
     method_loss = nn.BCEWithLogitsLoss(
         pos_weight=torch.from_numpy(
             _positive_weights(train_targets_np, parameters.positive_weight_power)
-        )
+        ).to(device)
     )
-    exclusive_loss = nn.CrossEntropyLoss()
+    exclusive_loss = nn.CrossEntropyLoss().to(device)
     task_loss = nn.BCEWithLogitsLoss(
         pos_weight=torch.from_numpy(
             _positive_weights(
                 task_targets_np.reshape(-1, 1), parameters.positive_weight_power
             )
-        ).squeeze(0)
+        ).squeeze(0).to(device)
     )
-    cardinality_loss = nn.CrossEntropyLoss(weight=torch.from_numpy(
-        _cardinality_class_weights(
-            cardinality_targets_np,
-            power=parameters.cardinality_balance_power,
-        ).astype(np.float32)
-    ))
-    best_key = (-1.0,) * 8
+    cardinality_loss = nn.CrossEntropyLoss(
+        weight=torch.from_numpy(
+            _cardinality_class_weights(
+                cardinality_targets_np,
+                power=parameters.cardinality_balance_power,
+            ).astype(np.float32)
+        ).to(device)
+    )
+    best_key = (-1.0,) * 9
     best_state = None
     best_thresholds = (0.5,) * len(METHOD_LABELS)
     best_task_threshold = 0.5
@@ -660,23 +808,32 @@ def _run_fold(
         running_loss = 0.0
         for start in range(0, len(order), parameters.batch_size):
             indices = order[start:start + parameters.batch_size]
-            batch = {name: value[indices] for name, value in train_x.items()}  # type: ignore[index]
+            batch = _batch_to_device(
+                {
+                    name: value[indices]  # type: ignore[index]
+                    for name, value in train_x.items()
+                },
+                device,
+            )
+            method_target_batch = train_targets[indices].to(device)
+            task_target_batch = task_targets[indices].to(device)
+            cardinality_target_batch = cardinality_targets[indices].to(device)
             outputs = model(**batch)
             method_logits, task_logits = outputs[:2]
-            loss = method_loss(method_logits, train_targets[indices])
+            loss = method_loss(method_logits, method_target_batch)
             loss = loss + parameters.task_loss_weight * task_loss(
-                task_logits, task_targets[indices]
+                task_logits, task_target_batch
             )
-            exclusive_mask = cardinality_targets[indices] == 1
+            exclusive_mask = cardinality_target_batch == 1
             if bool(exclusive_mask.any()):
-                exclusive_targets = train_targets[indices][exclusive_mask].argmax(dim=1)
+                exclusive_targets = method_target_batch[exclusive_mask].argmax(dim=1)
                 loss = loss + parameters.exclusive_loss_weight * exclusive_loss(
                     method_logits[exclusive_mask],
                     exclusive_targets,
                 )
             if len(outputs) == 3:
                 loss = loss + parameters.cardinality_loss_weight * cardinality_loss(
-                    outputs[2], cardinality_targets[indices]
+                    outputs[2], cardinality_target_batch
                 )
             optimizer.zero_grad()
             loss.backward()
@@ -687,7 +844,10 @@ def _run_fold(
             optimizer.step()
             running_loss += float(loss.detach()) * len(indices)
         method_scores, task_scores, cardinality_scores = _model_outputs(
-            model, validation_x, batch_size=parameters.batch_size
+            model,
+            validation_x,
+            batch_size=parameters.batch_size,
+            device=device,
         )
         selection_method_scores = method_scores
         selection_task_scores = task_scores
@@ -699,6 +859,7 @@ def _run_fold(
                 model,
                 calibration_encoded,
                 batch_size=parameters.batch_size,
+                device=device,
             )
             calibration_method, calibration_task, calibration_cardinality = (
                 calibration_outputs
@@ -818,8 +979,13 @@ def _run_fold(
         })
         if key > best_key:
             best_key = key
+            trainable_names = {
+                name for name, parameter in model.named_parameters() if parameter.requires_grad
+            }
             best_state = {
-                name: value.detach().clone() for name, value in model.state_dict().items()
+                name: value.detach().cpu().clone()
+                for name, value in model.state_dict().items()
+                if name in trainable_names
             }
             best_thresholds = thresholds
             best_task_threshold = task_threshold
@@ -835,9 +1001,9 @@ def _run_fold(
                 break
     if best_state is None:
         raise RuntimeError("fine-tuning produced no checkpoint")
-    model.load_state_dict(best_state)
+    model.load_state_dict(best_state, strict=False)
     method_scores, task_scores, cardinality_scores = _model_outputs(
-        model, test_x, batch_size=parameters.batch_size
+        model, test_x, batch_size=parameters.batch_size, device=device
     )
     predictions = (
         _predict_cardinality(method_scores, cardinality_scores)
@@ -852,7 +1018,12 @@ def _run_fold(
     external_evaluation = None
     if external_encoded is not None and external_examples is not None:
         external_method_scores, external_task_scores, external_cardinality_scores = (
-            _model_outputs(model, external_encoded, batch_size=parameters.batch_size)
+            _model_outputs(
+                model,
+                external_encoded,
+                batch_size=parameters.batch_size,
+                device=device,
+            )
         )
         external_predictions = (
             _predict_cardinality(external_method_scores, external_cardinality_scores)
@@ -874,6 +1045,7 @@ def _run_fold(
         }
     report = {
         "fold": fold,
+        "device": str(device),
         "train": len(train_indices),
         "validation": len(validation_indices),
         "test": len(test_indices),
@@ -898,7 +1070,10 @@ def _run_fold(
         report["external_evaluation"] = external_evaluation
     if prediction_encoded is not None and prediction_ids is not None:
         prediction_method, prediction_task, prediction_cardinality = _model_outputs(
-            model, prediction_encoded, batch_size=parameters.batch_size
+            model,
+            prediction_encoded,
+            batch_size=parameters.batch_size,
+            device=device,
         )
         frozen_predictions = (
             _predict_cardinality(prediction_method, prediction_cardinality)
@@ -916,8 +1091,10 @@ def _run_fold(
             "method_scores": prediction_method.tolist(),
             "task_scores": prediction_task.tolist(),
         }
-    del model
+    del best_state, model
     gc.collect()
+    if getattr(device, "type", None) == "cuda":
+        torch.cuda.empty_cache()
     return predictions, report
 
 
@@ -936,17 +1113,26 @@ def run_cross_validation(
     external_candidates_path: Path | tuple[Path, ...] | None = None,
     external_reviews_path: Path | None = None,
     prediction_candidates_path: Path | tuple[Path, ...] | None = None,
+    device: str = "auto",
 ) -> dict[str, Any]:
     """Fine-tune a fresh encoder per fold and return out-of-fold predictions."""
     import torch
     from transformers import AutoTokenizer
 
     parameters = parameters or ManualFinetuneParameters()
+    if parameters.load_in_4bit and not parameters.lora_rank:
+        raise ValueError("load_in_4bit requires a positive lora_rank for training")
+    if parameters.pooling not in {"mean", "last"}:
+        raise ValueError("pooling must be 'mean' or 'last'")
+    resolved_device = _resolve_device(device)
     torch.set_num_threads(max(1, min(8, torch.get_num_threads())))
     rows = load_examples()
     examples = _examples(rows)
     folds = assign_folds(rows, fold_count)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name,
+        padding_side="left" if parameters.pooling == "last" else "right",
+    )
     if (training_candidates_path is None) != (not training_reviews_paths):
         raise ValueError("training candidates and reviews must be provided together")
     training_reviews = []
@@ -963,7 +1149,10 @@ def run_cross_validation(
         training_examples = [review.as_example() for review in training_reviews]
     all_examples = examples + training_examples
     encoded = tokenizer(
-        [f"query: {example.text}" for example in all_examples],
+        [
+            _format_model_input(example.text, parameters.query_instruction)
+            for example in all_examples
+        ],
         max_length=parameters.max_length,
         padding=True,
         truncation=True,
@@ -988,7 +1177,10 @@ def run_cross_validation(
         _validate_external_partition(training_reviews, calibration_reviews)
         calibration_examples = [review.as_example() for review in calibration_reviews]
         calibration_encoded = tokenizer(
-            [f"query: {example.text}" for example in calibration_examples],
+            [
+                _format_model_input(example.text, parameters.query_instruction)
+                for example in calibration_examples
+            ],
             max_length=parameters.max_length,
             padding=True,
             truncation=True,
@@ -1011,7 +1203,10 @@ def run_cross_validation(
         _validate_external_partition(calibration_reviews, external_reviews)
         external_examples = [review.as_example() for review in external_reviews]
         external_encoded = tokenizer(
-            [f"query: {example.text}" for example in external_examples],
+            [
+                _format_model_input(example.text, parameters.query_instruction)
+                for example in external_examples
+            ],
             max_length=parameters.max_length,
             padding=True,
             truncation=True,
@@ -1033,7 +1228,10 @@ def run_cross_validation(
                 + ", ".join(overlap)
             )
         prediction_encoded = tokenizer(
-            [f"query: {item.text}" for item in prediction_candidates],
+            [
+                _format_model_input(item.text, parameters.query_instruction)
+                for item in prediction_candidates
+            ],
             max_length=parameters.max_length,
             padding=True,
             truncation=True,
@@ -1077,6 +1275,7 @@ def run_cross_validation(
             test_indices=test_indices,
             parameters=parameters,
             fold=test_fold,
+            device=resolved_device,
             calibration_encoded=calibration_encoded,
             calibration_examples=calibration_examples,
             external_encoded=external_encoded,
@@ -1092,6 +1291,7 @@ def run_cross_validation(
             "version": FINETUNE_CV_VERSION,
             "fold_assignment": FOLD_ASSIGNMENT_VERSION,
             "model": model_name,
+            "device": str(resolved_device),
             "parameters": asdict(parameters),
             "completed_folds": len(fold_reports),
             "total_folds": fold_count,
@@ -1147,6 +1347,7 @@ def run_cross_validation(
         "fold_assignment": FOLD_ASSIGNMENT_VERSION,
         "purpose": "development diagnostic; not sealed-holdout evidence",
         "model": model_name,
+        "device": str(resolved_device),
         "parameters": asdict(parameters),
         "examples": len(examples),
         "training_only_examples": len(training_examples),
@@ -1195,8 +1396,16 @@ def run_cross_validation(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=DEFAULT_CONTEXTUAL_MODEL)
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="PyTorch device: auto, cpu, cuda, cuda:N, or another torch device string",
+    )
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--max-length", type=int, default=96)
+    parser.add_argument("--pooling", choices=("mean", "last"), default="mean")
+    parser.add_argument("--query-instruction")
+    parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--unfrozen-layers", type=int, default=4)
@@ -1250,6 +1459,9 @@ def main() -> None:
             unfrozen_layers=args.unfrozen_layers,
             hidden_size=args.hidden_size,
             architecture=args.architecture,
+            pooling=args.pooling,
+            query_instruction=args.query_instruction,
+            load_in_4bit=args.load_in_4bit,
             threshold_calibration=args.threshold_calibration,
             encoder_learning_rate=args.encoder_learning_rate,
             head_learning_rate=args.head_learning_rate,
@@ -1288,6 +1500,7 @@ def main() -> None:
         prediction_candidates_path=(
             tuple(args.prediction_candidates) if args.prediction_candidates else None
         ),
+        device=args.device,
     )
     rendered = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output is None:
@@ -1298,6 +1511,7 @@ def main() -> None:
     print(json.dumps({
         "output": str(args.output),
         "model": report["model"],
+        "device": report["device"],
         "examples": report["examples"],
         "aggregate": report["aggregate"],
         "false_activation_reasons": report["false_activation_reasons"],
@@ -1313,6 +1527,10 @@ __all__ = [
     "ManualFinetuneParameters",
     "LEXICAL_FEATURE_DIMENSIONS",
     "_hashed_lexical_features",
+    "_format_model_input",
+    "_pool_hidden_state",
+    "_lora_target_modules",
+    "_resolve_device",
     "_model_scores",
     "_consensus_predictions",
     "_individual_accuracy_checkpoint_key",

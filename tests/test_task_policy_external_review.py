@@ -91,6 +91,24 @@ def test_external_reviews_allow_out_of_domain_natural_negative(tmp_path: Path) -
     assert loaded[0].uncategorized_reason == "out_of_domain"
 
 
+def test_external_reviews_preserve_model_annotation_weight_inputs(tmp_path: Path) -> None:
+    candidates = tmp_path / "candidates.jsonl"
+    reviews = tmp_path / "reviews.jsonl"
+    _write_jsonl(candidates, [_candidate()])
+    _write_jsonl(reviews, [{
+        "candidate_id": "external:one",
+        "include": True,
+        "policies": ["bugfix"],
+        "notes": "A model-labeled contract restoration.",
+        "annotation": {"kind": "model", "confidence": 0.82},
+    }])
+
+    loaded = load_external_reviews(candidates, reviews)
+
+    assert loaded[0].annotation_kind == "model"
+    assert loaded[0].annotation_confidence == 0.82
+
+
 def test_external_reviews_require_reason_only_for_uncategorized_rows(
     tmp_path: Path,
 ) -> None:

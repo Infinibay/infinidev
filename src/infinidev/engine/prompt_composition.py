@@ -24,6 +24,7 @@ class ConditionalPromptFragment:
     content: str
     roles: frozenset[str]
     phases: frozenset[str]
+    condition_reason: str = ""
     priority: int = 0
     max_utf8_bytes: int = 900
     requires_operations: frozenset[str] = frozenset()
@@ -38,6 +39,12 @@ class ConditionalPromptFragment:
     @property
     def content_hash(self) -> str:
         payload = f"{self.id}\0{self.version}\0{self.content}".encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    @property
+    def conditional_content_hash(self) -> str:
+        """Hash the condition together with the instruction it controls."""
+        payload = f"{self.id}\0{self.version}\0{self.condition_reason}\0{self.content}".encode()
         return hashlib.sha256(payload).hexdigest()
 
 
@@ -136,6 +143,69 @@ def select_conditional_fragments(
         if not content:
             omitted.append((fragment.id, "empty"))
             continue
+        if used + size > max(0, max_utf8_bytes):
+            omitted.append((fragment.id, "budget"))
+            continue
+        chosen.append(fragment)
+        used += size
+    return ConditionalPromptSelection(
+        fragments=tuple(chosen),
+        omitted=tuple(omitted),
+        used_utf8_bytes=used,
+    )
+
+
+def select_conditional_catalog(
+    fragments: Iterable[ConditionalPromptFragment],
+    *,
+    role: str,
+    phase: str,
+    max_utf8_bytes: int,
+    provider: str = "",
+    model: str = "",
+) -> ConditionalPromptSelection:
+    """Select the complete role/phase catalog without task-profile gating."""
+    eligible: list[ConditionalPromptFragment] = []
+    omitted: list[tuple[str, str]] = []
+    for fragment in fragments:
+        reason = ""
+        if role not in fragment.roles:
+            reason = "role-mismatch"
+        elif phase not in fragment.phases:
+            reason = "phase-mismatch"
+        elif not fragment.condition_reason.strip():
+            reason = "missing-condition-reason"
+        elif fragment.model_routes and not provider and not model:
+            reason = "model-route-unavailable"
+        elif fragment.model_routes and not any(
+            _model_route_matches(selector, provider=provider, model=model)
+            for selector in fragment.model_routes
+        ):
+            reason = "model-route-mismatch"
+        elif any(
+            _model_route_matches(selector, provider=provider, model=model)
+            for selector in fragment.excluded_model_routes
+        ):
+            reason = "excluded-model-route"
+        if reason:
+            omitted.append((fragment.id, reason))
+        else:
+            eligible.append(fragment)
+
+    eligible.sort(key=lambda item: (-item.priority, item.id))
+    chosen: list[ConditionalPromptFragment] = []
+    used = 0
+    for fragment in eligible:
+        content = _clip_utf8(fragment.content, fragment.max_utf8_bytes)
+        if not content:
+            omitted.append((fragment.id, "empty"))
+            continue
+        rendered = (
+            f'<if reason="{fragment.condition_reason}">\n'
+            f"{content}\n"
+            "</if>"
+        )
+        size = len(rendered.encode("utf-8"))
         if used + size > max(0, max_utf8_bytes):
             omitted.append((fragment.id, "budget"))
             continue

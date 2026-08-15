@@ -10,13 +10,18 @@ from bench.task_policy_manual_finetune_cv import (
     ManualFinetuneParameters,
     _consensus_predictions,
     _domain_checkpoint_key,
+    _format_model_input,
     _hashed_lexical_features,
     _model_scores,
     _individual_accuracy_checkpoint_key,
+    _lora_target_modules,
     _predict_cardinality,
     _positive_weights,
+    _pool_hidden_state,
+    _resolve_device,
     _select_accuracy_thresholds,
     _select_domain_accuracy_thresholds,
+    _select_natural_accuracy_threshold,
     _validate_external_partition,
 )
 
@@ -27,7 +32,36 @@ def test_finetune_parameters_default_to_shared_mean_architecture() -> None:
     assert parameters.architecture == "shared_mean"
     assert parameters.threshold_calibration == "independent"
     assert parameters.lora_rank == 0
+    assert parameters.pooling == "mean"
+    assert parameters.query_instruction is None
+    assert parameters.load_in_4bit is False
     assert parameters.exclusive_loss_weight == pytest.approx(0.7)
+
+
+def test_model_input_supports_plain_and_instruct_embedding_formats() -> None:
+    assert _format_model_input("fix it", None) == "query: fix it"
+    assert _format_model_input("fix it", "Classify this request") == (
+        "Instruct: Classify this request\nQuery:fix it"
+    )
+    with pytest.raises(ValueError, match="must not be blank"):
+        _format_model_input("fix it", "   ")
+
+
+def test_hidden_state_pooling_supports_mean_and_last_token() -> None:
+    torch = pytest.importorskip("torch")
+    hidden = torch.tensor([
+        [[1.0, 2.0], [3.0, 4.0], [50.0, 60.0]],
+        [[70.0, 80.0], [5.0, 6.0], [7.0, 8.0]],
+    ])
+    mask = torch.tensor([[1, 1, 0], [0, 1, 1]])
+
+    mean = _pool_hidden_state(hidden, mask, "mean")
+    last = _pool_hidden_state(hidden, mask, "last")
+
+    assert torch.equal(mean, torch.tensor([[2.0, 3.0], [6.0, 7.0]]))
+    assert torch.equal(last, torch.tensor([[3.0, 4.0], [7.0, 8.0]]))
+    with pytest.raises(ValueError, match="pooling must be"):
+        _pool_hidden_state(hidden, mask, "unknown")
 
 
 def test_positive_weights_support_tempered_inverse_frequency() -> None:
@@ -81,6 +115,32 @@ def test_checkpoint_key_prioritizes_the_worst_per_label_accuracy() -> None:
         individually_accurate, accuracy_target=0.95
     ) > (
         _individual_accuracy_checkpoint_key(aggregate_winner, accuracy_target=0.95)
+    )
+
+
+def test_checkpoint_key_rejects_high_accuracy_with_zero_recall() -> None:
+    from bench.task_policy_multilabel_head import METHOD_LABELS
+
+    def report(*, accuracy: float, recall: float) -> dict[str, object]:
+        return {
+            "per_label": {
+                label: {
+                    "accuracy": accuracy,
+                    "precision": float(recall > 0.0),
+                    "recall": recall,
+                }
+                for label in METHOD_LABELS
+            },
+            "exact_match": accuracy,
+        }
+
+    useful = report(accuracy=0.94, recall=0.5)
+    degenerate = report(accuracy=0.99, recall=0.0)
+
+    assert _individual_accuracy_checkpoint_key(
+        useful, accuracy_target=0.95
+    ) > _individual_accuracy_checkpoint_key(
+        degenerate, accuracy_target=0.95
     )
 
 
@@ -143,6 +203,25 @@ def test_domain_accuracy_thresholds_prefer_supported_natural_labels() -> None:
     assert task_threshold == 0.0
 
 
+def test_natural_threshold_fallback_keeps_supported_recall() -> None:
+    expected = np.asarray([True] * 5 + [False] * 95)
+    scores = np.asarray(
+        [0.20, 0.21, 0.22, 0.23, 0.24]
+        + [0.30] * 10
+        + [0.10] * 85
+    )
+
+    threshold = _select_natural_accuracy_threshold(
+        scores,
+        expected,
+        accuracy_target=0.95,
+    )
+
+    predicted = scores >= threshold
+    assert int((predicted & expected).sum()) == 5
+    assert threshold <= 0.20
+
+
 def test_domain_checkpoint_key_uses_natural_metrics_only_with_support() -> None:
     from bench.task_policy_multilabel_head import METHOD_LABELS
 
@@ -164,7 +243,40 @@ def test_domain_checkpoint_key_uses_natural_metrics_only_with_support() -> None:
     )
 
     assert key[1] == pytest.approx(5 / 6)
-    assert key[2] == pytest.approx(0.80)
+    assert key[2] == pytest.approx(1.0)
+    assert key[3] == pytest.approx(0.80)
+
+
+def test_domain_checkpoint_key_rejects_supported_zero_recall() -> None:
+    from bench.task_policy_multilabel_head import METHOD_LABELS
+
+    def report(*, accuracy: float, recall: float) -> dict[str, object]:
+        return {
+            "per_label": {
+                label: {
+                    "accuracy": accuracy,
+                    "precision": float(recall > 0.0),
+                    "recall": recall,
+                    "support": 7,
+                }
+                for label in METHOD_LABELS
+            },
+            "exact_match": accuracy,
+        }
+
+    synthetic = report(accuracy=0.9, recall=0.5)
+    useful = report(accuracy=0.94, recall=0.5)
+    degenerate = report(accuracy=0.99, recall=0.0)
+
+    assert _domain_checkpoint_key(
+        synthetic,
+        useful,
+        accuracy_target=0.95,
+    ) > _domain_checkpoint_key(
+        synthetic,
+        degenerate,
+        accuracy_target=0.95,
+    )
 
 
 def test_model_scores_batches_tokenized_inputs() -> None:
@@ -185,6 +297,102 @@ def test_model_scores_batches_tokenized_inputs() -> None:
     assert methods.shape == (3, 2)
     assert task.shape == (3,)
     assert methods[0, 0] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("module_names", "expected"),
+    [
+        (
+            ("encoder.layer.0.attention.query", "encoder.layer.0.attention.value"),
+            ("query", "value"),
+        ),
+        (
+            ("layers.0.self_attn.q_proj", "layers.0.self_attn.v_proj"),
+            ("q_proj", "v_proj"),
+        ),
+    ],
+)
+def test_lora_target_modules_supports_encoder_projection_conventions(
+    module_names: tuple[str, ...],
+    expected: tuple[str, str],
+) -> None:
+    class Encoder:
+        def named_modules(self) -> list[tuple[str, object]]:
+            return [(name, object()) for name in module_names]
+
+    assert _lora_target_modules(Encoder()) == expected
+
+
+def test_lora_target_modules_rejects_unknown_attention_projections() -> None:
+    class Encoder:
+        def named_modules(self) -> list[tuple[str, object]]:
+            return [("layers.0.attention.unknown", object())]
+
+    with pytest.raises(ValueError, match="unsupported encoder attention projections"):
+        _lora_target_modules(Encoder())
+
+
+def test_model_scores_moves_cpu_batches_to_cuda_and_returns_numpy() -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+
+    class Model:
+        def eval(self) -> None:
+            pass
+
+        def __call__(self, *, input_ids: object) -> tuple[object, object]:
+            assert input_ids.device.type == "cuda"
+            values = input_ids.to(dtype=torch.float32)
+            return values, values[:, 0]
+
+    encoded = {"input_ids": torch.tensor([[0, 1], [2, 3]])}
+
+    methods, task = _model_scores(
+        Model(),
+        encoded,
+        batch_size=1,
+        device=torch.device("cuda"),
+    )
+
+    assert isinstance(methods, np.ndarray)
+    assert isinstance(task, np.ndarray)
+    assert methods.shape == (2, 2)
+    assert task.shape == (2,)
+
+
+def test_device_selection_defaults_to_cpu_when_cuda_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    assert str(_resolve_device("auto")) == "cpu"
+    assert str(_resolve_device("cpu")) == "cpu"
+
+
+def test_device_selection_accepts_available_cuda_devices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+
+    assert str(_resolve_device("auto")) == "cuda"
+    assert str(_resolve_device("cuda")) == "cuda"
+    assert str(_resolve_device("cuda:1")) == "cuda:1"
+    with pytest.raises(ValueError, match="index 2 is unavailable"):
+        _resolve_device("cuda:2")
+
+
+def test_device_selection_rejects_cuda_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    with pytest.raises(RuntimeError, match=r"torch\.cuda\.is_available\(\) is false"):
+        _resolve_device("cuda")
 
 
 def test_cardinality_prediction_can_abstain_and_select_top_labels() -> None:

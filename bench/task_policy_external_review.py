@@ -59,6 +59,8 @@ class ExternalReview:
     policies: tuple[str, ...]
     notes: str
     uncategorized_reason: str | None = None
+    annotation_kind: str = "human"
+    annotation_confidence: float = 1.0
 
     def as_example(self) -> MultiLabelExample:
         """Return the common benchmark representation."""
@@ -195,6 +197,21 @@ def load_external_reviews(
         text = clean_external_request(str(candidate.get("issue_text", "")))
         if not text:
             raise ValueError(f"candidate {candidate_id} has empty issue_text")
+        annotation = decision.get("annotation")
+        annotation_kind = "human"
+        annotation_confidence = 1.0
+        if annotation is not None:
+            if not isinstance(annotation, dict) or annotation.get("kind") != "model":
+                raise ValueError(f"review {candidate_id} has invalid annotation provenance")
+            confidence = annotation.get("confidence")
+            if (
+                isinstance(confidence, bool)
+                or not isinstance(confidence, (int, float))
+                or not 0 <= float(confidence) <= 1
+            ):
+                raise ValueError(f"review {candidate_id} has invalid annotation confidence")
+            annotation_kind = "model"
+            annotation_confidence = float(confidence)
         reviewed.append(ExternalReview(
             candidate_id=candidate_id,
             repo=str(source.get("repo", "")),
@@ -203,6 +220,8 @@ def load_external_reviews(
             policies=policies,
             notes=notes,
             uncategorized_reason=uncategorized_reason or None,
+            annotation_kind=annotation_kind,
+            annotation_confidence=annotation_confidence,
         ))
     return reviewed
 
