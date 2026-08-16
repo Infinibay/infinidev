@@ -35,6 +35,10 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
+from infinidev.engine.orchestration.difficulty import (
+    DifficultyLevel,
+    resolve_difficulty,
+)
 from infinidev.engine.task_policies.models import TaskProfile
 
 logger = logging.getLogger(__name__)
@@ -170,6 +174,18 @@ class Task(BaseModel):
         ),
     )
 
+    difficulty: DifficultyLevel = Field(
+        default="hard",
+        description=(
+            "How much planning depth the task deserves. ``hard`` is the "
+            "conservative default that preserves the previous behaviour; "
+            "``easy`` and ``medium`` let the planner skip its most "
+            "expensive sub-steps for focused or single-file work. The "
+            "difficulty is resolved once at construction time and rendered "
+            "into the prompt so the planner can scale its effort."
+        ),
+    )
+
     # --- Validators ---------------------------------------------------------
 
     @field_validator("title")
@@ -240,6 +256,9 @@ def task_from_free_text(
     constraints: list[str] | None = None,
     references: list[str] | None = None,
     task_profile: TaskProfile | None = None,
+    difficulty: DifficultyLevel | None = None,
+    opened_files: tuple[str, ...] | list[str] = (),
+    prior_turn_count: int = 0,
 ) -> Task:
     """Build a :class:`Task` from raw user text.
 
@@ -280,6 +299,18 @@ def task_from_free_text(
             "The user's request as written in <description> is "
             "satisfied to the user's confirmation."
         ]
+    # Difficulty: explicit value wins; otherwise the deterministic resolver
+    # classifies from the request text. Default "hard" preserves the
+    # pre-existing plan-execute-summarize behaviour for callers that pass
+    # no signals.
+    if difficulty is None:
+        decision = resolve_difficulty(
+            text,
+            opened_files=tuple(opened_files),
+            prior_turn_count=prior_turn_count,
+        )
+        difficulty = decision.level
+
     return Task(
         title=title,
         description=text,
@@ -294,6 +325,7 @@ def task_from_free_text(
         constraints=[item.strip() for item in (constraints or []) if item and item.strip()],
         references=[item.strip() for item in (references or []) if item and item.strip()],
         task_profile=task_profile,
+        difficulty=difficulty,
     )
 
 

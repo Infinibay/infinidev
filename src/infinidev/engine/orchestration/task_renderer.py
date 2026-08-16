@@ -74,6 +74,8 @@ def render_task_xml(task: Task) -> str:
 
     parts.append(f"  <title>{_escape(task.title)}</title>")
 
+    parts.append(f"  <difficulty>{_escape(task.difficulty)}</difficulty>")
+
     kind_desc = SUGGESTED_TASK_KINDS.get(task.kind)
     if kind_desc:
         parts.append(

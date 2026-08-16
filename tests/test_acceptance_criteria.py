@@ -108,6 +108,101 @@ class TestBuildPlanCriteria:
         assert plan.acceptance_criteria == []
 
 
+# ── defensive coercion of non-string step fields ─────────────────────────────
+# Some hosted models (notably MiniMax M-series) occasionally emit plan-step
+# fields whose value is a dict or list rather than a string. The legacy
+# (value or "").strip() pattern crashes with AttributeError on truthy
+# non-strings; the parser must coerce to '' and keep building a Plan.
+class TestBuildPlanDefensiveCoercion:
+    def _args(self, **step_overrides):
+        base = {
+            "overview": "Fix the typo in requirements.txt now.",
+            "steps": [{"title": "Bump cryptography pin"}],
+        }
+        base["steps"][0].update(step_overrides)
+        return base
+
+    def test_dict_valued_detail_does_not_raise(self):
+        plan = _build_plan_from_args(self._args(
+            detail={"text": "nested dict masquerading as a string"},
+        ))
+        # The parser must keep building a Plan even though ``detail`` is
+        # a dict — coerce it to '' instead of crashing.
+        assert plan is not None
+        assert plan.steps[0].detail == ""
+
+    def test_list_valued_expected_output_does_not_raise(self):
+        plan = _build_plan_from_args(self._args(
+            expected_output=["pin", "updated"],
+        ))
+        assert plan is not None
+        assert plan.steps[0].expected_output == ""
+
+    def test_dict_valued_overview_does_not_raise(self):
+        plan = _build_plan_from_args({
+            "overview": {"nested": "dict"},
+            "steps": [{"title": "Bump cryptography pin"}],
+        })
+        # Overview is mandatory; if it's non-string and non-strippable,
+        # the parser must return None so the caller can fall back rather
+        # than crash with AttributeError.
+        assert plan is None
+
+    def test_int_valued_detail_coerced_to_empty(self):
+        plan = _build_plan_from_args(self._args(detail=42))
+        assert plan is not None
+        # ints are not strings, so the helper coerces to '' rather than
+        # rendering the repr; the planner still has a usable plan.
+        assert plan.steps[0].detail == ""
+
+    def test_mixed_string_and_dict_fields_kept_together(self):
+        plan = _build_plan_from_args({
+            "overview": "Fix the typo in requirements.txt now.",
+            "steps": [
+                {
+                    "title": "Bump cryptography pin",
+                    "detail": {"text": "dict-typed detail"},
+                    "expected_output": "pin == 46.0.6",
+                },
+                {
+                    "title": "Verify with pip install",
+                    "detail": "Run pip install -r requirements.txt --dry-run",
+                    "expected_output": {"nested": "dict"},
+                },
+            ],
+        })
+        assert plan is not None
+        assert len(plan.steps) == 2
+        # Bad fields coerced to ''; good fields preserved.
+        assert plan.steps[0].detail == ""
+        assert plan.steps[0].expected_output == "pin == 46.0.6"
+        assert plan.steps[1].detail == "Run pip install -r requirements.txt --dry-run"
+        assert plan.steps[1].expected_output == ""
+
+    def test_bytes_valued_detail_decoded_as_text(self):
+        """A model that returns ``b"text"`` should surface as plain text.
+
+        Some hosted models (notably M-series) occasionally emit bytes-typed
+        strings instead of real str. Dropping them silently would lose real
+        plan content; decoding them as UTF-8 preserves the signal.
+        """
+        plan = _build_plan_from_args(self._args(detail=b"Run pytest tests/test_auth.py"))
+        assert plan is not None
+        assert plan.steps[0].detail == "Run pytest tests/test_auth.py"
+
+    def test_int_valued_detail_zero_coerced_to_empty(self):
+        """An int-typed model output is not textual content.
+
+        ``0`` is falsy so the legacy ``(value or "")`` short-circuit would
+        have produced '' anyway, but a non-zero int would have raised. The
+        helper now coerces consistently — int output is never useful as
+        step detail, so it becomes ''.
+        """
+        plan = _build_plan_from_args(self._args(detail=42))
+        assert plan is not None
+        assert plan.steps[0].detail == ""
+
+
 # ── emit_plan schema advertises the field ────────────────────────────────
 
 class TestEmitPlanSchema:

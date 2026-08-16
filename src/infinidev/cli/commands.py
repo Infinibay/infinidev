@@ -133,6 +133,7 @@ def handle_command(cmd_text: str):
         click.echo("  /engine [mode]     - Show or set task engine (auto|task|react|staged|graph_beta)")
         click.echo("  /reindex [--full]  - Re-index the workspace (--full clears DB first)")
         click.echo("  /think             - Enable deep analysis for the next task")
+        click.echo("  /effort [level]    - Show or set reasoning effort (levels depend on model)")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
         click.echo("  /brainstorm <problem> - Creative ideation with forced perspectives")
         click.echo("  /refactor [scope]  - Refactor code (modularize, clean, restructure)")
@@ -161,6 +162,10 @@ def handle_command(cmd_text: str):
 
     elif cmd == "/think":
         return "think"
+
+    elif cmd == "/effort":
+        handle_effort_command(parts)
+        return True
 
     elif cmd == "/init":
         return "init"  # Signal to main loop to run init
@@ -287,6 +292,92 @@ def _render_agents_classic(parts: list[str]) -> None:
         round_num = message.get("round", "?")
         click.echo(click.style(f"\n{speaker} · {persona}  [round {round_num}]", bold=True))
         click.echo(message.get("text", ""))
+
+
+def _effort_choices() -> tuple[list[str], bool]:
+    """Reasoning levels worth offering, and whether they came from a model.
+
+    Mirrors the TUI handler: on the ChatGPT subscription the catalog decides
+    (per-model levels), every other provider gets the generic presets.
+    """
+    from infinidev.config.llm import CHATGPT_SUBSCRIPTION_PROVIDER
+    from infinidev.config.thinking_budget import subscription_efforts
+
+    if settings.LLM_PROVIDER == CHATGPT_SUBSCRIPTION_PROVIDER:
+        levels = subscription_efforts()
+        if levels:
+            return levels, True
+    return ["low", "medium", "high", "ultra"], False
+
+
+def _effort_in_effect() -> str:
+    """What the next request will actually carry, described in one line.
+
+    Built by running the real ``apply_thinking_budget`` over an empty kwargs
+    dict rather than by re-deriving it here — a description that can disagree
+    with the code is worse than no description.
+    """
+    from infinidev.config.thinking_budget import apply_thinking_budget
+
+    probe: dict = {}
+    try:
+        apply_thinking_budget(probe, settings.LLM_PROVIDER, settings.LLM_MODEL)
+    except Exception as exc:
+        return f"could not resolve ({exc})"
+
+    if "reasoning_effort" in probe:
+        return f"reasoning_effort={probe['reasoning_effort']}"
+    if "thinking" in probe:
+        return f"thinking={probe['thinking']}"
+    if "max_tokens" in probe:
+        return f"max_tokens={probe['max_tokens']}"
+    return "no thinking parameter sent"
+
+
+def handle_effort_command(parts: list[str]) -> None:
+    """Show or set the reasoning effort, bounded by what the model accepts.
+
+    Usage: ``/effort`` (list) | ``/effort high`` | ``/effort max`` ...
+    """
+    from infinidev.config.settings import reload_all
+
+    choices, from_catalog = _effort_choices()
+    current = (settings.THINKING_BUDGET or "").lower().strip()
+
+    if len(parts) == 1:
+        source = (
+            f"published by {settings.LLM_MODEL}"
+            if from_catalog
+            else "generic presets for this provider"
+        )
+        listed = "\n".join(
+            f"  {'>' if level == current else ' '} {level}" for level in choices
+        )
+        extra = "" if current in choices else f"\n  (current: {current})"
+        click.echo(click.style("Reasoning effort — " + source, bold=True))
+        click.echo(listed)
+        if extra:
+            click.echo(extra)
+        click.echo("")
+        click.echo(f"In effect now: {_effort_in_effect()}")
+        click.echo("Change it with /effort <level>")
+        return
+
+    wanted = parts[1].lower().strip()
+    if wanted not in choices:
+        click.echo(click.style(
+            f"'{wanted}' is not available for {settings.LLM_MODEL}.",
+            fg="red",
+        ))
+        click.echo(f"Choose one of: {', '.join(choices)}")
+        return
+
+    settings.save_user_settings({"THINKING_BUDGET": wanted})
+    reload_all()
+    click.echo(click.style(
+        f"Reasoning effort set to {wanted}. In effect: {_effort_in_effect()}",
+        fg="green",
+    ))
 
 
 def handle_engine_command(parts: list[str]):

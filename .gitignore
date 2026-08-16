@@ -82,3 +82,8 @@ examples/**/*.db
 # Downloaded embedding calibration datasets retain their upstream licenses.
 bench/data/*.json
 bench/data/*.jsonl
+
+# Local CLI tool config (not project source)
+.qwen/
+# Merge-conflict / backup artifacts
+*.orig

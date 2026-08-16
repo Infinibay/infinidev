@@ -146,6 +146,11 @@ class TestExplorationBudget:
 
     def test_budget_nudge_forces_emit(self, patch_litellm):
         # 4 read calls = budget exhausted; nudge fires; emit on iter 5.
+        # The sample request classifies as ``medium`` under the new
+        # difficulty-aware planner, which lowers the default budget to
+        # 2 exploration calls / 4 iterations; this test specifically
+        # exercises the legacy hard budget (4 / 6), so we pass it
+        # explicitly to opt out of difficulty scaling.
         patch_litellm([
             _resp([_tc("list_directory", {"file_path": "."}, f"tc-{i}")])
             for i in range(4)
@@ -155,7 +160,11 @@ class TestExplorationBudget:
                 "steps": [{"title": "Do it", "detail": "d", "expected_output": "e"}],
             })]),
         ])
-        plan = run_planner(_sample_escalation())
+        plan = run_planner(
+            _sample_escalation(),
+            max_exploration_calls=4,
+            max_iterations=6,
+        )
         assert plan.overview == "Budget-limited plan."
 
     def test_budget_refuses_extra_calls_in_a_single_model_batch(

@@ -204,5 +204,38 @@ def test_renderer_escapes_xml_in_user_content():
     assert "&lt;/task&gt;" in out
 
 
+# --- Difficulty field -------------------------------------------------------
+
+
+def test_default_difficulty_is_hard():
+    """Default preserves the pre-existing full-depth plan behaviour."""
+    t = Task(**_valid_kwargs())
+    assert t.difficulty == "hard"
+
+
+def test_explicit_difficulty_is_preserved():
+    t = Task(**_valid_kwargs(difficulty="easy"))
+    assert t.difficulty == "easy"
+
+
+def test_free_text_resolves_difficulty_by_default():
+    t = task_from_free_text("Fix the typo in README.md.")
+    assert t.difficulty in ("easy", "medium", "hard")
+
+
+def test_free_text_honours_explicit_difficulty_override():
+    t = task_from_free_text(
+        "Refactor the auth module",
+        difficulty="easy",
+    )
+    assert t.difficulty == "easy"
+
+
+def test_renderer_emits_difficulty_block():
+    t = Task(**_valid_kwargs(difficulty="medium"))
+    out = render_task_xml(t)
+    assert "<difficulty>medium</difficulty>" in out
+
+
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])

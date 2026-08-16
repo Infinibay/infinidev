@@ -27,7 +27,10 @@ from infinidev.engine.oversized_result import (
     handle_oversized_result,
 )
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
-from infinidev.prompts.analyst.task_planner_prompt import TASK_PLANNER_SYSTEM_PROMPT
+from infinidev.prompts.analyst.task_planner_prompt import (
+    TASK_PLANNER_SYSTEM_PROMPT,
+    build_task_planner_system_prompt,
+)
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
@@ -42,6 +45,16 @@ _DEFAULT_MAX_EXPLORATION_CALLS = 4
 _DEFAULT_MAX_ITERATIONS = 6  # exploration + emit turn — upper cap
 _MAX_RESULT_CHARS = 8000
 
+# Per-difficulty caps for the planner turn. Cheap requests get a tight
+# budget so a single typo fix doesn't run the full hard-depth loop. The
+# hard row keeps the previous defaults; explicit ``max_exploration_calls``
+# and ``max_iterations`` arguments still win when callers pass them in.
+_DIFFICULTY_BUDGETS: dict[str, tuple[int, int]] = {
+    "easy": (1, 3),
+    "medium": (2, 4),
+    "hard": (_DEFAULT_MAX_EXPLORATION_CALLS, _DEFAULT_MAX_ITERATIONS),
+}
+
 
 def run_planner(
     escalation: EscalationPacket,
@@ -50,8 +63,8 @@ def run_planner(
     session_id: Optional[str] = None,
     project_id: Optional[int] = None,
     workspace_path: Optional[str] = None,
-    max_exploration_calls: int = _DEFAULT_MAX_EXPLORATION_CALLS,
-    max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+    max_exploration_calls: int | None = None,
+    max_iterations: int | None = None,
     hooks: Any | None = None,
 ) -> Plan:
     """Produce a Plan from the chat agent's escalation packet.
@@ -61,7 +74,37 @@ def run_planner(
     planner returns a minimal single-step Plan derived from
     ``escalation.understanding`` — the pipeline NEVER gets back a null
     plan, because there is no recovery path downstream.
+
+    Difficulty-adaptive budgets
+    ---------------------------
+    The plan depth scales to the request difficulty (easy / medium /
+    hard) resolved from ``escalation.user_request`` and the chat agent's
+    already-opened files. Pass ``max_exploration_calls`` or
+    ``max_iterations`` explicitly to override the per-difficulty default;
+    pass ``None`` (the default) to let difficulty decide.
     """
+    from infinidev.engine.orchestration.difficulty import resolve_difficulty
+
+    difficulty_decision = resolve_difficulty(
+        escalation.user_request,
+        opened_files=tuple(escalation.opened_files or ()),
+    )
+    difficulty_level = difficulty_decision.level
+    default_calls, default_iters = _DIFFICULTY_BUDGETS[difficulty_level]
+    if max_exploration_calls is None:
+        max_exploration_calls = default_calls
+    if max_iterations is None:
+        max_iterations = default_iters
+    logger.info(
+        "Task Planner difficulty=%s confidence=%.2f "
+        "exploration_calls=%d max_iterations=%d reason=%s",
+        difficulty_level,
+        difficulty_decision.confidence,
+        max_exploration_calls,
+        max_iterations,
+        difficulty_decision.reason,
+    )
+
     agent_id = f"planner-{uuid.uuid4().hex[:8]}"
     tools = get_tools_for_role("task_planner")
     bind_tools_to_agent(tools, agent_id)
@@ -103,7 +146,7 @@ def run_planner(
     from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
     planner_prompt = apply_calibrated_guidance(
-        TASK_PLANNER_SYSTEM_PROMPT, "planner"
+        build_task_planner_system_prompt(difficulty_level), "planner"
     )
     from infinidev.config.settings import settings
     from infinidev.engine.task_policies.rendering import (
@@ -326,6 +369,33 @@ def _render_handoff(
     return "\n".join(lines)
 
 
+def _coerce_str(value: Any) -> str:
+    """Return ``value`` as a stripped string, or '' when it isn't textual.
+
+    Some hosted models (notably MiniMax M-series) occasionally emit plan-step
+    fields whose value is a dict, list, bytes, or number rather than a string.
+    The legacy ``(value or "").strip()`` pattern explodes with
+    ``AttributeError`` on truthy non-strings; this helper coerces anything
+    non-string (or non-strip stringable) to '' so the parser can keep
+    building a best-effort plan instead of crashing the loop. A dict's Python
+    repr is not useful for the planner — drop it and let the missing-step
+    signal surface upstream. Bytes are decoded as UTF-8 (lossy) so a model
+    that returns ``b"text"`` still surfaces as plain text instead of being
+    silently dropped. Numbers stay '' (the strict contract from the
+    initial coercion work — numeric step detail is never useful).
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            return value.decode("utf-8", errors="replace").strip()
+        except Exception:
+            return ""
+    return ""
+
+
 def _build_plan_from_args(args: dict) -> Plan | None:
     """Build a validated Plan from Task Planner tool arguments.
 
@@ -334,7 +404,7 @@ def _build_plan_from_args(args: dict) -> Plan | None:
     native tool-call path and the prose-JSON recovery path so the two
     cannot drift.
     """
-    overview = (args.get("overview") or "").strip()
+    overview = _coerce_str(args.get("overview"))
     raw_steps = args.get("steps") or []
     if not isinstance(raw_steps, list):
         raw_steps = []
@@ -342,13 +412,13 @@ def _build_plan_from_args(args: dict) -> Plan | None:
     for s in raw_steps:
         if not isinstance(s, dict):
             continue
-        title = (s.get("title") or "").strip()
+        title = _coerce_str(s.get("title"))
         if not title:
             continue
         steps.append(PlanStepSpec(
             title=title,
-            detail=(s.get("detail") or "").strip(),
-            expected_output=(s.get("expected_output") or "").strip(),
+            detail=_coerce_str(s.get("detail")),
+            expected_output=_coerce_str(s.get("expected_output")),
             verify=StepVerification.from_loose(s),
         ))
     if not overview or not steps:
