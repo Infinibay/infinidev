@@ -873,11 +873,13 @@ class InfinidevApp:
             # terminal (they land as plain text in the input buffer).
             cleaned_text, attachments = self._resolve_attachments(user_text)
             if self._engine_running:
-                # Inject message into the running loop — will appear in next iteration
-                if self.engine is not None:
-                    self.engine.inject_message(cleaned_text, attachments)
-                    # No "injected" confirmation — the user already
-                    # expects this behaviour; the line was just noise.
+                # A user message is guidance for the active run, not a request
+                # to cancel it.  Prefer the engine's live injection hook when
+                # the active engine supports it; older/alternate engines may
+                # only support the UI fallback queue.
+                inject_message = getattr(self.engine, "inject_message", None)
+                if callable(inject_message):
+                    inject_message(cleaned_text, attachments)
                 else:
                     self._pending_inputs.append(cleaned_text)
                     self.add_message("System", "Queued — waiting for current task to finish.", "system")
