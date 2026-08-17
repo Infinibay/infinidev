@@ -101,6 +101,8 @@ def check_effect_permission(
     tool_name: str,
     effects: ToolEffects,
     arguments: dict[str, Any],
+    *,
+    tool: Any | None = None,
 ) -> str | None:
     """Authorize sensitive effects or return a model-facing denial."""
 
@@ -108,6 +110,21 @@ def check_effect_permission(
         return None
 
     from infinidev.config.settings import settings
+
+    # MCP tools have their own permission gate (``MCP_PERMISSION``) that runs
+    # inside the bridge's ``_run``. When the user has explicitly opted into an
+    # MCP server they trust, ``MCP_PERMISSION=auto_approve`` is the
+    # authoritative decision — running the generic effect-broker too would
+    # re-prompt the user for every call (e.g. ``ken_remember``). Honour the
+    # MCP gate first, then fall through to ``TOOL_EFFECTS_PERMISSION``.
+    is_mcp = bool(getattr(tool, "is_mcp_tool", False))
+    if is_mcp:
+        mcp_mode = str(getattr(settings, "MCP_PERMISSION", "auto_approve") or "auto_approve")
+        if mcp_mode == "auto_approve":
+            return None
+        if mcp_mode == "deny":
+            return f"Tool operation denied: MCP_PERMISSION=deny ({tool_name})"
+        # ``ask``/``auto`` fall through to the generic broker below.
 
     mode = str(getattr(settings, "TOOL_EFFECTS_PERMISSION", "auto") or "auto")
     if mode == "auto_approve":

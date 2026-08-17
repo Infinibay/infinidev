@@ -209,3 +209,113 @@ def test_mcp_ask_mode_prompts_user(monkeypatch: pytest.MonkeyPatch) -> None:
     request_perm.assert_called_once()
     manager_factory.return_value.call.assert_not_called()
     assert "denied" in result.lower()
+
+
+# ── Effect-broker interaction (UPSTREAM of mcp_bridge._run) ────────────────
+#
+# ``execute_tool_call`` runs ``check_effect_permission`` BEFORE the MCP
+# bridge's own ``_run``. When ``MCP_PERMISSION=auto_approve`` the MCP gate
+# is authoritative, so the generic effect-broker must not re-prompt or block
+# the call. Earlier versions of the code did just that, which made the
+# permissions-tab toggle appear non-functional in the TUI (every ken_remember
+# call still asked for confirmation).
+
+
+def test_mcp_auto_approve_bypasses_effect_broker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP_PERMISSION=auto_approve must short-circuit check_effect_permission."""
+    from infinidev.config.settings import settings
+    from infinidev.tools.base.tool_effects import ToolEffects, check_effect_permission
+
+    monkeypatch.setattr(settings, "MCP_PERMISSION", "auto_approve")
+    # Force the generic broker into the *strict* mode to prove the MCP gate
+    # wins regardless of TOOL_EFFECTS_PERMISSION.
+    monkeypatch.setattr(settings, "TOOL_EFFECTS_PERMISSION", "ask")
+
+    cls = _make_tool_class(name="ken_remember", read_only=False)
+    effects = ToolEffects(mutates_external_state=True)
+
+    with patch(
+        "infinidev.tools.permission.request_permission"
+    ) as request_perm:
+        result = check_effect_permission(
+            "ken_remember", effects, {"topic": "x"}, tool=cls()
+        )
+
+    assert result is None
+    request_perm.assert_not_called()
+
+
+def test_mcp_deny_short_circuits_effect_broker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP_PERMISSION=deny must block MCP tools regardless of the generic
+    broker's mode."""
+    from infinidev.config.settings import settings
+    from infinidev.tools.base.tool_effects import ToolEffects, check_effect_permission
+
+    monkeypatch.setattr(settings, "MCP_PERMISSION", "deny")
+    monkeypatch.setattr(settings, "TOOL_EFFECTS_PERMISSION", "auto_approve")
+
+    cls = _make_tool_class(name="ken_remember", read_only=False)
+    effects = ToolEffects(mutates_external_state=True)
+
+    result = check_effect_permission(
+        "ken_remember", effects, {"topic": "x"}, tool=cls()
+    )
+
+    assert result is not None
+    assert "deny" in result.lower()
+
+
+def test_mcp_ask_falls_through_to_effect_broker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP_PERMISSION=ask must defer to the generic effect-broker."""
+    from infinidev.config.settings import settings
+    from infinidev.tools.base.tool_effects import ToolEffects, check_effect_permission
+
+    monkeypatch.setattr(settings, "MCP_PERMISSION", "ask")
+    monkeypatch.setattr(settings, "TOOL_EFFECTS_PERMISSION", "auto_approve")
+
+    cls = _make_tool_class(name="ken_remember", read_only=False)
+    effects = ToolEffects(mutates_external_state=True)
+
+    # auto_approve returns None — the point is that the MCP gate did NOT
+    # short-circuit, otherwise the result would be a denial string.
+    result = check_effect_permission(
+        "ken_remember", effects, {"topic": "x"}, tool=cls()
+    )
+    assert result is None
+
+
+def test_non_mcp_tool_unaffected_by_mcp_permission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local tools must still honour TOOL_EFFECTS_PERMISSION even when
+    MCP_PERMISSION is auto_approve."""
+    from infinidev.config.settings import settings
+    from infinidev.tools.base.tool_effects import ToolEffects, check_effect_permission
+
+    monkeypatch.setattr(settings, "MCP_PERMISSION", "auto_approve")
+    monkeypatch.setattr(settings, "TOOL_EFFECTS_PERMISSION", "ask")
+
+    # A bare object without is_mcp_tool — stands in for a local tool.
+    local_tool = MagicMock(spec=["effects"])
+    local_tool.is_mcp_tool = False
+    effects = ToolEffects(mutates_external_state=True)
+
+    with patch(
+        "infinidev.tools.permission.is_permission_handler_registered",
+        return_value=True,
+    ), patch(
+        "infinidev.tools.permission.request_permission",
+        return_value=True,
+    ) as request_perm:
+        result = check_effect_permission(
+            "edit_file", effects, {"path": "x"}, tool=local_tool
+        )
+
+    assert result is None
+    request_perm.assert_called_once()

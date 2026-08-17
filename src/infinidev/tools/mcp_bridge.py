@@ -377,6 +377,7 @@ def build_tool_class(tool: Any) -> type[InfinibayBaseTool]:
             "effects": ToolEffects,
             "use_constraints": ToolUseConstraints,
             "mcp_server": ClassVar[str],
+            "is_mcp_tool": ClassVar[bool],
         },
         "__doc__": tool.description or description,
         "__module__": __name__,
@@ -387,6 +388,10 @@ def build_tool_class(tool: Any) -> type[InfinibayBaseTool]:
         "effects": effects,
         "use_constraints": use_constraints,
         "mcp_server": server,
+        # Marker so the generic effect-broker (``check_effect_permission``)
+        # can route MCP tools through ``MCP_PERMISSION`` instead of
+        # re-prompting with ``TOOL_EFFECTS_PERMISSION``.
+        "is_mcp_tool": True,
         "_run": _run,
     }
     class_name = "".join(part.title() for part in remote_name.split("_")) + "McpTool"

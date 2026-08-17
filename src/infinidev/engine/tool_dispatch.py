@@ -640,7 +640,7 @@ def execute_tool_call(
     if effects is not None:
         from infinidev.tools.base.tool_effects import check_effect_permission
 
-        permission_error = check_effect_permission(name, effects, args)
+        permission_error = check_effect_permission(name, effects, args, tool=tool)
         if permission_error:
             return json.dumps({"error": permission_error})
 
