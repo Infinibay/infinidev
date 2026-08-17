@@ -760,7 +760,9 @@ def run_task(
     use_phase_engine: bool = False,
     force_gather: bool = False,
     attachments: list[Any] | None = None,
+    autonomous: bool = False,
     _hook_reentry: bool = False,
+    _autonomous_budget: Any = None,
 ) -> str:
     """Run a complete task through the chat-agent-first pipeline.
 
@@ -901,6 +903,35 @@ def run_task(
             _hook_reentry=True,
         )
 
+    def _autonomous_chain_reenter(*, instruction: str, budget: Any) -> str:
+        """Re-enter ``run_task`` with the autonomous chain's continuation.
+
+        Unlike ``_reenter`` (which serves the user-installed
+        ``task_end_instruction`` hook), this path is owned by the chain:
+        it forces ``autonomous=True`` so the next turn still chains
+        itself, propagates ``session_id`` and the engine/hooks pair, but
+        re-uses ``task_instruction`` so the chain's prompts look the
+        same as a hook-driven turn to downstream observers (logs,
+        transcripts, hooks see the ``[task_instruction]`` prefix that
+        marks these as non-user-typed text). The ``budget`` is shared
+        so the chain's counters accumulate against one instance.
+        """
+        from infinidev.engine.user_hooks import task_instruction
+
+        return run_task(
+            agent=agent,
+            user_input=task_instruction(instruction),
+            session_id=session_id,
+            engine=engine,
+            reviewer=reviewer,
+            hooks=hooks,
+            use_phase_engine=use_phase_engine,
+            force_gather=force_gather,
+            attachments=None,
+            autonomous=True,
+            _autonomous_budget=budget,
+        )
+
     # ── Chat agent ──────────────────────────────────────────────────────
     hooks.on_phase("chat")
     agent_id = getattr(agent, "agent_id", None) or getattr(agent, "id", None)
@@ -964,6 +995,7 @@ def run_task(
         workspace_path=agent_workspace,
         hooks=hooks,
         attachments=attachments,
+        autonomous_hint=autonomous,
     )
 
     if chat_result.kind == "respond":
@@ -1173,6 +1205,63 @@ def run_task(
         else:
             runtime.block_current_task(result)
         return _reenter(followup)
+
+    # ── Autonomous chain ("manejate vos") ─────────────────────────────
+    # After the developer produced its first plan, decide whether to
+    # chain another plan automatically. Trigger conditions:
+    #   * the caller passed ``autonomous=True`` (UI toggle, CLI flag); or
+    #   * the chat agent detected an autonomous phrase in the user input
+    #     and stamped ``escalation.autonomous`` on the packet.
+    # Budget enforcement comes from :mod:`engine.orchestration.autonomous`
+    # (max_plans, tokens, wall, idle) and is bounded independently of
+    # ``_hook_reentry``: the chain is a new user-turn-shaped re-entry, but
+    # the hook-based instruction hook's own re-entry path takes precedence
+    # — so a user who configured both never sees the chain run twice.
+    _autonomous_active = bool(autonomous or escalation.autonomous) and not _hook_reentry
+    if _autonomous_active:
+        from infinidev.engine.orchestration.autonomous import (
+            AutonomousBudget,
+            budget_status_text as _autonomous_budget_status_text,
+            should_continue as _autonomous_should_continue,
+            stop_reason as _autonomous_stop_reason,
+        )
+
+        # Reuse the chain's budget on a re-entered turn; otherwise
+        # build a fresh one for this user session. Sharing the budget
+        # means plan 2 of the chain reads ``plans_executed==1`` and the
+        # max_plans fuse trips at the right number, not at "3 every
+        # time we re-enter".
+        _chain_budget = _autonomous_budget or AutonomousBudget.from_settings()
+        if _autonomous_budget is None:
+            _chain_budget.start()
+        _chain_budget.record_outcome(_turn_status)
+        hooks.on_status(
+            "info",
+            f"Autonomous chain: {_autonomous_budget_status_text(_chain_budget)}",
+        )
+        if _autonomous_should_continue(_chain_budget, _turn_status):
+            _continuation = (
+                "Continue with the next pending item from the same "
+                "overarching task, without re-asking me. Stop and report "
+                "concisely when done or when you have no next item."
+            )
+            runtime.record_step(result, step_id=root_task.id)
+            if engine_run.status == "completed":
+                runtime.complete_current_task(result)
+            elif engine_run.status == "blocked":
+                runtime.block_current_task(result)
+            else:
+                runtime.fail_current_task(result)
+            return _autonomous_chain_reenter(
+                instruction=_continuation, budget=_chain_budget,
+            )
+        # Budget exhausted — log the reason, fall through to the
+        # normal closing path so the user gets a single turn summary.
+        reason = _autonomous_stop_reason(_chain_budget) or "chain budget exhausted"
+        hooks.on_status(
+            "info",
+            f"Autonomous chain stopped: {reason}",
+        )
 
     # ── Hidden work summary ─────────────────────────────────────────────
     # Record what the developer loop just did as a hidden conversation

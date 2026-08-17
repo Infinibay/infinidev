@@ -75,3 +75,9 @@ class EscalationPacket:
     # Resolved once from the literal request after enrichment and reused by
     # every engine. Typed loosely to keep this handoff module cycle-free.
     task_profile: Any | None = None
+    # Set to True when the chat agent (or pipeline caller) detects an
+    # autonomous intent ("manejate vos", "keep going", etc.) or an explicit
+    # ``autonomous=True`` kwarg. The pipeline reads this to decide whether
+    # to chain another plan once the current one completes, bounded by the
+    # four topes in :mod:`infinidev.engine.orchestration.autonomous`.
+    autonomous: bool = False

@@ -23,6 +23,7 @@ from infinidev.tools.meta.plan_tools import (
 )
 from infinidev.tools.meta.declare_test_command_tool import DeclareTestCommandTool
 from infinidev.tools.meta.tail_test_output_tool import TailTestOutputTool
+from infinidev.tools.meta.notifications_tool import ManageNotificationsTool
 from infinidev.tools.git import (
     GitBranchTool,
     GitCommitTool,
@@ -117,6 +118,7 @@ META_TOOLS = [
     DeclareTestCommandTool,
     TailTestOutputTool,
     RequestCapabilityTool,
+    ManageNotificationsTool,
 ]
 GIT_TOOLS = [GitBranchTool, GitCommitTool, GitDiffTool, GitStatusTool]
 SHELL_TOOLS = [

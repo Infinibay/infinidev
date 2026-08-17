@@ -355,7 +355,7 @@ def _end_ken_sessions() -> None:
 
 
 def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
-                       continue_session: bool = False) -> None:
+                       continue_session: bool = False, autonomous: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
 
     Thin adapter over :func:`engine.orchestration.run_task` /
@@ -435,6 +435,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
             reviewer=ReviewEngine(),
             hooks=hooks,
             use_phase_engine=use_phase_engine,
+            autonomous=autonomous,
         )
         # Don't echo the reply again if it was already streamed/notified to
         # the terminal by the respond branch (the develop path leaves the
@@ -481,7 +482,8 @@ def _bootstrap_ken_runtime() -> None:
 @click.option("--profile", is_flag=True, help="Enable session profiling (saves to ~/.infinidev/profiles/).")
 @click.option("--continue", "-c", "continue_session", is_flag=True, help="Resume the most recent session in this directory.")
 @click.option("--resume", is_flag=True, help="Pick a recent session to resume from a list.")
-def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool, continue_session: bool, resume: bool):
+@click.option("--autonomous", "autonomous", is_flag=True, help="Force autonomous ('manejate vos') mode: chain plans until budget exhaustion or completion.")
+def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool, continue_session: bool, resume: bool, autonomous: bool = False):
     """Main entry point for Infinidev CLI."""
     from infinidev.cli.profiler import SessionProfiler
 
@@ -506,7 +508,7 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, pro
     _bootstrap_ken_runtime()
 
     with SessionProfiler(enabled=profile) as profiler:
-        _run_main(no_tui, classic, prompt, think, profile, continue_session, resume)
+        _run_main(no_tui, classic, prompt, think, profile, continue_session, resume, autonomous=autonomous)
 
     if profile and profiler.report_path:
         click.echo(click.style(f"\nProfile saved to: {profiler.report_path}", fg="cyan"))
@@ -554,12 +556,13 @@ def _resolve_classic_session(continue_session: bool, resume: bool) -> tuple[str,
 
 
 def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool,
-              continue_session: bool = False, resume: bool = False):
+              continue_session: bool = False, resume: bool = False, autonomous: bool = False):
     """Inner dispatch — runs inside the profiler context manager."""
     # Non-interactive --prompt mode
     if prompt:
         _run_single_prompt(prompt, use_phase_engine=think,
-                            continue_session=continue_session)
+                            continue_session=continue_session,
+                            autonomous=autonomous)
         return
 
     if not (no_tui or classic):

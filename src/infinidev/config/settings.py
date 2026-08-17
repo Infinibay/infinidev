@@ -96,6 +96,19 @@ class Settings(BaseSettings):
     MAX_DIR_LISTING: int = 1000
     MAX_DIR_LISTING_CHARS: int = Field(default=12_000, ge=1_024)
 
+    # Programmable notifications subsystem. The scheduler runs as a daemon
+    # thread that polls ~/.infinidev/notifications.db every second. Disabling
+    # this stops new fires but the manage_notifications tool remains usable
+    # for inspection; the registry itself is never wiped by the toggle.
+    NOTIFICATIONS_ENABLED: bool = True
+    # Maximum webhook delivery timeout in seconds (per request). Console
+    # delivery is synchronous and unbounded.
+    NOTIFICATIONS_WEBHOOK_TIMEOUT: float = 5.0
+    # Poll interval for the scheduler thread. 1s is the recommended floor —
+    # finer polling burns CPU without improving cron resolution beyond 1
+    # minute.
+    NOTIFICATIONS_POLL_INTERVAL: float = 1.0
+
     # Private command-output capture. Disabled by default so execute_command's
     # return shape and filesystem/database side effects stay backward compatible.
     # Enabling is fail-closed unless every bound below is a positive integer.
@@ -328,6 +341,19 @@ class Settings(BaseSettings):
     GRAPH_MAX_NODE_REVISITS: int = 4
     GRAPH_NODE_TOKEN_BUDGET: int = 200_000
     GRAPH_RUN_TOOL_BUDGET: int = 500
+
+    # ── Autonomous ("manejate vos") chain budget ─────────────────────
+    # When the user toggles autonomous mode, the pipeline chains plans
+    # back-to-back. These four fields are the fuses kept on the chain:
+    # any one reaching its limit ends the chain at the next checkpoint.
+    # All values are conservative defaults — the user can lift them via
+    # env vars (INFINIDEV_AUTONOMOUS_*) or .infinidev/settings.json.
+    # 0 / negative falls back to the default in autonomous.from_settings so
+    # a misconfiguration cannot turn the chain into an infinite loop.
+    AUTONOMOUS_MAX_PLANS: int = 3  # hard cap on plans executed in one chain
+    AUTONOMOUS_TOKEN_BUDGET: int = 50_000  # cumulative prompt tokens consumed
+    AUTONOMOUS_WALL_SECONDS: int = 900  # total wall-clock time, 15 min default
+    AUTONOMOUS_IDLE_PASSES: int = 2  # consecutive "no new work" plans before stop
 
     # Gather phase (pre-implementation info collection)
     GATHER_ENABLED: bool = False

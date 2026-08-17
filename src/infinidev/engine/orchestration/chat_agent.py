@@ -27,7 +27,7 @@ import re
 import traceback
 import types
 import uuid
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.engine._best_effort import best_effort
@@ -45,6 +45,9 @@ from infinidev.engine.oversized_result import (
 )
 from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+from infinidev.engine.orchestration.autonomous import (
+    apply_autonomous_to_packet as _apply_autonomous_to_packet,
+)
 from infinidev.engine.orchestration.request_signals import (
     explicit_execution_score as _explicit_execution_score,
     is_referenced_continuation_request,
@@ -69,6 +72,7 @@ _MAX_RESULT_CHARS = 8000  # trim overly long tool outputs before re-prompting
 
 def _direct_execution_route(
     user_input: str, attachments: list[Any] | None,
+    *, autonomous_hint: bool = False,
 ) -> ChatAgentResult | None:
     """Bypass conversational routing only for high-confidence work intent."""
     direct_signal = "explicit execution request"
@@ -127,6 +131,9 @@ def _direct_execution_route(
         suggested_flow="develop",
         attachments=list(attachments or []),
     )
+    packet = _apply_autonomous_to_packet(
+        packet, user_input, explicit_hint=autonomous_hint,
+    )
     return ChatAgentResult(kind="escalate", escalation=packet)
 
 
@@ -139,6 +146,7 @@ def run_chat_agent(
     max_iterations: int | None = None,
     hooks: Any | None = None,
     attachments: list[Any] | None = None,
+    autonomous_hint: bool = False,
 ) -> ChatAgentResult:
     """Run one turn of the chat agent and return its result.
 
@@ -192,9 +200,16 @@ def run_chat_agent(
                 "No request was sent; your text and attachments were left unchanged."
             ),
         )
-    direct_route = _direct_execution_route(user_input, attachments)
+    direct_route = _direct_execution_route(user_input, attachments, autonomous_hint=autonomous_hint)
     if direct_route is not None:
         return direct_route
+    # Local closure that stamps the autonomous flag onto every
+    # EscalationPacket this turn can produce (direct, narrated, escalate
+    # tool, max-iter fallback). The hint comes from the pipeline's
+    # `autonomous=True` kwarg or from a manual session toggle — text
+    # matching happens via the default detection in the helper.
+    def _apply(packet: EscalationPacket) -> EscalationPacket:
+        return _apply_autonomous_to_packet(packet, user_input, explicit_hint=autonomous_hint)
     tools = get_tools_for_role("chat_agent", supports_vision=_supports_vision)
     bind_tools_to_agent(tools, agent_id)
     set_context(
@@ -241,6 +256,7 @@ def run_chat_agent(
             hooks=hooks,
             cr_hooks=cr_hooks,
             project_id=project_id,
+            apply_autonomous=_apply,
         )
         # Carry the attachments through the escalation packet so the
         # planner and developer can also see the images the user
@@ -294,6 +310,7 @@ def _run_llm_loop(
     hooks: Any | None = None,
     cr_hooks: Any | None = None,
     project_id: int | None = None,
+    apply_autonomous: Callable[[EscalationPacket], EscalationPacket] | None = None,
 ) -> ChatAgentResult:
     import litellm
 
@@ -407,6 +424,7 @@ def _run_llm_loop(
                     user_signal="(auto-escalate: narrated handoff)",
                     suggested_flow="develop",
                 )
+                packet = apply_autonomous(packet) if apply_autonomous is not None else _apply_autonomous_to_packet(packet, user_input)
                 return ChatAgentResult(
                     kind="escalate",
                     escalation=packet,
@@ -432,7 +450,10 @@ def _run_llm_loop(
             if name == "respond":
                 return _build_respond(tc, user_input, streamed=streamed)
             if name == "escalate":
-                return _build_escalate(tc, user_input, streamed=streamed)
+                return _build_escalate(
+                    tc, user_input, streamed=streamed,
+                    apply_autonomous=apply_autonomous,
+                )
 
         # No terminator — execute read-only tools and continue.
         for tc in tool_calls:
@@ -477,6 +498,7 @@ def _run_llm_loop(
         messages=messages,
         user_input=user_input,
         iterations=max_iterations,
+        apply_autonomous=apply_autonomous,
     )
 
 
@@ -516,6 +538,7 @@ def _build_respond(
 
 def _build_escalate(
     tc: Any, user_input: str, *, streamed: bool = False,
+    apply_autonomous: Callable[[EscalationPacket], EscalationPacket] | None = None,
 ) -> ChatAgentResult:
     args = _parse_args(tc)
     understanding = (args.get("understanding") or "").strip()
@@ -543,6 +566,10 @@ def _build_escalate(
         council_requested=bool(args.get("council_requested")),
         council_focus=focus,  # type: ignore[arg-type]
     )
+    if apply_autonomous is not None:
+        packet = apply_autonomous(packet)
+    else:  # pragma: no cover - exercised only via the closure in run_chat_agent
+        packet = _apply_autonomous_to_packet(packet, user_input)
     # `streamed` carries through whether any plain-text content was emitted
     # to the UI before the escalate tool fired — the pipeline uses it to
     # finalize the orphaned streaming bubble.
@@ -551,6 +578,7 @@ def _build_escalate(
 
 def _build_max_iter_escalation(
     *, messages: list[dict[str, Any]], user_input: str, iterations: int,
+    apply_autonomous: Callable[[EscalationPacket], EscalationPacket] | None = None,
 ) -> ChatAgentResult:
     """Synthesize an EscalationPacket when the chat agent exhausts its
     iteration budget without calling a terminator.
@@ -626,6 +654,10 @@ def _build_max_iter_escalation(
         user_signal="(auto-escalate: max_iter)",
         suggested_flow="develop",
     )
+    if apply_autonomous is not None:
+        packet = apply_autonomous(packet)
+    else:  # pragma: no cover - exercised only via the closure in run_chat_agent
+        packet = _apply_autonomous_to_packet(packet, user_input)
     return ChatAgentResult(kind="escalate", escalation=packet)
 
 
