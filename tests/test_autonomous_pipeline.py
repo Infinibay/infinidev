@@ -485,3 +485,238 @@ def test_should_continue_refuses_a_fourth_plan_under_default_budget() -> None:
         budget.record_outcome(outcome)
     # Three plans done; the next iteration must be rejected.
     assert should_continue(budget, "completed") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Unlimited mode + reflection step
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_unlimited_pipeline_keeps_going_past_max_plans(monkeypatch) -> None:
+    """With ``AUTONOMOUS_UNLIMITED=True`` the chain ignores ``max_plans``
+    and runs as many plans as the chat agent keeps producing.
+
+    This is the headline behaviour of "modo ilimitado real" — the user
+    does not want a 3-plan fuse, they want a chain that runs until the
+    engine itself reports done / blocked / error.
+    """
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    # max_plans is ignored when unlimited, but the chain still needs
+    # enough chat packets to drive the next turn.
+    packets = [_make_packet(autonomous=True) for _ in range(5)]
+    engine = _CountingEngine(plan_count=10)
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-unlimited-1",
+        workspace_path="/tmp/auto",
+    )
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-unlimited-1",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+        autonomous=True,
+    )
+
+    # 5 packets in → 5 engine calls, even though the default max_plans is 3.
+    assert len(engine.calls) == 5, (
+        f"unlimited chain should run every queued plan; got {len(engine.calls)}"
+    )
+
+
+def test_unlimited_pipeline_stops_on_terminal_outcome(monkeypatch) -> None:
+    """The unlimited chain stops when the engine itself reports a terminal
+    outcome on the first plan. Even with unlimited mode and packets
+    available, ``should_continue`` rejects a terminal ``last_outcome``.
+    """
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    packets = [_make_packet(autonomous=True) for _ in range(10)]
+    # Engine reports "blocked" — a terminal outcome. The chain must stop
+    # on the first plan instead of churning through all 10 packets.
+    engine = _CountingEngine(plan_count=10, status="blocked")
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-unlimited-2",
+        workspace_path="/tmp/auto",
+    )
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-unlimited-2",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+        autonomous=True,
+    )
+
+    # Only one plan ran: the engine reported blocked on the first turn,
+    # so the chain ended. If unlimited mode were also ignoring terminal
+    # outcomes, this would be 2+.
+    assert len(engine.calls) == 1, (
+        f"unlimited chain must stop on first terminal outcome; got {len(engine.calls)}"
+    )
+
+
+def test_unlimited_pipeline_ignores_idle_outcome(monkeypatch) -> None:
+    """The unlimited chain treats ``idle`` as ``continue`` so the agent
+    can keep going instead of giving up after one or two "no new work"
+    reports. The engine's status is whatever the stub returns, so we
+    exercise this at the budget-helper level via the chain's flow: an
+    engine that reports ``idle`` should still let the chain continue
+    in unlimited mode.
+    """
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    packets = [_make_packet(autonomous=True) for _ in range(3)]
+    # Engine reports "idle" each turn — bounded mode would stop after
+    # AUTONOMOUS_IDLE_PASSES (=2); unlimited mode keeps going.
+    engine = _CountingEngine(plan_count=10, status="idle")
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-unlimited-3",
+        workspace_path="/tmp/auto",
+    )
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-unlimited-3",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+        autonomous=True,
+    )
+
+    # In bounded mode the chain would stop after 2 idle plans; in
+    # unlimited mode all 3 run.
+    assert len(engine.calls) == 3, (
+        f"unlimited chain must ignore idle outcome; got {len(engine.calls)}"
+    )
+
+
+def test_reflection_prompt_is_injected_when_enabled(monkeypatch) -> None:
+    """The pipeline injects the reflection instruction between plans
+    when ``reflect_after_every_plan`` is True. The continuation
+    prompt is what reaches the developer on plan 2+ of the chain, so
+    it must contain the "reflect" cue the user asked for.
+    """
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN", True)
+    chat_inputs: list[str] = []
+    packets = [_make_packet(autonomous=True) for _ in range(2)]
+    engine = _CountingEngine(plan_count=10)
+    state = _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+
+    # Replace the chat stub with one that records user_input so the
+    # reflection prompt is observable end-to-end.
+    def _chat_capture(user_input: str, *args: Any, **kwargs: Any) -> ChatAgentResult:
+        chat_inputs.append(user_input)
+        idx = len(chat_inputs) - 1
+        try:
+            pkt = packets[idx]
+            return ChatAgentResult(kind="escalate", escalation=pkt)
+        except IndexError:
+            return ChatAgentResult(kind="respond", reply="done")
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+        _chat_capture,
+    )
+
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-reflect-1",
+        workspace_path="/tmp/auto",
+    )
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-reflect-1",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+        autonomous=True,
+    )
+
+    assert len(engine.calls) == 2
+    # The chain re-enters with the continuation as user_input; the chat
+    # agent receives it on a subsequent call. We expect at least the
+    # initial user call + the first chain re-entry.
+    assert len(chat_inputs) >= 2
+    # The first chat call carries the user's literal request; the next
+    # call(s) carry the chain's continuation. When reflection is on, the
+    # continuation is the reflection prompt.
+    first_continuation = chat_inputs[1].lower()
+    assert "reflect" in first_continuation, (
+        f"expected reflection prompt in chain continuation, got: {chat_inputs[1]!r}"
+    )
+    assert "next" in first_continuation, (
+        "reflection prompt should ask for the next improvement"
+    )
+
+
+def test_no_reflection_prompt_when_disabled(monkeypatch) -> None:
+    """When ``AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN=False`` the chain falls
+    back to the original "next pending item" continuation. The user can
+    opt out of reflection without losing the rest of the unlimited
+    behaviour.
+    """
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN", False)
+    chat_inputs: list[str] = []
+    packets = [_make_packet(autonomous=True) for _ in range(2)]
+    engine = _CountingEngine(plan_count=10)
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+
+    def _chat_capture(user_input: str, *args: Any, **kwargs: Any) -> ChatAgentResult:
+        chat_inputs.append(user_input)
+        idx = len(chat_inputs) - 1
+        try:
+            pkt = packets[idx]
+            return ChatAgentResult(kind="escalate", escalation=pkt)
+        except IndexError:
+            return ChatAgentResult(kind="respond", reply="done")
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+        _chat_capture,
+    )
+
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-reflect-off",
+        workspace_path="/tmp/auto",
+    )
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-reflect-off",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+        autonomous=True,
+    )
+
+    assert len(engine.calls) == 2
+    assert len(chat_inputs) >= 2
+    first_continuation = chat_inputs[1].lower()
+    assert "next pending item" in first_continuation, (
+        f"expected the legacy 'next pending item' continuation, got: {chat_inputs[1]!r}"
+    )
+    assert "reflect" not in first_continuation

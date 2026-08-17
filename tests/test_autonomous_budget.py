@@ -349,3 +349,169 @@ def test_global_settings_exposes_the_autonomous_fields():
     assert s.AUTONOMOUS_TOKEN_BUDGET == 200_000
     assert s.AUTONOMOUS_WALL_SECONDS == 900
     assert s.AUTONOMOUS_IDLE_PASSES == 2
+
+
+# ── Unlimited / reflection mode ────────────────────────────────────────
+
+
+def test_unlimited_default_is_false():
+    """A fresh budget is bounded by default. The user has to opt in via
+    ``AUTONOMOUS_UNLIMITED`` or ``/auto unlimited``; a default of True
+    would silently turn every /auto invocation into a non-stop loop,
+    which is exactly the surprise the user is reporting now.
+    """
+    assert AutonomousBudget().unlimited is False
+
+
+def test_unlimited_should_continue_ignores_plan_count():
+    """When ``unlimited`` is True, ``max_plans`` is no longer a fuse.
+    Exhausting the bound must not stop the chain — that's the whole
+    point of "100% autónoma sin parar".
+    """
+    budget = AutonomousBudget(max_plans=2, unlimited=True)
+    budget.record_outcome("continue")
+    budget.record_outcome("continue")
+    assert budget.plans_executed == 2
+    assert should_continue(budget, "continue") is True
+
+
+def test_unlimited_should_continue_ignores_token_budget():
+    """Tokens are also no longer a fuse in unlimited mode. The user is
+    willing to spend them; that's what the mode is for.
+    """
+    budget = AutonomousBudget(max_plans=100, token_budget=50, unlimited=True)
+    budget.record_outcome("continue", tokens_used=50)
+    assert budget.tokens_consumed == 50
+    assert should_continue(budget, "continue") is True
+
+
+def test_unlimited_should_continue_ignores_wall_clock():
+    """Wall clock is also ignored. The chain runs until the engine
+    itself reports a terminal outcome.
+    """
+    budget = AutonomousBudget(max_plans=100, wall_seconds=10, unlimited=True)
+    budget.start()
+    budget.wall_started_at = time.monotonic() - 10_000.0
+    assert budget.wall_elapsed > budget.wall_seconds
+    assert should_continue(budget, "continue") is True
+
+
+def test_unlimited_should_continue_ignores_idle_passes():
+    """Idle is treated as ``continue`` in unlimited mode so the agent
+    can keep brainstorming / exploring until it has something genuinely
+    done, instead of giving up after the second "no work" report.
+    """
+    budget = AutonomousBudget(max_plans=100, idle_passes=1, unlimited=True)
+    budget.record_outcome("idle")
+    budget.record_outcome("idle")
+    assert budget.idle_runs == 2
+    assert should_continue(budget, "idle") is True
+
+
+def test_unlimited_still_respects_terminal_outcomes():
+    """The only fuse that still trips in unlimited mode is the engine
+    itself reporting a terminal outcome (``done`` / ``blocked`` /
+    ``error``). The chain must stop on those, otherwise the whole
+    point of the engine surface is lost.
+    """
+    budget = AutonomousBudget(unlimited=True)
+    budget.record_outcome("continue")
+    budget.record_outcome("continue")
+    # done / blocked / error all stop the chain
+    assert should_continue(budget, "done") is False
+    assert should_continue(budget, "blocked") is False
+    assert should_continue(budget, "error") is False
+    # soft_blocked and idle keep going
+    assert should_continue(budget, "soft_blocked") is True
+    assert should_continue(budget, "idle") is True
+
+
+def test_unlimited_stop_reason_is_none_while_chain_runs():
+    """In unlimited mode ``stop_reason`` must return ``None`` while the
+    chain is allowed to continue, regardless of which other fuse is
+    "exhausted". Otherwise the chat agent would falsely announce a
+    stop reason every turn.
+    """
+    budget = AutonomousBudget(max_plans=2, token_budget=10, wall_seconds=1, idle_passes=1, unlimited=True)
+    budget.record_outcome("continue", tokens_used=10)
+    budget.wall_started_at = time.monotonic() - 100.0
+    assert stop_reason(budget) is None
+
+
+def test_unlimited_status_text_uses_infinity_glyph():
+    """The status text shown in the chat agent's banner and the UI's
+    status bar must mark the chain as ``UNLIMITED`` so the user can
+    tell at a glance that no plan/token/wall/idle bound is in effect.
+    """
+    budget = AutonomousBudget(max_plans=2, token_budget=100, wall_seconds=10, idle_passes=2, unlimited=True)
+    text = budget_status_text(budget)
+    assert "UNLIMITED" in text
+    assert "∞" in text
+
+
+def test_bounded_status_text_does_not_say_unlimited():
+    """A bounded budget must not falsely claim to be UNLIMITED. The
+    banner drives the user's mental model of the chain.
+    """
+    budget = AutonomousBudget()
+    text = budget_status_text(budget)
+    assert "UNLIMITED" not in text
+    assert "∞" not in text
+
+
+def test_reflect_after_every_plan_default_is_true():
+    """The reflection prompt is what turns the chain from "run three
+    plans" into "stop and think about the next improvement". The user
+    explicitly asked for the reflection behaviour, so the default is on.
+    """
+    assert AutonomousBudget().reflect_after_every_plan is True
+
+
+def test_from_settings_loads_unlimited_flag():
+    """The setting is read via ``from_settings`` so a user can persist
+    it in ``.infinidev/settings.json`` or via the
+    ``INFINIDEV_AUTONOMOUS_UNLIMITED`` env var.
+    """
+    fake = SimpleNamespace(
+        AUTONOMOUS_MAX_PLANS=3,
+        AUTONOMOUS_TOKEN_BUDGET=200_000,
+        AUTONOMOUS_WALL_SECONDS=900,
+        AUTONOMOUS_IDLE_PASSES=2,
+        AUTONOMOUS_UNLIMITED=True,
+        AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN=False,
+    )
+    budget = AutonomousBudget.from_settings(fake)
+    assert budget.unlimited is True
+    assert budget.reflect_after_every_plan is False
+
+
+def test_from_settings_treats_string_truthy_values():
+    """Env-var / JSON-file values arrive as strings, not bools. The
+    loader must accept ``"true"`` / ``"1"`` / ``"yes"`` in addition to
+    Python booleans, otherwise the persist-and-restart path is broken.
+    """
+    fake = SimpleNamespace(
+        AUTONOMOUS_MAX_PLANS=3,
+        AUTONOMOUS_TOKEN_BUDGET=200_000,
+        AUTONOMOUS_WALL_SECONDS=900,
+        AUTONOMOUS_IDLE_PASSES=2,
+        AUTONOMOUS_UNLIMITED="true",
+        AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN="0",
+    )
+    budget = AutonomousBudget.from_settings(fake)
+    assert budget.unlimited is True
+    assert budget.reflect_after_every_plan is False
+
+
+def test_global_settings_exposes_unlimited_and_reflect_fields():
+    """Both flags must be declared on the Settings class so the loader
+    can find them via ``getattr`` without raising ``AttributeError``.
+    """
+    from infinidev.config.settings import Settings
+
+    assert hasattr(Settings(), "AUTONOMOUS_UNLIMITED")
+    assert hasattr(Settings(), "AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN")
+    # Defaults match the dataclass defaults.
+    s = Settings()
+    assert s.AUTONOMOUS_UNLIMITED is False
+    assert s.AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN is True

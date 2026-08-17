@@ -63,6 +63,12 @@ DEFAULT_MAX_PLANS: int = 3
 DEFAULT_TOKEN_BUDGET: int = 200_000
 DEFAULT_WALL_SECONDS: int = 900
 DEFAULT_IDLE_PASSES: int = 2
+# When AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN is true the chain injects a
+# reflection step between plans so the agent pauses to think about what
+# to improve next instead of blindly queuing the next outstanding item.
+# Defaults to True: it costs almost nothing and is exactly what the user
+# asked for ("deténgase a pensar por donde continuar").
+DEFAULT_REFLECT_AFTER_EVERY_PLAN: bool = True
 
 
 # Outcome vocabulary the chain reacts to. Anything else is treated as a
@@ -110,6 +116,16 @@ class AutonomousBudget:
     token_budget: int = DEFAULT_TOKEN_BUDGET
     wall_seconds: int = DEFAULT_WALL_SECONDS
     idle_passes: int = DEFAULT_IDLE_PASSES
+    # When True, ``should_continue`` ignores plan/token/wall/idle fuses and
+    # only stops on a terminal outcome (``done`` / ``blocked`` / ``error``).
+    # The chain still respects the user's explicit ``/auto pause`` / ``/auto
+    # stop`` commands — those are handled outside the budget by the pipeline.
+    unlimited: bool = False
+    # When True, the pipeline injects a short reflection instruction between
+    # plans so the agent looks at the work it just did and proposes the next
+    # concrete improvement before continuing. Cheap and aligned with the
+    # "deténgase a pensar por donde continuar" request.
+    reflect_after_every_plan: bool = DEFAULT_REFLECT_AFTER_EVERY_PLAN
 
     # Counters — mutated by the pipeline, never by ``should_continue``.
     plans_executed: int = 0
@@ -201,11 +217,28 @@ class AutonomousBudget:
                 value = 0
             return value if value > 0 else default
 
+        def _flag(field_name: str, default: bool) -> bool:
+            raw = getattr(settings, field_name, None)
+            if isinstance(raw, bool):
+                return raw
+            if raw is None:
+                return default
+            if isinstance(raw, (int, float)):
+                return bool(raw)
+            if isinstance(raw, str):
+                return raw.strip().lower() in ("1", "true", "yes", "on", "y", "t")
+            return default
+
         return cls(
             max_plans=_positive("AUTONOMOUS_MAX_PLANS", DEFAULT_MAX_PLANS),
             token_budget=_positive("AUTONOMOUS_TOKEN_BUDGET", DEFAULT_TOKEN_BUDGET),
             wall_seconds=_positive("AUTONOMOUS_WALL_SECONDS", DEFAULT_WALL_SECONDS),
             idle_passes=_positive("AUTONOMOUS_IDLE_PASSES", DEFAULT_IDLE_PASSES),
+            unlimited=_flag("AUTONOMOUS_UNLIMITED", False),
+            reflect_after_every_plan=_flag(
+                "AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN",
+                DEFAULT_REFLECT_AFTER_EVERY_PLAN,
+            ),
         )
 
 
@@ -229,11 +262,23 @@ def should_continue(budget: AutonomousBudget, last_outcome: str | None) -> bool:
     added in the pipeline does not silently stop the chain.
     ``soft_blocked`` is treated as ``continue`` — see ``SOFT_BLOCKED_OUTCOMES``
     for the rationale (engine asked a question; chain keeps going).
+
+    When ``budget.unlimited`` is True the chain is only stopped by a
+    terminal outcome (``done`` / ``blocked`` / ``error``); all budget
+    fuses are ignored. The user can still cancel the chain with the
+    ``/auto pause`` / ``/auto stop`` UI commands — those are handled
+    outside this function by the pipeline's autonomous-active flag.
     """
     outcome = _normalise_outcome(last_outcome)
 
     if outcome in TERMINAL_OUTCOMES:
         return False
+
+    if budget.unlimited:
+        # Only terminal outcomes stop the chain in unlimited mode.
+        # ``idle`` is treated as ``continue`` so the agent can keep
+        # brainstorming / exploring until it has something genuinely done.
+        return True
 
     if budget.plans_executed >= budget.max_plans:
         return False
@@ -259,15 +304,30 @@ def budget_status_text(budget: AutonomousBudget) -> str:
     this matches the format the rest of the engine uses for status lines.
     """
     elapsed = int(budget.wall_elapsed)
-    if budget.wall_seconds <= 0:
+    if budget.unlimited:
+        mode = "UNLIMITED"
+        plan_part = f"plan {budget.plans_executed}/∞"
+        token_part = f"tokens {budget.tokens_consumed}/∞"
+        idle_part = f"idle {budget.idle_runs}/∞"
+        wall_part = f"wall {elapsed}s/∞"
+    elif budget.wall_seconds <= 0:
+        mode = "unbounded-time"
+        plan_part = f"plan {budget.plans_executed}/{budget.max_plans}"
+        token_part = f"tokens {budget.tokens_consumed}/{budget.token_budget}"
+        idle_part = f"idle {budget.idle_runs}/{budget.idle_passes}"
         wall_part = f"wall {elapsed}s/∞"
     else:
+        mode = "bounded"
+        plan_part = f"plan {budget.plans_executed}/{budget.max_plans}"
+        token_part = f"tokens {budget.tokens_consumed}/{budget.token_budget}"
+        idle_part = f"idle {budget.idle_runs}/{budget.idle_passes}"
         wall_part = f"wall {elapsed}s/{budget.wall_seconds}s"
     return (
-        f"plan {budget.plans_executed}/{budget.max_plans} • "
-        f"tokens {budget.tokens_consumed}/{budget.token_budget} • "
+        f"{plan_part} • "
+        f"{token_part} • "
         f"{wall_part} • "
-        f"idle {budget.idle_runs}/{budget.idle_passes}"
+        f"{idle_part} • "
+        f"mode {mode}"
     )
 
 
@@ -282,6 +342,11 @@ def stop_reason(budget: AutonomousBudget) -> str | None:
     outcome = _normalise_outcome(budget.last_outcome)
     if outcome in TERMINAL_OUTCOMES:
         return f"engine reported {outcome}"
+    if budget.unlimited:
+        # In unlimited mode the only stopper is a terminal outcome.
+        # Reaching this branch means should_continue() returned False on
+        # a terminal outcome, which is already reported above.
+        return None
     if budget.plans_executed >= budget.max_plans:
         return f"reached max_plans={budget.max_plans}"
     if budget.token_budget > 0 and budget.tokens_consumed >= budget.token_budget:
@@ -396,6 +461,7 @@ __all__ = [
     "AutonomousOutcome",
     "DEFAULT_IDLE_PASSES",
     "DEFAULT_MAX_PLANS",
+    "DEFAULT_REFLECT_AFTER_EVERY_PLAN",
     "DEFAULT_TOKEN_BUDGET",
     "DEFAULT_WALL_SECONDS",
     "SOFT_BLOCKED_OUTCOMES",

@@ -94,7 +94,13 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "  /findings   /knowledge       Browse what the agent learned\n"
         "  /documentation               Browse cached library docs\n"
         "  /reindex [--full]            Rebuild the local symbol index\n"
-        "  /auto <msg>                  Start autonomous chain with instructions\n"
+        "  /auto <msg>                  Start autonomous chain (b: ~3 plans / 15 min,\n"
+        "                                stops when engine reports done)\n"
+        "  /auto unlimited <msg>        Truly autonomous 100% non-stop mode:\n"
+        "                                ignores plans/tokens/wall/idle fuses,\n"
+        "                                reflects between plans to find the\n"
+        "                                next improvement, only stops on done\n"
+        "                                / blocked / error or /auto stop\n"
         "  /auto pause                  Pause the running autonomous chain\n"
         "  /auto stop                   Stop autonomous mode entirely\n"
         "  /clear                       Clear the transcript\n"
@@ -322,6 +328,14 @@ def _cmd_auto(app: InfinidevApp, parts: list[str]) -> None:
         text is prepended with the autonomous trigger phrase so the
         detector in ``engine/orchestration/autonomous.py`` trips regardless
         of the user's wording.
+      * ``/auto unlimited <msg>``     — start the chain in true non-stop
+        mode: no plan / token / wall / idle fuse, reflection between
+        plans, only stops on terminal engine outcomes or on
+        ``/auto stop``. Persists via ``AUTONOMOUS_UNLIMITED`` in
+        ``.infinidev/settings.json`` so subsequent ``/auto <msg>`` calls
+        inherit the same mode.
+      * ``/auto bounded <msg>``       — explicitly start a bounded chain
+        (the default) and clear the unlimited flag from settings.
       * ``/auto pause``               — cancel the current engine run but
         keep autonomous mode active; the next autonomous-triggered message
         resumes the chain.
@@ -329,16 +343,24 @@ def _cmd_auto(app: InfinidevApp, parts: list[str]) -> None:
         disable autonomous mode; the next user prompt is a single task.
 
     Subcommand dispatch only fires when the second token is exactly
-    ``"pause"`` or ``"stop"``. Anything else is treated as the task
-    description (so ``/auto stop the build`` starts a chain that says
-    "stop the build", which is what the user actually meant).
+    ``"pause"`` / ``"stop"`` / ``"unlimited"`` / ``"bounded"``. Anything
+    else is treated as the task description (so ``/auto stop the build``
+    starts a chain that says "stop the build", which is what the user
+    actually meant).
     """
     # No args → show usage.
     if len(parts) == 1:
         app.add_message(
             "System",
             "Usage:\n"
-            "  /auto <task description>   Start autonomous chain with instructions\n"
+            "  /auto <task description>   Start bounded autonomous chain (up to ~3 plans\n"
+            "                             or 15 min, until the engine reports done)\n"
+            "  /auto unlimited <msg>       Start 100% non-stop autonomous chain\n"
+            "                             (no plan / token / wall / idle fuse,\n"
+            "                             only stops on done/blocked/error or\n"
+            "                             /auto stop; reflects between plans)\n"
+            "  /auto bounded <msg>        Same as /auto <msg> but explicitly\n"
+            "                             bounded and clears the unlimited flag\n"
             "  /auto pause                Pause the running autonomous chain\n"
             "  /auto stop                 Stop autonomous mode entirely",
             "system",
@@ -358,6 +380,20 @@ def _cmd_auto(app: InfinidevApp, parts: list[str]) -> None:
         if sub == "stop":
             _auto_stop(app)
             return
+
+    # Mode-selector subcommands consume the second token and start a chain
+    # with the remaining text. ``/auto unlimited fix the build`` is a
+    # chain that says "fix the build" under the unlimited mode.
+    if sub == "unlimited":
+        _set_autonomous_unlimited(True)
+        msg = " ".join(parts[2:]).strip()
+        _auto_start(app, msg or "Continue working autonomously without stopping.")
+        return
+    if sub == "bounded":
+        _set_autonomous_unlimited(False)
+        msg = " ".join(parts[2:]).strip()
+        _auto_start(app, msg or "Continue working autonomously.")
+        return
 
     # Anything else (including "stop" with extra words) is the task
     # description — full tail after /auto.
@@ -383,6 +419,7 @@ def _auto_start(app: InfinidevApp, msg: str) -> None:
         )
         return
 
+    from infinidev.config.settings import settings as _settings
     from infinidev.ui.workers import run_in_background, run_engine_task
 
     # Prepend the trigger so the chat agent's natural-language detector
@@ -391,11 +428,38 @@ def _auto_start(app: InfinidevApp, msg: str) -> None:
 
     app._engine_running = True
     app._autonomous_active = True
-    app.add_message("System", f"Autonomous mode active.\n\n{msg}", "system")
+    mode_label = "UNLIMITED non-stop" if _settings.AUTONOMOUS_UNLIMITED else "bounded"
+    app.add_message(
+        "System",
+        f"Autonomous mode active ({mode_label}).\n\n{msg}",
+        "system",
+    )
     app._chat_history_control.show_thinking = True
     app.invalidate()
     app._ensure_engine()
     run_in_background(app, run_engine_task, app, augmented, exclusive=True)
+
+
+def _set_autonomous_unlimited(value: bool) -> None:
+    """Flip the ``AUTONOMOUS_UNLIMITED`` setting and persist it.
+
+    Called by the ``/auto unlimited`` and ``/auto bounded`` subcommands so
+    the user's choice survives a process restart. The pipeline reads the
+    flag via :func:`AutonomousBudget.from_settings`; without the persist
+    step a restart would silently fall back to bounded mode and surprise
+    the user.
+    """
+    from infinidev.config.settings import settings, reload_all
+
+    settings.AUTONOMOUS_UNLIMITED = bool(value)
+    try:
+        settings.save_user_settings({"AUTONOMOUS_UNLIMITED": bool(value)})
+    except Exception:
+        # Persistence is best-effort; the in-memory flip is what the
+        # current session actually needs. Settings.save_user_settings
+        # already logs its own failures.
+        pass
+    reload_all()
 
 
 def _auto_pause(app: InfinidevApp) -> None:

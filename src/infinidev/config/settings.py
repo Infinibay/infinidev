@@ -357,6 +357,19 @@ class Settings(BaseSettings):
     AUTONOMOUS_TOKEN_BUDGET: int = 200_000  # cumulative prompt tokens consumed
     AUTONOMOUS_WALL_SECONDS: int = 900  # total wall-clock time, 15 min default
     AUTONOMOUS_IDLE_PASSES: int = 2  # consecutive "no new work" plans before stop
+    # Truly unlimited autonomous mode. When True, the chain ignores
+    # max_plans / token_budget / wall_seconds / idle_passes and only
+    # stops on a terminal engine outcome (done / blocked / error) or on
+    # an explicit user command ("/auto pause" or "/auto stop"). The
+    # chain also injects a short reflection step between plans so the
+    # agent pauses to decide what to improve next instead of queuing
+    # the next outstanding item blindly. Use with care: this is the
+    # "100% autónoma sin parar" mode the user explicitly requested.
+    AUTONOMOUS_UNLIMITED: bool = False
+    # Whether to inject the reflection step between plans. Independent
+    # of unlimited so the bounded mode can also benefit from the
+    # "deténgase a pensar" behaviour. Defaults to True.
+    AUTONOMOUS_REFLECT_AFTER_EVERY_PLAN: bool = True
 
     # Gather phase (pre-implementation info collection)
     GATHER_ENABLED: bool = False

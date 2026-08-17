@@ -209,6 +209,108 @@ def test_auto_stop_sets_cancel_event_and_clears_active(app: FakeApp) -> None:
     assert any("stopped" in m[1].lower() for m in app.messages)
 
 
+# ── /auto unlimited / /auto bounded ──────────────────────────────────────
+
+
+def test_auto_unlimited_sets_flag_and_starts_chain(
+    app: FakeApp, patched_workers, monkeypatch
+) -> None:
+    """``/auto unlimited`` must flip ``AUTONOMOUS_UNLIMITED`` to True and
+    start a chain with the rest of the line as the task description.
+    """
+    from infinidev.config.settings import settings
+
+    previous = settings.AUTONOMOUS_UNLIMITED
+    saved: list[bool] = []
+    try:
+        # Stub the helper so the test never touches the user's real
+        # .infinidev/settings.json. The real implementation calls
+        # ``settings.save_user_settings`` and ``reload_all``; we replace
+        # it with a record-only function.
+        def _stub(value: bool) -> None:
+            settings.AUTONOMOUS_UNLIMITED = bool(value)
+            saved.append(bool(value))
+
+        monkeypatch.setattr(commands, "_set_autonomous_unlimited", _stub)
+        commands._cmd_auto(app, ["/auto", "unlimited", "ship", "the", "feature"])
+        assert settings.AUTONOMOUS_UNLIMITED is True
+        assert saved == [True]
+        # The chain was kicked off — engine is marked running and the
+        # background worker is invoked with the task description.
+        assert app._engine_running is True
+        assert app._autonomous_active is True
+        assert len(patched_workers) == 1
+        worker_args = patched_workers[0][1]
+        # The message is forwarded to the engine task — it should
+        # contain the user's request and the autonomous trigger phrase.
+        assert "ship the feature" in worker_args[1]
+        # The on-screen banner marks the mode as UNLIMITED.
+        banner_msgs = [m[1] for m in app.messages if "Autonomous mode active" in m[1]]
+        assert banner_msgs
+        assert "UNLIMITED" in banner_msgs[-1]
+    finally:
+        settings.AUTONOMOUS_UNLIMITED = previous
+
+
+def test_auto_bounded_clears_unlimited_flag(
+    app: FakeApp, patched_workers, monkeypatch
+) -> None:
+    """``/auto bounded`` flips ``AUTONOMOUS_UNLIMITED`` back to False and
+    starts a chain in the conservative mode. This is the escape hatch
+    for users who want to revert to the default after a session in
+    unlimited mode.
+    """
+    from infinidev.config.settings import settings
+
+    previous = settings.AUTONOMOUS_UNLIMITED
+    saved: list[bool] = []
+    try:
+        settings.AUTONOMOUS_UNLIMITED = True
+
+        def _stub(value: bool) -> None:
+            settings.AUTONOMOUS_UNLIMITED = bool(value)
+            saved.append(bool(value))
+
+        monkeypatch.setattr(commands, "_set_autonomous_unlimited", _stub)
+        commands._cmd_auto(app, ["/auto", "bounded", "tidy", "the", "changelog"])
+        assert settings.AUTONOMOUS_UNLIMITED is False
+        assert saved == [False]
+        # Banner shows the bounded mode.
+        banner_msgs = [m[1] for m in app.messages if "Autonomous mode active" in m[1]]
+        assert banner_msgs
+        assert "UNLIMITED" not in banner_msgs[-1]
+    finally:
+        settings.AUTONOMOUS_UNLIMITED = previous
+
+
+def test_auto_unlisted_subcommand_falls_through_to_task_description(
+    app: FakeApp, patched_workers, monkeypatch
+) -> None:
+    """``/auto stop the build`` is a task description (not a stop
+    command). The unlimited/bounded subcommands share this fallback:
+    any other second word is part of the message, not a mode flag.
+    """
+    from infinidev.config.settings import settings
+
+    previous = settings.AUTONOMOUS_UNLIMITED
+    saved: list[bool] = []
+    try:
+        def _stub(value: bool) -> None:
+            settings.AUTONOMOUS_UNLIMITED = bool(value)
+            saved.append(bool(value))
+
+        monkeypatch.setattr(commands, "_set_autonomous_unlimited", _stub)
+        commands._cmd_auto(app, ["/auto", "refactor", "the", "loader"])
+        # Flag is untouched — the second word is not unlimited/bounded.
+        assert settings.AUTONOMOUS_UNLIMITED == previous
+        assert saved == []
+        # The full tail is the task description.
+        worker_args = patched_workers[0][1]
+        assert "refactor the loader" in worker_args[1]
+    finally:
+        settings.AUTONOMOUS_UNLIMITED = previous
+
+
 # ── Robustness ────────────────────────────────────────────────────────────
 
 

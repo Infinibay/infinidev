@@ -1253,11 +1253,33 @@ def run_task(
             except Exception:
                 logger.debug("hooks.on_chain_mode failed", exc_info=True)
         if _autonomous_should_continue(_chain_budget, _turn_status):
-            _continuation = (
-                "Continue with the next pending item from the same "
-                "overarching task, without re-asking me. Stop and report "
-                "concisely when done or when you have no next item."
-            )
+            if _chain_budget.reflect_after_every_plan:
+                # Reflection step: ask the agent to look at what it just did,
+                # identify the next concrete improvement, and execute it
+                # instead of blindly picking the next outstanding item. This
+                # is the "deténgase a pensar por donde continuar" behaviour
+                # the user asked for; it works for both bounded and unlimited
+                # chains, but the combination with unlimited is the one that
+                # runs non-stop until the agent has nothing more to do.
+                _continuation = (
+                    "Autonomous chain continues. Briefly reflect on the "
+                    "work just completed in 2-4 sentences: (1) what "
+                    "changed, (2) what gap or follow-up improvement "
+                    "would move the project forward the most right now. "
+                    "Then execute that next improvement directly — do "
+                    "not re-ask me. Keep going, plan after plan, until "
+                    "you have a concrete reason to stop (no remaining "
+                    "follow-up, externally-blocked, or hit a real "
+                    "error). Use the project's own tests, lints and "
+                    "type checks to validate each change before moving "
+                    "on to the next one."
+                )
+            else:
+                _continuation = (
+                    "Continue with the next pending item from the same "
+                    "overarching task, without re-asking me. Stop and report "
+                    "concisely when done or when you have no next item."
+                )
             runtime.record_step(result, step_id=root_task.id)
             if engine_run.status == "completed":
                 runtime.complete_current_task(result)
