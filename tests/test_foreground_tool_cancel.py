@@ -47,6 +47,11 @@ def _bare_app(engine: _EngineStub) -> InfinidevApp:
     app._update_cancel_bar = Mock()
     app.flash_status = Mock()
     app.invalidate = Mock()
+    app.chat_messages = []
+    app._persist_session_message = Mock()
+    app._persist_runtime_state = Mock()
+    app._chat_history_control = Mock()
+    app._pending_inputs = []
     return app
 
 
@@ -115,3 +120,59 @@ def test_double_escape_without_active_tool_keeps_hold_cancel_available(monkeypat
     assert engine.tool_cancel_calls == 1
     assert engine.task_cancel_calls == 0
     assert app._cancel_hold_start == 100.0
+
+
+def test_hold_escape_fires_task_cancel_when_no_key_repeats_arrive(monkeypatch) -> None:
+    """Regression: holding Escape used to bail out after ~0.6s because terminals do
+    not auto-repeat the Escape key, so the watcher saw "no keydowns in 0.5s" and
+    treated it as a release. The 3-second hold-to-cancel must fire regardless of
+    whether the OS sends key-repeat events for Escape.
+    """
+    engine = _EngineStub(tool_active=False)
+    app = _bare_app(engine)
+
+    fake_now = {"t": 100.0}
+    monkeypatch.setattr(
+        "infinidev.ui.app.time.monotonic", lambda: fake_now["t"]
+    )
+    # Drain the watcher sleeps so we don't actually sleep in tests.
+    monkeypatch.setattr("infinidev.ui.app.time.sleep", lambda _s: None)
+
+    # First Escape press — starts the hold.
+    app.handle_escape()
+    assert app._cancel_hold_start == 100.0
+    assert engine.task_cancel_calls == 0
+
+    # Simulate the user still holding Escape 3.5s later, but the terminal has
+    # NOT sent any key-repeat events (the realistic scenario for Escape).
+    fake_now["t"] = 103.5
+
+    # Run the watcher synchronously; it should fire the task cancel.
+    app._cancel_hold_watcher()
+
+    assert engine.task_cancel_calls == 1
+    assert engine.tool_cancel_calls == 0
+    assert app._cancel_hold_start is None
+
+
+def test_hold_escape_aborts_when_engine_finishes_before_threshold(monkeypatch) -> None:
+    """If the engine finishes on its own while the user is holding Escape, the
+    watcher must clear the hold state without firing the task cancel."""
+    engine = _EngineStub(tool_active=False)
+    app = _bare_app(engine)
+
+    fake_now = {"t": 100.0}
+    monkeypatch.setattr(
+        "infinidev.ui.app.time.monotonic", lambda: fake_now["t"]
+    )
+    monkeypatch.setattr("infinidev.ui.app.time.sleep", lambda _s: None)
+
+    app.handle_escape()
+    # Engine finishes before the 3s threshold.
+    app._engine_running = False
+    fake_now["t"] = 101.0
+
+    app._cancel_hold_watcher()
+
+    assert engine.task_cancel_calls == 0
+    assert app._cancel_hold_start is None

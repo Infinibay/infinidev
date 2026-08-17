@@ -1177,17 +1177,19 @@ class InfinidevApp:
     _CANCEL_BAR_WIDTH = 6
 
     def _cancel_hold_watcher(self) -> None:
-        """Background thread: detect key release and animate progress bar."""
+        """Background thread: animate the hold-progress bar and fire cancel after 3s.
+
+        Terminals do NOT auto-repeat the Escape key (it is a control character),
+        so we cannot rely on repeated keydowns to distinguish "still holding" from
+        "released". The watcher therefore only bails when (a) the engine finished
+        on its own, or (b) the user aborted via a synchronous double-tap handled
+        inside ``handle_escape`` (which clears ``_cancel_hold_start``). Otherwise
+        the cancel fires after ``_CANCEL_HOLD_SECONDS``.
+        """
         try:
             while self._cancel_hold_start is not None:
                 time.sleep(0.1)
                 now = time.monotonic()
-                # User released Escape (and did not complete a double press).
-                if now - self._cancel_last_escape > self._DOUBLE_ESCAPE_SECONDS:
-                    self._cancel_hold_start = None
-                    self._update_cancel_bar()
-                    self.invalidate()
-                    return
                 # 3 seconds reached — trigger cancel
                 if now - self._cancel_hold_start >= self._CANCEL_HOLD_SECONDS:
                     self._execute_cancel()
