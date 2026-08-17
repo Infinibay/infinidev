@@ -67,3 +67,28 @@ def test_newlines_separate_entries_only_no_trailing():
     texts = _texts(state.get_fragments())
     assert texts.count("\n") == n - 1
     assert texts[-1] != "\n"  # no trailing blank line
+
+
+# ── /auto is registered for autocomplete (regression) ────────────────────
+
+
+def test_auto_command_matches_all_three_forms():
+    """Tapping /au should surface /auto, /auto pause, and /auto stop."""
+    from infinidev.ui.controls.autocomplete import COMMANDS
+
+    cmds = [c for c, _ in COMMANDS if c.startswith("/auto")]
+    assert cmds == ["/auto", "/auto pause", "/auto stop"]
+
+
+def test_auto_prefix_filters_correctly():
+    state = AutocompleteState()
+    state.update("/au")
+    match_cmds = [c for c, _ in state.matches]
+    assert match_cmds == ["/auto", "/auto pause", "/auto stop"]
+
+
+def test_auto_pause_prefix_filters_to_subcommand_only():
+    state = AutocompleteState()
+    state.update("/auto p")
+    match_cmds = [c for c, _ in state.matches]
+    assert match_cmds == ["/auto pause"]

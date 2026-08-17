@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     FILE_OPERATIONS_PERMISSION: str = "auto"  # "auto", "ask", "auto_approve", "allowed_paths"
     TOOL_EFFECTS_PERMISSION: str = "auto"  # "auto", "ask", "auto_approve"
     ALLOWED_FILE_PATHS: list[str] = []  # Allowed paths when permission is "allowed_paths"
+    # MCP tool permission mode — defaults to "auto_approve" because MCP
+    # servers are user-configured and trusted, unlike arbitrary shell commands.
+    # "auto_approve" (default): run every MCP tool without prompting;
+    # "auto": prompt only for MCP tools with side effects (not is_read_only);
+    # "ask": prompt for every MCP tool call;
+    # "deny": block every MCP tool call.
+    MCP_PERMISSION: str = "auto_approve"
 
     # File limits
     MAX_FILE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5MB
@@ -97,17 +104,9 @@ class Settings(BaseSettings):
     MAX_DIR_LISTING_CHARS: int = Field(default=12_000, ge=1_024)
 
     # Programmable notifications subsystem. The scheduler runs as a daemon
-    # thread that polls ~/.infinidev/notifications.db every second. Disabling
-    # this stops new fires but the manage_notifications tool remains usable
-    # for inspection; the registry itself is never wiped by the toggle.
-    NOTIFICATIONS_ENABLED: bool = True
-    # Maximum webhook delivery timeout in seconds (per request). Console
-    # delivery is synchronous and unbounded.
-    NOTIFICATIONS_WEBHOOK_TIMEOUT: float = 5.0
-    # Poll interval for the scheduler thread. 1s is the recommended floor —
-    # finer polling burns CPU without improving cron resolution beyond 1
-    # minute.
-    NOTIFICATIONS_POLL_INTERVAL: float = 1.0
+    # thread that polls ~/.infinidev/notifications.db every second and is
+    # started unconditionally by get_default_scheduler(); the manage_notifications
+    # tool remains usable for inspection regardless.
 
     # Private command-output capture. Disabled by default so execute_command's
     # return shape and filesystem/database side effects stay backward compatible.
@@ -351,7 +350,11 @@ class Settings(BaseSettings):
     # 0 / negative falls back to the default in autonomous.from_settings so
     # a misconfiguration cannot turn the chain into an infinite loop.
     AUTONOMOUS_MAX_PLANS: int = 3  # hard cap on plans executed in one chain
-    AUTONOMOUS_TOKEN_BUDGET: int = 50_000  # cumulative prompt tokens consumed
+    # 200k prompt tokens ≈ four ordinary plans. The previous 50k tripped on
+    # the first review-rework loop, which is why autonomous mode used to
+    # "stop all the time". The autonomous.from_settings fallback uses the
+    # module default if this field is 0/negative.
+    AUTONOMOUS_TOKEN_BUDGET: int = 200_000  # cumulative prompt tokens consumed
     AUTONOMOUS_WALL_SECONDS: int = 900  # total wall-clock time, 15 min default
     AUTONOMOUS_IDLE_PASSES: int = 2  # consecutive "no new work" plans before stop
 

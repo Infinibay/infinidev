@@ -50,7 +50,7 @@ No separate lint/format/typecheck tool is configured. There is no `ruff`, `black
 
 ## Configuration
 
-Settings live in `src/infinidev/config/settings.py` (a `pydantic_settings.BaseSettings`). All env vars use the `INFINIDEV_` prefix (legacy `INFINIBAY_` aliases still exist). Project-local runtime state is created in `.infinidev/` (cwd-relative); never commit secrets, generated databases, logs, model outputs, or large finetune artifacts.
+Settings live in `src/infinidev/config/settings.py` (a `pydantic_settings.BaseSettings`). All env vars use the `INFINIDEV_` prefix. Project-local runtime state is created in `.infinidev/` (cwd-relative); never commit secrets, generated databases, logs, model outputs, or large finetune artifacts.
 
 ## Model Target & Context Strategy
 

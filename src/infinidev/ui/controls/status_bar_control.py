@@ -19,6 +19,12 @@ class StatusBarControl(FormattedTextControl):
         self._model = "unknown"
         self._project = ""
         self._status = ""
+        # Persistent mode badge (e.g. "AUTO 2/3 · 12k/50k"). Deliberately
+        # separate from ``_status`` so cancel-hold progress and flash_status
+        # auto-clear calls cannot wipe the indicator. Render priority is
+        # brand → mode → status → model → project, so the badge is the
+        # first thing the eye lands on after the app name.
+        self._mode: tuple[str, str] = ("", "idle")
         super().__init__(self._get_text)
 
     def _get_text(self) -> FormattedText:
@@ -53,9 +59,17 @@ class StatusBarControl(FormattedTextControl):
         return self._build(model_shown, project_shown, status_shown)
 
     def _build(self, model: str, project: str, status: str) -> FormattedText:
-        """Assemble the visual fragments (left→right: model, project, status)."""
+        """Assemble the visual fragments (left→right: brand, mode, model, project, status)."""
         fragments: list[tuple[str, str]] = []
         fragments.append((f"{PRIMARY} bold", " infinidev "))
+        mode_label, mode_kind = self._mode
+        if mode_label:
+            # ACCENT for the active "AUTO" badge so the user sees at a
+            # glance that the chain is running. PRIMARY if the mode is
+            # informational only (e.g. "phase: planning").
+            colour = ACCENT if mode_kind == "active" else PRIMARY
+            fragments.append((f"{TEXT_MUTED}", " │ "))
+            fragments.append((f"{colour} bold", mode_label))
         if model:
             fragments.append((f"{TEXT_MUTED}", " │ "))
             fragments.append((f"{TEXT}", model))
@@ -75,5 +89,17 @@ class StatusBarControl(FormattedTextControl):
 
     def set_status(self, status: str) -> None:
         self._status = status
+
+    def set_mode(self, label: str, kind: str = "idle") -> None:
+        """Set the persistent mode badge rendered after the brand.
+
+        ``label`` is the human-readable text (e.g. ``"AUTO 2/3 · 12k/50k"``).
+        ``kind`` is ``"active"`` for highlight (chain running) or ``"idle"``
+        for the muted default. Pass ``""`` to clear the badge. The badge
+        is intentionally NOT touched by :meth:`set_status`, so the
+        cancel-hold progress and :func:`flash_status` auto-clear calls
+        cannot wipe it.
+        """
+        self._mode = (label, kind)
 
 

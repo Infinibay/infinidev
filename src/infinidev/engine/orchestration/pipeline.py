@@ -1235,10 +1235,23 @@ def run_task(
         if _autonomous_budget is None:
             _chain_budget.start()
         _chain_budget.record_outcome(_turn_status)
+        _chain_label = _autonomous_budget_status_text(_chain_budget)
         hooks.on_status(
             "info",
-            f"Autonomous chain: {_autonomous_budget_status_text(_chain_budget)}",
+            f"Autonomous chain: {_chain_label}",
         )
+        # Push the live budget into the persistent status-bar mode badge so
+        # the user sees "AUTO 2/3 · 12k/200k" even while the engine is busy
+        # and ``set_status`` calls are racing. The TUI hook is a no-op when
+        # the app has no status bar (classic CLI); we also no-op when the
+        # hook class doesn't implement ``on_chain_mode`` so older test
+        # doubles keep working.
+        _push_chain_mode = getattr(hooks, "on_chain_mode", None)
+        if callable(_push_chain_mode):
+            try:
+                _push_chain_mode(_chain_label, "active")
+            except Exception:
+                logger.debug("hooks.on_chain_mode failed", exc_info=True)
         if _autonomous_should_continue(_chain_budget, _turn_status):
             _continuation = (
                 "Continue with the next pending item from the same "
@@ -1262,6 +1275,15 @@ def run_task(
             "info",
             f"Autonomous chain stopped: {reason}",
         )
+        # Clear the mode badge so the bar doesn't keep showing AUTO after
+        # the chain ends. Empty label returns the bar to its brand-only
+        # state; ``idle`` keeps the same colour mapping as a non-empty
+        # informational badge.
+        if callable(_push_chain_mode):
+            try:
+                _push_chain_mode("", "idle")
+            except Exception:
+                logger.debug("hooks.on_chain_mode clear failed", exc_info=True)
 
     # ── Hidden work summary ─────────────────────────────────────────────
     # Record what the developer loop just did as a hidden conversation

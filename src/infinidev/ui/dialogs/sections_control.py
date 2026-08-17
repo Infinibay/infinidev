@@ -59,6 +59,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "Permissions": [
         ("EXECUTE_COMMANDS_PERMISSION", "Shell command permission mode", "select:auto,auto_approve,ask,allowed_list"),
         ("FILE_OPERATIONS_PERMISSION", "File operations permission mode", "select:auto,auto_approve,ask,allowed_paths"),
+        ("MCP_PERMISSION", "MCP tool permission mode (default: auto_approve)", "select:auto_approve,auto,ask,deny"),
     ],
     "Sandbox": [
         ("SANDBOX_ENABLED", "Enable sandboxed execution", "bool"),

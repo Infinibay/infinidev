@@ -55,7 +55,12 @@ logger = logging.getLogger(__name__)
 # "infinite", a positive default is the only contract that keeps the chain
 # bounded).
 DEFAULT_MAX_PLANS: int = 3
-DEFAULT_TOKEN_BUDGET: int = 50_000
+# 200k tokens is enough headroom for an ordinary plan to complete (a typical
+# review-rework loop spends 20-60k tokens of prompt alone) while still being
+# small enough that three plans cannot accidentally run a user's quota into
+# the ground. The previous 50k default tripped the chain on the first plan,
+# which is the root cause of the "autonomous mode stops all the time" bug.
+DEFAULT_TOKEN_BUDGET: int = 200_000
 DEFAULT_WALL_SECONDS: int = 900
 DEFAULT_IDLE_PASSES: int = 2
 
@@ -63,8 +68,19 @@ DEFAULT_IDLE_PASSES: int = 2
 # Outcome vocabulary the chain reacts to. Anything else is treated as a
 # "continue" signal so the chain does not silently die when a new outcome
 # value is introduced.
-AutonomousOutcome = Literal["continue", "done", "idle", "blocked", "error"]
+#
+# ``soft_blocked`` is the non-terminal variant of ``blocked``: the engine has
+# something to surface to the user (usually a clarification question) but
+# the chain must keep going. The pipeline translates it into a chat-agent
+# notification + continuation, instead of stopping the chain.
+AutonomousOutcome = Literal[
+    "continue", "done", "idle", "blocked", "error", "soft_blocked",
+]
 TERMINAL_OUTCOMES: frozenset[str] = frozenset({"done", "blocked", "error"})
+# Outcomes that mean "the engine asked a question / surfaced something for
+# the user, but the chain has more work to do". ``should_continue`` returns
+# True for these so the chain does not stop on a clarification.
+SOFT_BLOCKED_OUTCOMES: frozenset[str] = frozenset({"soft_blocked"})
 _IDLE_OUTCOME: str = "idle"
 
 
@@ -211,6 +227,8 @@ def should_continue(budget: AutonomousBudget, last_outcome: str | None) -> bool:
 
     An unknown outcome value is treated as ``continue`` so a new outcome
     added in the pipeline does not silently stop the chain.
+    ``soft_blocked`` is treated as ``continue`` — see ``SOFT_BLOCKED_OUTCOMES``
+    for the rationale (engine asked a question; chain keeps going).
     """
     outcome = _normalise_outcome(last_outcome)
 
@@ -380,6 +398,7 @@ __all__ = [
     "DEFAULT_MAX_PLANS",
     "DEFAULT_TOKEN_BUDGET",
     "DEFAULT_WALL_SECONDS",
+    "SOFT_BLOCKED_OUTCOMES",
     "TERMINAL_OUTCOMES",
     "apply_autonomous_to_packet",
     "budget_status_text",

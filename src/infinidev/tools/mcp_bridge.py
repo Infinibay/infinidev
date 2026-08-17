@@ -278,10 +278,58 @@ def build_tool_class(tool: Any) -> type[InfinibayBaseTool]:
     use_constraints = constraints_for_tool(remote_name, effects, remote=True)
 
     def _run(self, **kwargs: Any) -> str:
+        from infinidev.config.settings import settings
         from infinidev.engine.mcp_client import (
             McpUnavailable,
             get_default_mcp_manager,
         )
+
+        # Enforce MCP_PERMISSION before touching the network — the model can
+        # learn from a denial and we never want a refused call to have already
+        # reached the MCP server. Defaults to "auto_approve" because users
+        # opt into MCP servers they trust (ken, etc.) and the existing UX
+        # never prompted before this setting was introduced.
+        mode = getattr(settings, "MCP_PERMISSION", "auto_approve")
+        if mode == "deny":
+            return self._error(
+                f"MCP tool {remote_name!r} denied: MCP_PERMISSION=deny"
+            )
+        if mode == "ask":
+            from infinidev.tools.permission import request_permission
+            if not request_permission(
+                tool_name=f"mcp:{server}.{remote_name}",
+                description=f"Run MCP tool {remote_name!r} on {server!r}",
+                details="",
+            ):
+                return self._error(f"MCP tool {remote_name!r} denied by user")
+        elif mode == "auto" and not read_only:
+            # ``auto`` mirrors the shell-command semantics: prompt for any
+            # tool that mutates external state. Read-only MCP tools still run
+            # without a prompt.
+            from infinidev.tools.permission import request_permission
+            from infinidev.tools.permission import is_permission_handler_registered
+            if is_permission_handler_registered():
+                if not request_permission(
+                    tool_name=f"mcp:{server}.{remote_name}",
+                    description=(
+                        f"Run side-effecting MCP tool {remote_name!r} "
+                        f"on {server!r}"
+                    ),
+                    details="",
+                ):
+                    return self._error(
+                        f"MCP tool {remote_name!r} denied by user"
+                    )
+            # No handler registered (non-interactive, e.g. classic / bench):
+            # fail closed rather than silently running side-effecting MCP tools.
+            else:
+                return self._error(
+                    f"MCP tool {remote_name!r} denied: MCP_PERMISSION=auto "
+                    f"requires confirmation for side-effecting tools but no "
+                    f"approval UI is available. Set MCP_PERMISSION=auto_approve."
+                )
+        # mode == "auto_approve" (default) or read-only with mode == "auto":
+        # proceed without prompting.
 
         # Validate here, not upstream: the engine reaches ``_run`` directly
         # and the signature-based check it does instead cannot see through

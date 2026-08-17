@@ -1551,6 +1551,14 @@ class LoopEngine(AgentEngine):
                 "tool_calls_total_limit": ctx.max_total_calls,
             })
 
+            # Pre-LLM-call cancel check: if the user pressed Ctrl-C while the
+            # previous iteration's tool batch was running, the call below
+            # would otherwise block for the full LLM roundtrip before the
+            # post-call set() check fires. The post-call check stays as a
+            # safety net for cancels that arrive during the call itself.
+            if self._cancel_event.is_set():
+                break
+
             result = llm_caller.call(
                 ctx, messages, is_planning, action_tool_calls,
                 completion_only=completion_only,
@@ -1633,6 +1641,8 @@ class LoopEngine(AgentEngine):
                     # the following turn remains completion-only.
                     ctx.step_tool_limit += len(classified.regular)
                 if classified.regular:
+                    if self._cancel_event.is_set():
+                        break
                     action_tool_calls = self._critic.review_alongside(
                         ctx, messages, classified.regular,
                         getattr(result, "reasoning_content", None),

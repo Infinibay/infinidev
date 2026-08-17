@@ -94,6 +94,9 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "  /findings   /knowledge       Browse what the agent learned\n"
         "  /documentation               Browse cached library docs\n"
         "  /reindex [--full]            Rebuild the local symbol index\n"
+        "  /auto <msg>                  Start autonomous chain with instructions\n"
+        "  /auto pause                  Pause the running autonomous chain\n"
+        "  /auto stop                   Stop autonomous mode entirely\n"
         "  /clear                       Clear the transcript\n"
         "  /exit                        Quit",
         "system",
@@ -309,6 +312,114 @@ def _cmd_refactor(app: InfinidevApp, parts: list[str]) -> None:
     run_in_background(app, run_engine_task, app, prompt, exclusive=True)
 
 
+def _cmd_auto(app: InfinidevApp, parts: list[str]) -> None:
+    """Autonomous mode control — parent command for the chain.
+
+    Usage:
+      * ``/auto``                     — show usage.
+      * ``/auto <task description>``  — start the autonomous chain with the
+        given text as instructions/restrictions for the first plan. The
+        text is prepended with the autonomous trigger phrase so the
+        detector in ``engine/orchestration/autonomous.py`` trips regardless
+        of the user's wording.
+      * ``/auto pause``               — cancel the current engine run but
+        keep autonomous mode active; the next autonomous-triggered message
+        resumes the chain.
+      * ``/auto stop``                — cancel the current engine run and
+        disable autonomous mode; the next user prompt is a single task.
+
+    Subcommand dispatch only fires when the second token is exactly
+    ``"pause"`` or ``"stop"``. Anything else is treated as the task
+    description (so ``/auto stop the build`` starts a chain that says
+    "stop the build", which is what the user actually meant).
+    """
+    # No args → show usage.
+    if len(parts) == 1:
+        app.add_message(
+            "System",
+            "Usage:\n"
+            "  /auto <task description>   Start autonomous chain with instructions\n"
+            "  /auto pause                Pause the running autonomous chain\n"
+            "  /auto stop                 Stop autonomous mode entirely",
+            "system",
+        )
+        return
+
+    sub = parts[1].lower()
+
+    # Subcommand dispatch only fires when the user typed *exactly* the
+    # subcommand word. ``/auto stop the build`` is a task description,
+    # not a stop — so we gate on ``len(parts) == 2`` rather than matching
+    # the leading token.
+    if len(parts) == 2:
+        if sub == "pause":
+            _auto_pause(app)
+            return
+        if sub == "stop":
+            _auto_stop(app)
+            return
+
+    # Anything else (including "stop" with extra words) is the task
+    # description — full tail after /auto.
+    msg = " ".join(parts[1:])
+    _auto_start(app, msg)
+
+
+def _auto_start(app: InfinidevApp, msg: str) -> None:
+    """Start an autonomous chain with the given instructions."""
+    if not msg:
+        app.add_message(
+            "System",
+            "Usage: /auto <task description and any restrictions>",
+            "system",
+        )
+        return
+
+    if getattr(app, "_engine_running", False):
+        app.add_message(
+            "System",
+            "Cannot activate /auto while a task is already running.",
+            "system",
+        )
+        return
+
+    from infinidev.ui.workers import run_in_background, run_engine_task
+
+    # Prepend the trigger so the chat agent's natural-language detector
+    # catches the autonomous intent regardless of wording.
+    augmented = f"manejate vos.\n\nUser instructions: {msg}"
+
+    app._engine_running = True
+    app._autonomous_active = True
+    app.add_message("System", f"Autonomous mode active.\n\n{msg}", "system")
+    app._chat_history_control.show_thinking = True
+    app.invalidate()
+    app._ensure_engine()
+    run_in_background(app, run_engine_task, app, augmented, exclusive=True)
+
+
+def _auto_pause(app: InfinidevApp) -> None:
+    """Cancel the current engine run; keep autonomous mode active."""
+    cancel = getattr(app, "_cancel_event", None)
+    if cancel is not None:
+        cancel.set()
+    app.add_message(
+        "System",
+        "Autonomous chain paused. The current task has been cancelled; "
+        "send a new message to continue.",
+        "system",
+    )
+
+
+def _auto_stop(app: InfinidevApp) -> None:
+    """Cancel the current engine run and disable autonomous mode."""
+    cancel = getattr(app, "_cancel_event", None)
+    if cancel is not None:
+        cancel.set()
+    app._autonomous_active = False
+    app.add_message("System", "Autonomous mode stopped.", "system")
+
+
 def _cmd_sidebar(app: InfinidevApp, parts: list[str]) -> None:
     """Toggle the right panel — the fallback when Alt+. / F4 are eaten."""
     app.toggle_sidebar()
@@ -407,6 +518,7 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/init": _cmd_init,
     "/refactor": _cmd_refactor,
     "/reindex": _cmd_reindex,
+    "/auto": _cmd_auto,
 }
 
 

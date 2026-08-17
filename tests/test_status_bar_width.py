@@ -78,6 +78,78 @@ def test_status_bar_unclamped_when_no_app(monkeypatch):
     assert "m" in joined and "/p" in joined and "ok" in joined
 
 
+# ── mode badge (autonomous / chain indicator) ─────────────────────
+
+def test_mode_badge_renders_after_brand(monkeypatch):
+    """``set_mode`` must render the label after the brand, visible in the bar."""
+    monkeypatch.setattr(status_bar_control, "terminal_cols", lambda: None)
+    bar = StatusBarControl()
+    bar.set_mode("AUTO 2/3 · 12k/50k", "active")
+    bar.set_model("foo")
+    joined = _joined(bar._get_text())
+    assert "infinidev" in joined
+    assert "AUTO 2/3 · 12k/50k" in joined
+    # The badge is rendered as the first segment after the brand so the user
+    # sees it at a glance — check it precedes the model name in source order.
+    assert joined.index("AUTO 2/3 · 12k/50k") < joined.index("foo")
+
+
+def test_mode_badge_survives_transient_set_status(monkeypatch):
+    """The mode badge is a persistent channel; ``set_status`` must not wipe it.
+
+    This is the property that fixes the user-reported "no AUTO indicator"
+    complaint: cancel-hold progress and flash_status both call
+    ``set_status`` with a transient label, and the existing channel is
+    overwritten by those. The autonomous chain indicator lives on a
+    separate channel so those callers cannot erase it.
+    """
+    monkeypatch.setattr(status_bar_control, "terminal_cols", lambda: None)
+    bar = StatusBarControl()
+    bar.set_mode("AUTO 1/3", "active")
+    # Simulate the cancel-hold progress path: set_status replaces the
+    # transient channel. The mode badge must remain visible.
+    bar.set_status("Hold Esc: cancel task [████░░░░░░]")
+    joined = _joined(bar._get_text())
+    assert "AUTO 1/3" in joined, joined
+    assert "Hold Esc: cancel task" in joined
+
+
+def test_mode_badge_clear(monkeypatch):
+    """Passing ``""`` clears the badge — the next render must not show it."""
+    monkeypatch.setattr(status_bar_control, "terminal_cols", lambda: None)
+    bar = StatusBarControl()
+    bar.set_mode("AUTO 1/3", "active")
+    assert "AUTO 1/3" in _joined(bar._get_text())
+    bar.set_mode("", "idle")
+    assert "AUTO 1/3" not in _joined(bar._get_text())
+
+
+def test_mode_badge_uses_distinct_colours_for_active_vs_idle(monkeypatch):
+    """``active`` kind uses ACCENT; ``idle`` kind uses PRIMARY.
+
+    The colour distinction is what makes the badge legible at a glance —
+    the user needs to see ACCENT and immediately know "chain is running".
+    """
+    from infinidev.ui.theme import ACCENT, PRIMARY
+
+    monkeypatch.setattr(status_bar_control, "terminal_cols", lambda: None)
+    bar = StatusBarControl()
+    bar.set_mode("AUTO 1/3", "active")
+    frags = bar._get_text()
+    modes = [(style, label) for style, label in frags if label == "AUTO 1/3"]
+    assert modes, "mode badge missing from render"
+    style, _ = modes[0]
+    assert ACCENT in style, f"expected ACCENT in active style, got {style!r}"
+
+    bar.set_mode("phase: planning", "idle")
+    frags = bar._get_text()
+    modes = [(style, label) for style, label in frags if label == "phase: planning"]
+    assert modes, "idle mode badge missing from render"
+    style, _ = modes[0]
+    assert PRIMARY in style, f"expected PRIMARY in idle style, got {style!r}"
+    assert ACCENT not in style, "idle mode must not use ACCENT colour"
+
+
 # ── footer ──────────────────────────────────────────────────────────
 
 def test_footer_never_exceeds_width_and_drops_trailing_hints(monkeypatch):

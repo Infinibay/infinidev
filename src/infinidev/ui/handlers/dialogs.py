@@ -46,6 +46,7 @@ class DialogManager:
         self._debug_state: Any = None
         self._debug_sections_window: Any = None
         self._debug_content_window: Any = None
+        self._debug_initialized: bool = False
 
         # Background-tasks explorer state
         self._bgtasks_ctrl: Any = None
@@ -523,7 +524,18 @@ class DialogManager:
         run_in_background(self._app, _refresh_debug_state, self._app, state)
 
     def _init_debug_dialog(self) -> None:
-        """Create the debug panel dialog and register as a Float."""
+        """Create the debug panel dialog and register as a Float.
+
+        Idempotent: a second call (e.g. after ``open_debug`` reset its state
+        and a refactor accidentally re-entered the init path) is a no-op so
+        the controls' ``get_key_bindings`` wrappers are not stacked.
+        ``self._debug_state`` is also checked by ``open_debug`` before this
+        method is reached, but the explicit sentinel here is defence in
+        depth against any future caller that bypasses that guard.
+        """
+        if getattr(self, "_debug_initialized", False):
+            return
+
         from prompt_toolkit.layout.containers import (
             Float, ConditionalContainer, VSplit, Window,
         )
@@ -552,22 +564,32 @@ class DialogManager:
             scroll_offsets=ScrollOffsets(top=1, bottom=1),
         )
 
-        # Escape keybinding on both controls
+        # Escape keybinding on both controls. The handler is idempotent and
+        # restores focus to the chat input before requesting a redraw, so
+        # repeated presses while the engine is streaming thinking (which
+        # also fires ``app.invalidate`` from a worker thread) cannot leave
+        # focus parked on a now-hidden Float child.
+        def _close_debug(event):
+            if app.active_dialog != "debug_panel":
+                return
+            app.active_dialog = None
+            try:
+                app.app.layout.focus(app._chat_input_control)
+            except Exception:
+                pass
+            app.invalidate()
+
         for ctrl in (sections_ctrl, content_ctrl):
             original_kb = ctrl.get_key_bindings
 
-            def _make_kb(orig_fn=original_kb):
+            def _make_kb(orig_fn=original_kb, _close=_close_debug):
                 kb = orig_fn()
-
-                @kb.add("escape")
-                def _close(event):
-                    app.active_dialog = None
-                    app.focus_chat()
-                    app.invalidate()
-
+                kb.add("escape")(_close)
                 return kb
 
             ctrl.get_key_bindings = _make_kb
+
+        self._debug_initialized = True
 
         # Focus switching: when sections control says "content", move focus
         _orig_sections_kb = sections_ctrl.get_key_bindings

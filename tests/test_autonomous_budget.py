@@ -45,7 +45,7 @@ def test_default_topes_match_spec():
     """
     budget = AutonomousBudget()
     assert budget.max_plans == DEFAULT_MAX_PLANS == 3
-    assert budget.token_budget == DEFAULT_TOKEN_BUDGET == 50_000
+    assert budget.token_budget == DEFAULT_TOKEN_BUDGET == 200_000
     assert budget.wall_seconds == DEFAULT_WALL_SECONDS == 900
     assert budget.idle_passes == DEFAULT_IDLE_PASSES == 2
 
@@ -346,6 +346,6 @@ def test_global_settings_exposes_the_autonomous_fields():
     # The defaults exposed on the global settings also match the spec.
     s = Settings()
     assert s.AUTONOMOUS_MAX_PLANS == 3
-    assert s.AUTONOMOUS_TOKEN_BUDGET == 50_000
+    assert s.AUTONOMOUS_TOKEN_BUDGET == 200_000
     assert s.AUTONOMOUS_WALL_SECONDS == 900
     assert s.AUTONOMOUS_IDLE_PASSES == 2

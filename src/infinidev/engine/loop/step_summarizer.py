@@ -95,7 +95,7 @@ def _summarize_step(
         # Hard timeout: the summarizer is a "best effort" enrichment — if the
         # local model takes longer than this we'd rather fall back to the raw
         # summary than double the wall-clock cost of every step. Configurable
-        # via INFINIBAY_LOOP_SUMMARIZER_TIMEOUT.
+        # via INFINIDEV_LOOP_SUMMARIZER_TIMEOUT.
         timeout_s = float(getattr(settings, "LOOP_SUMMARIZER_TIMEOUT", 30) or 30)
         summarizer_params["timeout"] = timeout_s
 

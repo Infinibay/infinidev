@@ -363,7 +363,7 @@ when touching key bindings or startup.
 
 ### Config (`config/`)
 
-- `settings.py` — All settings use `INFINIBAY_` env var prefix. Key: `LLM_MODEL` (LiteLLM format like `ollama_chat/qwen3-coder:30b` or a configured hosted model), `LLM_BASE_URL`, `SANDBOX_ENABLED`, loop limits.
+- `settings.py` — All settings use `INFINIDEV_` env var prefix. Key: `LLM_MODEL` (LiteLLM format like `ollama_chat/qwen3-coder:30b` or a configured hosted model), `LLM_BASE_URL`, `SANDBOX_ENABLED`, loop limits.
 - `llm.py` — `get_litellm_params()` builds the dict for `litellm.completion()`.
 - `model_capabilities.py` — Runtime probing of FC support, JSON mode, schema sanitization needs.
 - `openai_oauth.py`, `codex_catalog.py` — the ChatGPT-subscription provider (below).

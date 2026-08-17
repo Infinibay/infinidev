@@ -92,6 +92,31 @@ class TUIHooks:
             self._app._actions_text = msg
             self._app.invalidate()
 
+    def on_chain_mode(self, label: str, kind: str = "active") -> None:
+        """Push the autonomous-chain status into the persistent mode badge.
+
+        ``label`` is the human-readable badge text (e.g. ``"AUTO 2/3 ·
+        12k/200k"``); ``kind`` is ``"active"`` while the chain is running
+        and ``"idle"`` once it stops. Routed through the
+        :class:`StatusBarControl` ``set_mode`` channel — *separate* from
+        ``set_status`` so cancel-hold progress / flash_status auto-clear
+        calls cannot wipe the AUTO indicator.
+
+        A no-op when the app has no status bar attached (classic CLI mode
+        does not have a status bar; the pipeline still calls this so the
+        method must not raise).
+        """
+        bar = getattr(self._app, "status_bar_control", None)
+        if bar is not None:
+            try:
+                bar.set_mode(label, kind)
+            except Exception:
+                logger.debug("status_bar.set_mode failed", exc_info=True)
+            try:
+                self._app.invalidate()
+            except Exception:
+                pass
+
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
         self._app._chat_history_control.show_thinking = False
         self._app.add_message(speaker, msg, kind)
