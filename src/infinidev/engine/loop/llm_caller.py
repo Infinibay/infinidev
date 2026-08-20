@@ -750,29 +750,60 @@ class LLMCaller:
 
     @staticmethod
     def _track_usage(ctx: ExecutionContext, response: Any) -> None:
+        """Record normalized provider usage without erasing known prompt size.
+
+        LiteLLM normally adapts responses to OpenAI's ``prompt_tokens`` /
+        ``completion_tokens`` names, but native Anthropic-style responses use
+        ``input_tokens`` / ``output_tokens`` and a few compatible endpoints
+        return the usage object as a mapping.  Context pressure must be based
+        on the last non-zero *input* measurement, not a missing optional field
+        from a later stream chunk.
+        """
         usage = getattr(response, "usage", None)
-        if usage:
-            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-            ctx.state.total_tokens += getattr(usage, "total_tokens", 0) or 0
-            ctx.state.total_prompt_tokens += prompt_tokens
-            ctx.state.total_completion_tokens += completion_tokens
+        if not usage:
+            return
+
+        def token_count(value: Any, *names: str) -> int:
+            for name in names:
+                raw = (
+                    value.get(name)
+                    if isinstance(value, dict)
+                    else getattr(value, name, None)
+                )
+                try:
+                    count = int(raw or 0)
+                except (TypeError, ValueError):
+                    continue
+                if count > 0:
+                    return count
+            return 0
+
+        prompt_tokens = token_count(usage, "prompt_tokens", "input_tokens")
+        completion_tokens = token_count(usage, "completion_tokens", "output_tokens")
+        total_tokens = token_count(usage, "total_tokens")
+        if not total_tokens:
+            total_tokens = prompt_tokens + completion_tokens
+
+        ctx.state.total_tokens += total_tokens
+        ctx.state.total_prompt_tokens += prompt_tokens
+        ctx.state.total_completion_tokens += completion_tokens
+        if prompt_tokens:
             ctx.state.last_prompt_tokens = prompt_tokens
+        if completion_tokens:
             ctx.state.last_completion_tokens = completion_tokens
 
-            # Cache metrics — Anthropic/DashScope/MiniMax format
-            cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
-            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-            ctx.state.cache_creation_tokens += cache_creation
-            ctx.state.cache_read_tokens += cache_read
+        # Cache metrics — Anthropic/DashScope/MiniMax format
+        cache_creation = token_count(usage, "cache_creation_input_tokens")
+        cache_read = token_count(usage, "cache_read_input_tokens")
+        ctx.state.cache_creation_tokens += cache_creation
+        ctx.state.cache_read_tokens += cache_read
 
-            # Cache metrics — OpenAI/ZAI format (prompt_tokens_details)
-            details = getattr(usage, "prompt_tokens_details", None)
-            if details:
-                cached = getattr(details, "cached_tokens", 0) or 0
-                ctx.state.cached_tokens += cached
+        # Cache metrics — OpenAI/ZAI format (prompt_tokens_details)
+        details = usage.get("prompt_tokens_details") if isinstance(usage, dict) else getattr(
+            usage, "prompt_tokens_details", None
+        )
+        if details:
+            ctx.state.cached_tokens += token_count(details, "cached_tokens")
 
-            # Cache metrics — DeepSeek-specific format
-            ds_hit = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
-            if ds_hit:
-                ctx.state.cached_tokens += ds_hit
+        # Cache metrics — DeepSeek-specific format
+        ctx.state.cached_tokens += token_count(usage, "prompt_cache_hit_tokens")

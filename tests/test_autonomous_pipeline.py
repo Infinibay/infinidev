@@ -162,18 +162,45 @@ class _CountingEngine:
     that each re-entry's continuation text reached the developer.
     """
 
-    def __init__(self, plan_count: int, status: str = "completed") -> None:
+    def __init__(
+        self,
+        plan_count: int,
+        status: str = "completed",
+        pressure_on_first_call: bool = False,
+    ) -> None:
         self._plan_count = plan_count
         self._status = status
+        self._pressure_on_first_call = pressure_on_first_call
         self.calls: list[tuple[int, str]] = []
         self._last_status = status
         self.is_cancelled = False
+        self.context_compacted = False
+        self.compacted_messages: list[dict[str, str]] = []
 
     def execute(self, *args: Any, **kwargs: Any) -> str:
         task_prompt = kwargs.get("task_prompt") or args[1] if len(args) > 1 else None
         prompt_user = task_prompt[0] if isinstance(task_prompt, tuple) else ""
         idx = len(self.calls) + 1
         self.calls.append((idx, prompt_user))
+        if self._pressure_on_first_call and idx == 1:
+            from infinidev.engine.loop.engine import _apply_context_pressure
+
+            messages = [
+                {"role": "user", "content": "Keep implementing."},
+                {"role": "tool", "content": "old output " + "x" * 4_000},
+                {"role": "assistant", "content": "recent reasoning"},
+                {"role": "tool", "content": "current output " + "y" * 4_000},
+            ]
+            context = SimpleNamespace(
+                state=SimpleNamespace(last_prompt_tokens=800_000),
+                max_context_tokens=1_000_000,
+                project_id=1,
+                agent_id="auto-test-agent",
+            )
+            self.context_compacted = _apply_context_pressure(
+                context, messages, announced=False
+            )
+            self.compacted_messages = messages
         return f"result-{idx}"
 
     def has_file_changes(self) -> bool:
@@ -187,6 +214,7 @@ class _CountingHooks:
     def __init__(self) -> None:
         self.phases: list[str] = []
         self.statuses: list[tuple[str, str]] = []
+        self.notifications: list[tuple[str, str, str]] = []
 
     def on_phase(self, phase: str) -> None:
         self.phases.append(phase)
@@ -195,7 +223,7 @@ class _CountingHooks:
         self.statuses.append((level, msg))
 
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
-        pass
+        self.notifications.append((speaker, msg, kind))
 
     def notify_stream_chunk(self, *args: Any, **kwargs: Any) -> None:
         pass
@@ -365,6 +393,46 @@ def test_pipeline_chains_plans_under_budget(monkeypatch) -> None:
     assert len(status_msgs) >= 1
 
 
+def test_unlimited_chain_resumes_after_task_end_instruction(monkeypatch) -> None:
+    """A task-end checkpoint must not consume the autonomous continuation.
+
+    The hook gets one internal turn to act on its instruction. Once that turn
+    completes, `/auto unlimited` must resume the normal chain without asking
+    the user to send another message.
+    """
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    packets = [_make_packet(autonomous=True) for _ in range(3)]
+    engine = _CountingEngine(plan_count=10)
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._task_end_hook",
+        lambda event, **kwargs: (
+            "Publish a progress update"
+            if event.value == "task_end_instruction" and not kwargs["skip"]
+            else ""
+        ),
+    )
+
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-hook-resume",
+        workspace_path="/tmp/auto",
+    )
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-hook-resume",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+        autonomous=True,
+    )
+
+    assert len(engine.calls) == 3
+
+
 def test_pipeline_stops_after_exactly_max_plans(monkeypatch) -> None:
     """Once ``max_plans`` is reached, the chain refuses the third call.
 
@@ -530,15 +598,57 @@ def test_unlimited_pipeline_keeps_going_past_max_plans(monkeypatch) -> None:
     )
 
 
-def test_unlimited_pipeline_stops_on_terminal_outcome(monkeypatch) -> None:
-    """The unlimited chain stops when the engine itself reports a terminal
-    outcome on the first plan. Even with unlimited mode and packets
-    available, ``should_continue`` rejects a terminal ``last_outcome``.
+def test_unlimited_checkpoint_explains_progress_and_continues(monkeypatch) -> None:
+    """A checkpoint is readable to a late-arriving user and never blocks the chain."""
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    packets = [_make_packet(autonomous=True) for _ in range(2)]
+    engine = _CountingEngine(plan_count=10)
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-progress-checkpoint",
+        workspace_path="/tmp/auto",
+    )
+    hooks = _CountingHooks()
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-progress-checkpoint",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=hooks,
+        autonomous=True,
+    )
+
+    assert len(engine.calls) == 2
+    checkpoints = [
+        message for speaker, message, kind in hooks.notifications
+        if speaker == "Infinidev" and kind == "agent" and "Progress update" in message
+    ]
+    assert checkpoints
+    checkpoint = checkpoints[0]
+    assert "What was done:" in checkpoint
+    assert "Why I am continuing:" in checkpoint
+    assert "Next:" in checkpoint
+    assert "/auto stop" in checkpoint
+
+
+def test_unlimited_pipeline_keeps_going_on_terminal_outcome(monkeypatch) -> None:
+    """The unlimited chain does NOT stop when the engine reports a terminal
+    outcome (``done`` / ``blocked`` / ``error``). The ``/auto unlimited``
+    UI command promises 100% non-stop mode; only the user's explicit
+    ``/auto stop`` (handled by ``app._autonomous_active`` outside the
+    budget) ends the chain. The previous contract required the chain to
+    stop after a single ``blocked`` report, which is exactly the bug the
+    user reported ("se detiene a los 5/15 minutos").
     """
     monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
     packets = [_make_packet(autonomous=True) for _ in range(10)]
-    # Engine reports "blocked" — a terminal outcome. The chain must stop
-    # on the first plan instead of churning through all 10 packets.
+    # Engine reports "blocked" — a terminal outcome. The chain must NOT
+    # stop on the first plan in unlimited mode; it churns through all
+    # packets until the packet queue is exhausted.
     engine = _CountingEngine(plan_count=10, status="blocked")
     _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
 
@@ -559,12 +669,41 @@ def test_unlimited_pipeline_stops_on_terminal_outcome(monkeypatch) -> None:
         autonomous=True,
     )
 
-    # Only one plan ran: the engine reported blocked on the first turn,
-    # so the chain ended. If unlimited mode were also ignoring terminal
-    # outcomes, this would be 2+.
-    assert len(engine.calls) == 1, (
-        f"unlimited chain must stop on first terminal outcome; got {len(engine.calls)}"
+    # All 10 plans ran: the engine reported blocked on every turn, but
+    # unlimited mode ignores the terminal outcome so the chain keeps
+    # going until the chat-agent packet queue is exhausted.
+    assert len(engine.calls) == 10, (
+        f"unlimited chain must keep going past terminal outcomes; "
+        f"got {len(engine.calls)}"
     )
+
+
+def test_unlimited_pipeline_continues_after_context_pressure(monkeypatch) -> None:
+    """Compaction is internal remediation, never a manual-restart boundary."""
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", True)
+    packets = [_make_packet(autonomous=True) for _ in range(2)]
+    engine = _CountingEngine(plan_count=10, pressure_on_first_call=True)
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-context-pressure",
+        workspace_path="/tmp/auto",
+    )
+
+    run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-context-pressure",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+        autonomous=True,
+    )
+
+    assert engine.context_compacted is True
+    assert "current Step remains active" in engine.compacted_messages[0]["content"]
+    assert len(engine.calls) == 2
 
 
 def test_unlimited_pipeline_ignores_idle_outcome(monkeypatch) -> None:

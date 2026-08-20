@@ -97,10 +97,11 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "  /auto <msg>                  Start autonomous chain (b: ~3 plans / 15 min,\n"
         "                                stops when engine reports done)\n"
         "  /auto unlimited <msg>        Truly autonomous 100% non-stop mode:\n"
-        "                                ignores plans/tokens/wall/idle fuses,\n"
-        "                                reflects between plans to find the\n"
-        "                                next improvement, only stops on done\n"
-        "                                / blocked / error or /auto stop\n"
+        "                                ignores plans/tokens/wall/idle fuses\n"
+        "                                AND any engine-reported done/\n"
+        "                                blocked/error, reflects between plans\n"
+        "                                to find the next improvement, only\n"
+        "                                stops on /auto stop\n"
         "  /auto pause                  Pause the running autonomous chain\n"
         "  /auto stop                   Stop autonomous mode entirely\n"
         "  /clear                       Clear the transcript\n"
@@ -329,9 +330,10 @@ def _cmd_auto(app: InfinidevApp, parts: list[str]) -> None:
         detector in ``engine/orchestration/autonomous.py`` trips regardless
         of the user's wording.
       * ``/auto unlimited <msg>``     — start the chain in true non-stop
-        mode: no plan / token / wall / idle fuse, reflection between
-        plans, only stops on terminal engine outcomes or on
-        ``/auto stop``. Persists via ``AUTONOMOUS_UNLIMITED`` in
+        mode: no plan / token / wall / idle fuse **and no engine-reported
+        done / blocked / error**, reflection between plans, only stops on
+        the user's explicit ``/auto stop``. Persists via
+        ``AUTONOMOUS_UNLIMITED`` in
         ``.infinidev/settings.json`` so subsequent ``/auto <msg>`` calls
         inherit the same mode.
       * ``/auto bounded <msg>``       — explicitly start a bounded chain
@@ -356,9 +358,10 @@ def _cmd_auto(app: InfinidevApp, parts: list[str]) -> None:
             "  /auto <task description>   Start bounded autonomous chain (up to ~3 plans\n"
             "                             or 15 min, until the engine reports done)\n"
             "  /auto unlimited <msg>       Start 100% non-stop autonomous chain\n"
-            "                             (no plan / token / wall / idle fuse,\n"
-            "                             only stops on done/blocked/error or\n"
-            "                             /auto stop; reflects between plans)\n"
+            "                             (no plan / token / wall / idle fuse\n"
+            "                             and no engine-reported done/blocked/\n"
+            "                             error; only /auto stop ends it;\n"
+            "                             reflects between plans)\n"
             "  /auto bounded <msg>        Same as /auto <msg> but explicitly\n"
             "                             bounded and clears the unlimited flag\n"
             "  /auto pause                Pause the running autonomous chain\n"

@@ -164,6 +164,37 @@ class OrchestrationHooks(Protocol):
         """The durable Goal/Stage/Task hierarchy changed."""
 
 
+def _autonomous_progress_checkpoint(
+    result: str,
+    *,
+    plan_number: int,
+    unlimited: bool,
+) -> str:
+    """Render a short, non-blocking update between autonomous plans.
+
+    The developer result may be long or formatted for an implementation
+    audience. Keep the checkpoint compact and readable in the transcript,
+    while preserving enough of the completed work for someone joining late.
+    """
+    completed = " ".join((result or "").split())
+    if not completed:
+        completed = "The previous work step finished without a written summary."
+    if len(completed) > 320:
+        completed = f"{completed[:317].rstrip()}..."
+    mode_reason = (
+        "unlimited mode remains active until you use /auto stop"
+        if unlimited
+        else "the autonomous budget still allows another step"
+    )
+    return (
+        f"Progress update — step {plan_number} completed.\n"
+        f"What was done: {completed}\n"
+        f"Why I am continuing: {mode_reason}.\n"
+        "Next: I will review the remaining work, choose the most useful next action, "
+        "and carry it out automatically."
+    )
+
+
 def _runtime_event_bridge(hooks: OrchestrationHooks):
     """Surface runtime task state on the status line.
 
@@ -878,7 +909,7 @@ def run_task(
     )
     chat_input = f"{user_input}\n\n{turn_context}" if turn_context else user_input
 
-    def _reenter(instruction: str) -> str:
+    def _reenter(instruction: str, *, continue_autonomously: bool = False) -> str:
         """Run the turn again with a hook's instruction as the input.
 
         Going back through ``run_task`` rather than re-driving the engine
@@ -900,6 +931,7 @@ def run_task(
             use_phase_engine=use_phase_engine,
             force_gather=force_gather,
             attachments=None,
+            autonomous=continue_autonomously,
             _hook_reentry=True,
         )
 
@@ -929,6 +961,10 @@ def run_task(
             force_gather=force_gather,
             attachments=None,
             autonomous=True,
+            # Chain continuations are internal turns, like an end-hook
+            # continuation.  Do not invoke task-end hooks again just because
+            # the chain published a progress checkpoint.
+            _hook_reentry=True,
             _autonomous_budget=budget,
         )
 
@@ -1204,7 +1240,10 @@ def run_task(
             runtime.complete_current_task(result)
         else:
             runtime.block_current_task(result)
-        return _reenter(followup)
+        return _reenter(
+            followup,
+            continue_autonomously=bool(autonomous or escalation.autonomous),
+        )
 
     # ── Autonomous chain ("manejate vos") ─────────────────────────────
     # After the developer produced its first plan, decide whether to
@@ -1217,7 +1256,10 @@ def run_task(
     # ``_hook_reentry``: the chain is a new user-turn-shaped re-entry, but
     # the hook-based instruction hook's own re-entry path takes precedence
     # — so a user who configured both never sees the chain run twice.
-    _autonomous_active = bool(autonomous or escalation.autonomous) and not _hook_reentry
+    # A task-end instruction is a one-turn detour, not permission to end an
+    # autonomous chain.  Its re-entry suppresses duplicate user hooks, but
+    # must still return to the chain after it finishes.
+    _autonomous_active = bool(autonomous or escalation.autonomous)
     if _autonomous_active:
         from infinidev.engine.orchestration.autonomous import (
             AutonomousBudget,
@@ -1253,6 +1295,15 @@ def run_task(
             except Exception:
                 logger.debug("hooks.on_chain_mode failed", exc_info=True)
         if _autonomous_should_continue(_chain_budget, _turn_status):
+            hooks.notify(
+                "Infinidev",
+                _autonomous_progress_checkpoint(
+                    result,
+                    plan_number=_chain_budget.plans_executed,
+                    unlimited=_chain_budget.unlimited,
+                ),
+                "agent",
+            )
             if _chain_budget.reflect_after_every_plan:
                 # Reflection step: ask the agent to look at what it just did,
                 # identify the next concrete improvement, and execute it

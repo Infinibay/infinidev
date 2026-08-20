@@ -12,6 +12,13 @@ plans ago. The structures here cap the chain by four orthogonal fuses:
   tolerates before giving up. ``idle_passes=2`` means the chain retires after
   seeing two adjacent plans that each surfaced zero new work.
 
+When ``unlimited=True`` (``/auto unlimited``) **every** fuse AND every
+engine-emitted terminal outcome is ignored: the chain only stops when the
+user explicitly sends ``/auto stop``. ``/auto pause`` cancels the current
+plan but leaves autonomous mode active for the next prompt. This is what the
+"100% non-stop" UI label promises — a single self-reported ``done`` from
+the engine must not be enough to end the chain.
+
 Design decisions
 ----------------
 * **Mutable dataclass, not frozen.** The topes (read once from settings) are
@@ -263,22 +270,30 @@ def should_continue(budget: AutonomousBudget, last_outcome: str | None) -> bool:
     ``soft_blocked`` is treated as ``continue`` — see ``SOFT_BLOCKED_OUTCOMES``
     for the rationale (engine asked a question; chain keeps going).
 
-    When ``budget.unlimited`` is True the chain is only stopped by a
-    terminal outcome (``done`` / ``blocked`` / ``error``); all budget
-    fuses are ignored. The user can still cancel the chain with the
-    ``/auto pause`` / ``/auto stop`` UI commands — those are handled
-    outside this function by the pipeline's autonomous-active flag.
+    When ``budget.unlimited`` is True the chain is **truly non-stop**: every
+    budget fuse (plan / token / wall / idle) AND every engine-emitted
+    terminal outcome (``done`` / ``blocked`` / ``error``) is ignored. The
+    only thing that ends the chain is the user's explicit
+    ``/auto stop`` (handled outside this function by the pipeline's
+    ``app._autonomous_active=False`` flag). This is what the
+    ``/auto unlimited`` UI command promises ("100% non-stop mode") and
+    what the user reported was broken: previously a single plan that the
+    engine self-reported as ``done`` ended the chain, even though the
+    user explicitly opted into non-stop mode. ``/auto pause`` cancels the
+    current plan but leaves autonomous mode active for the next prompt.
     """
+    if budget.unlimited:
+        # Truly non-stop mode: ignore all fuses AND all engine-emitted
+        # terminal outcomes. Only the user's explicit /auto stop (handled
+        # outside the budget by the pipeline via app._autonomous_active)
+        # can stop the chain. This honours the "100% non-stop" promise of
+        # the /auto unlimited UI command.
+        return True
+
     outcome = _normalise_outcome(last_outcome)
 
     if outcome in TERMINAL_OUTCOMES:
         return False
-
-    if budget.unlimited:
-        # Only terminal outcomes stop the chain in unlimited mode.
-        # ``idle`` is treated as ``continue`` so the agent can keep
-        # brainstorming / exploring until it has something genuinely done.
-        return True
 
     if budget.plans_executed >= budget.max_plans:
         return False

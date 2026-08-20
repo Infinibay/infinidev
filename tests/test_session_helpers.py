@@ -211,13 +211,15 @@ class TestContextManagerCompact:
 
         assert "chars compacted after prior delivery" in msgs[3]["content"]
         assert msgs[5]["content"] == "new" + "y" * 4_000
-    def test_pressure_starts_at_seventy_percent_or_below_100k_free(self):
+    def test_pressure_starts_at_eighty_percent_or_below_75k_free(self):
         from infinidev.engine.loop.context_manager import ContextManager
 
-        assert ContextManager.under_context_pressure(699_999, 1_000_000) is False
-        assert ContextManager.under_context_pressure(700_000, 1_000_000) is True
-        assert ContextManager.under_context_pressure(150_000, 250_000) is False
-        assert ContextManager.under_context_pressure(150_000, 249_999) is True
+        # Twenty percent remaining is reached first for a 1M-token window.
+        assert ContextManager.under_context_pressure(799_999, 1_000_000) is False
+        assert ContextManager.under_context_pressure(800_000, 1_000_000) is True
+        # The fixed 75k reserve is reached first for a 250k-token window.
+        assert ContextManager.under_context_pressure(175_000, 250_000) is False
+        assert ContextManager.under_context_pressure(175_001, 250_000) is True
         assert ContextManager.under_context_pressure(0, 1_000_000) is False
         assert ContextManager.under_context_pressure(700_000, 0) is False
 

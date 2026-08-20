@@ -176,6 +176,10 @@ class InfinidevApp:
         self._permission_details_buffer = None
         self._permission_allow_button = None
         self._permission_deny_button = None
+        self._context_admission_state: dict[str, object] = {}
+        self._context_admission_pending: tuple[str, list] | None = None
+        self._context_admission_compact_button = None
+        self._context_admission_switch_button = None
 
     def _init_content_windows(self) -> None:
         self._float_container = None
@@ -213,9 +217,13 @@ class InfinidevApp:
         set_copy_feedback(self._on_copy_feedback)
         global_kb = create_global_keybindings(self)
         self._layout = build_layout(self)
+        from infinidev.ui.dialogs.context_admission import create_context_admission_dialog
         from infinidev.ui.dialogs.permission_detail import create_permission_dialog
         if self._float_container is not None:
-            self._float_container.floats.append(create_permission_dialog(self))
+            self._float_container.floats.extend([
+                create_permission_dialog(self),
+                create_context_admission_dialog(self),
+            ])
         from prompt_toolkit.styles import Style as PTStyle
         app_style = PTStyle.from_dict({
             "scrollbar.background": f"bg:{SCROLLBAR_BG}",
@@ -809,6 +817,98 @@ class InfinidevApp:
 
     # ── Submit handler ───────────────────────────────────────────────
 
+    def _request_context_admission(self, user_input: str, attachments: list) -> bool:
+        """Show a decision modal when the selected model lacks useful headroom.
+
+        The task input remains queued in memory while the user decides, so the
+        same session, attachments, and staged context begin after either path.
+        """
+        try:
+            from infinidev.config.llm import get_litellm_params
+            from infinidev.config.providers import get_provider
+            from infinidev.config.settings import settings
+            from infinidev.ui.context_admission import find_context_admission
+
+            params = get_litellm_params()
+            provider = get_provider(settings.LLM_PROVIDER)
+            candidates = [f"{provider.prefix}{name}" for name in provider.static_models]
+            admission = find_context_admission(
+                model=str(params["model"]),
+                provider_id=settings.LLM_PROVIDER,
+                llm_params=params,
+                candidates=candidates,
+            )
+        except Exception:
+            logger.debug("Context admission check skipped", exc_info=True)
+            return False
+
+        if admission is None:
+            return False
+        self._context_admission_state = {
+            "active_window": admission.active_window,
+            "replacement_model": admission.replacement_model,
+        }
+        self._context_admission_pending = (user_input, attachments)
+        self._actions_text = "Waiting for context-window decision"
+        self.active_dialog = "context_admission"
+        try:
+            button = (
+                self._context_admission_switch_button
+                if admission.replacement_model
+                else self._context_admission_compact_button
+            )
+            if button is not None:
+                self.app.layout.focus(button)
+        except Exception:
+            pass
+        self.invalidate()
+        return True
+
+    def _resolve_context_admission(self, use_larger_model: bool) -> None:
+        """Apply the chosen admission action and launch the preserved task."""
+        pending = self._context_admission_pending
+        state = self._context_admission_state
+        if pending is None:
+            return
+
+        replacement = state.get("replacement_model")
+        if use_larger_model and isinstance(replacement, str) and replacement:
+            try:
+                from infinidev.config.settings import reload_all, settings
+
+                settings.save_user_settings({"LLM_MODEL": replacement})
+                reload_all()
+                self.add_message(
+                    "System", f"Using {replacement} for this and future tasks.", "system",
+                )
+            except OSError:
+                logger.warning("Could not save selected larger-context model", exc_info=True)
+                self.add_message(
+                    "System", "Could not change models; compacting and continuing.", "system",
+                )
+        else:
+            self.add_message(
+                "System", "Continuing with early context compaction enabled.", "system",
+            )
+
+        self._context_admission_pending = None
+        self._context_admission_state = {}
+        self.active_dialog = None
+        self._start_engine_task(*pending)
+
+    def _start_engine_task(self, user_input: str, attachments: list) -> None:
+        """Launch an already accepted task without changing its session state."""
+        self._engine_running = True
+        self._chat_history_control.show_thinking = True
+        self._chat_history_control.busy = True
+        self.invalidate()
+        self._ensure_engine()
+        from infinidev.ui.workers import run_in_background, run_engine_task
+
+        run_in_background(
+            self, run_engine_task, self, user_input, attachments, exclusive=True,
+        )
+
     def _apply_autocomplete(self, cmd: str) -> None:
         """Apply an autocomplete selection to the chat input."""
         from prompt_toolkit.document import Document
@@ -884,16 +984,9 @@ class InfinidevApp:
                     self._pending_inputs.append(cleaned_text)
                     self.add_message("System", "Queued — waiting for current task to finish.", "system")
             else:
-                self._engine_running = True
-                self._chat_history_control.show_thinking = True
-                self._chat_history_control.busy = True
-                self.invalidate()
-                self._ensure_engine()
-                from infinidev.ui.workers import run_in_background, run_engine_task
-                run_in_background(
-                    self, run_engine_task, self, cleaned_text,
-                    attachments, exclusive=True,
-                )
+                if self._request_context_admission(cleaned_text, attachments):
+                    return
+                self._start_engine_task(cleaned_text, attachments)
 
     def _handle_attach_command(self, user_text: str) -> None:
         """Process the ``/attach <source>`` inline command.
@@ -1127,6 +1220,9 @@ class InfinidevApp:
         pass
 
     def handle_escape(self) -> None:
+        if self.active_dialog == "context_admission":
+            self._resolve_context_admission(False)
+            return
         if self.active_dialog == "permission_request" and self._permission_waiting:
             self._resolve_permission(False)
             return

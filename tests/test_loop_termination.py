@@ -647,7 +647,7 @@ def test_edit_revert_cycle_is_not_repeated_progress():
     assert guard.non_progress_tool_calls == 2
 
 
-def test_context_pressure_compacts_and_announces_once(monkeypatch):
+def test_context_pressure_compacts_consumed_history_and_announces_once(monkeypatch):
     events: list[tuple[str, dict]] = []
     monkeypatch.setattr(
         "infinidev.engine.loop.engine._emit_loop_event",
@@ -657,8 +657,16 @@ def test_context_pressure_compacts_and_announces_once(monkeypatch):
     )
     ctx = _ctx()
     ctx.max_context_tokens = 1_000_000
-    ctx.state.last_prompt_tokens = 700_000
-    messages = [{"role": "user", "content": "Keep implementing."}]
+    ctx.state.last_prompt_tokens = 800_000
+    current_result = "CURRENT" + "y" * 4_000
+    messages = [
+        {"role": "system", "content": "system contract"},
+        {"role": "user", "content": "Keep implementing."},
+        {"role": "assistant", "content": "old reasoning\\n" + "x" * 1_000},
+        {"role": "tool", "content": "OLD" + "x" * 4_000},
+        {"role": "assistant", "content": "new reasoning\\n" + "y" * 1_000},
+        {"role": "tool", "content": current_result},
+    ]
 
     announced = _apply_context_pressure(ctx, messages, announced=False)
     announced = _apply_context_pressure(ctx, messages, announced=announced)
@@ -667,9 +675,11 @@ def test_context_pressure_compacts_and_announces_once(monkeypatch):
     assert [event_type for event_type, _data in events] == [
         "loop_context_compaction"
     ]
-    assert events[0][1]["remaining_tokens"] == 300_000
-    assert "current Step remains active" in messages[0]["content"]
-    assert "no tool-call budget" in messages[0]["content"]
+    assert events[0][1]["remaining_tokens"] == 200_000
+    assert "current Step remains active" in messages[1]["content"]
+    assert "no tool-call budget" in messages[1]["content"]
+    assert "chars compacted after prior delivery" in messages[3]["content"]
+    assert messages[5]["content"] == current_result
 
 
 

@@ -12,8 +12,11 @@ from __future__ import annotations
 
 from typing import Any
 
-CONTEXT_COMPACTION_USED_FRACTION = 0.70
-CONTEXT_COMPACTION_MIN_REMAINING = 100_000
+# Compact at the earlier of 75k tokens remaining or 20% of the window
+# remaining. The latter is expressed as 80% consumed for the direct
+# prompt-usage comparison below.
+CONTEXT_COMPACTION_USED_FRACTION = 0.80
+CONTEXT_COMPACTION_MIN_REMAINING = 75_000
 CONTEXT_PRESSURE_TOOL_RESULT_CHARS = 400
 
 

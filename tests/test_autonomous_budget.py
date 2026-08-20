@@ -391,7 +391,7 @@ def test_unlimited_should_continue_ignores_wall_clock():
     """
     budget = AutonomousBudget(max_plans=100, wall_seconds=10, unlimited=True)
     budget.start()
-    budget.wall_started_at = time.monotonic() - 10_000.0
+    budget.wall_started_at = time.monotonic() - 1_000.0
     assert budget.wall_elapsed > budget.wall_seconds
     assert should_continue(budget, "continue") is True
 
@@ -408,20 +408,25 @@ def test_unlimited_should_continue_ignores_idle_passes():
     assert should_continue(budget, "idle") is True
 
 
-def test_unlimited_still_respects_terminal_outcomes():
-    """The only fuse that still trips in unlimited mode is the engine
-    itself reporting a terminal outcome (``done`` / ``blocked`` /
-    ``error``). The chain must stop on those, otherwise the whole
-    point of the engine surface is lost.
+def test_unlimited_ignores_engine_terminal_outcomes():
+    """In ``unlimited`` mode (``/auto unlimited``) the chain must keep
+    going regardless of what the engine reports, including its own
+    terminal outcomes (``done`` / ``blocked`` / ``error``). The only
+    thing that ends the chain is the user's explicit ``/auto stop``
+    (handled outside the budget by ``app._autonomous_active``). The
+    previous contract ("done still stops in unlimited") caused a
+    single self-reported ``done`` to end the chain after one plan,
+    which is exactly the bug the user reported.
     """
     budget = AutonomousBudget(unlimited=True)
     budget.record_outcome("continue")
     budget.record_outcome("continue")
-    # done / blocked / error all stop the chain
-    assert should_continue(budget, "done") is False
-    assert should_continue(budget, "blocked") is False
-    assert should_continue(budget, "error") is False
-    # soft_blocked and idle keep going
+    # Engine-reported terminal outcomes are ignored in unlimited mode —
+    # the chain keeps running until /auto stop.
+    assert should_continue(budget, "done") is True
+    assert should_continue(budget, "blocked") is True
+    assert should_continue(budget, "error") is True
+    # soft_blocked and idle were already continue in unlimited mode.
     assert should_continue(budget, "soft_blocked") is True
     assert should_continue(budget, "idle") is True
 
