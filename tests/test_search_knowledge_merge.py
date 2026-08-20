@@ -1,14 +1,9 @@
-"""``search_knowledge`` after it absorbed ``read_findings``.
+"""Compatibility coverage for the retired local knowledge-search implementation.
 
-The two tools ran the same algorithm — full-text search over findings —
-behind different names, and a model that has to choose between them has to
-guess. ``search_knowledge`` took over, but only because it could take over
-everything ``read_findings`` did: browsing with no query at all, the
-session filter that defaults to the current session, and the type filter.
-
-These tests pin the parts a merge quietly loses. The mode split is the one
-worth stating: a snippet is an excerpt *around a query*, so browsing has to
-return the finding's content instead, not an empty string.
+The implementation remains directly importable for persisted integrations, but
+its aliases and developer schemas were retired when durable knowledge moved to
+Ken. These tests preserve its query semantics without advertising it as a live
+local tool.
 """
 
 from __future__ import annotations
