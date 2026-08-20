@@ -7,6 +7,7 @@ from infinidev.ui.controls.file_diff import (
     colorize_diff_side_by_side,
     _add_side_by_side_line,
 )
+from infinidev.ui.controls.message_widgets import DiffWidget
 
 
 # ── Sample diff ─────────────────────────────────────────────────────────────
@@ -133,7 +134,7 @@ class TestColorizeDiffSideBySide:
         """Custom column_width should be respected."""
         result_narrow = colorize_diff_side_by_side(SAMPLE_DIFF, column_width=20)
         result_wide = colorize_diff_side_by_side(SAMPLE_DIFF, column_width=80)
-        assert len(result_narrow) == len(result_wide)
+        assert len(result_narrow) >= len(result_wide)
 
     def test_context_line_appears_on_both_sides(self):
         """A context (unchanged) line should appear in both left and right columns."""
@@ -179,12 +180,51 @@ class TestAddSideBySideLine:
         left_text = result[0][0][1]
         assert len("hi") <= len(left_text.strip()) or "hi" in left_text
 
-    def test_truncation_when_exceeds_column_width(self):
+    def test_wraps_columns_when_they_exceed_column_width(self):
         result: list[list[tuple[str, str]]] = []
-        long_text = "x" * 100
-        _add_side_by_side_line(result, long_text, "right", 20, "s1", "s2")
-        left_text = result[0][0][1]
-        assert len(left_text.strip()) < 100
+        left_text = "x" * 100
+        right_text = "y" * 100
+        _add_side_by_side_line(result, left_text, right_text, 20, "s1", "s2")
+
+        assert len(result) == 5
+        assert "".join(row[0][1].strip() for row in result) == left_text
+        assert "".join(row[2][1].strip() for row in result) == right_text
+        assert all(len(row[0][1]) <= 21 for row in result)
+        assert all(len(row[2][1]) <= 21 for row in result)
+
+
+class TestDiffWidget:
+    """Tests for rendering diffs within the available viewport width."""
+
+    def test_side_by_side_diff_wraps_long_lines_without_losing_text(self, monkeypatch):
+        long_content = "x" * 90
+        monkeypatch.setattr(
+            "infinidev.ui.controls.message_widgets._side_by_side_enabled", lambda: True
+        )
+
+        result = DiffWidget().render(
+            {"text": "example.py", "diff_text": f"@@ -1 +1 @@\n+{long_content}", "collapsed": False},
+            width=80,
+        )
+
+        diff_rows = result.lines[1:-1]
+        assert len(diff_rows) == 4
+        assert "".join(row[2][1].strip() for row in diff_rows[1:]).endswith(
+            f"+{long_content}"
+        )
+        assert all(sum(len(text) for _, text in row) <= 80 for row in diff_rows)
+
+    def test_unified_diff_wraps_long_lines_without_losing_text(self):
+        long_content = "x" * 90
+        result = DiffWidget().render(
+            {"text": "example.py", "diff_text": f"@@ -1 +1 @@\n+{long_content}", "collapsed": False},
+            width=80,
+        )
+
+        diff_rows = result.lines[1:-1]
+        assert len(diff_rows) == 3
+        assert "".join(text for row in diff_rows for _, text in row).endswith(long_content)
+        assert all(sum(len(text) for _, text in row) <= 80 for row in diff_rows)
 
 
 # ── DIFF_DISPLAY_MODE routing ───────────────────────────────────────────────

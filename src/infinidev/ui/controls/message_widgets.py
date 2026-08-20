@@ -607,13 +607,15 @@ class DiffWidget:
         lines.append([(f"{DIFF_TITLE_FG} {title_bg} bold", f" {arrow} {header_text}{pad}")])
 
         if not collapsed and diff_text:
-            col_width = max(20, (width - 3) // 2)  # subtract separator width
+            # Reserve three cells for the separator and one leading cell on
+            # each column, which the side-by-side renderer adds itself.
+            col_width = max(1, (width - 5) // 2)
             if _side_by_side_enabled():
                 for diff_line in colorize_diff_side_by_side(diff_text, column_width=col_width):
-                    lines.append(diff_line)
+                    lines.extend(_wrap_fragments(diff_line, width))
             else:
                 for diff_line in colorize_diff_fragments(diff_text):
-                    lines.append(diff_line)
+                    lines.extend(_wrap_fragments(diff_line, width))
 
         lines.append([("", "")])
 

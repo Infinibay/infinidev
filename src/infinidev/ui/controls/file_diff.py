@@ -166,37 +166,33 @@ def _add_side_by_side_line(
     left_style: str,
     right_style: str,
 ) -> None:
-    """Append a single side-by-side line to *result*."""
-    sep = " │ "
-    # Truncate/pad left column
-    if left_style:
-        # Strip ANSI/content to measure visible width
-        vis_left = _visible_len(left_text)
-        if vis_left > half_w:
-            left_text = left_text[:half_w]
-            pad_l = ""
-        else:
-            pad_l = " " * (half_w - vis_left)
-    else:
-        pad_l = " " * max(0, half_w - len(left_text))
+    """Append wrapped, paired side-by-side lines to *result*.
 
-    fragments: list[tuple[str, str]] = []
-    if left_style:
-        fragments.append((left_style, f" {left_text}{pad_l}"))
-    else:
-        fragments.append(("", f" {left_text}{pad_l}"))
-    fragments.append((f"{TEXT_MUTED}", sep))
-    if right_style:
-        fragments.append((right_style, f" {right_text}"))
-    else:
-        fragments.append(("", f" {right_text}"))
-    result.append(fragments)
+    A long line is continued below its original column instead of being
+    truncated or flowing past the viewport.  Keeping the separator on each
+    continuation preserves the two-column layout.
+    """
+    left_rows = _wrap_column(left_text, half_w)
+    right_rows = _wrap_column(right_text, half_w)
+    row_count = max(len(left_rows), len(right_rows))
+
+    for index in range(row_count):
+        left = left_rows[index] if index < len(left_rows) else ""
+        right = right_rows[index] if index < len(right_rows) else ""
+        left_pad = " " * (half_w - len(left))
+        fragments = [
+            (left_style, f" {left}{left_pad}"),
+            (f"{TEXT_MUTED}", " │ "),
+            (right_style, f" {right}"),
+        ]
+        result.append(fragments)
 
 
-def _visible_len(text: str) -> int:
-    """Return the visible length of text (strips leading line-number prefix)."""
-    # Text like "   12 -removed content" — we just count characters
-    return len(text)
+def _wrap_column(text: str, width: int) -> list[str]:
+    """Split *text* into non-empty rows no wider than a diff column."""
+    if not text:
+        return [""]
+    return [text[index:index + width] for index in range(0, len(text), width)]
 
 
 
