@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from infinidev.prompts.profiles import EffectivePromptConfiguration
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +50,14 @@ class EvidenceReviewResult:
 class EvidenceReviewEngine:
     """Use an independent LLM pass, then ground its issues in the answer."""
 
+    def __init__(
+        self,
+        prompt_configuration: EffectivePromptConfiguration | None = None,
+    ) -> None:
+        self._prompt_configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
+
     def review(
         self,
         *,
@@ -79,7 +89,7 @@ class EvidenceReviewEngine:
             return EvidenceReviewResult("SKIPPED", "No reviewer LLM configured.")
 
         from infinidev.prompts.reviewer.evidence_system import (
-            EVIDENCE_REVIEW_SYSTEM_PROMPT,
+            build_evidence_review_system_prompt,
         )
 
         user_prompt = self._build_prompt(
@@ -90,7 +100,12 @@ class EvidenceReviewEngine:
             derived_verification_criteria=derived_verification_criteria or [],
         )
         messages = [
-            {"role": "system", "content": EVIDENCE_REVIEW_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": build_evidence_review_system_prompt(
+                    self._prompt_configuration
+                ),
+            },
             {"role": "user", "content": user_prompt},
         ]
 
@@ -222,12 +237,15 @@ def run_evidence_review_rework_loop(
     max_iterations: int | None = None,
     max_total_tool_calls: int | None = None,
     rework_execute_kwargs: dict[str, Any] | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> tuple[str, EvidenceReviewResult | None]:
     """Review and minimally rework informational output within a bounded loop."""
 
     from infinidev.config.settings import settings
 
-    reviewer = evidence_reviewer or EvidenceReviewEngine()
+    reviewer = evidence_reviewer or EvidenceReviewEngine(
+        prompt_configuration=prompt_configuration
+    )
     current = initial_result
     last: EvidenceReviewResult | None = None
     max_rounds = max(1, int(settings.EVIDENCE_REVIEW_MAX_ROUNDS))
@@ -296,6 +314,7 @@ def run_evidence_review_rework_loop(
                 task_prompt=(rework_description, task_prompt[1]),
                 verbose=True,
                 preserve_file_tracker=True,
+                prompt_configuration=prompt_configuration,
                 **rework_kwargs,
             )
         finally:

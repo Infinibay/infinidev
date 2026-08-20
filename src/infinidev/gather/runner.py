@@ -28,6 +28,10 @@ from infinidev.gather.models import (
     TicketType,
 )
 from infinidev.gather.questions import get_questions_for_type
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,20 +130,24 @@ def _extract_json_array(text: str) -> list | None:
 
     return None
 
-_SYNTHESIZER_SYSTEM_PROMPT = """\
+_SYNTHESIZER_GUIDANCE = """\
 Given a conversation history and the user's latest message, produce a complete, \
 self-contained task description containing the task, scope, constraints, technical \
 details, and expected outcome without relying on the conversation.
 
 Include: what needs to be done, why, any technical details mentioned, and the expected outcome.
+"""
 
+_SYNTHESIZER_CONTRACT = """\
 Output ONLY the description text. No JSON, no markdown formatting, no preamble.
 """
 
-_DYNAMIC_QUESTIONS_SYSTEM_PROMPT = """\
+_DYNAMIC_QUESTIONS_GUIDANCE = """\
 You are preparing to implement a code change. Given the ticket and information gathered so far, \
 generate additional questions that need to be answered before implementation begins.
+"""
 
+_DYNAMIC_QUESTIONS_CONTRACT = """\
 Call step_complete with status="done". In final_answer, output a JSON array of question objects:
 [{"id": "short_id", "question": "The question text", "context_prompt": "Detailed investigation prompt with {ticket_description} placeholder"}]
 
@@ -158,6 +166,8 @@ def run_gather(
     chat_history: list[dict],
     analyst_result: Any | None,
     agent: Any,
+    *,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> GatherBrief:
     """Run the complete information gathering phase.
 
@@ -166,6 +176,10 @@ def run_gather(
     Returns a GatherBrief with all gathered context. Never raises —
     falls back gracefully on any error.
     """
+
+    prompt_configuration = (
+        prompt_configuration or EffectivePromptConfiguration.compile()
+    )
 
     # Step -1: Index the project for code intelligence
     try:
@@ -203,14 +217,23 @@ def run_gather(
         analyst_spec = analyst_result.specification
 
     ticket_description = _synthesize_ticket(
-        user_input, chat_history, analyst_spec, agent,
+        user_input,
+        chat_history,
+        analyst_spec,
+        agent,
+        prompt_configuration=prompt_configuration,
     )
     logger.info("Gather: ticket synthesized (%d chars)", len(ticket_description))
 
     # Step 1: Classify
     _emit_gather_status("Classifying ticket...")
     logger.info("Gather: classifying ticket...")
-    classification = classify_ticket(ticket_description, analyst_spec, agent=agent)
+    classification = classify_ticket(
+        ticket_description,
+        analyst_spec,
+        agent=agent,
+        prompt_configuration=prompt_configuration,
+    )
     _emit_gather_status(f"Classified as [bold]{classification.ticket_type.value}[/bold]")
     logger.info(
         "Gather: classified as %s (%s)",
@@ -225,7 +248,7 @@ def run_gather(
     logger.info("Gather: %d fixed questions for type %s", len(questions), classification.ticket_type.value)
     total_questions = len(questions)
 
-    session = GatherSession()  # Shared state: opened_files, history, notes persist between questions
+    session = GatherSession(prompt_configuration)
     fixed_answers: list[QuestionResult] = []
     for i, q in enumerate(questions):
         _emit_gather_status(f"Investigating [{i + 1}/{total_questions}]: {q.question[:60]}")
@@ -259,7 +282,11 @@ def run_gather(
     _emit_gather_status("Generating follow-up questions...")
     logger.info("Gather: generating dynamic questions...")
     dynamic_questions = _generate_dynamic_questions(
-        ticket_description, classification, fixed_answers, agent,
+        ticket_description,
+        classification,
+        fixed_answers,
+        agent,
+        prompt_configuration=prompt_configuration,
     )
     logger.info("Gather: %d dynamic questions generated", len(dynamic_questions))
 
@@ -306,6 +333,8 @@ def _synthesize_ticket(
     chat_history: list[dict],
     analyst_spec: dict | None,
     agent: Any,
+    *,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> str:
     """Synthesize a complete ticket description using LoopEngine."""
     # If user_input is already detailed (>200 chars) and no chat history, use directly
@@ -330,7 +359,18 @@ def _synthesize_ticket(
     original_gather = settings.GATHER_ENABLED
 
     try:
-        agent._system_prompt_identity = _SYNTHESIZER_SYSTEM_PROMPT
+        configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
+        guidance = resolve_prompt_fragment(
+            "gather.synthesis_guidance",
+            "gather",
+            _SYNTHESIZER_GUIDANCE,
+            configuration=configuration,
+        )
+        agent._system_prompt_identity = "\n\n".join(
+            part for part in (guidance, _SYNTHESIZER_CONTRACT) if part
+        )
         agent.backstory = "Ticket synthesizer."
         settings.GATHER_ENABLED = False
 
@@ -345,6 +385,7 @@ def _synthesize_ticket(
             max_tool_calls_per_action=10,
             nudge_threshold=0,
             summarizer_enabled=False,
+            prompt_configuration=configuration,
         )
         if result and result.strip():
             return result.strip()
@@ -371,6 +412,8 @@ def _generate_dynamic_questions(
     classification: ClassificationResult,
     fixed_answers: list[QuestionResult],
     agent: Any,
+    *,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> list[Question]:
     """Generate dynamic follow-up questions using LoopEngine."""
     max_dynamic = settings.GATHER_MAX_DYNAMIC_QUESTIONS
@@ -391,7 +434,18 @@ def _generate_dynamic_questions(
     original_gather = _settings.GATHER_ENABLED
 
     try:
-        agent._system_prompt_identity = _DYNAMIC_QUESTIONS_SYSTEM_PROMPT
+        configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
+        guidance = resolve_prompt_fragment(
+            "gather.question_guidance",
+            "gather",
+            _DYNAMIC_QUESTIONS_GUIDANCE,
+            configuration=configuration,
+        )
+        agent._system_prompt_identity = "\n\n".join(
+            part for part in (guidance, _DYNAMIC_QUESTIONS_CONTRACT) if part
+        )
         agent.backstory = "Question generator."
         _settings.GATHER_ENABLED = False
 
@@ -406,6 +460,7 @@ def _generate_dynamic_questions(
             max_tool_calls_per_action=10,
             nudge_threshold=0,
             summarizer_enabled=False,
+            prompt_configuration=configuration,
         )
 
         logger.info("Dynamic questions result: %s", (result or "")[:300])

@@ -15,6 +15,7 @@ from infinidev.config.settings import settings
 from infinidev.engine.council import prompts as P
 from infinidev.engine.council.agent_loop import run_terminating_loop
 from infinidev.engine.council.brief import MemberAssignment
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 from infinidev.tools import get_tools_for_role
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def run_member_round(
     session_id: str | None = None,
     project_id: int | None = None,
     workspace_path: str | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> MemberTurn:
     """Run one member for one round and return its intended channel action.
 
@@ -60,7 +62,11 @@ def run_member_round(
     try:
         tools = get_tools_for_role("council_member")
         result = run_terminating_loop(
-            system_prompt=P.build_member_system_prompt(assignment, question),
+            system_prompt=P.build_member_system_prompt(
+                assignment,
+                question,
+                prompt_configuration,
+            ),
             user_content=P.render_member_round_message(digest, round_num),
             tools=tools,
             terminator_names={"channel_post", "conclude"},

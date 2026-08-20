@@ -132,11 +132,11 @@ def test_browsing_does_not_ask_reports_for_an_empty_match(findings):
 # ── the old name ─────────────────────────────────────────────────────────
 
 
-def test_read_findings_still_resolves():
-    """Models that learned the old name must not hit an unknown tool."""
+def test_read_findings_is_no_longer_a_local_alias():
+    """Retired local knowledge names must not bypass the Ken migration."""
     from infinidev.engine.tool_dispatch import _TOOL_ALIASES
 
-    assert _TOOL_ALIASES["read_findings"] == "search_knowledge"
+    assert "read_findings" not in _TOOL_ALIASES
 
 
 def test_semantic_mode_is_part_of_the_canonical_tool(findings, monkeypatch):
@@ -167,11 +167,11 @@ def test_semantic_mode_is_part_of_the_canonical_tool(findings, monkeypatch):
     assert len({row["embedding_space"] for row in stored}) == 1
 
 
-def test_old_semantic_name_is_alias_not_a_second_schema():
+def test_old_semantic_names_are_absent_from_the_local_schema():
     from infinidev.engine.tool_dispatch import _TOOL_ALIASES
     from infinidev.tools import get_tools_for_role
 
     names = {tool.name for tool in get_tools_for_role("developer", supports_vision=False)}
-    assert _TOOL_ALIASES["search_findings"] == "search_knowledge"
-    assert "search_knowledge" in names
+    assert "search_findings" not in _TOOL_ALIASES
+    assert "search_knowledge" not in names
     assert "search_findings" not in names

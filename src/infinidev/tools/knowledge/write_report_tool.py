@@ -91,7 +91,7 @@ class WriteReportTool(InfinibayBaseTool):
         except Exception as e:
             # Don't report success with artifact_id=None: the file exists but
             # the report would be invisible to read_report (DB-first) and
-            # search_knowledge (FTS over artifacts). Surface the failure.
+            # the report-search interface (FTS over artifacts). Surface the failure.
             return self._error(
                 f"Report file written to {host_file_path} but DB indexing "
                 f"failed (it will not be searchable or readable via "

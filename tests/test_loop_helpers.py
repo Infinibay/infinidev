@@ -370,7 +370,7 @@ class TestRollingHorizonToolRouting:
             "edit_file", "execute_command", "step_complete",
         ]
 
-        state.last_prompt_tokens = 700_000
+        state.last_prompt_tokens = 800_000
         available = LLMCaller._available_schemas(ctx, is_planning=False)
         assert [schema["function"]["name"] for schema in available] == [
             "read_file", "edit_file", "execute_command", "step_complete",

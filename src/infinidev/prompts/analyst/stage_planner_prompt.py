@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from infinidev.prompts.analyst.planning_vocabulary import PLANNING_VOCABULARY
+from infinidev.prompts.analyst.profiled_prompt import compose_profiled_planner_prompt
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 
 STAGE_PLANNER_SYSTEM_PROMPT = f"""\
@@ -153,4 +155,25 @@ without manufacturing intermediate structure.
 """
 
 
-__all__ = ["STAGE_PLANNER_SYSTEM_PROMPT"]
+def build_stage_planner_system_prompt(
+    *,
+    configuration: EffectivePromptConfiguration | None = None,
+) -> str:
+    """Build the Stage Planner prompt with optional guidance profiles."""
+    return compose_profiled_planner_prompt(
+        STAGE_PLANNER_SYSTEM_PROMPT,
+        configuration=configuration,
+        identity_name="stage_planner.identity",
+        methodology_name="stage_planner.methodology",
+        section_names={
+            "Planning vocabulary": "stage_planner.planning_vocabulary",
+            "The input and its authority": "stage_planner.authority_guidance",
+            "Goal clarity and planning horizon": "stage_planner.horizon_guidance",
+            "Decide from evidence": "stage_planner.decision_guidance",
+            "Shape the Stage and its Tasks": "stage_planner.decomposition_guidance",
+            "Example of the planning boundary": "stage_planner.examples",
+        },
+    )
+
+
+__all__ = ["STAGE_PLANNER_SYSTEM_PROMPT", "build_stage_planner_system_prompt"]

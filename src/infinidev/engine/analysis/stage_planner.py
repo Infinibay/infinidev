@@ -24,7 +24,10 @@ from infinidev.engine.prompt_profile import apply_calibrated_guidance
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
 from infinidev.engine.token_usage import report_prompt_tokens
 from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
-from infinidev.prompts.analyst.stage_planner_prompt import STAGE_PLANNER_SYSTEM_PROMPT
+from infinidev.prompts.analyst.stage_planner_prompt import (
+    build_stage_planner_system_prompt,
+)
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
@@ -50,6 +53,7 @@ def run_stage_planner(
     max_exploration_calls: int = _DEFAULT_MAX_EXPLORATION_CALLS,
     max_iterations: int = _DEFAULT_MAX_ITERATIONS,
     hooks: Any | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> StageDecision:
     """Evaluate the Goal from durable history and return exactly one decision.
 
@@ -57,6 +61,9 @@ def run_stage_planner(
     decision. They never masquerade as Goal completion or an empty successful
     queue.
     """
+    if prompt_configuration is None:
+        prompt_configuration = EffectivePromptConfiguration.compile()
+
     agent_id = f"stage-planner-{uuid.uuid4().hex[:8]}"
     tools = get_tools_for_role("stage_planner")
     bind_tools_to_agent(tools, agent_id)
@@ -69,7 +76,8 @@ def run_stage_planner(
     dispatch = build_tool_dispatch(tools)
     tool_schemas = [tool_to_openai_schema(tool) for tool in tools]
     stage_planner_prompt = apply_calibrated_guidance(
-        STAGE_PLANNER_SYSTEM_PROMPT, "planner"
+        build_stage_planner_system_prompt(configuration=prompt_configuration),
+        "planner",
     )
     from infinidev.config.settings import settings
     from infinidev.engine.task_policies.rendering import (

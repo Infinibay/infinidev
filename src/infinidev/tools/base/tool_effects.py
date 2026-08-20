@@ -172,8 +172,8 @@ _WRITES_WORKSPACE = frozenset({
     "delete_file", "move_file", "apply_file_patch", "rollback_task_changes",
 })
 _READS_INTERNAL = frozenset({
-    "background_status", "wait_for_background_task", "search_findings",
-    "read_report", "search_knowledge", "summarize_findings", "find_documentation",
+    "background_status", "wait_for_background_task", "read_report",
+    "find_documentation",
     "describe_tool", "recall_context", "tail_test_output",
     "history_search", "history_read", "history_trace",
 })
@@ -182,17 +182,17 @@ _NETWORK = frozenset({
     "update_documentation",
 })
 _INTERNAL_MUTATIONS = frozenset({
-    "record_finding", "validate_finding", "reject_finding", "update_finding",
-    "delete_finding", "write_report", "delete_report", "delete_documentation",
+    "write_report", "delete_report", "delete_documentation",
     "update_documentation", "add_step", "modify_step", "remove_step",
     "declare_test_command", "tail_test_output", "request_capability",
+    "manage_notifications",
 })
 _PROCESS = frozenset({
     "execute_command", "code_interpreter", "run_in_background",
     "stop_background_task", "wait_for_background_task", "background_status",
 })
 _DESTRUCTIVE = frozenset({
-    "delete_file", "delete_finding", "delete_report", "delete_documentation",
+    "delete_file", "delete_report", "delete_documentation",
     "rollback_task_changes",
 })
 
@@ -280,11 +280,6 @@ def constraints_for_tool(
             ("raw output from an earlier task step was evicted",),
             ("searching durable findings/reports or current workspace state",),
             ("retrieved content may be stale and is advisory",),
-        ),
-        "search_knowledge": (
-            ("searching durable findings or reports across steps/sessions",),
-            ("retrieving raw output evicted from the current task",),
-            ("semantic mode needs a query; reports use text mode",),
         ),
         "git_commit": (
             ("the user explicitly requested a commit",),

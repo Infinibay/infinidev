@@ -127,6 +127,7 @@ def _generate_plan(agent: Any,
     all_tools: list | None,
     verbose: bool,
     test_checkpoint: Any | None = None,
+    prompt_configuration: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Use LoopEngine to build the plan incrementally.
 
@@ -185,6 +186,7 @@ def _generate_plan(agent: Any,
     system_prompt = build_system_prompt(
         "Software engineering planner.",
         identity_override=identity,
+        prompt_configuration=prompt_configuration,
     )
 
     # Only offer plan management + step_complete — no read/write tools

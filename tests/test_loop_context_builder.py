@@ -51,6 +51,17 @@ def test_zero_total_tool_budget_reaches_the_loop_as_unlimited(
         "get_model_capabilities",
         lambda: SimpleNamespace(supports_function_calling=True),
     )
+    from infinidev.prompts import profiles
+
+    real_loader = profiles.load_prompt_profiles
+    prompt_profile_reads = 0
+
+    def tracked_loader(path=None):
+        nonlocal prompt_profile_reads
+        prompt_profile_reads += 1
+        return real_loader(path)
+
+    monkeypatch.setattr(profiles, "load_prompt_profiles", tracked_loader)
     engine = SimpleNamespace(_last_file_tracker=None)
     agent = SimpleNamespace(
         agent_id="developer-1",
@@ -87,6 +98,8 @@ def test_zero_total_tool_budget_reaches_the_loop_as_unlimited(
     assert "MiniMax M3 execution calibration" in ctx.system_prompt
     assert "Preserve the literal requested outcome" in ctx.system_prompt
     assert ctx.step_tool_limit is None
+    assert ctx.prompt_configuration is not None
+    assert prompt_profile_reads == 1
 
 
 def test_positive_total_tool_budget_remains_available_for_bounded_phases(

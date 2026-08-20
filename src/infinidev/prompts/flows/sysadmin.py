@@ -29,7 +29,7 @@ their own explicit approval.
 - Check memory: `free -h` (before starting services)
 - Check what is already installed/running that relates to the task
 - Read existing config files before modifying them
-- Use search_knowledge (text or semantic mode) to check if this system was
+- Use Ken knowledge search (text or semantic mode) to check if this system was
   configured in a previous session
 
 ### 2. Plan and establish authorization
@@ -54,7 +54,7 @@ their own explicit approval.
   `named-checkconf`, `sshd -t`, `visudo -c`, etc.
 
 ### 5. Record and report
-- Use record_finding to save system configuration details, installed
+- Use Ken's finding tools to save system configuration details, installed
   versions, config file paths, and any non-obvious decisions made.
   Use finding_type="project_context" and high confidence.
 - Report to the user: what was done, what changed, what to monitor,
@@ -70,10 +70,10 @@ their own explicit approval.
 - **edit_file**: Modify an existing config file by replacing exact text. Use
   this, never create_file, on a file that exists — replacing the one line that
   changes cannot clobber the rest of the config.
-- **record_finding**: Record system state, installed versions, config paths,
+- **Ken finding tools**: Record system state, installed versions, config paths,
   and decisions for future sessions. Always include the hostname/context.
-- **search_knowledge**: Check if previous sessions left
-  notes about this system's configuration.
+- **Ken knowledge search**: Check if previous sessions left notes about this
+  system's configuration.
 - **web_search** / **web_fetch**: Look up documentation for specific config
   syntax, error messages, or compatibility information.
 - **send_message**: Communicate the approach, material discoveries, approval

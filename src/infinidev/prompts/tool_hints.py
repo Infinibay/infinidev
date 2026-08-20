@@ -110,16 +110,6 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "code_search_web(query='fastapi background task example')",
     ),
     # Knowledge
-    "record_finding": (
-        "Save a finding to the knowledge base",
-        "record_finding(title='auth module', content='uses JWT with HS256')",
-    ),
-    "search_knowledge": (
-        "Search findings/reports by text, browse findings, or use semantic similarity",
-        "search_knowledge(query='auth & token*') | "
-        "search_knowledge(query='authentication design', mode='semantic') | "
-        "search_knowledge(finding_type='project_context')",
-    ),
     "history_search": (
         "Search the execution event log (engine runs, stages, tasks, digests) "
         "by full text plus filters like run_id or event_type",
@@ -135,26 +125,6 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "history_trace": (
         "Reconstruct the causal chain behind an event, or a run's ordered timeline",
         "history_trace(event_id='evt_ab12') | history_trace(run_id='run_ab12')",
-    ),
-    "update_finding": (
-        "Edit the content/topic of an existing finding by id",
-        "update_finding(finding_id=12, content='uses JWT RS256, not HS256')",
-    ),
-    "validate_finding": (
-        "Mark a finding as verified/confirmed",
-        "validate_finding(finding_id=12)",
-    ),
-    "reject_finding": (
-        "Mark a finding as wrong/rejected (keeps it for audit)",
-        "reject_finding(finding_id=12, reason='superseded by newer finding')",
-    ),
-    "delete_finding": (
-        "Permanently delete a finding by id",
-        "delete_finding(finding_id=12)",
-    ),
-    "summarize_findings": (
-        "Condense the session's findings into a compact summary",
-        "summarize_findings()",
     ),
     "write_report": (
         "Save a longer structured report (markdown) as an artifact",
@@ -262,6 +232,10 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "request_capability": (
         "Expose an optional tool group omitted by dynamic routing; this grants no effect permission",
         "request_capability(capability='web', rationale='The requested version is time-sensitive')",
+    ),
+    "manage_notifications": (
+        "Create and manage persistent interval, cron, script, file, or agent notifications",
+        "manage_notifications(action='list')",
     ),
     "delete_file": (
         "Remove one file recoverably and return its trash recovery path",
@@ -483,13 +457,6 @@ def build_tool_usage_section(
         (
             "Knowledge",
             [
-                "record_finding",
-                "search_knowledge",
-                "update_finding",
-                "validate_finding",
-                "reject_finding",
-                "delete_finding",
-                "summarize_findings",
                 "write_report",
                 "read_report",
                 "read_command_output",

@@ -378,6 +378,12 @@ class TestEvidenceCapture:
         sr = parse_step_complete_args('{"summary":"done","status":"continue"}')
         assert sr.evidence_summary == ""
 
+    def test_no_edit_is_captured(self):
+        sr = parse_step_complete_args(
+            '{"summary":"No change needed","status":"done","no_edit":true}'
+        )
+        assert sr.no_edit is True
+
 
 # ── verify threading planner -> spec -> step ─────────────────────────────
 

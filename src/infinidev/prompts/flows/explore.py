@@ -32,7 +32,7 @@ and synthesize findings into actionable recommendations.
 - **read_file** / **code_search** / **glob** / **list_directory**: Explore code for evidence
 - **execute_command**: Run commands to test hypotheses
 - **web_search** / **web_fetch**: Research external APIs, libraries, patterns
-- **record_finding**: Persist discoveries for future sessions
+- **Ken finding tools**: Persist discoveries for future sessions
 """
 
 EXPLORE_BACKSTORY = (

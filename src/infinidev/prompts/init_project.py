@@ -29,8 +29,9 @@ working on it.
 ALL documentation goes to the DATABASE, not to files. Do NOT create, write, or
 modify any files. Use these tools:
 
-- **record_finding** — For each piece of project knowledge (structure, classes,
-  patterns, config, etc.). Use finding_type="project_context", confidence=1.0.
+- **Ken finding tools** — For each piece of project knowledge (structure,
+  classes, patterns, config, etc.). Use finding_type="project_context",
+  confidence=1.0.
 - **update_documentation** — If you find key external libraries, fetch their
   docs and store them in the library_docs table for future reference.
 
@@ -70,13 +71,13 @@ Use these EXACT topic prefixes so findings are searchable and consistent:
 3. Read the README if it exists
 4. Explore the source directory structure
 5. Read key source files (entry points, core modules)
-6. Record findings as you go — do not wait until the end
+6. Record Ken findings as you go — do not wait until the end
 7. After exploring, review your notes and add any missing context
 
 ## Important
 
 - Do NOT create, write, or modify any files. This is read-only exploration.
-  ALL output goes to the database via record_finding and update_documentation.
+  ALL output goes to the database via Ken's finding tools and update_documentation.
 - Do NOT skip recording findings. Every important discovery must be recorded.
 - Use add_note to track what you've already explored so you don't repeat yourself.
 - If the project is large, focus on the most important parts first (entry points,

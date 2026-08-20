@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from infinidev.engine.council.brief import CouncilRoster, MemberAssignment
 from infinidev.engine.council.personas import render_palette
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
 
 # ── Language rule shared by every council prompt ─────────────────────────
 
@@ -20,11 +24,49 @@ _LANG_RULE = (
 )
 
 
+def _compose_profiled_prompt(
+    prompt: str,
+    *,
+    configuration: EffectivePromptConfiguration,
+    identity_name: str,
+    section_names: dict[str, str] | None = None,
+) -> str:
+    """Profile council guidance without removing tool/state contracts."""
+    preamble, marker, sections = prompt.partition("\n## ")
+    chunks: list[str | None] = [
+        resolve_prompt_fragment(
+            identity_name,
+            "council",
+            preamble,
+            configuration=configuration,
+        )
+    ]
+    if marker:
+        for raw_section in sections.split("\n## "):
+            title, separator, body = raw_section.partition("\n\n")
+            section = f"## {title}"
+            if separator:
+                section = f"{section}\n\n{body}"
+            name = (section_names or {}).get(title.strip())
+            chunks.append(
+                resolve_prompt_fragment(
+                    name,
+                    "council",
+                    section,
+                    configuration=configuration,
+                )
+                if name else section
+            )
+    return "\n\n".join(chunk for chunk in chunks if chunk)
+
+
 # ── Moderator: seed ──────────────────────────────────────────────────────
 
 
-def build_moderator_seed_prompt() -> str:
-    return f"""\
+def build_moderator_seed_prompt(
+    configuration: EffectivePromptConfiguration | None = None,
+) -> str:
+    prompt = f"""\
 You are the MODERATOR of a multi-agent council. A conversation with the
 user has escalated into a complex design/research question. Your job in
 this first step is to SET UP the debate — not to answer it.
@@ -63,6 +105,17 @@ Call ``seed_council`` EXACTLY once with:
 
 Communicate solely via tool calls. Your turn ends on ``seed_council``.
 """
+    return _compose_profiled_prompt(
+        prompt,
+        configuration=configuration or EffectivePromptConfiguration.compile(),
+        identity_name="council.seed_identity",
+        section_names={
+            "Language": "council.language_guidance",
+            "Persona palette (reference — adapt, don't copy blindly)": (
+                "council.persona_palette"
+            ),
+        },
+    )
 
 
 def render_seed_user_message(handoff: str) -> str:
@@ -75,8 +128,12 @@ def render_seed_user_message(handoff: str) -> str:
 # ── Member: one round-turn ───────────────────────────────────────────────
 
 
-def build_member_system_prompt(assignment: MemberAssignment, question: str) -> str:
-    return f"""\
+def build_member_system_prompt(
+    assignment: MemberAssignment,
+    question: str,
+    configuration: EffectivePromptConfiguration | None = None,
+) -> str:
+    prompt = f"""\
 You are a member of a multi-agent council deliberating a design/research
 question. You are ONE voice among several, each with a different persona.
 
@@ -117,6 +174,12 @@ End your turn by calling EXACTLY ONE of:
   * Do not restate what's already been said. Add, refute, or refine.
   * Communicate solely via tool calls.
 """
+    return _compose_profiled_prompt(
+        prompt,
+        configuration=configuration or EffectivePromptConfiguration.compile(),
+        identity_name="council.member_identity",
+        section_names={"Language": "council.language_guidance"},
+    )
 
 
 def render_member_round_message(digest: str, round_num: int) -> str:
@@ -132,8 +195,10 @@ def render_member_round_message(digest: str, round_num: int) -> str:
 # ── Moderator: convergence judge ─────────────────────────────────────────
 
 
-def build_moderator_judge_prompt() -> str:
-    return f"""\
+def build_moderator_judge_prompt(
+    configuration: EffectivePromptConfiguration | None = None,
+) -> str:
+    prompt = f"""\
 You are the MODERATOR judging whether a council debate has converged.
 
 {_LANG_RULE}
@@ -146,6 +211,12 @@ You will see the full channel after the latest round. Decide:
 Call ``council_verdict`` EXACTLY once with your decision and a one-line
 reason. Communicate solely via tool calls.
 """
+    return _compose_profiled_prompt(
+        prompt,
+        configuration=configuration or EffectivePromptConfiguration.compile(),
+        identity_name="council.judge_identity",
+        section_names={"Language": "council.language_guidance"},
+    )
 
 
 def render_judge_user_message(digest: str, round_num: int, max_rounds: int) -> str:
@@ -159,8 +230,10 @@ def render_judge_user_message(digest: str, round_num: int, max_rounds: int) -> s
 # ── Moderator: synthesize ────────────────────────────────────────────────
 
 
-def build_moderator_synth_prompt() -> str:
-    return f"""\
+def build_moderator_synth_prompt(
+    configuration: EffectivePromptConfiguration | None = None,
+) -> str:
+    prompt = f"""\
 You are the MODERATOR closing a council debate. Synthesise everything on
 the channel into a single design brief. This brief is the spec the planner and
 developer build from — make every section concrete enough that they never have
@@ -191,6 +264,12 @@ every member — not just the majority. Specifically:
 
 Communicate solely via tool calls. Your turn ends on ``synthesize_brief``.
 """
+    return _compose_profiled_prompt(
+        prompt,
+        configuration=configuration or EffectivePromptConfiguration.compile(),
+        identity_name="council.synthesis_identity",
+        section_names={"Language": "council.language_guidance"},
+    )
 
 
 def render_synth_user_message(digest: str) -> str:

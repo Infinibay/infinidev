@@ -5,8 +5,6 @@ Covers the four new pieces added in commits ``1a398f0`` and ``a78367a``:
   * ``db.service.get_anchored_findings`` — the retrieval query
   * ``tool_executor.annotate_with_memory`` — the result-time injection
   * ``tool_executor._MEMORY_HANDLERS`` — the per-tool anchor extractors
-  * ``tools.knowledge.RecordFindingTool`` — the write-side validation
-    (anchored types MUST carry at least one anchor)
 
 The tests use the ``temp_db`` fixture from ``conftest.py`` so the
 user's real ``~/.infinidev/infinidev.db`` is never touched.
@@ -25,12 +23,6 @@ from infinidev.engine.tool_executor import (
     annotate_with_memory,
 )
 from infinidev.tools.base.db import execute_with_retry
-from infinidev.tools.knowledge.finding_types import (
-    FINDING_TYPES,
-    FINDING_TYPE_HELP,
-)
-from infinidev.tools.knowledge.record_finding_input import RecordFindingInput
-from infinidev.tools.knowledge.update_finding_input import UpdateFindingInput
 
 
 def _insert_finding(
@@ -46,7 +38,7 @@ def _insert_finding(
 ) -> int:
     """Minimal direct-SQL insert used by the retrieval tests.
 
-    Bypasses ``RecordFindingTool`` on purpose — we want to exercise the
+    Bypasses any tool wrapper on purpose — we want to exercise the
     retrieval and injection sides in isolation from the write side.
     """
     def _do(conn: sqlite3.Connection) -> int:
@@ -335,149 +327,3 @@ class TestMemoryHandlers:
         # what we want.
         assert "web_fetch" not in _MEMORY_HANDLERS
         assert "web_search" not in _MEMORY_HANDLERS
-
-
-# ── RecordFindingTool validation ─────────────────────────────────────────
-
-
-class TestRecordFindingValidation:
-    """The write-side invariant: lesson/rule/landmine REQUIRE an anchor."""
-
-    def _run_tool(self, **kwargs):
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = RecordFindingTool()
-        return tool
-
-    def test_lesson_without_anchor_is_rejected(self, bound_tool):
-        """A lesson without any anchor_* must fail with a helpful error."""
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = bound_tool(RecordFindingTool)
-        result = tool._run(
-            title="some lesson",
-            content="some content",
-            finding_type="lesson",
-        )
-        parsed = json.loads(result)
-        assert "error" in parsed
-        # Error message must tell the LLM exactly what it did wrong
-        # AND suggest an alternative.
-        assert "anchor_" in parsed["error"]
-        assert "observation" in parsed["error"]
-
-    def test_rule_without_anchor_is_rejected(self, bound_tool):
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = bound_tool(RecordFindingTool)
-        result = tool._run(
-            title="some rule",
-            content="...",
-            finding_type="rule",
-        )
-        parsed = json.loads(result)
-        assert "error" in parsed
-        assert "anchor_" in parsed["error"]
-
-    def test_landmine_without_anchor_is_rejected(self, bound_tool):
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = bound_tool(RecordFindingTool)
-        result = tool._run(
-            title="some landmine",
-            content="...",
-            finding_type="landmine",
-        )
-        parsed = json.loads(result)
-        assert "error" in parsed
-        assert "anchor_" in parsed["error"]
-
-    def test_observation_without_anchor_is_accepted(self, bound_tool):
-        """observation is the un-anchored escape hatch."""
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = bound_tool(RecordFindingTool)
-        result = tool._run(
-            title="plain observation",
-            content="no anchor needed",
-            finding_type="observation",
-        )
-        parsed = json.loads(result)
-        # Should succeed — "error" must not be present
-        assert "error" not in parsed
-        assert parsed.get("finding_id") is not None
-
-    def test_lesson_with_file_anchor_is_accepted(self, bound_tool):
-        """A lesson with a file anchor passes validation."""
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = bound_tool(RecordFindingTool)
-        result = tool._run(
-            title="real lesson",
-            content="...",
-            finding_type="lesson",
-            anchor_file="src/foo.py",
-        )
-        parsed = json.loads(result)
-        assert "error" not in parsed
-        assert parsed.get("anchored") is True
-
-    def test_lesson_with_only_error_anchor_is_accepted(self, bound_tool):
-        """Any single anchor is enough — not just file/symbol."""
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = bound_tool(RecordFindingTool)
-        result = tool._run(
-            title="error-anchored lesson",
-            content="...",
-            finding_type="lesson",
-            anchor_error="database is locked",
-        )
-        parsed = json.loads(result)
-        assert "error" not in parsed
-        assert parsed.get("anchored") is True
-
-    def test_invalid_finding_type_rejected(self, bound_tool):
-        """Unknown finding_type is rejected before the anchor check runs."""
-        from infinidev.tools.knowledge.record_finding_tool import RecordFindingTool
-        tool = bound_tool(RecordFindingTool)
-        result = tool._run(
-            title="x",
-            content="y",
-            finding_type="nonsense_type",
-        )
-        parsed = json.loads(result)
-        assert "error" in parsed
-        assert "Invalid finding_type" in parsed["error"]
-
-
-# ── FINDING_TYPES centralization ─────────────────────────────────────────
-
-
-class TestFindingTypesDedup:
-    """Regression guard: ``FINDING_TYPES`` must stay centralized."""
-
-    def test_anchored_types_present(self):
-        """The three anchored types are defined."""
-        for t in ("lesson", "rule", "landmine"):
-            assert t in FINDING_TYPES
-
-    def test_classic_types_preserved(self):
-        """The original types still work."""
-        for t in ("observation", "hypothesis", "project_context"):
-            assert t in FINDING_TYPES
-
-    def test_help_covers_new_types(self):
-        """``FINDING_TYPE_HELP`` mentions all three anchored types."""
-        help_lower = FINDING_TYPE_HELP.lower()
-        assert "lesson" in help_lower
-        assert "rule" in help_lower
-        assert "landmine" in help_lower
-
-    def test_record_and_update_share_the_same_tuple(self):
-        """Both tool modules import from ``finding_types`` — same object."""
-        from infinidev.tools.knowledge import record_finding_tool as rft
-        from infinidev.tools.knowledge import update_finding_tool as uft
-        assert rft.FINDING_TYPES is uft.FINDING_TYPES is FINDING_TYPES
-
-    def test_input_schemas_have_anchor_fields(self):
-        """Both input schemas expose the four anchor_* fields."""
-        for schema in (RecordFindingInput, UpdateFindingInput):
-            fields = schema.model_fields
-            for anchor in (
-                "anchor_file", "anchor_symbol", "anchor_tool", "anchor_error",
-            ):
-                assert anchor in fields, f"{anchor} missing from {schema.__name__}"

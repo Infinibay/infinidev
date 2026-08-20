@@ -229,6 +229,13 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "When status=done, the final result to return",
                 },
+                "no_edit": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true only when this completed development task needs no "
+                        "workspace edit. This bypasses only the edit-evidence gate."
+                    ),
+                },
             },
             "required": ["summary", "status", "evidence_summary"],
         },

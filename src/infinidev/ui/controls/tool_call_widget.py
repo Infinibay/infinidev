@@ -608,46 +608,6 @@ def _fmt_git_simple(args, result, error, width) -> SectionList:
     return s
 
 
-def _fmt_record_finding(args, result, error, width) -> SectionList:
-    # Args-only: the persisted body is in args; the result is just
-    # a "stored OK / id=N" envelope which is noise.
-    title = args.get("title") or "?"
-    content = args.get("content") or args.get("body") or ""
-    s: SectionList = [_kv("title", title)]
-    if content:
-        s.append(_spacer())
-        s.append(_label("content"))
-        s.append(_block(content, _TC_VAL_FG))
-    return s
-
-
-def _fmt_search_findings(args, result, error, width) -> SectionList:
-    # Search → the matches ARE the value. Keep result.
-    q = args.get("query") or ""
-    s: SectionList = [_kv("query", q)]
-    if result and not error:
-        s.append(_spacer())
-        s.extend(_smart_result(result))
-    return s
-
-
-def _fmt_search_knowledge(args, result, error, width) -> SectionList:
-    # One tool, two modes. A search's matches are the point, so the result
-    # is shown; a browse is the bulk read that used to be `read_findings`,
-    # pulled in for the agent's own context — the user wants the filter it
-    # ran under, not the dump.
-    query = args.get("query") or ""
-    if query:
-        return _fmt_search_findings(args, result, error, width)
-
-    filters = [
-        _kv(k, str(args[k]))
-        for k in ("finding_type", "session_id", "min_confidence")
-        if args.get(k) not in (None, "")
-    ]
-    return filters or [_kv("browse", "all findings")]
-
-
 def _fmt_web(args, result, error, width) -> SectionList:
     # Args-only: web result is consumed by the agent. The user
     # already sees the URL/query — that's what they wanted to know.
@@ -680,10 +640,6 @@ _TOOL_FORMATTERS: dict[str, Callable[[dict, str, str, int], SectionList]] = {
     "git_commit": _fmt_git_simple,
     "git_status": _fmt_git_simple,
     "git_push": _fmt_git_simple,
-    "record_finding": _fmt_record_finding,
-    "search_findings": _fmt_search_findings,
-    "read_findings": _fmt_search_knowledge,  # retired alias
-    "search_knowledge": _fmt_search_knowledge,
     "web_search": _fmt_web,
     "web_fetch": _fmt_web,
 }

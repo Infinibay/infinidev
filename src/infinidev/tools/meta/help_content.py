@@ -28,10 +28,7 @@ _CATEGORY_INDEX = {
         "background_status", "stop_background_task", "wait_for_background_task",
     ],
     "knowledge": [
-        "record_finding", "search_knowledge", "update_finding",
-        "validate_finding", "reject_finding", "delete_finding",
-        "summarize_findings", "write_report", "read_report",
-        "read_command_output", "delete_report",
+        "write_report", "read_report", "read_command_output", "delete_report",
     ],
     "web": ["web_search", "web_fetch", "code_search_web"],
     "docs": [

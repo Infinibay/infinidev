@@ -53,6 +53,7 @@ from infinidev.engine.orchestration.request_signals import (
     is_referenced_continuation_request,
 )
 from infinidev.prompts.chat_agent import build_chat_agent_system_prompt
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
@@ -147,6 +148,7 @@ def run_chat_agent(
     hooks: Any | None = None,
     attachments: list[Any] | None = None,
     autonomous_hint: bool = False,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> ChatAgentResult:
     """Run one turn of the chat agent and return its result.
 
@@ -165,6 +167,9 @@ def run_chat_agent(
     max-iter exhaustion), a fallback ``respond`` is returned rather
     than raising — the UI must always get something to show the user.
     """
+    prompt_configuration = (
+        prompt_configuration or EffectivePromptConfiguration.compile()
+    )
     if not user_input or not user_input.strip():
         return ChatAgentResult(
             kind="respond",
@@ -236,7 +241,10 @@ def run_chat_agent(
             logger.debug("ContextRank start failed for chat agent", exc_info=True)
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": build_chat_agent_system_prompt()},
+        {
+            "role": "system",
+            "content": build_chat_agent_system_prompt(prompt_configuration),
+        },
         {
             "role": "user",
             "content": _build_user_message(

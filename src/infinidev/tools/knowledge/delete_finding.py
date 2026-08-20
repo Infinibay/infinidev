@@ -1,13 +1,5 @@
-"""Tool for deleting research findings."""
+"""Backward-compatible import for :class:`DeleteFindingTool`."""
 
-import sqlite3
-from typing import Type
+from .delete_finding_tool import DeleteFindingTool
 
-from pydantic import BaseModel, Field
-
-from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.base.db import execute_with_retry
-
-
-from infinidev.tools.knowledge.delete_finding_input import DeleteFindingInput
-from infinidev.tools.knowledge.delete_finding_tool import DeleteFindingTool
+__all__ = ["DeleteFindingTool"]

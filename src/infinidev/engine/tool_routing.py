@@ -20,11 +20,7 @@ _CORE = frozenset({
 
 _CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
     "web": frozenset({"web_search", "web_fetch", "code_search_web"}),
-    "knowledge": frozenset({
-        "record_finding", "validate_finding", "reject_finding",
-        "update_finding", "delete_finding", "write_report", "read_report",
-        "delete_report", "search_knowledge", "summarize_findings",
-    }),
+    "knowledge": frozenset({"write_report", "read_report", "delete_report"}),
     "docs": frozenset({
         "delete_documentation", "find_documentation", "update_documentation",
     }),

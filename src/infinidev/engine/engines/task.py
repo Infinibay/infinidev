@@ -118,6 +118,12 @@ class TaskAdapter:
         reviewer = kwargs["reviewer"]
         hooks = kwargs["hooks"]
         session_id = kwargs["session_id"]
+        from infinidev.prompts.profiles import EffectivePromptConfiguration
+
+        prompt_configuration = (
+            kwargs.get("prompt_configuration")
+            or EffectivePromptConfiguration.compile()
+        )
         goal = _goal_from_escalation(escalation)
         task_prompt = _build_task_prompt(escalation, kwargs.get("turn_context", ""))
 
@@ -141,6 +147,7 @@ class TaskAdapter:
             session_id=session_id,
             force_gather=kwargs.get("force_gather", False),
             hooks=hooks,
+            prompt_configuration=prompt_configuration,
         )
 
         total_tool_budget = settings.TASK_MAX_TOOL_CALLS
@@ -192,6 +199,7 @@ class TaskAdapter:
             # duplicates that investigation and discards most of its context.
             # Dedicated /explore remains available for tree-shaped research.
             allow_explore=False,
+            prompt_configuration=prompt_configuration,
         )
         if getattr(used_engine, "is_cancelled", False):
             return EngineResult(
@@ -225,6 +233,7 @@ class TaskAdapter:
                         settings.TASK_MAX_TOOL_CALLS_PER_STEP
                     ),
                 },
+                prompt_configuration=prompt_configuration,
             )
             review_status = getattr(used_engine, "_last_status", "") or "completed"
             if review_status in {"blocked", "failed", "exhausted"}:

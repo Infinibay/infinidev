@@ -40,7 +40,6 @@ WRITE_TOOLS = {
     "git_commit", "git_branch", "git_push",
     "execute_command",  # Commands can have side effects
     "code_interpreter",  # Executes arbitrary code — must be sequential
-    "record_finding", "update_finding", "delete_finding",
     "write_report", "delete_report",
     "update_documentation", "delete_documentation",
     "send_message",

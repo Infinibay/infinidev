@@ -17,7 +17,6 @@ _READ_ONLY_TOOLS = {
     "read_file", "list_directory", "glob", "code_search",
     "project_structure", "find_references",
     "list_symbols", "search_symbols", "get_symbol_code",
-    "search_knowledge",
     "web_search", "web_fetch",
     # execute_command is allowed for running tests / inspection ONLY —
     # it must never be used to edit, move, or delete files during INVESTIGATE.
@@ -90,6 +89,7 @@ def _investigate(agent: Any,
             nudge_threshold=strategy.investigate_max_tool_calls - 2,
             summarizer_enabled=False,
             identity_override=strategy.investigate_identity or None,
+            prompt_configuration=prompt_configuration,
         )
 
         # Collect ALL notes from the engine
@@ -126,6 +126,7 @@ def _investigate_iteratively(agent: Any,
     verbose: bool,
     max_questions: int,
     skip_investigate: bool = False,
+    prompt_configuration: Any | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
     """Interleave question generation and investigation.
 
@@ -213,6 +214,7 @@ def _investigate_iteratively(agent: Any,
             nudge_threshold=strategy.investigate_max_tool_calls - 2,
             summarizer_enabled=False,
             identity_override=strategy.investigate_identity or None,
+            prompt_configuration=prompt_configuration,
         )
 
         # Collect notes

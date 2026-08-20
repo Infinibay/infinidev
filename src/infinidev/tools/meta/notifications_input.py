@@ -47,11 +47,11 @@ class ManageNotificationsInput(BaseModel):
         default=None,
         description=(
                 "Trigger config as a JSON object. Required for create. "
-                "Fields: interval → {every_seconds:int}; "
-                "cron → {cron:\"minute hour dom month dow\"}; "
-                "script → {command:str, working_dir?:str, expected_exit_code?:int, stdout_match?:str}; "
-                "file → {path:str, watch?:\"mtime\"|\"sha256\"}; "
-                "agent → {} (fires only via action=\"fire\")."
+                "Fields: interval uses {every_seconds:int}; "
+                "cron uses {cron:\"minute hour dom month dow\"}; "
+                "script uses {command:str, working_dir?:str, expected_exit_code?:int, stdout_match?:str}; "
+                "file uses {path:str, watch?:\"mtime\"|\"sha256\"}; "
+                "agent uses {} (fires only via action=\"fire\")."
             ),
     )
     channel_type: ChannelKind | None = Field(
@@ -61,8 +61,9 @@ class ManageNotificationsInput(BaseModel):
     channel: dict | None = Field(
         default=None,
         description=(
-                "Channel config. console → {log_path?:str} (defaults to ~/.infinidev/notifications.log); "
-                "webhook → {url:str, method?:\"POST\"|\"PUT\", headers?:{str:str}}."
+                "Channel config. console uses {log_path?:str} "
+                "(defaults to ~/.infinidev/notifications.log); webhook uses "
+                "{url:str, method?:\"POST\"|\"PUT\", headers?:{str:str}}."
             ),
     )
     enabled: bool | None = Field(

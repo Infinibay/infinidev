@@ -446,7 +446,7 @@ def test_primary_loop_prompt_separates_bars_from_adaptable_methods() -> None:
     assert "unresolved product\n  choice" in CLI_AGENT_IDENTITY
     assert "missing authorization" in CLI_AGENT_IDENTITY
     assert "active preference profile" in CLI_AGENT_IDENTITY
-    assert "The live `record_finding` schema defines" in CLI_AGENT_IDENTITY
+    assert "The live Ken finding-tool\nschemas define" in CLI_AGENT_IDENTITY
     assert "| `anchor_file=" not in CLI_AGENT_IDENTITY
     assert "NEVER pause mid-loop" not in CLI_AGENT_IDENTITY
     assert "NEVER re-open it" not in CLI_AGENT_IDENTITY

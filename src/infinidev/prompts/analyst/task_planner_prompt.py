@@ -13,6 +13,8 @@ from typing import Literal
 
 from infinidev.engine.orchestration.difficulty import DifficultyLevel
 from infinidev.prompts.analyst.planning_vocabulary import PLANNING_VOCABULARY
+from infinidev.prompts.analyst.profiled_prompt import compose_profiled_planner_prompt
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 
 _EASY_PROMPT = f"""\
@@ -284,6 +286,8 @@ planning methods arrive in a conditional policy fragment.
 def build_task_planner_system_prompt(
     difficulty: DifficultyLevel,
     vocabulary: str = PLANNING_VOCABULARY,
+    *,
+    configuration: EffectivePromptConfiguration | None = None,
 ) -> str:
     """Build the Task Planner system prompt sized to the request difficulty.
 
@@ -295,23 +299,34 @@ def build_task_planner_system_prompt(
     to emit 1–2 Steps at most.
     """
     if difficulty == "easy":
-        return _EASY_PROMPT
-    if difficulty == "medium":
-        # Allow callers to inject an alternate vocabulary if needed; the
-        # medium prompt embeds it directly so we substitute once.
-        if vocabulary == PLANNING_VOCABULARY:
-            return _MEDIUM_PROMPT
-        return _MEDIUM_PROMPT.replace(PLANNING_VOCABULARY, vocabulary)
-    if difficulty == "hard":
-        if vocabulary == PLANNING_VOCABULARY:
-            return _HARD_PROMPT
-        return _HARD_PROMPT.replace(PLANNING_VOCABULARY, vocabulary)
-    # Literal["easy","medium","hard"] — unreachable in normal use; raise
-    # instead of silently returning the hard default so a future widening
-    # of the union surfaces at the build site.
-    raise ValueError(
-        f"unknown difficulty level: {difficulty!r}; expected one of "
-        "'easy', 'medium', 'hard'"
+        prompt = _EASY_PROMPT
+    elif difficulty == "medium":
+        prompt = _MEDIUM_PROMPT
+    elif difficulty == "hard":
+        prompt = _HARD_PROMPT
+    else:
+        # Literal["easy","medium","hard"] — unreachable in normal use; raise
+        # instead of silently returning the hard default so a future widening
+        # of the union surfaces at the build site.
+        raise ValueError(
+            f"unknown difficulty level: {difficulty!r}; expected one of "
+            "'easy', 'medium', 'hard'"
+        )
+
+    if vocabulary != PLANNING_VOCABULARY:
+        prompt = prompt.replace(PLANNING_VOCABULARY, vocabulary)
+    return compose_profiled_planner_prompt(
+        prompt,
+        configuration=configuration,
+        identity_name="task_planner.identity",
+        methodology_name="task_planner.methodology",
+        section_names={
+            "Planning vocabulary": "task_planner.planning_vocabulary",
+            "The handoff": "task_planner.handoff_guidance",
+            "Turn evidence into Steps": "task_planner.decomposition_guidance",
+            "Verification": "task_planner.verification_guidance",
+            "Output-shape example": "task_planner.examples",
+        },
     )
 
 

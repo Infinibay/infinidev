@@ -59,12 +59,6 @@ TOOL_DETAIL_KEYS: dict[str, list[str]] = {
     "search_symbols": ["query"],
     "get_symbol_code": ["name"],
     "project_structure": ["path", "directory", "dir", "folder", "subdir"],
-    "search_knowledge": ["query"],
-    "record_finding": ["title"],
-    "search_findings": ["query"],
-    "read_findings": ["query"],
-    "update_finding": ["finding_id"],
-    "delete_finding": ["finding_id"],
 }
 
 

@@ -12,6 +12,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+from infinidev.prompts.profiles import EffectivePromptConfiguration
+
 if TYPE_CHECKING:
     from infinidev.engine.task_policies.models import TaskProfile
 
@@ -56,9 +58,15 @@ class ReviewEngine:
     changes. Returns APPROVED, REJECTED, or SKIPPED (if no code changes).
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        prompt_configuration: EffectivePromptConfiguration | None = None,
+    ) -> None:
         self._review_count: int = 0
         self._max_reviews: int = 3  # Max review-rework cycles
+        self._prompt_configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
 
     def reset(self) -> None:
         """Reset state for a new task."""
@@ -68,15 +76,26 @@ class ReviewEngine:
     def _compose_system_prompt(
         stable_prompt: str,
         task_profile: "TaskProfile | None",
+        *,
+        section_names: dict[str, str] | None = None,
+        configuration: EffectivePromptConfiguration | None = None,
     ) -> str:
-        """Attach only reviewer fragments selected for the current task."""
+        """Profile reviewer guidance, then attach task-selected fragments."""
         from infinidev.config.settings import settings
         from infinidev.engine.task_policies.rendering import (
             compose_task_aware_system_prompt,
         )
+        from infinidev.prompts.reviewer.profiled_prompt import (
+            compose_profiled_reviewer_prompt,
+        )
 
-        return compose_task_aware_system_prompt(
+        profiled_prompt = compose_profiled_reviewer_prompt(
             stable_prompt,
+            configuration=configuration or EffectivePromptConfiguration.compile(),
+            section_names=section_names or {},
+        )
+        return compose_task_aware_system_prompt(
+            profiled_prompt,
             task_profile,
             role="reviewer",
             phase="review",
@@ -307,7 +326,10 @@ class ReviewEngine:
             plan_steps=plan_steps,
         )
         system_prompt = self._compose_system_prompt(
-            EXTRACTOR_SYSTEM_PROMPT, task_profile,
+            EXTRACTOR_SYSTEM_PROMPT,
+            task_profile,
+            section_names={"Identity": "extractor.identity"},
+            configuration=self._prompt_configuration,
         )
         messages = [
             {"role": "system", "content": system_prompt},
@@ -557,7 +579,16 @@ class ReviewEngine:
             recent_messages=recent_messages,
         )
         system_prompt = self._compose_system_prompt(
-            JUDGE_SYSTEM_PROMPT, task_profile,
+            JUDGE_SYSTEM_PROMPT,
+            task_profile,
+            section_names={
+                "Identity": "judge.identity",
+                "Inputs You Will Receive": "judge.input_guidance",
+                "Authority & Scope": "judge.authority_guidance",
+                "Review Criteria (in priority order)": "judge.evaluation_guidance",
+                "Severity Classification": "judge.severity_guidance",
+            },
+            configuration=self._prompt_configuration,
         )
         messages = [
             {"role": "system", "content": system_prompt},
@@ -675,7 +706,16 @@ class ReviewEngine:
             automated_checks=automated_checks,
         )
         system_prompt = self._compose_system_prompt(
-            REVIEWER_SYSTEM_PROMPT, task_profile,
+            REVIEWER_SYSTEM_PROMPT,
+            task_profile,
+            section_names={
+                "Identity": "reviewer.identity",
+                "Inputs You Will Receive": "reviewer.input_guidance",
+                "Authority & Scope": "reviewer.authority_guidance",
+                "Review Criteria": "reviewer.evaluation_guidance",
+                "Severity Classification": "reviewer.severity_guidance",
+            },
+            configuration=self._prompt_configuration,
         )
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1122,6 +1162,7 @@ def run_review_rework_loop(
     max_total_tool_calls: int | None = None,
     rework_execute_kwargs: dict[str, Any] | None = None,
     run_verification: bool = True,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> tuple[str, ReviewResult | None]:
     """Run verification + review-rework cycle.
 
@@ -1229,6 +1270,7 @@ def run_review_rework_loop(
                     task_prompt=fix_prompt,
                     verbose=True,
                     preserve_file_tracker=True,
+                    prompt_configuration=prompt_configuration,
                     **rework_kwargs,
                 )
                 if new_result and new_result.strip():
@@ -1375,6 +1417,7 @@ def run_review_rework_loop(
                 new_result = engine.execute(
                     agent=agent, task_prompt=fix_prompt, verbose=True,
                     preserve_file_tracker=True,
+                    prompt_configuration=prompt_configuration,
                     **rework_kwargs,
                 )
                 if new_result and new_result.strip():
@@ -1515,6 +1558,7 @@ def run_review_rework_loop(
                 task_prompt=fix_prompt,
                 verbose=True,
                 preserve_file_tracker=True,
+                prompt_configuration=prompt_configuration,
                 **rework_kwargs,
             )
             if not result or not result.strip():

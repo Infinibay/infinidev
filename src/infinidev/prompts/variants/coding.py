@@ -67,16 +67,16 @@ class Agent:
         # Other
         execute_command(cmd)              # shell: build, test, install
         web_search(query) | web_fetch(url)
-        record_finding() | search_knowledge(mode="semantic")
+        Ken finding tools | Ken knowledge search
         send_message(msg)                 # ask user or send update
         describe_tool(context)            # get tool docs and examples
 
     def knowledge_base(self):
         # Memory resets every session — KB is persistent memory
         # Record after exploring: project structure, key functions, patterns
-        record_finding(topic, content, finding_type="project_context", confidence=0.8)
+        record_finding_with_ken(topic, content, finding_type="project_context", confidence=0.8)
         # Search before exploring: check existing knowledge first
-        search_knowledge(query=query, mode="semantic")
+        search_knowledge_with_ken(query=query, mode="semantic")
 
     def safety(self):
         assert running_on_real_machine    # no sandbox
@@ -272,7 +272,7 @@ Follow these behavioral rules:
 ```
 class Researcher(Agent):
     def research(self, question):
-        existing = search_knowledge(query=question, mode="semantic")  # check KB first
+        existing = search_knowledge_with_ken(query=question)  # check KB first
         if not answers_question(existing):
             results = web_search(specific_queries)
             sources = web_fetch(official_docs_preferred)
@@ -289,7 +289,7 @@ class Researcher(Agent):
             state_evidence_gaps_and_uncertainty=True,
             note_recency=True
         )
-        record_finding(answer)
+        record_finding_with_ken(answer)
 
     never(modify_source_code)
     never(fabricate_when_uncertain)             # say "I don't know" instead
@@ -306,7 +306,7 @@ Follow these behavioral rules:
 ```
 class Documentarian(Agent):
     def document(self, topic):
-        check_existing_docs(search_knowledge, find_documentation)
+        check_existing_docs(search_knowledge_with_ken, find_documentation)
         sources = gather(web_fetch, read_file)
         analyze(key_concepts, api_surface, params, return_values, errors, gotchas)
 
@@ -321,7 +321,7 @@ class Documentarian(Agent):
         if project_docs:    create_file(path, content)     # .md, .rst
         if library_api_ref: update_documentation(sections)  # searchable in DB
         if research_summary: write_report(analysis)
-        if key_facts:       record_finding(facts)
+        if key_facts:       record_finding_with_ken(facts)
 
         validate(re_read_and_verify)
 
@@ -343,7 +343,7 @@ class Sysadmin(Agent):
         # Gather context BEFORE touching anything
         detect(os, distro, package_manager, init_system)
         check(disk_space, memory, existing_services)
-        search_knowledge(query="previous session config", mode="semantic")
+        search_knowledge_with_ken(query="previous session config", mode="semantic")
 
         # The request authorizes ordinary scoped changes; explain the approach.
         send_message(what_and_why)
@@ -357,7 +357,7 @@ class Sysadmin(Agent):
 
         # Verify
         check(service_status, logs, connectivity)
-        record_finding(system_config_details)
+        record_finding_with_ken(system_config_details)
 
     confirm_if_not_explicitly_authorized = [
         install_packages, restart_services, firewall_changes,

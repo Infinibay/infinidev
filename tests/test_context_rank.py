@@ -123,9 +123,9 @@ class TestInteractionLogger:
         result = classify_tool_call("rename_symbol", {"qualified_name": "Foo.bar"})
         assert result == ("symbol_write", "Foo.bar", "symbol", 2.5)
 
-        # Finding
+        # Retired knowledge tools are no longer tracked.
         result = classify_tool_call("record_finding", {"topic": "auth uses RS256"})
-        assert result == ("finding_create", "auth uses RS256", "finding", 1.5)
+        assert result is None
 
         # Untracked
         result = classify_tool_call("think", {"text": "hmm"})

@@ -98,12 +98,6 @@ _TOOL_ALIASES: dict[str, str] = {
     # spellings remain compatibility aliases for persisted/manual calls.
     "help": "describe_tool",
     "explain_tool": "describe_tool",
-    # read_findings and search_knowledge were the same algorithm (FTS over
-    # findings) behind two names. search_knowledge took over, including the
-    # no-query browse mode and the session/type filters, so the old name is
-    # a pure rename — every read_findings parameter exists there unchanged.
-    "read_findings": "search_knowledge",
-    "search_findings": "search_knowledge",
 }
 
 
@@ -292,9 +286,6 @@ def execute_tool_call(
 
     if not isinstance(args, dict):
         return json.dumps({"error": f"Expected dict arguments, got {type(args).__name__}"})
-
-    if requested_name == "search_findings":
-        args.setdefault("mode", "semantic")
 
     # Reading a path is an intent models express more reliably than the
     # file-vs-directory distinction. Resolve that distinction from the

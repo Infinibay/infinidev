@@ -72,13 +72,12 @@ Three rules that list does NOT convey:
 
 ## Knowledge Base — your memory across sessions
 
-Your memory resets every session; the knowledge base does not. Search it when
-past project knowledge can answer the current question. Record only facts that
-outlive this task. Use an observational type for project facts and an anchored
-`lesson`, `rule`, or `landmine` for knowledge that matters when a particular
-file, symbol, tool, or error appears. The live `record_finding` schema defines
-the types, anchors, and validation rules; call `describe_tool(context="record_finding")` when its
-compact schema leaves out a decision you need to make.
+Your memory resets every session; Ken's knowledge store does not. Search it
+when past project knowledge can answer the current question. Record only facts
+that outlive this task. Use an observational type for project facts and an
+anchored `lesson`, `rule`, or `landmine` for knowledge that matters when a
+particular file, symbol, tool, or error appears. The live Ken finding-tool
+schemas define the types, anchors, and validation rules.
 
 ## Safety
 
@@ -499,9 +498,9 @@ block, those are past lessons auto-attached to this file/symbol/tool.
 Read them — they are higher-priority context than anything else in
 the tool result. Apply them in your next decision.
 
-To save a new lesson, use `record_finding(finding_type="lesson", ...)`
-with `anchor_file=` or `anchor_symbol=` pointing at what you just
-learned about. Without an anchor the memory is lost.
+To save a new lesson, use Ken's finding tool with `finding_type="lesson"`
+and `anchor_file=` or `anchor_symbol=` pointing at what you just learned
+about. Without an anchor the memory is lost.
 """
 
 LOOP_PROTOCOL_SMALL = """\

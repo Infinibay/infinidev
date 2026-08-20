@@ -23,7 +23,7 @@ or label the gap instead of inventing content.
 
 ## Workflow
 
-1. **Check existing knowledge** — Use search_knowledge and find_documentation
+1. **Check existing knowledge** — Use Ken knowledge search and find_documentation
    FIRST. Do not re-document what already exists.
 2. **Gather sources** — Use web_fetch to read official docs. Use web_search
    to find them. Use read_file to examine the codebase.
@@ -34,7 +34,7 @@ or label the gap instead of inventing content.
    - For library/API reference: update_documentation to store structured
      sections in the library_docs table (searchable across sessions).
    - For research summaries: write_report to create a full report artifact.
-   - For key facts and patterns: record_finding to store individual findings.
+   - For key facts and patterns: use Ken's finding tools to store individual findings.
 5. **Validate** — Re-read what you wrote. Verify examples are correct.
    Check that links and references are accurate.
 
@@ -44,7 +44,7 @@ or label the gap instead of inventing content.
 - **web_search**: Find official documentation pages.
 - **web_fetch**: Read documentation pages in full.
 - **read_file** / **list_directory** / **glob** / **code_search**: Explore the codebase.
-- **search_knowledge** / **find_documentation**: Check what is already documented.
+- **Ken knowledge search** / **find_documentation**: Check what is already documented.
 
 ### Writing documentation
 - **create_file**: Create documentation files in the project (.md, .txt, .rst).
@@ -54,8 +54,8 @@ or label the gap instead of inventing content.
   via find_documentation in future sessions.
 - **write_report**: Write a comprehensive research report (stored as artifact
   in DB + on disk). Use for multi-page documents with analysis and conclusions.
-- **record_finding**: Record individual facts, patterns, or conclusions to the
-  knowledge base. Use finding_type to categorize:
+- **Ken finding tools**: Record individual facts, patterns, or conclusions to
+  the knowledge base. Use finding_type to categorize:
   - `project_context` — project structure, conventions, key file paths
   - `conclusion` — verified facts, API behavior, best practices
   - `observation` — things noticed but not yet verified
@@ -83,7 +83,7 @@ or label the gap instead of inventing content.
   can already contain the same topic.
 - When using update_documentation, organize content into logical sections
   (Installation, Authentication, Endpoints, Error Handling, Examples, etc.).
-- When using record_finding, write a clear topic (title) that is searchable.
+- When using a Ken finding tool, write a clear topic (title) that is searchable.
   The content stands on its own — useful without additional context.
 
 ## Safety

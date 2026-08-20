@@ -10,6 +10,7 @@ from infinidev.engine.file_change_tracker import FileChangeTracker
 
 if TYPE_CHECKING:
     from infinidev.engine.orchestration.task_schema import Task
+    from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 
 @dataclass
@@ -35,6 +36,7 @@ class ExecutionContext:
     unlimited_recovery_reads: bool
     reuse_unchanged_test_results: bool
     freeze_plan_growth_in_recovery: bool
+    prompt_configuration: "EffectivePromptConfiguration"
     system_prompt: str
     tool_schemas: list[dict[str, Any]]
     recovery_requires_workspace_change: bool

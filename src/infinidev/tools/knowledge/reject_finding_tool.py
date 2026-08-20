@@ -6,7 +6,8 @@ from typing import Type
 from pydantic import BaseModel, Field
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.base.db import execute_with_retry
+from infinidev.tools.base.db import execute_with_retry, get_db_path
+from infinidev.tools.base.permissions import check_file_permission
 from infinidev.tools.knowledge.reject_finding_input import RejectFindingInput
 
 
@@ -19,6 +20,10 @@ class RejectFindingTool(InfinibayBaseTool):
     args_schema: Type[BaseModel] = RejectFindingInput
 
     def _run(self, finding_id: int, reason: str) -> str:
+        permission_error = check_file_permission("edit_file", get_db_path())
+        if permission_error:
+            return self._error(permission_error)
+
         agent_id = self._validate_agent_context()
 
         def _reject(conn: sqlite3.Connection) -> dict:

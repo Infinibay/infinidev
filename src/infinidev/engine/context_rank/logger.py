@@ -164,10 +164,6 @@ _TOOL_EVENT_MAP: dict[str, tuple[str, str, float]] = {
     # Symbol writes
     "rename_symbol":    ("symbol_write", "symbol", 2.5),
     "move_symbol":      ("symbol_write", "symbol", 2.5),
-    # Findings
-    "record_finding":   ("finding_create", "finding", 1.5),
-    "search_findings":  ("finding_read",   "finding", 0.8),
-    "search_knowledge": ("finding_read",   "finding", 0.8),
     # Shell
     "execute_command":  ("command_exec", "file", 0.3),
 }

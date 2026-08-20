@@ -83,7 +83,7 @@ def _build_tools_prompt_small(tool_schemas: list[dict[str, Any]]) -> str:
         "SHELL": {"execute_command"},
         "GIT": {"git_branch", "git_commit", "git_diff", "git_status"},
         "WEB": {"web_search", "web_fetch"},
-        "KNOWLEDGE": {"record_finding", "search_knowledge"},
+        "KNOWLEDGE": {"write_report", "read_report", "delete_report"},
         "STEP MANAGEMENT": {"step_complete", "add_note", "add_session_note", "add_step",
                             "modify_step", "remove_step"},
     }

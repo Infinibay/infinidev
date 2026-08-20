@@ -7,7 +7,8 @@ from typing import Type
 from pydantic import BaseModel
 
 from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.base.db import execute_with_retry
+from infinidev.tools.base.db import execute_with_retry, get_db_path
+from infinidev.tools.base.permissions import check_file_permission
 from infinidev.tools.knowledge.finding_types import ANCHORED_TYPES, FINDING_TYPES
 from infinidev.tools.knowledge.update_finding_input import UpdateFindingInput
 
@@ -38,6 +39,10 @@ class UpdateFindingTool(InfinibayBaseTool):
         anchor_tool: str | None = None,
         anchor_error: str | None = None,
     ) -> str:
+        permission_error = check_file_permission("edit_file", get_db_path())
+        if permission_error:
+            return self._error(permission_error)
+
         if finding_type is not None and finding_type not in FINDING_TYPES:
             return self._error(
                 f"Invalid finding_type '{finding_type}'. "

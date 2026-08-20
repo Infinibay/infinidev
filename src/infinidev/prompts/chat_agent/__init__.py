@@ -3,7 +3,14 @@ system prompt with live tool lists injected from the tool registry."""
 
 from __future__ import annotations
 
-from infinidev.prompts.chat_agent.system import CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE
+from infinidev.prompts.chat_agent.system import (
+    CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE,
+    compose_chat_agent_system_prompt,
+)
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
 
 __all__ = [
     "CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE",
@@ -87,7 +94,9 @@ def _render_developer_toolset(
     return "\n".join(lines)
 
 
-def build_chat_agent_system_prompt() -> str:
+def build_chat_agent_system_prompt(
+    configuration: EffectivePromptConfiguration | None = None,
+) -> str:
     """Render the chat-agent system prompt with live tool lists.
 
     Called once per chat turn from ``orchestration.chat_agent`` to
@@ -104,14 +113,23 @@ def build_chat_agent_system_prompt() -> str:
     chat_tools = get_tools_for_role("chat_agent")
     dev_tools = get_tools_for_role("developer")
 
-    prompt = CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE.format(
-        chat_agent_toolbox=_render_chat_toolbox(chat_tools),
-        developer_toolset=_render_developer_toolset(dev_tools, chat_tools),
+    effective = configuration or EffectivePromptConfiguration.compile()
+    prompt = compose_chat_agent_system_prompt(
+        CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE.format(
+            chat_agent_toolbox=_render_chat_toolbox(chat_tools),
+            developer_toolset=_render_developer_toolset(dev_tools, chat_tools),
+        ),
+        configuration=effective,
     )
     # The chat agent answers questions *about* this project and decides what
     # to escalate, so the project's own instructions apply to it at least as
     # much as to the developer.
-    project = render_project_instructions(None)
+    project = resolve_prompt_fragment(
+        "chat.project_instructions",
+        "chat",
+        render_project_instructions(None),
+        configuration=effective,
+    )
     rendered = f"{prompt}\n\n{project}" if project else prompt
     from infinidev.config.llm import get_litellm_params_for_behavior
     from infinidev.config.settings import settings
@@ -124,8 +142,14 @@ def build_chat_agent_system_prompt() -> str:
         settings.LLM_PROVIDER,
         str(route.get("model", settings.LLM_MODEL)),
     )
-    if policy.chat_prompt_addendum:
-        rendered = f"{rendered}\n\n{policy.chat_prompt_addendum}"
+    addendum = resolve_prompt_fragment(
+        "chat.model_guidance",
+        "chat",
+        policy.chat_prompt_addendum or "",
+        configuration=effective,
+    )
+    if addendum:
+        rendered = f"{rendered}\n\n{addendum}"
     from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
     return apply_calibrated_guidance(rendered, "chat_agent")

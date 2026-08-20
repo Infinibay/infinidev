@@ -129,7 +129,7 @@ Files:
 
 def test_context_pressure_compacts_without_forcing_step_completion():
     state = _empty_state()
-    state.last_prompt_tokens = 700_000
+    state.last_prompt_tokens = 800_000
 
     out = build_iteration_prompt(
         "Implement the grounded GPU change",

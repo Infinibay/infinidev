@@ -40,18 +40,10 @@ from infinidev.tools.shell import (
 )
 from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
 from infinidev.tools.knowledge import (
-    RecordFindingTool,
-    SearchFindingsTool,
-    ValidateFindingTool,
-    RejectFindingTool,
-    UpdateFindingTool,
-    DeleteFindingTool,
     WriteReportTool,
     ReadReportTool,
     ReadCommandOutputTool,
     DeleteReportTool,
-    SearchKnowledgeTool,
-    SummarizeFindingsTool,
 )
 from infinidev.tools.chat import SendMessageTool
 from infinidev.tools.chat_agent import RespondTool, EscalateTool
@@ -131,17 +123,10 @@ SHELL_TOOLS = [
 ]
 WEB_TOOLS = [WebSearchTool, WebFetchTool, CodeSearchWebTool]
 KNOWLEDGE_TOOLS = [
-    RecordFindingTool,
-    ValidateFindingTool,
-    RejectFindingTool,
-    UpdateFindingTool,
-    DeleteFindingTool,
     WriteReportTool,
     ReadReportTool,
     ReadCommandOutputTool,
     DeleteReportTool,
-    SearchKnowledgeTool,
-    SummarizeFindingsTool,
 ]
 CHAT_TOOLS = [SendMessageTool]
 GENERATION_TOOLS = [GenerateImageTool]
@@ -207,9 +192,6 @@ SMALL_MODEL_TOOLS = [
     # turn explaining that the requested tool is unavailable.
     SendMessageTool,
     HelpTool,
-    # Knowledge (2)
-    RecordFindingTool,
-    SearchKnowledgeTool,
     # Code intelligence (8)
     SearchSymbolsTool,
     GetSymbolCodeTool,

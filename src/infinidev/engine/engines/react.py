@@ -80,6 +80,12 @@ class ReactAdapter:
         session_id = kwargs["session_id"]
         force_gather = kwargs.get("force_gather", False)
         turn_context = kwargs.get("turn_context", "")
+        from infinidev.prompts.profiles import EffectivePromptConfiguration
+
+        prompt_configuration = (
+            kwargs.get("prompt_configuration")
+            or EffectivePromptConfiguration.compile()
+        )
 
         goal = _goal_from_escalation(escalation)
         task_prompt = _build_task_prompt(escalation, turn_context)
@@ -91,6 +97,7 @@ class ReactAdapter:
             session_id=session_id,
             force_gather=force_gather,
             hooks=hooks,
+            prompt_configuration=prompt_configuration,
         )
 
         literal_description = goal.user_request
@@ -127,6 +134,7 @@ class ReactAdapter:
                 max_prompt_tokens=settings.REACT_MAX_PROMPT_TOKENS,
                 skip_plan=True,
                 allow_explore=False,
+                prompt_configuration=prompt_configuration,
             )
         finally:
             agent.deactivate()
@@ -187,6 +195,7 @@ class ReactAdapter:
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=settings.REACT_MAX_TOOL_CALLS,
                 rework_execute_kwargs={"skip_plan": True},
+                prompt_configuration=prompt_configuration,
             )
             if getattr(engine, "is_cancelled", False):
                 return EngineResult(

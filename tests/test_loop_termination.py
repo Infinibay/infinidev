@@ -746,6 +746,18 @@ def test_edit_requirement_preserves_the_active_step_before_plan_advance():
     assert _should_advance_plan(result) is False
 
 
+def test_no_edit_can_close_an_unedited_feature_task():
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="feature")
+    result = StepResult(
+        summary="No implementation change is needed", status="done", no_edit=True,
+    )
+
+    assert _enforce_edit_requirement(ctx, result) is False
+    assert result.status == "done"
+    assert result.interrupted is False
+
+
 def test_verified_noop_step_can_close_an_already_satisfied_feature_task():
     from infinidev.engine.loop.plan_step import PlanStep
 
@@ -807,6 +819,23 @@ def test_implementation_step_cannot_close_without_an_edit():
     assert _enforce_step_effect(ctx, result) is True
     assert result.interrupted is True
     assert _should_advance_plan(result) is False
+
+
+def test_no_edit_can_close_an_unedited_implementation_step():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Implement the parser fix", status="active"),
+    ]
+    result = StepResult(
+        summary="The requested behavior already exists", status="continue", no_edit=True,
+    )
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert result.interrupted is False
+    assert _should_advance_plan(result) is True
 
 
 def test_verified_model_step_accepts_effect_from_an_earlier_task_edit():

@@ -1,8 +1,15 @@
 """System contract for reviewing read-only and informational outcomes."""
 
-EVIDENCE_REVIEW_SYSTEM_PROMPT = """You are an evidence reviewer, not a second author.
+from __future__ import annotations
 
-Evaluate whether the submitted response is justified by the supplied evidence and the
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
+
+_EVIDENCE_REVIEW_IDENTITY = """You are an evidence reviewer, not a second author."""
+
+_EVIDENCE_REVIEW_GUIDANCE = """Evaluate whether the submitted response is justified by the supplied evidence and the
 original request. Do not improve style, introduce new requirements, or reject a response
 merely because you would phrase it differently.
 
@@ -15,9 +22,9 @@ Check:
 
 A recommendation may be judgment rather than fact, but its factual premises still need
 support. A blocking issue MUST quote an exact, non-empty excerpt from the submitted
-response in claim_excerpt. Never quote the task or evidence as the claim excerpt.
+response in claim_excerpt. Never quote the task or evidence as the claim excerpt."""
 
-Return JSON only:
+_EVIDENCE_REVIEW_CONTRACT = """Return JSON only:
 {
   "verdict": "APPROVED" | "REJECTED",
   "summary": "short assessment",
@@ -34,3 +41,34 @@ Return JSON only:
   ]
 }
 """
+
+EVIDENCE_REVIEW_SYSTEM_PROMPT = "\n\n".join((
+    _EVIDENCE_REVIEW_IDENTITY,
+    _EVIDENCE_REVIEW_GUIDANCE,
+    _EVIDENCE_REVIEW_CONTRACT,
+))
+
+
+def build_evidence_review_system_prompt(
+    configuration: EffectivePromptConfiguration,
+) -> str:
+    """Apply optional evidence-review guidance while retaining its JSON contract."""
+    fragments = (
+        resolve_prompt_fragment(
+            "evidence.identity",
+            "review",
+            _EVIDENCE_REVIEW_IDENTITY,
+            configuration=configuration,
+        ),
+        resolve_prompt_fragment(
+            "evidence.evaluation_guidance",
+            "review",
+            _EVIDENCE_REVIEW_GUIDANCE,
+            configuration=configuration,
+        ),
+        _EVIDENCE_REVIEW_CONTRACT,
+    )
+    return "\n\n".join(fragment for fragment in fragments if fragment)
+
+
+__all__ = ["EVIDENCE_REVIEW_SYSTEM_PROMPT", "build_evidence_review_system_prompt"]

@@ -21,6 +21,11 @@ one tool call — `respond` (conversational reply, turn ends) or
 
 from __future__ import annotations
 
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
+
 
 CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE = """\
 You are Infinidev, a conversational coding assistant with **read-only** \
@@ -36,6 +41,8 @@ Portuguese, reply in Portuguese. If English, English. If the user mixes \
 This applies to the ``message`` field of ``respond`` and the \
 ``user_visible_preview`` field of ``escalate``. This rule overrides any \
 tendency to default to English because this prompt is in English.
+
+## Routing contract
 
 Every user turn starts here. Your one job per turn is to understand what \
 the user said and end the turn with exactly one of two terminator tools:
@@ -140,7 +147,7 @@ THE REAL FILES first. The conversation history you see above is a \
 truncated snapshot; the authoritative source is the project on disk \
 and the knowledge base. Answering a "explain those recommendations" \
 question from memory is hallucination, not recall. Call ``read_file`` \
-/ ``search_knowledge`` / ``get_symbol_code`` to reground, then \
+/ Ken knowledge search / ``get_symbol_code`` to reground, then \
 ``respond``.
 
 Phrases that signal self-referential follow-ups include:
@@ -170,3 +177,49 @@ the developer's toolset also cannot do.
 escalate.user_visible_preview). The user is in a chat, not reading a \
 blog post.
 """
+
+
+_OPTIONAL_SECTION_PROFILES = {
+    "CRITICAL: Reply in the user's language": "chat.language_guidance",
+    "Convening a council (multi-agent deliberation)": "chat.council_guidance",
+    "Self-referential follow-ups — use tools, don't guess": "chat.followup_guidance",
+}
+
+
+def compose_chat_agent_system_prompt(
+    prompt: str,
+    *,
+    configuration: EffectivePromptConfiguration,
+) -> str:
+    """Profile optional chat guidance while retaining routing contracts."""
+    preamble, marker, sections = prompt.partition("\n## ")
+    chunks: list[str | None] = [
+        resolve_prompt_fragment(
+            "chat.identity",
+            "chat",
+            preamble,
+            configuration=configuration,
+        )
+    ]
+    if marker:
+        for raw_section in sections.split("\n## "):
+            title, separator, body = raw_section.partition("\n\n")
+            section = f"## {title}"
+            if separator:
+                section = f"{section}\n\n{body}"
+            profile_name = _OPTIONAL_SECTION_PROFILES.get(title.strip())
+            if profile_name is None:
+                chunks.append(section)
+            else:
+                chunks.append(
+                    resolve_prompt_fragment(
+                        profile_name,
+                        "chat",
+                        section,
+                        configuration=configuration,
+                    )
+                )
+    return "\n\n".join(chunk for chunk in chunks if chunk)
+
+
+__all__ = ["CHAT_AGENT_SYSTEM_PROMPT_TEMPLATE", "compose_chat_agent_system_prompt"]

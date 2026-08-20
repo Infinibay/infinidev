@@ -462,7 +462,8 @@ def _enforce_edit_requirement(
         in getattr(state, "objectively_verified_step_indices", set())
     )
     if (
-        step_result.status != "done"
+        step_result.no_edit
+        or step_result.status != "done"
         or not _task_requires_edits(ctx)
         or ctx.state.task_has_edits
         or verified_noop
@@ -488,7 +489,11 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     ActionRecord.changes_made, so a later test-only turn may still close a Step
     that edited successfully on its previous attempt.
     """
-    if step_result.interrupted or step_result.status not in {"continue", "done"}:
+    if (
+        step_result.no_edit
+        or step_result.interrupted
+        or step_result.status not in {"continue", "done"}
+    ):
         return False
     plan = getattr(ctx.state, "plan", None)
     active = getattr(plan, "active_step", None)
@@ -870,6 +875,7 @@ class LoopEngine(AgentEngine):
         nudge_threshold: int | None = None,
         nudge_message_template: str | None = None,
         summarizer_enabled: bool | None = None,
+        prompt_configuration: Any | None = None,
         identity_override: str | None = None,
         initial_plan: Any | None = None,
         initial_attachments: list[Any] | None = None,
@@ -913,6 +919,7 @@ class LoopEngine(AgentEngine):
             nudge_threshold=nudge_threshold,
             nudge_message_template=nudge_message_template,
             summarizer_enabled=summarizer_enabled,
+            prompt_configuration=prompt_configuration,
             identity_override=identity_override,
             initial_plan=initial_plan,
             task=task,

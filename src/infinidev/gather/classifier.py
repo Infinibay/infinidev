@@ -6,14 +6,22 @@ import json
 import logging
 from typing import Any
 
-from infinidev.gather.models import ClassificationResult, TicketType, DepthLevel
+from infinidev.gather.models import ClassificationResult, DepthLevel, TicketType
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
 
 logger = logging.getLogger(__name__)
 
-_CLASSIFIER_IDENTITY = """\
+_CLASSIFIER_GUIDANCE = """\
 ## Identity
 
-You are a ticket classifier. Your ONLY job is to classify a software task into one type.
+You are a ticket classifier.
+"""
+
+_CLASSIFIER_CONTRACT = """\
+Your ONLY job is to classify a software task into one type.
 
 Types:
 - bug: Something is broken, produces errors, or behaves incorrectly
@@ -55,6 +63,8 @@ def classify_ticket(
     ticket_description: str,
     analyst_spec: dict | None = None,
     agent: Any = None,
+    *,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> ClassificationResult:
     """Classify a ticket into a type using LoopEngine.
 
@@ -79,7 +89,18 @@ def classify_ticket(
     original_gather = settings.GATHER_ENABLED
 
     try:
-        agent._system_prompt_identity = _CLASSIFIER_IDENTITY
+        configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
+        guidance = resolve_prompt_fragment(
+            "gather.classifier_guidance",
+            "gather",
+            _CLASSIFIER_GUIDANCE,
+            configuration=configuration,
+        )
+        agent._system_prompt_identity = "\n\n".join(
+            part for part in (guidance, _CLASSIFIER_CONTRACT) if part
+        )
         agent.backstory = "Ticket classifier."
         settings.GATHER_ENABLED = False
 
@@ -98,6 +119,7 @@ def classify_ticket(
             max_tool_calls_per_action=10,
             nudge_threshold=0,
             summarizer_enabled=False,
+            prompt_configuration=configuration,
         )
 
         logger.info("Classifier raw result: %s", (result or "")[:300])

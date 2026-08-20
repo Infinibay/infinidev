@@ -68,7 +68,7 @@ Example 2 — Starting from an error message:
   5. step_complete
 
 Example 3 — Tracing from stack trace:
-  1. search_knowledge(mode="semantic", query="TypeError models.py")  no prior findings
+  1. Ken knowledge search(query="TypeError models.py")  no prior findings
   2. read_file: "src/models.py" (lines 120-130)
   3. add_note: "models.py:123 get_display_name() calls name.lower() but name can be NULL (nullable column). Need None check"
   4. glob: "tests/**/test_model*"  found tests/test_models.py
@@ -108,7 +108,7 @@ Example 2 — Reading a test specification:
   3. step_complete
 
 Example 3 — Checking existing knowledge:
-  1. search_knowledge(mode="semantic", query="rate limiter implementation")
+  1. Ken knowledge search(query="rate limiter implementation")
      Output: found: "Rate limiter uses token bucket at services/rate_limit.py"
   2. add_note: "EXISTING: Rate limiter at services/rate_limit.py uses token bucket. Config: RATE_LIMIT_RPM env var"
   3. step_complete

@@ -172,4 +172,5 @@ def parse_step_complete_args(arguments: str | dict[str, Any]) -> "StepResult":
         next_steps=[],
         final_answer=raw_answer,
         evidence_summary=evidence,
+        no_edit=args.get("no_edit", False),
     )

@@ -49,6 +49,7 @@ class StagedAdapter:
             turn_context=kwargs.get("turn_context", ""),
             use_phase_engine=kwargs.get("use_phase_engine", False),
             force_gather=kwargs.get("force_gather", False),
+            prompt_configuration=kwargs.get("prompt_configuration"),
             max_execution_tool_calls_per_task=kwargs.get(
                 "max_execution_tool_calls_per_task"
             ),

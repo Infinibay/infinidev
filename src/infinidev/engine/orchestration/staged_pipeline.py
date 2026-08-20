@@ -24,6 +24,7 @@ from infinidev.engine.analysis.staged_planning import (
     plan_snapshot,
 )
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ def run_staged_goal(
     turn_context: str = "",
     use_phase_engine: bool = False,
     force_gather: bool = False,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
     max_stage_transitions: int = _DEFAULT_MAX_STAGE_TRANSITIONS,
     max_execution_tool_calls_per_task: int | None = None,
     preserve_file_tracker_from_handoff: bool = False,
@@ -69,6 +71,9 @@ def run_staged_goal(
     """
     from infinidev.engine.analysis.stage_planner import run_stage_planner
 
+    prompt_configuration = (
+        prompt_configuration or EffectivePromptConfiguration.compile()
+    )
     state = _load_or_create_state(session_id, escalation)
     _add_guidance(state, escalation.user_request)
     _restore_interrupted_task(state)
@@ -94,6 +99,7 @@ def run_staged_goal(
                 turn_context=turn_context,
                 use_phase_engine=use_phase_engine,
                 force_gather=force_gather,
+                prompt_configuration=prompt_configuration,
                 max_execution_tool_calls_per_task=max_execution_tool_calls_per_task,
                 preserve_file_tracker_from_handoff=(
                     preserve_file_tracker_from_handoff
@@ -116,6 +122,7 @@ def run_staged_goal(
             project_id=project_id,
             workspace_path=workspace_path,
             hooks=hooks,
+            prompt_configuration=prompt_configuration,
         )
         _publish_state(state, session_id, hooks)
 
@@ -242,6 +249,7 @@ def _execute_stage(
     turn_context: str,
     use_phase_engine: bool,
     force_gather: bool,
+    prompt_configuration: EffectivePromptConfiguration,
     max_execution_tool_calls_per_task: int | None,
     preserve_file_tracker_from_handoff: bool,
 ) -> tuple[str, Any]:
@@ -303,6 +311,7 @@ def _execute_stage(
                     project_id=project_id,
                     workspace_path=workspace_path,
                     hooks=hooks,
+                    prompt_configuration=prompt_configuration,
                 )
             plan = _scope_task_plan(plan, stage, task)
             task.plan = plan_snapshot(plan)
@@ -367,6 +376,7 @@ def _execute_stage(
             session_id=session_id,
             force_gather=force_gather,
             hooks=hooks,
+            prompt_configuration=prompt_configuration,
         )
         try:
             result, used_engine = pipeline_mod._run_execution_phase(
@@ -402,6 +412,7 @@ def _execute_stage(
                     * task.attempts
                 ),
                 max_prompt_tokens=_staged_execution_prompt_budget(),
+                prompt_configuration=prompt_configuration,
             )
         except Exception as exc:
             logger.exception("Stage Task execution failed: %s", task.spec.title)
@@ -461,6 +472,7 @@ def _execute_stage(
             max_total_tool_calls=_staged_execution_tool_budget(
                 max_execution_tool_calls_per_task
             ) * task.attempts,
+            prompt_configuration=prompt_configuration,
         )
         last_result = result
         if getattr(used_engine, "is_cancelled", False):

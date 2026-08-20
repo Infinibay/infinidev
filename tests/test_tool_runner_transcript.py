@@ -434,7 +434,7 @@ def test_minimax_recovery_redelivers_an_exact_cached_read_under_pressure(tmp_pat
     ctx.suppress_discovery_this_step = True
     ctx.unlimited_recovery_reads = True
     ctx.max_context_tokens = 1_000_000
-    ctx.state.last_prompt_tokens = 700_000
+    ctx.state.last_prompt_tokens = 800_000
     runner = ToolRunner(_engine(nudge_at=99))
     call = _call(
         "read-1",

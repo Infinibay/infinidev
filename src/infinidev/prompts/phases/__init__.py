@@ -156,14 +156,20 @@ def get_strategy(task_type: str) -> PhaseStrategy:
 
     style = resolve_style()
 
+    from infinidev.prompts.profiles import resolve_prompt_fragment
+
+    def fragment(suffix: str, default: str) -> str:
+        name = f"phase.{task_type}.{suffix}"
+        return resolve_prompt_fragment(name, suffix.removesuffix("_identity"), default, get_variant(name, style)) or ""
+
     return PhaseStrategy(
         questions_prompt=base.questions_prompt,  # questions stay unchanged
-        investigate_prompt=get_variant(f"phase.{task_type}.investigate", style) or base.investigate_prompt,
-        plan_prompt=get_variant(f"phase.{task_type}.plan", style) or base.plan_prompt,
-        execute_prompt=get_variant(f"phase.{task_type}.execute", style) or base.execute_prompt,
-        investigate_identity=get_variant(f"phase.{task_type}.investigate_identity", style) or base.investigate_identity,
-        plan_identity=get_variant(f"phase.{task_type}.plan_identity", style) or base.plan_identity,
-        execute_identity=get_variant(f"phase.{task_type}.execute_identity", style) or base.execute_identity,
+        investigate_prompt=fragment("investigate", base.investigate_prompt),
+        plan_prompt=fragment("plan", base.plan_prompt),
+        execute_prompt=fragment("execute", base.execute_prompt),
+        investigate_identity=fragment("investigate_identity", base.investigate_identity),
+        plan_identity=fragment("plan_identity", base.plan_identity),
+        execute_identity=fragment("execute_identity", base.execute_identity),
         fallback_questions=base.fallback_questions,
         questions_min=base.questions_min,
         questions_max=base.questions_max,

@@ -406,7 +406,12 @@ class GraphEngineAdapter:
         from infinidev.engine.orchestration.task_renderer import render_task_xml
         from infinidev.engine.orchestration.task_schema import task_from_free_text
         from infinidev.prompts.flows import get_flow_config
+        from infinidev.prompts.profiles import EffectivePromptConfiguration
 
+        prompt_configuration = (
+            kwargs.get("prompt_configuration")
+            or EffectivePromptConfiguration.compile()
+        )
         escalation = kwargs["escalation"]
         agent = kwargs["agent"]
         engine = kwargs["engine"]
@@ -520,6 +525,7 @@ class GraphEngineAdapter:
             session_id=session_id,
             force_gather=kwargs.get("force_gather", False),
             hooks=hooks,
+            prompt_configuration=prompt_configuration,
         )
 
         max_tool_calls = max(
@@ -552,6 +558,7 @@ class GraphEngineAdapter:
                 resume_state=resume_state,
                 skip_plan=False,
                 allow_plan_mutation=False,
+                prompt_configuration=prompt_configuration,
             )
         finally:
             agent.deactivate()
@@ -599,6 +606,7 @@ class GraphEngineAdapter:
                 "allow_plan_mutation": False,
             },
             run_verification=is_goal_verification,
+            prompt_configuration=prompt_configuration,
         )
         review_status = getattr(engine, "_last_status", "") or "completed"
         if getattr(engine, "is_cancelled", False):
@@ -648,6 +656,12 @@ class GraphEngineAdapter:
     def run(self, **kwargs: Any) -> EngineResult:
         from infinidev.config.settings import settings
 
+        from infinidev.prompts.profiles import EffectivePromptConfiguration
+
+        kwargs["prompt_configuration"] = (
+            kwargs.get("prompt_configuration")
+            or EffectivePromptConfiguration.compile()
+        )
         escalation = kwargs.get("escalation")
         session_id = kwargs.get("session_id", "")
         run_id = kwargs.get("run_id") or f"graph_{id(self):x}"

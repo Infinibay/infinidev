@@ -240,6 +240,7 @@ def run_selected_engine(
     use_phase_engine: bool = False,
     force_gather: bool = False,
     mode_override: str | None = None,
+    prompt_configuration: Any | None = None,
 ) -> EngineResult:
     """Select an engine for the escalated task and run it."""
     from infinidev.config.settings import settings as _settings
@@ -260,6 +261,7 @@ def run_selected_engine(
         "turn_context": turn_context,
         "use_phase_engine": use_phase_engine,
         "force_gather": force_gather,
+        "prompt_configuration": prompt_configuration,
     }
 
     # ── Event log: open the run ────────────────────────────────────────────

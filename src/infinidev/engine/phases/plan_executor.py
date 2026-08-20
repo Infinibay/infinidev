@@ -20,6 +20,8 @@ def _execute_minimal(
     task_tools: list | None,
     depth_config: Any,
     verbose: bool,
+    *,
+    prompt_configuration: Any | None = None,
 ) -> tuple[str, LoopEngine]:
     """Minimal depth: single LoopEngine run with no phase separation.
 
@@ -40,6 +42,7 @@ def _execute_minimal(
         nudge_threshold=0,
         summarizer_enabled=True,
         identity_override=strategy.execute_identity or None,
+        prompt_configuration=prompt_configuration,
     )
 
     return result or "", engine
@@ -58,6 +61,7 @@ def _execute_plan(
     verbose: bool,
     test_checkpoint: Any | None = None,
     on_step_start: Any | None = None,
+    prompt_configuration: Any | None = None,
 ) -> tuple[str, LoopEngine]:
     """Execute each plan step via LoopEngine.
 
@@ -150,6 +154,7 @@ def _execute_plan(
             nudge_threshold=0,
             summarizer_enabled=True,
             identity_override=strategy.execute_identity or None,
+            prompt_configuration=prompt_configuration,
         )
 
         last_engine = engine

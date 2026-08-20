@@ -27,6 +27,7 @@ from infinidev.engine.council.brief import (
     OpeningThread,
 )
 from infinidev.engine.council import prompts as P
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 from infinidev.tools import get_tools_for_role
 
 logger = logging.getLogger(__name__)
@@ -49,11 +50,12 @@ def seed_council(
     session_id: str | None = None,
     project_id: int | None = None,
     workspace_path: str | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> CouncilRoster:
     """Run the moderator's seed turn → a roster of members + threads."""
     tools = get_tools_for_role("council_moderator")
     result = run_terminating_loop(
-        system_prompt=P.build_moderator_seed_prompt(),
+        system_prompt=P.build_moderator_seed_prompt(prompt_configuration),
         user_content=P.render_seed_user_message(handoff),
         tools=tools,
         terminator_names={"seed_council"},
@@ -154,6 +156,7 @@ def judge_convergence(
     session_id: str | None = None,
     project_id: int | None = None,
     workspace_path: str | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> tuple[bool, str]:
     """Ask the moderator whether the debate converged. Returns (converged, reason).
 
@@ -163,7 +166,7 @@ def judge_convergence(
     """
     tools = get_tools_for_role("council_moderator")
     result = run_terminating_loop(
-        system_prompt=P.build_moderator_judge_prompt(),
+        system_prompt=P.build_moderator_judge_prompt(prompt_configuration),
         user_content=P.render_judge_user_message(
             digest, round_num, settings.COUNCIL_MAX_ROUNDS,
         ),
@@ -192,11 +195,12 @@ def synthesize(
     session_id: str | None = None,
     project_id: int | None = None,
     workspace_path: str | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> DesignBrief:
     """Run the moderator's synthesis turn → the final DesignBrief."""
     tools = get_tools_for_role("council_moderator")
     result = run_terminating_loop(
-        system_prompt=P.build_moderator_synth_prompt(),
+        system_prompt=P.build_moderator_synth_prompt(prompt_configuration),
         user_content=P.render_synth_user_message(digest),
         tools=tools,
         terminator_names={"synthesize_brief"},

@@ -459,6 +459,7 @@ def run_council(
     project_id: int | None = None,
     workspace_path: str | None = None,
     hooks: Any | None = None,
+    prompt_configuration: Any | None = None,
 ) -> DesignBrief | None:
     """Deliberate on ``handoff`` and return a synthesised DesignBrief.
 
@@ -470,8 +471,16 @@ def run_council(
     if not settings.COUNCIL_ENABLED:
         return None
 
+    from infinidev.prompts.profiles import EffectivePromptConfiguration
+
+    prompt_configuration = (
+        prompt_configuration or EffectivePromptConfiguration.compile()
+    )
     ctx = dict(
-        session_id=session_id, project_id=project_id, workspace_path=workspace_path,
+        session_id=session_id,
+        project_id=project_id,
+        workspace_path=workspace_path,
+        prompt_configuration=prompt_configuration,
     )
 
     def _status(level: str, msg: str) -> None:

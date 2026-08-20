@@ -20,10 +20,6 @@ from infinidev.tools.code_intel import (
     RenameSymbolTool, MoveSymbolTool,
 )
 from infinidev.tools.git import GitDiffTool, GitStatusTool, GitCommitTool, GitBranchTool
-from infinidev.tools.knowledge import (
-    SearchFindingsTool, RecordFindingTool,
-    UpdateFindingTool, DeleteFindingTool,
-)
 from infinidev.tools.shell import ExecuteCommandTool, CodeInterpreterTool
 from infinidev.tools.chat import SendMessageTool
 from infinidev.tools.web import WebSearchTool, WebFetchTool, CodeSearchWebTool
@@ -40,7 +36,6 @@ EXPECTED_READ_ONLY = {
     ProjectStructureTool, AnalyzeCodeTool, FindSimilarMethodsTool,
     SearchByDocstringTool, IterSymbolsTool, ProjectStatsTool,
     GitDiffTool, GitStatusTool,
-    SearchFindingsTool,
     WebSearchTool, WebFetchTool, CodeSearchWebTool,
 }
 
@@ -49,7 +44,6 @@ KNOWN_WRITE_TOOLS = {
     CreateFileTool,
     RenameSymbolTool, MoveSymbolTool,
     GitCommitTool, GitBranchTool,
-    RecordFindingTool, UpdateFindingTool, DeleteFindingTool,
     ExecuteCommandTool, CodeInterpreterTool,
     SendMessageTool,
 }
@@ -102,7 +96,6 @@ class TestChatAgentRole:
             "edit_symbol", "add_symbol", "remove_symbol",
             "rename_symbol", "move_symbol",
             "git_commit", "git_branch",
-            "record_finding", "update_finding", "delete_finding",
             "execute_command", "code_interpreter",
             "send_message",
         }
@@ -119,8 +112,6 @@ class TestChatAgentRole:
             "find_similar_methods", "search_by_docstring",
             "iter_symbols", "project_stats",
             "git_diff", "git_status",
-            # search_knowledge owns browse, full-text, and semantic modes.
-            "search_knowledge",
         }
         missing = must_include - names
         assert not missing, f"chat_agent missing read-only tools: {missing}"

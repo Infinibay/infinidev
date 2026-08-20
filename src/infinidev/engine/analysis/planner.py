@@ -28,9 +28,9 @@ from infinidev.engine.oversized_result import (
 )
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.prompts.analyst.task_planner_prompt import (
-    TASK_PLANNER_SYSTEM_PROMPT,
     build_task_planner_system_prompt,
 )
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 from infinidev.tools import get_tools_for_role
 from infinidev.tools.base.context import (
     bind_tools_to_agent,
@@ -66,6 +66,7 @@ def run_planner(
     max_exploration_calls: int | None = None,
     max_iterations: int | None = None,
     hooks: Any | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> Plan:
     """Produce a Plan from the chat agent's escalation packet.
 
@@ -84,6 +85,9 @@ def run_planner(
     pass ``None`` (the default) to let difficulty decide.
     """
     from infinidev.engine.orchestration.difficulty import resolve_difficulty
+
+    if prompt_configuration is None:
+        prompt_configuration = EffectivePromptConfiguration.compile()
 
     difficulty_decision = resolve_difficulty(
         escalation.user_request,
@@ -146,7 +150,11 @@ def run_planner(
     from infinidev.engine.prompt_profile import apply_calibrated_guidance
 
     planner_prompt = apply_calibrated_guidance(
-        build_task_planner_system_prompt(difficulty_level), "planner"
+        build_task_planner_system_prompt(
+            difficulty_level,
+            configuration=prompt_configuration,
+        ),
+        "planner",
     )
     from infinidev.config.settings import settings
     from infinidev.engine.task_policies.rendering import (

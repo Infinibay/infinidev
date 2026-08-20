@@ -74,7 +74,6 @@ _READ_ONLY_TOOLS: frozenset[str] = frozenset({
     "read_file", "partial_read", "list_directory", "glob", "code_search",
     "get_symbol_code", "list_symbols", "search_symbols", "find_references",
     "project_structure", "describe_tool", "git_status", "git_diff", "git_log",
-    "search_knowledge",
 })
 
 

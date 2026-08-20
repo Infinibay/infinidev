@@ -34,7 +34,7 @@ Alphabet (one letter per tool, ~15 letters cover everything):
 ``X``             execute_command
 ``T``             think
 ``N``             add_note, add_session_note
-``F``             record_finding, search_findings, read_findings, knowledge ops
+``F``             report and documentation knowledge ops
 ``W``             web_search, web_fetch
 ``H``             describe_tool, help, explain_tool
 ``I``             code_interpreter
@@ -111,15 +111,6 @@ _TOOL_LETTER_MAP: dict[str, str] = {
     "add_note": "N",
     "add_session_note": "N",
     # Knowledge
-    "record_finding": "F",
-    "search_findings": "F",
-    "read_findings": "F",
-    "validate_finding": "F",
-    "reject_finding": "F",
-    "update_finding": "F",
-    "delete_finding": "F",
-    "search_knowledge": "F",
-    "summarize_findings": "F",
     "write_report": "F",
     "read_report": "F",
     "delete_report": "F",

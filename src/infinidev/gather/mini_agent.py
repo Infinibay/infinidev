@@ -13,6 +13,10 @@ import logging
 from typing import Any
 
 from infinidev.gather.models import Question, QuestionResult
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +24,22 @@ logger = logging.getLogger(__name__)
 READ_ONLY_TOOL_NAMES = {
     "read_file", "list_directory", "code_search", "glob",
     "execute_command",
-    "search_knowledge",
     "web_search", "web_fetch", "code_search_web",
     "find_documentation",
     "find_references", "list_symbols",
     "search_symbols", "get_symbol_code", "project_structure",
 }
 
-_INVESTIGATOR_IDENTITY = """\
+_INVESTIGATOR_GUIDANCE = """\
 ## Identity
 
-You are a codebase investigator. You ONLY gather information — you do NOT plan fixes,
-write code, or suggest solutions. Just find facts and report them.
+You are a codebase investigator. Just find facts and report them.
+"""
 
+_INVESTIGATOR_CONTRACT = """\
 ## Rules
+
+You ONLY gather information — you do NOT plan fixes, write code, or suggest solutions.
 
 - Your job is to answer ONE specific question with facts from the codebase.
 - Use symbol/code-intel tools (search_symbols, find_references, get_symbol_code, list_symbols, project_structure) for identifiers and code structure. Use code_search for non-symbol text such as error strings. Signatures are in your appended tools section.
@@ -53,9 +59,15 @@ class GatherSession:
     so the agent doesn't re-read files or lose context.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        prompt_configuration: EffectivePromptConfiguration | None = None,
+    ):
         self._last_state_dict: dict | None = None
         self._engine = None
+        self._prompt_configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
 
     def answer_question(
         self,
@@ -106,7 +118,15 @@ class GatherSession:
         original_gather = settings.GATHER_ENABLED
 
         try:
-            agent._system_prompt_identity = _INVESTIGATOR_IDENTITY
+            guidance = resolve_prompt_fragment(
+                "gather.identity_guidance",
+                "gather",
+                _INVESTIGATOR_GUIDANCE,
+                configuration=self._prompt_configuration,
+            )
+            agent._system_prompt_identity = "\n\n".join(
+                part for part in (guidance, _INVESTIGATOR_CONTRACT) if part
+            )
             agent.backstory = "Codebase investigator. Reads code, answers questions."
             settings.GATHER_ENABLED = False
 
@@ -137,6 +157,7 @@ class GatherSession:
                 max_tool_calls_per_action=question.max_tool_calls,
                 nudge_threshold=0,
                 summarizer_enabled=True,
+                prompt_configuration=self._prompt_configuration,
             )
 
             # Save state for next question

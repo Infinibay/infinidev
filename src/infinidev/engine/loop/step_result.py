@@ -22,6 +22,9 @@ class StepResult(BaseModel):
     # of WHICH check it ran — it is never the source of truth for pass/fail
     # (that is the executed StepVerification). Previously parsed-and-discarded.
     evidence_summary: str = ""
+    # Explicit opt-in for a completed development task that correctly requires
+    # no workspace edit. It bypasses only the edit-evidence completion gates.
+    no_edit: bool = False
 
     # Post-processing metadata (set by _run_inner_loop, consumed by step_manager)
     action_tool_calls: int = 0

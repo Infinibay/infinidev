@@ -32,16 +32,22 @@ from typing import Any, Callable
 
 from infinidev.engine.analysis.step_verification import StepVerification
 from infinidev.engine.analysis.verification_result import VerificationResult
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
 
 logger = logging.getLogger(__name__)
 
 _MAX_CONTEXT_CHARS = 12000  # budget for changed-file contents in the prompt
 _MIN_EVIDENCE_CHARS = 8  # quotes shorter than this can't ground a PASS
 
-_SYSTEM_PROMPT = (
+_VERIFIER_IDENTITY = (
     "You are a SKEPTICAL, INDEPENDENT verifier. You did NOT write this code "
     "and you owe it no benefit of the doubt. Your DEFAULT assumption is that "
-    "the objective was NOT met.\n\n"
+    "the objective was NOT met."
+)
+_VERIFIER_GUIDANCE = (
     "Your job: decide whether the objective is satisfied by the CHANGED CODE "
     "shown, and back it with VERBATIM evidence.\n"
     "- verdict PASS: only if you can quote EXACT text from the changes that "
@@ -53,11 +59,18 @@ _SYSTEM_PROMPT = (
     "assume/infer it.\n"
     "- verdict UNVERIFIABLE: the objective genuinely cannot be judged from "
     "code alone (needs a human, a running system, or external context).\n\n"
-    "Be harsh. Never output PASS without a verbatim quote from the changes. "
+    "Be harsh. Never output PASS without a verbatim quote from the changes."
+)
+_VERIFIER_CONTRACT = (
     "Respond with ONLY a JSON object and nothing else:\n"
     '{"verdict": "PASS|FAIL|UNVERIFIABLE", "cited_evidence": "<exact quoted '
     'text from the changes, or empty>", "reason": "<one short sentence>"}'
 )
+_SYSTEM_PROMPT = "\n\n".join((
+    _VERIFIER_IDENTITY,
+    _VERIFIER_GUIDANCE,
+    _VERIFIER_CONTRACT,
+))
 
 
 class AdversarialVerifier:
@@ -68,9 +81,13 @@ class AdversarialVerifier:
         workspace: str | None = None,
         llm_params: dict | None = None,
         completion_fn: Callable[[list[dict]], str] | None = None,
+        prompt_configuration: EffectivePromptConfiguration | None = None,
     ) -> None:
         self._workspace = workspace or os.getcwd()
         self._params = llm_params
+        self._prompt_configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
         # Injectable for tests: takes messages, returns the raw model content.
         self._completion_fn = completion_fn
 
@@ -133,8 +150,26 @@ class AdversarialVerifier:
             f"## Changed code (current contents)\n{body}\n\n"
             "Judge ONLY from the changes above. Quote exact text for a PASS."
         )
+        system_fragments = (
+            resolve_prompt_fragment(
+                "adversarial.identity",
+                "review",
+                _VERIFIER_IDENTITY,
+                configuration=self._prompt_configuration,
+            ),
+            resolve_prompt_fragment(
+                "adversarial.evaluation_guidance",
+                "review",
+                _VERIFIER_GUIDANCE,
+                configuration=self._prompt_configuration,
+            ),
+            _VERIFIER_CONTRACT,
+        )
+        system_prompt = "\n\n".join(
+            fragment for fragment in system_fragments if fragment
+        )
         return [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user},
         ]
 

@@ -63,9 +63,14 @@ class PhaseEngine:
         task_tools: list | None = None,
         test_command: str | None = None,
         depth_config: Any | None = None,
+        prompt_configuration: Any | None = None,
     ) -> str:
         from infinidev.gather.models import DepthLevel, DepthConfig, DEPTH_CONFIGS
+        from infinidev.prompts.profiles import EffectivePromptConfiguration
 
+        prompt_configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
         description, expected_output = task_prompt
 
         # Init test checkpoint
@@ -89,7 +94,9 @@ class PhaseEngine:
                 if verbose:
                     _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — type: feature, depth: standard (small model — skipped classify)")
             else:
-                classification = self._classify(agent, description, verbose)
+                classification = self._classify(
+                    agent, description, verbose, prompt_configuration
+                )
             task_type = classification.ticket_type.value
             depth_config = DEPTH_CONFIGS.get(classification.depth, DEPTH_CONFIGS[DepthLevel.standard])
             if verbose and not _is_small_model():
@@ -104,8 +111,16 @@ class PhaseEngine:
 
         # ── MINIMAL: single free LoopEngine run ─────────────────
         if depth_config.skip_questions and depth_config.skip_investigate and depth_config.plan_min_steps <= 1:
-            result, engine = _execute_minimal(agent, description, expected_output, strategy,
-                                              task_tools, depth_config, verbose)
+            result, engine = _execute_minimal(
+                agent,
+                description,
+                expected_output,
+                strategy,
+                task_tools,
+                depth_config,
+                verbose,
+                prompt_configuration=prompt_configuration,
+            )
             self._last_engine = engine
             if strategy.auto_test and self._test_checkpoint:
                 passed, total = self._test_checkpoint.run()
@@ -124,6 +139,7 @@ class PhaseEngine:
                 agent, description, strategy, task_tools, verbose,
                 max_questions=depth_config.questions_max,
                 skip_investigate=depth_config.skip_investigate,
+                prompt_configuration=prompt_configuration,
             )
 
         # ── Phase 3: PLAN ───────────────────────────────────────
@@ -135,6 +151,7 @@ class PhaseEngine:
         plan_steps = _generate_plan(
             agent, description, answers, all_notes, strategy, task_tools, verbose,
             test_checkpoint=self._test_checkpoint,
+            prompt_configuration=prompt_configuration,
         )
 
         if not plan_steps:
@@ -159,6 +176,7 @@ class PhaseEngine:
                 agent, description, expected_output, answers, all_notes,
                 plan_steps, strategy, task_tools, depth_config, verbose,
                 test_checkpoint=self._test_checkpoint,
+                prompt_configuration=prompt_configuration,
             )
             self._last_engine = engine
 
@@ -178,7 +196,14 @@ class PhaseEngine:
                     all_notes.append(f"PROGRESS: {passed}/{total} tests passing after round {plan_round + 1}")
 
                     plan_steps = _generate_plan(
-                        agent, description, answers, all_notes, strategy, task_tools, verbose,
+                        agent,
+                        description,
+                        answers,
+                        all_notes,
+                        strategy,
+                        task_tools,
+                        verbose,
+                        prompt_configuration=prompt_configuration,
                     )
                     if not plan_steps:
                         break
@@ -205,6 +230,7 @@ class PhaseEngine:
         on_plan_ready: Callable[[list[dict]], tuple[str, str]],
         on_step_start: Callable[[int, int, list, list], None] | None = None,
         verbose: bool = True,
+        prompt_configuration: Any | None = None,
     ) -> str:
         """Run the phase pipeline with a human-in-the-loop plan review.
 
@@ -233,14 +259,20 @@ class PhaseEngine:
         ``threading.Event``; a CLI could use ``input()``.
         """
         from infinidev.gather.models import DEPTH_CONFIGS
+        from infinidev.prompts.profiles import EffectivePromptConfiguration
 
+        prompt_configuration = (
+            prompt_configuration or EffectivePromptConfiguration.compile()
+        )
         # Init test checkpoint
         from infinidev.tools.base.context import get_current_workspace_path
         workdir = get_current_workspace_path()
         self._test_checkpoint = TestCheckpoint(None, workdir)
 
         # 1. Classify
-        classification = self._classify(agent, task_description, verbose)
+        classification = self._classify(
+            agent, task_description, verbose, prompt_configuration
+        )
         depth_config = DEPTH_CONFIGS.get(classification.depth)
         task_type = classification.ticket_type.value
         strategy = get_strategy(task_type)
@@ -251,6 +283,7 @@ class PhaseEngine:
             agent, task_description, strategy, None, verbose=verbose,
             max_questions=depth_config.questions_max,
             skip_investigate=depth_config.skip_investigate,
+            prompt_configuration=prompt_configuration,
         )
 
         # 3. Plan + review loop
@@ -264,7 +297,14 @@ class PhaseEngine:
                 plan_desc += f"\n\n## USER FEEDBACK ON PREVIOUS PLAN\n{feedback_context}"
 
             plan_steps = _generate_plan(
-                agent, plan_desc, answers, all_notes, strategy, None, verbose=verbose,
+                agent,
+                plan_desc,
+                answers,
+                all_notes,
+                strategy,
+                None,
+                verbose=verbose,
+                prompt_configuration=prompt_configuration,
             )
             if not plan_steps:
                 return "Failed to generate a plan."
@@ -286,21 +326,33 @@ class PhaseEngine:
         result, last_engine = _execute_plan(
             agent, task_description, expected_output,
             answers, all_notes, plan_steps, strategy, None, depth_config,
-            verbose=verbose, on_step_start=on_step_start,
+            verbose=verbose,
+            on_step_start=on_step_start,
+            prompt_configuration=prompt_configuration,
         )
         self._last_engine = last_engine
         return result
 
     # ── Classify ─────────────────────────────────────────────────
 
-    def _classify(self, agent: Any, description: str, verbose: bool) -> Any:
+    def _classify(
+        self,
+        agent: Any,
+        description: str,
+        verbose: bool,
+        prompt_configuration: Any | None = None,
+    ) -> Any:
         """Run ticket classification to determine task_type and depth."""
         from infinidev.gather.classifier import classify_ticket
 
         if verbose:
             _log(f"\n{BOLD}🏷️  Step 0: CLASSIFY{RESET}")
 
-        result = classify_ticket(description, agent=agent)
+        result = classify_ticket(
+            description,
+            agent=agent,
+            prompt_configuration=prompt_configuration,
+        )
 
         if verbose:
             _log(f"  {DIM}Type: {result.ticket_type.value} — {result.reasoning}{RESET}")

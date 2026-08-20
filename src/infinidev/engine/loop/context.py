@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from infinidev.config.settings import settings
 from infinidev.engine._best_effort import best_effort
@@ -16,6 +16,9 @@ from infinidev.engine.loop.prompt.tools_section import (
     _build_tools_prompt_small,
 )
 from infinidev.engine.summarizer import SmartContextSummarizer
+
+if TYPE_CHECKING:
+    from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 # Re-export so existing ``from infinidev.engine.loop.context import
 # build_tools_prompt_section`` imports keep working after the extraction.
@@ -89,6 +92,22 @@ from infinidev.engine.loop.prompt.text import (  # noqa: F401
 
 
 
+def _profiled_block(
+    prompt: str,
+    name: str,
+    configuration: EffectivePromptConfiguration,
+) -> str:
+    """Apply one run-scoped optional-content setting."""
+    from infinidev.prompts.profiles import resolve_prompt_fragment
+
+    return resolve_prompt_fragment(
+        name,
+        "develop",
+        prompt,
+        configuration=configuration,
+    ) or ""
+
+
 def build_system_prompt(
     backstory: str,
     *,
@@ -98,6 +117,7 @@ def build_system_prompt(
     protocol_override: str | None = None,
     small_model: bool = False,
     workspace_path: str | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> str:
     """Combine CLI identity, tech guidelines, session context, and loop protocol.
 
@@ -111,19 +131,38 @@ def build_system_prompt(
             ``CLAUDE.md``), its contents join the cacheable prefix — it is
             stable for the whole session, and it is the project speaking, so
             it belongs above the per-iteration context, not inside it.
+        prompt_configuration: Run-scoped profile snapshot. When omitted,
+            compatibility callers resolve the project profile directly.
     """
+    from infinidev.prompts.profiles import EffectivePromptConfiguration
+
+    configuration = prompt_configuration or EffectivePromptConfiguration.compile()
     if small_model:
         identity = CLI_AGENT_IDENTITY_SMALL
         protocol = LOOP_PROTOCOL_SMALL
         behavior = BEHAVIOR_GUIDELINES_SMALL
     else:
+        from infinidev.prompts.profiles import resolve_prompt_fragment
         from infinidev.prompts.variants import get_variant
 
-        identity = identity_override or get_variant("loop.identity") or CLI_AGENT_IDENTITY
-        protocol = protocol_override or get_variant("loop.protocol") or LOOP_PROTOCOL
+        identity = identity_override or resolve_prompt_fragment(
+            "loop.identity",
+            "develop",
+            CLI_AGENT_IDENTITY,
+            get_variant("loop.identity"),
+            configuration=prompt_configuration,
+        ) or ""
+        protocol = protocol_override or resolve_prompt_fragment(
+            "loop.protocol",
+            "develop",
+            LOOP_PROTOCOL,
+            get_variant("loop.protocol"),
+            configuration=prompt_configuration,
+        ) or ""
         behavior = BEHAVIOR_GUIDELINES
 
-    behavior_parts: list[str] = [identity, behavior]
+    behavior = _profiled_block(behavior, "loop.behavior_guidelines", configuration)
+    behavior_parts: list[str] = [part for part in (identity, behavior) if part]
     execution_parts: list[str] = []
 
     # Tech-specific guidelines (skip for small models — too many tokens)
@@ -135,11 +174,16 @@ def build_system_prompt(
             if prompt:
                 tech_sections.append(prompt)
         if tech_sections:
-            execution_parts.append(
-                "## Technology Guidelines\n\n" + "\n\n".join(tech_sections)
+            technology_guidance = _profiled_block(
+                "## Technology Guidelines\n\n" + "\n\n".join(tech_sections),
+                "loop.technology_guidance",
+                configuration,
             )
+            if technology_guidance:
+                execution_parts.append(technology_guidance)
 
-    execution_parts.append(protocol)
+    if protocol:
+        execution_parts.append(protocol)
 
     # The project's own instructions go last in the stable prefix: they are
     # meant to override the general guidance above, and the end of the
@@ -150,7 +194,9 @@ def build_system_prompt(
 
         block = render_project_instructions(workspace_path)
         if block:
-            execution_parts.append(block)
+            block = _profiled_block(block, "loop.project_instructions", configuration)
+            if block:
+                execution_parts.append(block)
 
     # When the pair-programming critic is enabled, teach the principal
     # that those `--- critic note ---` blocks at the end of tool
@@ -159,7 +205,13 @@ def build_system_prompt(
     with best_effort("critic protocol addendum check failed"):
         from infinidev.config import settings as _settings
         if getattr(_settings, "ASSISTANT_LLM_ENABLED", False):
-            execution_parts.append(CRITIC_PROTOCOL_ADDENDUM)
+            critic_guidance = _profiled_block(
+                CRITIC_PROTOCOL_ADDENDUM,
+                "loop.critic_guidance",
+                configuration,
+            )
+            if critic_guidance:
+                execution_parts.append(critic_guidance)
 
     from infinidev.engine.prompt_layers import (
         PromptLayer,
@@ -196,6 +248,13 @@ def build_system_prompt(
             f"<session-context>\n{numbered}\n</session-context>",
             "runtime-session",
         ).render()
+        session_block = _profiled_block(
+            session_block,
+            "loop.session_context",
+            configuration,
+        )
+        if not session_block:
+            return stable_prefix
         return (
             stable_prefix
             + f"\n\n{CACHE_BREAKPOINT_MARKER}\n\n"
@@ -220,6 +279,7 @@ def build_iteration_prompt(
     small_model: bool = False,
     require_step_orientation: bool = True,
     task: Any | None = None,  # infinidev.engine.orchestration.task_schema.Task
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
@@ -227,21 +287,27 @@ def build_iteration_prompt(
     <previous-actions>, <current-action>, <next-actions>,
     <expected-output>, <user-message>, and <context-budget> XML blocks.
     """
+    from infinidev.prompts.profiles import EffectivePromptConfiguration
+
+    configuration = prompt_configuration or EffectivePromptConfiguration.compile()
     parts: list[str] = []
 
-    _append_if(parts, _render_smart_summary(state, small_model))
-    _append_if(parts, _render_project_knowledge(project_knowledge))
-    _append_if(parts, _render_context_corpus(context_corpus))
-    _append_if(
-        parts,
+    def optional(name: str, block: str) -> None:
+        _append_if(parts, _profiled_block(block, name, configuration))
+
+    optional("iteration.smart_summary", _render_smart_summary(state, small_model))
+    optional("iteration.project_knowledge", _render_project_knowledge(project_knowledge))
+    optional("iteration.context_corpus", _render_context_corpus(context_corpus))
+    optional(
+        "iteration.context_rank",
         _render_context_rank(
             context_rank_result,
             max_chars=4_000 if small_model else None,
         ),
     )
-    _append_if(parts, _render_workspace())
-    _append_if(parts, _render_background_completions())
-    _append_if(parts, _render_background_tasks())
+    optional("iteration.workspace", _render_workspace())
+    optional("iteration.background_completions", _render_background_completions())
+    optional("iteration.background_tasks", _render_background_tasks())
 
     # Task: prefer the structured ``Task`` rendering when available
     # (set by the engine when the orchestration layer built one). Both
@@ -270,7 +336,7 @@ def build_iteration_prompt(
         from infinidev.engine.guidance import drain_pending_guidance
         guidance_text = drain_pending_guidance(state)
         if guidance_text:
-            parts.append(guidance_text)
+            optional("iteration.reactive_guidance", guidance_text)
 
     with best_effort("runtime intervention render failed"):
         from infinidev.engine.behavior.runtime_policy import drain_runtime_intervention
@@ -312,15 +378,15 @@ def build_iteration_prompt(
             lines.append("</file-integrity-warning>")
             parts.append("\n".join(lines))
 
-    _append_if(parts, _render_opened_files(state))
-    _append_if(parts, _render_session_notes(session_notes))
-    _append_if(parts, _render_notes(state))
+    optional("iteration.opened_files", _render_opened_files(state))
+    optional("iteration.session_notes", _render_session_notes(session_notes))
+    optional("iteration.working_notes", _render_notes(state))
     # Note-taking nudges — two tiers: a gentle reminder when recent
     # tool calls haven't produced a note, and a stronger warning when a
     # step completed without ANY notes at all.
     note_nudge = _render_note_nudge(state, small_model)
     if note_nudge:
-        parts.append(note_nudge)
+        optional("iteration.note_nudge", note_nudge)
 
     # Plan (if we have one) — skip for agents that don't use plans (e.g. analyst)
     if not skip_plan:
@@ -383,8 +449,9 @@ def build_iteration_prompt(
                 f"call recall_context(query=...) to retrieve their detail or "
                 f"any tool output from them.)\n"
             )
-        parts.append(
-            f"<previous-actions>\n{header}{chr(10).join(summaries)}\n</previous-actions>"
+        optional(
+            "iteration.previous_actions",
+            f"<previous-actions>\n{header}{chr(10).join(summaries)}\n</previous-actions>",
         )
 
         # Consolidated anti-patterns from all steps — skip for small models
@@ -392,9 +459,10 @@ def build_iteration_prompt(
             all_anti = [r.anti_patterns for r in state.history if r.anti_patterns]
             if all_anti:
                 avoid_lines = [f"- {ap}" for ap in all_anti]
-                parts.append(
+                optional(
+                    "iteration.anti_patterns",
                     f"<avoid>\nDo NOT repeat these patterns from previous steps:\n"
-                    f"{chr(10).join(avoid_lines)}\n</avoid>"
+                    f"{chr(10).join(avoid_lines)}\n</avoid>",
                 )
 
         # Behavior summary from tracker — reinforces good patterns, warns about bad
@@ -410,7 +478,10 @@ def build_iteration_prompt(
                 blines.append("STOP DOING: " + "; ".join(unique_bad))
             total_score = sum(r.behavior_score for r in state.history)
             blines.append(f"Behavior score: {total_score:+d}")
-            parts.append(f"<behavior-summary>\n{chr(10).join(blines)}\n</behavior-summary>")
+            optional(
+                "iteration.behavior_summary",
+                f"<behavior-summary>\n{chr(10).join(blines)}\n</behavior-summary>",
+            )
 
     # Current action — skip for agents that don't use plans
     active = state.plan.active_step if not skip_plan else None
@@ -442,7 +513,10 @@ def build_iteration_prompt(
         ]
         if next_steps:
             lines = [f"{s.index}. {s.title}" for s in next_steps]
-            parts.append(f"<next-actions>\n{chr(10).join(lines)}\n</next-actions>")
+            optional(
+                "iteration.next_actions",
+                f"<next-actions>\n{chr(10).join(lines)}\n</next-actions>",
+            )
 
     # User messages injected mid-task (live guidance from the user).
     # The user is a human watching the agent work in a live session.
@@ -563,10 +637,11 @@ def build_iteration_prompt(
                 "is not a completion signal and does not create a tool-call budget."
             )
 
-        parts.append(
+        optional(
+            "iteration.context_budget",
             "<context-budget>\n"
             + "\n".join(budget_lines)
-            + "\n</context-budget>"
+            + "\n</context-budget>",
         )
 
     return "\n\n".join(parts)

@@ -156,9 +156,94 @@ class _FakeReviewer:
     pass
 
 
+class _SnapshotReviewer:
+    _prompt_configuration = None
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Tests
 # ─────────────────────────────────────────────────────────────────────────
+
+
+class TestPromptSnapshotLifecycle:
+    def test_escalated_turn_loads_profiles_once_and_shares_the_snapshot(
+        self, tmp_path, monkeypatch,
+    ):
+        from infinidev.engine.engines.base import EngineResult
+        from infinidev.prompts import profiles
+
+        profile_path = tmp_path / "prompts.json"
+        profile_path.write_text(
+            json.dumps({"develop": {"loop.identity": False}}),
+            encoding="utf-8",
+        )
+        real_loader = profiles.load_prompt_profiles
+        reads = 0
+        observed = {}
+
+        def tracked_loader(path=None):
+            nonlocal reads
+            reads += 1
+            return real_loader(path)
+
+        escalation = EscalationPacket(
+            user_request="implement the requested change",
+            understanding="Implement the requested change",
+        )
+
+        def chat_agent(*_args, **kwargs):
+            observed["chat"] = kwargs["prompt_configuration"]
+            profile_path.write_text(
+                json.dumps({"develop": {"loop.identity": True}}),
+                encoding="utf-8",
+            )
+            return ChatAgentResult(kind="escalate", escalation=escalation)
+
+        engine = _FakeEngine(result_text="Done with one prompt snapshot.")
+
+        def selected_engine(**kwargs):
+            observed["engine"] = kwargs["prompt_configuration"]
+            return EngineResult(
+                engine_name="task",
+                status="completed",
+                user_message=engine.result_text,
+                engine=engine,
+            )
+
+        monkeypatch.setattr(profiles, "get_prompt_profile_path", lambda: profile_path)
+        monkeypatch.setattr(profiles, "load_prompt_profiles", tracked_loader)
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+            chat_agent,
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.engines.run_selected_engine",
+            selected_engine,
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.pipeline._run_elaboration_phase",
+            lambda **kwargs: kwargs["escalation"],
+        )
+        monkeypatch.setattr(
+            "infinidev.engine.orchestration.pipeline._run_council_phase",
+            lambda **kwargs: kwargs["escalation"],
+        )
+
+        reviewer = _SnapshotReviewer()
+        result = run_task(
+            agent=_FakeAgent(),
+            user_input=escalation.user_request,
+            session_id="prompt-snapshot",
+            engine=engine,
+            reviewer=reviewer,
+            hooks=_RecordingHooks(),
+        )
+
+        assert result == engine.result_text
+        assert reads == 1
+        assert observed["chat"] is observed["engine"]
+        assert reviewer._prompt_configuration is observed["chat"]
+        assert observed["chat"].resolve("develop", "loop.identity").enabled is False
 
 
 class TestChatRespondShortCircuits:

@@ -9,14 +9,20 @@ from typing import Any
 from infinidev.config.settings import settings
 from infinidev.engine.formats.tool_call_parser import safe_json_loads as _safe_json_loads
 from infinidev.engine.loop.models import LoopState, StepResult
+from infinidev.prompts.profiles import (
+    EffectivePromptConfiguration,
+    resolve_prompt_fragment,
+)
 
 logger = logging.getLogger(__name__)
 
 
-_SUMMARIZER_SYSTEM_PROMPT = """\
+_SUMMARIZER_GUIDANCE = """\
 You are a step summarizer for a coding agent. Analyze the raw step data and produce a structured JSON summary.
 The summary helps the agent remember what happened and plan the next step effectively.
+"""
 
+_SUMMARIZER_OUTPUT_CONTRACT = """\
 Output EXACTLY this JSON format (no markdown, no code fences, just JSON):
 {
   "files_to_preload": ["path1", "path2"],
@@ -82,15 +88,33 @@ def _summarize_step(
 
     user_prompt = "\n\n".join(parts)
 
-    # Make the summarizer LLM call (no tools)
+    # Make the summarizer LLM call (no tools). The JSON contract is atomic;
+    # only role/method guidance can be disabled.
+    configuration = (
+        llm_params.get("_prompt_configuration")
+        or EffectivePromptConfiguration.compile()
+    )
+    guidance = resolve_prompt_fragment(
+        "summary.step_guidance",
+        "summarize",
+        _SUMMARIZER_GUIDANCE,
+        configuration=configuration,
+    )
+    system_prompt = "\n\n".join(
+        part for part in (guidance, _SUMMARIZER_OUTPUT_CONTRACT) if part
+    )
     summarizer_messages = [
-        {"role": "system", "content": _SUMMARIZER_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
 
     try:
         import litellm
-        summarizer_params = {k: v for k, v in llm_params.items() if k != "tool_choice"}
+        summarizer_params = {
+            key: value
+            for key, value in llm_params.items()
+            if key not in {"tool_choice", "_prompt_configuration"}
+        }
         summarizer_params.pop("tools", None)
         # Hard timeout: the summarizer is a "best effort" enrichment — if the
         # local model takes longer than this we'd rather fall back to the raw

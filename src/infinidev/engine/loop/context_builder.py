@@ -48,6 +48,7 @@ from infinidev.engine.tool_dispatch import (
     build_tool_dispatch,
     build_tool_schemas,
 )
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 from infinidev.tools.base.context import bind_tools_to_agent, get_context_for_agent
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,10 @@ def build_execution_context(
     tool_dispatch = build_tool_dispatch(tools) if tools else {}
 
     task_profile = getattr(kwargs.get("task"), "task_profile", None)
+    prompt_configuration = (
+        kwargs.get("prompt_configuration")
+        or EffectivePromptConfiguration.compile()
+    )
     identity_override = _resolve_identity_override(
         agent,
         tools,
@@ -202,6 +207,7 @@ def build_execution_context(
         protocol_override=getattr(agent, "_system_prompt_protocol", None),
         small_model=is_small,
         workspace_path=getattr(agent, "workspace_path", None),
+        prompt_configuration=prompt_configuration,
     )
     if model_policy.prompt_addendum:
         system_prompt = f"{system_prompt}\n\n{model_policy.prompt_addendum}"
@@ -257,6 +263,7 @@ def build_execution_context(
         unlimited_recovery_reads=model_policy.unlimited_recovery_reads,
         reuse_unchanged_test_results=model_policy.reuse_unchanged_test_results,
         freeze_plan_growth_in_recovery=model_policy.freeze_plan_growth_in_recovery,
+        prompt_configuration=prompt_configuration,
         recovery_requires_workspace_change=(
             model_policy.recovery_requires_workspace_change),
         system_prompt=system_prompt, tool_schemas=tool_schemas,
@@ -440,6 +447,12 @@ def build_iteration_messages(
 
     from infinidev.engine.static_analysis_timer import measure
 
+    prompt_configuration = getattr(ctx, "prompt_configuration", None)
+    if prompt_configuration is None:
+        # Compatibility for standalone callers that construct a lightweight
+        # context instead of entering through build_execution_context().
+        prompt_configuration = EffectivePromptConfiguration.compile()
+
     with measure("prompt_build"):
         user_prompt = build_iteration_prompt(
             ctx.desc, ctx.expected, effective_state,
@@ -460,6 +473,7 @@ def build_iteration_messages(
             task=ctx.task,
             small_model=ctx.is_small,
             require_step_orientation=getattr(ctx, "require_step_orientation", True),
+            prompt_configuration=prompt_configuration,
         )
 
     from infinidev.engine.prompt_composition import measure_prompt_composition

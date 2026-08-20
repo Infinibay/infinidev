@@ -35,6 +35,7 @@ import os
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from infinidev.engine._best_effort import best_effort
+from infinidev.prompts.profiles import EffectivePromptConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,7 @@ def _run_gather_phase(
     session_id: str,
     force_gather: bool,
     hooks: OrchestrationHooks,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> tuple[str, str]:
     """Gather: collect codebase context before execution. Soft-fails.
 
@@ -257,7 +259,13 @@ def _run_gather_phase(
             {"role": "user" if "[user]" in s.lower() else "assistant", "content": s}
             for s in get_recent_summaries(session_id, limit=10)
         ]
-        brief = run_gather(user_input, chat_history, None, agent)
+        brief = run_gather(
+            user_input,
+            chat_history,
+            None,
+            agent,
+            prompt_configuration=prompt_configuration,
+        )
         desc, expected = task_prompt
         desc = brief.render() + "\n\n" + desc
         hooks.on_status("info", f"Gathered: {brief.summary()}")
@@ -381,6 +389,7 @@ def _run_council_phase(
     project_id: int | None,
     workspace_path: str | None,
     hooks: OrchestrationHooks,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> Any:
     """Multi-agent deliberation between escalate and the planner.
 
@@ -426,6 +435,7 @@ def _run_council_phase(
             project_id=project_id,
             workspace_path=workspace_path,
             hooks=hooks,
+            prompt_configuration=prompt_configuration,
         )
     except Exception as exc:
         logger.error("Council phase failed: %s", exc, exc_info=True)
@@ -488,6 +498,7 @@ def _run_execution_phase(
     max_tool_calls_per_action: int | None = None,
     allow_explore: bool | None = None,
     allow_plan_mutation: bool | None = None,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> tuple[str, Any]:
     """Execution: dispatch to LoopEngine (or PhaseEngine for ``--think``).
 
@@ -521,6 +532,7 @@ def _run_execution_phase(
                 task_type="feature",
                 verbose=True,
                 depth_config=_depth_config,
+                prompt_configuration=prompt_configuration,
             )
             used_engine: Any = phase_eng
         else:
@@ -543,6 +555,17 @@ def _run_execution_phase(
                 execute_kwargs["allow_explore"] = allow_explore
             if allow_plan_mutation is not None:
                 execute_kwargs["allow_plan_mutation"] = allow_plan_mutation
+            import inspect
+
+            execute_parameters = inspect.signature(engine.execute).parameters
+            if (
+                "prompt_configuration" in execute_parameters
+                or any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in execute_parameters.values()
+                )
+            ):
+                execute_kwargs["prompt_configuration"] = prompt_configuration
             result = engine.execute(
                 agent=agent,
                 task_prompt=task_prompt,
@@ -577,6 +600,7 @@ def _run_review_phase(
     max_total_tool_calls: int | None = None,
     rework_execute_kwargs: dict[str, Any] | None = None,
     run_verification: bool = True,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
 ) -> str:
     """Review code changes or evidence-ground an informational outcome.
 
@@ -624,6 +648,7 @@ def _run_review_phase(
                 max_iterations=max_iterations,
                 max_total_tool_calls=max_total_tool_calls,
                 rework_execute_kwargs=rework_execute_kwargs,
+                prompt_configuration=prompt_configuration,
             )
         except Exception as exc:
             logger.error("Evidence review phase failed: %s", exc, exc_info=True)
@@ -641,7 +666,7 @@ def _run_review_phase(
     if reviewer is None:
         from infinidev.engine.analysis.review_engine import ReviewEngine
 
-        reviewer = ReviewEngine()
+        reviewer = ReviewEngine(prompt_configuration=prompt_configuration)
 
     hooks.on_phase("review")
     hooks.on_status("info", "Running code review...")
@@ -696,6 +721,7 @@ def _run_review_phase(
             max_total_tool_calls=max_total_tool_calls,
             rework_execute_kwargs=rework_execute_kwargs,
             run_verification=run_verification,
+            prompt_configuration=prompt_configuration,
         )
         if review_result is not None and review_result.is_rejected:
             engine._last_status = "blocked"
@@ -792,6 +818,7 @@ def run_task(
     force_gather: bool = False,
     attachments: list[Any] | None = None,
     autonomous: bool = False,
+    prompt_configuration: EffectivePromptConfiguration | None = None,
     _hook_reentry: bool = False,
     _autonomous_budget: Any = None,
 ) -> str:
@@ -835,6 +862,12 @@ def run_task(
     package initialisation time. A previous cleanup attempt hoisted
     them and crashed the CLI on cold start; see the revert commit.
     """
+    prompt_configuration = (
+        prompt_configuration or EffectivePromptConfiguration.compile()
+    )
+    if reviewer is not None and hasattr(reviewer, "_prompt_configuration"):
+        reviewer._prompt_configuration = prompt_configuration
+
     from infinidev.engine.orchestration.chat_agent import run_chat_agent
     from infinidev.engine.orchestration.request_signals import (
         resolve_referenced_repository,
@@ -932,6 +965,7 @@ def run_task(
             force_gather=force_gather,
             attachments=None,
             autonomous=continue_autonomously,
+            prompt_configuration=prompt_configuration,
             _hook_reentry=True,
         )
 
@@ -961,6 +995,7 @@ def run_task(
             force_gather=force_gather,
             attachments=None,
             autonomous=True,
+            prompt_configuration=prompt_configuration,
             # Chain continuations are internal turns, like an end-hook
             # continuation.  Do not invoke task-end hooks again just because
             # the chain published a progress checkpoint.
@@ -1032,6 +1067,7 @@ def run_task(
         hooks=hooks,
         attachments=attachments,
         autonomous_hint=autonomous,
+        prompt_configuration=prompt_configuration,
     )
 
     if chat_result.kind == "respond":
@@ -1149,6 +1185,7 @@ def run_task(
         project_id=agent_project_id,
         workspace_path=agent_workspace,
         hooks=hooks,
+        prompt_configuration=prompt_configuration,
     )
 
     # Resolve task method once from the literal request. Semantic stages may
@@ -1207,6 +1244,7 @@ def run_task(
         turn_context=turn_context,
         use_phase_engine=use_phase_engine,
         force_gather=force_gather,
+        prompt_configuration=prompt_configuration,
     )
     result = engine_run.user_message
     used_engine = engine_run.engine
