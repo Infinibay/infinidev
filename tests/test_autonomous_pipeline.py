@@ -358,6 +358,7 @@ def test_pipeline_chains_plans_under_budget(monkeypatch) -> None:
     stamped ``autonomous=True``. The pipeline must call the engine
     three times and return after the third plan exhausts the fuse.
     """
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", False)
     packets = [_make_packet(autonomous=True) for _ in range(3)]
     engine = _CountingEngine(plan_count=10)
     state = _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
@@ -444,6 +445,7 @@ def test_pipeline_stops_after_exactly_max_plans(monkeypatch) -> None:
     """
     from infinidev.config.settings import settings as _settings
 
+    monkeypatch.setattr(_settings, "AUTONOMOUS_UNLIMITED", False)
     monkeypatch.setattr(_settings, "AUTONOMOUS_MAX_PLANS", 2)
     monkeypatch.setattr(_settings, "AUTONOMOUS_WALL_SECONDS", 900)
     monkeypatch.setattr(_settings, "AUTONOMOUS_TOKEN_BUDGET", 50_000)
@@ -505,6 +507,7 @@ def test_chat_agent_user_signal_manejate_vos_enables_autonomous(monkeypatch) -> 
     # autonomous phrase; the chain flag came entirely from user_signal).
     packets = [stamped, stamped]
     engine = _CountingEngine(plan_count=10)
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", False)
     monkeypatch.setattr(_settings_module(), "AUTONOMOUS_MAX_PLANS", 2)
     monkeypatch.setattr(_settings_module(), "AUTONOMOUS_WALL_SECONDS", 900)
     monkeypatch.setattr(_settings_module(), "AUTONOMOUS_TOKEN_BUDGET", 50_000)

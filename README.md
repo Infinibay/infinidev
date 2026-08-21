@@ -100,6 +100,12 @@ Infinidev stores settings, history, logs, and its SQLite knowledge database in
 `.infinidev/` inside the current project. Environment variables use the
 `INFINIDEV_` prefix. Secrets and generated runtime state should not be committed.
 
+Council transcripts shown by `/agents` are process-local and retain the 100 most
+recent completed councils by default, while always preserving active councils. Set
+`COUNCIL_HISTORY_LIMIT` in `.infinidev/settings.json` (or
+`INFINIDEV_COUNCIL_HISTORY_LIMIT`) to a non-negative number; use `0` to discard a
+transcript after its completion event or `null` for unlimited retention.
+
 ## Development
 
 ```bash

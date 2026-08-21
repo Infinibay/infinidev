@@ -5,6 +5,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from infinidev.config.settings import Settings, settings, reload_all, SETTINGS_FILE
 
@@ -58,6 +59,41 @@ class TestSettings:
         # Should not crash; defaults used
         assert s.LOOP_MAX_ITERATIONS == 50
 
+    @pytest.mark.parametrize(
+        ("configured", "expected"),
+        [(0, 0), (None, None)],
+    )
+    def test_council_history_limit_loads_boundary_values(
+        self, tmp_path, configured, expected,
+    ):
+        """Council history accepts disabled and unlimited retention."""
+        sf = tmp_path / "settings.json"
+        sf.write_text(json.dumps({"COUNCIL_HISTORY_LIMIT": configured}))
+
+        with patch("infinidev.config.settings.SETTINGS_FILE", sf):
+            loaded = Settings.load_user_settings()
+
+        assert loaded.COUNCIL_HISTORY_LIMIT is expected
+
+    def test_council_history_limit_accepts_null_environment_value(self):
+        """Environment configuration can explicitly select unlimited retention."""
+        with patch.dict(
+            os.environ,
+            {"INFINIDEV_COUNCIL_HISTORY_LIMIT": "null"},
+        ):
+            loaded = Settings()
+
+        assert loaded.COUNCIL_HISTORY_LIMIT is None
+
+    def test_council_history_limit_rejects_negative_value(self, tmp_path):
+        """Council history cannot be configured with a negative limit."""
+        sf = tmp_path / "settings.json"
+        sf.write_text(json.dumps({"COUNCIL_HISTORY_LIMIT": -1}))
+
+        with patch("infinidev.config.settings.SETTINGS_FILE", sf):
+            with pytest.raises(ValidationError):
+                Settings.load_user_settings()
+
     def test_env_var_override(self):
         """Env var INFINIDEV_LLM_MODEL takes precedence."""
         with patch.dict(os.environ, {"INFINIDEV_LLM_MODEL": "env/override"}):
@@ -88,11 +124,14 @@ class TestSettings:
         """reload_all() updates the global settings object."""
         sf = tmp_path / "settings.json"
         sf.write_text(json.dumps({"LOOP_MAX_ITERATIONS": 99}))
-        original = settings.LOOP_MAX_ITERATIONS
-        with patch("infinidev.config.settings.SETTINGS_FILE", sf):
-            reload_all()
-        assert settings.LOOP_MAX_ITERATIONS == 99
-        settings.LOOP_MAX_ITERATIONS = original
+        original = settings.model_dump()
+        try:
+            with patch("infinidev.config.settings.SETTINGS_FILE", sf):
+                reload_all()
+            assert settings.LOOP_MAX_ITERATIONS == 99
+        finally:
+            for key, value in original.items():
+                setattr(settings, key, value)
 
 
 # ── LLM Config ───────────────────────────────────────────────────────────────
@@ -110,14 +149,15 @@ class TestLLMConfig:
 
     def test_auto_correct_ollama_prefix(self):
         """ollama/ prefix is corrected to ollama_chat/."""
-        orig = settings.LLM_MODEL
+        original = (settings.LLM_PROVIDER, settings.LLM_MODEL)
+        settings.LLM_PROVIDER = "ollama"
         settings.LLM_MODEL = "ollama/test-model"
         try:
             from infinidev.config.llm import get_litellm_params
             params = get_litellm_params()
             assert params["model"].startswith("ollama_chat/")
         finally:
-            settings.LLM_MODEL = orig
+            settings.LLM_PROVIDER, settings.LLM_MODEL = original
 
     def test_empty_model_raises(self):
         """Empty LLM_MODEL raises RuntimeError."""

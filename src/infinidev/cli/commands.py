@@ -249,13 +249,21 @@ def _render_background_tasks_classic(task_id: str | None = None) -> None:
 
 def _render_agents_classic(parts: list[str]) -> None:
     """List councils or print one debate/member transcript."""
-    from infinidev.engine.council.observer import get_council, list_councils
+    from infinidev.engine.council.observer import (
+        council_eviction_count,
+        get_council,
+        list_councils,
+    )
 
-    councils = list_councils()
-    if not councils:
-        click.echo(click.style("No councils have run in this process.", dim=True))
-        return
     if not parts:
+        councils = list_councils(include_messages=False)
+        evicted = council_eviction_count()
+        if not councils:
+            message = "No recent councils are retained." if evicted else (
+                "No councils have run in this process."
+            )
+            click.echo(click.style(message, dim=True))
+            return
         click.echo(click.style("Councils and agents", bold=True))
         for council in councils:
             click.echo(
@@ -266,6 +274,10 @@ def _render_agents_classic(parts: list[str]) -> None:
                     f"    {member['member_id']} · {member.get('persona', '')} "
                     f"[{member.get('status', 'waiting')}]"
                 )
+        if evicted:
+            click.echo(click.style(
+                f"\n{evicted} older council transcript(s) were evicted.", dim=True,
+            ))
         click.echo("\nUse /agents <council-id> [member-id] to inspect a transcript.")
         return
 

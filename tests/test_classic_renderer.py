@@ -260,6 +260,20 @@ def test_loop_start_resets_stale_token_counters(renderer, fresh_bus, status):
     assert status.iteration == 0
 
 
+def test_council_finished_promises_only_recent_transcript(renderer, fresh_bus, capsys):
+    fresh_bus.emit(
+        "council_finished",
+        1,
+        "agent-a",
+        {"council": {"id": "council-7", "status": "completed"}},
+    )
+
+    out = capsys.readouterr().out
+    assert "council-7 completed" in out
+    assert "recent transcript in /agents" in out
+    assert "transcript kept" not in out
+
+
 def test_flush_think_does_not_truncate_long_tail(renderer, fresh_bus, capsys):
     long_thought = "x" * 500  # > 320, no newline → kept as the buffered tail
     fresh_bus.emit("loop_thinking_chunk", 1, "agent-a", {"text": long_thought})

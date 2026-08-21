@@ -7,7 +7,7 @@ from typing import Any, Callable
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from infinidev.engine.council.observer import list_councils
+from infinidev.engine.council import observer
 from infinidev.ui.theme import ACCENT, PRIMARY, SUCCESS, TEXT, TEXT_DIM, TEXT_MUTED
 
 
@@ -21,7 +21,7 @@ class AgentsBrowserControl(FormattedTextControl):
 
     def entries(self) -> list[tuple[str, str | None, dict[str, Any]]]:
         entries: list[tuple[str, str | None, dict[str, Any]]] = []
-        for council in list_councils(include_messages=False):
+        for council in observer.list_councils(include_messages=False):
             entries.append((council["id"], None, council))
             for member in council.get("members", {}).values():
                 entries.append((council["id"], member.get("member_id"), member))
@@ -41,7 +41,13 @@ class AgentsBrowserControl(FormattedTextControl):
 
     def _fragments(self) -> FormattedText:
         entries = self.entries()
+        evicted = observer.council_eviction_count()
         if not entries:
+            if evicted:
+                return FormattedText([
+                    (TEXT_MUTED, " No recent councils are retained.\n"),
+                    (TEXT_DIM, f" {evicted} older council transcript(s) were evicted."),
+                ])
             return FormattedText([
                 (TEXT_MUTED, " No councils have run in this process.\n"),
                 (TEXT_DIM, " Start a council and its agents will appear here."),
@@ -71,6 +77,11 @@ class AgentsBrowserControl(FormattedTextControl):
                 fragments.append((base, f"{marker}  {member_id} · {persona}"))
                 fragments.append((colour, f"  {status}\n"))
                 fragments.append((TEXT_MUTED, f"      {objective[:96]}\n"))
+        if evicted:
+            fragments.append((
+                TEXT_DIM,
+                f"\n {evicted} older council transcript(s) were evicted.\n",
+            ))
         fragments.append((TEXT_DIM, "\n ↑/↓ select   Enter open tab   Esc close"))
         return FormattedText(fragments)
 

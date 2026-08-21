@@ -1,6 +1,6 @@
 [project]
 name = "infinidev"
-version = "0.18.1"
+version = "0.19.0"
 description = "A terminal-based AI programming tool using agent loops."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -60,6 +60,7 @@ dependencies = [
     "tree-sitter-kotlin>=1.1.0",
     "wordfreq>=3.1.1",
     "langdetect>=1.0.9",
+    "ken-rank>=0.13.1",
 ]
 
 [project.urls]

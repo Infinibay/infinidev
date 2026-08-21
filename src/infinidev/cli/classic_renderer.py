@@ -374,7 +374,7 @@ class ClassicRenderer:
         council = data.get("council") or {}
         status = council.get("status", "completed")
         self._println(_dim(
-            f"Council {council.get('id', '')} {status} — transcript kept in /agents"
+            f"Council {council.get('id', '')} {status} — recent transcript in /agents"
         ))
 
     # ── Internals ─────────────────────────────────────────────────────

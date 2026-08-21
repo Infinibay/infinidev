@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -455,6 +455,18 @@ class Settings(BaseSettings):
     # separately capped low (it just needs to read the digest and vote).
     COUNCIL_MODERATOR_MAX_ITERS: int = 60
     COUNCIL_MAX_CONCURRENCY: int = 4  # members run in parallel up to this many
+    # Keep recent completed transcripts inspectable without retaining them forever.
+    # Set to null in settings.json to restore unlimited process-local history.
+    COUNCIL_HISTORY_LIMIT: int | None = Field(default=100, ge=0)
+
+    @field_validator("COUNCIL_HISTORY_LIMIT", mode="before")
+    @classmethod
+    def _parse_optional_council_history_limit(cls, value: object) -> object:
+        """Accept an explicit ``null`` string from environment configuration."""
+        if isinstance(value, str) and value.strip().lower() == "null":
+            return None
+        return value
+
     # Off by default: the chat agent may PROPOSE a council on complexity,
     # but auto-triggering without a user signal risks the model's own
     # over-estimation. Reserved for a future opt-in.

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
-import torch
+
+
+torch = pytest.importorskip("torch")
 
 from bench.fit_static_query_projection_spanish import clamp_projection_delta
 
