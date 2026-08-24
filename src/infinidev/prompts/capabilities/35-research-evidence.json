@@ -1,0 +1,10 @@
+{
+  "id": "capability.research_evidence",
+  "reason": "the task asks for current facts, comparisons, recommendations, or external research",
+  "guidance": [
+    "Prefer current primary sources and attach material claims to the evidence that supports them.",
+    "Separate direct observations from inference, record conflicts and unavailable evidence, and state",
+    "when freshness cannot be established. Research or analysis does not authorize modifying code or",
+    "external state unless the request independently grants that authority."
+  ]
+}

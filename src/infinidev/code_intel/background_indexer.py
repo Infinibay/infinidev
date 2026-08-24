@@ -9,9 +9,12 @@ isolated tool invocations).
 
 This module is the bridge:
 
-  * :func:`set_global_queue` — called once at process start (e.g.
-    by ``cli.main``) with a started ``IndexQueue`` instance.
+  * :func:`set_global_queue` — replaces the registration explicitly.
   * :func:`get_global_queue` — for introspection / tests.
+  * :func:`acquire_global_queue` — atomically registers a queue only when
+    no other instance owns the process-wide slot.
+  * :func:`release_global_queue` — atomically clears a queue only while
+    it remains the registered instance.
   * :func:`enqueue_or_sync` — the public entry point for tools.
     Pushes the path to the global queue if one is running; otherwise
     falls back to a synchronous ``ensure_indexed`` call so callers
@@ -56,6 +59,31 @@ def get_global_queue() -> "IndexQueue | None":
         return _global_queue
 
 
+def acquire_global_queue(queue: "IndexQueue") -> bool:
+    """Register *queue* unless another running queue owns the global slot."""
+    global _global_queue
+    with _lock:
+        if _global_queue is not None and _global_queue.is_running():
+            return False
+        _global_queue = queue
+        return True
+
+
+def release_global_queue(queue: "IndexQueue") -> bool:
+    """Clear *queue* if it is still the registered instance.
+
+    Returns ``True`` when the queue was released. A different queue may be
+    registered while the caller stops its worker; in that case this leaves the
+    replacement untouched and returns ``False``.
+    """
+    global _global_queue
+    with _lock:
+        if _global_queue is not queue:
+            return False
+        _global_queue = None
+        return True
+
+
 def enqueue_or_sync(
     project_id: int,
     file_path: str,
@@ -76,12 +104,19 @@ def enqueue_or_sync(
     and swallowed, just like the previous in-line behaviour.
     """
     queue = get_global_queue()
-    if queue is not None and queue.is_running() and queue._project_id == project_id:
+    if queue is not None and queue.project_id == project_id:
         try:
-            queue.enqueue(file_path, notify_integrity=notify_integrity)
-            return
-        except Exception as exc:
-            logger.debug("background_indexer: enqueue failed for %s: %s", file_path, exc)
+            if queue.enqueue_if_running(
+                file_path,
+                notify_integrity=notify_integrity,
+            ):
+                return
+        except Exception:
+            logger.debug(
+                "background_indexer: enqueue failed for %s",
+                file_path,
+                exc_info=True,
+            )
             # Fall through to sync fallback below.
 
     # Sync fallback — same code path as before this module existed.
@@ -90,8 +125,18 @@ def enqueue_or_sync(
         ensure_indexed(
             project_id, file_path, notify_integrity=notify_integrity,
         )
-    except Exception as exc:
-        logger.debug("background_indexer: sync index failed for %s: %s", file_path, exc)
+    except Exception:
+        logger.debug(
+            "background_indexer: sync index failed for %s",
+            file_path,
+            exc_info=True,
+        )
 
 
-__all__ = ["set_global_queue", "get_global_queue", "enqueue_or_sync"]
+__all__ = [
+    "set_global_queue",
+    "get_global_queue",
+    "acquire_global_queue",
+    "release_global_queue",
+    "enqueue_or_sync",
+]

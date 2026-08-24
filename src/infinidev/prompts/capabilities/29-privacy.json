@@ -1,0 +1,10 @@
+{
+  "id": "capability.privacy",
+  "reason": "the task handles personal, sensitive, retained, uploaded, or logged data",
+  "guidance": [
+    "Minimize collection, exposure, and retention to what the requested behavior requires. Trace every",
+    "local persistence, diagnostic, and external-transmission path; redact sensitive fields and require",
+    "current authority before sending data to another service. Verify the changed path without exposing",
+    "real user data or secrets."
+  ]
+}

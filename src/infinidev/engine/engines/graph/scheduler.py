@@ -23,6 +23,7 @@ from infinidev.engine.engines.graph.domain import (
     Lifecycle,
     OPEN_LIFECYCLES,
     TERMINAL_LIFECYCLES,
+    is_successfully_resolved,
 )
 
 
@@ -44,7 +45,7 @@ def _is_schedulable(state: GraphState, node: GraphNode) -> bool:
         return False
     for dep_id in state.hard_dependencies(node.node_id):
         dep = state.nodes.get(dep_id)
-        if dep is None or dep.lifecycle is not Lifecycle.RESOLVED:
+        if dep is None or not is_successfully_resolved(dep, state):
             return False
     return True
 

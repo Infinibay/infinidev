@@ -24,6 +24,7 @@ from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.engine.orchestration.pipeline import run_task
 from infinidev.engine.analysis.plan import Plan, PlanStepSpec
+from infinidev.engine.analysis.review_engine import ReviewResult
 from infinidev.engine.analysis.staged_planning import (
     CompleteGoalDecision,
     EmitStageDecision,
@@ -125,6 +126,8 @@ class _FakeEngine:
         self.captured_initial_plan: Plan | None = None
         self.captured_task_prompt: tuple[str, str] | None = None
         self._files_changed = False
+        self._last_status = "completed"
+        self.is_cancelled = False
 
     def execute(
         self,
@@ -151,9 +154,36 @@ class _FakeEngine:
     def has_file_changes(self) -> bool:
         return self._files_changed
 
+    def get_file_contents(self) -> dict[str, str]:
+        return {}
+
+    def get_file_tracker(self):
+        return None
+
+    def get_changed_files_summary(self) -> str:
+        return ""
+
+    def get_file_change_reasons(self) -> dict[str, list[str]]:
+        return {}
+
+    def get_plan_steps(self) -> list[dict[str, Any]]:
+        return []
+
+    def get_objective_checks(self) -> list[dict[str, Any]]:
+        return []
+
 
 class _FakeReviewer:
-    pass
+    can_review_again = False
+
+    def reset(self) -> None:
+        pass
+
+    def _should_multi_pass(self, *_args) -> bool:
+        return False
+
+    def review(self, **_kwargs) -> ReviewResult:
+        return ReviewResult(verdict="APPROVED", summary="Approved by test reviewer.")
 
 
 class _SnapshotReviewer:

@@ -1,0 +1,9 @@
+{
+  "id": "capability.configuration_change",
+  "reason": "the task changes configuration, defaults, feature flags, or environment values",
+  "guidance": [
+    "Trace precedence, defaults, validation, and every consumer before editing configuration behavior.",
+    "Preserve secret boundaries and exercise absent, invalid, explicit, and legacy values at the changed",
+    "entry point. Document only user-visible controls that the implementation actually reads."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "capability.change_preservation",
+  "reason": "a narrow update affects an existing artifact with unrelated content or a dirty working tree",
+  "guidance": [
+    "Read the current artifact before editing, identify what must remain unchanged, and make the",
+    "smallest local transformation. Inspect the resulting diff for deletions, generated files,",
+    "binaries, and unrelated changes; restore capture artifacts rather than normalizing them."
+  ]
+}

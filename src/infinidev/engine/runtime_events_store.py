@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +34,10 @@ def _ensure_table() -> None:
             "CREATE INDEX IF NOT EXISTS runtime_events_session_idx "
             "ON runtime_events(session_id, created_at);"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS runtime_events_task_idx "
+            "ON runtime_events(session_id, task_id, created_at)"
+        )
         # execute_with_retry leaves committing to the caller.
         conn.commit()
 
@@ -47,6 +52,13 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_safe(asdict(value))
+    if hasattr(value, "model_dump"):
+        try:
+            return _json_safe(value.model_dump(mode="json"))
+        except Exception:
+            return repr(value)
     if hasattr(value, "to_dict"):
         try:
             return _json_safe(value.to_dict())
@@ -100,21 +112,29 @@ def list_events(
     if not session_id:
         return []
     try:
+        requested_limit = int(limit)
+        if requested_limit <= 0:
+            return []
         _ensure_table()
 
         def _select(conn):
             if task_id:
                 return conn.execute(
-                    "SELECT id, task_id, event, payload, created_at "
-                    "FROM runtime_events WHERE session_id = ? AND task_id = ? "
-                    "ORDER BY created_at ASC LIMIT ?",
-                    (session_id, task_id, int(limit)),
+                    "SELECT id, task_id, event, payload, created_at FROM ("
+                    " SELECT rowid AS sequence, id, task_id, event, payload, "
+                    " created_at FROM runtime_events "
+                    " WHERE session_id = ? AND task_id = ? "
+                    " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+                    ") ORDER BY created_at ASC, sequence ASC",
+                    (session_id, task_id, requested_limit),
                 ).fetchall()
             return conn.execute(
-                "SELECT id, task_id, event, payload, created_at "
-                "FROM runtime_events WHERE session_id = ? "
-                "ORDER BY created_at ASC LIMIT ?",
-                (session_id, int(limit)),
+                "SELECT id, task_id, event, payload, created_at FROM ("
+                " SELECT rowid AS sequence, id, task_id, event, payload, "
+                " created_at FROM runtime_events WHERE session_id = ? "
+                " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+                ") ORDER BY created_at ASC, sequence ASC",
+                (session_id, requested_limit),
             ).fetchall()
 
         rows = execute_with_retry(_select)

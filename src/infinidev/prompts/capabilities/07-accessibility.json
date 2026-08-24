@@ -1,0 +1,9 @@
+{
+  "id": "capability.accessibility",
+  "reason": "the current task changes an interactive user interface",
+  "guidance": [
+    "Preserve keyboard operation, readable labels, focus order, and existing non-visual interaction",
+    "paths. Check the changed flow without relying only on color, pointer input, animation, or a",
+    "screenshot. Treat accessibility as observable behavior, and report only the checks actually run."
+  ]
+}

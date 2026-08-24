@@ -1,0 +1,9 @@
+{
+  "id": "capability.handoff",
+  "reason": "work will continue across sessions, agents, or maintainers",
+  "guidance": [
+    "Record the current state, authoritative decisions, changed artifacts, observed evidence,",
+    "unresolved risks, and the exact next verification. Distinguish facts from assumptions and stale",
+    "leads, so the next worker can resume without repeating work or treating planned steps as complete."
+  ]
+}

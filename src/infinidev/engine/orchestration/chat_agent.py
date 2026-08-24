@@ -768,64 +768,236 @@ def _fallback_respond(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-# Session ids queued for a one-shot full-history replay. Set by the
-# resume path (`-c`/`--resume`) so the FIRST turn after reopening a
-# session shows the model the entire prior conversation, not just the
-# usual 6-turn tail. Consumed once, then the session reverts to the
-# normal compact window — so continuity is paid for exactly once.
-_FULL_HISTORY_ONCE: set[str] = set()
-_RESUME_HISTORY_LIMIT = 200
+# Session ids queued for a one-shot resume-context replay. The complete
+# transcript remains display-only; the routing model receives a compact tail
+# plus the durable active-Step checkpoint.
+_RESUME_CONTEXT_ONCE: set[str] = set()
+_RESUME_EVENT_LIMIT = 32
+_RESUME_SNAPSHOT_MAX_UTF8_BYTES = 512 * 1024
+_PROVIDER_TEXT_SAFETY_CHARS = 8_000_000
+
+
+def request_resume_context_once(session_id: str) -> None:
+    """Queue one compact execution checkpoint for the next routed turn."""
+    if session_id:
+        _RESUME_CONTEXT_ONCE.add(session_id)
 
 
 def request_full_history_once(session_id: str) -> None:
-    """Make the next ``_build_user_message`` for ``session_id`` replay the
-    full conversation instead of the 6-turn tail. Idempotent."""
-    if session_id:
-        _FULL_HISTORY_ONCE.add(session_id)
+    """Backward-compatible alias for the pre-checkpoint resume API."""
+    request_resume_context_once(session_id)
+
+
+def _clip_resume_text(value: Any, limit: int = 8_000) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    marker = "\n[...resume data truncated...]\n"
+    remaining = max(0, limit - len(marker))
+    head = remaining // 2
+    return text[:head] + marker + text[-(remaining - head):]
+
+
+def _bound_resume_value(value: Any, *, depth: int = 0) -> Any:
+    if depth >= 6:
+        return _clip_resume_text(value, 2_000)
+    if isinstance(value, str):
+        return _clip_resume_text(value)
+    if isinstance(value, dict):
+        return {
+            str(key): _bound_resume_value(item, depth=depth + 1)
+            for key, item in list(value.items())[-64:]
+            if not str(key).startswith("_")
+        }
+    if isinstance(value, (list, tuple)):
+        return [
+            _bound_resume_value(item, depth=depth + 1)
+            for item in list(value)[-64:]
+        ]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _clip_resume_text(value, 2_000)
+
+
+def _compact_staged_state(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    goal = value.get("goal") if isinstance(value.get("goal"), dict) else {}
+    stages = value.get("stages") if isinstance(value.get("stages"), list) else []
+    active_stage = stages[-1] if stages and isinstance(stages[-1], dict) else {}
+    tasks = active_stage.get("tasks")
+    tasks = tasks if isinstance(tasks, list) else []
+    compact_tasks = []
+    for raw in tasks[-20:]:
+        if not isinstance(raw, dict):
+            continue
+        spec = raw.get("spec") if isinstance(raw.get("spec"), dict) else {}
+        compact_tasks.append({
+            "id": spec.get("id"),
+            "title": _clip_resume_text(spec.get("title", ""), 500),
+            "status": raw.get("status"),
+            "attempts": raw.get("attempts"),
+            "error": _clip_resume_text(raw.get("error", ""), 1_000),
+        })
+    evidence = []
+    for raw in list(value.get("evidence") or [])[-12:]:
+        if isinstance(raw, dict):
+            evidence.append({
+                "id": raw.get("id"),
+                "kind": raw.get("kind"),
+                "summary": _clip_resume_text(raw.get("summary", ""), 1_000),
+            })
+    stage_spec = (
+        active_stage.get("spec")
+        if isinstance(active_stage.get("spec"), dict)
+        else {}
+    )
+    return {
+        "status": value.get("status"),
+        "goal": {
+            "title": _clip_resume_text(goal.get("title", ""), 500),
+            "user_request": _clip_resume_text(goal.get("user_request", ""), 4_000),
+        },
+        "active_stage": {
+            "id": active_stage.get("id"),
+            "number": active_stage.get("number"),
+            "title": _clip_resume_text(stage_spec.get("title", ""), 500),
+            "status": active_stage.get("status"),
+            "tasks": compact_tasks,
+        },
+        "recent_evidence": evidence,
+    }
+
+
+def _resume_event_window(
+    raw_messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Return only the active Step tail, with a legacy-turn fallback."""
+    marker_index: int | None = None
+    user_index: int | None = None
+    for index in range(len(raw_messages) - 1, -1, -1):
+        raw = raw_messages[index]
+        if not isinstance(raw, dict):
+            continue
+        msg_type = str(raw.get("type") or "")
+        sender = str(raw.get("sender") or "")
+        if msg_type == "step_checkpoint":
+            marker_index = index
+            break
+        if user_index is None and (msg_type == "user" or sender == "You"):
+            user_index = index
+
+    start = marker_index if marker_index is not None else (
+        (user_index + 1) if user_index is not None else 0
+    )
+    events: list[dict[str, Any]] = []
+    for raw in raw_messages[start:]:
+        if not isinstance(raw, dict):
+            continue
+        message = {
+            key: value for key, value in raw.items()
+            if not str(key).startswith("_")
+        }
+        sender = str(message.get("sender") or "")
+        msg_type = str(message.get("type") or "")
+        if msg_type in {"banner", "user"}:
+            continue
+        if msg_type == "agent" and sender in {"Infinidev", "You"}:
+            continue
+        if message.get("running"):
+            message["running"] = False
+            message["error"] = (
+                message.get("error")
+                or "Interrupted before the previous session closed."
+            )
+        bounded = _bound_resume_value(message)
+        if isinstance(bounded, dict):
+            events.append(bounded)
+
+    omitted = max(0, len(events) - _RESUME_EVENT_LIMIT)
+    return events[-_RESUME_EVENT_LIMIT:], omitted
 
 
 def _get_resumed_state_snapshot(session_id: str) -> str:
-    """Serialize non-conversational execution state for one resume prompt.
+    """Serialize a bounded active-Step checkpoint for the routing model.
 
-    The provider cannot safely receive historical tool calls as native
-    assistant/tool messages: most APIs require perfectly paired call ids and
-    ordering. A delimited JSON snapshot preserves the complete arguments,
-    results, intermediate messages, task, and plan without violating that
-    protocol. User/final-agent rows are omitted because ``turns`` already
-    carries them.
+    The full structured transcript is restored only in the UI. Historical
+    provider-native tool calls cannot be replayed safely across a process
+    boundary, and concatenating an hours-long ledger can exceed provider
+    per-block limits even when every individual event is modest.
     """
     from infinidev.db.service import (
         get_session_messages,
         get_session_runtime_state,
     )
+    from infinidev.engine.loop.resume_checkpoint import (
+        compact_checkpoint_for_chat,
+    )
 
     runtime = get_session_runtime_state(session_id)
-    events: list[dict[str, Any]] = []
-    for raw_message in get_session_messages(session_id):
-        message = {
-            key: value
-            for key, value in raw_message.items()
-            if not str(key).startswith("_")
-        }
-        sender = str(message.get("sender") or "")
-        msg_type = str(message.get("type") or "")
-        if msg_type == "banner":
-            continue
-        if msg_type == "user" or (
-            msg_type == "agent" and sender in {"Infinidev", "You"}
-        ):
-            continue
-        events.append(message)
-
+    events, omitted = _resume_event_window(get_session_messages(session_id))
+    ui_state = runtime.get("ui_state") or {}
+    loop_resume = compact_checkpoint_for_chat(
+        ui_state.get("loop_resume") if isinstance(ui_state, dict) else None
+    )
     snapshot = {
-        "task_description": runtime.get("task_description", ""),
-        "plan_steps": runtime.get("plan_steps", []),
-        "staged_planning": runtime.get("staged_planning", {}),
-        "intermediate_events": events,
+        "task_description": _clip_resume_text(
+            runtime.get("task_description", ""), 8_000
+        ),
+        "plan_steps": _bound_resume_value(runtime.get("plan_steps", [])),
+        "staged_planning": _compact_staged_state(
+            runtime.get("staged_planning", {})
+        ),
+        "loop_resume": loop_resume,
+        "active_step_events": events,
+        "events_omitted_before_active_tail": omitted,
     }
     if not any(snapshot.values()):
         return ""
-    return json.dumps(snapshot, ensure_ascii=False, default=str)
+
+    def encode() -> bytes:
+        return json.dumps(
+            snapshot, ensure_ascii=False, default=str, separators=(",", ":")
+        ).encode("utf-8")
+
+    payload = encode()
+    while (
+        len(payload) > _RESUME_SNAPSHOT_MAX_UTF8_BYTES
+        and snapshot["active_step_events"]
+    ):
+        snapshot["active_step_events"].pop(0)
+        snapshot["events_omitted_before_active_tail"] += 1
+        payload = encode()
+
+    if len(payload) > _RESUME_SNAPSHOT_MAX_UTF8_BYTES:
+        snapshot["active_step_events"] = []
+        snapshot["staged_planning"] = _bound_resume_value(
+            snapshot["staged_planning"]
+        )
+        payload = encode()
+    if len(payload) > _RESUME_SNAPSHOT_MAX_UTF8_BYTES:
+        snapshot = {
+            "task_description": snapshot["task_description"],
+            "plan_steps": list(snapshot["plan_steps"] or [])[-20:],
+            "loop_resume": snapshot["loop_resume"],
+            "resume_data_truncated": True,
+        }
+        payload = json.dumps(
+            snapshot, ensure_ascii=False, default=str, separators=(",", ":")
+        ).encode("utf-8")
+    return payload.decode("utf-8")
+
+
+def _clip_provider_text(text: str) -> str:
+    if len(text) <= _PROVIDER_TEXT_SAFETY_CHARS:
+        return text
+    marker = (
+        "\n\n[Earlier context omitted because one provider text block has "
+        "a hard size limit.]\n\n"
+    )
+    remaining = _PROVIDER_TEXT_SAFETY_CHARS - len(marker)
+    head = remaining // 3
+    return text[:head] + marker + text[-(remaining - head):]
 
 
 def _build_user_message(
@@ -851,17 +1023,17 @@ def _build_user_message(
     trimmed = user_input.strip()
     turns: list[tuple[str, str]] = []
     resumed_state = ""
-    is_resuming = bool(session_id and session_id in _FULL_HISTORY_ONCE)
+    is_resuming = bool(session_id and session_id in _RESUME_CONTEXT_ONCE)
     if session_id:
         if is_resuming:
-            _FULL_HISTORY_ONCE.discard(session_id)
+            _RESUME_CONTEXT_ONCE.discard(session_id)
         try:
             from infinidev.db.service import get_recent_turns_full
-            # On the first turn of a resumed session, replay everything;
-            # otherwise the usual compact tail. The flag self-consumes.
-            limit = _RESUME_HISTORY_LIMIT if is_resuming else 6
+            # Resume and ordinary turns use the same compact conversation
+            # tail. Execution continuity comes from the Step checkpoint below,
+            # never from replaying an hours-long transcript.
             turns = get_recent_turns_full(
-                session_id, limit=limit, max_chars_per_turn=2000,
+                session_id, limit=6, max_chars_per_turn=2000,
             )
         except Exception as exc:
             logger.warning(
@@ -907,6 +1079,7 @@ def _build_user_message(
         text = "\n".join(lines)
     else:
         text = trimmed
+    text = _clip_provider_text(text)
 
     if attachments:
         from infinidev.engine.multimodal import (

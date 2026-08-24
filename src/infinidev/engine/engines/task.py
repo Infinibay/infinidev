@@ -11,6 +11,10 @@ from infinidev.engine.engines.base import (
     STATUS_BLOCKED,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
+    STATUS_FAILED,
+    get_loop_status,
+    loop_observed_metrics,
+    normalize_loop_status,
 )
 
 
@@ -201,19 +205,18 @@ class TaskAdapter:
             allow_explore=False,
             prompt_configuration=prompt_configuration,
         )
+        loop_status = get_loop_status(used_engine)
+        status = normalize_loop_status(loop_status)
+        closing_loop_status = loop_status
         if getattr(used_engine, "is_cancelled", False):
-            return EngineResult(
-                engine_name=self.name,
-                status=STATUS_CANCELLED,
-                user_message=result,
-                summary="Task execution cancelled by the user.",
-                engine=used_engine,
-                state=getattr(used_engine, "_last_state", None),
-                resume_token=session_id,
+            status = STATUS_CANCELLED
+        elif status == STATUS_FAILED and loop_status != "failed":
+            hooks.on_status(
+                "error",
+                "Task engine returned an empty or unknown terminal status; "
+                "failing closed instead of reporting completion.",
             )
 
-        loop_status = getattr(used_engine, "_last_status", "") or "completed"
-        status = STATUS_BLOCKED if loop_status in {"blocked", "failed", "exhausted"} else STATUS_COMPLETED
         if status == STATUS_COMPLETED:
             result = pipeline_mod._run_review_phase(
                 engine=used_engine,
@@ -235,15 +238,27 @@ class TaskAdapter:
                 },
                 prompt_configuration=prompt_configuration,
             )
-            review_status = getattr(used_engine, "_last_status", "") or "completed"
-            if review_status in {"blocked", "failed", "exhausted"}:
-                status = STATUS_BLOCKED
+            review_status = get_loop_status(used_engine)
+            closing_loop_status = review_status
+            status = normalize_loop_status(review_status)
+            if getattr(used_engine, "is_cancelled", False):
+                status = STATUS_CANCELLED
+            elif status == STATUS_FAILED and review_status != "failed":
+                hooks.on_status(
+                    "error",
+                    "Task review returned an empty or unknown terminal status; "
+                    "failing closed.",
+                )
 
         return EngineResult(
             engine_name=self.name,
             status=status,
             user_message=result,
-            summary=f"Task loop closed {status} (loop status: {loop_status}).",
+            summary=(
+                f"Task loop closed {status} (initial loop status: "
+                f"{loop_status or '<empty>'}; closing loop status: "
+                f"{closing_loop_status or '<empty>'})."
+            ),
             engine=used_engine,
             state=getattr(used_engine, "_last_state", None),
             resume_token=session_id,
@@ -259,6 +274,7 @@ class TaskAdapter:
                     None if settings.TASK_MAX_TOOL_CALLS_PER_STEP <= 0
                     else settings.TASK_MAX_TOOL_CALLS_PER_STEP
                 ),
+                **loop_observed_metrics(used_engine),
             },
         )
 

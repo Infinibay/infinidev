@@ -29,6 +29,7 @@ from infinidev.engine.engines.base import (
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_FAILED,
+    normalize_terminal_message,
 )
 from infinidev.engine.engines.routing import (
     ENGINE_GRAPH_BETA,
@@ -50,6 +51,43 @@ from infinidev.engine.history.digest import (
 logger = logging.getLogger(__name__)
 
 _HANDOFF_CONTEXT_LIMIT = 6000
+_VALID_TERMINAL_STATUSES = frozenset({
+    STATUS_COMPLETED,
+    STATUS_BLOCKED,
+    STATUS_CANCELLED,
+    STATUS_FAILED,
+})
+
+
+def _enforce_status_contract(result: EngineResult, hooks: Any) -> EngineResult:
+    """Normalize valid labels and fail closed on adapter contract violations."""
+    raw_status = getattr(result, "status", "")
+    normalized = str(raw_status or "").strip().lower()
+    if normalized in _VALID_TERMINAL_STATUSES:
+        result.status = normalized
+        result.user_message = normalize_terminal_message(
+            result.user_message, result.status
+        )
+        return result
+
+    invalid_status = str(raw_status or "")
+    result.status = STATUS_FAILED
+    result.metrics = {
+        **result.metrics,
+        "invalid_terminal_status": invalid_status,
+    }
+    diagnostic = (
+        f"Engine adapter {result.engine_name!r} returned invalid terminal "
+        f"status {invalid_status!r}; failed closed."
+    )
+    result.summary = f"{diagnostic} {result.summary}".strip()
+    logger.error(diagnostic)
+    with best_effort("invalid engine status notice failed"):
+        hooks.on_status("error", diagnostic)
+    result.user_message = normalize_terminal_message(
+        result.user_message, result.status
+    )
+    return result
 
 
 def _show_selection(selection: EngineSelection, hooks: Any) -> None:
@@ -265,39 +303,51 @@ def run_selected_engine(
     }
 
     # ── Event log: open the run ────────────────────────────────────────────
+    goal_title = (
+        escalation.user_request.strip().splitlines() or [""]
+    )[0][:120]
     run_id: str | None = None
     with best_effort("engine run registration failed"):
-        run_id = store.create_run(
+        selection_payload = selection.to_payload()
+        initial_events = [
+            store.PendingEvent(
+                ev.RUN_STARTED,
+                {
+                    "mode": selection.requested_mode,
+                    "engine": selection.engine,
+                },
+            ),
+            store.PendingEvent(
+                ev.GOAL_REVISED,
+                {
+                    "title": goal_title,
+                    "revision": 1,
+                    "understanding": escalation.understanding,
+                },
+                goal_revision=1,
+            ),
+            store.PendingEvent(
+                ev.ENGINE_SELECTED,
+                selection_payload,
+            ),
+        ]
+        if escalation.task_profile is not None:
+            initial_events.append(
+                store.PendingEvent(
+                    ev.TASK_PROFILE_RESOLVED,
+                    escalation.task_profile.event_payload(),
+                )
+            )
+        run_id = store.open_run(
             session_id=session_id,
             engine=selection.engine,
+            initial_events=initial_events,
             mode=selection.requested_mode,
-            goal_title=(escalation.user_request.strip().splitlines() or [""])[0][:120],
+            goal_title=goal_title,
             goal_request=escalation.user_request,
             project_id=project_id,
-            selection=selection.to_payload(),
+            selection=selection_payload,
         )
-        store.append_event(
-            run_id, session_id, ev.RUN_STARTED,
-            {"mode": selection.requested_mode, "engine": selection.engine},
-        )
-        store.append_event(
-            run_id, session_id, ev.GOAL_REVISED,
-            {
-                "title": (escalation.user_request.strip().splitlines() or [""])[0][:120],
-                "revision": 1,
-                "understanding": escalation.understanding,
-            },
-            goal_revision=1,
-        )
-        store.append_event(
-            run_id, session_id, ev.ENGINE_SELECTED,
-            selection.to_payload(),
-        )
-        if escalation.task_profile is not None:
-            store.append_event(
-                run_id, session_id, ev.TASK_PROFILE_RESOLVED,
-                escalation.task_profile.event_payload(),
-            )
 
     dispatch["run_id"] = run_id
 
@@ -346,12 +396,14 @@ def run_selected_engine(
             resume_token=session_id,
         )
 
+    result = _enforce_status_contract(result, hooks)
     result, transition_event = _apply_transition(
         result,
         source=selection.engine,
         dispatch=dispatch,
         hooks=hooks,
     )
+    result = _enforce_status_contract(result, hooks)
     result.run_id = run_id
 
     # ── Event log: close the run ───────────────────────────────────────────
@@ -365,28 +417,51 @@ def run_selected_engine(
         STATUS_FAILED: ev.RUN_FAILED,
     }.get(result.status, ev.RUN_FAILED)
 
-    with best_effort("engine run closing events failed"):
-        if result.engine_name == ENGINE_STAGED and result.state is not None:
-            for event_type, node_id, payload in _staged_projection_events(result.state):
+    if result.engine_name == ENGINE_STAGED and result.state is not None:
+        projection_events = _staged_projection_events(result.state)
+        for event_type, node_id, payload in projection_events:
+            with best_effort(
+                "staged projection event %s failed",
+                event_type,
+            ):
                 store.append_event(
-                    run_id, session_id, event_type, payload, node_id=node_id
+                    run_id,
+                    session_id,
+                    event_type,
+                    payload,
+                    node_id=node_id,
                 )
-        if transition_event is not None:
+
+    if transition_event is not None:
+        with best_effort("engine transition event failed"):
             store.append_event(
-                run_id, session_id, ev.ENGINE_SWITCHED,
+                run_id,
+                session_id,
+                ev.ENGINE_SWITCHED,
                 transition_event,
             )
-        store.append_event(
-            run_id, session_id, terminal_event,
-            {
-                "status": result.status,
-                "summary": result.summary,
-                "result_excerpt": (result.user_message or "")[:2000],
-                "metrics": result.metrics,
-            },
+
+    digest: dict[str, Any] = {}
+    with best_effort(
+        "fallback engine digest construction failed",
+        level=logging.WARNING,
+    ):
+        digest = digest_from_outcome(
+            run_id=run_id,
+            engine_name=result.engine_name,
+            mode=selection.requested_mode,
+            status=result.status,
+            goal_title=goal_title,
+            user_request=escalation.user_request,
+            selection=selection.to_payload(),
+            result_text=result.user_message,
         )
 
-        if result.engine_name == ENGINE_STAGED and result.state is not None:
+    if result.engine_name == ENGINE_STAGED and result.state is not None:
+        with best_effort(
+            "staged engine digest construction failed",
+            level=logging.WARNING,
+        ):
             digest = digest_from_staged_state(
                 result.state,
                 run_id=run_id,
@@ -395,21 +470,43 @@ def run_selected_engine(
                 selection=selection.to_payload(),
                 status=result.status,
             )
-        else:
-            digest = digest_from_outcome(
-                run_id=run_id,
-                engine_name=result.engine_name,
-                mode=selection.requested_mode,
-                status=result.status,
-                goal_title=(escalation.user_request.strip().splitlines() or [""])[0][:120],
-                user_request=escalation.user_request,
-                selection=selection.to_payload(),
-                result_text=result.user_message,
-            )
-        if transition_event is not None:
-            digest["engine"]["transitions"] = [transition_event]
-        store.append_event(run_id, session_id, ev.DIGEST_CREATED, digest)
-        store.finish_run(run_id, result.status, digest=digest, metrics=result.metrics)
+
+    if not digest:
+        digest = {
+            "status": result.status,
+            "engine": {
+                "name": result.engine_name,
+                "mode": selection.requested_mode,
+                "transitions": [],
+            },
+            "references": {"run_id": run_id},
+        }
+
+    engine_digest = digest.get("engine")
+    if not isinstance(engine_digest, dict):
+        engine_digest = {}
+        digest["engine"] = engine_digest
+    if transition_event is not None:
+        engine_digest["transitions"] = [transition_event]
+
+    with best_effort(
+        "engine run atomic close failed",
+        level=logging.ERROR,
+    ):
+        store.close_run(
+            run_id,
+            session_id,
+            result.status,
+            terminal_event_type=terminal_event,
+            terminal_payload={
+                "status": result.status,
+                "summary": result.summary,
+                "result_excerpt": (result.user_message or "")[:2000],
+                "metrics": result.metrics,
+            },
+            digest=digest,
+            metrics=result.metrics,
+        )
 
     return result
 

@@ -38,6 +38,7 @@ from infinidev.engine.loop.context import (
 from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.model_context import _get_model_max_context
 from infinidev.engine.loop.models import LoopState
+from infinidev.engine.loop.resume_checkpoint import render_interrupted_step_context
 from infinidev.engine.model_execution_policy import resolve_model_execution_policy
 from infinidev.engine.tool_dispatch import (
     ADD_NOTE_SCHEMA,
@@ -475,6 +476,10 @@ def build_iteration_messages(
             require_step_orientation=getattr(ctx, "require_step_orientation", True),
             prompt_configuration=prompt_configuration,
         )
+        if first_turn and getattr(ctx, "resumed", False):
+            interrupted = render_interrupted_step_context(ctx.state)
+            if interrupted:
+                user_prompt = f"{user_prompt}\n\n{interrupted}"
 
     from infinidev.engine.prompt_composition import measure_prompt_composition
 

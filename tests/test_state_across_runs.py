@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from infinidev.engine.file_change_tracker import FileChangeTracker
 from infinidev.engine.loop.loop_plan import LoopPlan
 from infinidev.engine.loop.models import LoopState
@@ -131,3 +133,29 @@ def test_model_continue_advances_the_plan():
         ctx, StepResult(summary="done", status="continue"), step_mgr, [], 0, 0,
     )
     assert advanced == [True]
+
+# Terminal metadata belongs to one execute() call.
+
+
+def test_execute_clears_stale_terminal_metadata_before_context_setup(
+    monkeypatch,
+):
+    from infinidev.engine.loop.engine import LoopEngine
+
+    engine = LoopEngine()
+    engine._last_status = "done"
+    engine._last_total_tool_calls = 37
+
+    def context_failure(*_args, **_kwargs):
+        raise RuntimeError("context setup failed")
+
+    monkeypatch.setattr(engine, "_build_context", context_failure)
+
+    with pytest.raises(RuntimeError, match="context setup failed"):
+        engine.execute(
+            agent=object(),
+            task_prompt=("Do the task", "Report the result"),
+        )
+
+    assert engine._last_status == ""
+    assert engine._last_total_tool_calls == 0

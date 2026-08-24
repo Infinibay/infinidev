@@ -1,0 +1,10 @@
+{
+  "id": "capability.ai_system_evaluation",
+  "reason": "the task evaluates prompts, agents, retrieval, model routing, or tool-use behavior",
+  "guidance": [
+    "Define representative cases, expected outcomes, and failure labels before comparing systems. Use",
+    "identical inputs and execution conditions, separate model quality from harness and tool failures,",
+    "and retain adverse examples without tuning only to the evaluation set. Report variance, missing",
+    "coverage, and observed trade-offs instead of reducing quality to one unsupported score."
+  ]
+}

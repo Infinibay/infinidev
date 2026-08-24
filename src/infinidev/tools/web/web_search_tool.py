@@ -2,18 +2,20 @@
 
 import collections
 import hashlib
+import threading
 import time
 from typing import Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
+from infinidev.tools.web.web_search_input import WebSearchInput
 
 # Simple in-memory LRU cache (bounded to 256 entries)
 _MAX_CACHE_SIZE = 256
 _search_cache: collections.OrderedDict[str, tuple[float, list]] = collections.OrderedDict()
-from infinidev.tools.web.web_search_input import WebSearchInput
+_search_cache_lock = threading.Lock()
 
 
 class WebSearchTool(InfinibayBaseTool):
@@ -31,11 +33,14 @@ class WebSearchTool(InfinibayBaseTool):
     def _run(self, query: str, num_results: int = 10) -> str:
         # Check cache
         cache_key = hashlib.sha256(f"{query}:{num_results}".encode()).hexdigest()
-        if cache_key in _search_cache:
-            cached_time, cached_results = _search_cache[cache_key]
-            if time.time() - cached_time < settings.WEB_CACHE_TTL_SECONDS:
-                _search_cache.move_to_end(cache_key)  # true LRU: touch on hit
-                return self._success({"results": cached_results, "cached": True})
+        with _search_cache_lock:
+            cached = _search_cache.get(cache_key)
+            if cached is not None:
+                cached_time, cached_results = cached
+                if time.monotonic() - cached_time < settings.WEB_CACHE_TTL_SECONDS:
+                    _search_cache.move_to_end(cache_key)
+                    return self._success({"results": cached_results, "cached": True})
+                del _search_cache[cache_key]
 
         from infinidev.tools.web.backends import search_ddg
 
@@ -49,10 +54,10 @@ class WebSearchTool(InfinibayBaseTool):
         # would pin that failure for the full WEB_CACHE_TTL_SECONDS window and
         # every identical search would be served the empty result from cache.
         if results:
-            if len(_search_cache) >= _MAX_CACHE_SIZE:
-                _search_cache.popitem(last=False)
-            _search_cache[cache_key] = (time.time(), results)
-            _search_cache.move_to_end(cache_key)
+            with _search_cache_lock:
+                while len(_search_cache) >= _MAX_CACHE_SIZE:
+                    _search_cache.popitem(last=False)
+                _search_cache[cache_key] = (time.monotonic(), results)
 
         return self._success({"results": results, "count": len(results)})
 

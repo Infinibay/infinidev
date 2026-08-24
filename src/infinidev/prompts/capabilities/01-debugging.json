@@ -1,0 +1,10 @@
+{
+  "id": "capability.debugging",
+  "reason": "the current task requires diagnosing incorrect behavior",
+  "guidance": [
+    "Reproduce the symptom or establish the failing contract before changing code. Form a narrow",
+    "cause hypothesis from observed evidence, make the smallest corrective change, and rerun the",
+    "same reproducer plus directly affected checks. Do not hide failed attempts or broaden the fix",
+    "to unrelated cleanup."
+  ]
+}

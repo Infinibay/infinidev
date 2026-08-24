@@ -1,11 +1,9 @@
 """Guardrail validation runner for the loop engine.
 
-Extracted verbatim from ``LoopEngine._apply_guardrail`` so the engine
-module stays focused on the loop. Behavior is unchanged: validate the
-final result with the guardrail and, on failure, re-prompt the model
-(with feedback) to produce a corrected result. A guardrail that raises
-is logged loudly (ERROR + traceback) and the *unvalidated* result is
-shipped (fail-open) — same as before.
+Validation and correction run before LoopEngine emits its terminal event, so
+corrective tool calls remain observable and file changes remain tracked. A
+guardrail that raises is logged loudly and the unvalidated result is shipped
+(fail-open), preserving the public fallback policy.
 """
 
 from __future__ import annotations
@@ -30,6 +28,53 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_MAX_GUARDRAIL_CORRECTION_ROUNDS = 8
+_UNBOUNDED_GUARDRAIL_TOOL_FUSE = 16
+
+
+def _tool_call_allowance(
+    ctx: "ExecutionContext",
+    state: "LoopState | None",
+    max_per_action: int,
+    unbounded_calls: int,
+) -> int:
+    """Return the remaining regular-tool allowance for one correction."""
+    allowance = (
+        max_per_action
+        if max_per_action > 0
+        else max(0, _UNBOUNDED_GUARDRAIL_TOOL_FUSE - unbounded_calls)
+    )
+    total_limit = getattr(ctx, "max_total_calls", None)
+    total_used = getattr(state, "total_tool_calls", 0)
+    if isinstance(total_limit, int):
+        allowance = min(allowance, max(0, total_limit - int(total_used or 0)))
+    return allowance
+
+
+def _record_tool_call(state: "LoopState | None") -> None:
+    """Account for a corrective tool call in the owning LoopState."""
+    if state is None:
+        return
+    total = getattr(state, "total_tool_calls", None)
+    if isinstance(total, int):
+        state.total_tool_calls = total + 1
+
+
+def _track_response_usage(ctx: "ExecutionContext", response: Any) -> None:
+    """Reuse the normal loop accounting for corrective LLM calls."""
+    if getattr(response, "usage", None) is None:
+        return
+    from infinidev.engine.loop.llm_caller import LLMCaller
+
+    LLMCaller._track_usage(ctx, response)
+
+
+def _prompt_budget_exhausted(ctx: "ExecutionContext") -> bool:
+    """Return whether another corrective LLM request would cross the run fuse."""
+    limit = getattr(ctx, "max_prompt_tokens", None)
+    used = getattr(getattr(ctx, "state", None), "total_prompt_tokens", 0)
+    return isinstance(limit, int) and int(used or 0) >= limit
+
 
 def apply_guardrail(
     ctx: "ExecutionContext",
@@ -51,7 +96,9 @@ def apply_guardrail(
     if guardrail is None:
         return result
 
-    for attempt in range(max_retries):
+    correction_limit = max(0, int(max_retries))
+    unbounded_tool_calls = 0
+    for attempt in range(correction_limit + 1):
         try:
             validation = guardrail(result)
             # Tuple guardrails return (success, result_or_feedback).
@@ -59,11 +106,18 @@ def apply_guardrail(
                 success, feedback = validation
                 if success:
                     return result
+                if attempt >= correction_limit:
+                    return result
                 # Retry with feedback
                 logger.info(
-                    "Guardrail failed (attempt %d/%d): %s",
-                    attempt + 1, max_retries, str(feedback)[:200],
+                    "Guardrail failed (correction %d/%d): %s",
+                    attempt + 1, correction_limit, str(feedback)[:200],
                 )
+                if _prompt_budget_exhausted(ctx):
+                    logger.warning(
+                        "Guardrail correction skipped: prompt-token budget exhausted"
+                    )
+                    return result
                 feedback_prompt = (
                     f"Your previous output was rejected by validation.\n"
                     f"Feedback: {feedback}\n\n"
@@ -75,14 +129,28 @@ def apply_guardrail(
                     {"role": "user", "content": feedback_prompt},
                 ]
 
-                # Run inner loop for retry
+                # One correction is a bounded micro-loop even when the main
+                # Step has no configured tool-call boundary. The first model
+                # call is always allowed because it may return corrected prose
+                # or step_complete without using a regular tool.
                 step_text = ""
                 action_tool_calls = 0
-                while action_tool_calls < max_per_action:
+                tool_call_allowance = _tool_call_allowance(
+                    ctx,
+                    state,
+                    max_per_action,
+                    unbounded_tool_calls,
+                )
+                tool_budget_exhausted = False
+                for _round in range(_MAX_GUARDRAIL_CORRECTION_ROUNDS):
+                    if _prompt_budget_exhausted(ctx):
+                        return result
                     response = _call_llm(
-                        llm_params, messages,
+                        llm_params,
+                        messages,
                         tool_schemas if tool_schemas else None,
                     )
+                    _track_response_usage(ctx, response)
                     choice = response.choices[0]
                     msg = choice.message
                     tc_list = getattr(msg, "tool_calls", None)
@@ -107,8 +175,9 @@ def apply_guardrail(
                         messages.append(assistant_msg)
                         for tc in tc_list:
                             if tc.function.name == "step_complete":
-                                # Parse final answer from step_complete
-                                sr = _parse_step_complete_args(tc.function.arguments)
+                                sr = _parse_step_complete_args(
+                                    tc.function.arguments
+                                )
                                 step_text = sr.final_answer or sr.summary
                                 messages.append({
                                     "role": "tool",
@@ -116,26 +185,38 @@ def apply_guardrail(
                                     "content": '{"status": "acknowledged"}',
                                 })
                                 break
+                            if action_tool_calls >= tool_call_allowance:
+                                tool_budget_exhausted = True
+                                break
                             _pre_content_g = _capture_pre_content(
-                                tc.function.name, tc.function.arguments, ctx.file_tracker,
+                                tc.function.name,
+                                tc.function.arguments,
+                                ctx.file_tracker,
                             )
+                            action_tool_calls += 1
+                            unbounded_tool_calls += 1
+                            _record_tool_call(state)
                             tc_result = execute_tool_call(
                                 tool_dispatch,
                                 tc.function.name,
                                 tc.function.arguments,
                             )
                             _maybe_emit_file_change(
-                                tc.function.name, tc.function.arguments, tc_result,
-                                _pre_content_g, ctx.file_tracker,
-                                ctx.project_id, ctx.agent_id, hooks,
+                                tc.function.name,
+                                tc.function.arguments,
+                                tc_result,
+                                _pre_content_g,
+                                ctx.file_tracker,
+                                ctx.project_id,
+                                ctx.agent_id,
+                                hooks,
                             )
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc.id,
                                 "content": tc_result,
                             })
-                            action_tool_calls += 1
-                        if step_text:
+                        if step_text or tool_budget_exhausted:
                             break
                     else:
                         step_text = msg.content or ""
@@ -143,9 +224,8 @@ def apply_guardrail(
 
                 result = step_text or result
             else:
-                # Simple bool guardrail
-                if validation:
-                    return result
+                # A boolean guardrail provides no feedback for correction.
+                return result
         except Exception as exc:
             # A guardrail is a correctness check; on a crash we fall through
             # to `return result`, shipping UNVALIDATED output (fail-open).
@@ -155,5 +235,6 @@ def apply_guardrail(
                 "Guardrail raised exception; result is UNVALIDATED: %s",
                 exc, exc_info=True,
             )
+            return result
 
     return result

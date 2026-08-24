@@ -18,6 +18,14 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+TERMINAL_TASK_STATUSES = frozenset({
+    TaskStatus.BLOCKED,
+    TaskStatus.COMPLETED,
+    TaskStatus.FAILED,
+    TaskStatus.CANCELLED,
+})
+
+
 @dataclass(slots=True)
 class TaskItem:
     """A user-visible unit of work with explicit lifecycle metadata."""
@@ -59,6 +67,13 @@ class RuntimeState:
 
     def next_task(self) -> TaskItem | None:
         """Return the first runnable task and mark it active."""
+        if (
+            self.cancelled
+            or self.current_task_id is not None
+            or any(task.status is TaskStatus.ACTIVE for task in self.tasks)
+        ):
+            return None
+
         completed = {
             task.id for task in self.tasks if task.status == TaskStatus.COMPLETED
         }
@@ -73,22 +88,30 @@ class RuntimeState:
         return None
 
     def finish_task(self, task_id: str, result: str = "") -> None:
-        """Mark a task complete and release its dependants."""
-        for task in self.tasks:
-            if task.id == task_id:
-                task.status = TaskStatus.COMPLETED
-                task.result = result
-                break
-        if self.current_task_id == task_id:
-            self.current_task_id = None
+        """Mark the active current task complete and release its dependants."""
+        task = next((item for item in self.tasks if item.id == task_id), None)
+        if task is None:
+            raise KeyError(f"unknown task {task_id!r}")
+        if (
+            task.status is not TaskStatus.ACTIVE
+            or self.current_task_id != task_id
+        ):
+            raise RuntimeError(
+                f"task {task_id!r} is not the active current task"
+            )
+        task.status = TaskStatus.COMPLETED
+        task.result = result
+        self.current_task_id = None
 
     def compact_memory(self, keep: int = 12) -> None:
         """Retain high-value recent memory while leaving chat immutable."""
         active = [entry for entry in self.memory if entry.active]
         ranked = sorted(
-            active, key=lambda entry: (entry.importance, entry.id), reverse=True
+            enumerate(active),
+            key=lambda item: (item[1].importance, item[0]),
+            reverse=True,
         )
-        retained = {entry.id for entry in ranked[:keep]}
+        retained = {entry.id for _, entry in ranked[:max(0, keep)]}
         for entry in self.memory:
             if entry.active and entry.id not in retained:
                 entry.active = False
@@ -98,14 +121,14 @@ class RuntimeState:
         return [entry.content for entry in self.memory if entry.active]
 
     def is_finished(self) -> bool:
-        """Whether all tasks reached a terminal state."""
-        return all(
-            task.status
-            in {
-                TaskStatus.BLOCKED,
-                TaskStatus.COMPLETED,
-                TaskStatus.FAILED,
-                TaskStatus.CANCELLED,
-            }
-            for task in self.tasks
+        """Whether the runtime was cancelled or all scheduled work is terminal."""
+        return self.cancelled or (
+            bool(self.tasks)
+            and all(task.status in TERMINAL_TASK_STATUSES for task in self.tasks)
+        )
+
+    def is_successful(self) -> bool:
+        """Whether every task completed successfully, not merely terminally."""
+        return bool(self.tasks) and all(
+            task.status is TaskStatus.COMPLETED for task in self.tasks
         )

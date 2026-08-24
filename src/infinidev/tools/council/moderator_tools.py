@@ -181,18 +181,17 @@ class SynthesizeBriefInput(BaseModel):
     user_decision_required: bool = Field(
         False,
         description=(
-            "Set True ONLY if the council hit a genuine PRODUCT/DESIGN fork "
-            "that the model must not decide alone (e.g. 'optimise for latency "
-            "or for cost?'). Resolve purely technical questions yourself — "
-            "do NOT punt those to the user. Dissent is the best signal that a "
-            "real user-facing choice exists."
+            "Set True only for a genuine product/design preference worth "
+            "surfacing (for example latency versus cost or a UX choice). "
+            "Still choose a recommended default: Council is advisory and "
+            "does not block execution. Resolve technical questions yourself."
         ),
     )
     open_questions_for_user: list[str] = Field(
         default_factory=list,
         description=(
-            "The concrete questions to ask the user, in their language. "
-            "Required when user_decision_required is True, empty otherwise."
+            "Advisory product questions to surface in the user preview and planner "
+            "brief. Required when user_decision_required is True."
         ),
     )
 

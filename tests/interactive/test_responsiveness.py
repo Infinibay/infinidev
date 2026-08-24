@@ -126,7 +126,7 @@ def test_b_real_task_visible_start():
             # tool call in the chat), or it printed any planning
             # marker. Both are acceptable signs of "loop started".
             s.wait_for(
-                r"(list_directory|Step \d|Planning|Analyzing)",
+                r"(list_directory|Step \d|Planning|Analyzing|Working|Thinking\.\.\.)",
                 timeout=15,
             )
         except pexpect.TIMEOUT:

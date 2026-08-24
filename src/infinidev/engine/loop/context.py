@@ -150,20 +150,29 @@ def build_system_prompt(
             "develop",
             CLI_AGENT_IDENTITY,
             get_variant("loop.identity"),
-            configuration=prompt_configuration,
+            configuration=configuration,
         ) or ""
         protocol = protocol_override or resolve_prompt_fragment(
             "loop.protocol",
             "develop",
             LOOP_PROTOCOL,
             get_variant("loop.protocol"),
-            configuration=prompt_configuration,
+            configuration=configuration,
         ) or ""
         behavior = BEHAVIOR_GUIDELINES
 
     behavior = _profiled_block(behavior, "loop.behavior_guidelines", configuration)
     behavior_parts: list[str] = [part for part in (identity, behavior) if part]
     execution_parts: list[str] = []
+
+    # Optional capabilities are an explicit user choice, so honor them for every
+    # developer model. Unlike automatic tech hints, disabled capabilities add no
+    # tokens and enabled ones must not silently disappear on the compact path.
+    from infinidev.prompts.optional_capabilities import render_optional_capabilities
+
+    optional_capabilities = render_optional_capabilities(configuration)
+    if optional_capabilities:
+        execution_parts.append(optional_capabilities)
 
     # Tech-specific guidelines (skip for small models — too many tokens)
     if tech_hints and not small_model:

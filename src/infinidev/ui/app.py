@@ -37,6 +37,9 @@ from infinidev.ui.handlers.dialogs import DialogManager
 
 logger = logging.getLogger(__name__)
 
+_STREAM_CHECKPOINT_INTERVAL_SECONDS = 1.0
+_STREAM_CHECKPOINT_CHARS = 4096
+
 
 class InfinidevApp:
     """Application state and controller for the Infinidev TUI.
@@ -283,17 +286,14 @@ class InfinidevApp:
     def _repaint_resumed_history(self) -> None:
         """Repaint the complete prior transcript and sidebar state on resume.
 
-        Display-only — costs zero tokens. The model itself gets the full
-        history on its first turn via the replay queued in
-        ``begin_resumed_session`` (chat_agent.request_full_history_once).
+        Display-only — costs zero tokens. The model gets a bounded active-Step checkpoint on
+        its first turn via ``begin_resumed_session``; this complete
+        transcript is never concatenated into a provider request.
         """
         try:
             state = self._resume_request.get("state") or {}
             messages = state.get("messages") or []
             turns = self._resume_request.get("turns") or []
-            if not messages and not turns:
-                return
-
             structured_messages: list[dict[str, Any]] = []
             for raw_message in messages:
                 if not isinstance(raw_message, dict):
@@ -301,7 +301,10 @@ class InfinidevApp:
                 message = dict(raw_message)
                 if message.get("type") == "banner":
                     continue
+                was_streaming = message.get("streaming") is True
                 message["streaming"] = False
+                if was_streaming:
+                    message["_interrupted_stream"] = True
                 if message.get("running"):
                     message["running"] = False
                     message["error"] = (
@@ -314,29 +317,52 @@ class InfinidevApp:
             # conversation turns followed by new structured events. Prepend
             # only turns that are not already represented, preserving the old
             # history without duplicating new user/final-agent messages.
+            # Structured persistence was introduced after conversation_turns,
+            # so it normally covers the newest suffix of a migrated session.
+            # Match from the tail and consume counts: set-style deduplication
+            # drops every old occurrence when identical text appears more than
+            # once but only one structured copy exists.
+            structured_counts: dict[tuple[str, str, str], int] = {}
+            for message in structured_messages:
+                key = (
+                    str(message.get("type") or ""),
+                    str(message.get("sender") or ""),
+                    str(message.get("text") or ""),
+                )
+                structured_counts[key] = structured_counts.get(key, 0) + 1
+
             legacy_messages: list[dict[str, Any]] = []
-            for role, content in turns:
+            for role, content in reversed(turns):
                 msg_type = "user" if role == "user" else "agent"
                 sender = "You" if role == "user" else "Infinidev"
-                duplicate = any(
-                    message.get("type") == msg_type
-                    and message.get("sender") == sender
-                    and message.get("text") == content
-                    for message in structured_messages
+                key = (msg_type, sender, content)
+                remaining = structured_counts.get(key, 0)
+                if remaining:
+                    structured_counts[key] = remaining - 1
+                    continue
+                legacy_messages.append({
+                    "sender": sender,
+                    "text": content,
+                    "type": msg_type,
+                    "streaming": False,
+                })
+            legacy_messages.reverse()
+
+            for message in structured_messages:
+                if not message.pop("_interrupted_stream", False):
+                    continue
+                partial_text = str(message.get("text") or "").rstrip()
+                notice = "_Interrupted before the previous session closed._"
+                message["text"] = (
+                    f"{partial_text}\n\n{notice}" if partial_text else notice
                 )
-                if not duplicate:
-                    legacy_messages.append({
-                        "sender": sender,
-                        "text": content,
-                        "type": msg_type,
-                        "streaming": False,
-                    })
 
             restored_messages = [*legacy_messages, *structured_messages]
             self.chat_messages.extend(restored_messages)
             self.add_message(
                 "System",
-                f"↻ Resumed session {self.session_id[:8]} — "
+                f"↻ Resumed session "
+                f"{self._resume_request.get('display_name') or self.session_id[:8]} — "
                 f"{len(restored_messages)} prior events restored. "
                 "PgUp to browse the full history.",
                 "system",
@@ -465,15 +491,15 @@ class InfinidevApp:
         last = self.chat_messages[-1] if self.chat_messages else None
         if last is not None and last.get("streaming") is True:
             last["streaming"] = False
-            self._persist_session_message(last)
+            self._checkpoint_stream_message(last, force=True)
 
-    def _persist_session_message(self, message: dict[str, Any]) -> None:
+    def _persist_session_message(self, message: dict[str, Any]) -> bool:
         """Best-effort persistence for one structured transcript row."""
         if (
             getattr(self, "_restoring_session", False)
             or not getattr(self, "session_id", "")
         ):
-            return
+            return False
         try:
             from infinidev.db.service import store_session_message
 
@@ -482,10 +508,46 @@ class InfinidevApp:
                 message,
                 message_id=message.get("_resume_message_id"),
             )
-            if message_id is not None:
-                message["_resume_message_id"] = message_id
+            if message_id is None:
+                return False
+            message["_resume_message_id"] = message_id
+            return True
         except Exception:
             logger.debug("session message persistence failed", exc_info=True)
+            return False
+
+    def _checkpoint_stream_message(
+        self,
+        message: dict[str, Any],
+        *,
+        force: bool = False,
+    ) -> None:
+        """Persist partial output without writing SQLite for every chunk."""
+        now = time.monotonic()
+        text_size = len(str(message.get("text") or ""))
+        previous_at = message.get("_stream_checkpoint_at")
+        previous_size = message.get("_stream_checkpoint_chars")
+        first_checkpoint = not (
+            isinstance(previous_at, (int, float))
+            and isinstance(previous_size, int)
+        )
+        interval_due = (
+            not first_checkpoint
+            and now - previous_at >= _STREAM_CHECKPOINT_INTERVAL_SECONDS
+        )
+        size_due = (
+            not first_checkpoint
+            and text_size - previous_size >= _STREAM_CHECKPOINT_CHARS
+        )
+        if not (force or first_checkpoint or interval_due or size_due):
+            return
+
+        if self._persist_session_message(message):
+            message["_stream_checkpoint_at"] = now
+            message["_stream_checkpoint_chars"] = text_size
+            if force:
+                message.pop("_stream_checkpoint_at", None)
+                message.pop("_stream_checkpoint_chars", None)
 
     def _persist_runtime_state(self) -> None:
         """Best-effort persistence for task, plan, and sidebar state."""
@@ -575,15 +637,18 @@ class InfinidevApp:
         ):
             existing = str(last.get("text") or "")
             last["text"] = existing + str(chunk)
+            target = last
         else:
             # A different speaker taking over ends the previous stream.
             self._seal_open_stream()
-            self.chat_messages.append({
+            target = {
                 "sender": sender,
                 "text": str(chunk) if chunk else "",
                 "type": msg_type,
                 "streaming": True,
-            })
+            }
+            self.chat_messages.append(target)
+        self._checkpoint_stream_message(target)
         self._chat_history_control.invalidate_cache()
         try:
             self.invalidate()
@@ -616,7 +681,7 @@ class InfinidevApp:
         if target is None:
             return
         target["streaming"] = False
-        self._persist_session_message(target)
+        self._checkpoint_stream_message(target, force=True)
         self._persist_runtime_state()
         self._chat_history_control.invalidate_cache()
         try:
@@ -1334,6 +1399,19 @@ class InfinidevApp:
         # Signal the engine to stop
         if self.engine:
             self.engine.cancel()
+
+        # Question and /plan workers block on Events outside the engine's
+        # cancellation primitive. Full task cancellation must release both,
+        # otherwise the worker survives forever after the engine is stopped.
+        analysis_event = getattr(self, "_analysis_event", None)
+        if getattr(self, "_analysis_waiting", False) and analysis_event is not None:
+            self._analysis_answer = ""
+            analysis_event.set()
+
+        plan_review_event = getattr(self, "_plan_review_event", None)
+        if getattr(self, "_plan_review_waiting", False) and plan_review_event is not None:
+            self._plan_review_answer = "cancel"
+            plan_review_event.set()
         # Hidden message — stays in chat_messages for context but not rendered
         message = {
             "sender": "System",
@@ -1739,8 +1817,8 @@ class InfinidevApp:
 def _resolve_tui_resume(continue_session: bool, resume: bool) -> dict | None:
     """Resolve -c/--resume BEFORE the full-screen app starts.
 
-    Always returns ``{"session_id", "turns"}`` — a fresh session has an
-    empty ``turns`` list. Registering the id here (fresh or resumed)
+    Returns the session id, display name, turns, and structured state. A fresh
+    session has an empty ``turns`` list. Registering the id here (fresh or resumed)
     means even brand-new TUI sessions land in the registry so a later
     ``-c`` can find them. The ``--resume`` picker prints to the normal
     terminal and reads a line of input here — doing it before app.run()
@@ -1750,27 +1828,34 @@ def _resolve_tui_resume(continue_session: bool, resume: bool) -> dict | None:
 
     chosen: dict | None = None
     if resume:
-        sessions = sr.recent_sessions()
-        if sessions:
-            print("Recent sessions:")
-            for i, s in enumerate(sessions, 1):
-                print(f"  {i}. {sr.session_label(s)}")
+        def _prompt(message: str) -> str:
             try:
-                raw = input("Resume which? (number, or Enter for fresh) ").strip()
+                return input(f"{message} ")
             except (EOFError, KeyboardInterrupt):
-                raw = ""
-            if raw.isdigit() and 1 <= int(raw) <= len(sessions):
-                chosen = sessions[int(raw) - 1]
+                return ""
+
+        chosen = sr.pick_recent_session(_prompt, print)
     elif continue_session:
         chosen = sr.resolve_continue_session()
 
     if not chosen:
         sid = str(uuid.uuid4())
         sr.begin_fresh_session(sid)
-        return {"session_id": sid, "turns": [], "state": {}}
+        return {
+            "session_id": sid,
+            "display_name": sid[:8],
+            "turns": [],
+            "state": {},
+        }
     sid = chosen["session_id"]
     turns = sr.begin_resumed_session(sid)
-    return {"session_id": sid, "turns": turns, "state": sr.resumed_session_state(sid)}
+    display_name = str(chosen.get("title") or "").strip() or sid[:8]
+    return {
+        "session_id": sid,
+        "display_name": display_name,
+        "turns": turns,
+        "state": sr.resumed_session_state(sid),
+    }
 
 
 def run_tui(continue_session: bool = False, resume: bool = False) -> None:

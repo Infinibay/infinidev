@@ -1,0 +1,9 @@
+{
+  "id": "capability.incident_response",
+  "reason": "the user reports an active outage, severe regression, or production incident",
+  "guidance": [
+    "Prioritize authorized containment and evidence preservation before broad repair. Establish impact,",
+    "timeline, and the last known good state; avoid speculative or destructive actions, verify recovery",
+    "from the affected user surface, and record causal follow-up separately from immediate mitigation."
+  ]
+}

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from infinidev.engine.tree.context import INIT_TREE_SCHEMA
 from infinidev.engine.tree.engine import TreeEngine
 from infinidev.engine.tree.models import (
     TreeNode,
@@ -58,6 +60,22 @@ def _mock_response(tool_calls=None, content="", usage_tokens=100):
 
     response.choices = [choice]
     return response
+
+
+def _tree_settings(**overrides):
+    values = {
+        "TREE_BRAINSTORM_INNER_LOOP_MAX": 1,
+        "TREE_INNER_LOOP_MAX": 1,
+        "TREE_BRAINSTORM_TOOL_CALLS_PER_NODE": 2,
+        "TREE_MAX_TOOL_CALLS_PER_NODE": 2,
+        "TREE_BRAINSTORM_MAX_DEPTH": 2,
+        "TREE_MAX_DEPTH": 2,
+        "TREE_MAX_LLM_CALLS": 10,
+        "TREE_MAX_TOOL_CALLS": 10,
+        "TREE_MAX_NODES": 10,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def _patch_engine():
@@ -122,7 +140,6 @@ class TestTreeEngineInit:
                         "state": "solvable",
                         "confidence": "high",
                         "summary": "Use watchdog for file change detection",
-                        "new_facts": [{"content": "watchdog library available", "source_tool": "web_search"}],
                     },
                 }]),
                 # Explore child 1.2
@@ -156,6 +173,8 @@ class TestTreeEngineInit:
             assert "Hot-reload is feasible" in result
             assert "Recommended Approach" in result
             assert mock_store.called
+            stored = json.loads(mock_store.call_args.kwargs["tree_json"])
+            assert stored["current_node_id"] is None
 
 
 class TestTreeEngineDecomposition:
@@ -335,6 +354,295 @@ class TestTreeEngineToolCalls:
             )
 
             assert "Entry point found" in result
+
+    def test_mixed_tool_and_resolve_waits_for_observed_tool_result(self):
+        """A terminal resolution cannot predate results emitted in the same turn."""
+        patches = _patch_engine()
+
+        with patches["llm_params"], patches["caps"], patches["store"] as mock_store, \
+             patches["call_llm"] as mock_llm, \
+             patch(
+                 "infinidev.engine.tree.engine.execute_tool_call",
+                 return_value="observed file content",
+             ):
+            mock_llm.side_effect = [
+                _mock_response(tool_calls=[{
+                    "name": "init_tree",
+                    "arguments": {
+                        "root_problem": "Inspect the entry point",
+                        "sub_problems": [{"problem": "Read main.py"}],
+                    },
+                }]),
+                _mock_response(tool_calls=[
+                    {
+                        "name": "read_file",
+                        "arguments": {"file_path": "src/main.py"},
+                    },
+                    {
+                        "name": "resolve_node",
+                        "arguments": {
+                            "state": "solvable",
+                            "confidence": "high",
+                            "summary": "Premature resolution",
+                        },
+                    },
+                ]),
+                _mock_response(tool_calls=[{
+                    "name": "resolve_node",
+                    "arguments": {
+                        "state": "solvable",
+                        "confidence": "high",
+                        "summary": "Resolution after observing the file",
+                    },
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "synthesize",
+                    "arguments": {
+                        "synthesis": "The entry point was inspected",
+                        "recommended_approach": "Use the observed entry point",
+                    },
+                }]),
+            ]
+
+            TreeEngine().execute(
+                _make_agent(),
+                task_prompt=("Inspect the entry point", "Analysis"),
+            )
+
+            stored = json.loads(mock_store.call_args.kwargs["tree_json"])
+            assert stored["root"]["children"][0]["exploration_summary"] == (
+                "Resolution after observing the file"
+            )
+
+    def test_malformed_resolve_arguments_do_not_resolve_node(self):
+        """Malformed terminal arguments must not default to a successful state."""
+        patches = _patch_engine()
+
+        with patches["llm_params"], patches["caps"], patches["store"] as mock_store, \
+             patches["call_llm"] as mock_llm:
+            mock_llm.side_effect = [
+                _mock_response(tool_calls=[{
+                    "name": "init_tree",
+                    "arguments": {
+                        "root_problem": "Validate resolution",
+                        "sub_problems": [{"problem": "Resolve safely"}],
+                    },
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "resolve_node",
+                    "arguments": "{not valid json",
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "resolve_node",
+                    "arguments": {
+                        "state": "mitigable",
+                        "confidence": "medium",
+                        "summary": "Validated resolution",
+                    },
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "synthesize",
+                    "arguments": {
+                        "synthesis": "Resolution was validated",
+                        "recommended_approach": "Keep the mitigation",
+                    },
+                }]),
+            ]
+
+            TreeEngine().execute(
+                _make_agent(),
+                task_prompt=("Validate resolution", "Analysis"),
+            )
+
+            stored = json.loads(mock_store.call_args.kwargs["tree_json"])
+            child = stored["root"]["children"][0]
+            assert child["state"] == "mitigable"
+            assert child["exploration_summary"] == "Validated resolution"
+
+    def test_new_fact_must_quote_observed_tool_output(self):
+        """A model cannot promote fabricated text into the verified fact ledger."""
+        patches = _patch_engine()
+
+        with patches["llm_params"], patches["caps"], patches["store"] as mock_store, \
+             patches["call_llm"] as mock_llm, \
+             patch(
+                 "infinidev.engine.tree.engine.execute_tool_call",
+                 return_value="def main(): return 42",
+             ):
+            mock_llm.side_effect = [
+                _mock_response(tool_calls=[{
+                    "name": "init_tree",
+                    "arguments": {
+                        "root_problem": "Inspect implementation",
+                        "sub_problems": [{"problem": "Read implementation"}],
+                    },
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "read_file",
+                    "arguments": {"file_path": "src/main.py"},
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "resolve_node",
+                    "arguments": {
+                        "state": "solvable",
+                        "confidence": "high",
+                        "summary": "Claimed a fabricated return value",
+                        "new_facts": [{
+                            "content": "main returns 99",
+                            "evidence": "return 99",
+                            "source_tool": "read_file",
+                        }],
+                    },
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "resolve_node",
+                    "arguments": {
+                        "state": "solvable",
+                        "confidence": "high",
+                        "summary": "Used the observed return value",
+                        "new_facts": [{
+                            "content": "main returns 42",
+                            "evidence": "return 42",
+                            "source_tool": "read_file",
+                        }],
+                    },
+                }]),
+                _mock_response(tool_calls=[{
+                    "name": "synthesize",
+                    "arguments": {
+                        "synthesis": "The implementation was inspected",
+                        "recommended_approach": "Use the observed value",
+                    },
+                }]),
+            ]
+
+            TreeEngine().execute(
+                _make_agent(),
+                task_prompt=("Inspect implementation", "Analysis"),
+            )
+
+            stored = json.loads(mock_store.call_args.kwargs["tree_json"])
+            child = stored["root"]["children"][0]
+            assert child["exploration_summary"] == "Used the observed return value"
+            assert [fact["content"] for fact in child["facts"]] == ["main returns 42"]
+
+    def test_parallel_tool_calls_respect_per_node_budget(self):
+        """One parallel batch cannot execute more tools than the node budget."""
+        tree = TreeState(root=TreeNode(id="1", problem_statement="Inspect files"))
+        settings = _tree_settings()
+        response = _mock_response(tool_calls=[
+            {"name": "read_file", "arguments": {"file_path": f"file_{i}.py"}}
+            for i in range(3)
+        ])
+
+        with patch("infinidev.engine.tree.engine._call_llm", return_value=response), \
+             patch(
+                 "infinidev.engine.tree.engine.execute_tool_call",
+                 return_value="content",
+             ) as execute:
+            TreeEngine()._explore_loop(
+                tree,
+                "Inspect files",
+                "system",
+                [],
+                {"model": "test"},
+                False,
+                {},
+                1,
+                "test_agent",
+                settings,
+                build_prompt_fn=lambda _desc, _tree, _node: "inspect",
+            )
+
+        assert execute.call_count == 2
+        assert tree.total_tool_calls == 2
+
+
+class TestTreeEngineProviderErrors:
+    @pytest.mark.parametrize("arguments", [None, [], 42, object(), "[1, 2]"])
+    def test_non_mapping_tool_arguments_are_rejected_safely(self, arguments):
+        assert TreeEngine()._parse_args(arguments) == {}
+
+    def test_schema_call_retries_invalid_expected_tool_payload(self):
+        tree = TreeState()
+        invalid = _mock_response(tool_calls=[{
+            "name": "init_tree",
+            "arguments": {"root_problem": "Missing decomposition"},
+        }])
+        valid = _mock_response(tool_calls=[{
+            "name": "init_tree",
+            "arguments": {
+                "root_problem": "Valid decomposition",
+                "sub_problems": [{"problem": "Inspect contract"}],
+            },
+        }])
+
+        with patch(
+            "infinidev.engine.tree.engine._call_llm",
+            side_effect=[invalid, valid],
+        ):
+            result = TreeEngine()._call_with_schema(
+                {"model": "test"},
+                [{"role": "user", "content": "initialize"}],
+                [INIT_TREE_SCHEMA],
+                "init_tree",
+                tree,
+                False,
+            )
+
+        assert result is not None
+        assert result["root_problem"] == "Valid decomposition"
+        assert tree.total_llm_calls == 2
+
+    def test_schema_retries_count_every_provider_attempt(self):
+        tree = TreeState()
+        valid = _mock_response(tool_calls=[{
+            "name": "init_tree",
+            "arguments": {
+                "root_problem": "Retry safely",
+                "sub_problems": [{"problem": "Inspect retry"}],
+            },
+        }])
+
+        with patch(
+            "infinidev.engine.tree.engine._call_llm",
+            side_effect=[RuntimeError("temporary outage"), valid],
+        ):
+            result = TreeEngine()._call_with_schema(
+                {"model": "test"},
+                [{"role": "user", "content": "initialize"}],
+                [],
+                "init_tree",
+                tree,
+                False,
+            )
+
+        assert result is not None
+        assert tree.total_llm_calls == 2
+
+    def test_manual_provider_error_exhausts_node_without_crashing(self):
+        tree = TreeState(root=TreeNode(id="1", problem_statement="Inspect files"))
+
+        with patch(
+            "infinidev.engine.tree.engine._call_llm",
+            side_effect=RuntimeError("provider unavailable"),
+        ):
+            TreeEngine()._explore_loop(
+                tree,
+                "Inspect files",
+                "system",
+                [],
+                {"model": "test"},
+                True,
+                {},
+                1,
+                "test_agent",
+                _tree_settings(),
+                build_prompt_fn=lambda _desc, _tree, _node: "inspect",
+            )
+
+        assert tree.root.state == "needs_experiment"
+        assert tree.current_node_id is None
 
 
 class TestExploreSubproblem:

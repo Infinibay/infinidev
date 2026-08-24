@@ -1,0 +1,10 @@
+{
+  "id": "capability.observability",
+  "reason": "the task changes behavior used for production or runtime diagnosis",
+  "guidance": [
+    "Define diagnostics that distinguish success, retry, cancellation, and terminal failure. Preserve",
+    "correlation and original failure context, use structured fields instead of ambiguous prose, and",
+    "exclude credentials or sensitive payloads. Exercise the diagnostic path that operators will use;",
+    "do not infer runtime visibility from a logging call alone."
+  ]
+}

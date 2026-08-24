@@ -100,6 +100,25 @@ def test_read_only_review_selects_review_policy() -> None:
     assert _selected(profile) == {"review.read_only"}
 
 
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "Research caching approaches and write a report only.",
+        "Investiga alternativas de caché y escribe un informe.",
+        "I want you to compare the providers and prepare a recommendation.",
+    ],
+)
+def test_response_only_deliverable_does_not_grant_modify_authority(
+    user_text: str,
+) -> None:
+    profile = resolve_task_profile(user_text)
+
+    assert "research" in profile.operations
+    assert profile.authority == ("answer", "diagnose")
+    assert profile.result == ("report",)
+    assert "modify" not in profile.authority
+
+
 def test_review_report_write_does_not_become_implementation_work() -> None:
     profile = resolve_task_profile(
         "Review auth.py and write REVIEW.md. Report correctness or security blockers "

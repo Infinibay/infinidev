@@ -23,8 +23,9 @@ class Fact(BaseModel):
 
     content: str
     source: Literal["initial", "discovered", "inherited"] = "discovered"
-    evidence: str = ""  # Raw tool output backing this fact
-    source_tool: str = ""  # Which tool produced the evidence
+    evidence: str = ""  # Observed quote or reasoning rationale
+    source_tool: str = ""  # Tool name when support_kind is tool
+    support_kind: Literal["tool", "user", "reasoning"] = "reasoning"
     confidence: Literal["high", "medium", "low"] = "medium"
 
 

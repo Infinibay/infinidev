@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -39,6 +38,52 @@ Rules:
 - anti_patterns: Look for repeated failed tool calls, re-reading same files, loops without progress.
 - If no anti-patterns were observed, set it to empty string.
 """
+
+
+_MAX_SUMMARY_FIELD_CHARS = 500
+_MAX_FILES_TO_PRELOAD = 5
+
+
+def _summary_text(document: dict, field: str, fallback: str = "") -> str:
+    """Return one bounded text field, rejecting non-string model output."""
+    value = document.get(field)
+    if not isinstance(value, str):
+        return fallback
+    value = value.strip()
+    return (value or fallback)[:_MAX_SUMMARY_FIELD_CHARS]
+
+
+def _summary_files(document: dict) -> list[str]:
+    """Return up to five unique, non-empty path strings in model order."""
+    value = document.get("files_to_preload")
+    if not isinstance(value, list):
+        return []
+
+    paths: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        path = item.strip()
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+        if len(paths) >= _MAX_FILES_TO_PRELOAD:
+            break
+    return paths
+
+
+def _normalize_summary(document: dict, fallback_summary: str) -> dict:
+    """Normalize the untrusted JSON object returned by the summarizer model."""
+    return {
+        "summary": _summary_text(document, "summary", fallback_summary),
+        "files_to_preload": _summary_files(document),
+        "changes_made": _summary_text(document, "changes_made"),
+        "discovered": _summary_text(document, "discovered"),
+        "pending": _summary_text(document, "pending"),
+        "anti_patterns": _summary_text(document, "anti_patterns"),
+    }
 
 
 def _summarize_step(
@@ -136,8 +181,8 @@ def _summarize_step(
         response = litellm.completion(**call_kwargs)
         content = response.choices[0].message.content or ""
 
-        # Try to parse as JSON
-        import json as _json
+        # Try to parse as JSON. Every field remains untrusted model output
+        # until _normalize_summary validates its type and bound.
         # Strip markdown code fences if present
         clean = content.strip()
         if clean.startswith("```"):
@@ -150,14 +195,7 @@ def _summarize_step(
 
         parsed = _safe_json_loads(clean)
         if isinstance(parsed, dict):
-            return {
-                "summary": str(parsed.get("summary", step_result.summary))[:500],
-                "files_to_preload": list(parsed.get("files_to_preload", []))[:5],
-                "changes_made": str(parsed.get("changes_made", ""))[:500],
-                "discovered": str(parsed.get("discovered", ""))[:500],
-                "pending": str(parsed.get("pending", ""))[:500],
-                "anti_patterns": str(parsed.get("anti_patterns", ""))[:500],
-            }
+            return _normalize_summary(parsed, step_result.summary)
     except Exception as exc:
         logger.debug("Summarizer call failed, using fallback: %s", str(exc)[:200])
 

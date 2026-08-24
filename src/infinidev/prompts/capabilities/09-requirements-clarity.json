@@ -1,0 +1,10 @@
+{
+  "id": "capability.requirements_clarity",
+  "reason": "the requested outcome is materially ambiguous or has conflicting interpretations",
+  "guidance": [
+    "Separate stated facts, working assumptions, and choices that belong to the user. Inspect the",
+    "named artifact and repository evidence before asking; ask only when an unresolved choice would",
+    "materially change the result. Do not turn ordinary reversible implementation details into",
+    "questions or silently choose among incompatible outcomes."
+  ]
+}

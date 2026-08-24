@@ -24,9 +24,14 @@ def test_bridge_records_tool_call_and_result():
 
 
 def test_bridge_blocks_current_task_on_failure():
-    runtime = TaskRuntime()
+    events: list[dict] = []
+    runtime = TaskRuntime(on_event=events.append, persist_events=False)
     task = runtime.add_task("Work")
     runtime.start_next_task()
     bridge = McpRuntimeBridge(runtime)
     bridge({"event": "failure", "server": "ken", "error": "down", "count": 1})
+
     assert task.status == TaskStatus.BLOCKED
+    assert task.result == "ken failure (1): down"
+    assert runtime.state.current_task_id is None
+    assert any(event["event"] == "task_blocked" for event in events)

@@ -9,12 +9,17 @@ back to the bare summary and ``changes_made`` / ``discovered_context`` /
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from infinidev.engine.loop import step_manager
-from infinidev.engine.loop.models import LoopState, StepResult
+from infinidev.engine.loop.models import (
+    LoopState,
+    MAX_CACHE_CONTENT_SIZE,
+    StepResult,
+)
 
 
 def test_summarize_step_is_resolvable_from_step_manager():
@@ -238,3 +243,140 @@ def test_closure_note_failure_preserves_summary_archive_and_hook_order(
     record = ctx.state.history[-1]
     assert record.summary == "original summary"
     assert record.hook_notes == "hook output"
+
+
+def test_summarizer_preload_is_confined_to_workspace(monkeypatch, ctx, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    inside = workspace / "inside.py"
+    inside.write_text("INSIDE = True\n")
+    outside = tmp_path / "outside-secret.py"
+    outside.write_text("SECRET = True\n")
+    escaping_link = workspace / "outside-link.py"
+    escaping_link.symlink_to(outside)
+    ctx.agent.workspace_path = str(workspace)
+
+    monkeypatch.setattr(
+        step_manager,
+        "_summarize_step",
+        lambda *_args, **_kwargs: {
+            "summary": "choose next files",
+            "files_to_preload": [
+                str(outside),
+                "outside-link.py",
+                "inside.py",
+            ],
+            "changes_made": "",
+            "discovered": "",
+            "pending": "",
+            "anti_patterns": "",
+        },
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_archive_evicted_context",
+        lambda *_args: [],
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_record_outcome",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_step_end_summary_hook",
+        lambda *_args: "",
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_record_command_output_notes",
+        lambda *_args: "",
+    )
+
+    step_manager.StepManager(_Engine()).summarize_and_record(
+        ctx,
+        StepResult(summary="raw", status="continue"),
+        [],
+        0,
+        0,
+    )
+
+    assert set(ctx.state.opened_files) == {"inside.py"}
+    assert ctx.state.opened_files["inside.py"].content == "INSIDE = True\n"
+    assert ctx.state.history[-1].files_to_preload == ["inside.py"]
+
+
+def test_summarizer_preload_reads_at_most_cache_limit(monkeypatch, ctx, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    oversized = workspace / "oversized.txt"
+    oversized.write_text("x" * (MAX_CACHE_CONTENT_SIZE + 100))
+    ctx.agent.workspace_path = str(workspace)
+
+    monkeypatch.setattr(
+        step_manager,
+        "_summarize_step",
+        lambda *_args, **_kwargs: {
+            "summary": "preload bounded file",
+            "files_to_preload": ["oversized.txt"],
+            "changes_made": "",
+            "discovered": "",
+            "pending": "",
+            "anti_patterns": "",
+        },
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_archive_evicted_context",
+        lambda *_args: [],
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_record_outcome",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_step_end_summary_hook",
+        lambda *_args: "",
+    )
+    monkeypatch.setattr(
+        step_manager.StepManager,
+        "_record_command_output_notes",
+        lambda *_args: "",
+    )
+
+    read_sizes = []
+    original_open = Path.open
+
+    class TrackedReader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            read_sizes.append(size)
+            return self.handle.read(size)
+
+    def tracked_open(path, *args, **kwargs):
+        return TrackedReader(original_open(path, *args, **kwargs))
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+
+    step_manager.StepManager(_Engine()).summarize_and_record(
+        ctx,
+        StepResult(summary="raw", status="continue"),
+        [],
+        0,
+        0,
+    )
+
+    assert read_sizes == [MAX_CACHE_CONTENT_SIZE + 1]
+    assert ctx.state.opened_files == {}
+    assert ctx.state.history[-1].files_to_preload == []

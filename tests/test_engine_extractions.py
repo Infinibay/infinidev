@@ -9,6 +9,7 @@ provably behavior-preserving and stays that way.
 from types import SimpleNamespace
 
 from infinidev.engine.loop.guardrail_runner import apply_guardrail
+from infinidev.engine.loop.loop_state import LoopState
 from infinidev.engine.loop.user_message_injector import UserMessageInjector
 
 
@@ -140,18 +141,270 @@ class TestApplyGuardrail:
         assert out == "ORIG"  # unvalidated result shipped (fail-open)
         assert "UNVALIDATED" in caplog.text
 
-    def test_failing_tuple_guardrail_retries_then_returns_original(self):
-        calls = {"n": 0}
+    def test_unlimited_tool_budget_still_reprompts_via_llm(self, monkeypatch):
+        import infinidev.engine.loop.guardrail_runner as gr
 
-        def always_fail(_r):
-            calls["n"] += 1
-            return (False, "nope")
+        fake_resp = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="CORRECTED",
+                        tool_calls=None,
+                    )
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=11,
+                completion_tokens=3,
+                total_tokens=14,
+            ),
+        )
+        llm_calls = {"n": 0}
 
-        # max_per_action=0 -> the LLM retry loop body never runs, so the
-        # result is unchanged and the guardrail is re-checked each attempt.
-        out = apply_guardrail(_ctx(), "ORIG", always_fail, 3, {}, "sys", "d", "e", None, [], {}, max_per_action=0)
+        def call_llm(*args, **kwargs):
+            llm_calls["n"] += 1
+            return fake_resp
+
+        monkeypatch.setattr(gr, "_call_llm", call_llm)
+        guard_calls = {"n": 0}
+
+        def guard(result):
+            guard_calls["n"] += 1
+            return (
+                (False, "needs work")
+                if guard_calls["n"] == 1
+                else (True, result)
+            )
+
+        ctx = _ctx()
+        ctx.state = LoopState()
+        out = apply_guardrail(
+            ctx,
+            "ORIG",
+            guard,
+            3,
+            {"model": "x"},
+            "sys",
+            "d",
+            "e",
+            ctx.state,
+            [],
+            {},
+            max_per_action=0,
+        )
+
+        assert out == "CORRECTED"
+        assert llm_calls["n"] == 1
+        assert guard_calls["n"] == 2
+        assert ctx.state.total_prompt_tokens == 11
+        assert ctx.state.total_completion_tokens == 3
+        assert ctx.state.total_tokens == 14
+
+    def test_last_corrected_result_is_revalidated(self, monkeypatch):
+        import infinidev.engine.loop.guardrail_runner as gr
+
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="CORRECTED",
+                        tool_calls=None,
+                    )
+                )
+            ]
+        )
+        llm_calls = {"n": 0}
+
+        def call_llm(*args, **kwargs):
+            llm_calls["n"] += 1
+            return response
+
+        monkeypatch.setattr(gr, "_call_llm", call_llm)
+        validated: list[str] = []
+
+        def guard(result):
+            validated.append(result)
+            return False, "still invalid"
+
+        out = apply_guardrail(
+            _ctx(),
+            "ORIG",
+            guard,
+            1,
+            {"model": "x"},
+            "sys",
+            "d",
+            "e",
+            None,
+            [],
+            {},
+            max_per_action=0,
+        )
+
+        assert out == "CORRECTED"
+        assert llm_calls["n"] == 1
+        assert validated == ["ORIG", "CORRECTED"]
+
+    def test_guardrail_tool_calls_count_toward_loop_budget(self, monkeypatch):
+        import infinidev.engine.loop.guardrail_runner as gr
+
+        tool_call = SimpleNamespace(
+            id="tc1",
+            function=SimpleNamespace(name="read_file", arguments="{}"),
+        )
+        responses = iter([
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="",
+                            tool_calls=[tool_call],
+                        )
+                    )
+                ]
+            ),
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="CORRECTED",
+                            tool_calls=None,
+                        )
+                    )
+                ]
+            ),
+        ])
+        monkeypatch.setattr(gr, "_call_llm", lambda *args, **kwargs: next(responses))
+        monkeypatch.setattr(gr, "_capture_pre_content", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gr, "_maybe_emit_file_change", lambda *args, **kwargs: None)
+        executed: list[str] = []
+
+        def execute(_dispatch, name, _arguments):
+            executed.append(name)
+            return "ok"
+
+        monkeypatch.setattr(gr, "execute_tool_call", execute)
+        state = SimpleNamespace(total_tool_calls=4)
+        guard_calls = {"n": 0}
+
+        def guard(result):
+            guard_calls["n"] += 1
+            return (
+                (False, "inspect first")
+                if guard_calls["n"] == 1
+                else (True, result)
+            )
+
+        out = apply_guardrail(
+            _ctx(),
+            "ORIG",
+            guard,
+            3,
+            {"model": "x"},
+            "sys",
+            "d",
+            "e",
+            state,
+            [{"type": "function"}],
+            {"read_file": object()},
+            max_per_action=2,
+        )
+
+        assert out == "CORRECTED"
+        assert executed == ["read_file"]
+        assert state.total_tool_calls == 5
+
+    def test_guardrail_respects_remaining_global_tool_budget(self, monkeypatch):
+        import infinidev.engine.loop.guardrail_runner as gr
+
+        tool_call = SimpleNamespace(
+            id="tc1",
+            function=SimpleNamespace(name="read_file", arguments="{}"),
+        )
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="",
+                        tool_calls=[tool_call],
+                    )
+                )
+            ]
+        )
+        monkeypatch.setattr(gr, "_call_llm", lambda *args, **kwargs: response)
+        monkeypatch.setattr(gr, "_capture_pre_content", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gr, "_maybe_emit_file_change", lambda *args, **kwargs: None)
+        executed: list[str] = []
+        monkeypatch.setattr(
+            gr,
+            "execute_tool_call",
+            lambda _dispatch, name, _arguments: executed.append(name) or "ok",
+        )
+        ctx = _ctx()
+        ctx.max_total_calls = 4
+        state = SimpleNamespace(total_tool_calls=4)
+
+        out = apply_guardrail(
+            ctx,
+            "ORIG",
+            lambda _result: (False, "inspect first"),
+            1,
+            {"model": "x"},
+            "sys",
+            "d",
+            "e",
+            state,
+            [{"type": "function"}],
+            {"read_file": object()},
+            max_per_action=2,
+        )
+
         assert out == "ORIG"
-        assert calls["n"] == 3  # one check per retry attempt
+        assert executed == []
+        assert state.total_tool_calls == 4
+
+    def test_guardrail_does_not_cross_exhausted_prompt_budget(self, monkeypatch):
+        import infinidev.engine.loop.guardrail_runner as gr
+
+        llm_calls = {"n": 0}
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="CORRECTED",
+                        tool_calls=None,
+                    )
+                )
+            ]
+        )
+
+        def call_llm(*args, **kwargs):
+            llm_calls["n"] += 1
+            return response
+
+        monkeypatch.setattr(gr, "_call_llm", call_llm)
+        ctx = _ctx()
+        ctx.state = LoopState(total_prompt_tokens=100)
+        ctx.max_prompt_tokens = 100
+
+        out = apply_guardrail(
+            ctx,
+            "ORIG",
+            lambda _result: (False, "needs work"),
+            3,
+            {"model": "x"},
+            "sys",
+            "d",
+            "e",
+            ctx.state,
+            [],
+            {},
+            max_per_action=0,
+        )
+
+        assert out == "ORIG"
+        assert llm_calls["n"] == 0
+        assert ctx.state.total_prompt_tokens == 100
 
     def test_failing_tuple_guardrail_reprompts_via_llm(self, monkeypatch):
         import infinidev.engine.loop.guardrail_runner as gr

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import hashlib
 import json
-import uuid
+import re
 from typing import Any, Literal
+import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -141,8 +143,18 @@ class EvidenceEntry(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
     def fingerprint(self) -> str:
-        normalized = " ".join(self.summary.lower().split())
-        return hashlib.sha256(f"{self.kind}\0{normalized}".encode()).hexdigest()
+        """Return a provenance-aware identity for safe ledger deduplication."""
+        payload = {
+            "kind": self.kind,
+            "summary": " ".join(self.summary.casefold().split()),
+            "stage_id": self.stage_id,
+            "task_id": self.task_id,
+            "details": self.details,
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, ensure_ascii=False, default=repr
+        ).encode()
+        return hashlib.sha256(encoded).hexdigest()
 
 
 class TaskExecutionRecord(BaseModel):
@@ -212,15 +224,72 @@ class StagedPlanningState(BaseModel):
 
     def add_evidence(self, entry: EvidenceEntry) -> bool:
         """Add a genuinely new observation and return whether it changed the ledger."""
-        fingerprints = {existing.fingerprint() for existing in self.evidence}
-        if entry.fingerprint() in fingerprints:
-            return False
+        fingerprint = entry.fingerprint()
+        for existing in self.evidence:
+            existing_fingerprint = existing.fingerprint()
+            if existing.id == entry.id:
+                if existing_fingerprint == fingerprint:
+                    return False
+                raise ValueError(
+                    f"evidence id {entry.id!r} already identifies another entry"
+                )
+            if existing_fingerprint == fingerprint:
+                return False
         self.evidence.append(entry)
         self.revision += 1
         return True
 
     def snapshot(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
+
+
+def statement_cites_evidence(
+    statement: str,
+    evidence_ids: Iterable[str],
+) -> bool:
+    """Whether *statement* contains one complete ledger id, not a substring."""
+    for evidence_id in evidence_ids:
+        if not evidence_id:
+            continue
+        pattern = (
+            rf"(?<![A-Za-z0-9_-]){re.escape(evidence_id)}"
+            r"(?![A-Za-z0-9_-])"
+        )
+        if re.search(pattern, statement):
+            return True
+    return False
+
+
+def task_evidence_supports_delivery(entry: EvidenceEntry) -> bool:
+    """Whether completed Task evidence proves delivery or an accepted no-op."""
+
+    return (
+        entry.kind == "task_result"
+        and entry.details.get("task_status") == "completed"
+        and (
+            entry.details.get("workspace_changed") is True
+            or entry.details.get("no_edit_accepted") is True
+        )
+    )
+
+
+def tasks_missing_completion_evidence(
+    state: StagedPlanningState,
+    stage: StageExecutionRecord,
+) -> list[TaskExecutionRecord]:
+    """Return completed Tasks lacking their own durable completion evidence."""
+    proven = {
+        (entry.stage_id, entry.task_id)
+        for entry in state.evidence
+        if entry.kind == "task_result"
+        and entry.details.get("task_status") == "completed"
+    }
+    return [
+        task
+        for task in stage.tasks
+        if task.status == "completed"
+        and (stage.id, task.spec.id) not in proven
+    ]
 
 
 class TaskPlanningHandoff(BaseModel):
@@ -303,4 +372,7 @@ __all__ = [
     "TaskExecutionRecord",
     "TaskPlanningHandoff",
     "plan_snapshot",
+    "statement_cites_evidence",
+    "task_evidence_supports_delivery",
+    "tasks_missing_completion_evidence",
 ]

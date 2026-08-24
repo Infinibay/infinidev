@@ -1,0 +1,9 @@
+{
+  "id": "capability.api_contracts",
+  "reason": "the task changes an API, protocol, schema, CLI contract, or integration boundary",
+  "guidance": [
+    "Identify representative producers and consumers plus success and error semantics before changing",
+    "the contract. Preserve compatibility unless the request explicitly changes it, and verify a",
+    "representative round trip or consumer interaction instead of checking only one endpoint."
+  ]
+}

@@ -13,11 +13,74 @@ logger = logging.getLogger(__name__)
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ALLOWED_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "TIMESTAMP", "DATETIME", "NUMERIC"}
+_SQLITE_VARIABLE_BATCH_SIZE = 900
 
 # Canonical schema lives in schema.sql next to this module (the same file the
 # Rust crate mirrors via include_str!). Fresh DBs are provisioned from it
 # verbatim, so the DDL has a single source of truth.
 _SCHEMA_SQL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
+
+# One selector per table whose rows belong to a session. Project knowledge such
+# as findings and artifacts deliberately stays outside this list: session_id is
+# provenance there, not ownership. Child tables without session_id are selected
+# through their owning operation/run so legacy rows are handled as well.
+_SESSION_ROW_SELECTORS: tuple[tuple[str, str], ...] = (
+    ("sessions", "session_id = ?"),
+    ("conversation_turns", "session_id = ?"),
+    ("session_notes", "session_id = ?"),
+    ("session_messages", "session_id = ?"),
+    ("session_runtime_state", "session_id = ?"),
+    ("objective_verdicts", "session_id = ?"),
+    ("exploration_trees", "session_id = ?"),
+    ("image_generation_operations", "session_id = ?"),
+    (
+        "image_generation_items",
+        "operation_id IN (SELECT operation_id FROM image_generation_operations "
+        "WHERE session_id = ?)",
+    ),
+    ("engine_runs", "session_id = ?"),
+    (
+        "execution_events",
+        "session_id = ? OR run_id IN (SELECT run_id FROM engine_runs WHERE session_id = ?)",
+    ),
+    (
+        "graph_nodes",
+        "session_id = ? OR run_id IN (SELECT run_id FROM engine_runs WHERE session_id = ?)",
+    ),
+    (
+        "graph_edges",
+        "run_id IN (SELECT run_id FROM engine_runs WHERE session_id = ?)",
+    ),
+    (
+        "graph_states",
+        "session_id = ? OR run_id IN (SELECT run_id FROM engine_runs WHERE session_id = ?)",
+    ),
+    ("cr_contexts", "session_id = ?"),
+    ("cr_interactions", "session_id = ?"),
+    ("cr_session_scores", "session_id = ?"),
+)
+
+# Foreign-key children must be removed before their parents. This is explicit
+# rather than relying on connection-specific PRAGMA foreign_keys behavior.
+_SESSION_DELETE_ORDER: tuple[tuple[str, str], ...] = (
+    ("graph_edges", _SESSION_ROW_SELECTORS[12][1]),
+    ("graph_nodes", _SESSION_ROW_SELECTORS[11][1]),
+    ("graph_states", _SESSION_ROW_SELECTORS[13][1]),
+    ("execution_events", _SESSION_ROW_SELECTORS[10][1]),
+    ("engine_runs", _SESSION_ROW_SELECTORS[9][1]),
+    ("image_generation_items", _SESSION_ROW_SELECTORS[8][1]),
+    ("image_generation_operations", _SESSION_ROW_SELECTORS[7][1]),
+    ("cr_interactions", _SESSION_ROW_SELECTORS[15][1]),
+    ("cr_contexts", _SESSION_ROW_SELECTORS[14][1]),
+    ("cr_session_scores", _SESSION_ROW_SELECTORS[16][1]),
+    ("session_runtime_state", _SESSION_ROW_SELECTORS[4][1]),
+    ("session_messages", _SESSION_ROW_SELECTORS[3][1]),
+    ("session_notes", _SESSION_ROW_SELECTORS[2][1]),
+    ("conversation_turns", _SESSION_ROW_SELECTORS[1][1]),
+    ("objective_verdicts", _SESSION_ROW_SELECTORS[5][1]),
+    ("exploration_trees", _SESSION_ROW_SELECTORS[6][1]),
+    ("sessions", _SESSION_ROW_SELECTORS[0][1]),
+)
 
 
 def _load_schema_sql() -> str:
@@ -213,6 +276,124 @@ def register_session(
     execute_with_retry(_upsert)
 
 
+def rename_session(session_id: str, title: str) -> bool:
+    """Give an existing session a user-defined display name.
+
+    Names are normalized to one line and capped at the same 80-character
+    limit used by automatically derived titles. Returns ``False`` when the
+    session does not exist or either input is blank.
+    """
+    normalized = " ".join(title.split())[:80]
+    if not session_id or not normalized:
+        return False
+
+    def _update(conn):
+        cursor = conn.execute(
+            "UPDATE sessions SET title = ? WHERE session_id = ?",
+            (normalized, session_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    return bool(execute_with_retry(_update))
+
+
+def get_sessions_storage_bytes(session_ids: list[str]) -> dict[str, int]:
+    """Estimate owned SQLite payload bytes for several sessions in one DB visit."""
+    unique_ids = list(dict.fromkeys(session_id for session_id in session_ids if session_id))
+    if not unique_ids:
+        return {}
+
+    def _query(conn: sqlite3.Connection) -> dict[str, int]:
+        column_cache: dict[str, list[str]] = {}
+        totals = {session_id: 0 for session_id in unique_ids}
+        for table, selector in _SESSION_ROW_SELECTORS:
+            columns = column_cache.setdefault(
+                table,
+                [
+                    row["name"]
+                    for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                ],
+            )
+            if not columns:
+                continue
+            size_expression = " + ".join(
+                f"COALESCE(length(CAST(\"{column}\" AS BLOB)), 0)" for column in columns
+            )
+            parameter_count = selector.count("?")
+            if selector != "session_id = ?":
+                for session_id in unique_ids:
+                    row = conn.execute(
+                        f"SELECT COALESCE(SUM({size_expression}), 0) AS payload_bytes "
+                        f"FROM {table} WHERE {selector}",
+                        (session_id,) * parameter_count,
+                    ).fetchone()
+                    totals[session_id] += int(row["payload_bytes"] or 0)
+                continue
+
+            session_column = selector.partition("=")[0].strip()
+            for offset in range(0, len(unique_ids), _SQLITE_VARIABLE_BATCH_SIZE):
+                batch = unique_ids[offset : offset + _SQLITE_VARIABLE_BATCH_SIZE]
+                placeholders = ", ".join("?" for _session_id in batch)
+                rows = conn.execute(
+                    f"SELECT {session_column} AS session_id, "
+                    f"COALESCE(SUM({size_expression}), 0) AS payload_bytes "
+                    f"FROM {table} WHERE {session_column} IN ({placeholders}) "
+                    f"GROUP BY {session_column}",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    totals[str(row["session_id"])] += int(row["payload_bytes"] or 0)
+        return totals
+
+    return execute_with_retry(_query) or {}
+
+
+def get_session_storage_bytes(session_id: str) -> int:
+    """Estimate SQLite payload bytes owned by ``session_id``.
+
+    SQLite does not expose physical page allocation per logical row. This
+    therefore reports the reproducible sum of each selected value's encoded
+    bytes (TEXT as UTF-8, BLOB as raw bytes, numeric values as their SQLite text
+    representation). It includes indexes/page overhead in neither this session
+    nor any other, making the figure useful for relative picker sizes without
+    pretending to be exact reclaimed file space.
+    """
+    return get_sessions_storage_bytes([session_id]).get(session_id, 0)
+
+
+def delete_session(session_id: str) -> bool:
+    """Transactionally remove all database state owned by one session.
+
+    Project-level findings and artifacts are retained because their session IDs
+    record provenance rather than ownership. Returns whether any row was
+    deleted, including orphaned legacy state with no ``sessions`` registry row.
+    """
+    if not session_id:
+        return False
+
+    def _delete(conn: sqlite3.Connection) -> bool:
+        removed = 0
+        conn.execute("SAVEPOINT delete_session")
+        try:
+            for table, selector in _SESSION_DELETE_ORDER:
+                parameter_count = selector.count("?")
+                cursor = conn.execute(
+                    f"DELETE FROM {table} WHERE {selector}",
+                    (session_id,) * parameter_count,
+                )
+                removed += max(cursor.rowcount, 0)
+            conn.execute("RELEASE SAVEPOINT delete_session")
+            conn.commit()
+        except sqlite3.Error:
+            conn.execute("ROLLBACK TO SAVEPOINT delete_session")
+            conn.execute("RELEASE SAVEPOINT delete_session")
+            raise
+        return removed > 0
+
+    return bool(execute_with_retry(_delete))
+
+
 def get_last_session(workspace_path: str | None = None) -> dict | None:
     """Return the most-recently-active session, or None.
 
@@ -237,7 +418,7 @@ def get_last_session(workspace_path: str | None = None) -> dict | None:
 
 
 def list_recent_sessions(
-    workspace_path: str | None = None, limit: int = 20
+    workspace_path: str | None = None, limit: int | None = 20
 ) -> list[dict]:
     """Return recent sessions (newest first) for the resume picker.
 
@@ -248,18 +429,19 @@ def list_recent_sessions(
     (cross-directory noise is worse than a short list).
     """
     def _query(conn):
+        where = "WHERE turn_count > 0"
+        params: list[Any] = []
         if workspace_path:
-            rows = conn.execute(
-                "SELECT * FROM sessions WHERE workspace_path = ? AND turn_count > 0 "
-                "ORDER BY last_active_at DESC LIMIT ?",
-                (workspace_path, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM sessions WHERE turn_count > 0 "
-                "ORDER BY last_active_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            where += " AND workspace_path = ?"
+            params.append(workspace_path)
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = " LIMIT ?"
+            params.append(limit)
+        rows = conn.execute(
+            f"SELECT * FROM sessions {where} ORDER BY last_active_at DESC{limit_clause}",
+            params,
+        ).fetchall()
         return [dict(r) for r in rows]
     return execute_with_retry(_query) or []
 
@@ -436,13 +618,20 @@ def persist_session_runtime_state(
             "SELECT ui_state_json FROM session_runtime_state WHERE session_id = ?",
             (session_id,),
         ).fetchone()
-        if existing and "staged_planning" not in requested_ui_state:
+        if existing:
             try:
                 prior_ui = json.loads(existing["ui_state_json"] or "{}")
             except (TypeError, json.JSONDecodeError):
                 prior_ui = {}
-            if isinstance(prior_ui, dict) and "staged_planning" in prior_ui:
-                requested_ui_state["staged_planning"] = prior_ui["staged_planning"]
+            if isinstance(prior_ui, dict):
+                # Engine checkpoints and staged state have their own writers.
+                # A routine sidebar repaint must merge, not erase, them.
+                for durable_key in ("staged_planning", "loop_resume"):
+                    if (
+                        durable_key not in requested_ui_state
+                        and durable_key in prior_ui
+                    ):
+                        requested_ui_state[durable_key] = prior_ui[durable_key]
         ui_json = json.dumps(requested_ui_state, ensure_ascii=False, default=str)
         conn.execute(
             """
@@ -511,6 +700,24 @@ def persist_staged_planning_state(
     persist_session_runtime_state(
         session_id,
         task_description=str(current.get("task_description") or task_description),
+        plan_steps=list(current.get("plan_steps") or []),
+        ui_state=ui_state,
+    )
+
+
+def persist_loop_resume_checkpoint(
+    session_id: str,
+    checkpoint: dict[str, Any],
+) -> None:
+    """Merge the latest bounded LoopEngine checkpoint into session state."""
+    if not session_id or not isinstance(checkpoint, dict):
+        return
+    current = get_session_runtime_state(session_id)
+    ui_state = dict(current.get("ui_state") or {})
+    ui_state["loop_resume"] = checkpoint
+    persist_session_runtime_state(
+        session_id,
+        task_description=str(current.get("task_description") or ""),
         plan_steps=list(current.get("plan_steps") or []),
         ui_state=ui_state,
     )

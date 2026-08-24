@@ -22,6 +22,72 @@ STATUS_BLOCKED = "blocked"
 STATUS_CANCELLED = "cancelled"
 STATUS_FAILED = "failed"
 
+_LOOP_STATUS_MAP: dict[str, Status] = {
+    "done": "completed",
+    "completed": "completed",
+    "blocked": "blocked",
+    "exhausted": "blocked",
+    "cancelled": "cancelled",
+    "failed": "failed",
+}
+
+
+def get_loop_status(engine: Any) -> str:
+    """Return a normalized raw LoopEngine terminal label."""
+    return str(getattr(engine, "_last_status", "") or "").strip().lower()
+
+
+def normalize_loop_status(loop_status: str) -> Status:
+    """Map known loop labels and fail closed on missing or unknown values."""
+    return _LOOP_STATUS_MAP.get(loop_status, "failed")
+
+
+def normalize_terminal_message(
+    message: Any,
+    status: Status,
+) -> str:
+    """Make an empty/generic result agree with the terminal status."""
+    text = message.strip() if isinstance(message, str) else ""
+    if text and not (
+        status != STATUS_COMPLETED
+        and text in {"Done.", "Done. (no additional output)"}
+    ):
+        return text
+
+    return {
+        STATUS_COMPLETED: "Done. (no additional output)",
+        STATUS_BLOCKED: (
+            "Execution stopped before completion. "
+            "No additional output was produced."
+        ),
+        STATUS_CANCELLED: (
+            "Execution was cancelled. No additional output was produced."
+        ),
+        STATUS_FAILED: (
+            "Execution failed. No additional output was produced."
+        ),
+    }[status]
+
+
+def loop_observed_metrics(engine: Any) -> dict[str, int]:
+    """Return stable counters from the LoopEngine-compatible result surface."""
+    state = getattr(engine, "_last_state", None)
+
+    def counter(source: Any, name: str) -> int:
+        value = getattr(source, name, 0)
+        return value if type(value) is int and value >= 0 else 0
+
+    observed_tool_calls = getattr(engine, "_last_total_tool_calls", None)
+    if type(observed_tool_calls) is not int or observed_tool_calls < 0:
+        observed_tool_calls = counter(state, "total_tool_calls")
+
+    return {
+        "observed_iterations": counter(state, "iteration_count"),
+        "observed_tool_calls": observed_tool_calls,
+        "observed_prompt_tokens": counter(state, "total_prompt_tokens"),
+        "observed_completion_tokens": counter(state, "total_completion_tokens"),
+    }
+
 
 @dataclass(frozen=True)
 class TransitionRequest:
@@ -99,4 +165,7 @@ __all__ = [
     "STATUS_COMPLETED",
     "STATUS_FAILED",
     "TransitionRequest",
+    "get_loop_status",
+    "loop_observed_metrics",
+    "normalize_loop_status",
 ]

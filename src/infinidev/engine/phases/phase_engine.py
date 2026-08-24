@@ -29,10 +29,7 @@ from infinidev.engine.phases.question_generator import (
     _generate_questions,
     _generate_followups,
 )
-from infinidev.engine.phases.investigator import (
-    _investigate,
-    _investigate_iteratively,
-)
+from infinidev.engine.phases.investigator import _investigate_iteratively
 from infinidev.engine.phases.plan_generator import _generate_plan
 from infinidev.engine.phases.plan_executor import (
     _execute_minimal,
@@ -48,10 +45,12 @@ class PhaseEngine:
     Thin orchestrator that delegates each phase to its component module.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, loop_engine: LoopEngine | None = None) -> None:
+        self._execution_engine = loop_engine or LoopEngine()
         self._last_engine: LoopEngine | None = None
         self._last_plan_steps: list[dict] = []
         self._test_checkpoint: TestCheckpoint | None = None
+        self._terminal_status: str = ""
 
     def execute(
         self,
@@ -65,6 +64,11 @@ class PhaseEngine:
         depth_config: Any | None = None,
         prompt_configuration: Any | None = None,
     ) -> str:
+        self._last_engine = self._execution_engine
+        self._last_plan_steps = []
+        self._terminal_status = ""
+        self._execution_engine._last_status = ""
+
         from infinidev.gather.models import DepthLevel, DepthConfig, DEPTH_CONFIGS
         from infinidev.prompts.profiles import EffectivePromptConfiguration
 
@@ -107,6 +111,9 @@ class PhaseEngine:
             if verbose:
                 _log(f"\n{BOLD}{CYAN}⚡ Phase Engine{RESET} — type: {task_type}, depth: (provided)")
 
+        if self._cancel_requested():
+            return self._finish_cancelled()
+
         strategy = get_strategy(task_type)
 
         # ── MINIMAL: single free LoopEngine run ─────────────────
@@ -120,8 +127,12 @@ class PhaseEngine:
                 depth_config,
                 verbose,
                 prompt_configuration=prompt_configuration,
+                loop_engine=self._execution_engine,
             )
             self._last_engine = engine
+            if self._cancel_requested():
+                cancelled_result = self._finish_cancelled()
+                return result or cancelled_result
             if strategy.auto_test and self._test_checkpoint:
                 passed, total = self._test_checkpoint.run()
                 if verbose and total > 0:
@@ -136,11 +147,19 @@ class PhaseEngine:
             strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
 
             answers, all_notes = _investigate_iteratively(
-                agent, description, strategy, task_tools, verbose,
+                agent,
+                description,
+                strategy,
+                task_tools,
+                verbose,
                 max_questions=depth_config.questions_max,
                 skip_investigate=depth_config.skip_investigate,
                 prompt_configuration=prompt_configuration,
+                loop_engine=self._execution_engine,
+                cancel_check=self._cancel_requested,
             )
+            if self._cancel_requested():
+                return self._finish_cancelled()
 
         # ── Phase 3: PLAN ───────────────────────────────────────
         if verbose:
@@ -149,12 +168,23 @@ class PhaseEngine:
         strategy.plan_min_steps = depth_config.plan_min_steps
 
         plan_steps = _generate_plan(
-            agent, description, answers, all_notes, strategy, task_tools, verbose,
+            agent,
+            description,
+            answers,
+            all_notes,
+            strategy,
+            task_tools,
+            verbose,
             test_checkpoint=self._test_checkpoint,
             prompt_configuration=prompt_configuration,
+            cancel_check=self._cancel_requested,
+            max_rounds=depth_config.plan_max_rounds,
         )
 
+        if self._cancel_requested():
+            return self._finish_cancelled()
         if not plan_steps:
+            self._last_status = "failed"
             return "Failed to generate a valid plan."
 
         self._last_plan_steps = plan_steps
@@ -177,8 +207,15 @@ class PhaseEngine:
                 plan_steps, strategy, task_tools, depth_config, verbose,
                 test_checkpoint=self._test_checkpoint,
                 prompt_configuration=prompt_configuration,
+                loop_engine=self._execution_engine,
+                preserve_file_tracker=plan_round > 0,
             )
             self._last_engine = engine
+            if self._cancel_requested():
+                cancelled_result = self._finish_cancelled()
+                return result or cancelled_result
+            if self._last_status not in {"done", "completed"}:
+                return result
 
             # Check test progress
             if strategy.auto_test and self._test_checkpoint:
@@ -204,7 +241,11 @@ class PhaseEngine:
                         task_tools,
                         verbose,
                         prompt_configuration=prompt_configuration,
+                        cancel_check=self._cancel_requested,
+                        max_rounds=depth_config.plan_max_rounds,
                     )
+                    if self._cancel_requested():
+                        return self._finish_cancelled()
                     if not plan_steps:
                         break
 
@@ -258,6 +299,11 @@ class PhaseEngine:
         return only once the user has answered — the TUI does this with
         ``threading.Event``; a CLI could use ``input()``.
         """
+        self._last_engine = self._execution_engine
+        self._last_plan_steps = []
+        self._terminal_status = ""
+        self._execution_engine._last_status = ""
+
         from infinidev.gather.models import DEPTH_CONFIGS
         from infinidev.prompts.profiles import EffectivePromptConfiguration
 
@@ -275,16 +321,27 @@ class PhaseEngine:
         )
         depth_config = DEPTH_CONFIGS.get(classification.depth)
         task_type = classification.ticket_type.value
+        if self._cancel_requested():
+            return self._finish_cancelled()
+
         strategy = get_strategy(task_type)
 
         # 2. Investigate
         strategy.investigate_max_tool_calls = depth_config.investigate_max_tool_calls
         answers, all_notes = _investigate_iteratively(
-            agent, task_description, strategy, None, verbose=verbose,
+            agent,
+            task_description,
+            strategy,
+            None,
+            verbose=verbose,
             max_questions=depth_config.questions_max,
             skip_investigate=depth_config.skip_investigate,
             prompt_configuration=prompt_configuration,
+            loop_engine=self._execution_engine,
+            cancel_check=self._cancel_requested,
         )
+        if self._cancel_requested():
+            return self._finish_cancelled()
 
         # 3. Plan + review loop
         feedback_context = ""
@@ -305,8 +362,13 @@ class PhaseEngine:
                 None,
                 verbose=verbose,
                 prompt_configuration=prompt_configuration,
+                cancel_check=self._cancel_requested,
+                max_rounds=depth_config.plan_max_rounds,
             )
+            if self._cancel_requested():
+                return self._finish_cancelled()
             if not plan_steps:
+                self._last_status = "failed"
                 return "Failed to generate a plan."
 
             verdict, feedback = on_plan_ready(plan_steps)
@@ -315,6 +377,7 @@ class PhaseEngine:
                 self._last_plan_steps = plan_steps
                 break
             if verdict == "cancel":
+                self._last_status = "cancelled"
                 return "Plan cancelled."
             # "feedback" → loop back with feedback context
             feedback_context = feedback
@@ -329,11 +392,24 @@ class PhaseEngine:
             verbose=verbose,
             on_step_start=on_step_start,
             prompt_configuration=prompt_configuration,
+            loop_engine=self._execution_engine,
         )
         self._last_engine = last_engine
+        if self._cancel_requested():
+            cancelled_result = self._finish_cancelled()
+            return result or cancelled_result
         return result
 
     # ── Classify ─────────────────────────────────────────────────
+
+    def _cancel_requested(self) -> bool:
+        """Return whether the owning turn requested full task cancellation."""
+        return bool(getattr(self._execution_engine, "is_cancelled", False))
+
+    def _finish_cancelled(self) -> str:
+        """Record a cancelled terminal outcome at a phase boundary."""
+        self._last_status = "cancelled"
+        return "Task cancelled by user."
 
     def _classify(
         self,
@@ -380,6 +456,61 @@ class PhaseEngine:
         if content.startswith("json"):
             content = content[4:].strip()
         return content
+
+    @property
+    def _last_status(self) -> str:
+        if self._last_engine is not None:
+            return str(getattr(self._last_engine, "_last_status", "") or "")
+        return self._terminal_status
+
+    @_last_status.setter
+    def _last_status(self, status: str) -> None:
+        self._terminal_status = str(status or "")
+        if self._last_engine is not None:
+            self._last_engine._last_status = self._terminal_status
+
+    @property
+    def _last_state(self) -> Any | None:
+        if self._last_engine is None:
+            return None
+        return getattr(self._last_engine, "_last_state", None)
+
+    @property
+    def _last_total_tool_calls(self) -> int:
+        if self._last_engine is None:
+            return 0
+        return int(getattr(self._last_engine, "_last_total_tool_calls", 0) or 0)
+
+    def cancel(self) -> None:
+        """Cancel the full phase task through its shared LoopEngine."""
+        self._execution_engine.cancel()
+
+    def cancel_active_tool(self) -> bool:
+        """Cancel only the current foreground tool batch."""
+        return self._execution_engine.cancel_active_tool()
+
+    @property
+    def has_active_tool(self) -> bool:
+        """Return whether the shared LoopEngine is running tools."""
+        return bool(self._execution_engine.has_active_tool)
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancel_requested()
+
+    def get_objective_checks(self) -> list[dict[str, Any]]:
+        if self._last_engine is None:
+            return []
+        getter = getattr(self._last_engine, "get_objective_checks", None)
+        return list(getter() or []) if callable(getter) else []
+
+    def build_work_summary(self, result: str, status: str) -> str | None:
+        if self._last_engine is None:
+            return None
+        builder = getattr(self._last_engine, "build_work_summary", None)
+        if not callable(builder):
+            return None
+        return builder(result, status)
 
     def get_changed_files_summary(self) -> str:
         if self._last_engine:

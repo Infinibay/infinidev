@@ -32,10 +32,22 @@ class TaskRuntime:
 
     def add_task(self, title: str, depends_on: list[str] | None = None) -> TaskItem:
         """Create a task and emit its initial state."""
+        if self.state.cancelled:
+            raise RuntimeError("cannot add work to a cancelled runtime")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("task title must be a non-empty string")
+
+        title = title.strip()
+        dependencies = list(dict.fromkeys(depends_on or []))
+        known_ids = {task.id for task in self.state.tasks}
+        unknown = [task_id for task_id in dependencies if task_id not in known_ids]
+        if unknown:
+            raise ValueError(f"unknown task dependencies: {', '.join(unknown)}")
+
         task = TaskItem(
             id=str(uuid.uuid4()),
             title=title,
-            depends_on=list(depends_on or []),
+            depends_on=dependencies,
         )
         self.state.tasks.append(task)
         self._emit("task_created", task=task)
@@ -104,9 +116,9 @@ class TaskRuntime:
         task_id = self.state.current_task_id
         if task_id is None:
             return
-        self.state.finish_task(task_id, result)
         if result:
             self.remember(result, kind="task_result", importance=0.9)
+        self.state.finish_task(task_id, result)
         self.state.compact_memory()
         self._emit("task_completed", task_id=task_id, result=result)
 
@@ -127,32 +139,85 @@ class TaskRuntime:
         task_id = self.state.current_task_id
         if task_id is None:
             return
-        for task in self.state.tasks:
-            if task.id == task_id:
-                task.status = status
-                if status == TaskStatus.FAILED:
-                    task.error = detail
-                else:
-                    task.result = detail
-                break
-        self.state.current_task_id = None
+        task = next(
+            (item for item in self.state.tasks if item.id == task_id),
+            None,
+        )
+        if task is None:
+            logger.warning("active task %s is missing from runtime state", task_id)
+            self.state.current_task_id = None
+            return
         if detail:
             self.remember(detail, kind=event, importance=0.9)
+        task.status = status
+        if status == TaskStatus.FAILED:
+            task.error = detail
+        else:
+            task.result = detail
+        self.state.current_task_id = None
         self.state.compact_memory()
         self._emit(event, task_id=task_id, detail=detail)
+        self._block_terminal_dependents()
+
+    def _block_terminal_dependents(self) -> None:
+        """Close pending work that can no longer satisfy its dependencies."""
+        terminal_failures = {
+            TaskStatus.BLOCKED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }
+        while True:
+            tasks_by_id = {task.id: task for task in self.state.tasks}
+            newly_blocked: list[tuple[TaskItem, str]] = []
+            for task in self.state.tasks:
+                if task.status is not TaskStatus.PENDING:
+                    continue
+                blockers = [
+                    tasks_by_id[dependency_id]
+                    for dependency_id in task.depends_on
+                    if (
+                        dependency_id in tasks_by_id
+                        and tasks_by_id[dependency_id].status in terminal_failures
+                    )
+                ]
+                if not blockers:
+                    continue
+                detail = "Blocked by terminal dependency: " + ", ".join(
+                    f"{blocker.title} [{blocker.id}] ({blocker.status.value})"
+                    for blocker in blockers
+                )
+                task.status = TaskStatus.BLOCKED
+                task.result = detail
+                newly_blocked.append((task, detail))
+
+            if not newly_blocked:
+                return
+            for task, detail in newly_blocked:
+                self._emit(
+                    "task_blocked",
+                    task_id=task.id,
+                    detail=detail,
+                )
 
     def cancel(self) -> None:
-        """Cancel the runtime and its active task."""
+        """Cancel the runtime and every task that can still execute."""
+        if self.state.cancelled:
+            return
         self.state.cancelled = True
-        if self.state.current_task_id:
-            for task in self.state.tasks:
-                if task.id == self.state.current_task_id:
-                    task.status = TaskStatus.CANCELLED
-                    break
+        for task in self.state.tasks:
+            if task.status in {TaskStatus.PENDING, TaskStatus.ACTIVE}:
+                task.status = TaskStatus.CANCELLED
+        self.state.current_task_id = None
         self._emit("runtime_cancelled")
 
     def _emit(self, event: str, **payload: Any) -> None:
-        record = {"event": event, "task_id": self.state.task_id, **payload}
+        record = {"event": event, "runtime_id": self.state.task_id, **payload}
+        event_task_id = record.get("task_id")
+        if event.startswith("task_") and not event_task_id:
+            event_task_id = getattr(record.get("task"), "id", None)
+            if event_task_id:
+                record["task_id"] = event_task_id
+
         if self._on_event is not None:
             self._on_event(record)
         if self._persist_events:
@@ -164,7 +229,7 @@ class TaskRuntime:
                 {
                     key: value
                     for key, value in record.items()
-                    if key not in {"event", "task_id"}
+                    if key not in {"event", "runtime_id", "task_id"}
                 },
-                task_id=record.get("task_id") if event.startswith("task_") else None,
+                task_id=event_task_id if event.startswith("task_") else None,
             )

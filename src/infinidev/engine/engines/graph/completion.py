@@ -23,7 +23,7 @@ from infinidev.engine.engines.graph.domain import (
     Freshness,
     GraphState,
     Lifecycle,
-    Verdict,
+    is_successfully_resolved,
 )
 
 
@@ -37,13 +37,22 @@ class GoalAssessment:
 
 
 def _requirement_nodes(state: GraphState):
-    return [n for n in state.nodes.values() if n.node_type == NODE_REQUIREMENT]
+    return [
+        node for node in state.nodes.values()
+        if node.node_type == NODE_REQUIREMENT
+        and node.freshness is not Freshness.INVALIDATED
+    ]
 
 
 def _blocker_nodes(state: GraphState):
     return [
-        n for n in state.nodes.values()
-        if n.node_type == NODE_BLOCKER and n.lifecycle is not Lifecycle.RESOLVED
+        node for node in state.nodes.values()
+        if node.node_type == NODE_BLOCKER
+        and node.freshness is not Freshness.INVALIDATED
+        and (
+            node.lifecycle is not Lifecycle.RESOLVED
+            or node.freshness is not Freshness.CURRENT
+        )
     ]
 
 
@@ -73,62 +82,77 @@ def evaluate_goal(state: GraphState) -> GoalAssessment:
         # No explicit requirements: fall back to executable work. Complete
         # only if every work/verification node resolved.
         work = [
-            n for n in state.nodes.values()
-            if n.node_type in {"work", "verification"}
+            node for node in state.nodes.values()
+            if node.node_type in {"work", "verification"}
+            and node.freshness is not Freshness.INVALIDATED
         ]
         if not work:
             return GoalAssessment(
                 status="in_progress",
                 reasons=["no requirements or work nodes yet"],
             )
-        open_work = [
-            n for n in work if n.lifecycle is not Lifecycle.RESOLVED
+        incomplete_work = [
+            node for node in work if not is_successfully_resolved(node, state)
         ]
-        if not open_work:
+        if not incomplete_work:
             return GoalAssessment(
                 status="complete",
-                reasons=["all work nodes resolved"],
+                reasons=["all work nodes resolved with current confirmed evidence"],
             )
-        missing = [n.title or n.node_id for n in open_work]
+        missing = [node.title or node.node_id for node in incomplete_work]
         return GoalAssessment(
             status="in_progress",
-            reasons=[f"{len(open_work)} work node(s) still open"],
+            reasons=[
+                f"{len(incomplete_work)} work node(s) lack current confirmed evidence"
+            ],
             missing=missing,
         )
 
-    satisfied = []
-    for req in requirements:
-        if req.lifecycle is Lifecycle.ABANDONED:
-            # An abandoned requirement means the goal changed under us; that
-            # needs a user decision, not silent completion.
-            missing.append(req.title or req.node_id)
-            continue
-        if req.lifecycle is Lifecycle.RESOLVED and req.verdict is Verdict.CONFIRMED:
-            satisfied.append(req)
-        else:
-            missing.append(req.title or req.node_id)
+    abandoned = [
+        requirement
+        for requirement in requirements
+        if requirement.lifecycle is Lifecycle.ABANDONED
+    ]
+    if abandoned:
+        return GoalAssessment(
+            status="blocked",
+            reasons=[f"{len(abandoned)} required node(s) were abandoned"],
+            missing=[node.title or node.node_id for node in abandoned],
+        )
 
-    open_work = [
+    satisfied = []
+    for requirement in requirements:
+        if is_successfully_resolved(requirement, state):
+            satisfied.append(requirement)
+        else:
+            missing.append(requirement.title or requirement.node_id)
+
+    incomplete_work = [
         node for node in state.nodes.values()
         if node.node_type in {"work", "verification"}
-        and node.lifecycle is not Lifecycle.RESOLVED
+        and node.freshness is not Freshness.INVALIDATED
+        and not is_successfully_resolved(node, state)
     ]
-    if open_work:
-        missing.extend(node.title or node.node_id for node in open_work)
+    if incomplete_work:
+        missing.extend(node.title or node.node_id for node in incomplete_work)
 
     if missing:
         return GoalAssessment(
             status="in_progress",
             reasons=[
                 f"{len(satisfied)}/{len(requirements)} requirement(s) satisfied; "
-                f"{len(open_work)} executable node(s) still open"
+                f"{len(incomplete_work)} executable node(s) lack current "
+                "confirmed evidence"
             ],
             missing=missing,
         )
 
     return GoalAssessment(
         status="complete",
-        reasons=[f"all {len(requirements)} requirement(s) resolved and confirmed"],
+        reasons=[
+            f"all {len(requirements)} requirement(s) resolved with current "
+            "confirmed evidence"
+        ],
     )
 
 

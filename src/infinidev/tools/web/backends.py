@@ -6,11 +6,15 @@ Provides pure functions (no BaseTool dependency) for search and content fetching
 from __future__ import annotations
 
 import logging
+import threading
 
 from infinidev.config.settings import settings
 from infinidev.tools.web.rate_limiter import web_rate_limiter
 
 logger = logging.getLogger(__name__)
+
+_DDG_MAX_IN_FLIGHT = 4
+_ddg_worker_slots = threading.BoundedSemaphore(_DDG_MAX_IN_FLIGHT)
 
 
 def search_ddg(query: str, num_results: int = 10) -> list[dict]:
@@ -41,19 +45,43 @@ def search_ddg(query: str, num_results: int = 10) -> list[dict]:
             ddgs = DDGS()
         return list(ddgs.text(query, max_results=num_results))
 
-    # Hard timeout: DDGS with backend='auto' can try multiple backends
-    # sequentially, each with its own HTTP timeout.  Wrap the whole
-    # operation in a thread with a wall-clock deadline so it can never
-    # block the engine loop indefinitely.
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-    try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            raw_results = pool.submit(_do_search).result(timeout=timeout)
-    except FuturesTimeout:
-        logger.warning("DDG search timed out after %ds for query: %s", timeout, query[:80])
+    # ThreadPoolExecutor's context manager waits for running workers during
+    # shutdown, which defeats Future.result(timeout=...). A daemon worker
+    # lets the caller honor the wall-clock deadline while DDGS finishes its
+    # own bounded network attempt in the background.
+    worker_slots = _ddg_worker_slots
+    if not worker_slots.acquire(blocking=False):
+        logger.warning(
+            "DDG search skipped because %d workers are still in flight",
+            _DDG_MAX_IN_FLIGHT,
+        )
         return []
-    except Exception as exc:
-        logger.warning("DDG search failed: %s", exc)
+
+    completed = threading.Event()
+    raw_results: list[dict] = []
+    error: list[Exception] = []
+
+    def _worker() -> None:
+        try:
+            raw_results.extend(_do_search())
+        except Exception as exc:
+            error.append(exc)
+        finally:
+            worker_slots.release()
+            completed.set()
+
+    worker = threading.Thread(target=_worker, name="infinidev-ddg-search", daemon=True)
+    try:
+        worker.start()
+    except RuntimeError as exc:
+        worker_slots.release()
+        logger.warning("Failed to start DDG search worker: %s", exc)
+        return []
+    if not completed.wait(timeout=max(float(timeout), 0.0)):
+        logger.warning("DDG search timed out after %ss for query: %s", timeout, query[:80])
+        return []
+    if error:
+        logger.warning("DDG search failed: %s", error[0])
         return []
 
     results = []

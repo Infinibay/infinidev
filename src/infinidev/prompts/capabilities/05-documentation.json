@@ -1,0 +1,9 @@
+{
+  "id": "capability.documentation",
+  "reason": "the requested result includes user-facing or maintainer documentation",
+  "guidance": [
+    "Document the behavior that exists after the change: purpose, entry point, constraints, and one",
+    "representative example. Follow repository terminology and verify commands or links when",
+    "practical. Do not present planned, inferred, or untested behavior as currently supported."
+  ]
+}

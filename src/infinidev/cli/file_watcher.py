@@ -4,13 +4,12 @@ Monitors workspace for file changes and provides callbacks for affected paths.
 Only triggers refresh for visible (expanded) directories in the explorer.
 """
 
+import logging
 import os
 import pathlib
+from threading import Event, Lock, Thread, current_thread
 from typing import Callable, Optional, Set
-from threading import Thread, Event
-import logging
 
-import os
 os.environ["WATCHFILES_DEBUG"] = "false"  # Suppress Rust-level debug output
 
 try:
@@ -89,7 +88,10 @@ class _InfinidevWatchFilter(DefaultFilter):  # type: ignore[misc, valid-type]
         # catches the dominant noise sources (logs, sqlite sidecars).
         # ``Path.suffix`` would miss multi-segment suffixes like
         # ``.db-wal``, so check the basename tail explicitly.
-        parts = path.split("/")
+        # watchfiles emits native paths, so accept both separators even when
+        # a Windows path is inspected by a non-Windows test or remote client.
+        parts = path.replace("\\", "/").split("/")
+        parts = [part.casefold() for part in parts]
         name = parts[-1]
         for suf in _IGNORED_SUFFIXES:
             if name.endswith(suf):
@@ -139,11 +141,13 @@ class FileWatcher:
         self.workspace = pathlib.Path(workspace).resolve()
         self.callback = callback
         self.index_callback = index_callback
-        self.visible_paths_callback = visible_paths_callback or (lambda: set())
+        self.visible_paths_callback = visible_paths_callback
         
         self._running = False
         self._stop_event = Event()
         self._watch_thread: Optional[Thread] = None
+        self._lifecycle_lock = Lock()
+        self._state_lock = Lock()
         self._file_set: Set[str] = set()
     
     def _is_path_visible(self, file_path: pathlib.Path) -> bool:
@@ -159,8 +163,8 @@ class FileWatcher:
             # Normalize the path relative to workspace
             relative = file_path.relative_to(self.workspace)
             
-            # If we have a visible paths callback, check against it
-            if self.visible_paths_callback:
+            # If we have a visible paths callback, check against it.
+            if self.visible_paths_callback is not None:
                 visible = self.visible_paths_callback()
                 for visible_path in visible:
                     try:
@@ -170,9 +174,9 @@ class FileWatcher:
                     except (ValueError, FileNotFoundError):
                         continue
                 return False
-            else:
-                # No visible paths tracked, only watch workspace root
-                return True
+
+            # Without UI visibility state, refresh changes anywhere in the workspace.
+            return True
                 
         except ValueError:
             # Path is not under workspace
@@ -196,8 +200,15 @@ class FileWatcher:
             logger.debug(f"Could not check visibility for {changed_path}: {e}")
             return False
     
+    def _publish_worker_exit(self, worker: Thread) -> None:
+        """Publish an exit only when *worker* still owns the watcher state."""
+        with self._state_lock:
+            if self._watch_thread is worker:
+                self._running = False
+
     def _run_watcher(self):
         """Internal watcher loop running in background thread."""
+        worker = current_thread()
         logger.info(f"Starting file watcher for {self.workspace}")
 
         try:
@@ -216,9 +227,10 @@ class FileWatcher:
                 if self._stop_event.is_set():
                     break
                     
-                # Process each change
+                # Process each change. Read lifecycle state through the same lock
+                # used by start(), stop(), and worker-exit publication.
                 for change_type, file_path in changes:
-                    if not self._running:
+                    if not self.is_running():
                         break
                         
                     try:
@@ -245,6 +257,7 @@ class FileWatcher:
         except Exception as e:
             logger.error(f"Watcher error: {e}")
         finally:
+            self._publish_worker_exit(worker)
             logger.info("File watcher stopped")
     
     def start(self) -> bool:
@@ -256,31 +269,59 @@ class FileWatcher:
         if not WATCHFILES_AVAILABLE:
             logger.error("Cannot start file watcher: watchfiles not installed")
             return False
-            
-        if self._running:
-            logger.warning("File watcher already running")
+
+        with self._lifecycle_lock:
+            with self._state_lock:
+                thread = self._watch_thread
+                if thread is not None and thread.is_alive():
+                    if self._running:
+                        logger.warning("File watcher already running")
+                        return True
+                    logger.error(
+                        "Cannot restart file watcher while its previous thread is still alive"
+                    )
+                    return False
+
+                if self._running:
+                    logger.warning("File watcher already running")
+                    return True
+
+                self._running = True
+                self._stop_event.clear()
+                thread = Thread(target=self._run_watcher, daemon=True)
+                self._watch_thread = thread
+                try:
+                    thread.start()
+                except RuntimeError:
+                    self._watch_thread = None
+                    self._running = False
+                    self._stop_event.set()
+                    raise
+
+            logger.info(f"File watcher started for {self.workspace}")
             return True
-            
-        self._running = True
-        self._stop_event.clear()
-        self._watch_thread = Thread(target=self._run_watcher, daemon=True)
-        self._watch_thread.start()
-        
-        logger.info(f"File watcher started for {self.workspace}")
-        return True
     
-    def stop(self):
-        """Stop the file watcher gracefully."""
-        if not self._running:
-            return
-            
-        self._running = False
-        self._stop_event.set()
-        
-        if self._watch_thread and self._watch_thread.is_alive():
-            self._watch_thread.join(timeout=2.0)
-            
-        logger.info("File watcher stopped")
+    def stop(self) -> None:
+        """Stop the watcher, raising if its thread outlives the bounded join."""
+        with self._lifecycle_lock:
+            with self._state_lock:
+                thread = self._watch_thread
+                if not self._running and not (thread is not None and thread.is_alive()):
+                    return
+
+                self._running = False
+                self._stop_event.set()
+
+            if thread is not None and thread.is_alive():
+                if thread is current_thread():
+                    return
+                thread.join(timeout=2.0)
+                if thread.is_alive():
+                    raise TimeoutError(
+                        f"File watcher thread did not stop within 2 seconds for {self.workspace}"
+                    )
+
+            logger.info("File watcher stopped")
     
     def update_visible_paths(self, visible_paths: Set[str]):
         """Update the set of visible/expanded paths.
@@ -297,4 +338,5 @@ class FileWatcher:
     
     def is_running(self) -> bool:
         """Check if the watcher is currently running."""
-        return self._running
+        with self._state_lock:
+            return self._running

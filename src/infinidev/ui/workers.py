@@ -130,6 +130,10 @@ def run_engine_task(
 
     except Exception as e:
         logger.error("run_engine_task failed: %s", e, exc_info=True)
+        analysis_event = getattr(app, "_analysis_event", None)
+        if getattr(app, "_analysis_waiting", False) and analysis_event is not None:
+            app._analysis_answer = ""
+            analysis_event.set()
         app._analysis_waiting = False
         app._chat_history_control.show_thinking = False
         app.add_message("Error", str(e), "system")
@@ -268,7 +272,12 @@ def run_plan_task(app: InfinidevApp, task_description: str) -> None:
         app._actions_text = "Planning..."
         app.invalidate()
 
-        phase_engine = PhaseEngine()
+        if app.engine is not None:
+            app.engine._hooks = hooks
+            begin_turn = getattr(app.engine, "begin_turn", None)
+            if callable(begin_turn):
+                begin_turn()
+        phase_engine = PhaseEngine(loop_engine=app.engine)
 
         def _on_plan_ready(plan_steps: list[dict]) -> tuple[str, str]:
             """Show the plan in the chat and block until the user replies."""

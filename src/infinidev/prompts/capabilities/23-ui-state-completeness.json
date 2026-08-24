@@ -1,0 +1,9 @@
+{
+  "id": "capability.ui_state_completeness",
+  "reason": "the task builds or changes an interactive screen or component",
+  "guidance": [
+    "Account for loading, empty, error, disabled, overflow, narrow-layout, and recovery states that the",
+    "changed flow can enter. Verify transitions and user actions on the rendered interaction surface;",
+    "do not treat a happy-path screenshot or static component tree as complete behavior evidence."
+  ]
+}

@@ -5,6 +5,8 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
+    # Logging is not configured yet; dotenv support is optional and must not
+    # prevent the CLI from starting with the process environment unchanged.
     pass
 
 import sys
@@ -26,6 +28,8 @@ def _setup_gpu_library_path():
                         if lib_dir not in current:
                             os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{current}" if current else lib_dir
     except Exception:
+        # This optional probe runs before logging and ONNX imports. Preserve
+        # CPU startup when NVIDIA packages are absent, broken, or inaccessible.
         pass
 
 _setup_gpu_library_path()
@@ -41,6 +45,8 @@ from infinidev.agents.base import InfinidevAgent
 from infinidev.engine.loop import LoopEngine
 from infinidev.engine.analysis.review_engine import ReviewEngine
 import infinidev.prompts.flows  # noqa: F401 — registers flows
+
+logger = logging.getLogger(__name__)
 
 # ── Logging setup ────────────────────────────────────────────────────────
 #
@@ -152,11 +158,24 @@ _IMPERATIVE_PREFIXES = (
 )
 
 
-def _bootstrap_single_prompt_runtime() -> None:
-    """Side effects shared by every classic entry point: DB init, ui/behavior
-    hook registration, initial index, background indexer queue. Pulled out so
-    both ``--prompt`` and the interactive ``_run_main`` setup do this exactly
-    once and never drift apart."""
+_QUEUE_NOT_PROVIDED = object()
+_NO_OWNED_QUEUE = object()
+
+
+def _bootstrap_single_prompt_runtime():
+    """Initialize classic services and return the queue owned by this bootstrap."""
+    from infinidev.code_intel.background_indexer import (
+        acquire_global_queue,
+        get_global_queue,
+    )
+
+    existing_queue = get_global_queue()
+    if existing_queue is not None and existing_queue.is_running():
+        # A live queue proves classic bootstrap already transferred ownership.
+        # Repeating the setup would replace its only global reference and orphan
+        # both its worker and the file watcher attached below.
+        return _NO_OWNED_QUEUE
+
     init_db()
     from infinidev.engine.hooks.ui_hooks import register_ui_hooks
     register_ui_hooks()
@@ -170,10 +189,34 @@ def _bootstrap_single_prompt_runtime() -> None:
     )
 
     from infinidev.cli.index_queue import IndexQueue
-    from infinidev.code_intel.background_indexer import set_global_queue
     _q = IndexQueue(project_id=1)
-    _q.start()
-    set_global_queue(_q)
+    try:
+        _q.start()
+        acquired_queue = acquire_global_queue(_q)
+    except Exception:
+        # Until registration succeeds, bootstrap still owns the queue. A start
+        # implementation may raise after launching its worker, so always stop
+        # the local instance before propagating the original bootstrap error.
+        try:
+            _q.stop()
+        except Exception:
+            logger.debug(
+                "Failed to stop unregistered background index queue",
+                exc_info=True,
+            )
+        raise
+
+    if not acquired_queue:
+        # Another bootstrap won ownership after our optimistic check. Stop the
+        # local worker rather than overwriting or orphaning either instance.
+        try:
+            _q.stop()
+        except Exception:
+            logger.debug(
+                "Failed to stop unowned background index queue",
+                exc_info=True,
+            )
+        return _NO_OWNED_QUEUE
 
     # Warm Pydantic schema introspection so the first
     # ``LoopEngine._build_context()`` call doesn't pay ~500 ms of
@@ -189,7 +232,7 @@ def _bootstrap_single_prompt_runtime() -> None:
         _warm_tools = get_tools_for_role("developer", small_model=True)
         build_tool_schemas(_warm_tools, small_model=True)
     except Exception:
-        pass
+        logger.debug("Failed to warm tool schemas", exc_info=True)
 
     # File watcher — catches every modification to the workspace,
     # including shell commands (``sed ... > file.ts``), external
@@ -213,21 +256,40 @@ def _bootstrap_single_prompt_runtime() -> None:
                     from infinidev.code_intel.background_indexer import enqueue_or_sync
                     enqueue_or_sync(1, changed_path)
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Failed to index changed file: %s",
+                        changed_path,
+                        exc_info=True,
+                    )
 
             _watcher = FileWatcher(
                 workspace=workspace,
                 callback=lambda _p: None,  # no visual callback in classic
                 index_callback=_index_on_change,
             )
-            _watcher.start()
-            # Stash on the IndexQueue so _run_main can stop it on exit.
+            # Publish ownership before start: a start implementation may raise
+            # after launching its thread, and teardown must still be able to find it.
             setattr(_q, "_file_watcher", _watcher)
+            try:
+                _watcher.start()
+            except Exception:
+                try:
+                    _watcher.stop()
+                except Exception:
+                    logger.debug(
+                        "Failed to stop partially started classic-mode file watcher",
+                        exc_info=True,
+                    )
+                else:
+                    setattr(_q, "_file_watcher", None)
+                raise
     except Exception:
         # File watcher is best-effort. If watchfiles isn't installed
         # or the start fails, classic mode still works — it just
         # misses shell-bypass detection.
-        pass
+        logger.debug("Failed to start classic-mode file watcher", exc_info=True)
+
+    return _q
 
 
 # ── Classic-mode play-by-play log bridge ────────────────────────────────
@@ -299,6 +361,10 @@ def _format_event(event_type: str, data: dict) -> str | None:
     return f"· {event_type}: {_truncate(str(data), 200)}"
 
 
+_classic_event_bridge_bus = None
+_classic_event_bridge_callback = None
+
+
 def _install_classic_event_bridge() -> None:
     """Register a logger-only EventBus subscriber for ``INFINIDEV_LOG_FILE``.
 
@@ -316,6 +382,14 @@ def _install_classic_event_bridge() -> None:
     try:
         from infinidev.flows.event_listeners import event_bus
     except Exception:
+        logger.debug("Failed to import event bus for classic-mode bridge", exc_info=True)
+        return
+
+    global _classic_event_bridge_bus, _classic_event_bridge_callback
+    if (
+        _classic_event_bridge_bus is event_bus
+        and _classic_event_bridge_callback is not None
+    ):
         return
 
     def _bridge(event_type: str, project_id: int, agent_id: str, data: dict) -> None:
@@ -325,12 +399,16 @@ def _install_classic_event_bridge() -> None:
                 _EVENT_LOG.info(line)
         except Exception:
             # Logging must never break the engine — swallow everything.
-            pass
+            logger.debug("Failed to format classic-mode event", exc_info=True)
 
     try:
         event_bus.subscribe(_bridge)
     except Exception:
-        pass
+        logger.debug("Failed to install classic-mode event bridge", exc_info=True)
+        return
+
+    _classic_event_bridge_bus = event_bus
+    _classic_event_bridge_callback = _bridge
 
 
 # Only attaches when INFINIDEV_LOG_FILE is set. Coexists with the
@@ -354,6 +432,98 @@ def _end_ken_sessions() -> None:
         logging.debug("ken session end failed", exc_info=True)
 
 
+def _cleanup_classic_runtime(
+    renderer,
+    set_permission_handler,
+    *,
+    owned_queue=_QUEUE_NOT_PROVIDED,
+) -> None:
+    """Release resources owned by one classic runtime.
+
+    ``owned_queue`` lets normal callers pin cleanup to the queue returned by
+    bootstrap. The default lookup remains for direct compatibility callers.
+    """
+    try:
+        set_permission_handler(None)
+    except Exception:
+        logger.debug("Failed to reset classic permission handler", exc_info=True)
+
+    if renderer is not None:
+        try:
+            renderer.unsubscribe()
+        except Exception:
+            logger.debug("Failed to unsubscribe classic renderer", exc_info=True)
+
+    _end_ken_sessions()
+
+    try:
+        from infinidev.code_intel.background_indexer import (
+            get_global_queue,
+            release_global_queue,
+        )
+
+        if owned_queue is _NO_OWNED_QUEUE:
+            return
+        queue = get_global_queue() if owned_queue is _QUEUE_NOT_PROVIDED else owned_queue
+    except Exception:
+        logger.debug("Failed to find background index queue", exc_info=True)
+        return
+
+    if queue is None:
+        return
+
+    watcher = getattr(queue, "_file_watcher", None)
+    if watcher is not None:
+        try:
+            watcher.stop()
+        except Exception:
+            logger.debug("Failed to stop classic-mode file watcher", exc_info=True)
+            return
+
+    try:
+        queue.stop()
+    except Exception:
+        logger.debug("Failed to stop background index queue", exc_info=True)
+        return
+
+    try:
+        release_global_queue(queue)
+    except Exception:
+        logger.debug("Failed to clear background index queue", exc_info=True)
+
+
+def _echo_final(text: str) -> None:
+    """Write plain final output without letting a broken stream fail the run."""
+    try:
+        click.echo(text)
+    except Exception:
+        logger.debug("Failed to render final result as plain text", exc_info=True)
+
+
+def _stdout_is_terminal() -> bool:
+    """Detect terminal output without making stream introspection a hard dependency."""
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        logger.debug("Failed to detect whether stdout is a terminal", exc_info=True)
+        return False
+
+
+def _render_final(text: str | None) -> None:
+    """Render a classic-mode final result, falling back to plain text."""
+    if not text:
+        _echo_final("Done.")
+        return
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+
+        Console(file=sys.stdout, force_terminal=_stdout_is_terminal()).print(Markdown(text))
+    except Exception:
+        logger.debug("Failed to render final result with Rich", exc_info=True)
+        _echo_final(text)
+
+
 def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
                        continue_session: bool = False, autonomous: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
@@ -370,37 +540,42 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
     from infinidev.cli import session_resume as sr
     from infinidev.cli.classic_renderer import ClassicRenderer, SessionStatus
 
-    _bootstrap_single_prompt_runtime()
-
-    agent = InfinidevAgent(agent_id="cli_agent")
-    _cont = sr.resolve_continue_session() if continue_session else None
-    if _cont:
-        session_id = _cont["session_id"]
-        sr.begin_resumed_session(session_id)
-    else:
-        session_id = str(uuid.uuid4())
-        sr.begin_fresh_session(session_id)
-    hooks = NonInteractiveHooks()
-    engine = LoopEngine()
-    renderer = ClassicRenderer(SessionStatus(
-        provider=settings.LLM_PROVIDER,
-        model=(
-            settings.LLM_MODEL.split("/", 1)[-1]
-            if "/" in settings.LLM_MODEL else settings.LLM_MODEL
-        ),
-    ))
-    renderer.subscribe()
     from infinidev.tools.permission import (
         make_noninteractive_permission_handler,
         set_permission_handler,
     )
 
-    set_permission_handler(make_noninteractive_permission_handler(prompt_text))
-
-    # A one-shot run is still a conversation as far as Ken is concerned:
-    # the turn opens its session lazily inside run_task, and every exit
-    # path — including the two flow shortcuts — has to close it.
+    renderer = None
+    owned_queue = _QUEUE_NOT_PROVIDED
     try:
+        bootstrapped_queue = _bootstrap_single_prompt_runtime()
+        owned_queue = (
+            _QUEUE_NOT_PROVIDED if bootstrapped_queue is None else bootstrapped_queue
+        )
+
+        agent = InfinidevAgent(agent_id="cli_agent")
+        _cont = sr.resolve_continue_session() if continue_session else None
+        if _cont:
+            session_id = _cont["session_id"]
+            sr.begin_resumed_session(session_id)
+        else:
+            session_id = str(uuid.uuid4())
+            sr.begin_fresh_session(session_id)
+        hooks = NonInteractiveHooks()
+        engine = LoopEngine()
+        renderer = ClassicRenderer(SessionStatus(
+            provider=settings.LLM_PROVIDER,
+            model=(
+                settings.LLM_MODEL.split("/", 1)[-1]
+                if "/" in settings.LLM_MODEL else settings.LLM_MODEL
+            ),
+        ))
+        renderer.subscribe()
+        set_permission_handler(make_noninteractive_permission_handler(prompt_text))
+
+        # A one-shot run is still a conversation as far as Ken is concerned:
+        # the turn opens its session lazily inside run_task, and every exit
+        # path — including the two flow shortcuts — has to close it.
         # /explore and /brainstorm prefixes bypass the full pipeline and run
         # the TreeEngine directly with no analysis or review.
         if prompt_text.startswith("/explore "):
@@ -411,7 +586,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
                 session_id=session_id, engine=engine, hooks=hooks,
                 use_tree_engine=True,
             )
-            click.echo(result or "Done.")
+            _render_final(result)
             return
         if prompt_text.startswith("/brainstorm "):
             problem = prompt_text[len("/brainstorm "):]
@@ -421,7 +596,7 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
                 session_id=session_id, engine=engine, hooks=hooks,
                 use_tree_engine=True,
             )
-            click.echo(result or "Done.")
+            _render_final(result)
             return
 
         # Every turn runs through chat agent → (maybe escalate) → planner →
@@ -441,11 +616,13 @@ def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
         # the terminal by the respond branch (the develop path leaves the
         # flag False, so its result still prints).
         if not getattr(hooks, "reply_already_shown", False):
-            click.echo(result or "Done.")
+            _render_final(result)
     finally:
-        renderer.unsubscribe()
-        set_permission_handler(None)
-        _end_ken_sessions()
+        _cleanup_classic_runtime(
+            renderer,
+            set_permission_handler,
+            owned_queue=owned_queue,
+        )
 
 
 def _bootstrap_ken_runtime() -> None:
@@ -481,7 +658,11 @@ def _bootstrap_ken_runtime() -> None:
 )
 @click.option("--profile", is_flag=True, help="Enable session profiling (saves to ~/.infinidev/profiles/).")
 @click.option("--continue", "-c", "continue_session", is_flag=True, help="Resume the most recent session in this directory.")
-@click.option("--resume", is_flag=True, help="Pick a recent session to resume from a list.")
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Pick, rename, or delete a prior session (shows estimated storage).",
+)
 @click.option("--autonomous", "autonomous", is_flag=True, help="Force autonomous ('manejate vos') mode: chain plans until budget exhaustion or completion.")
 def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, provider: str | None, think: bool, profile: bool, continue_session: bool, resume: bool, autonomous: bool = False):
     """Main entry point for Infinidev CLI."""
@@ -521,26 +702,20 @@ def main(no_tui: bool, classic: bool, prompt: str | None, model: str | None, pro
     _fast_exit_workaround()
 
 
-def _resolve_classic_session(continue_session: bool, resume: bool) -> tuple[str, list]:
-    """Resolve the session_id for classic mode, honoring -c/--resume.
-
-    Returns ``(session_id, prior_turns)`` where ``prior_turns`` is the
-    list of ``(role, content)`` to repaint (empty for a fresh session).
-    """
+def _resolve_classic_session(
+    continue_session: bool, resume: bool
+) -> tuple[str, list, str]:
+    """Resolve the session id, prior turns, and display name for classic mode."""
     from infinidev.cli import session_resume as sr
 
     chosen: dict | None = None
     if resume:
-        sessions = sr.recent_sessions()
-        if not sessions:
-            click.echo(click.style("No prior sessions to resume — starting fresh.", fg="yellow"))
-        else:
-            click.echo(click.style("Recent sessions:", bold=True))
-            for i, s in enumerate(sessions, 1):
-                click.echo(f"  {i}. {sr.session_label(s)}")
-            raw = click.prompt("Resume which? (number, or Enter for fresh)", default="", show_default=False)
-            if raw.strip().isdigit() and 1 <= int(raw) <= len(sessions):
-                chosen = sessions[int(raw) - 1]
+        chosen = sr.pick_recent_session(
+            lambda message: click.prompt(message, default="", show_default=False),
+            click.echo,
+        )
+        if chosen is None:
+            click.echo(click.style("Starting a fresh session.", fg="yellow"))
     elif continue_session:
         chosen = sr.resolve_continue_session()
         if chosen is None:
@@ -548,16 +723,44 @@ def _resolve_classic_session(continue_session: bool, resume: bool) -> tuple[str,
 
     if chosen:
         sid = chosen["session_id"]
-        return sid, sr.begin_resumed_session(sid)
+        display_name = str(chosen.get("title") or "").strip() or sid[:8]
+        return sid, sr.begin_resumed_session(sid), display_name
 
     sid = str(uuid.uuid4())
     sr.begin_fresh_session(sid)
-    return sid, []
+    return sid, [], sid[:8]
 
 
 def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool,
               continue_session: bool = False, resume: bool = False, autonomous: bool = False):
-    """Inner dispatch — runs inside the profiler context manager."""
+    """Dispatch a CLI run and always release an initialized classic runtime."""
+    classic_runtime = []
+    try:
+        return _run_main_inner(
+            no_tui,
+            classic,
+            prompt,
+            think,
+            profile,
+            continue_session,
+            resume,
+            autonomous,
+            classic_runtime,
+        )
+    finally:
+        if classic_runtime:
+            renderer, set_permission_handler, owned_queue = classic_runtime[0]
+            _cleanup_classic_runtime(
+                renderer,
+                set_permission_handler,
+                owned_queue=owned_queue,
+            )
+
+
+def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool, profile: bool,
+                    continue_session: bool, resume: bool, autonomous: bool,
+                    classic_runtime: list) -> None:
+    """Run the selected CLI mode inside the outer lifecycle guard."""
     # Non-interactive --prompt mode
     if prompt:
         _run_single_prompt(prompt, use_phase_engine=think,
@@ -577,7 +780,15 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         return
 
     # Classic interactive mode — thin adapter around the unified pipeline.
-    _bootstrap_single_prompt_runtime()
+    # Register teardown before bootstrap because bootstrap owns process-wide
+    # services and may fail after starting them.
+    from infinidev.tools.permission import set_permission_handler
+    classic_runtime.append((None, set_permission_handler, _QUEUE_NOT_PROVIDED))
+    bootstrapped_queue = _bootstrap_single_prompt_runtime()
+    owned_queue = (
+        _QUEUE_NOT_PROVIDED if bootstrapped_queue is None else bootstrapped_queue
+    )
+    classic_runtime[0] = (None, set_permission_handler, owned_queue)
 
     from infinidev.engine.orchestration import (
         run_task, run_flow_task, ClickHooks,
@@ -603,6 +814,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
         ),
     )
     renderer = ClassicRenderer(status)
+    classic_runtime[0] = (renderer, set_permission_handler, owned_queue)
     renderer.subscribe()
 
     # ── Banner ───────────────────────────────────────────────────────
@@ -614,18 +826,6 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     ))
     click.echo(click.style("  /help · /status · Ctrl+C cancel · Ctrl+D quit", dim=True))
     click.echo(hr())
-
-    # Final-result renderer: tries Rich Markdown, falls back to plain.
-    def _render_final(text: str | None) -> None:
-        if not text:
-            click.echo("Done.")
-            return
-        try:
-            from rich.console import Console
-            from rich.markdown import Markdown
-            Console(file=sys.stdout, force_terminal=sys.stdout.isatty()).print(Markdown(text))
-        except Exception:
-            click.echo(text)
 
     # ── prompt_toolkit session with status bar ───────────────────────
     kb = KeyBindings()
@@ -651,14 +851,16 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
     )
 
     agent = InfinidevAgent(agent_id="cli_agent")
-    session_id, _resumed_turns = _resolve_classic_session(continue_session, resume)
+    session_id, _resumed_turns, _session_display_name = _resolve_classic_session(
+        continue_session, resume
+    )
     engine = LoopEngine()
     # Repaint prior conversation so you can see where you left off. This is
-    # display-only (zero tokens); the model gets the full history on its
-    # first turn via the resume replay queued in begin_resumed_session().
+    # display-only (zero tokens); the model gets a compact active-Step
+    # checkpoint on its first turn via begin_resumed_session().
     if _resumed_turns:
         click.echo(click.style(
-            f"  ↻ Resumed session {session_id[:8]} · "
+            f"  ↻ Resumed session {_session_display_name} · "
             f"{len(_resumed_turns)} prior turns restored", fg="cyan"))
         click.echo(hr())
         for _role, _content in _resumed_turns:
@@ -673,7 +875,6 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
 
     # Inline permission handler — bridges engine worker thread → main.
     pq = PermissionQueue()
-    from infinidev.tools.permission import set_permission_handler
     set_permission_handler(make_permission_handler(pq))
 
     def _drain_permission_requests() -> None:
@@ -711,7 +912,7 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
 
             _fallthrough_to_pipeline = False
             if user_input.startswith("/"):
-                cmd_result = handle_command(user_input)
+                cmd_result = handle_command(user_input, session_id=session_id)
 
                 if isinstance(cmd_result, tuple) and cmd_result[0] == "prompt":
                     user_input = cmd_result[1]
@@ -824,27 +1025,6 @@ def _run_main(no_tui: bool, classic: bool, prompt: str | None, think: bool, prof
             click.echo(click.style(f"Error: {e}", fg="red"))
             logging.exception("Error in main loop")
 
-    # Graceful renderer detach on exit.
-    try:
-        renderer.unsubscribe()
-    except Exception:
-        pass
-
-    # Close Ken's session for the conversation that just ended. /sessions/end
-    # is what snapshots the productivity scores its predictive channel reads
-    # NEXT time, so skipping it costs the next session, not this one.
-    _end_ken_sessions()
-
-    # Cleanup background services — the IndexQueue was started inside
-    # _bootstrap_single_prompt_runtime() and registered globally; fetch
-    # it through the public accessor and stop it on exit.
-    from infinidev.code_intel.background_indexer import get_global_queue
-    _q = get_global_queue()
-    if _q is not None:
-        try:
-            _q.stop()
-        except Exception:
-            pass
 
 def _fast_exit_workaround() -> None:
     """Bypass Python interpreter finalisation to dodge a gRPC SIGSEGV.
@@ -886,12 +1066,16 @@ def _fast_exit_workaround() -> None:
         if _q is not None:
             _q.stop()
     except Exception:
-        pass
-    try:
-        _sys.stdout.flush()
-        _sys.stderr.flush()
-    except Exception:
-        pass
+        logger.debug("Failed to stop background index queue during shutdown", exc_info=True)
+    for stream_name, stream in (("stdout", _sys.stdout), ("stderr", _sys.stderr)):
+        try:
+            stream.flush()
+        except Exception:
+            logger.debug(
+                "Failed to flush %s during shutdown",
+                stream_name,
+                exc_info=True,
+            )
     _os._exit(0)
 
 

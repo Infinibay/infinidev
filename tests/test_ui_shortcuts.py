@@ -28,6 +28,7 @@ class _App:
         self.explorer_visible = False
         self.active_tab = "chat"
         self.active_dialog = None
+        self.session_id = "active-session"
         self.messages: list[tuple[str, str, str]] = []
         self.focused_sidebar = False
 
@@ -108,6 +109,21 @@ def test_slash_sidebar_is_the_terminal_proof_fallback(app):
 
     _cmd_sidebar(app, ["/sidebar"])
     assert app.sidebar_visible is True
+
+
+def test_session_command_names_the_active_session(app, monkeypatch):
+    from infinidev.ui.handlers import commands
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "infinidev.cli.session_resume.name_session",
+        lambda session_id, title: calls.append((session_id, title)) or "Release train",
+    )
+
+    commands.handle_command(app, "/session Release train")
+
+    assert calls == [("active-session", "Release train")]
+    assert app.messages[-1][1] == "Session named: Release train"
 
 
 def test_help_lists_only_commands_that_exist():

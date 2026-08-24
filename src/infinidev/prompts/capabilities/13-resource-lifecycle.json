@@ -1,0 +1,9 @@
+{
+  "id": "capability.resource_lifecycle",
+  "reason": "the code acquires processes, files, sockets, watchers, tasks, or temporary resources",
+  "guidance": [
+    "Pair each successful acquisition with idempotent cleanup under normal completion, failure, and",
+    "cancellation. Check partial startup, repeated stop, and retry after failed initialization so stale",
+    "state cannot leak resources or prevent recovery."
+  ]
+}

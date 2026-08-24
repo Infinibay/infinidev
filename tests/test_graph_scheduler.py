@@ -28,6 +28,10 @@ from infinidev.engine.engines.graph.scheduler import (
 def _seed_state() -> GraphState:
     state = GraphState(run_id="run-sched")
     state, _ = reduce(state, ReviseGoalOp(text="goal"))
+    state, _ = reduce(state, GraphPatchOp(
+        add_nodes=[NodeSpec(node_id="e", node_type="evidence")],
+        based_on_revision=state.revision,
+    ))
     return state
 
 
@@ -67,6 +71,43 @@ class TestReadyFrontier:
             node_id="dep", evidence_ids=["e"], outcome="ok"
         ))
         assert {n.node_id for n in ready_frontier(state)} == {"w1"}
+
+    def test_stale_resolved_dependency_blocks_dependent(self):
+        state = _seed_state()
+        state, _ = _add_work_nodes(state, ["dep", "w1"])
+        state, _ = reduce(state, GraphPatchOp(
+            add_edges=[EdgeSpec(source="w1", target="dep", edge_type=EDGE_REQUIRES)],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="dep", evidence_ids=["e"], outcome="ok"),
+        )
+        state.nodes["dep"] = state.nodes["dep"].with_updates(
+            freshness=Freshness.STALE
+        )
+
+        assert ready_frontier(state) == []
+
+    def test_stale_dependency_proof_blocks_dependent(self):
+        state = _seed_state()
+        state, _ = _add_work_nodes(state, ["dep", "w1"])
+        state, _ = reduce(state, GraphPatchOp(
+            add_edges=[
+                EdgeSpec(source="w1", target="dep", edge_type=EDGE_REQUIRES),
+            ],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="dep", evidence_ids=["e"], outcome="ok"),
+        )
+        state.nodes["e"] = state.nodes["e"].with_updates(
+            freshness=Freshness.STALE
+        )
+
+        assert ready_frontier(state) == []
+
 
     def test_invalidated_nodes_excluded(self):
         state = _seed_state()

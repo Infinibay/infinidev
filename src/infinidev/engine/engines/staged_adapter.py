@@ -29,6 +29,46 @@ def _map_status(staged_status: str) -> str:
     }.get(staged_status, STATUS_FAILED)
 
 
+def _staged_state_metrics(state: Any) -> dict[str, Any]:
+    """Summarize durable staged progress.
+
+    The last LoopEngine sub-run is not reported as the whole staged execution.
+    """
+    stages = list(getattr(state, "stages", ()) or ())
+    tasks = [
+        task
+        for stage in stages
+        for task in (getattr(stage, "tasks", ()) or ())
+    ]
+
+    def status_counts(records: list[Any]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in records:
+            status = str(getattr(record, "status", "") or "unknown")
+            counts[status] = counts.get(status, 0) + 1
+        return counts
+
+    attempts = sum(
+        value
+        for task in tasks
+        if type(value := getattr(task, "attempts", 0)) is int and value >= 0
+    )
+    revision = getattr(state, "revision", 0)
+    if type(revision) is not int or revision < 0:
+        revision = 0
+
+    return {
+        "goal_status": str(getattr(state, "status", "") or "unknown"),
+        "stages": len(stages),
+        "stage_status_counts": status_counts(stages),
+        "tasks": len(tasks),
+        "task_status_counts": status_counts(tasks),
+        "task_attempts": attempts,
+        "evidence_entries": len(getattr(state, "evidence", ()) or ()),
+        "state_revision": revision,
+    }
+
+
 class StagedAdapter:
     """Dispatch escalated work through the durable Goal/Stage/Task engine."""
 
@@ -75,6 +115,7 @@ class StagedAdapter:
             state=state,
             evidence=evidence,
             resume_token=kwargs.get("session_id"),
+            metrics=_staged_state_metrics(state),
         )
 
 

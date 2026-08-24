@@ -1,0 +1,10 @@
+{
+  "id": "capability.security",
+  "reason": "the current task touches trust boundaries, credentials, permissions, or untrusted input",
+  "guidance": [
+    "Trace untrusted data from entry point to sensitive sink. Preserve least privilege, existing",
+    "permission gates, and safe serialization or process APIs. Validate the traced abuse case",
+    "without exposing secrets, and distinguish an observed vulnerability from general hardening",
+    "advice."
+  ]
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import logging
 import re
@@ -128,6 +129,8 @@ def _generate_plan(agent: Any,
     verbose: bool,
     test_checkpoint: Any | None = None,
     prompt_configuration: Any | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    max_rounds: int = 5,
 ) -> list[dict[str, Any]]:
     """Use LoopEngine to build the plan incrementally.
 
@@ -139,6 +142,9 @@ def _generate_plan(agent: Any,
     step_complete, but NEVER activates/executes them. Stops when model
     says done or max rounds reached.
     """
+    if cancel_check is not None and cancel_check():
+        return []
+
     from infinidev.engine.llm_client import call_llm
     from infinidev.config.llm import get_litellm_params, _is_small_model
     from infinidev.engine.loop.context import build_system_prompt
@@ -162,14 +168,20 @@ def _generate_plan(agent: Any,
         text_steps = _generate_plan_text_mode(
             agent, description, answers_text, notes_text, strategy, verbose,
         )
+        if cancel_check is not None and cancel_check():
+            return []
         if len(text_steps) >= strategy.plan_min_steps:
             return text_steps
         if verbose and text_steps:
             _log(f"  {YELLOW}⚠ Text-mode produced {len(text_steps)} steps (need {strategy.plan_min_steps}), falling back to tool mode{RESET}")
 
     baseline_str = ""
+    if cancel_check is not None and cancel_check():
+        return []
     if strategy.auto_test and test_checkpoint:
         passed, total = test_checkpoint.run()
+        if cancel_check is not None and cancel_check():
+            return []
         if total > 0:
             baseline_str = f"\nTest baseline: {passed}/{total} passing\n"
 
@@ -209,9 +221,10 @@ def _generate_plan(agent: Any,
         })
 
     collected_steps: list[dict[str, Any]] = []
-    max_rounds = 5
 
     for round_num in range(max_rounds):
+        if cancel_check is not None and cancel_check():
+            return []
         try:
             response = call_llm(llm_params, messages, tools=tools, tool_choice="required",
                                 on_thinking_chunk=_on_thinking, on_stream_status=_on_stream_status)
@@ -220,6 +233,9 @@ def _generate_plan(agent: Any,
             if verbose:
                 _log(f"  {RED}⚠ LLM error: {str(exc)[:80]}{RESET}")
             break
+
+        if cancel_check is not None and cancel_check():
+            return []
 
         choice = response.choices[0]
         message = choice.message

@@ -17,7 +17,11 @@ from infinidev.engine.engine_logging import (
     RESET as _RESET,
 )
 from infinidev.engine.hooks.hooks import hook_manager as _hook_manager, HookContext as _HookContext, HookEvent as _HookEvent
-from infinidev.engine.loop.models import ActionRecord, StepResult
+from infinidev.engine.loop.models import (
+    ActionRecord,
+    MAX_CACHE_CONTENT_SIZE,
+    StepResult,
+)
 from infinidev.engine.loop.behavior_rules import _READ_TOOLS, is_workspace_edit_tool
 from infinidev.engine.loop.loop_plan import _step_concepts, _step_phase
 from infinidev.engine.loop.step_summarizer import _summarize_step, _synthesize_final
@@ -76,6 +80,38 @@ def _get_settings():
     return settings
 
 
+def _workspace_preload_path(
+    ctx: ExecutionContext,
+    raw_path: object,
+) -> tuple[str, Path] | None:
+    """Resolve one model-suggested preload strictly inside the workspace."""
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None
+
+    workspace_hint = (
+        getattr(ctx, "workspace_path", None)
+        or getattr(getattr(ctx, "agent", None), "workspace_path", None)
+    )
+    if not workspace_hint:
+        from infinidev.tools.base.context import get_current_workspace_path
+
+        workspace_hint = get_current_workspace_path() or os.getcwd()
+
+    try:
+        workspace = Path(str(workspace_hint)).expanduser().resolve()
+        candidate = Path(raw_path.strip()).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve()
+        relative = resolved.relative_to(workspace)
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+    if not resolved.is_file():
+        return None
+    return relative.as_posix(), resolved
+
+
 _FOLDED_STEP_GENERIC_CONCEPTS = frozenset({
     "args", "arguments", "behavior", "keyword", "only", "semantics",
     "using",
@@ -100,6 +136,30 @@ def _edited_evidence_words(ctx: ExecutionContext, files_edited: set[str]) -> set
     return set(re.findall(r"[a-z0-9]+", "\n".join(parts).casefold()))
 
 
+def _persisted_active_edit_paths(ctx: ExecutionContext) -> set[str]:
+    """Recover net paths edited by the active Step across loop interruptions."""
+    plan = getattr(ctx.state, "plan", None)
+    active = getattr(plan, "active_step", None)
+    if active is None:
+        return set()
+    file_tracker = getattr(ctx, "file_tracker", None)
+    entry = getattr(ctx.state, "step_entry_change_fingerprints", {}).get(
+        active.index
+    )
+    if (
+        entry is None
+        or file_tracker is None
+        or not hasattr(file_tracker, "change_fingerprint")
+    ):
+        return set()
+    before = dict(entry)
+    current = dict(file_tracker.change_fingerprint(reconcile=True))
+    return {
+        path for path in set(before) | set(current)
+        if before.get(path) != current.get(path)
+    }
+
+
 def _fold_verified_model_steps(
     ctx: ExecutionContext,
     step_result: StepResult,
@@ -112,6 +172,8 @@ def _fold_verified_model_steps(
     """
     tracker = getattr(step_result, "behavior_tracker", None)
     files_edited = set(getattr(tracker, "files_edited", ()) or ())
+    if not files_edited:
+        files_edited = _persisted_active_edit_paths(ctx)
     successful_tests = list(
         getattr(tracker, "successful_test_commands", ()) or ()
     )
@@ -425,12 +487,31 @@ class StepManager:
         ctx.state.history.append(record)
         self._arm_semantic_stagnation_control(ctx)
 
-        # Pre-load files recommended by summarizer
-        for fpath in record.files_to_preload:
-            if fpath not in ctx.state.opened_files and os.path.isfile(fpath):
-                with best_effort("preload file read failed"):
-                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
-                        ctx.state.cache_file(fpath, f.read())
+        # Pre-load only existing files that resolve inside this run's workspace.
+        # The summarizer is untrusted model output: absolute external paths,
+        # escaping symlinks, malformed values, and oversized files are ignored.
+        normalized_preloads: list[str] = []
+        for raw_path in record.files_to_preload:
+            candidate = _workspace_preload_path(ctx, raw_path)
+            if candidate is None:
+                continue
+            cache_path, resolved_path = candidate
+            if cache_path in ctx.state.opened_files:
+                normalized_preloads.append(cache_path)
+                continue
+
+            loaded = False
+            with best_effort("preload file read failed"):
+                with resolved_path.open(
+                    "r", encoding="utf-8", errors="replace"
+                ) as preload_file:
+                    content = preload_file.read(MAX_CACHE_CONTENT_SIZE + 1)
+                if len(content) <= MAX_CACHE_CONTENT_SIZE:
+                    ctx.state.cache_file(cache_path, content)
+                    loaded = True
+            if loaded:
+                normalized_preloads.append(cache_path)
+        record.files_to_preload = normalized_preloads
 
         ctx.state.current_step_index = step_index
 
@@ -674,6 +755,9 @@ class StepManager:
         # hidden end-of-task work summary after execute() returns.
         self._engine._last_state = ctx.state
         self._engine._last_status = status
+        checkpoint = getattr(self._engine, "_checkpoint", None)
+        if callable(checkpoint):
+            checkpoint(ctx, terminal_status=status)
         if ctx.verbose:
             _log_finish(ctx.agent_name, status, iteration + 1, ctx.state.total_tool_calls, ctx.state.total_tokens)
             _log_cache_summary(ctx.state)

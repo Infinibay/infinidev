@@ -1,22 +1,25 @@
 """Tool for searching code examples and documentation on the web."""
 
-import json
+from __future__ import annotations
+
+import collections
 import logging
+import threading
+import time
 from typing import Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from infinidev.config.settings import settings
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.web.backends import search_ddg
+from infinidev.tools.web.code_search_web_input import CodeSearchWebInput
 
 logger = logging.getLogger(__name__)
 
-# In-memory cache for code search results
-_cache: dict[str, str] = {}
-_CACHE_MAX = 50
-from infinidev.tools.web.code_search_web_input import CodeSearchWebInput
-
-
+# Bounded, expiring cache for code search results.
+_cache: collections.OrderedDict[tuple[str, int], tuple[float, str]] = collections.OrderedDict()
+_cache_lock = threading.Lock()
 _CACHE_MAX = 50
 
 
@@ -39,22 +42,36 @@ class CodeSearchWebTool(InfinibayBaseTool):
         language: str = "",
         num_results: int = 5,
     ) -> str:
-        if not query.strip():
+        query = query.strip()
+        language = language.strip()
+        if not query:
             return self._error("Empty query.")
 
-        # Build search query with site filters for code-relevant sources
-        sites = "site:stackoverflow.com OR site:github.com OR site:docs.python.org OR site:developer.mozilla.org"
-        search_query = f"{query}"
+        sites = (
+            "site:stackoverflow.com OR site:github.com OR "
+            "site:docs.python.org OR site:developer.mozilla.org"
+        )
+        search_query = query
         if language:
             search_query = f"{language} {search_query}"
         search_query = f"{search_query} ({sites})"
 
-        # Check cache
-        cache_key = f"{search_query}:{num_results}"
-        if cache_key in _cache:
-            return _cache[cache_key]
+        cache_key = (search_query, num_results)
+        now = time.monotonic()
+        with _cache_lock:
+            cached = _cache.get(cache_key)
+            if cached is not None:
+                cached_at, cached_output = cached
+                if now - cached_at < settings.WEB_CACHE_TTL_SECONDS:
+                    _cache.move_to_end(cache_key)
+                    return cached_output
+                del _cache[cache_key]
 
-        results = search_ddg(search_query, num_results=num_results)
+        try:
+            results = search_ddg(search_query, num_results=num_results)
+        except Exception as exc:
+            logger.warning("Code search failed for %r: %s", query, exc)
+            return self._error(f"Code search failed: {exc}")
 
         if not results:
             return self._error(
@@ -62,25 +79,21 @@ class CodeSearchWebTool(InfinibayBaseTool):
                 "Try rephrasing the query or being more specific."
             )
 
-        # Format results
         formatted = []
-        for i, r in enumerate(results, 1):
+        for i, result in enumerate(results, 1):
             formatted.append(
-                f"{i}. **{r['title']}**\n"
-                f"   URL: {r['url']}\n"
-                f"   {r['snippet']}"
+                f"{i}. **{result['title']}**\n"
+                f"   URL: {result['url']}\n"
+                f"   {result['snippet']}"
             )
 
         output = f"Code search results for: {query}\n\n" + "\n\n".join(formatted)
-
         self._log_tool_usage(f"Code search: {query} ({len(results)} results)")
 
-        # Cache result
-        if len(_cache) >= _CACHE_MAX:
-            # Evict oldest entry
-            oldest = next(iter(_cache))
-            del _cache[oldest]
-        _cache[cache_key] = output
+        with _cache_lock:
+            if _CACHE_MAX > 0:
+                while len(_cache) >= _CACHE_MAX:
+                    _cache.popitem(last=False)
+                _cache[cache_key] = (time.monotonic(), output)
 
         return output
-

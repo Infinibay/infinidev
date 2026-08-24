@@ -1,0 +1,10 @@
+{
+  "id": "capability.dependency_change",
+  "reason": "the task adds, removes, upgrades, or replaces a dependency",
+  "guidance": [
+    "Establish why the dependency is needed and inspect compatibility and migration notes for the chosen",
+    "version. Use the repository's package manager, keep manifest and lockfile consistent, and exercise",
+    "the runtime paths that import or invoke it. Do not add a package when existing project or standard",
+    "library support satisfies the contract."
+  ]
+}

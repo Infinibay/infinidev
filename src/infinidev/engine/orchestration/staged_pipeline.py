@@ -22,7 +22,11 @@ from infinidev.engine.analysis.staged_planning import (
     TaskExecutionRecord,
     TaskPlanningHandoff,
     plan_snapshot,
+    statement_cites_evidence,
+    task_evidence_supports_delivery,
+    tasks_missing_completion_evidence,
 )
+from infinidev.engine.engines.base import get_loop_status, normalize_loop_status
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 from infinidev.prompts.profiles import EffectivePromptConfiguration
 
@@ -106,8 +110,13 @@ def run_staged_goal(
                 ),
             )
             _publish_state(state, session_id, hooks)
-            if getattr(used_engine, "is_cancelled", False):
-                return _cancelled_result(state, used_engine, last_result, session_id, hooks)
+            if (
+                getattr(used_engine, "is_cancelled", False)
+                or active_stage.status == "cancelled"
+            ):
+                return _cancelled_result(
+                    state, used_engine, last_result, session_id, hooks
+                )
             failed_stage = _failed_stage_result(
                 state, active_stage, used_engine, session_id, hooks,
             )
@@ -116,14 +125,28 @@ def run_staged_goal(
 
         hooks.on_phase("analysis")
         hooks.on_status("info", "Evaluating Goal and planning the next Stage...")
-        decision = run_stage_planner(
-            state,
-            session_id=session_id,
-            project_id=project_id,
-            workspace_path=workspace_path,
-            hooks=hooks,
-            prompt_configuration=prompt_configuration,
-        )
+        try:
+            decision = run_stage_planner(
+                state,
+                session_id=session_id,
+                project_id=project_id,
+                workspace_path=workspace_path,
+                hooks=hooks,
+                prompt_configuration=prompt_configuration,
+            )
+        except Exception as exc:
+            logger.exception("Stage Planner failed")
+            detail = str(exc).strip() or "no error detail"
+            reason = (
+                "Stage Planner failed before returning a valid decision: "
+                f"{type(exc).__name__}: {detail[:1000]}"
+            )
+            hooks.on_status("error", reason)
+            decision = BlockGoalDecision(
+                reason=reason,
+                missing="A valid Stage Planner decision on a later retry.",
+                evidence=[entry.id for entry in state.evidence[-10:]],
+            )
         _publish_state(state, session_id, hooks)
 
         recovered = _recover_completion_after_planner_protocol_failure(
@@ -278,49 +301,66 @@ def _execute_stage(
         hooks.on_status("info", f"Stage {stage.number} / Task: {task.spec.title}")
         _publish_state(state, session_id, hooks)
 
-        plan = _plan_from_snapshot(task)
-        planned_now = plan is None
-        if plan is None:
-            if _use_local_bounded_plan(stage, task):
+        try:
+            plan = _plan_from_snapshot(task)
+            planned_now = plan is None
+            if plan is None:
+                if _use_local_bounded_plan(stage, task):
+                    hooks.on_status(
+                        "info",
+                        f"Using bounded local plan for Task: {task.spec.title}",
+                    )
+                    plan = Plan(
+                        overview=(
+                            "Local routing: the first Task is already bounded by "
+                            "an explicit path, outcome, and acceptance checks."
+                        ),
+                    )
+                else:
+                    handoff = TaskPlanningHandoff(
+                        goal=state.goal,
+                        stage_id=stage.id,
+                        stage_number=stage.number,
+                        stage=stage.spec,
+                        task=task.spec,
+                        dependency_results=_dependency_results(stage, task),
+                        evidence=list(state.evidence),
+                    )
+                    hooks.on_phase("analysis")
+                    hooks.on_status(
+                        "info",
+                        f"Planning Task: {task.spec.title}",
+                    )
+                    plan = run_planner(
+                        escalation,
+                        task_handoff=handoff,
+                        session_id=session_id,
+                        project_id=project_id,
+                        workspace_path=workspace_path,
+                        hooks=hooks,
+                        prompt_configuration=prompt_configuration,
+                    )
+                plan = _scope_task_plan(plan, stage, task)
+                task.plan = plan_snapshot(plan)
+                state.revision += 1
+            else:
                 hooks.on_status(
                     "info",
-                    f"Using bounded local plan for Task: {task.spec.title}",
+                    f"Resuming persisted plan for Task: {task.spec.title}",
                 )
-                plan = Plan(
-                    overview=(
-                        "Local routing: the first Task is already bounded by "
-                        "an explicit path, outcome, and acceptance checks."
-                    ),
-                )
-            else:
-                handoff = TaskPlanningHandoff(
-                    goal=state.goal,
-                    stage_id=stage.id,
-                    stage_number=stage.number,
-                    stage=stage.spec,
-                    task=task.spec,
-                    dependency_results=_dependency_results(stage, task),
-                    evidence=list(state.evidence),
-                )
-                hooks.on_phase("analysis")
-                hooks.on_status("info", f"Planning Task: {task.spec.title}")
-                plan = run_planner(
-                    escalation,
-                    task_handoff=handoff,
-                    session_id=session_id,
-                    project_id=project_id,
-                    workspace_path=workspace_path,
-                    hooks=hooks,
-                    prompt_configuration=prompt_configuration,
-                )
-            plan = _scope_task_plan(plan, stage, task)
-            task.plan = plan_snapshot(plan)
-            state.revision += 1
-        else:
-            hooks.on_status(
-                "info",
-                f"Resuming persisted plan for Task: {task.spec.title}",
+        except Exception as exc:
+            _fail_task_phase(
+                state,
+                stage,
+                task,
+                "Planning",
+                exc,
+                used_engine,
+                session_id,
+                hooks,
             )
+            continue
+
         notify = getattr(hooks, "notify", None)
         if planned_now and callable(notify):
             notify("Planner", plan.overview, "agent")
@@ -333,6 +373,7 @@ def _execute_stage(
             last_result = direct_verification
             task.status = "completed"
             task.result = direct_verification
+            task.error = ""
             hooks.on_status(
                 "info",
                 f"Task verified deterministically without a developer turn: "
@@ -350,34 +391,50 @@ def _execute_stage(
             _publish_state(state, session_id, hooks)
             continue
 
-        flow_config = get_flow_config("develop")
-        task_prompt = (
-            _render_developer_task(state, stage, task, turn_context),
-            flow_config.expected_output,
-        )
-        task_checks = _task_checks(task, plan)
-        structured_task = task_from_free_text(
-            _render_structured_task_description(state, stage, task),
-            title=_schema_safe_title(task.spec.title),
-            kind=_task_kind(
-                state.goal.intent,
-                stage.spec.purpose,
-                task.spec.title,
-                task.spec.outcome,
-            ),
-            acceptance_criteria=list(state.goal.acceptance_criteria) or None,
-            derived_verification_criteria=task_checks,
-            task_profile=state.goal.task_profile,
-        )
-        task_prompt = pipeline_mod._run_gather_phase(
-            user_input=task.spec.title,
-            agent=agent,
-            task_prompt=task_prompt,
-            session_id=session_id,
-            force_gather=force_gather,
-            hooks=hooks,
-            prompt_configuration=prompt_configuration,
-        )
+        try:
+            flow_config = get_flow_config("develop")
+            task_prompt = (
+                _render_developer_task(state, stage, task, turn_context),
+                flow_config.expected_output,
+            )
+            task_checks = _task_checks(task, plan)
+            structured_task = task_from_free_text(
+                _render_structured_task_description(state, stage, task),
+                title=_schema_safe_title(task.spec.title),
+                kind=_task_kind(
+                    state.goal.intent,
+                    stage.spec.purpose,
+                    task.spec.title,
+                    task.spec.outcome,
+                ),
+                acceptance_criteria=(
+                    list(state.goal.acceptance_criteria) or None
+                ),
+                derived_verification_criteria=task_checks,
+                task_profile=state.goal.task_profile,
+            )
+            task_prompt = pipeline_mod._run_gather_phase(
+                user_input=task.spec.title,
+                agent=agent,
+                task_prompt=task_prompt,
+                session_id=session_id,
+                force_gather=force_gather,
+                hooks=hooks,
+                prompt_configuration=prompt_configuration,
+            )
+        except Exception as exc:
+            _fail_task_phase(
+                state,
+                stage,
+                task,
+                "Task preparation",
+                exc,
+                used_engine,
+                session_id,
+                hooks,
+            )
+            continue
+
         try:
             result, used_engine = pipeline_mod._run_execution_phase(
                 agent=agent,
@@ -415,11 +472,16 @@ def _execute_stage(
                 prompt_configuration=prompt_configuration,
             )
         except Exception as exc:
-            logger.exception("Stage Task execution failed: %s", task.spec.title)
-            task.status = "failed"
-            task.error = f"{type(exc).__name__}: {exc}"
-            _record_task_evidence(state, stage, task, task.error, used_engine)
-            _publish_state(state, session_id, hooks)
+            _fail_task_phase(
+                state,
+                stage,
+                task,
+                "Execution",
+                exc,
+                used_engine,
+                session_id,
+                hooks,
+            )
             continue
 
         last_result = result
@@ -430,7 +492,14 @@ def _execute_stage(
             _record_task_evidence(state, stage, task, result, used_engine)
             return result, used_engine
 
-        loop_status = getattr(used_engine, "_last_status", "") or "completed"
+        loop_status = get_loop_status(used_engine)
+        loop_outcome = normalize_loop_status(loop_status)
+        if loop_outcome == "cancelled":
+            task.status = "cancelled"
+            task.result = result
+            stage.status = "cancelled"
+            _record_task_evidence(state, stage, task, result, used_engine)
+            return result, used_engine
         if (
             loop_status == "exhausted"
             and not _prompt_budget_exhausted(used_engine)
@@ -450,7 +519,24 @@ def _execute_stage(
             )
             _publish_state(state, session_id, hooks)
             continue
-        if loop_status in {"blocked", "failed", "exhausted"} or _has_blocked_steps(used_engine):
+        if loop_outcome == "failed":
+            task.status = "failed"
+            task.result = result
+            task.error = (
+                "The Task execution failed."
+                if loop_status == "failed"
+                else "The Task execution returned no valid terminal status."
+            )
+            if loop_status != "failed":
+                hooks.on_status(
+                    "error",
+                    "Staged Task returned an empty or unknown terminal status; "
+                    "failing closed.",
+                )
+            _record_task_evidence(state, stage, task, result, used_engine)
+            _publish_state(state, session_id, hooks)
+            continue
+        if loop_outcome == "blocked" or _has_blocked_steps(used_engine):
             task.status = "blocked"
             task.result = result
             task.error = "The Task execution closed with blocked work."
@@ -458,22 +544,36 @@ def _execute_stage(
             _publish_state(state, session_id, hooks)
             continue
 
-        result = pipeline_mod._run_review_phase(
-            engine=used_engine,
-            agent=agent,
-            session_id=session_id,
-            task_prompt=task_prompt,
-            result=result,
-            reviewer=reviewer,
-            hooks=hooks,
-            acceptance_criteria=None,
-            derived_verification_criteria=task_checks,
-            task=structured_task,
-            max_total_tool_calls=_staged_execution_tool_budget(
-                max_execution_tool_calls_per_task
-            ) * task.attempts,
-            prompt_configuration=prompt_configuration,
-        )
+        try:
+            result = pipeline_mod._run_review_phase(
+                engine=used_engine,
+                agent=agent,
+                session_id=session_id,
+                task_prompt=task_prompt,
+                result=result,
+                reviewer=reviewer,
+                hooks=hooks,
+                acceptance_criteria=None,
+                derived_verification_criteria=task_checks,
+                task=structured_task,
+                max_total_tool_calls=_staged_execution_tool_budget(
+                    max_execution_tool_calls_per_task
+                ) * task.attempts,
+                prompt_configuration=prompt_configuration,
+            )
+        except Exception as exc:
+            _fail_task_phase(
+                state,
+                stage,
+                task,
+                "Review",
+                exc,
+                used_engine,
+                session_id,
+                hooks,
+                partial_result=last_result,
+            )
+            continue
         last_result = result
         if getattr(used_engine, "is_cancelled", False):
             task.status = "cancelled"
@@ -481,8 +581,32 @@ def _execute_stage(
             stage.status = "cancelled"
             _record_task_evidence(state, stage, task, result, used_engine)
             return result, used_engine
-        review_status = getattr(used_engine, "_last_status", "") or "completed"
-        if review_status in {"blocked", "failed", "exhausted"} or _has_blocked_steps(used_engine):
+        review_status = get_loop_status(used_engine)
+        review_outcome = normalize_loop_status(review_status)
+        if review_outcome == "cancelled":
+            task.status = "cancelled"
+            task.result = result
+            stage.status = "cancelled"
+            _record_task_evidence(state, stage, task, result, used_engine)
+            return result, used_engine
+        if review_outcome == "failed":
+            task.status = "failed"
+            task.result = result
+            task.error = (
+                "Review/rework failed."
+                if review_status == "failed"
+                else "Review/rework returned no valid terminal status."
+            )
+            if review_status != "failed":
+                hooks.on_status(
+                    "error",
+                    "Staged review returned an empty or unknown terminal status; "
+                    "failing closed.",
+                )
+            _record_task_evidence(state, stage, task, result, used_engine)
+            _publish_state(state, session_id, hooks)
+            continue
+        if review_outcome == "blocked" or _has_blocked_steps(used_engine):
             task.status = "blocked"
             task.result = result
             task.error = "Review/rework closed with blocked work."
@@ -491,6 +615,7 @@ def _execute_stage(
             continue
         task.status = "completed"
         task.result = result
+        task.error = ""
         _record_task_evidence(state, stage, task, result, used_engine)
         _publish_state(state, session_id, hooks)
 
@@ -577,9 +702,28 @@ def _goal_from_escalation(escalation: EscalationPacket) -> GoalSpec:
 
 
 def _infer_goal_intent(escalation: EscalationPacket) -> str:
-    """Classify the requested result without making discovery an error."""
-    parts = [escalation.user_request, escalation.understanding]
-    text = "\n".join(parts).lower()
+    """Classify result intent from literal authority, never derived prose."""
+    profile = escalation.task_profile
+    if profile is None:
+        # Task-policy rendering can be disabled, but the literal authority
+        # boundary still needs the same deterministic interpretation.
+        from infinidev.engine.task_policies import resolve_task_profile
+
+        profile = resolve_task_profile(
+            escalation.user_request,
+            enable_embeddings=False,
+            enable_llm_fallback=False,
+        )
+    authority = {
+        str(item).casefold()
+        for item in (getattr(profile, "authority", ()) or ())
+    }
+    if authority & {"modify", "commit", "publish"}:
+        return "implementation"
+    if authority and authority <= {"answer", "diagnose"}:
+        return "informational"
+
+    text = escalation.user_request.lower()
     implementation_pattern = re.compile(
         r"\b(implement|build|create|add|update|change|fix|write|modify|"
         r"crear|agregar|añadir|implementar|programar|modificar|corregir|"
@@ -604,14 +748,25 @@ def _add_guidance(state: StagedPlanningState, guidance: str) -> None:
 
 
 def _restore_interrupted_task(state: StagedPlanningState) -> None:
-    stage = state.active_stage
-    if stage is None:
-        return
-    for task in stage.tasks:
-        if task.status == "active":
-            task.status = "pending"
-            task.error = "Execution was interrupted; resuming from persisted state."
-            state.revision += 1
+    changed = False
+    for stage in state.stages:
+        for task in stage.tasks:
+            if task.status == "completed" and task.error:
+                task.error = ""
+                changed = True
+
+    active_stage = state.active_stage
+    if active_stage is not None:
+        for task in active_stage.tasks:
+            if task.status == "active":
+                task.status = "pending"
+                task.error = (
+                    "Execution was interrupted; resuming from persisted state."
+                )
+                changed = True
+
+    if changed:
+        state.revision += 1
 
 
 def _next_ready_task(stage: StageExecutionRecord) -> TaskExecutionRecord | None:
@@ -651,6 +806,39 @@ def _dependency_results(
         for candidate in stage.tasks
         if candidate.spec.id in wanted and candidate.status == "completed"
     }
+
+
+def _fail_task_phase(
+    state: StagedPlanningState,
+    stage: StageExecutionRecord,
+    task: TaskExecutionRecord,
+    phase: str,
+    exc: Exception,
+    engine: Any,
+    session_id: str,
+    hooks: Any,
+    *,
+    partial_result: str = "",
+) -> None:
+    """Close an in-process Task phase exception as durable failed state."""
+    logger.exception(
+        "Stage Task %s failed during %s",
+        task.spec.title,
+        phase.lower(),
+    )
+    task.status = "failed"
+    task.result = partial_result or ""
+    task.error = (
+        f"{phase} failed: {type(exc).__name__}: {str(exc)[:1000]}"
+    )
+    _record_task_evidence(
+        state,
+        stage,
+        task,
+        task.error,
+        engine,
+    )
+    _publish_state(state, session_id, hooks)
 
 
 def _record_task_evidence(
@@ -697,6 +885,7 @@ def _record_task_evidence(
                 if workspace_changed is None
                 else workspace_changed
             ),
+            "no_edit_accepted": _engine_no_edit_accepted(engine),
         },
     )
     if state.add_evidence(entry):
@@ -721,6 +910,11 @@ def _engine_has_file_changes(engine: Any) -> bool | None:
         return bool(getter())
     except Exception:
         return None
+
+
+def _engine_no_edit_accepted(engine: Any) -> bool:
+    state = getattr(engine, "_last_state", None)
+    return bool(getattr(state, "task_no_edit_accepted", False))
 
 
 def _prior_task_target_was_edited(
@@ -817,6 +1011,13 @@ _VERIFY_TASK_RE = re.compile(
     r"ejecutar|verificar|confirmar|comprobar|validar|inspeccionar|auditar)\b",
     re.IGNORECASE,
 )
+_READ_ONLY_TASK_RE = re.compile(
+    r"\b(research|investigate|analy[sz]e|explain|compare|summari[sz]e|"
+    r"review|inspect|audit|report|recommend|assess|"
+    r"investigar|analizar|explicar|comparar|resumir|revisar|inspeccionar|"
+    r"auditar|informar|recomendar|evaluar)\b",
+    re.IGNORECASE,
+)
 
 
 def _task_kind(
@@ -826,7 +1027,10 @@ def _task_kind(
     task_outcome: str = "",
 ) -> str:
     task_text = f"{task_title}\n{task_outcome}"
-    if _VERIFY_TASK_RE.search(task_text) and not _WRITE_TASK_RE.search(task_text):
+    if (
+        (_VERIFY_TASK_RE.search(task_text) or _READ_ONLY_TASK_RE.search(task_text))
+        and not _WRITE_TASK_RE.search(task_text)
+    ):
         return "investigation"
     if stage_purpose == "discovery":
         return "investigation"
@@ -959,19 +1163,27 @@ def _failed_stage_result(
     )
     missing = "\n".join(f"- {detail}" for detail in details)
     evidence = [f"{entry.id}: {entry.summary}" for entry in state.evidence]
-    stage.status = "blocked"
-    state.status = "blocked"
+    terminal_status = (
+        "failed" if any(task.status == "failed" for task in failed) else "blocked"
+    )
+    stage.status = terminal_status
+    state.status = terminal_status
     state.terminal = GoalTerminalState(
-        kind="goal_blocked",
+        kind="failed" if terminal_status == "failed" else "goal_blocked",
         summary=reason,
         evidence=evidence,
         missing=missing,
     )
     state.revision += 1
-    _set_engine_status(engine, "blocked")
+    _set_engine_status(engine, terminal_status)
     _publish_state(state, session_id, hooks)
+    result_text = (
+        _failed_text(reason, missing, evidence)
+        if terminal_status == "failed"
+        else _blocked_text(reason, missing, evidence)
+    )
     return StagedRunResult(
-        text=_blocked_text(reason, missing, evidence),
+        text=result_text,
         engine=engine,
         state=state,
     )
@@ -1265,24 +1477,44 @@ def _completion_error(
 ) -> str:
     if not state.evidence:
         return "Goal completion was rejected because the evidence ledger is empty."
-    task_evidence = [
-        entry for entry in state.evidence if entry.kind == "task_result"
-    ]
-    if (
-        state.goal.intent == "implementation"
-        and task_evidence
-        and all(entry.details.get("workspace_changed") is False for entry in task_evidence)
+
+    latest = state.stages[-1] if state.stages else prior
+    if latest is not None and any(
+        task.status != "completed" for task in latest.tasks
     ):
-        return (
-            "Goal completion was rejected because this implementation Goal has "
-            "no observed workspace change. Continue with a delivery Stage or "
-            "block on the concrete obstacle."
-        )
-    if prior is not None and any(task.status != "completed" for task in prior.tasks):
         return (
             "Goal completion was rejected because the latest Stage contains "
             "blocked, failed, cancelled, or pending Tasks."
         )
+    if latest is not None:
+        missing_proof = tasks_missing_completion_evidence(state, latest)
+        if missing_proof:
+            tasks = ", ".join(f"Task {task.spec.id}" for task in missing_proof)
+            return (
+                "Goal completion was rejected because completed work lacks "
+                f"durable Task evidence: {tasks}."
+            )
+
+    completed_task_evidence = [
+        entry
+        for entry in state.evidence
+        if entry.kind == "task_result"
+        and entry.details.get("task_status") == "completed"
+    ]
+    if (
+        state.goal.intent == "implementation"
+        and not any(
+            task_evidence_supports_delivery(entry)
+            for entry in completed_task_evidence
+        )
+    ):
+        return (
+            "Goal completion was rejected because this implementation Goal has "
+            "no observed workspace change and no explicitly accepted no-edit "
+            "outcome in completed Task evidence. Continue with a delivery "
+            "Stage or block on the concrete obstacle."
+        )
+
     literal_count = len(state.goal.acceptance_criteria)
     if literal_count and len(decision.evidence) < literal_count:
         return (
@@ -1291,7 +1523,7 @@ def _completion_error(
         )
     known_ids = {entry.id for entry in state.evidence}
     if any(
-        not any(evidence_id in statement for evidence_id in known_ids)
+        not statement_cites_evidence(statement, known_ids)
         for statement in decision.evidence
     ):
         return (
@@ -1312,9 +1544,9 @@ def _recover_completion_after_planner_protocol_failure(
 
     This is deliberately narrow. It does not reinterpret a semantic
     ``block_goal`` decision, and it does not guess through user-authored
-    acceptance criteria. Recovery requires a fully completed Stage, a real
-    workspace change, and re-running the exact test command captured by the
-    developer successfully.
+    acceptance criteria. Recovery requires a fully completed Stage, either a
+    real workspace change or an accepted no-edit outcome, and re-running the
+    exact test command captured by the developer successfully.
     """
     if not isinstance(decision, BlockGoalDecision):
         return None
@@ -1327,7 +1559,10 @@ def _recover_completion_after_planner_protocol_failure(
         return None
     if not stage.tasks or any(task.status != "completed" for task in stage.tasks):
         return None
-    if not _engine_has_file_changes(engine):
+    if not (
+        _engine_has_file_changes(engine)
+        or _engine_no_edit_accepted(engine)
+    ):
         return None
     loop_state = getattr(engine, "_last_state", None)
     test_command = str(getattr(loop_state, "last_test_command", "") or "").strip()
@@ -1384,6 +1619,14 @@ def _blocked_text(reason: str, missing: str, evidence: list[str]) -> str:
         text += "\n\nObserved evidence:\n" + "\n".join(f"- {item}" for item in evidence)
     return text
 
+
+def _failed_text(reason: str, details: str, evidence: list[str]) -> str:
+    text = f"Goal failed: {reason}\n\nFailure details:\n{details}"
+    if evidence:
+        text += "\n\nObserved evidence:\n" + "\n".join(
+            f"- {item}" for item in evidence
+        )
+    return text
 
 def _cancelled_result(
     state: StagedPlanningState,

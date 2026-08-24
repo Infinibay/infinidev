@@ -259,3 +259,58 @@ def test_pipeline_uses_evidence_review_when_workspace_is_unchanged(monkeypatch) 
 
     assert result == "grounded answer"
     assert called["initial_result"] == "draft"
+
+def test_pipeline_evidence_review_exception_marks_engine_failed(
+    monkeypatch,
+) -> None:
+    from infinidev.config.settings import settings
+    from infinidev.engine.orchestration.pipeline import _run_review_phase
+
+    monkeypatch.setattr(settings, "REVIEW_ENABLED", True)
+    monkeypatch.setattr(settings, "EVIDENCE_REVIEW_ENABLED", True)
+
+    def broken_review(**_kwargs):
+        raise RuntimeError("evidence reviewer unavailable")
+
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.evidence_review.run_evidence_review_rework_loop",
+        broken_review,
+    )
+
+    class Engine:
+        _last_status = "done"
+
+        def has_file_changes(self):
+            return False
+
+    class Hooks:
+        def __init__(self):
+            self.statuses = []
+
+        def on_phase(self, _phase):
+            pass
+
+        def on_status(self, level, message):
+            self.statuses.append((level, message))
+
+        def notify(self, *_args):
+            pass
+
+    engine = Engine()
+    hooks = Hooks()
+    result = _run_review_phase(
+        engine=engine,
+        agent=SimpleNamespace(),
+        session_id="evidence-review-error",
+        task_prompt=("Research X", "Report"),
+        result="draft",
+        reviewer=SimpleNamespace(),
+        hooks=hooks,
+    )
+
+    assert result == "draft"
+    assert engine._last_status == "failed"
+    assert hooks.statuses[-1] == (
+        "error",
+        "Evidence review error: evidence reviewer unavailable",
+    )

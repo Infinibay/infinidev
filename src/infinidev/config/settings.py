@@ -338,6 +338,9 @@ class Settings(BaseSettings):
     # and its bounded LoopEngine leaf executions.
     GRAPH_MAX_OPEN_BRANCHES: int = 8
     GRAPH_MAX_NODE_REVISITS: int = 4
+    # Zero disables the corresponding resource fuse, matching LoopEngine's
+    # public budget convention. The leaf-run and revisit fuses still terminate
+    # a Graph run even when one resource counter is unlimited.
     GRAPH_NODE_TOKEN_BUDGET: int = 200_000
     GRAPH_RUN_TOOL_BUDGET: int = 500
 

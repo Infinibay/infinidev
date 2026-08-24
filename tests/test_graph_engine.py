@@ -7,11 +7,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from infinidev.engine.engines.base import STATUS_BLOCKED, STATUS_COMPLETED
+from infinidev.engine.engines.base import (
+    STATUS_BLOCKED,
+    STATUS_CANCELLED,
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+)
 from infinidev.engine.engines.graph import completion
 from infinidev.engine.engines.graph.context import build_capsule, render_capsule
 from infinidev.engine.engines.graph.domain import (
     EDGE_REQUIRES,
+    EDGE_SATISFIES,
+    EDGE_SUPPORTS,
     Freshness,
     GraphState,
     Lifecycle,
@@ -21,6 +28,7 @@ from infinidev.engine.engines.graph.engine import (
     GraphEngineAdapter,
 )
 from infinidev.engine.engines.graph.ops import (
+    AbandonNodeOp,
     ActivateNodeOp,
     EdgeSpec,
     GraphPatchOp,
@@ -36,6 +44,69 @@ from infinidev.engine.orchestration.escalation_packet import EscalationPacket
 
 def _escalation(text="Add JWT middleware to the auth module") -> EscalationPacket:
     return EscalationPacket(user_request=text, understanding=text)
+
+
+def _run_live_leaf_with_status(
+    monkeypatch,
+    *,
+    initial_status: str,
+    review_status: str | None = None,
+) -> str:
+    from infinidev.engine.orchestration import pipeline as pipeline_mod
+
+    monkeypatch.setattr(
+        pipeline_mod, "_run_gather_phase", lambda **kwargs: kwargs["task_prompt"]
+    )
+
+    def review(**kwargs):
+        if review_status is not None:
+            kwargs["engine"]._last_status = review_status
+        return kwargs["result"]
+
+    monkeypatch.setattr(pipeline_mod, "_run_review_phase", review)
+
+    class Agent:
+        def activate_context(self, **kwargs):
+            pass
+
+        def deactivate(self):
+            pass
+
+    class Engine:
+        _last_status = initial_status
+        is_cancelled = False
+
+        def execute(self, **kwargs):
+            return "leaf result"
+
+    class Hooks:
+        def on_phase(self, phase):
+            pass
+
+        def on_status(self, level, message):
+            pass
+
+    _result, status = GraphEngineAdapter()._run_live_leaf(
+        capsule_text="active graph node",
+        budget={"max_tool_calls": 2},
+        node=SimpleNamespace(
+            title="Implement middleware",
+            node_type="work",
+            objective="Implement middleware",
+            expected_outcome="Middleware works",
+            payload={"deferred_scope": []},
+        ),
+        kwargs={
+            "escalation": _escalation(),
+            "agent": Agent(),
+            "engine": Engine(),
+            "hooks": Hooks(),
+            "session_id": "s1",
+            "reviewer": None,
+        },
+        preserve_file_tracker=False,
+    )
+    return status
 
 
 # ── Adapter: completed path ──────────────────────────────────────────────────
@@ -55,6 +126,10 @@ class TestAdapterCompleted:
         assert result.status == STATUS_COMPLETED
         assert result.engine_name == "graph_beta"
         assert result.user_message == "middleware added and tested"
+        assert result.metrics["leaf_runs"] == 1
+        assert result.metrics["max_leaf_runs"] == 12
+        assert result.metrics["observed_tool_calls"] == 0
+        assert result.metrics["visited_nodes"] == 1
         # The executor received an authority-tagged capsule, not the raw graph.
         text = captured["text"]
         assert '<goal authority="USER_LITERAL">' in text
@@ -94,6 +169,65 @@ class TestAdapterCompleted:
         assert "Type: verification" in seen[-1]
         assert "Graph completed all work nodes" in result.user_message
         assert all(f"completed node {i}" in result.user_message for i in range(1, 5))
+
+    def test_live_branches_accumulate_changes_for_integration_and_summary(self):
+        escalation = EscalationPacket(
+            user_request="Implement both branches and verify the result",
+            understanding="Implement and verify both branches",
+            grounded_spec=SimpleNamespace(
+                in_scope=["Implement transport", "Implement rendering"]
+            ),
+        )
+
+        class Tracker:
+            def __init__(self, labels):
+                self.labels = list(labels)
+
+            def merge_from(self, other):
+                self.labels = list(other.labels) + self.labels
+
+        engine = SimpleNamespace(
+            _last_file_tracker=None,
+            _last_total_tool_calls=0,
+        )
+
+        class RecordingAdapter(GraphEngineAdapter):
+            def __init__(self):
+                super().__init__()
+                self.calls = []
+
+            def _run_live_leaf(self, **kwargs):
+                node = kwargs["node"]
+                preserve = kwargs["preserve_file_tracker"]
+                tracker = Tracker([node.title])
+                if preserve and engine._last_file_tracker is not None:
+                    tracker.merge_from(engine._last_file_tracker)
+                engine._last_file_tracker = tracker
+                engine._last_total_tool_calls = len(self.calls) + 1
+                self.calls.append((node.node_type, preserve, node.title))
+                return f"completed {node.title}", STATUS_COMPLETED
+
+        adapter = RecordingAdapter()
+        result = adapter.run(
+            escalation=escalation,
+            session_id="s1",
+            engine=engine,
+        )
+
+        assert result.status == STATUS_COMPLETED
+        assert [preserve for _, preserve, _ in adapter.calls] == [
+            False,
+            False,
+            True,
+        ]
+        assert {title for _, _, title in adapter.calls} == set(
+            engine._last_file_tracker.labels
+        )
+        assert len(engine._last_file_tracker.labels) == 3
+        assert engine._last_total_tool_calls == 6
+        assert result.metrics["leaf_runs"] == 3
+        assert result.metrics["observed_tool_calls"] == 6
+        assert result.metrics["visited_nodes"] == 3
 
     def test_explicit_test_scope_is_the_integrating_verification_node(self):
         escalation = EscalationPacket(
@@ -365,7 +499,7 @@ class TestAdapterCompleted:
         )
         result, status = adapter._run_live_leaf(
             capsule_text="active graph node",
-            budget={"max_tool_calls": 1},
+            budget={"max_tool_calls": 1, "token_budget": 1_234},
             node=SimpleNamespace(
                 title="Do the thing",
                 node_type="work",
@@ -387,6 +521,7 @@ class TestAdapterCompleted:
         assert (result, status) == ("done", STATUS_COMPLETED)
         assert engine.execute_kwargs["skip_plan"] is False
         assert engine.execute_kwargs["allow_plan_mutation"] is False
+        assert engine.execute_kwargs["max_prompt_tokens"] == 1_234
         assert engine.execute_kwargs["initial_plan"].rolling_horizon_limit == 3
         assert len(engine.execute_kwargs["initial_plan"].steps) == 1
         task = engine.execute_kwargs["task"]
@@ -410,6 +545,7 @@ class TestAdapterCompleted:
         assert review_kwargs["rework_execute_kwargs"] == {
             "skip_plan": False,
             "allow_plan_mutation": False,
+            "max_prompt_tokens": 1_234,
         }
 
     def test_live_leaf_reports_budget_exhaustion_as_resumable(self, monkeypatch):
@@ -463,6 +599,41 @@ class TestAdapterCompleted:
 
         assert result == "Step interrupted at its tool-call boundary."
         assert status == _LEAF_INTERRUPTED
+
+
+    @pytest.mark.parametrize(
+        ("loop_status", "expected_status"),
+        [
+            ("cancelled", STATUS_CANCELLED),
+            ("", STATUS_FAILED),
+            ("unknown", STATUS_FAILED),
+        ],
+    )
+    def test_live_leaf_preserves_non_success_terminal_statuses(
+        self, monkeypatch, loop_status, expected_status
+    ):
+        assert _run_live_leaf_with_status(
+            monkeypatch, initial_status=loop_status
+        ) == expected_status
+
+    @pytest.mark.parametrize(
+        ("review_status", "expected_status"),
+        [
+            ("cancelled", STATUS_CANCELLED),
+            ("failed", STATUS_FAILED),
+            ("", STATUS_FAILED),
+            ("unknown", STATUS_FAILED),
+            ("exhausted", _LEAF_INTERRUPTED),
+        ],
+    )
+    def test_live_leaf_preserves_review_terminal_statuses(
+        self, monkeypatch, review_status, expected_status
+    ):
+        assert _run_live_leaf_with_status(
+            monkeypatch,
+            initial_status="done",
+            review_status=review_status,
+        ) == expected_status
 
 
 # ── Adapter: blocked / budget paths ─────────────────────────────────────────
@@ -547,6 +718,102 @@ class TestAdapterBlocked:
         assert adapter.calls == 1
         assert "revisit budget (1)" in result.summary
 
+    def test_leaf_run_fuse_reports_consumed_budget_metrics(self):
+        from infinidev.engine.engines.graph.scheduler import SchedulerLimits
+
+        class AlwaysInterrupted(GraphEngineAdapter):
+            calls = 0
+
+            def _run_live_leaf(self, **kwargs):
+                self.calls += 1
+                return "budget boundary", _LEAF_INTERRUPTED
+
+        adapter = AlwaysInterrupted(
+            limits=SchedulerLimits(max_node_revisits=10),
+            max_leaf_runs=2,
+        )
+        result = adapter.run(escalation=_escalation(), session_id="s1")
+
+        assert result.status == STATUS_BLOCKED
+        assert result.transition_request is not None
+        assert result.transition_request.reason == "graph_leaf_budget_exhausted"
+        assert adapter.calls == 2
+        assert result.metrics["leaf_runs"] == 2
+        assert result.metrics["max_leaf_runs"] == 2
+        assert result.metrics["node_visits"] == 2
+        assert result.metrics["observed_tool_calls"] == 0
+
+    def test_run_tool_budget_is_shared_across_leaves(self, monkeypatch):
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "GRAPH_RUN_TOOL_BUDGET", 5)
+        engine = SimpleNamespace(
+            _last_file_tracker=None,
+            _last_total_tool_calls=0,
+        )
+
+        class BudgetedAdapter(GraphEngineAdapter):
+            def __init__(self):
+                super().__init__()
+                self.budgets = []
+
+            def _run_live_leaf(self, **kwargs):
+                self.budgets.append(kwargs["budget"]["max_tool_calls"])
+                engine._last_total_tool_calls = 4 if len(self.budgets) == 1 else 1
+                return "leaf completed", STATUS_COMPLETED
+
+        escalation = EscalationPacket(
+            user_request="Implement both branches and verify the result",
+            understanding="Implement and verify both branches",
+            grounded_spec=SimpleNamespace(
+                in_scope=["Implement transport", "Implement rendering"]
+            ),
+        )
+        adapter = BudgetedAdapter()
+        result = adapter.run(
+            escalation=escalation,
+            session_id="s1",
+            engine=engine,
+        )
+
+        assert adapter.budgets == [5, 1]
+        assert result.status == STATUS_BLOCKED
+        assert result.transition_request is not None
+        assert result.transition_request.reason == (
+            "graph_run_tool_budget_exhausted: 5/5 tool calls"
+        )
+        assert result.metrics["leaf_runs"] == 2
+        assert result.metrics["observed_tool_calls"] == 5
+
+    def test_zero_run_tool_budget_disables_only_the_global_fuse(
+        self, monkeypatch
+    ):
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "GRAPH_RUN_TOOL_BUDGET", 0)
+        budgets = []
+
+        def executor(capsule_text, budget):
+            budgets.append(budget["max_tool_calls"])
+            return "leaf completed"
+
+        escalation = EscalationPacket(
+            user_request="Implement both branches and verify the result",
+            understanding="Implement and verify both branches",
+            grounded_spec=SimpleNamespace(
+                in_scope=["Implement transport", "Implement rendering"]
+            ),
+        )
+        result = GraphEngineAdapter(executor=executor).run(
+            escalation=escalation,
+            session_id="s1",
+        )
+
+        assert result.status == STATUS_COMPLETED
+        assert budgets == [settings.REACT_MAX_TOOL_CALLS] * 3
+        assert result.metrics["max_tool_calls"] is None
+        assert result.metrics["leaf_runs"] == 3
+
     def test_revisit_fuse_zero_blocks_immediately(self):
         from infinidev.engine.engines.graph.scheduler import SchedulerLimits
 
@@ -594,6 +861,7 @@ class TestCapsule:
         state, _ = reduce(state, ReviseGoalOp(text="Ship the feature"))
         state, _ = reduce(state, GraphPatchOp(
             add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence", title="Observed result"),
                 NodeSpec(node_id="req1", node_type="requirement",
                          title="Feature required"),
                 NodeSpec(node_id="dep", node_type="work", title="Prepare schema"),
@@ -625,6 +893,40 @@ class TestCapsule:
         dep_entry = next(d for d in capsule.dependencies if d["node_id"] == "dep")
         assert dep_entry["outcome"] == "schema ready"
 
+    def test_semantic_edges_survive_serialization_round_trip(self):
+        state = self._graph_with_dependency()
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[
+                NodeSpec(
+                    node_id="e1",
+                    node_type="evidence",
+                    title="Observed schema evidence",
+                ),
+            ],
+            add_edges=[
+                EdgeSpec(
+                    source="e1",
+                    target="w1",
+                    edge_type=EDGE_SUPPORTS,
+                ),
+                EdgeSpec(
+                    source="w1",
+                    target="req1",
+                    edge_type=EDGE_SATISFIES,
+                ),
+            ],
+            based_on_revision=state.revision,
+        ))
+        restored = GraphState.model_validate_json(state.model_dump_json())
+
+        capsule = build_capsule(restored, "w1")
+
+        assert [item["node_id"] for item in capsule.ancestors] == ["req1"]
+        assert [item["node_id"] for item in capsule.evidence] == ["e1"]
+        assert GraphEngineAdapter()._requirements_satisfied_by(
+            restored, "w1"
+        ) == ["req1"]
+
     def test_render_uses_authority_blocks(self):
         state = self._graph_with_dependency()
         state, _ = reduce(state, ActivateNodeOp(node_id="dep"))
@@ -652,7 +954,10 @@ class TestCompletion:
         state = GraphState(run_id="run-c")
         state, _ = reduce(state, ReviseGoalOp(text="goal"))
         state, _ = reduce(state, GraphPatchOp(
-            add_nodes=[NodeSpec(node_id="r1", node_type="requirement", title="r")],
+            add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence"),
+                NodeSpec(node_id="r1", node_type="requirement", title="r"),
+            ],
             based_on_revision=state.revision,
         ))
         assert not completion.is_goal_complete(state)
@@ -666,6 +971,7 @@ class TestCompletion:
         state, _ = reduce(state, ReviseGoalOp(text="goal"))
         state, _ = reduce(state, GraphPatchOp(
             add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence"),
                 NodeSpec(node_id="r1", node_type="requirement", title="r"),
                 NodeSpec(node_id="b1", node_type="blocker", title="needs creds"),
             ],
@@ -678,11 +984,57 @@ class TestCompletion:
         assert assessment.status == "blocked"
         assert "needs creds" in assessment.missing
 
+    def test_stale_resolved_blocker_still_blocks_goal(self):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence"),
+                NodeSpec(node_id="r1", node_type="requirement", title="r"),
+                NodeSpec(node_id="b1", node_type="blocker", title="needs creds"),
+            ],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state, ResolveNodeOp(node_id="r1", evidence_ids=["e"])
+        )
+        state, _ = reduce(state, ResolveNodeOp(node_id="b1", evidence_ids=[]))
+        state.nodes["b1"] = state.nodes["b1"].with_updates(
+            freshness=Freshness.STALE
+        )
+
+        assessment = completion.evaluate_goal(state)
+
+        assert assessment.status == "blocked"
+        assert assessment.missing == ["needs creds"]
+
+    def test_resolved_rejected_blocker_is_closed(self):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence"),
+                NodeSpec(node_id="r1", node_type="requirement", title="r"),
+                NodeSpec(node_id="b1", node_type="blocker", title="false alarm"),
+            ],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state, ResolveNodeOp(node_id="r1", evidence_ids=["e"])
+        )
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="b1", evidence_ids=[], verdict="rejected"),
+        )
+
+        assert completion.is_goal_complete(state)
+
     def test_confirmed_requirement_does_not_hide_open_work(self):
         state = GraphState(run_id="run-c")
         state, _ = reduce(state, ReviseGoalOp(text="goal"))
         state, _ = reduce(state, GraphPatchOp(
             add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence"),
                 NodeSpec(node_id="r1", node_type="requirement", title="r"),
                 NodeSpec(node_id="w1", node_type="work", title="still open"),
             ],
@@ -696,6 +1048,139 @@ class TestCompletion:
 
         assert assessment.status == "in_progress"
         assert "still open" in assessment.missing
+
+    def test_abandoned_requirement_blocks_goal(self):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[
+                NodeSpec(node_id="r1", node_type="requirement", title="required"),
+            ],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state,
+            AbandonNodeOp(node_id="r1", reason="could not satisfy it"),
+        )
+
+        assessment = completion.evaluate_goal(state)
+
+        assert assessment.status == "blocked"
+        assert assessment.missing == ["required"]
+
+    @pytest.mark.parametrize(
+        ("freshness", "expected_missing"),
+        [
+            (Freshness.STALE, ["required"]),
+            (Freshness.INVALIDATED, []),
+        ],
+    )
+    def test_confirmed_requirement_must_be_current(
+        self, freshness, expected_missing
+    ):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence"),
+                NodeSpec(node_id="r1", node_type="requirement", title="required"),
+            ],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="r1", evidence_ids=["e"], verdict="confirmed"),
+        )
+        state.nodes["r1"] = state.nodes["r1"].with_updates(freshness=freshness)
+
+        assessment = completion.evaluate_goal(state)
+
+        assert assessment.status == "in_progress"
+        assert assessment.missing == expected_missing
+
+    def test_invalidated_historical_requirement_does_not_block_current_goal(self):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[
+                NodeSpec(node_id="old-evidence", node_type="evidence"),
+                NodeSpec(node_id="current-evidence", node_type="code_ref"),
+                NodeSpec(node_id="old", node_type="requirement", title="old"),
+                NodeSpec(node_id="current", node_type="requirement", title="current"),
+            ],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state, ResolveNodeOp(node_id="old", evidence_ids=["old-evidence"])
+        )
+        state.nodes["old"] = state.nodes["old"].with_updates(
+            freshness=Freshness.INVALIDATED
+        )
+        state, _ = reduce(
+            state, ResolveNodeOp(node_id="current", evidence_ids=["current-evidence"])
+        )
+
+        assert completion.is_goal_complete(state)
+
+    def test_rejected_resolved_work_is_not_complete(self):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[NodeSpec(node_id="w1", node_type="work", title="failed")],
+            based_on_revision=state.revision,
+        ))
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="w1", evidence_ids=[], verdict="rejected"),
+        )
+
+        assessment = completion.evaluate_goal(state)
+
+        assert assessment.status == "in_progress"
+        assert assessment.missing == ["failed"]
+
+    def test_evidence_required_node_without_evidence_is_not_complete(self):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[NodeSpec(node_id="w1", node_type="work", title="unproven")],
+            based_on_revision=state.revision,
+        ))
+        state.nodes["w1"] = state.nodes["w1"].with_updates(
+            lifecycle=Lifecycle.RESOLVED,
+            verdict="confirmed",
+        )
+
+        assessment = completion.evaluate_goal(state)
+
+        assert assessment.status == "in_progress"
+        assert assessment.missing == ["unproven"]
+
+    @pytest.mark.parametrize("proof_id", ["missing", "stale-proof"])
+    def test_loaded_state_requires_a_current_materialized_proof(self, proof_id):
+        state = GraphState(run_id="run-c")
+        state, _ = reduce(state, ReviseGoalOp(text="goal"))
+        state, _ = reduce(state, GraphPatchOp(
+            add_nodes=[
+                NodeSpec(node_id="w1", node_type="work", title="legacy work"),
+                NodeSpec(node_id="stale-proof", node_type="evidence"),
+            ],
+            based_on_revision=state.revision,
+        ))
+        state.nodes["stale-proof"] = state.nodes["stale-proof"].with_updates(
+            freshness=Freshness.STALE
+        )
+        state.nodes["w1"] = state.nodes["w1"].with_updates(
+            lifecycle=Lifecycle.RESOLVED,
+            verdict="confirmed",
+            evidence_refs=[proof_id],
+        )
+
+        assessment = completion.evaluate_goal(state)
+
+        assert assessment.status == "in_progress"
+        assert assessment.missing == ["legacy work"]
+
 
     def test_budget_fuses(self):
         node_budget = completion.NodeBudget(tokens=100, tool_calls=5)
@@ -726,9 +1211,25 @@ class TestPersistence:
         ))
 
         loaded = persistence.load_projection()
-        assert "w1" in loaded.nodes
-        assert loaded.nodes["w1"].title == "task one"
-        assert loaded.revision == state.revision
+
+        assert loaded.model_dump(mode="json") == state.model_dump(mode="json")
+
+    def test_apply_rolls_back_event_when_projection_fails(
+        self, temp_db, monkeypatch
+    ):
+        run_id = store.create_run(session_id="s1", engine="graph_beta")
+        persistence = GraphPersistence(run_id, session_id="s1")
+        state = GraphState(run_id=run_id, session_id="s1")
+
+        def fail_projection(*args, **kwargs):
+            raise RuntimeError("projection write failed")
+
+        monkeypatch.setattr(persistence, "save_projection", fail_projection)
+
+        with pytest.raises(RuntimeError, match="projection write failed"):
+            persistence.apply(state, ReviseGoalOp(text="goal"))
+
+        assert store.list_run_events(run_id) == []
 
     def test_replay_rebuilds_graph(self, temp_db):
         run_id = store.create_run(session_id="s1", engine="graph_beta")
@@ -738,6 +1239,7 @@ class TestPersistence:
         state, _ = persistence.apply(state, ReviseGoalOp(text="goal"))
         state, _ = persistence.apply(state, GraphPatchOp(
             add_nodes=[
+                NodeSpec(node_id="e", node_type="evidence"),
                 NodeSpec(node_id="a", node_type="work", title="A"),
                 NodeSpec(node_id="b", node_type="work", title="B"),
             ],
@@ -750,9 +1252,8 @@ class TestPersistence:
         )
 
         replayed = persistence.replay()
-        assert set(replayed.nodes) == set(state.nodes)
-        assert replayed.nodes["a"].lifecycle is Lifecycle.RESOLVED
-        assert replayed.revision == state.revision
+
+        assert replayed.model_dump(mode="json") == state.model_dump(mode="json")
 
     def test_invalid_op_not_persisted(self, temp_db):
         run_id = store.create_run(session_id="s1", engine="graph_beta")

@@ -1,0 +1,10 @@
+{
+  "id": "capability.git_hygiene",
+  "reason": "the work includes commits, rebases, conflict resolution, release branches, or pull-request preparation",
+  "guidance": [
+    "Inspect status and the exact diff, preserve unrelated working-tree changes, and distinguish source",
+    "edits from generated or binary artifacts. Do not rewrite history, discard changes, force-update a",
+    "remote, or broaden a commit without explicit authority. Verify the intended revision and report",
+    "remaining uncommitted or untracked work before handoff."
+  ]
+}

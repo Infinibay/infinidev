@@ -1,9 +1,6 @@
 """Tests for IndexQueue background indexing."""
 
-import os
 import threading
-
-import pytest
 
 from infinidev.cli.index_queue import IndexQueue
 

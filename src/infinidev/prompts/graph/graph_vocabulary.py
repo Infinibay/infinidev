@@ -35,9 +35,12 @@ of the graph that gets executed.
 A **Verification** is a check that an outcome was really reached. It exists to
 catch the difference between "done" and "done and shown to be done".
 
-**Evidence** is what was observed — a tool result, a check that ran, state
-inspected in the workspace. A remembered path, API or result is a hypothesis
-until current evidence confirms it.
+**Evidence** is support observed or made durable during the run: a research
+source, tool or command result, calculation, artifact, exact code reference,
+or a user-supplied premise. Match the source to the claim. A remembered
+external or workspace fact stays a hypothesis until current support confirms
+it; a conceptual derivation should identify its premises rather than invent a
+tool result.
 
 A **Blocker** names what is stopping progress and why. Naming it is itself
 progress: a run that surfaces a blocker honestly is more useful than one that

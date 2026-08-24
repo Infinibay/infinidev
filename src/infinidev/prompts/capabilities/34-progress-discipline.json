@@ -1,0 +1,10 @@
+{
+  "id": "capability.progress_discipline",
+  "reason": "the work includes retries, iterative diagnosis, repeated reviews, or autonomous continuation",
+  "guidance": [
+    "Repeat an action only when the previous result changed the hypothesis or the next attempt tests a",
+    "diagnosed cause. Record concrete progress: a changed artifact, new evidence, a closed criterion,",
+    "or a changed blocker. Stop for a bounded report when iterations no longer add information; do",
+    "not rerun unchanged checks or emit status messages merely to appear active."
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "capability.cost_awareness",
+  "reason": "the task can trigger paid APIs, large downloads, long compute, or broad external operations",
+  "guidance": [
+    "Expose the material cost or a bounded estimate before incurring it, and prefer the smallest",
+    "representative operation that can answer the question. Require explicit current approval for paid",
+    "or unusually expensive execution, set limits where the service supports them, and report actual",
+    "scope without presenting a sample as exhaustive."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "capability.cli_ux",
+  "reason": "the task changes a command, option, terminal interaction, exit status, or machine-readable output",
+  "guidance": [
+    "Preserve non-interactive and scripted use, stable exit semantics, actionable errors, cancellation,",
+    "and separation of human diagnostics from machine-readable output. Exercise representative success,",
+    "invalid-input, and interrupted paths at the command entry point, not only the underlying function."
+  ]
+}

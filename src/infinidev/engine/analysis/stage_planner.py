@@ -16,6 +16,9 @@ from infinidev.engine.analysis.staged_planning import (
     StageDecision,
     StageSpec,
     StagedPlanningState,
+    statement_cites_evidence,
+    task_evidence_supports_delivery,
+    tasks_missing_completion_evidence,
 )
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.llm_client import call_llm
@@ -198,13 +201,14 @@ def _run_llm_loop(
         terminal_calls = [
             call for call in tool_calls if call.function.name in _TERMINALS
         ]
-        if len(terminal_calls) > 1:
+        if terminal_calls and len(tool_calls) != 1:
             for call in tool_calls:
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
                     "content": (
-                        "Invalid Stage Planner turn: call exactly one terminal tool."
+                        "Invalid Stage Planner turn: a terminal decision must be "
+                        "the only tool call in the turn."
                     ),
                 })
             continue
@@ -379,6 +383,34 @@ def _decision_error(
                 "complete_goal was rejected: the observed evidence ledger is empty. "
                 "Emit a Stage that can establish the Goal or block on a real obstacle."
             )
+        latest = state.stages[-1] if state.stages else None
+        if latest is not None and any(
+            task.status != "completed" for task in latest.tasks
+        ):
+            return (
+                "complete_goal was rejected: the latest Stage still has unfinished "
+                "or unsuccessful Tasks."
+            )
+        if latest is not None:
+            missing_proof = tasks_missing_completion_evidence(state, latest)
+            if missing_proof:
+                task_ids = ", ".join(task.spec.id for task in missing_proof)
+                return (
+                    "complete_goal was rejected: completed Tasks lack durable "
+                    f"completion evidence: {task_ids}."
+                )
+        if (
+            state.goal.intent == "implementation"
+            and not any(
+                task_evidence_supports_delivery(entry)
+                for entry in state.evidence
+            )
+        ):
+            return (
+                "complete_goal was rejected: this implementation Goal has no "
+                "observed workspace change and no explicitly accepted no-edit "
+                "outcome in completed Task evidence."
+            )
         literal_count = len(state.goal.acceptance_criteria)
         if literal_count and len(decision.evidence) < literal_count:
             return (
@@ -387,7 +419,7 @@ def _decision_error(
             )
         known_ids = {entry.id for entry in state.evidence}
         if any(
-            not any(evidence_id in statement for evidence_id in known_ids)
+            not statement_cites_evidence(statement, known_ids)
             for statement in decision.evidence
         ):
             return (

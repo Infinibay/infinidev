@@ -8,6 +8,8 @@ directly, and rendering a message dict written by hand.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
@@ -156,3 +158,127 @@ def test_only_the_last_message_can_be_mid_stream():
 
     assert app.chat_messages[0]["streaming"] is False
     assert app.chat_messages[1]["streaming"] is True
+
+
+def test_streaming_persistence_uses_bounded_checkpoints(monkeypatch):
+    """Chunks are durable without turning every token into a SQLite write."""
+    from infinidev.ui import app as app_module
+
+    app = object.__new__(app_module.InfinidevApp)
+    app.chat_messages = []
+
+    class _Control:
+        def invalidate_cache(self): pass
+
+    app._chat_history_control = _Control()
+    app.invalidate = lambda: None
+    writes: list[tuple[str, bool]] = []
+
+    def _persist(message):
+        writes.append((message["text"], message["streaming"]))
+        return True
+
+    app._persist_session_message = _persist
+    app._persist_runtime_state = lambda: None
+    monkeypatch.setattr(app_module, "_STREAM_CHECKPOINT_CHARS", 5)
+    ticks = iter([100.0, 100.1, 100.2, 101.4, 101.5])
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: next(ticks))
+
+    app.append_to_last_message("A", "a", "agent")
+    app.append_to_last_message("A", "b", "agent")
+    app.append_to_last_message("A", "cdef", "agent")
+    app.append_to_last_message("A", "g", "agent")
+    app.finalize_streaming_message("A", "agent")
+
+    assert writes == [
+        ("a", True),
+        ("abcdef", True),
+        ("abcdefg", True),
+        ("abcdefg", False),
+    ]
+    assert not any(key.startswith("_stream_checkpoint_") for key in app.chat_messages[0])
+
+
+def test_partial_stream_is_recoverable_before_stream_end(temp_db, monkeypatch):
+    """A hard stop after the first chunk still leaves a resumable message."""
+    from infinidev.db.service import get_session_messages, register_session
+    from infinidev.ui import app as app_module
+
+    register_session("stream-checkpoint", "/work")
+    app = object.__new__(app_module.InfinidevApp)
+    app.chat_messages = []
+    app.session_id = "stream-checkpoint"
+    app._restoring_session = False
+
+    class _Control:
+        def invalidate_cache(self): pass
+
+    app._chat_history_control = _Control()
+    app.invalidate = lambda: None
+    app._persist_runtime_state = lambda: None
+    ticks = iter([200.0, 200.1, 200.2])
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: next(ticks))
+
+    app.append_to_last_message("A", "partial", "agent")
+    app.append_to_last_message("A", " answer", "agent")
+
+    checkpoint = get_session_messages("stream-checkpoint")
+    assert len(checkpoint) == 1
+    assert checkpoint[0]["text"] == "partial"
+    assert checkpoint[0]["streaming"] is True
+
+    app.finalize_streaming_message("A", "agent")
+    final = get_session_messages("stream-checkpoint")
+    assert len(final) == 1
+    assert final[0]["text"] == "partial answer"
+    assert final[0]["streaming"] is False
+
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_hint"),
+    [
+        ("text", "Waiting for your response..."),
+        ("confirm", "Waiting for your confirmation (y / n / feedback)..."),
+    ],
+)
+def test_ask_user_renders_every_prompt_before_waiting(
+    monkeypatch, kind, expected_hint
+):
+    from infinidev.ui.hooks_tui import TUIHooks
+
+    rendered: list[tuple[str, str, str]] = []
+    app = SimpleNamespace(
+        _chat_history_control=SimpleNamespace(show_thinking=True),
+        _actions_text="Thinking",
+        _analysis_event=None,
+        _analysis_waiting=False,
+        _analysis_answer="",
+        add_message=lambda sender, prompt, msg_type: rendered.append(
+            (sender, prompt, msg_type)
+        ),
+        invalidate=lambda: None,
+    )
+
+    class ImmediateAnswerEvent:
+        def wait(self):
+            assert rendered == [
+                ("Infinidev", "Choose SQLite or PostgreSQL", "system"),
+            ]
+            assert app._actions_text == expected_hint
+            assert app._analysis_waiting is True
+            app._analysis_answer = "PostgreSQL"
+
+    monkeypatch.setattr(
+        "infinidev.ui.hooks_tui.threading.Event", ImmediateAnswerEvent
+    )
+
+    answer = TUIHooks(app).ask_user(
+        "Choose SQLite or PostgreSQL",
+        kind,
+    )
+
+    assert answer == "PostgreSQL"
+    assert app._analysis_waiting is False
+    assert app._analysis_event is None
+    assert app._chat_history_control.show_thinking is True

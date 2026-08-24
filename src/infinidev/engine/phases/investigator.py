@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 from typing import Any
 
+from infinidev.engine.engine_logging import (
+    BOLD,
+    CYAN,
+    DIM,
+    RESET,
+    log as _log,
+)
 from infinidev.engine.loop import LoopEngine
-from infinidev.engine.engine_logging import log as _log, BOLD, DIM, RESET, CYAN, YELLOW
-from infinidev.engine.phases.question_generator import _generate_questions, _generate_followups
+from infinidev.engine.phases.question_generator import (
+    _generate_followups,
+    _generate_questions,
+)
 from infinidev.prompts.phases import PhaseStrategy
 
 logger = logging.getLogger(__name__)
@@ -23,99 +33,6 @@ _READ_ONLY_TOOLS = {
     "execute_command",
 }
 
-_MAX_FOLLOWUP_DEPTH = 2
-
-
-def _investigate(agent: Any,
-    questions: list[dict[str, Any]],
-    strategy: PhaseStrategy,
-    all_tools: list | None,
-    verbose: bool,
-) -> list[dict[str, str]]:
-    """Run one mini-LoopEngine per question with read-only tools."""
-    # Filter to read-only tools — INVESTIGATE must NOT modify files
-    if all_tools:
-        read_tools = [
-            t for t in all_tools
-            if getattr(t, 'name', '') in _READ_ONLY_TOOLS
-        ]
-    else:
-        agent_tools = getattr(agent, 'tools', []) or []
-        read_tools = [
-            t for t in agent_tools
-            if getattr(t, 'name', '') in _READ_ONLY_TOOLS
-        ] if agent_tools else []
-
-    answers: list[dict[str, str]] = []
-    all_notes: list[str] = []  # ALL notes across ALL questions
-    previous_text = ""
-
-    for i, q in enumerate(questions):
-        q_text = q["question"]
-        if verbose:
-            _log(f"  {CYAN}Q{i+1}/{len(questions)}: {q_text[:80]}{RESET}")
-
-        # Build previous answers context
-        if answers:
-            prev_lines = "\n".join(
-                f"  Q: {a['question']}\n  A: {a['answer']}"
-                for a in answers
-            )
-            previous_text = f"## PREVIOUS ANSWERS\n{prev_lines}"
-
-        # Format the investigate prompt
-        inv_prompt = strategy.investigate_prompt.replace(
-            "{{q_num}}", str(i + 1)
-        ).replace(
-            "{{q_total}}", str(len(questions))
-        ).replace(
-            "{{question}}", q_text
-        ).replace(
-            "{{previous_answers}}", previous_text
-        )
-
-        from infinidev.config.llm import _is_small_model as _is_sm
-        _max_iters = 2 if _is_sm() else 3
-
-        engine = LoopEngine()
-        result = engine.execute(
-            agent=agent,
-            task_prompt=(inv_prompt, "Answer the question with add_note."),
-            verbose=verbose,
-            task_tools=read_tools,
-            max_iterations=_max_iters,
-            max_total_tool_calls=strategy.investigate_max_tool_calls,
-            max_tool_calls_per_action=strategy.investigate_max_tool_calls,
-            nudge_threshold=strategy.investigate_max_tool_calls - 2,
-            summarizer_enabled=False,
-            identity_override=strategy.investigate_identity or None,
-            prompt_configuration=prompt_configuration,
-        )
-
-        # Collect ALL notes from the engine
-        if engine._last_state and engine._last_state.notes:
-            for note in engine._last_state.notes:
-                if note not in all_notes:
-                    all_notes.append(note)
-
-        # Use all notes from this question as the answer summary
-        answer_text = result or "No answer found."
-        if engine._last_state and engine._last_state.notes:
-            answer_text = " | ".join(engine._last_state.notes)
-
-        answers.append({
-            "question": q_text,
-            "answer": answer_text[:800],
-        })
-
-        if verbose:
-            note_count = len(engine._last_state.notes) if engine._last_state else 0
-            _log(f"    {DIM}Notes ({note_count}): {answer_text[:100]}{RESET}")
-
-    return answers, all_notes
-
-# ── Iterative investigation (merged phases 1+2) ────────────────────
-
 _MAX_FOLLOWUP_DEPTH = 2  # Max chain depth for follow-up questions
 
 
@@ -127,6 +44,8 @@ def _investigate_iteratively(agent: Any,
     max_questions: int,
     skip_investigate: bool = False,
     prompt_configuration: Any | None = None,
+    loop_engine: LoopEngine | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
     """Interleave question generation and investigation.
 
@@ -135,14 +54,28 @@ def _investigate_iteratively(agent: Any,
     3. Investigate follow-ups (up to _MAX_FOLLOWUP_DEPTH)
     4. Return all answers + notes
     """
+    engine = loop_engine or LoopEngine()
+
+    def _cancelled() -> bool:
+        return bool(
+            getattr(engine, "is_cancelled", False)
+            or (cancel_check is not None and cancel_check())
+        )
+
     # Phase 1: Seed questions
     if verbose:
         _log(f"\n{BOLD}❓ Phase 1: QUESTIONS{RESET}")
 
     seed_questions = _generate_questions(
-        agent, description, strategy, verbose,
+        agent,
+        description,
+        strategy,
+        verbose,
         max_questions=max_questions,
+        cancel_check=_cancelled,
     )
+    if _cancelled():
+        return [], []
 
     if verbose:
         _log(f"  {DIM}{len(seed_questions)} seed questions generated{RESET}")
@@ -172,9 +105,12 @@ def _investigate_iteratively(agent: Any,
     all_notes: list[str] = []
     total_investigated = 0
 
-    def _investigate_one(question: dict, label: str) -> None:
+    def _investigate_one(question: dict, label: str) -> bool:
         """Investigate a single question and collect results."""
         nonlocal total_investigated
+        if _cancelled():
+            return False
+
         q_text = question["question"]
 
         if verbose:
@@ -202,7 +138,6 @@ def _investigate_iteratively(agent: Any,
         from infinidev.config.llm import _is_small_model as _is_sm2
         _max_iters2 = 2 if _is_sm2() else 3
 
-        engine = LoopEngine()
         result = engine.execute(
             agent=agent,
             task_prompt=(inv_prompt, "Answer the question with add_note."),
@@ -216,6 +151,8 @@ def _investigate_iteratively(agent: Any,
             identity_override=strategy.investigate_identity or None,
             prompt_configuration=prompt_configuration,
         )
+        if _cancelled():
+            return False
 
         # Collect notes
         if engine._last_state and engine._last_state.notes:
@@ -236,18 +173,30 @@ def _investigate_iteratively(agent: Any,
         if verbose:
             note_count = len(engine._last_state.notes) if engine._last_state else 0
             _log(f"    {DIM}Notes ({note_count}): {answer_text[:100]}{RESET}")
+        return True
 
     def _investigate_with_followups(question: dict, label_prefix: str, depth: int) -> None:
         """Investigate a question, then recursively investigate follow-ups."""
-        _investigate_one(question, label_prefix)
+        if _cancelled() or not _investigate_one(question, label_prefix):
+            return
 
         # Check budget and depth
-        if total_investigated >= max_questions or depth >= _MAX_FOLLOWUP_DEPTH:
+        if (
+            _cancelled()
+            or total_investigated >= max_questions
+            or depth >= _MAX_FOLLOWUP_DEPTH
+        ):
             return
 
         # Generate follow-ups
         followups = _generate_followups(
-            agent, description, answers, all_notes, strategy, verbose,
+            agent,
+            description,
+            answers,
+            all_notes,
+            strategy,
+            verbose,
+            cancel_check=_cancelled,
         )
 
         if not followups:
@@ -260,14 +209,14 @@ def _investigate_iteratively(agent: Any,
             _log(f"    {DIM}↳ {len(followups)} follow-up(s) generated{RESET}")
 
         for j, fq in enumerate(followups):
-            if total_investigated >= max_questions:
+            if _cancelled() or total_investigated >= max_questions:
                 break
             fu_label = f"{label_prefix} / F{j+1}"
             _investigate_with_followups(fq, fu_label, depth + 1)
 
     # Investigate each seed question with follow-ups
     for i, q in enumerate(seed_questions):
-        if total_investigated >= max_questions:
+        if _cancelled() or total_investigated >= max_questions:
             break
         _investigate_with_followups(q, f"Q{i+1}/{len(seed_questions)}", depth=0)
 

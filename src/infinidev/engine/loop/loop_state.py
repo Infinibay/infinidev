@@ -61,6 +61,10 @@ class LoopState(BaseModel):
     opened_files_prompt_max_chars: int = 0
     tool_calls_since_last_note: int = 0  # For gentle note-taking nudge
     task_has_edits: bool = False  # Set once when any edit tool succeeds
+    # A write Task may legitimately be an already-satisfied no-op. This is set
+    # only after the loop accepts an explicit step_complete(no_edit=true), then
+    # persisted so outer Stage completion does not demand a cosmetic edit.
+    task_no_edit_accepted: bool = False
     # Successful edit evidence keyed by the active Step. Unlike an LLM
     # summary, this survives a tool-budget interruption and lets the next
     # iteration close the same implementation Step after verification.

@@ -176,3 +176,36 @@ def test_hold_escape_aborts_when_engine_finishes_before_threshold(monkeypatch) -
 
     assert engine.task_cancel_calls == 0
     assert app._cancel_hold_start is None
+
+
+def test_task_cancel_releases_pending_plan_review() -> None:
+    engine = _EngineStub(tool_active=False)
+    app = _bare_app(engine)
+    review_event = Mock()
+    app._plan_review_waiting = True
+    app._plan_review_answer = ""
+    app._plan_review_event = review_event
+
+    app._execute_cancel()
+
+    assert engine.task_cancel_calls == 1
+    assert app._plan_review_answer == "cancel"
+    review_event.set.assert_called_once_with()
+
+
+
+def test_task_cancel_releases_pending_analysis_question() -> None:
+    engine = _EngineStub(tool_active=False)
+    app = _bare_app(engine)
+    analysis_event = Mock()
+    app._analysis_waiting = True
+    app._analysis_answer = "stale"
+    app._analysis_event = analysis_event
+    app._plan_review_waiting = False
+    app._plan_review_event = None
+
+    app._execute_cancel()
+
+    assert engine.task_cancel_calls == 1
+    assert app._analysis_answer == ""
+    analysis_event.set.assert_called_once_with()

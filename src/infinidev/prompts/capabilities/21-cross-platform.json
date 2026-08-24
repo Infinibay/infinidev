@@ -1,0 +1,9 @@
+{
+  "id": "capability.cross_platform",
+  "reason": "behavior depends on an operating system, shell, filesystem, terminal, encoding, or architecture",
+  "guidance": [
+    "Use portable project APIs where the supported contract is shared, and isolate unavoidable",
+    "platform branches. Preserve path, quoting, newline, encoding, signal, and exit semantics; exercise",
+    "the supported variants available in the current environment and name any platform coverage not run."
+  ]
+}

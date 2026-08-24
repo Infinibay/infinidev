@@ -1,0 +1,9 @@
+{
+  "id": "capability.performance",
+  "reason": "the current task requires improving performance",
+  "guidance": [
+    "Measure a representative baseline before tuning and identify the observed bottleneck. Change",
+    "only the hot path, preserve correctness, and compare the identical workload afterward. Report",
+    "the measurement conditions and result; do not claim improvement from intuition alone."
+  ]
+}

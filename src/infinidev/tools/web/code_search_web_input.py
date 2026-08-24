@@ -1,19 +1,8 @@
-"""Tool for searching code examples and documentation on the web."""
+"""Input schema for code-focused web search."""
 
-import json
-import logging
-from typing import Type
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
-
-from infinidev.tools.base.base_tool import InfinibayBaseTool
-from infinidev.tools.web.backends import search_ddg
-
-logger = logging.getLogger(__name__)
-
-# In-memory cache for code search results
-_cache: dict[str, str] = {}
-_CACHE_MAX = 50
 
 
 class CodeSearchWebInput(BaseModel):
@@ -35,5 +24,3 @@ class CodeSearchWebInput(BaseModel):
         le=15,
         description="Number of results to return (1-15).",
     )
-
-

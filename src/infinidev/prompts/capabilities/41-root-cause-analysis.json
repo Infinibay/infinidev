@@ -1,0 +1,10 @@
+{
+  "id": "capability.root_cause_analysis",
+  "reason": "a failure repeats, spans components, or has only a symptom-level explanation",
+  "guidance": [
+    "Build a causal chain from observed events and test the nearest hypothesis that distinguishes",
+    "competing causes. Repair the earliest demonstrated cause within the user's control, then verify",
+    "both the original symptom and the causal link. Do not force a predetermined number of why steps or",
+    "present correlation and chronology as causation."
+  ]
+}

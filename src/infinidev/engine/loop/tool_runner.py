@@ -1220,6 +1220,13 @@ class ToolRunner:
 
             pending_nudge = self._budget_nudge(ctx, action_tool_calls) or pending_nudge
 
+            # Persist after every observed tool result. If the process stops
+            # inside this Step, pending_archive is the exact bounded view the
+            # model had seen and can be rendered safely on resume.
+            checkpoint = getattr(self._engine, "_checkpoint", None)
+            if callable(checkpoint):
+                checkpoint(ctx)
+
         deferred.extend(pending_images)
 
         if pending_nudge is not None:

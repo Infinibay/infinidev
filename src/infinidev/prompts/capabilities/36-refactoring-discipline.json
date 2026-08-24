@@ -1,0 +1,9 @@
+{
+  "id": "capability.refactoring_discipline",
+  "reason": "the task explicitly restructures code while preserving behavior",
+  "guidance": [
+    "Establish the observable behavior and affected contracts before moving a boundary. Make one",
+    "coherent structural change at a time, avoid opportunistic feature changes, and rerun the narrowest",
+    "check for each moved boundary. Report any behavior change instead of presenting it as refactoring."
+  ]
+}

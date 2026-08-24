@@ -82,6 +82,11 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "\n"
         "COMMANDS\n"
         "  /models [list|set|manage]    Show or change the model\n"
+        "  /prompts                     List optional capabilities\n"
+        "  /prompts search <term>       Find capabilities by name or condition\n"
+        "  /prompts show <name>         Preview capability guidance\n"
+        "  /prompts enable|disable <n>  Toggle it for future tasks\n"
+        "  /prompts reset <name>        Remove your override and inherit state\n"
         "  /effort [level]              Reasoning depth this model accepts\n"
         "  /engine [mode]               Task engine: auto|task|react|staged|graph_beta\n"
         "  /settings [key] [value]      Show or change settings\n"
@@ -104,10 +109,22 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "                                stops on /auto stop\n"
         "  /auto pause                  Pause the running autonomous chain\n"
         "  /auto stop                   Stop autonomous mode entirely\n"
+        "  /session <name>              Name it (--resume manages prior sessions)\n"
         "  /clear                       Clear the transcript\n"
         "  /exit                        Quit",
         "system",
     )
+
+
+def _cmd_session(app: InfinidevApp, parts: list[str]) -> None:
+    """Persist a user-facing name for the active session."""
+    from infinidev.cli.session_resume import name_session
+
+    normalized = name_session(app.session_id, " ".join(parts[1:]))
+    if normalized:
+        app.add_message("System", f"Session named: {normalized}", "system")
+    else:
+        app.add_message("System", "Usage: /session <name>", "system")
 
 
 def _cmd_settings(app: InfinidevApp, parts: list[str]) -> None:
@@ -120,6 +137,17 @@ def _cmd_engine(app: InfinidevApp, parts: list[str]) -> None:
 
 def _cmd_models(app: InfinidevApp, parts: list[str]) -> None:
     handle_models(app, parts)
+
+
+def _cmd_prompts(app: InfinidevApp, parts: list[str]) -> None:
+    """List or update optional prompt capabilities."""
+    from infinidev.prompts.commands import handle_prompts_command
+
+    try:
+        message = handle_prompts_command(parts)
+    except (OSError, ValueError) as exc:
+        message = f"Could not update prompt capabilities: {exc}"
+    app.add_message("System", message, "system")
 
 
 def _cmd_effort(app: InfinidevApp, parts: list[str]) -> None:
@@ -566,9 +594,11 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/quit": _cmd_exit,
     "/clear": _cmd_clear,
     "/help": _cmd_help,
+    "/session": _cmd_session,
     "/settings": _cmd_settings,
     "/engine": _cmd_engine,
     "/models": _cmd_models,
+    "/prompts": _cmd_prompts,
     "/effort": _cmd_effort,
     "/debug": _cmd_debug,
     "/notes": _cmd_notes,

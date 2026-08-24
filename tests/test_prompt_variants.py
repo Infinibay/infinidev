@@ -264,10 +264,31 @@ class TestPhaseStrategyIntegration:
             assert s.execute_max_tool_calls_per_step == original.execute_max_tool_calls_per_step
 
     def test_unknown_type_defaults_to_feature(self):
-        with patch("infinidev.prompts.variants.resolve_style", return_value="full"):
-            from infinidev.prompts.phases import get_strategy, STRATEGIES
-            s = get_strategy("unknown_type")
-            assert s.execute_prompt == STRATEGIES["feature"].execute_prompt
+        def keep_default(_name, _phase, default, _variant):
+            return default
+
+        with (
+            patch("infinidev.prompts.variants.resolve_style", return_value="full"),
+            patch(
+                "infinidev.prompts.profiles.resolve_prompt_fragment",
+                side_effect=keep_default,
+            ) as resolve_fragment,
+        ):
+            from infinidev.prompts.phases import STRATEGIES, get_strategy
+
+            strategy = get_strategy("unknown_type")
+
+        assert strategy.execute_prompt == STRATEGIES["feature"].execute_prompt
+        assert {
+            call.args[0] for call in resolve_fragment.call_args_list
+        } == {
+            "phase.feature.investigate",
+            "phase.feature.plan",
+            "phase.feature.execute",
+            "phase.feature.investigate_identity",
+            "phase.feature.plan_identity",
+            "phase.feature.execute_identity",
+        }
 
 
 # ── Flow identity integration ────────────────────────────────────────────

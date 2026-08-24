@@ -21,9 +21,13 @@ from infinidev.engine.analysis.staged_planning import (
     StagedPlanningState,
 )
 from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+from infinidev.engine.task_policies.models import TaskProfile
 from infinidev.engine.orchestration.staged_pipeline import (
+    _completion_error,
     _goal_from_escalation,
+    _record_task_evidence,
     _scope_task_plan,
+    _task_kind,
     run_staged_goal,
 )
 
@@ -195,17 +199,25 @@ def test_small_goal_uses_one_stage_one_task_then_evidence_completion(
     assert result.text.startswith("executed Task only")
 
 
-def test_completed_stage_recovers_when_only_terminal_planner_protocol_fails(
-    temp_db, monkeypatch, runtime,
+@pytest.mark.parametrize("failure_mode", ["protocol", "exception"])
+def test_completed_stage_recovers_when_only_terminal_planner_fails(
+    temp_db, monkeypatch, runtime, failure_mode,
 ):
     protocol_failure = BlockGoalDecision(
         reason="Stage Planner exhausted its iteration budget without a valid decision.",
         missing="A valid Stage Planner decision on a later retry.",
         evidence=[],
     )
+
+    def planner_exception(_state):
+        raise RuntimeError("planner transport failed")
+
+    terminal_failure = (
+        planner_exception if failure_mode == "exception" else protocol_failure
+    )
     _install_stage_planner(monkeypatch, [
         _stage("One slice", [_task("only")]),
-        protocol_failure,
+        terminal_failure,
     ])
     engine = _Engine()
     engine._last_state = SimpleNamespace(last_test_command="pytest focused.py -q")
@@ -221,12 +233,43 @@ def test_completed_stage_recovers_when_only_terminal_planner_protocol_fails(
 
     result = run_staged_goal(
         escalation=_escalation(), agent=_Agent(), engine=engine, reviewer=object(),
-        hooks=_Hooks(), session_id="planner-protocol-recovery", project_id=1,
+        hooks=_Hooks(), session_id="planner-terminal-recovery", project_id=1,
         workspace_path="/workspace",
     )
 
     assert result.state.status == "complete"
     assert result.engine._last_status == "completed"
+
+
+def test_stage_planner_exception_without_completion_evidence_blocks_durably(
+    temp_db, monkeypatch, runtime,
+):
+    def fail_planner(*_args, **_kwargs):
+        raise RuntimeError("planner transport failed")
+
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.stage_planner.run_stage_planner",
+        fail_planner,
+    )
+    hooks = _Hooks()
+    engine = _Engine()
+
+    result = run_staged_goal(
+        escalation=_escalation(), agent=_Agent(), engine=engine, reviewer=object(),
+        hooks=hooks, session_id="stage-planner-exception", project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "blocked"
+    assert result.state.terminal is not None
+    assert result.state.terminal.kind == "goal_blocked"
+    assert "Stage Planner failed" in result.state.terminal.summary
+    assert "planner transport failed" in result.state.terminal.summary
+    assert result.engine._last_status == "blocked"
+    assert any(
+        level == "error" and "Stage Planner failed" in message
+        for level, message in hooks.statuses
+    )
 
 
 def test_empty_task_plan_gets_bounded_steps_from_structured_task() -> None:
@@ -598,6 +641,133 @@ def test_blocked_task_prevents_false_goal_completion(
     assert "Task attempt" in result.text
 
 
+@pytest.mark.parametrize("loop_status", ["failed", "", "unknown"])
+def test_invalid_or_failed_task_status_never_completes_goal(
+    temp_db, monkeypatch, runtime, loop_status
+):
+    def non_success_execute(**kwargs):
+        runtime["executions"].append(kwargs)
+        engine = kwargs["engine"]
+        engine._last_status = loop_status
+        engine.steps = [{"title": "unfinished", "status": "active"}]
+        return "unfinished work", engine
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._run_execution_phase",
+        non_success_execute,
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Attempt", [_task("attempt")]),
+        _complete("The queue is empty"),
+    ])
+
+    result = run_staged_goal(
+        escalation=_escalation(),
+        agent=_Agent(),
+        engine=_Engine(),
+        reviewer=object(),
+        hooks=_Hooks(),
+        session_id=f"non-success-{loop_status or 'empty'}",
+        project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "failed"
+    assert result.state.terminal is not None
+    assert result.state.terminal.kind == "failed"
+    assert result.state.stages[0].tasks[0].status == "failed"
+    assert result.engine._last_status == "failed"
+    assert result.text.startswith("Goal failed:")
+    assert runtime["reviews"] == []
+
+
+def test_raw_cancelled_task_status_cancels_goal_without_boolean_flag(
+    temp_db, monkeypatch, runtime
+):
+    def cancelled_execute(**kwargs):
+        runtime["executions"].append(kwargs)
+        engine = kwargs["engine"]
+        engine._last_status = "cancelled"
+        return "partial work", engine
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._run_execution_phase",
+        cancelled_execute,
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Attempt", [_task("attempt")]),
+        _complete("The queue is empty"),
+    ])
+    engine = _Engine()
+
+    result = run_staged_goal(
+        escalation=_escalation(),
+        agent=_Agent(),
+        engine=engine,
+        reviewer=object(),
+        hooks=_Hooks(),
+        session_id="raw-cancelled-task",
+        project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == "cancelled"
+    assert result.state.stages[0].tasks[0].status == "cancelled"
+    assert result.engine._last_status == "cancelled"
+    assert runtime["reviews"] == []
+
+
+@pytest.mark.parametrize(
+    ("review_status", "expected_goal_status", "expected_task_status"),
+    [
+        ("failed", "failed", "failed"),
+        ("", "failed", "failed"),
+        ("unknown", "failed", "failed"),
+        ("cancelled", "cancelled", "cancelled"),
+    ],
+)
+def test_review_terminal_status_never_completes_staged_task(
+    temp_db,
+    monkeypatch,
+    runtime,
+    review_status,
+    expected_goal_status,
+    expected_task_status,
+):
+    def non_success_review(**kwargs):
+        runtime["reviews"].append(kwargs)
+        kwargs["engine"]._last_status = review_status
+        return kwargs["result"]
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._run_review_phase",
+        non_success_review,
+    )
+    _install_stage_planner(monkeypatch, [
+        _stage("Attempt", [_task("attempt")]),
+        _complete("The queue is empty"),
+    ])
+
+    result = run_staged_goal(
+        escalation=_escalation(),
+        agent=_Agent(),
+        engine=_Engine(),
+        reviewer=object(),
+        hooks=_Hooks(),
+        session_id=f"review-{review_status or 'empty'}",
+        project_id=1,
+        workspace_path="/workspace",
+    )
+
+    assert result.state.status == expected_goal_status
+    assert result.state.stages[0].tasks[0].status == expected_task_status
+    if expected_goal_status == "failed":
+        assert result.state.terminal is not None
+        assert result.state.terminal.kind == "failed"
+        assert result.engine._last_status == "failed"
+        assert result.text.startswith("Goal failed:")
+
+
 def test_exhausted_task_prevents_false_goal_completion(
     temp_db, monkeypatch, runtime,
 ):
@@ -768,9 +938,16 @@ def test_resume_mid_stage_skips_completed_dependency(
     stage.status = "active"
     stage.tasks[0].status = "completed"
     stage.tasks[0].result = "first result"
-    state.add_evidence(EvidenceEntry(
-        kind="task_result", summary="first result", stage_id=stage.id, task_id="first"
-    ))
+    stage.tasks[0].error = "stale error from an older successful run"
+    first_evidence = EvidenceEntry(
+        kind="task_result",
+        summary="first result",
+        stage_id=stage.id,
+        task_id="first",
+        details={"task_status": "completed", "workspace_changed": True},
+    )
+    state.add_evidence(first_evidence)
+    stage.tasks[0].evidence_ids.append(first_evidence.id)
     register_session("resume", "/workspace")
     persist_staged_planning_state("resume", state.snapshot())
     _install_stage_planner(monkeypatch, [
@@ -786,6 +963,132 @@ def test_resume_mid_stage_skips_completed_dependency(
     assert [handoff.task.id for handoff in runtime["task_plans"]] == ["second"]
     assert result.state.status == "complete"
     assert "continue the active goal" in result.state.guidance
+    assert result.state.stages[0].tasks[0].error == ""
+
+
+def test_resume_interrupted_task_clears_stale_error_after_success(
+    temp_db, monkeypatch, runtime,
+):
+    from infinidev.db.service import (
+        persist_staged_planning_state,
+        register_session,
+    )
+
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Resume interrupted Task",
+        user_request="Resume the interrupted Task until it is complete.",
+    ))
+    stage = state.add_stage(StageSpec(
+        title="Resume",
+        outcome="The Task completes",
+        exit_criteria=["The result is observed"],
+        tasks=[_task("interrupted")],
+    ))
+    stage.status = "active"
+    task = stage.tasks[0]
+    task.status = "active"
+    task.attempts = 1
+    task.error = "Process stopped before completion."
+    register_session("resume-interrupted", "/workspace")
+    persist_staged_planning_state(
+        "resume-interrupted",
+        state.snapshot(),
+    )
+    _install_stage_planner(monkeypatch, [
+        _complete("The resumed Task completed"),
+    ])
+
+    result = run_staged_goal(
+        escalation=_escalation("continue the interrupted Task"),
+        agent=_Agent(),
+        engine=_Engine(),
+        reviewer=object(),
+        hooks=_Hooks(),
+        session_id="resume-interrupted",
+        project_id=1,
+        workspace_path="/workspace",
+    )
+
+    resumed = result.state.stages[0].tasks[0]
+    assert resumed.status == "completed"
+    assert resumed.attempts == 2
+    assert resumed.error == ""
+    assert runtime["executions"][0]["preserve_task_state"] is True
+    assert runtime["executions"][0]["max_total_tool_calls"] == 80
+    completion_evidence = next(
+        entry
+        for entry in result.state.evidence
+        if entry.task_id == "interrupted"
+        and entry.details.get("task_status") == "completed"
+    )
+    assert completion_evidence.details["error"] == ""
+
+
+@pytest.mark.parametrize(
+    ("failure_point", "expected_error"),
+    [
+        ("planner", "Planning failed: RuntimeError: phase boom"),
+        ("gather", "Task preparation failed: RuntimeError: phase boom"),
+        ("execution", "Execution failed: RuntimeError: phase boom"),
+        ("review", "Review failed: RuntimeError: phase boom"),
+    ],
+)
+def test_task_phase_exception_closes_task_and_goal_as_failed(
+    temp_db,
+    monkeypatch,
+    runtime,
+    failure_point,
+    expected_error,
+):
+    targets = {
+        "planner": "infinidev.engine.analysis.planner.run_planner",
+        "gather": (
+            "infinidev.engine.orchestration.pipeline._run_gather_phase"
+        ),
+        "execution": (
+            "infinidev.engine.orchestration.pipeline._run_execution_phase"
+        ),
+        "review": (
+            "infinidev.engine.orchestration.pipeline._run_review_phase"
+        ),
+    }
+
+    def fail_phase(*_args, **_kwargs):
+        raise RuntimeError("phase boom")
+
+    monkeypatch.setattr(targets[failure_point], fail_phase)
+    _install_stage_planner(monkeypatch, [
+        _stage("Fail safely", [_task("phase")]),
+    ])
+    engine = _Engine()
+
+    result = run_staged_goal(
+        escalation=_escalation(),
+        agent=_Agent(),
+        engine=engine,
+        reviewer=object(),
+        hooks=_Hooks(),
+        session_id=f"phase-failure-{failure_point}",
+        project_id=1,
+        workspace_path="/workspace",
+    )
+
+    task = result.state.stages[0].tasks[0]
+    assert result.state.status == "failed"
+    assert result.state.terminal is not None
+    assert result.state.terminal.kind == "failed"
+    assert task.status == "failed"
+    assert task.error == expected_error
+    assert engine._last_status == "failed"
+    evidence = next(
+        entry
+        for entry in result.state.evidence
+        if entry.task_id == "phase"
+    )
+    assert evidence.details["task_status"] == "failed"
+    assert evidence.details["error"] == expected_error
+    if failure_point == "review":
+        assert task.result.startswith("executed Task phase")
 
 
 def test_stage_resource_limit_is_incomplete_not_success(
@@ -846,9 +1149,165 @@ def test_informational_goal_can_complete_from_read_only_evidence(
     assert result.state.status == "complete"
 
 
+def test_response_only_report_stays_informational_without_attached_profile() -> None:
+    goal = _goal_from_escalation(_escalation(
+        "Research caching approaches and write a report only."
+    ))
+
+    assert goal.intent == "informational"
+
+
+def test_derived_understanding_cannot_grant_write_intent() -> None:
+    escalation = EscalationPacket(
+        user_request="Investiga las alternativas y entrega una recomendación.",
+        understanding="Implement the best alternative.",
+        task_profile=TaskProfile(
+            operations=("research",),
+            authority=("answer", "diagnose"),
+            result=("report",),
+            sequence=("investigate",),
+        ),
+    )
+
+    assert _goal_from_escalation(escalation).intent == "informational"
+
+
+def test_research_task_inside_delivery_stage_remains_read_only() -> None:
+    assert _task_kind(
+        "implementation",
+        "delivery",
+        "Research provider limits",
+        "Compare the options and report the findings",
+    ) == "investigation"
+
+
 def test_reviewing_an_existing_implementation_stays_informational():
     goal = _goal_from_escalation(_escalation(
         "Revisa la implementación actual y explica los riesgos."
     ))
 
     assert goal.intent == "informational"
+
+
+def test_completion_requires_evidence_for_every_latest_stage_task() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Audit two components",
+        user_request="Audit both components.",
+        intent="informational",
+    ))
+    stage = state.add_stage(_stage(
+        "Audit", [_task("first"), _task("second")]
+    ).stage)
+    for task in stage.tasks:
+        task.status = "completed"
+    evidence = EvidenceEntry(
+        kind="task_result",
+        summary="first component audited",
+        stage_id=stage.id,
+        task_id="first",
+        details={"task_status": "completed", "workspace_changed": False},
+    )
+    state.add_evidence(evidence)
+    stage.tasks[0].evidence_ids.append(evidence.id)
+
+    error = _completion_error(
+        state,
+        stage,
+        CompleteGoalDecision(evidence=[f"{evidence.id}: first audited"]),
+    )
+
+    assert "Task second" in error
+    assert "evidence" in error.lower()
+
+
+def test_implementation_completion_accepts_explicit_no_edit_evidence() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Confirm existing behavior",
+        user_request="Implement the behavior if it is missing.",
+        intent="implementation",
+    ))
+    stage = state.add_stage(_stage("Verify existing behavior", [_task("verify")]).stage)
+    task = stage.tasks[0]
+    task.status = "completed"
+    evidence = EvidenceEntry(
+        kind="task_result",
+        summary="The requested behavior already exists and was verified.",
+        stage_id=stage.id,
+        task_id=task.spec.id,
+        details={
+            "task_status": "completed",
+            "workspace_changed": False,
+            "no_edit_accepted": True,
+        },
+    )
+    state.add_evidence(evidence)
+    task.evidence_ids.append(evidence.id)
+
+    error = _completion_error(
+        state,
+        stage,
+        CompleteGoalDecision(evidence=[f"{evidence.id}: verified no-op"]),
+    )
+
+    assert error == ""
+
+
+def test_task_evidence_persists_loop_no_edit_outcome() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Confirm existing behavior",
+        user_request="Implement the behavior if it is missing.",
+        intent="implementation",
+    ))
+    stage = state.add_stage(_stage("Delivery", [_task("only")]).stage)
+    task = stage.tasks[0]
+    task.status = "completed"
+    engine = _Engine()
+    engine.has_changes = False
+    engine._last_state = SimpleNamespace(task_no_edit_accepted=True)
+
+    _record_task_evidence(state, stage, task, "Already satisfied", engine)
+
+    evidence = state.evidence[-1]
+    assert evidence.details["workspace_changed"] is False
+    assert evidence.details["no_edit_accepted"] is True
+
+
+def test_implementation_completion_requires_changed_task_evidence() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Implement feature",
+        user_request="Implement the feature.",
+        intent="implementation",
+    ))
+    observation = EvidenceEntry(
+        kind="stage_planner_observation",
+        summary="repository inspected",
+    )
+    state.add_evidence(observation)
+
+    error = _completion_error(
+        state,
+        None,
+        CompleteGoalDecision(evidence=[f"{observation.id}: inspected"]),
+    )
+
+    assert "completed Task evidence" in error
+
+
+def test_pipeline_completion_requires_exact_evidence_id() -> None:
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Explain architecture",
+        user_request="Explain the architecture.",
+        intent="informational",
+    ))
+    observation = EvidenceEntry(kind="observation", summary="flow inspected")
+    state.add_evidence(observation)
+
+    error = _completion_error(
+        state,
+        None,
+        CompleteGoalDecision(
+            evidence=[f"{observation.id}-forged: flow inspected"]
+        ),
+    )
+
+    assert "exact observed evidence-ledger ID" in error

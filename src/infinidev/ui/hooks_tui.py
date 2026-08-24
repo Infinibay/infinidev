@@ -209,19 +209,18 @@ class TUIHooks:
         always have an interactive user, so returning a string (possibly
         empty) is the normal case.
 
-        UX note: previous versions silently relied on ``notify()`` having
-        rendered the question right before, which is true for the
-        ``clarification`` kind (analyst Q&A) but NOT for ``confirm``
-        (the develop spec confirmation). The result was a 10-15 second
-        "phantom hang" between analysis and develop where the user had
-        no idea the system was waiting for them. We now render the
-        prompt + actions hint for ``confirm`` so the user can see they
-        need to type ``y`` to proceed.
+        Every question is rendered here. Callers are not required to emit a
+        duplicate ``notify`` first; relying on that made free-text product
+        decisions block behind an invisible prompt.
         """
         app = self._app
-        if kind == "confirm" and prompt:
+        if prompt:
             app.add_message("Infinidev", prompt, "system")
-            app._actions_text = "Waiting for your confirmation (y / n / feedback)..."
+            app._actions_text = (
+                "Waiting for your confirmation (y / n / feedback)..."
+                if kind == "confirm"
+                else "Waiting for your response..."
+            )
         app._chat_history_control.show_thinking = False
         app._analysis_event = threading.Event()
         app._analysis_waiting = True

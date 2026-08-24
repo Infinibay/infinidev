@@ -33,15 +33,15 @@ You operate in an exploration tree engine. Follow these rules:
 
 ### Exploration Rules
 - Keep the tree shallow and focused; the engine enforces the depth and branching limits for this run
-- Every *fact* MUST cite evidence from tool output; speculative directions are allowed only when recorded as a `hypothesis` (resolve_node hypothesis state / hypothesis_content), never as a fact
+- Support facts in proportion to their source: repository or external claims cite observed tool output; user-provided premises declare source_kind=user; conceptual derivations declare source_kind=reasoning and state their rationale. Unsupported possibilities remain hypotheses
 - Pivot questions restructure the tree; informational ones add data
 - When a node seems unsolvable, decompose the assumptions behind "unsolvable"
 - Use OR logic when independent alternatives can resolve a blocked path
 - Constraints and blockers always propagate upward from children
 
 ### CRITICAL
-- VERIFY with tools before asserting facts
-- Verify before recording any claim as a fact; in brainstorm mode hypotheses may run ahead of evidence if explicitly labeled as hypotheses
+- Verify with tools when a claim depends on repository or external state
+- Do not invent tool evidence. Supplied premises and reasoning may be recorded with their explicit source kind; uncertain possibilities remain hypotheses
 - Do NOT assume APIs work a certain way — check documentation
 - When done exploring a node, you MUST call `resolve_node`
 """
@@ -123,6 +123,7 @@ RESOLVE_NODE_SCHEMA: dict = {
         ),
         "parameters": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "state": {
                     "type": "string",
@@ -150,10 +151,22 @@ RESOLVE_NODE_SCHEMA: dict = {
                     "description": "Facts discovered during exploration",
                     "items": {
                         "type": "object",
+                        "additionalProperties": False,
                         "properties": {
                             "content": {"type": "string"},
-                            "evidence": {"type": "string"},
-                            "source_tool": {"type": "string"},
+                            "evidence": {
+                                "type": "string",
+                                "description": "Observed quote or reasoning rationale, when available",
+                            },
+                            "source_tool": {
+                                "type": "string",
+                                "description": "Required only when source_kind is tool",
+                            },
+                            "source_kind": {
+                                "type": "string",
+                                "enum": ["tool", "user", "reasoning"],
+                                "description": "How this fact is grounded",
+                            },
                             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                         },
                         "required": ["content"],
@@ -164,6 +177,7 @@ RESOLVE_NODE_SCHEMA: dict = {
                     "description": "Questions that were answered",
                     "items": {
                         "type": "object",
+                        "additionalProperties": False,
                         "properties": {
                             "question": {"type": "string"},
                             "answer": {"type": "string"},
@@ -177,6 +191,7 @@ RESOLVE_NODE_SCHEMA: dict = {
                     "description": "Further decomposition if needed",
                     "items": {
                         "type": "object",
+                        "additionalProperties": False,
                         "properties": {
                             "problem": {"type": "string"},
                             "logic": {"type": "string", "enum": ["AND", "OR"]},
@@ -184,6 +199,7 @@ RESOLVE_NODE_SCHEMA: dict = {
                                 "type": "array",
                                 "items": {
                                     "type": "object",
+                                    "additionalProperties": False,
                                     "properties": {
                                         "content": {"type": "string"},
                                         "question_type": {"type": "string", "enum": ["pivot", "informational"]},
@@ -205,6 +221,7 @@ RESOLVE_NODE_SCHEMA: dict = {
                     "description": "External blockers found",
                     "items": {
                         "type": "object",
+                        "additionalProperties": False,
                         "properties": {
                             "description": {"type": "string"},
                             "blocker_type": {
@@ -360,11 +377,12 @@ def build_explore_prompt(
     # Instructions
     parts.append(
         "<instructions>\n"
-        "Explore this sub-problem using available tools to gather evidence.\n"
+        "Explore this sub-problem using tools when its claims need external or "
+        "repository evidence.\n"
         "When done, call `resolve_node` with your findings.\n\n"
         "Guidelines:\n"
-        "- Use tools to verify assumptions — don't guess\n"
-        "- Record new facts with evidence from tool output\n"
+        "- Use tools to verify claims about external or repository state\n"
+        "- Mark each fact as tool, user, or reasoning; never invent tool output\n"
         "- Answer open questions where possible\n"
         "- If the problem needs further decomposition, include new_sub_problems\n"
         "- If blocked by external factors, report them as new_blockers\n"

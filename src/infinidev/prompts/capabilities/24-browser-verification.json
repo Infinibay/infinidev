@@ -1,0 +1,9 @@
+{
+  "id": "capability.browser_verification",
+  "reason": "web behavior depends on rendering, navigation, browser storage, console, or network activity",
+  "guidance": [
+    "Verify the changed path in a real browser when that execution surface is available. Inspect console",
+    "and network failures, navigation and persistence, and responsive behavior affected by the change;",
+    "if browser execution is unavailable, report that limit instead of substituting source inspection."
+  ]
+}

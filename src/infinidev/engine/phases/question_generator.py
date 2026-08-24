@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import logging
 import re
@@ -97,6 +98,7 @@ def _generate_questions(agent: Any,
     strategy: PhaseStrategy,
     verbose: bool,
     max_questions: int | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate questions using generate_question tool in a mini-loop.
 
@@ -104,6 +106,9 @@ def _generate_questions(agent: Any,
     per question, then step_complete(done) when finished.
     For small models, tries text-mode (numbered list) first.
     """
+    if cancel_check is not None and cancel_check():
+        return []
+
     from infinidev.config.llm import get_litellm_params, _is_small_model
     from infinidev.engine.loop.context import build_system_prompt
     from infinidev.engine.tool_dispatch import (
@@ -118,7 +123,11 @@ def _generate_questions(agent: Any,
     if _is_small_model():
         if verbose:
             _log(f"  {DIM}Using text-mode question generation (small model){RESET}")
-        text_qs = _generate_questions_text_mode(agent, description, strategy, verbose, q_max)
+        text_qs = _generate_questions_text_mode(
+            agent, description, strategy, verbose, q_max
+        )
+        if cancel_check is not None and cancel_check():
+            return []
         if len(text_qs) >= q_min:
             return text_qs
         if verbose and text_qs:
@@ -162,12 +171,17 @@ def _generate_questions(agent: Any,
     max_rounds = q_max + 3  # headroom for retries
 
     for round_num in range(max_rounds):
+        if cancel_check is not None and cancel_check():
+            return []
         try:
             response = call_llm(llm_params, messages, tools=tools, tool_choice="auto",
                                 on_thinking_chunk=_on_thinking, on_stream_status=_on_stream_status)
         except Exception as exc:
             logger.warning("Question generation failed (round %d): %s", round_num + 1, str(exc)[:200])
             break
+
+        if cancel_check is not None and cancel_check():
+            return []
 
         choice = response.choices[0]
         message = choice.message
@@ -235,6 +249,9 @@ def _generate_questions(agent: Any,
         if done or len(collected) >= q_max:
             break
 
+    if cancel_check is not None and cancel_check():
+        return []
+
     if len(collected) < q_min:
         if verbose:
             _log(f"  {YELLOW}Using fallback questions ({len(collected)} < {q_min}){RESET}")
@@ -251,8 +268,12 @@ def _generate_followups(agent: Any,
     all_notes: list[str],
     strategy: PhaseStrategy,
     verbose: bool,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Ask LLM if follow-up questions are needed based on investigation so far."""
+    if cancel_check is not None and cancel_check():
+        return []
+
     from infinidev.config.llm import get_litellm_params
     from infinidev.engine.loop.context import build_system_prompt
     from infinidev.engine.tool_dispatch import (
@@ -300,12 +321,17 @@ def _generate_followups(agent: Any,
     max_rounds = 3
 
     for round_num in range(max_rounds):
+        if cancel_check is not None and cancel_check():
+            return []
         try:
             response = call_llm(llm_params, messages, tools=tools, tool_choice="auto",
                                 on_thinking_chunk=_on_thinking, on_stream_status=_on_stream_status)
         except Exception as exc:
             logger.warning("Follow-up generation failed: %s", str(exc)[:200])
             break
+
+        if cancel_check is not None and cancel_check():
+            return []
 
         choice = response.choices[0]
         message = choice.message

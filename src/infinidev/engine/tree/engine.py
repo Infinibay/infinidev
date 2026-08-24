@@ -22,6 +22,11 @@ from infinidev.db.service import store_exploration_tree
 from infinidev.engine.base import AgentEngine
 from infinidev.engine.engine_logging import log as _engine_log
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
+from infinidev.engine.tree.contracts import (
+    validate_resolution_evidence,
+    validate_resolve_node,
+    validate_tool_payload,
+)
 from infinidev.engine.tree.context import (
     INIT_TREE_SCHEMA,
     RESOLVE_NODE_SCHEMA,
@@ -231,8 +236,6 @@ class TreeEngine(AgentEngine):
             llm_params, init_messages, [INIT_TREE_SCHEMA],
             "init_tree", tree, manual_tc,
         )
-        tree.total_llm_calls += 1
-
         if init_result is None:
             return "Failed to decompose the problem. The LLM did not produce a valid init_tree call."
 
@@ -378,6 +381,7 @@ class TreeEngine(AgentEngine):
             node_tool_calls = 0
             inner_iterations = 0
             resolved = False
+            observed_tool_outputs: dict[str, list[str]] = {}
 
             while (
                 inner_iterations < inner_loop_max
@@ -387,20 +391,21 @@ class TreeEngine(AgentEngine):
             ):
                 inner_iterations += 1
 
-                # Call LLM
-                if manual_tc:
-                    response = _call_llm(llm_params, messages)
-                else:
-                    try:
+                # Call LLM. Provider errors have the same bounded fallback for
+                # native and manually parsed tool-call modes.
+                tree.total_llm_calls += 1
+                try:
+                    if manual_tc:
+                        response = _call_llm(llm_params, messages)
+                    else:
                         response = _call_llm(
                             llm_params, messages, explore_schemas,
                             tool_choice="auto",
                         )
-                    except Exception as exc:
-                        logger.warning("LLM error in explore phase: %s", exc)
-                        break
+                except Exception as exc:
+                    logger.warning("LLM error in explore phase: %s", exc)
+                    break
 
-                tree.total_llm_calls += 1
                 usage = getattr(response, "usage", None)
                 if usage:
                     tree.total_tokens += getattr(usage, "total_tokens", 0)
@@ -444,19 +449,28 @@ class TreeEngine(AgentEngine):
                         })
                     continue
 
-                # Process tool calls
-                resolve_call = None
-                regular_calls = []
+                # Process tool calls. A resolution is terminal for this node and
+                # therefore must be based only on results from earlier turns.
+                resolve_calls = [
+                    tc for tc in tool_calls if tc.function.name == "resolve_node"
+                ]
+                regular_calls = [
+                    tc for tc in tool_calls if tc.function.name != "resolve_node"
+                ]
+                protocol_error = ""
+                if len(resolve_calls) > 1:
+                    protocol_error = (
+                        "Invalid Tree engine turn: emit exactly one resolve_node call."
+                    )
+                elif resolve_calls and regular_calls:
+                    protocol_error = (
+                        "Invalid Tree engine turn: resolve_node must be the only tool "
+                        "call. Observe the requested tool results before resolving."
+                    )
+                resolve_call = resolve_calls[0] if len(resolve_calls) == 1 else None
 
-                for tc in tool_calls:
-                    if tc.function.name == "resolve_node":
-                        resolve_call = tc
-                    else:
-                        regular_calls.append(tc)
-
-                # Build assistant message for FC mode
+                # Preserve the provider's call order and answer every function call.
                 if not manual_tc:
-                    all_tcs = regular_calls + ([resolve_call] if resolve_call else [])
                     assistant_msg: dict[str, Any] = {
                         "role": "assistant",
                         "content": message.content or "",
@@ -471,7 +485,7 @@ class TreeEngine(AgentEngine):
                                     ),
                                 },
                             }
-                            for tc in all_tcs
+                            for tc in tool_calls
                         ],
                     }
                     messages.append(assistant_msg)
@@ -481,24 +495,40 @@ class TreeEngine(AgentEngine):
                         "content": getattr(message, "content", "") or "",
                     })
 
-                # Execute regular tools
+                # Execute regular tools without allowing one parallel batch to
+                # overshoot either the per-node or global tool budget.
                 tool_results_text: list[str] = []
                 for tc in regular_calls:
-                    result = execute_tool_call(
-                        tool_dispatch, tc.function.name, tc.function.arguments,
-                    )
-                    node_tool_calls += 1
-                    tree.total_tool_calls += 1
-                    node.tool_calls_count += 1
+                    if (
+                        node_tool_calls >= tool_calls_per_node
+                        or tree.total_tool_calls >= settings.TREE_MAX_TOOL_CALLS
+                    ):
+                        result = (
+                            "Tool call rejected: the exploration tool budget is "
+                            "exhausted for this node or run."
+                        )
+                    else:
+                        result = execute_tool_call(
+                            tool_dispatch, tc.function.name, tc.function.arguments,
+                        )
+                        node_tool_calls += 1
+                        tree.total_tool_calls += 1
+                        node.tool_calls_count += 1
+                        observed_tool_outputs.setdefault(
+                            tc.function.name, []
+                        ).append(str(result))
 
-                    _emit_tree_event("tree_tool_call", project_id, agent_id, {
-                        "node_id": node.id,
-                        "tool_name": tc.function.name,
-                        "args_preview": tc.function.arguments[:80] if tc.function.arguments else "",
-                        "total_tokens": tree.total_tokens,
-                        "total_tool_calls": tree.total_tool_calls,
-                        "prompt_tokens": _last_prompt_tokens,
-                    }, f"  🔧 [{node.id}] {tc.function.name}")
+                        _emit_tree_event("tree_tool_call", project_id, agent_id, {
+                            "node_id": node.id,
+                            "tool_name": tc.function.name,
+                            "args_preview": (
+                                tc.function.arguments[:80]
+                                if tc.function.arguments else ""
+                            ),
+                            "total_tokens": tree.total_tokens,
+                            "total_tool_calls": tree.total_tool_calls,
+                            "prompt_tokens": _last_prompt_tokens,
+                        }, f"  🔧 [{node.id}] {tc.function.name}")
 
                     if manual_tc:
                         tool_results_text.append(
@@ -511,52 +541,80 @@ class TreeEngine(AgentEngine):
                             "content": result,
                         })
 
-                # Handle resolve_node
-                if resolve_call:
-                    if not manual_tc:
+                # Reject ambiguous or premature terminal calls after returning any
+                # regular tool results, so the next turn can use those observations.
+                if resolve_calls and protocol_error:
+                    for tc in resolve_calls:
+                        if manual_tc:
+                            tool_results_text.append(
+                                f"[Tool: resolve_node] Result:\n{protocol_error}"
+                            )
+                        else:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": protocol_error,
+                            })
+
+                # Handle one isolated, schema-valid resolve_node call.
+                elif resolve_call is not None:
+                    resolve_args = self._parse_args(resolve_call.function.arguments)
+                    resolution_error = self._apply_resolve(
+                        node,
+                        resolve_args,
+                        tree,
+                        settings,
+                        observed_tool_outputs,
+                    )
+                    feedback = resolution_error or '{"status": "acknowledged"}'
+                    if manual_tc:
+                        tool_results_text.append(
+                            f"[Tool: resolve_node] Result:\n{feedback}"
+                        )
+                    else:
                         messages.append({
                             "role": "tool",
                             "tool_call_id": resolve_call.id,
-                            "content": '{"status": "acknowledged"}',
+                            "content": feedback,
                         })
 
-                    resolve_args = self._parse_args(resolve_call.function.arguments)
-                    self._apply_resolve(node, resolve_args, tree, settings)
+                    if not resolution_error:
+                        _emit_tree_event("tree_node_resolved", project_id, agent_id, {
+                            "node_id": node.id,
+                            "state": node.state,
+                            "confidence": node.confidence,
+                            "summary": node.exploration_summary or "",
+                            "total_tokens": tree.total_tokens,
+                            "total_tool_calls": tree.total_tool_calls,
+                            "prompt_tokens": _last_prompt_tokens,
+                        }, (
+                            f"  ✅ [{node.id}] is {node.state} ({node.confidence}): "
+                            f"{(node.exploration_summary or '')[:80]}"
+                        ))
 
-                    _emit_tree_event("tree_node_resolved", project_id, agent_id, {
-                        "node_id": node.id,
-                        "state": node.state,
-                        "confidence": node.confidence,
-                        "summary": node.exploration_summary or "",
-                        "total_tokens": tree.total_tokens,
-                        "total_tool_calls": tree.total_tool_calls,
-                        "prompt_tokens": _last_prompt_tokens,
-                    }, (
-                        f"  ✅ [{node.id}] is {node.state} ({node.confidence}): "
-                        f"{(node.exploration_summary or '')[:80]}"
-                    ))
+                        if node.id not in tree.explored_node_ids:
+                            tree.explored_node_ids.append(node.id)
+                        resolved = True
 
-                    tree.explored_node_ids.append(node.id)
-                    resolved = True
+                        propagate(tree.root)
+                        total = tree.count_nodes()
+                        resolved_count = sum(
+                            1 for nid in tree.explored_node_ids
+                            if tree.get_node(nid) and tree.get_node(nid).is_resolved()
+                        )
+                        _emit_tree_event("tree_propagation", project_id, agent_id, {
+                            "root_state": tree.root.state if tree.root else "unknown",
+                            "total_nodes": total,
+                            "resolved_nodes": resolved_count,
+                            "total_tokens": tree.total_tokens,
+                            "total_tool_calls": tree.total_tool_calls,
+                        }, (
+                            f"  📊 Progress: {resolved_count}/{total} nodes resolved, "
+                            f"root: {tree.root.state if tree.root else '?'}"
+                        ))
+                        break
 
-                    # Propagate
-                    propagate(tree.root)
-                    total = tree.count_nodes()
-                    resolved_count = sum(
-                        1 for nid in tree.explored_node_ids
-                        if tree.get_node(nid) and tree.get_node(nid).is_resolved()
-                    )
-                    _emit_tree_event("tree_propagation", project_id, agent_id, {
-                        "root_state": tree.root.state if tree.root else "unknown",
-                        "total_nodes": total,
-                        "resolved_nodes": resolved_count,
-                        "total_tokens": tree.total_tokens,
-                        "total_tool_calls": tree.total_tool_calls,
-                    }, f"  📊 Progress: {resolved_count}/{total} nodes resolved, root: {tree.root.state if tree.root else '?'}")
-
-                    break
-
-                # Manual mode: send tool results
+                # Manual mode uses a user message as the pseudo-tool result channel.
                 if manual_tc and tool_results_text:
                     messages.append({
                         "role": "user",
@@ -572,6 +630,7 @@ class TreeEngine(AgentEngine):
                 propagate(tree.root)
                 _log(f"  {_YELLOW}⚠ [{node.id}] forced to needs_experiment (budget){_RESET}")
 
+            tree.current_node_id = None
             tree.iteration_count += 1
 
     def _synthesize_and_store(
@@ -605,8 +664,6 @@ class TreeEngine(AgentEngine):
             llm_params, synth_messages, [SYNTHESIZE_SCHEMA],
             "synthesize", tree, manual_tc,
         )
-        tree.total_llm_calls += 1
-
         if synth_result:
             synthesis_text = synth_result.get("synthesis", "")
             approach = synth_result.get("recommended_approach", "")
@@ -768,6 +825,7 @@ class TreeEngine(AgentEngine):
         """Call LLM expecting a specific pseudo-tool call. Returns parsed args or None."""
         max_attempts = 3
         for attempt in range(max_attempts):
+            tree.total_llm_calls += 1
             try:
                 if manual_tc:
                     response = _call_llm(llm_params, messages)
@@ -789,41 +847,61 @@ class TreeEngine(AgentEngine):
             choice = response.choices[0]
             message = choice.message
 
-            # Extract tool call
+            # Extract and validate every matching pseudo-tool payload.
+            validation_error = ""
+            candidates: list[dict[str, Any]] = []
             if manual_tc:
                 raw_content = (message.content or "").strip()
                 parsed = _parse_text_tool_calls(raw_content)
                 if parsed:
-                    for pc in parsed:
-                        if pc["name"] == expected_tool:
-                            args = pc["arguments"]
-                            return args if isinstance(args, dict) else {}
+                    candidates = [
+                        call["arguments"]
+                        if isinstance(call.get("arguments"), dict) else {}
+                        for call in parsed
+                        if call.get("name") == expected_tool
+                    ]
             else:
                 tool_calls = getattr(message, "tool_calls", None)
                 if tool_calls:
-                    for tc in tool_calls:
-                        if tc.function.name == expected_tool:
-                            return self._parse_args(tc.function.arguments)
+                    candidates = [
+                        self._parse_args(call.function.arguments)
+                        for call in tool_calls
+                        if call.function.name == expected_tool
+                    ]
 
-            # Retry with nudge
+            for candidate in candidates:
+                validation_error = validate_tool_payload(
+                    candidate, schemas, expected_tool
+                )
+                if not validation_error:
+                    return candidate
+
+            # Retry with actionable feedback.
             content = (message.content or "").strip()
             if content:
                 messages.append({"role": "assistant", "content": content})
-            messages.append({
-                "role": "user",
-                "content": f"You must call the `{expected_tool}` tool. Please try again.",
-            })
+            if validation_error:
+                nudge = (
+                    f"The `{expected_tool}` arguments were invalid: "
+                    f"{validation_error}. Call it again with a valid payload."
+                )
+            else:
+                nudge = f"You must call the `{expected_tool}` tool. Please try again."
+            messages.append({"role": "user", "content": nudge})
 
         return None
 
-    def _parse_args(self, arguments: str | dict[str, Any]) -> dict[str, Any]:
-        """Parse tool call arguments from string or dict."""
+    def _parse_args(self, arguments: Any) -> dict[str, Any]:
+        """Parse only JSON objects, rejecting every other provider payload shape."""
         if isinstance(arguments, dict):
             return arguments
-        try:
-            return json.loads(arguments) if arguments and arguments.strip() else {}
-        except json.JSONDecodeError:
+        if not isinstance(arguments, str) or not arguments.strip():
             return {}
+        try:
+            parsed = json.loads(arguments)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
 
     def _apply_resolve(
         self,
@@ -831,9 +909,18 @@ class TreeEngine(AgentEngine):
         args: dict[str, Any],
         tree: TreeState,
         settings: Any,
-    ) -> None:
-        """Apply resolve_node arguments to a tree node."""
-        node.state = args.get("state", "solvable")
+        observed_tool_outputs: dict[str, list[str]],
+    ) -> str:
+        """Apply validated, observed resolve_node arguments or reject them."""
+        payload, error = validate_resolve_node(args)
+        if payload is None:
+            return error
+        evidence_error = validate_resolution_evidence(payload, observed_tool_outputs)
+        if evidence_error:
+            return evidence_error
+        args = payload.model_dump(exclude_none=True)
+
+        node.state = args["state"]
         node.confidence = args.get("confidence", "medium")
         node.exploration_summary = args.get("summary", "")
 
@@ -844,6 +931,7 @@ class TreeEngine(AgentEngine):
                 source="discovered",
                 evidence=f_data.get("evidence", ""),
                 source_tool=f_data.get("source_tool", ""),
+                support_kind=f_data.get("source_kind", "tool"),
                 confidence=f_data.get("confidence", "medium"),
             ))
 
@@ -904,6 +992,8 @@ class TreeEngine(AgentEngine):
                     content=q_data.get("content", ""),
                     question_type=q_data.get("question_type", "informational"),
                 ))
+
+        return ""
 
     def _format_brainstorm_synthesis(self, converge_result: dict[str, Any]) -> str:
         """Delegate to ``tree/brainstorm.format_brainstorm_synthesis``."""

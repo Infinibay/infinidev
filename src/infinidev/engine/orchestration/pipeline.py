@@ -395,8 +395,8 @@ def _run_council_phase(
 
     Runs ONLY when ``escalation.council_requested`` is set and the
     feature is enabled. Returns a possibly-updated EscalationPacket
-    carrying the synthesised ``design_brief`` (and, if the council hit a
-    genuine product fork, the user's answer folded into the request).
+    carrying the synthesised ``design_brief``. Product questions remain
+    advisory context; this optional phase never blocks execution.
 
     Soft-fails: any problem returns the original escalation unchanged, so
     the pipeline always proceeds to the planner. The council enriches the
@@ -445,35 +445,27 @@ def _run_council_phase(
     if brief is None:
         return escalation
 
-    # Conditional user approval: only interrupt when the council flagged
-    # a genuine product fork it must not decide alone. Otherwise flow
-    # straight through. (See DesignBrief.user_decision_required.)
-    enriched_request = escalation.user_request
+    # Council questions are advisory. Spec elaboration already owns genuine
+    # execution-blocking product decisions before this phase; asking again
+    # here made an optional enrichment phase stall the whole pipeline.
+    preview = brief.render_user_preview()
     if brief.user_decision_required and brief.open_questions_for_user:
-        answer = hooks.ask_user(brief.render_questions_for_user(), "text")
-        if answer and answer.strip():
-            enriched_request = (
-                f"{escalation.user_request}\n\n"
-                f"[User decision on the council's open question(s)]: "
-                f"{answer.strip()}"
-            )
-            hooks.on_status("approved", "Incorporating your decision.")
-        else:
-            # Non-interactive or skipped — proceed with the council's
-            # recommendation and note the unanswered questions as risks.
-            hooks.on_status(
-                "warn",
-                "No decision provided — proceeding with the council's "
-                "recommended approach.",
-            )
+        hooks.on_status(
+            "warn",
+            "Council surfaced an unresolved product preference; continuing "
+            "with its recommended approach and retaining the question in the "
+            "planner brief.",
+        )
+        preview += "\nOpen questions retained for review:\n" + "\n".join(
+            f"- {question}" for question in brief.open_questions_for_user
+        )
 
-    # Surface a short summary to the user (non-blocking).
     with best_effort("council preview notify failed"):
-        hooks.notify("Council", brief.render_user_preview(), "agent")
+        hooks.notify("Council", preview, "agent")
 
     return _dc_replace(
         escalation,
-        user_request=enriched_request,
+        user_request=escalation.user_request,
         design_brief=brief,
     )
 
@@ -525,7 +517,7 @@ def _run_execution_phase(
                     _depth_config = DEPTH_CONFIGS.get(
                         agent._gather_brief.classification.depth
                     )
-            phase_eng = PhaseEngine()
+            phase_eng = PhaseEngine(loop_engine=engine)
             result = phase_eng.execute(
                 agent=agent,
                 task_prompt=task_prompt,
@@ -652,6 +644,8 @@ def _run_review_phase(
             )
         except Exception as exc:
             logger.error("Evidence review phase failed: %s", exc, exc_info=True)
+            with best_effort("evidence review failure status update failed"):
+                engine._last_status = "failed"
             hooks.on_status("error", f"Evidence review error: {exc}")
 
         # Evidence rework is normally read-only, but the developer may have
@@ -727,6 +721,8 @@ def _run_review_phase(
             engine._last_status = "blocked"
     except Exception as exc:
         logger.error("Review phase failed: %s", exc, exc_info=True)
+        with best_effort("code review failure status update failed"):
+            engine._last_status = "failed"
         hooks.on_status("error", f"Review error: {exc}")
 
     return result
@@ -1252,7 +1248,10 @@ def run_task(
     # Review happens inside the selected adapter: per Task for Staged, once
     # for ReAct, and per executed leaf for Graph. A cancelled run is resumable;
     # do not restart it here.
-    if getattr(used_engine, "is_cancelled", False):
+    if (
+        _normalized_engine_status(engine_run) == "cancelled"
+        or getattr(used_engine, "is_cancelled", False)
+    ):
         logger.info("run_task: cancelled — skipping end-of-task hooks")
         runtime.record_step(result, step_id=root_task.id)
         runtime.cancel()
@@ -1265,7 +1264,8 @@ def run_task(
     # summary — so neither closing step happens twice.
     from infinidev.engine.user_hooks import UserHookEvent
 
-    _turn_status = getattr(used_engine, "_last_status", "") or "completed"
+    _turn_status = _normalized_engine_status(engine_run)
+    _autonomous_outcome = _autonomous_turn_outcome(engine_run)
     followup = _task_end_hook(
         UserHookEvent.TASK_END_INSTRUCTION,
         user_input=user_input, session_id=session_id, result=result,
@@ -1274,10 +1274,7 @@ def run_task(
     )
     if followup:
         runtime.record_step(result, step_id=root_task.id)
-        if engine_run.status == "completed":
-            runtime.complete_current_task(result)
-        else:
-            runtime.block_current_task(result)
+        _close_runtime_task(runtime, result, _turn_status)
         return _reenter(
             followup,
             continue_autonomously=bool(autonomous or escalation.autonomous),
@@ -1314,7 +1311,7 @@ def run_task(
         _chain_budget = _autonomous_budget or AutonomousBudget.from_settings()
         if _autonomous_budget is None:
             _chain_budget.start()
-        _chain_budget.record_outcome(_turn_status)
+        _chain_budget.record_outcome(_autonomous_outcome)
         _chain_label = _autonomous_budget_status_text(_chain_budget)
         hooks.on_status(
             "info",
@@ -1332,7 +1329,7 @@ def run_task(
                 _push_chain_mode(_chain_label, "active")
             except Exception:
                 logger.debug("hooks.on_chain_mode failed", exc_info=True)
-        if _autonomous_should_continue(_chain_budget, _turn_status):
+        if _autonomous_should_continue(_chain_budget, _autonomous_outcome):
             hooks.notify(
                 "Infinidev",
                 _autonomous_progress_checkpoint(
@@ -1370,12 +1367,7 @@ def run_task(
                     "concisely when done or when you have no next item."
                 )
             runtime.record_step(result, step_id=root_task.id)
-            if engine_run.status == "completed":
-                runtime.complete_current_task(result)
-            elif engine_run.status == "blocked":
-                runtime.block_current_task(result)
-            else:
-                runtime.fail_current_task(result)
+            _close_runtime_task(runtime, result, _turn_status)
             return _autonomous_chain_reenter(
                 instruction=_continuation, budget=_chain_budget,
             )
@@ -1400,7 +1392,12 @@ def run_task(
     # Record what the developer loop just did as a hidden conversation
     # turn so the NEXT turn's chat agent has continuity instead of starting
     # cold. Best-effort: a failure here must never sink a completed task.
-    _store_work_summary(used_engine, session_id, result)
+    _store_work_summary(
+        used_engine,
+        session_id,
+        result,
+        status=_turn_status,
+    )
     _store_task_hook_note(session_id, _task_end_hook(
         UserHookEvent.TASK_END_SUMMARY,
         user_input=user_input, session_id=session_id, result=result,
@@ -1409,15 +1406,59 @@ def run_task(
 
     hooks.on_phase("idle")
     runtime.record_step(result, step_id=root_task.id)
-    if engine_run.status == "completed":
-        runtime.complete_current_task(result)
-    elif engine_run.status == "blocked":
-        runtime.block_current_task(result)
-    else:
-        runtime.fail_current_task(result)
+    _close_runtime_task(runtime, result, _turn_status)
     runtime.append_chat("assistant", result)
     _report_turn_end_to_ken(result, session_id)
     return result
+
+
+def _normalized_engine_status(engine_run: Any) -> str:
+    """Return the adapter contract status, failing closed on invalid values."""
+    status = str(getattr(engine_run, "status", "") or "").strip().lower()
+    if status in {"completed", "blocked", "cancelled", "failed"}:
+        return status
+    return "failed"
+
+
+def _close_runtime_task(runtime: Any, result: str, status: str) -> None:
+    """Close the active runtime task with the adapter terminal outcome."""
+    if status == "completed":
+        runtime.complete_current_task(result)
+    elif status == "blocked":
+        runtime.block_current_task(result)
+    elif status == "cancelled":
+        runtime.cancel()
+    else:
+        runtime.fail_current_task(result)
+
+
+def _autonomous_turn_outcome(engine_run: Any) -> str:
+    """Translate an EngineResult into the autonomous policy vocabulary.
+
+    A selected engine's normalized failure is authoritative even when its
+    underlying LoopEngine lacks a terminal label. Successful plans retain the
+    finer raw outcome so bounded autonomous mode can distinguish a definitive
+    done from a successful intermediate completed pass.
+    """
+    status = _normalized_engine_status(engine_run)
+    if status == "failed":
+        return "error"
+    if status in {"blocked", "cancelled"}:
+        return "blocked"
+
+    engine = getattr(engine_run, "engine", None)
+    raw_status = str(getattr(engine, "_last_status", "") or "").strip().lower()
+    return {
+        "done": "done",
+        "blocked": "blocked",
+        "failed": "error",
+        "cancelled": "blocked",
+        "exhausted": "blocked",
+        "idle": "idle",
+        "soft_blocked": "soft_blocked",
+        "continue": "continue",
+        "completed": "completed",
+    }.get(raw_status, "continue")
 
 
 def _turn_changed_files(engine: Any) -> bool:
@@ -1524,7 +1565,13 @@ def _store_task_hook_note(session_id: str, note: str) -> None:
         store_conversation_turn(session_id, "work_summary", note)
 
 
-def _store_work_summary(engine: Any, session_id: str, result: str) -> None:
+def _store_work_summary(
+    engine: Any,
+    session_id: str,
+    result: str,
+    *,
+    status: str | None = None,
+) -> None:
     """Persist the hidden end-of-task work summary, if the engine offers one.
 
     Only the LoopEngine exposes ``build_work_summary``; the legacy
@@ -1537,8 +1584,12 @@ def _store_work_summary(engine: Any, session_id: str, result: str) -> None:
     if not session_id or not hasattr(engine, "build_work_summary"):
         return
     try:
-        status = getattr(engine, "_last_status", "") or "completed"
-        summary = engine.build_work_summary(result or "", status)
+        summary_status = (
+            str(status).strip().lower()
+            if status is not None
+            else str(getattr(engine, "_last_status", "") or "failed").strip().lower()
+        )
+        summary = engine.build_work_summary(result or "", summary_status)
         if not summary:
             return
         from infinidev.db.service import store_conversation_turn
@@ -1574,6 +1625,7 @@ def run_flow_task(
     nothing to classify. Review is also skipped — these flows produce
     summary text, not code changes that need verifying.
     """
+    from infinidev.engine.engines.base import get_loop_status, normalize_loop_status
     from infinidev.engine.flows import get_flow_config
     from infinidev.prompts.flows import get_flow_identity
 
@@ -1602,10 +1654,44 @@ def run_flow_task(
                 task_prompt=task_prompt,
                 verbose=True,
             )
-        if not result or not result.strip():
-            result = "Done."
-    finally:
-        agent.deactivate()
+        if use_tree_engine:
+            if not result or not result.strip():
+                result = "Done."
+        else:
+            loop_status = get_loop_status(engine_to_use)
+            outcome = normalize_loop_status(loop_status)
+            if getattr(engine_to_use, "is_cancelled", False):
+                outcome = "cancelled"
 
-    hooks.on_phase("idle")
+            if outcome == "failed":
+                hooks.on_status(
+                    "error",
+                    (
+                        "Direct flow failed."
+                        if loop_status == "failed"
+                        else "Direct flow returned an empty or unknown terminal "
+                        "status; failing closed."
+                    ),
+                )
+                if not result or not result.strip():
+                    result = "Flow failed. (no additional output)"
+            elif outcome == "cancelled":
+                hooks.on_status("warn", "Direct flow execution was cancelled.")
+                if not result or not result.strip():
+                    result = "Execution cancelled; the flow remains incomplete."
+            elif outcome == "blocked":
+                hooks.on_status(
+                    "warn",
+                    "Direct flow stopped before it could complete.",
+                )
+                if not result or not result.strip():
+                    result = "Flow blocked before completion."
+            elif not result or not result.strip():
+                result = "Done."
+    finally:
+        try:
+            agent.deactivate()
+        finally:
+            hooks.on_phase("idle")
+
     return result

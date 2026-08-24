@@ -1,0 +1,10 @@
+{
+  "id": "capability.data_migration",
+  "reason": "the current task changes persisted data, schemas, or serialized formats",
+  "guidance": [
+    "Identify the existing format and every reader and writer affected before changing it. Preserve a",
+    "safe upgrade path, make partial failure recoverable, and avoid irreversible conversion without",
+    "explicit authorization. Exercise representative old and new data and state the compatibility",
+    "boundary established by the check."
+  ]
+}

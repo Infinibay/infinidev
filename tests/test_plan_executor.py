@@ -39,6 +39,8 @@ def test_minimal_executor_passes_supported_kwargs_and_phase_identity() -> None:
 
     kwargs = _assert_execute_kwargs_are_supported(engine.execute)
     assert kwargs["identity_override"] == strategy.execute_identity
+    assert kwargs["max_total_tool_calls"] == strategy.execute_max_tool_calls_per_step
+    assert kwargs["max_tool_calls_per_action"] == strategy.execute_max_tool_calls_per_step
     assert result == "done"
     assert returned_engine is engine
 
@@ -70,5 +72,54 @@ def test_plan_executor_passes_supported_kwargs_and_phase_identity() -> None:
 
     kwargs = _assert_execute_kwargs_are_supported(engine.execute)
     assert kwargs["identity_override"] == strategy.execute_identity
+    assert kwargs["max_total_tool_calls"] == strategy.execute_max_tool_calls_per_step
+    assert kwargs["max_tool_calls_per_action"] == strategy.execute_max_tool_calls_per_step
     assert result == "done"
     assert returned_engine is engine
+
+
+def test_plan_executor_reuses_provided_engine_and_stops_after_cancellation() -> None:
+    engine = MagicMock(spec=LoopEngine)
+    outcomes = iter(
+        (("done", "step one done", 2), ("cancelled", "cancelled", 3))
+    )
+
+    def execute(**kwargs):
+        status, result, tool_calls = next(outcomes)
+        engine._last_status = status
+        engine._last_total_tool_calls = tool_calls
+        return result
+
+    engine.execute.side_effect = execute
+    strategy = STRATEGIES["bug"]
+    steps = [
+        {"step": 1, "title": "Inspect src/example.py", "files": []},
+        {"step": 2, "title": "Fix src/example.py", "files": ["src/example.py"]},
+        {"step": 3, "title": "Run tests", "files": []},
+    ]
+
+    with (
+        patch("infinidev.engine.phases.plan_executor.LoopEngine") as loop_cls,
+        patch("infinidev.config.llm._is_small_model", return_value=False),
+    ):
+        result, returned_engine = _execute_plan(
+            agent=object(),
+            description="Fix the bug",
+            expected_output="Tests pass",
+            answers=[],
+            all_notes=[],
+            plan_steps=steps,
+            strategy=strategy,
+            all_tools=[],
+            depth_config=DEPTH_CONFIGS[DepthLevel.deep],
+            verbose=False,
+            loop_engine=engine,
+        )
+
+    assert result == "cancelled"
+    assert returned_engine is engine
+    assert engine.execute.call_count == 2
+    assert engine._last_total_tool_calls == 5
+    assert engine.execute.call_args_list[0].kwargs["preserve_file_tracker"] is False
+    assert engine.execute.call_args_list[1].kwargs["preserve_file_tracker"] is True
+    loop_cls.assert_not_called()

@@ -253,14 +253,13 @@ every member — not just the majority. Specifically:
   * ``affected_files`` — what the work will likely touch.
   * ``open_risks`` — failure modes the developer must guard against.
   * ``dissent`` — minority positions, named honestly. Do not bury them.
-  * ``user_decision_required`` — set TRUE only if the debate exposed a
-    genuine PRODUCT/DESIGN fork that you must NOT decide alone (e.g.
-    "optimise for latency or cost?", "which UX?"). Resolve purely
-    technical questions yourself. Unresolved dissent over a user-facing
-    tradeoff requires this to be TRUE, and you MUST list the concrete
-    questions in ``open_questions_for_user`` — setting user_decision_required without
-    supplying those questions has NO effect (it is ignored), so the brief would proceed
-    as if no decision were needed.
+  * ``user_decision_required`` - set TRUE only if the debate exposed a
+    genuine PRODUCT/DESIGN preference worth surfacing (for example,
+    latency versus cost or a UX choice). Still select a recommended
+    default in ``chosen_approach``: Council is advisory and never blocks
+    execution. Resolve purely technical questions yourself. List each
+    preference in ``open_questions_for_user``; a flag without questions
+    has no effect.
 
 Communicate solely via tool calls. Your turn ends on ``synthesize_brief``.
 """

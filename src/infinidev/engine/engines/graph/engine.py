@@ -26,6 +26,8 @@ from infinidev.engine.engines.base import (
     STATUS_COMPLETED,
     STATUS_FAILED,
     TransitionRequest,
+    get_loop_status,
+    normalize_loop_status,
 )
 from infinidev.engine.engines.graph import completion
 from infinidev.engine.engines.graph.context import build_capsule, render_capsule
@@ -378,7 +380,7 @@ class GraphEngineAdapter:
     def _requirements_satisfied_by(self, state: GraphState, node_id: str) -> list[str]:
         requirement_ids = []
         for edge in state.edges_from(node_id):
-            if edge.edge_type is not EDGE_SATISFIES:
+            if edge.edge_type != EDGE_SATISFIES:
                 continue
             target = state.nodes.get(edge.target)
             if target is not None and target.node_type == "requirement":
@@ -528,12 +530,17 @@ class GraphEngineAdapter:
             prompt_configuration=prompt_configuration,
         )
 
-        max_tool_calls = max(
-            1,
-            min(
-                settings.REACT_MAX_TOOL_CALLS,
-                int(budget.get("max_tool_calls", settings.REACT_MAX_TOOL_CALLS)),
-            ),
+        configured_tool_calls = int(
+            budget.get("max_tool_calls", settings.REACT_MAX_TOOL_CALLS)
+        )
+        positive_tool_limits = [
+            limit
+            for limit in (settings.REACT_MAX_TOOL_CALLS, configured_tool_calls)
+            if limit > 0
+        ]
+        max_tool_calls = min(positive_tool_limits) if positive_tool_limits else 0
+        max_prompt_tokens = int(
+            budget.get("token_budget", settings.GRAPH_NODE_TOKEN_BUDGET)
         )
         hooks.on_phase("execute")
         hooks.on_status(
@@ -554,6 +561,7 @@ class GraphEngineAdapter:
                 task=structured_task,
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=max_tool_calls,
+                max_prompt_tokens=max_prompt_tokens,
                 preserve_file_tracker=preserve_file_tracker,
                 resume_state=resume_state,
                 skip_plan=False,
@@ -571,13 +579,18 @@ class GraphEngineAdapter:
         if getattr(engine, "is_cancelled", False):
             return result, STATUS_CANCELLED
 
-        loop_status = getattr(engine, "_last_status", "") or "completed"
+        loop_status = get_loop_status(engine)
+        status = normalize_loop_status(loop_status)
         if loop_status == "exhausted":
             return result, _LEAF_INTERRUPTED
-        if loop_status == "blocked":
-            return result, STATUS_BLOCKED
-        if loop_status == "failed":
-            return result, STATUS_FAILED
+        if status == STATUS_FAILED and loop_status != "failed":
+            hooks.on_status(
+                "error",
+                "Graph leaf returned an empty or unknown terminal status; "
+                "failing closed instead of resolving the node.",
+            )
+        if status != STATUS_COMPLETED:
+            return result, status
 
         if getattr(node, "payload", {}).get("evidence_only"):
             if engine.has_file_changes():
@@ -604,20 +617,24 @@ class GraphEngineAdapter:
             rework_execute_kwargs={
                 "skip_plan": False,
                 "allow_plan_mutation": False,
+                "max_prompt_tokens": max_prompt_tokens,
             },
             run_verification=is_goal_verification,
             prompt_configuration=prompt_configuration,
         )
-        review_status = getattr(engine, "_last_status", "") or "completed"
+        review_status = get_loop_status(engine)
+        review_outcome = normalize_loop_status(review_status)
         if getattr(engine, "is_cancelled", False):
             return result, STATUS_CANCELLED
         if review_status == "exhausted":
             return result, _LEAF_INTERRUPTED
-        if review_status == "blocked":
-            return result, STATUS_BLOCKED
-        if review_status == "failed":
-            return result, STATUS_FAILED
-        return result, STATUS_COMPLETED
+        if review_outcome == STATUS_FAILED and review_status != "failed":
+            hooks.on_status(
+                "error",
+                "Graph leaf review returned an empty or unknown terminal status; "
+                "failing closed instead of resolving the node.",
+            )
+        return result, review_outcome
 
     @staticmethod
     def _resume_leaf_state(engine: Any) -> dict[str, Any] | None:
@@ -653,6 +670,44 @@ class GraphEngineAdapter:
 
     # ── main loop ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _accumulate_leaf_observability(
+        engine: Any,
+        previous_tracker: Any | None,
+        total_tool_calls: int,
+        *,
+        tracker_was_preserved: bool,
+    ) -> tuple[Any | None, int]:
+        """Aggregate branch changes and counters after branch-local review.
+
+        Sibling work leaves stay isolated while they execute and are reviewed.
+        Once a leaf closes, its tracker absorbs the older aggregate so the
+        integration verifier and final task summary can observe every branch.
+        Resumed leaves already merged the prior tracker in LoopEngine.
+        """
+        if engine is None:
+            return previous_tracker, total_tool_calls
+
+        current_tracker = getattr(engine, "_last_file_tracker", None)
+        if current_tracker is None:
+            if previous_tracker is not None:
+                engine._last_file_tracker = previous_tracker
+            current_tracker = previous_tracker
+        elif (
+            previous_tracker is not None
+            and current_tracker is not previous_tracker
+            and not tracker_was_preserved
+        ):
+            merge_from = getattr(current_tracker, "merge_from", None)
+            if callable(merge_from):
+                merge_from(previous_tracker)
+
+        run_tool_calls = getattr(engine, "_last_total_tool_calls", 0)
+        if isinstance(run_tool_calls, int):
+            total_tool_calls += run_tool_calls
+        engine._last_total_tool_calls = total_tool_calls
+        return current_tracker, total_tool_calls
+
     def run(self, **kwargs: Any) -> EngineResult:
         from infinidev.config.settings import settings
 
@@ -665,6 +720,40 @@ class GraphEngineAdapter:
         escalation = kwargs.get("escalation")
         session_id = kwargs.get("session_id", "")
         run_id = kwargs.get("run_id") or f"graph_{id(self):x}"
+        visits: dict[str, int] = {}
+        leaf_runs = 0
+        resume_node_id: str | None = None
+        last_result = ""
+        completed_results: list[tuple[str, str]] = []
+        aggregate_tracker: Any | None = None
+        total_tool_calls = 0
+
+        def current_metrics() -> dict[str, Any]:
+            return {
+                "max_leaf_runs": self._max_leaf_runs,
+                "leaf_runs": leaf_runs,
+                "max_tool_calls": (
+                    None
+                    if settings.GRAPH_RUN_TOOL_BUDGET <= 0
+                    else settings.GRAPH_RUN_TOOL_BUDGET
+                ),
+                "observed_tool_calls": total_tool_calls,
+                "max_prompt_tokens_per_node": (
+                    None
+                    if settings.GRAPH_NODE_TOKEN_BUDGET <= 0
+                    else settings.GRAPH_NODE_TOKEN_BUDGET
+                ),
+                "max_open_branches": self._limits.max_open_branches,
+                "max_node_revisits": self._limits.max_node_revisits,
+                "visited_nodes": len(visits),
+                "node_visits": sum(visits.values()),
+            }
+
+        def remaining_run_tool_calls() -> int | None:
+            configured = settings.GRAPH_RUN_TOOL_BUDGET
+            if configured <= 0:
+                return None
+            return max(0, configured - total_tool_calls)
 
         try:
             state = self._seed_state(run_id, session_id, escalation)
@@ -675,13 +764,8 @@ class GraphEngineAdapter:
                 user_message=f"Could not seed the work graph: {exc}",
                 summary="seed failed",
                 engine=kwargs.get("engine"),
+                metrics=current_metrics(),
             )
-
-        visits: dict[str, int] = {}
-        leaf_runs = 0
-        resume_node_id: str | None = None
-        last_result = ""
-        completed_results: list[tuple[str, str]] = []
 
         while True:
             assessment = completion.evaluate_goal(state)
@@ -696,6 +780,7 @@ class GraphEngineAdapter:
                     engine=kwargs.get("engine"),
                     state=state,
                     resume_token=session_id,
+                    metrics=current_metrics(),
                 )
             if assessment.status == "blocked":
                 return EngineResult(
@@ -708,6 +793,31 @@ class GraphEngineAdapter:
                     engine=kwargs.get("engine"),
                     state=state,
                     resume_token=session_id,
+                    metrics=current_metrics(),
+                )
+
+            remaining_tool_calls = remaining_run_tool_calls()
+            if remaining_tool_calls == 0:
+                run_tool_budget = settings.GRAPH_RUN_TOOL_BUDGET
+                return EngineResult(
+                    engine_name=self.name,
+                    status=STATUS_BLOCKED,
+                    user_message=(
+                        "The graph engine reached its run-wide tool-call fuse "
+                        f"({total_tool_calls}/{run_tool_budget}) before completing."
+                    ),
+                    summary="run tool-call budget exhausted",
+                    engine=kwargs.get("engine"),
+                    state=state,
+                    resume_token=session_id,
+                    metrics=current_metrics(),
+                    transition_request=TransitionRequest(
+                        target="staged",
+                        reason=(
+                            "graph_run_tool_budget_exhausted: "
+                            f"{total_tool_calls}/{run_tool_budget} tool calls"
+                        ),
+                    ),
                 )
 
             if leaf_runs >= self._max_leaf_runs:
@@ -722,6 +832,7 @@ class GraphEngineAdapter:
                     engine=kwargs.get("engine"),
                     state=state,
                     resume_token=session_id,
+                    metrics=current_metrics(),
                     transition_request=TransitionRequest(
                         target="staged",
                         reason="graph_leaf_budget_exhausted",
@@ -754,6 +865,7 @@ class GraphEngineAdapter:
                     engine=kwargs.get("engine"),
                     state=state,
                     resume_token=session_id,
+                    metrics=current_metrics(),
                 )
 
             node_id = node.node_id
@@ -761,11 +873,18 @@ class GraphEngineAdapter:
                 state, _ = self._apply(
                     state, ActivateNodeOp(node_id=node_id, rationale=reason)
                 )
+                node_tool_limits = [
+                    limit
+                    for limit in (
+                        settings.REACT_MAX_TOOL_CALLS,
+                        remaining_tool_calls,
+                    )
+                    if limit is not None and limit > 0
+                ]
                 node_budget = {
                     "token_budget": settings.GRAPH_NODE_TOKEN_BUDGET,
-                    "max_tool_calls": min(
-                        settings.REACT_MAX_TOOL_CALLS,
-                        settings.GRAPH_RUN_TOOL_BUDGET,
+                    "max_tool_calls": (
+                        min(node_tool_limits) if node_tool_limits else 0
                     ),
                 }
                 capsule = build_capsule(
@@ -776,14 +895,18 @@ class GraphEngineAdapter:
                 )
                 capsule_text = render_capsule(capsule)
                 if self._executor is None:
+                    preserve_leaf_tracker = (
+                        resuming_leaf or node.node_type == "verification"
+                    )
                     result_text, leaf_status = self._run_live_leaf(
                         capsule_text=capsule_text,
                         budget=node_budget,
                         node=node,
                         kwargs=kwargs,
-                        # Carry state only across an immediate retry of this
-                        # node. Sibling branches must never inherit its diff.
-                        preserve_file_tracker=resuming_leaf,
+                        # Work siblings stay isolated. A resumed leaf needs its
+                        # checkpoint, while the integration verifier needs the
+                        # accumulated task diff from every completed branch.
+                        preserve_file_tracker=preserve_leaf_tracker,
                         resume_leaf=resuming_leaf,
                     )
                 else:
@@ -798,6 +921,17 @@ class GraphEngineAdapter:
                     engine=kwargs.get("engine"),
                     state=state,
                     resume_token=session_id,
+                    metrics=current_metrics(),
+                )
+
+            if self._executor is None:
+                aggregate_tracker, total_tool_calls = (
+                    self._accumulate_leaf_observability(
+                        kwargs.get("engine"),
+                        aggregate_tracker,
+                        total_tool_calls,
+                        tracker_was_preserved=preserve_leaf_tracker,
+                    )
                 )
 
             if leaf_status == _LEAF_INTERRUPTED:
@@ -819,6 +953,7 @@ class GraphEngineAdapter:
                         engine=kwargs.get("engine"),
                         state=state,
                         resume_token=session_id,
+                        metrics=current_metrics(),
                     )
                 visits[node_id] = visits.get(node_id, 0) + 1
                 leaf_runs += 1
@@ -834,6 +969,7 @@ class GraphEngineAdapter:
                     engine=kwargs.get("engine"),
                     state=state,
                     resume_token=session_id,
+                    metrics=current_metrics(),
                 )
 
             last_result = result_text or last_result
@@ -888,6 +1024,7 @@ class GraphEngineAdapter:
                     engine=kwargs.get("engine"),
                     state=state,
                     resume_token=session_id,
+                    metrics=current_metrics(),
                 )
 
             visits[node_id] = visits.get(node_id, 0) + 1

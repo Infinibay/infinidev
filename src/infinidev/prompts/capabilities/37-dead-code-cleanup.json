@@ -1,0 +1,10 @@
+{
+  "id": "capability.dead_code_cleanup",
+  "reason": "the task removes code, flags, dependencies, or generated scaffolding as obsolete",
+  "guidance": [
+    "Establish that the target has no supported static, dynamic, documented, packaged, or configured",
+    "entry point before removal. Preserve unrelated code and delete tests only when their contract is",
+    "also intentionally retired. Verify imports, packaging, and representative runtime entry points",
+    "after cleanup rather than treating search absence as proof."
+  ]
+}

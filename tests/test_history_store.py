@@ -63,6 +63,47 @@ class TestStoreRuns:
         assert run["digest_json"] == {"status": "completed"}
         assert run["metrics_json"] == {"stages": 2}
 
+    def test_close_run_rolls_back_all_terminal_state_on_failure(
+        self, temp_db, monkeypatch
+    ):
+        run_id = store.create_run(session_id="s1", engine="staged")
+        append_event = store.append_event_in_transaction
+
+        def fail_digest(
+            conn, event_run_id, session_id, event_type, *args, **kwargs
+        ):
+            if event_type == ev.DIGEST_CREATED:
+                raise RuntimeError("digest write failed")
+            return append_event(
+                conn,
+                event_run_id,
+                session_id,
+                event_type,
+                *args,
+                **kwargs,
+            )
+
+        monkeypatch.setattr(
+            store, "append_event_in_transaction", fail_digest
+        )
+
+        with pytest.raises(RuntimeError, match="digest write failed"):
+            store.close_run(
+                run_id,
+                "s1",
+                store.RUN_COMPLETED,
+                terminal_event_type=ev.RUN_COMPLETED,
+                terminal_payload={"status": store.RUN_COMPLETED},
+                digest={"status": store.RUN_COMPLETED},
+                metrics={"tasks": 1},
+            )
+
+        run = store.get_run(run_id)
+        assert run["status"] == store.RUN_RUNNING
+        assert run["digest_json"] == {}
+        assert run["metrics_json"] == {}
+        assert store.list_run_events(run_id) == []
+
     def test_goal_request_is_redacted_on_write(self, temp_db):
         run_id = store.create_run(
             session_id="s1", engine="react",

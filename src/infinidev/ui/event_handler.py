@@ -119,6 +119,21 @@ def _dispatch(app: InfinidevApp, event_type: str, data: dict[str, Any]) -> None:
         iteration = data.get("iteration", 0)
         status = data.get("status", "")
 
+        if status == "active" and desc:
+            persist = getattr(app, "_persist_session_message", None)
+            if callable(persist):
+                persist({
+                    "sender": "System",
+                    "text": "",
+                    "type": "step_checkpoint",
+                    "visible": False,
+                    "iteration": iteration,
+                    "step_title": desc,
+                    "plan_steps": [
+                        dict(step) for step in steps if isinstance(step, dict)
+                    ],
+                })
+
         # The title belongs in the STEPS/plan panels. The developer's
         # plain-language send_message at step start supplies the useful chat
         # context without duplicating an internal plan label here.

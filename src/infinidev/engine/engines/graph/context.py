@@ -77,7 +77,7 @@ def _ancestors(state: GraphState, node_id: str) -> list[GraphNode]:
         next_frontier: list[str] = []
         for current in frontier:
             for edge in state.edges_to(current):
-                if edge.edge_type is not EDGE_DECOMPOSES_INTO:
+                if edge.edge_type != EDGE_DECOMPOSES_INTO:
                     continue
                 parent = state.nodes.get(edge.source)
                 if parent is None or parent.node_id in seen:
@@ -119,7 +119,7 @@ def _evidence(state: GraphState, node: GraphNode) -> list[dict[str, Any]]:
         _add(state.nodes.get(ref))
     # Evidence wired in through ``supports`` edges.
     for edge in state.edges_to(node.node_id):
-        if edge.edge_type is not EDGE_SUPPORTS:
+        if edge.edge_type != EDGE_SUPPORTS:
             continue
         source = state.nodes.get(edge.source)
         if source is not None and source.node_type == "evidence":

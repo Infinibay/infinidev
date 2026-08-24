@@ -22,6 +22,7 @@ def _execute_minimal(
     verbose: bool,
     *,
     prompt_configuration: Any | None = None,
+    loop_engine: LoopEngine | None = None,
 ) -> tuple[str, LoopEngine]:
     """Minimal depth: single LoopEngine run with no phase separation.
 
@@ -30,15 +31,15 @@ def _execute_minimal(
     if verbose:
         _log(f"\n{BOLD}🔨 EXECUTE (minimal — single run){RESET}")
 
-    engine = LoopEngine()
+    engine = loop_engine or LoopEngine()
     result = engine.execute(
         agent=agent,
         task_prompt=(description, expected_output),
         verbose=verbose,
         task_tools=task_tools,
         max_iterations=50,
-        max_total_tool_calls=1000,
-        max_tool_calls_per_action=0,
+        max_total_tool_calls=strategy.execute_max_tool_calls_per_step,
+        max_tool_calls_per_action=strategy.execute_max_tool_calls_per_step,
         nudge_threshold=0,
         summarizer_enabled=True,
         identity_override=strategy.execute_identity or None,
@@ -62,6 +63,8 @@ def _execute_plan(
     test_checkpoint: Any | None = None,
     on_step_start: Any | None = None,
     prompt_configuration: Any | None = None,
+    loop_engine: LoopEngine | None = None,
+    preserve_file_tracker: bool = False,
 ) -> tuple[str, LoopEngine]:
     """Execute each plan step via LoopEngine.
 
@@ -77,8 +80,16 @@ def _execute_plan(
     completed: list[str] = []
     last_result = ""
     last_engine: LoopEngine | None = None
+    total_tool_calls = 0
+    engine = loop_engine or LoopEngine()
 
-    for step in plan_steps:
+    for step_index, step in enumerate(plan_steps):
+        if getattr(engine, "is_cancelled", False) is True:
+            engine._last_status = "cancelled"
+            last_engine = engine
+            last_result = last_result or "Task cancelled by user."
+            break
+
         step_num = step["step"]
         step_desc = step.get("title", step.get("explanation", ""))
         step_detail = step.get("explanation", "") if "title" in step else ""
@@ -142,23 +153,35 @@ def _execute_plan(
         if verbose:
             _log(f"\n  {CYAN}Step {step_num}/{total}: {step_desc[:80]}{RESET}")
 
-        engine = LoopEngine()
         result = engine.execute(
             agent=agent,
             task_prompt=(full_prompt, expected_output),
             verbose=verbose,
             task_tools=all_tools,
             max_iterations=50,
-            max_total_tool_calls=1000,
-            max_tool_calls_per_action=0,
+            max_total_tool_calls=strategy.execute_max_tool_calls_per_step,
+            max_tool_calls_per_action=strategy.execute_max_tool_calls_per_step,
             nudge_threshold=0,
             summarizer_enabled=True,
             identity_override=strategy.execute_identity or None,
             prompt_configuration=prompt_configuration,
+            preserve_file_tracker=preserve_file_tracker or step_index > 0,
         )
+
+        run_tool_calls = getattr(engine, "_last_total_tool_calls", 0)
+        if isinstance(run_tool_calls, int):
+            total_tool_calls += run_tool_calls
 
         last_engine = engine
         last_result = result or step_desc
+        if getattr(engine, "is_cancelled", False) is True:
+            engine._last_status = "cancelled"
+            break
+
+        status = str(getattr(engine, "_last_status", "") or "").strip().lower()
+        if status not in {"done", "completed"}:
+            break
+
         completed.append(f"Step {step_num}: {step_desc}: {(result or 'done')[:80]}")
 
         # Auto-test after code-modifying steps
@@ -169,4 +192,5 @@ def _execute_plan(
                 color = RED if test_checkpoint.has_regression() else GREEN
                 _log(f"    {color}{progress}{RESET}")
 
-    return last_result, last_engine or LoopEngine()
+    engine._last_total_tool_calls = total_tool_calls
+    return last_result, last_engine or engine

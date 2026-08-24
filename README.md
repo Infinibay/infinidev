@@ -55,8 +55,22 @@ Useful command-line modes:
 infinidev --no-tui                 # text-only interface
 infinidev -p "explain this repo"   # one prompt, then exit
 infinidev --continue               # resume the latest local session
-infinidev --resume                 # choose a previous session
+infinidev --resume                 # choose, rename, or delete a previous session
 ```
+
+Inside either interface, use `/session <name>` to give the current session a durable
+name. The `--resume` picker shows all sessions registered in the active workspace database
+(local-workspace entries first), including their names and estimated storage; enter
+`rename NUMBER NAME` or `delete NUMBER` to manage an entry before resuming it.
+
+Use `/prompts` to list the optional prompt capabilities in your shared catalog, narrow
+that list with `/prompts search <term>`, and inspect a guide before activation with
+`/prompts show <name>`. Then use `/prompts enable <name>` or `/prompts disable <name>`
+to change one for future tasks. Use `/prompts reset <name>` to remove your override and
+inherit the catalog or project state again.
+Shared profiles live in `~/.infinidev/prompts/`; a project's
+`.infinidev/prompts.json` can override them. See [Prompt profiles](docs/prompt-profiles.md)
+for the catalog format and precedence rules.
 
 ## What it includes
 
@@ -64,6 +78,7 @@ infinidev --resume                 # choose a previous session
 - Plan-execute-summarize and staged execution for long, multi-step tasks.
 - File, shell, Git, web, code-intelligence, knowledge, and image tools.
 - Persistent, searchable working memory with recoverable tool evidence.
+- Project and user-level prompt profiles, with opt-in workflow guides managed through `/prompts`.
 - Model capability detection and native or text-based tool calling.
 - MCP server support; Ken is used for semantic project context when available.
 - Permission checks, deterministic completion gates, tests, and post-change review.

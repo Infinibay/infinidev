@@ -1,0 +1,9 @@
+{
+  "id": "capability.test_quality",
+  "reason": "tests are flaky, heavily mocked, brittle, or being substantially redesigned",
+  "guidance": [
+    "Assert observable contracts, control nondeterminism explicitly, and avoid coupling to internal",
+    "call order unless that order is the contract. Ensure the test exercises real production logic and,",
+    "when practical, demonstrate that the regression assertion fails against the original defect."
+  ]
+}

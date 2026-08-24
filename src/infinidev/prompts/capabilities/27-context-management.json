@@ -1,0 +1,9 @@
+{
+  "id": "capability.context_management",
+  "reason": "a long task risks losing constraints or accumulating irrelevant context",
+  "guidance": [
+    "Preserve authoritative requirements and durable findings before compression or phase changes.",
+    "Summarize decisions and evidence rather than raw chatter, discard superseded speculation, and",
+    "re-read the exact source before consequential edits when retained context may be incomplete."
+  ]
+}

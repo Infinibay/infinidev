@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
 import pathlib
 import re
 
@@ -353,10 +354,34 @@ def _log_message_nodes(tree: ast.AST) -> set[int]:
     return out
 
 
+def _json_strings(value: object) -> list[str]:
+    """Recursively collect model-facing text leaves from a JSON prompt resource."""
+    if isinstance(value, str):
+        return [value] if len(value) > 40 else []
+    if isinstance(value, list):
+        if all(isinstance(item, str) for item in value):
+            text = "\n".join(value)
+            return [text] if len(text) > 40 else []
+        strings: list[str] = []
+        for item in value:
+            strings.extend(_json_strings(item))
+        return strings
+    if isinstance(value, dict):
+        strings = []
+        for item in value.values():
+            strings.extend(_json_strings(item))
+        return strings
+    return []
+
+
 def _prompt_strings(path: pathlib.Path) -> list[str]:
-    """String literals that reach the model: not docstrings, not log lines."""
+    """Model-facing strings from Python prompt modules or JSON resources."""
+    source = path.read_text(encoding="utf-8")
+    if path.suffix == ".json":
+        return _json_strings(json.loads(source))
+
     try:
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(source)
     except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
         return []
     skip = _docstring_nodes(tree) | _log_message_nodes(tree)
@@ -377,7 +402,7 @@ def _prompt_strings(path: pathlib.Path) -> list[str]:
 
 
 def _prompt_files() -> list[pathlib.Path]:
-    return sorted(PROMPTS_DIR.rglob("*.py"))
+    return sorted((*PROMPTS_DIR.rglob("*.py"), *PROMPTS_DIR.rglob("*.json")))
 
 
 def _rel(path: pathlib.Path) -> str:

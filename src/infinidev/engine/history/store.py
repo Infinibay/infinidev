@@ -18,6 +18,7 @@ guards because the event log must never sink a task run.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
 import logging
@@ -28,6 +29,7 @@ from typing import Any
 
 from infinidev.code_intel._db import execute_with_retry, sanitize_fts5_query
 from infinidev.engine.history.events import (
+    DIGEST_CREATED,
     VISIBILITY_ARCHIVE_ONLY,
     VISIBILITY_PUBLIC,
 )
@@ -43,6 +45,20 @@ RUN_COMPLETED = "completed"
 RUN_BLOCKED = "blocked"
 RUN_CANCELLED = "cancelled"
 RUN_FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class PendingEvent:
+    """One event to append as part of a larger history transaction."""
+
+    event_type: str
+    payload: dict[str, Any] | None = None
+    actor: str = "system"
+    parent_event_id: str | None = None
+    goal_revision: int | None = None
+    node_id: str | None = None
+    visibility: str = VISIBILITY_PUBLIC
+    timestamp: float | None = None
 
 
 def new_run_id() -> str:
@@ -73,6 +89,45 @@ def _row_to_event(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def create_run_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    engine: str,
+    mode: str = "",
+    goal_title: str = "",
+    goal_request: str = "",
+    project_id: int | None = None,
+    parent_run_id: str | None = None,
+    selection: dict[str, Any] | None = None,
+    run_id: str | None = None,
+) -> str:
+    """Insert an engine run on *conn* without committing."""
+    rid = run_id or new_run_id()
+    selection_payload = redact_payload(selection or {})
+    clean_goal_title = redact_payload(goal_title or "")
+    clean_goal_request = redact_payload(goal_request or "")
+    conn.execute(
+        """INSERT INTO engine_runs
+           (run_id, session_id, project_id, parent_run_id, engine, mode,
+            goal_title, goal_request, status, selection_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            rid,
+            session_id,
+            project_id,
+            parent_run_id,
+            engine,
+            mode,
+            clean_goal_title,
+            clean_goal_request,
+            RUN_RUNNING,
+            json.dumps(selection_payload, ensure_ascii=False),
+        ),
+    )
+    return rid
+
+
 def create_run(
     *,
     session_id: str,
@@ -85,28 +140,49 @@ def create_run(
     selection: dict[str, Any] | None = None,
     run_id: str | None = None,
 ) -> str:
-    """Insert one ``engine_runs`` row and return its run_id."""
+    """Insert and commit one engine run, returning its run_id."""
     rid = run_id or new_run_id()
-    selection_payload = redact_payload(selection or {})
-    clean_goal_title = redact_payload(goal_title or "")
-    clean_goal_request = redact_payload(goal_request or "")
 
     def _insert(conn: sqlite3.Connection) -> str:
-        conn.execute(
-            """INSERT INTO engine_runs
-               (run_id, session_id, project_id, parent_run_id, engine, mode,
-                goal_title, goal_request, status, selection_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                rid, session_id, project_id, parent_run_id, engine, mode,
-                clean_goal_title, clean_goal_request, RUN_RUNNING,
-                json.dumps(selection_payload, ensure_ascii=False),
-            ),
+        create_run_in_transaction(
+            conn,
+            session_id=session_id,
+            engine=engine,
+            mode=mode,
+            goal_title=goal_title,
+            goal_request=goal_request,
+            project_id=project_id,
+            parent_run_id=parent_run_id,
+            selection=selection,
+            run_id=rid,
         )
         conn.commit()
         return rid
 
     return execute_with_retry(_insert)
+
+
+def finish_run_in_transaction(
+    conn: sqlite3.Connection,
+    run_id: str,
+    status: str,
+    *,
+    digest: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> None:
+    """Update a run's terminal snapshot without committing the transaction."""
+    conn.execute(
+        """UPDATE engine_runs
+           SET status = ?, digest_json = ?, metrics_json = ?,
+               finished_at = CURRENT_TIMESTAMP
+           WHERE run_id = ?""",
+        (
+            status,
+            json.dumps(redact_payload(digest or {}), ensure_ascii=False),
+            json.dumps(metrics or {}, ensure_ascii=False),
+            run_id,
+        ),
+    )
 
 
 def finish_run(
@@ -119,17 +195,12 @@ def finish_run(
     """Close a run: terminal status + digest + metrics."""
 
     def _update(conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """UPDATE engine_runs
-               SET status = ?, digest_json = ?, metrics_json = ?,
-                   finished_at = CURRENT_TIMESTAMP
-               WHERE run_id = ?""",
-            (
-                status,
-                json.dumps(redact_payload(digest or {}), ensure_ascii=False),
-                json.dumps(metrics or {}, ensure_ascii=False),
-                run_id,
-            ),
+        finish_run_in_transaction(
+            conn,
+            run_id,
+            status,
+            digest=digest,
+            metrics=metrics,
         )
         conn.commit()
 
@@ -193,6 +264,69 @@ def latest_run_for_session(session_id: str) -> dict[str, Any] | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def append_event_in_transaction(
+    conn: sqlite3.Connection,
+    run_id: str,
+    session_id: str,
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    actor: str = "system",
+    parent_event_id: str | None = None,
+    goal_revision: int | None = None,
+    node_id: str | None = None,
+    visibility: str = VISIBILITY_PUBLIC,
+    timestamp: float | None = None,
+) -> str:
+    """Append one event on *conn* without committing its transaction.
+
+    This lower-level form lets a caller atomically couple the canonical event
+    with related projections. The caller owns commit/rollback.
+    """
+    event_id = new_event_id()
+    clean_payload = redact_payload(payload or {})
+    payload_json = json.dumps(clean_payload, ensure_ascii=False)
+    hash_payload = (
+        clean_payload
+        if isinstance(clean_payload, dict)
+        else {"value": clean_payload}
+    )
+    content_hash = _canonical_hash(hash_payload)
+    if visibility not in (VISIBILITY_PUBLIC, VISIBILITY_ARCHIVE_ONLY):
+        visibility = VISIBILITY_PUBLIC
+
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sequence), 0) + 1 FROM execution_events "
+        "WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    sequence = int(row[0]) if row is not None else 1
+    conn.execute(
+        """INSERT INTO execution_events
+           (event_id, run_id, session_id, sequence, timestamp, actor,
+            event_type, parent_event_id, goal_revision, node_id,
+            visibility, payload_json, schema_version, content_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            event_id,
+            run_id,
+            session_id,
+            sequence,
+            time.time() if timestamp is None else timestamp,
+            actor,
+            event_type,
+            parent_event_id,
+            goal_revision,
+            node_id,
+            visibility,
+            payload_json,
+            SCHEMA_VERSION,
+            content_hash,
+        ),
+    )
+    return event_id
+
+
 def append_event(
     run_id: str,
     session_id: str,
@@ -204,42 +338,117 @@ def append_event(
     goal_revision: int | None = None,
     node_id: str | None = None,
     visibility: str = VISIBILITY_PUBLIC,
+    timestamp: float | None = None,
 ) -> str:
-    """Append one event and return its event_id.
-
-    The per-run sequence is assigned inside the inserting transaction, and
-    the payload is redacted and content-hashed before it touches disk.
-    """
-    event_id = new_event_id()
-    clean_payload = redact_payload(payload or {})
-    payload_json = json.dumps(clean_payload, ensure_ascii=False)
-    content_hash = _canonical_hash(clean_payload if isinstance(clean_payload, dict) else {"value": clean_payload})
-    if visibility not in (VISIBILITY_PUBLIC, VISIBILITY_ARCHIVE_ONLY):
-        visibility = VISIBILITY_PUBLIC
+    """Append and commit one event, returning its event_id."""
 
     def _insert(conn: sqlite3.Connection) -> str:
-        row = conn.execute(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM execution_events "
-            "WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
-        sequence = int(row[0]) if row is not None else 1
-        conn.execute(
-            """INSERT INTO execution_events
-               (event_id, run_id, session_id, sequence, timestamp, actor,
-                event_type, parent_event_id, goal_revision, node_id,
-                visibility, payload_json, schema_version, content_hash)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                event_id, run_id, session_id, sequence, time.time(), actor,
-                event_type, parent_event_id, goal_revision, node_id,
-                visibility, payload_json, SCHEMA_VERSION, content_hash,
-            ),
+        event_id = append_event_in_transaction(
+            conn,
+            run_id,
+            session_id,
+            event_type,
+            payload,
+            actor=actor,
+            parent_event_id=parent_event_id,
+            goal_revision=goal_revision,
+            node_id=node_id,
+            visibility=visibility,
+            timestamp=timestamp,
         )
         conn.commit()
         return event_id
 
     return execute_with_retry(_insert)
+
+
+def open_run(
+    *,
+    session_id: str,
+    engine: str,
+    initial_events: list[PendingEvent],
+    mode: str = "",
+    goal_title: str = "",
+    goal_request: str = "",
+    project_id: int | None = None,
+    parent_run_id: str | None = None,
+    selection: dict[str, Any] | None = None,
+    run_id: str | None = None,
+) -> str:
+    """Atomically create a run and append its initial lifecycle events."""
+    rid = run_id or new_run_id()
+
+    def _open(conn: sqlite3.Connection) -> str:
+        create_run_in_transaction(
+            conn,
+            session_id=session_id,
+            engine=engine,
+            mode=mode,
+            goal_title=goal_title,
+            goal_request=goal_request,
+            project_id=project_id,
+            parent_run_id=parent_run_id,
+            selection=selection,
+            run_id=rid,
+        )
+        for event in initial_events:
+            append_event_in_transaction(
+                conn,
+                rid,
+                session_id,
+                event.event_type,
+                event.payload,
+                actor=event.actor,
+                parent_event_id=event.parent_event_id,
+                goal_revision=event.goal_revision,
+                node_id=event.node_id,
+                visibility=event.visibility,
+                timestamp=event.timestamp,
+            )
+        conn.commit()
+        return rid
+
+    return execute_with_retry(_open)
+
+
+def close_run(
+    run_id: str,
+    session_id: str,
+    status: str,
+    *,
+    terminal_event_type: str,
+    terminal_payload: dict[str, Any] | None = None,
+    digest: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    """Atomically append terminal records and close the owning run."""
+
+    def _close(conn: sqlite3.Connection) -> tuple[str, str]:
+        terminal_event_id = append_event_in_transaction(
+            conn,
+            run_id,
+            session_id,
+            terminal_event_type,
+            terminal_payload,
+        )
+        digest_event_id = append_event_in_transaction(
+            conn,
+            run_id,
+            session_id,
+            DIGEST_CREATED,
+            digest,
+        )
+        finish_run_in_transaction(
+            conn,
+            run_id,
+            status,
+            digest=digest,
+            metrics=metrics,
+        )
+        conn.commit()
+        return terminal_event_id, digest_event_id
+
+    return execute_with_retry(_close)
 
 
 def list_run_events(
@@ -462,6 +671,7 @@ def trace_chain(
 
 
 __all__ = [
+    "PendingEvent",
     "RUN_BLOCKED",
     "RUN_CANCELLED",
     "RUN_COMPLETED",
@@ -469,14 +679,19 @@ __all__ = [
     "RUN_RUNNING",
     "SCHEMA_VERSION",
     "append_event",
+    "append_event_in_transaction",
+    "close_run",
     "create_run",
+    "create_run_in_transaction",
     "events_around",
     "finish_run",
+    "finish_run_in_transaction",
     "get_run",
     "latest_run_for_session",
     "list_run_events",
     "new_event_id",
     "new_run_id",
+    "open_run",
     "read_events",
     "search_events",
     "trace_chain",

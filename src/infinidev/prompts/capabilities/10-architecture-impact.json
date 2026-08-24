@@ -1,0 +1,9 @@
+{
+  "id": "capability.architecture_impact",
+  "reason": "the change crosses module, package, process, or public-contract boundaries",
+  "guidance": [
+    "Trace callers, data flow, ownership, and compatibility across each crossed boundary before",
+    "editing it. Keep the boundary movement as small as the requested outcome permits, then exercise",
+    "every affected entry point rather than validating only the edited module."
+  ]
+}

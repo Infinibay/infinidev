@@ -19,10 +19,10 @@ Design constraints (see the design discussion that produced this):
   * **Convergence is judged, with a hard cap.** The moderator decides
     each round whether the debate converged; ``COUNCIL_MAX_ROUNDS`` is
     the runaway guard.
-  * **User approval is conditional.** The brief carries
-    ``user_decision_required`` — the pipeline only interrupts the user
-    when the council hits a genuine product fork it must not decide
-    alone.
+  * **Product questions are advisory.** The brief carries
+    ``user_decision_required`` so the pipeline can surface a genuine
+    product preference, while execution continues with the council's
+    chosen approach. Blocking authority remains in spec elaboration.
 
 The public entry point is :func:`run_council`.
 """

@@ -167,15 +167,18 @@ class _CountingEngine:
         plan_count: int,
         status: str = "completed",
         pressure_on_first_call: bool = False,
+        result_status: str | None = None,
     ) -> None:
         self._plan_count = plan_count
         self._status = status
+        self._result_status = status if result_status is None else result_status
         self._pressure_on_first_call = pressure_on_first_call
         self.calls: list[tuple[int, str]] = []
         self._last_status = status
         self.is_cancelled = False
         self.context_compacted = False
         self.compacted_messages: list[dict[str, str]] = []
+        self.summary_statuses: list[str] = []
 
     def execute(self, *args: Any, **kwargs: Any) -> str:
         task_prompt = kwargs.get("task_prompt") or args[1] if len(args) > 1 else None
@@ -207,6 +210,7 @@ class _CountingEngine:
         return False
 
     def build_work_summary(self, result: str, status: str) -> str:
+        self.summary_statuses.append(status)
         return ""
 
 
@@ -302,7 +306,7 @@ def _patch_pipeline(monkeypatch, *, chat_packets, engine):
                 task_prompt=("user", "task"),
             )
             engine = _engine
-            status = _engine._last_status
+            status = _engine._result_status
 
         return _Result()
 
@@ -392,6 +396,133 @@ def test_pipeline_chains_plans_under_budget(monkeypatch) -> None:
     # Status banner: at least one status line about the autonomous chain.
     status_msgs = [m for _, m in hooks.statuses if "Autonomous chain" in m]
     assert len(status_msgs) >= 1
+
+
+def test_failed_engine_result_stops_bounded_chain_with_missing_raw_status(
+    monkeypatch,
+) -> None:
+    """The adapter result is authoritative when LoopEngine has no label."""
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", False)
+    monkeypatch.setattr(_settings_module(), "AUTONOMOUS_MAX_PLANS", 3)
+    packets = [_make_packet(autonomous=True) for _ in range(2)]
+    engine = _CountingEngine(plan_count=10, status="", result_status="failed")
+    state = _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="autonomous-failed-result",
+        workspace_path="/tmp/auto",
+    )
+    hooks = _CountingHooks()
+
+    result = run_task(
+        agent=_FakeAgent(),
+        user_input="manejate vos",
+        session_id="autonomous-failed-result",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=hooks,
+        autonomous=True,
+    )
+
+    assert result == "result-1"
+    assert len(engine.calls) == 1
+    assert state["chat_calls"] == 1
+    assert engine.summary_statuses == ["failed"]
+    assert any(
+        "engine reported error" in message
+        for _level, message in hooks.statuses
+        if "Autonomous chain stopped" in message
+    )
+
+
+def test_cancelled_engine_result_skips_end_hooks_without_boolean_flag(
+    monkeypatch,
+) -> None:
+    packets = [_make_packet(autonomous=False, user_request="Stop the task")]
+    engine = _CountingEngine(
+        plan_count=1,
+        status="cancelled",
+        result_status="cancelled",
+    )
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+
+    def unexpected_hook(*_args, **_kwargs):
+        raise AssertionError("cancelled adapter result reached end-of-task hooks")
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._task_end_hook",
+        unexpected_hook,
+    )
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="cancelled-adapter-result",
+        workspace_path="/tmp/auto",
+    )
+
+    result = run_task(
+        agent=_FakeAgent(),
+        user_input="Stop the task",
+        session_id="cancelled-adapter-result",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+    )
+
+    assert result == "result-1"
+    assert len(engine.calls) == 1
+    assert engine.summary_statuses == []
+
+
+def test_failed_turn_with_end_hook_records_failed_not_blocked(
+    temp_db, monkeypatch
+) -> None:
+    packets = [
+        _make_packet(autonomous=False, user_request="Run the task"),
+        _make_packet(autonomous=False, user_request="Inspect the failure"),
+    ]
+    engine = _CountingEngine(
+        plan_count=2,
+        status="",
+        result_status="failed",
+    )
+    _patch_pipeline(monkeypatch, chat_packets=packets, engine=engine)
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.pipeline._task_end_hook",
+        lambda event, **kwargs: (
+            "Inspect the failure"
+            if event.value == "task_end_instruction" and not kwargs["skip"]
+            else ""
+        ),
+    )
+    set_context(
+        agent_id="auto-test-agent",
+        project_id=1,
+        session_id="failed-hook-runtime",
+        workspace_path="/tmp/auto",
+    )
+
+    result = run_task(
+        agent=_FakeAgent(),
+        user_input="Run the task",
+        session_id="failed-hook-runtime",
+        engine=engine,
+        reviewer=_FakeReviewer(),
+        hooks=_CountingHooks(),
+    )
+
+    from infinidev.engine.runtime_events_store import list_events
+
+    events = [
+        event["event"]
+        for event in list_events("failed-hook-runtime")
+    ]
+    assert result == "result-2"
+    assert len(engine.calls) == 2
+    assert "task_blocked" not in events
+    assert events.count("task_failed") == 2
 
 
 def test_unlimited_chain_resumes_after_task_end_instruction(monkeypatch) -> None:

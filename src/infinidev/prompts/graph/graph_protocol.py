@@ -38,10 +38,13 @@ decisions already present. If new evidence overturns an earlier belief, do not
 quietly ignore the old one — mark it superseded or invalidated so the record
 stays coherent. A graph that disagrees with itself helps no one.
 
-### Resolve with evidence, not with confidence
-A work or verification node resolves when there is observed evidence for it,
-not when it feels finished. If you cannot produce evidence, say the node is
-inconclusive or blocked — that is a true result, not a failure.
+### Resolve with support matched to the claim's declared source
+A confirmed work or verification node resolves from an observed result, not
+from confidence alone. Support may be a research observation, source, command
+result, durable artifact, code reference, or a user-supplied constraint; it
+does not have to be a file edit. If a claim cannot be confirmed, resolve it as
+inconclusive or rejected without fabricating a reference. That is a true
+result, not a failure.
 
 ### Leave a checkpoint before you move on
 When you suspend a node, leave a checkpoint: what you were attempting, what

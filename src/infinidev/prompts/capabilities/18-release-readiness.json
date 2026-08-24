@@ -1,0 +1,10 @@
+{
+  "id": "capability.release_readiness",
+  "reason": "the task prepares a release, deployment, or production handoff",
+  "guidance": [
+    "Check the exact revision, generated artifacts, migrations, configuration, and rollback path before",
+    "handoff. Run the repository's release checks and verify the deployed or packaged surface when that",
+    "surface is available. Report unavailable checks explicitly; successful build or deploy output alone",
+    "does not establish production health."
+  ]
+}

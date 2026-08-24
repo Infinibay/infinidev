@@ -60,6 +60,10 @@ from infinidev.engine.loop.loop_plan import (
     _step_targets,
 )
 from infinidev.engine.loop.models import ActionRecord, LoopState, StepResult
+from infinidev.engine.loop.resume_checkpoint import (
+    build_loop_resume_checkpoint,
+    resume_state_for_task,
+)
 from infinidev.engine.loop.step_complete_gate import (
     StepCompleteGate,
     step_complete_status,
@@ -453,6 +457,13 @@ def _enforce_edit_requirement(
 ) -> bool:
     """Pause a write Task that claims completion before its first edit."""
     state = getattr(ctx, "state", None)
+    if (
+        step_result.no_edit
+        and step_result.status in {"continue", "done"}
+        and _task_requires_edits(ctx)
+        and state is not None
+    ):
+        state.task_no_edit_accepted = True
     plan = getattr(state, "plan", None)
     active = getattr(plan, "active_step", None)
     verified_noop = (
@@ -489,8 +500,12 @@ def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool
     ActionRecord.changes_made, so a later test-only turn may still close a Step
     that edited successfully on its previous attempt.
     """
+    task_kind = str(
+        getattr(getattr(ctx, "task", None), "kind", "") or ""
+    ).casefold()
     if (
-        step_result.no_edit
+        (task_kind and not _task_requires_edits(ctx))
+        or step_result.no_edit
         or step_result.interrupted
         or step_result.status not in {"continue", "done"}
     ):
@@ -903,8 +918,16 @@ class LoopEngine(AgentEngine):
         branch that asks "No plan yet — call add_step" is naturally
         suppressed because state.plan.steps is non-empty.
         """
+        # Terminal metadata belongs to this execute() call. Reset it before
+        # context construction so an early exception cannot leak a prior
+        # successful run into adapters, metrics, or review/rework handling.
+        self._last_status = ""
+        self._last_total_tool_calls = 0
+
         if preserve_task_state and resume_state is None and self._last_state is not None:
             resume_state = self._last_state.model_dump(mode="json")
+        if resume_state is None:
+            resume_state = self._load_persisted_resume_state(task_prompt, task)
 
         ctx = self._build_context(
             agent, task_prompt,
@@ -957,6 +980,7 @@ class LoopEngine(AgentEngine):
         # change between execute() calls.
         self._supports_vision_cached = None
         llm_caller, tool_proc, guard, step_mgr = self._init_execution(ctx, task_prompt)
+        self._checkpoint(ctx)
         consecutive_all_done = 0
         self._step_gate.reset_run()
         self._critic.reset_run()
@@ -1310,8 +1334,7 @@ class LoopEngine(AgentEngine):
             },
             project_id=ctx.project_id, agent_id=ctx.agent_id,
         ))
-        if ctx.event_id:
-            self._checkpoint(ctx.event_id, ctx.state)
+        self._checkpoint(ctx)
 
     def _check_termination(
         self, ctx: ExecutionContext, step_result: StepResult,
@@ -1350,13 +1373,13 @@ class LoopEngine(AgentEngine):
                 step_result.status = "continue"
                 return None
             result = step_result.final_answer or step_result.summary
-            result = step_mgr.finish(ctx, "done", iteration, result)
-            return self._apply_guardrail(
+            result = self._apply_guardrail(
                 ctx, result, ctx.guardrail, ctx.guardrail_max_retries,
                 ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
                 ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
                 max_per_action=ctx.max_per_action,
             )
+            return step_mgr.finish(ctx, "done", iteration, result)
 
         if step_result.status == "blocked":
             if ctx.state.plan.has_pending:
@@ -1372,13 +1395,13 @@ class LoopEngine(AgentEngine):
             return step_mgr.finish(ctx, "blocked", iteration, step_result.summary)
 
         if consecutive_all_done >= 2 and ctx.state.plan.steps and not ctx.state.plan.has_pending:
-            result = step_mgr.finish(ctx, "done", iteration, step_result.summary)
-            return self._apply_guardrail(
-                ctx, result, ctx.guardrail, ctx.guardrail_max_retries,
+            result = self._apply_guardrail(
+                ctx, step_result.summary, ctx.guardrail, ctx.guardrail_max_retries,
                 ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
                 ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
                 max_per_action=ctx.max_per_action,
             )
+            return step_mgr.finish(ctx, "done", iteration, result)
 
         return None
 
@@ -1907,9 +1930,49 @@ class LoopEngine(AgentEngine):
                 ctx.state.notes.append(f"Exploration failed: {exc}")
 
 
-    def _checkpoint(self, event_id: int, state: LoopState) -> None:
-        """No-op in CLI mode."""
-        pass
+    @staticmethod
+    def _load_persisted_resume_state(
+        task_prompt: tuple[str, str],
+        task: Any | None,
+    ) -> dict[str, Any] | None:
+        """Load a matching interrupted Task without touching visual history."""
+        try:
+            from infinidev.db.service import get_session_runtime_state
+            from infinidev.tools.base.context import get_current_session_id
+
+            session_id = get_current_session_id()
+            if not session_id:
+                return None
+            runtime = get_session_runtime_state(session_id)
+            checkpoint = (runtime.get("ui_state") or {}).get("loop_resume")
+            return resume_state_for_task(checkpoint, task_prompt, task)
+        except Exception:
+            logger.debug("loop resume checkpoint load failed", exc_info=True)
+            return None
+
+    def _checkpoint(
+        self,
+        ctx: ExecutionContext,
+        *,
+        terminal_status: str = "",
+    ) -> None:
+        """Persist one bounded, Task-bound checkpoint for process resume."""
+        try:
+            from infinidev.db.service import persist_loop_resume_checkpoint
+            from infinidev.tools.base.context import get_current_session_id
+
+            session_id = get_current_session_id()
+            if not session_id:
+                return
+            checkpoint = build_loop_resume_checkpoint(
+                ctx.state,
+                (ctx.desc, ctx.expected),
+                ctx.task,
+                terminal_status=terminal_status,
+            )
+            persist_loop_resume_checkpoint(session_id, checkpoint)
+        except Exception:
+            logger.debug("loop resume checkpoint persistence failed", exc_info=True)
 
     def _store_stats(self, state: LoopState) -> None:
         """Store execution stats for external access."""

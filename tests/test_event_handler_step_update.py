@@ -16,6 +16,7 @@ class _FakeApp:
         self._steps_text = ""
         self._plan_text = ""
         self.messages: list[tuple[str, str, str]] = []
+        self.persisted_messages: list[dict] = []
         self.logs: list[str] = []
 
     def add_message(
@@ -29,6 +30,9 @@ class _FakeApp:
 
     def add_log(self, text: str) -> None:
         self.logs.append(text)
+
+    def _persist_session_message(self, message: dict) -> None:
+        self.persisted_messages.append(message)
 
 
 def test_active_step_title_stays_in_side_panels_not_chat() -> None:
@@ -47,6 +51,18 @@ def test_active_step_title_stays_in_side_panels_not_chat() -> None:
     assert app.messages == []
     assert "> Trace the event path" in app._steps_text
     assert app._plan_text == "Step 2: Trace the event path"
+    assert app.persisted_messages == [{
+        "sender": "System",
+        "text": "",
+        "type": "step_checkpoint",
+        "visible": False,
+        "iteration": 2,
+        "step_title": "Trace the event path",
+        "plan_steps": [
+            {"index": 1, "title": "Read prompts", "status": "done"},
+            {"index": 2, "title": "Trace the event path", "status": "active"},
+        ],
+    }]
 
 
 def test_agent_orientation_still_reaches_chat() -> None:

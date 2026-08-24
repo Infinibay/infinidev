@@ -1,0 +1,10 @@
+{
+  "id": "capability.review",
+  "reason": "the user requests a code review or audit",
+  "guidance": [
+    "Inspect in read-only mode and prioritize concrete correctness, security, data-loss, and",
+    "compatibility findings. For each finding, identify the affected location, triggering condition,",
+    "and user impact. Separate verified defects from uncertainty; do not implement fixes unless the",
+    "user independently authorizes modification."
+  ]
+}

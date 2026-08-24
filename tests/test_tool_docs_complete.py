@@ -7,6 +7,8 @@ the offending tools — add them to TOOL_DESCRIPTIONS (and the relevant
 category in ``build_tool_usage_section``) to fix it.
 """
 
+import ast
+
 import pytest
 
 from infinidev.config.settings import settings
@@ -68,6 +70,57 @@ def test_every_developer_tool_has_a_description(monkeypatch):
         f"TOOL_DESCRIPTIONS in prompts/tool_hints.py: {missing}. "
         "Add a (description, example) entry for each."
     )
+
+
+def test_tool_description_examples_match_live_argument_schemas(monkeypatch):
+    """Every advertised call must remain executable against the public schema."""
+    for tool in _local_tools(monkeypatch):
+        _description, example = TOOL_DESCRIPTIONS[tool.name]
+        try:
+            tree = ast.parse(example, mode="eval")
+        except SyntaxError as err:
+            pytest.fail(f"{tool.name} has an invalid Python example: {err}", pytrace=False)
+
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == tool.name
+        ]
+        assert calls, f"{tool.name} example does not call {tool.name}: {example}"
+
+        fields = tool.args_schema.model_fields
+        required = {name for name, field in fields.items() if field.is_required()}
+        for call in calls:
+            assert not call.args, (
+                f"{tool.name} example uses positional arguments, but tool calls require "
+                f"named arguments: {example}"
+            )
+            assert all(keyword.arg is not None for keyword in call.keywords), (
+                f"{tool.name} example uses **kwargs, which hides its public arguments: {example}"
+            )
+            kwargs = {
+                keyword.arg: ast.literal_eval(keyword.value)
+                for keyword in call.keywords
+                if keyword.arg is not None
+            }
+            unknown = set(kwargs) - set(fields)
+            missing = required - set(kwargs)
+            assert not unknown, (
+                f"{tool.name} example uses unknown arguments {sorted(unknown)}; "
+                f"schema fields are {sorted(fields)}: {example}"
+            )
+            assert not missing, (
+                f"{tool.name} example omits required arguments {sorted(missing)}: {example}"
+            )
+            try:
+                tool.args_schema.model_validate(kwargs)
+            except (TypeError, ValueError) as err:
+                pytest.fail(
+                    f"{tool.name} example values fail its public schema: {err}\n{example}",
+                    pytrace=False,
+                )
 
 
 def test_every_mcp_tool_arrives_with_a_description():

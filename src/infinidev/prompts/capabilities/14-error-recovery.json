@@ -1,0 +1,9 @@
+{
+  "id": "capability.error_recovery",
+  "reason": "a workflow can partially fail or retry tool, network, or external operations",
+  "guidance": [
+    "Classify failures as transient, permanent, or cancelled and preserve the original cause. Retry",
+    "only transient cases with explicit bounds, and leave state either safely resumable or clearly",
+    "rolled back; never convert a partial failure into reported success."
+  ]
+}

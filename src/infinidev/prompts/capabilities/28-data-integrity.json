@@ -1,0 +1,9 @@
+{
+  "id": "capability.data_integrity",
+  "reason": "the change can duplicate, lose, reorder, or corrupt persisted user or project data",
+  "guidance": [
+    "State atomicity, idempotency, ordering, and recovery invariants before changing writes. Exercise",
+    "interruption and repeated application at the affected storage boundary, and verify durable results",
+    "through the normal reader. Never treat an accepted write request as proof that data was preserved."
+  ]
+}

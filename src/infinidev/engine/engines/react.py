@@ -23,7 +23,11 @@ from infinidev.engine.engines.base import (
     STATUS_BLOCKED,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
+    STATUS_FAILED,
     TransitionRequest,
+    get_loop_status,
+    loop_observed_metrics,
+    normalize_loop_status,
 )
 
 
@@ -58,6 +62,54 @@ def _build_task_prompt(
     )
     flow_config = get_flow_config("develop")
     return description, flow_config.expected_output
+
+
+def _budget_transition(engine: Any) -> TransitionRequest:
+    metrics = loop_observed_metrics(engine)
+    tool_calls = metrics["observed_tool_calls"]
+    prompt_tokens = metrics["observed_prompt_tokens"]
+    iterations = metrics["observed_iterations"]
+
+    if (
+        settings.REACT_MAX_TOOL_CALLS > 0
+        and tool_calls >= settings.REACT_MAX_TOOL_CALLS
+    ):
+        detail = (
+            "tool-call budget reached "
+            f"({tool_calls}/{settings.REACT_MAX_TOOL_CALLS})"
+        )
+    elif (
+        settings.REACT_MAX_PROMPT_TOKENS > 0
+        and prompt_tokens >= settings.REACT_MAX_PROMPT_TOKENS
+    ):
+        detail = (
+            "prompt token budget reached "
+            f"({prompt_tokens}/{settings.REACT_MAX_PROMPT_TOKENS})"
+        )
+    elif (
+        settings.REACT_MAX_ITERATIONS > 0
+        and iterations >= settings.REACT_MAX_ITERATIONS
+    ):
+        detail = (
+            "iteration budget reached "
+            f"({iterations}/{settings.REACT_MAX_ITERATIONS})"
+        )
+    else:
+        detail = (
+            "the task did not converge within the configured iteration, "
+            "tool-call, or prompt-token budget"
+        )
+
+    return TransitionRequest(
+        target="staged",
+        reason=f"react_budget_exhausted: {detail}.",
+    )
+
+
+def _result_text(result: Any) -> str:
+    if isinstance(result, str) and result.strip():
+        return result
+    return "Done. (no additional output)"
 
 
 class ReactAdapter:
@@ -115,7 +167,8 @@ class ReactAdapter:
         hooks.on_status(
             "info",
             f"ReAct direct execution (budget {settings.REACT_MAX_ITERATIONS} "
-            f"iterations / {settings.REACT_MAX_TOOL_CALLS} tool calls)",
+            f"iterations / {settings.REACT_MAX_TOOL_CALLS} tool calls / "
+            f"{settings.REACT_MAX_PROMPT_TOKENS} prompt tokens)",
         )
 
         agent.activate_context(session_id=session_id)
@@ -139,42 +192,27 @@ class ReactAdapter:
         finally:
             agent.deactivate()
 
-        if not result or not result.strip():
-            result = "Done. (no additional output)"
-
-        if getattr(engine, "is_cancelled", False):
-            return EngineResult(
-                engine_name=self.name,
-                status=STATUS_CANCELLED,
-                user_message=result,
-                summary="ReAct run cancelled by the user.",
-                engine=engine,
-                resume_token=session_id,
-            )
-
-        loop_status = getattr(engine, "_last_status", "") or "completed"
+        result = _result_text(result)
+        loop_status = get_loop_status(engine)
+        status = normalize_loop_status(loop_status)
+        closing_loop_status = loop_status
         transition_request = None
 
-        if loop_status == "exhausted":
-            # Budget fuse blown: this is NOT success. Escalate to Staged.
-            status = STATUS_BLOCKED
-            transition_request = TransitionRequest(
-                target="staged",
-                reason=(
-                    "react_budget_exhausted: the task did not converge within "
-                    f"{settings.REACT_MAX_ITERATIONS} iterations / "
-                    f"{settings.REACT_MAX_TOOL_CALLS} tool calls."
-                ),
-            )
+        if getattr(engine, "is_cancelled", False):
+            status = STATUS_CANCELLED
+        elif loop_status == "exhausted":
+            transition_request = _budget_transition(engine)
             hooks.on_status(
                 "warn",
                 "ReAct budget exhausted — marking blocked and suggesting the "
                 "staged engine.",
             )
-        elif loop_status in {"blocked", "failed"}:
-            status = STATUS_BLOCKED
-        else:
-            status = STATUS_COMPLETED
+        elif status == STATUS_FAILED and loop_status != "failed":
+            hooks.on_status(
+                "error",
+                "ReAct returned an empty or unknown terminal status; failing "
+                "closed instead of reporting completion.",
+            )
 
         # Run the same closing review Staged uses, so ReAct does not bypass
         # semantic verification.
@@ -194,50 +232,51 @@ class ReactAdapter:
                 task=structured_task,
                 max_iterations=settings.REACT_MAX_ITERATIONS,
                 max_total_tool_calls=settings.REACT_MAX_TOOL_CALLS,
-                rework_execute_kwargs={"skip_plan": True},
+                rework_execute_kwargs={
+                    "skip_plan": True,
+                    "max_prompt_tokens": settings.REACT_MAX_PROMPT_TOKENS,
+                },
                 prompt_configuration=prompt_configuration,
             )
+            result = _result_text(result)
+            review_status = get_loop_status(engine)
+            closing_loop_status = review_status
+            status = normalize_loop_status(review_status)
+
             if getattr(engine, "is_cancelled", False):
-                return EngineResult(
-                    engine_name=self.name,
-                    status=STATUS_CANCELLED,
-                    user_message=result,
-                    summary="ReAct run cancelled during review.",
-                    engine=engine,
-                    resume_token=session_id,
+                status = STATUS_CANCELLED
+            elif review_status == "exhausted":
+                transition_request = _budget_transition(engine)
+                hooks.on_status(
+                    "warn",
+                    "ReAct review rework exhausted its budget — marking blocked "
+                    "and suggesting the staged engine.",
                 )
-            # The rework loop re-runs the engine; a blocked close there must
-            # surface as blocked, mirroring the staged per-task handling.
-            review_status = getattr(engine, "_last_status", "") or "completed"
-            if review_status in {"blocked", "failed", "exhausted"}:
-                status = STATUS_BLOCKED
+            elif status == STATUS_FAILED and review_status != "failed":
+                hooks.on_status(
+                    "error",
+                    "ReAct review returned an empty or unknown terminal status; "
+                    "failing closed.",
+                )
 
         return EngineResult(
             engine_name=self.name,
             status=status,
             user_message=result,
-            summary=f"ReAct run closed {status} (loop status: {loop_status}).",
+            summary=(
+                f"ReAct run closed {status} (initial loop status: "
+                f"{loop_status or '<empty>'}; closing loop status: "
+                f"{closing_loop_status or '<empty>'})."
+            ),
             engine=engine,
+            state=getattr(engine, "_last_state", None),
             resume_token=session_id,
             transition_request=transition_request,
             metrics={
                 "max_iterations": settings.REACT_MAX_ITERATIONS,
                 "max_tool_calls": settings.REACT_MAX_TOOL_CALLS,
                 "max_prompt_tokens": settings.REACT_MAX_PROMPT_TOKENS,
-                "observed_iterations": getattr(
-                    getattr(engine, "_last_state", None), "iteration_count", 0
-                ),
-                "observed_tool_calls": getattr(
-                    getattr(engine, "_last_state", None), "total_tool_calls", 0
-                ),
-                "observed_prompt_tokens": getattr(
-                    getattr(engine, "_last_state", None), "total_prompt_tokens", 0
-                ),
-                "observed_completion_tokens": getattr(
-                    getattr(engine, "_last_state", None),
-                    "total_completion_tokens",
-                    0,
-                ),
+                **loop_observed_metrics(engine),
             },
         )
 

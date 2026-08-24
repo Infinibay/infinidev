@@ -93,6 +93,41 @@ _MODIFY = re.compile(
     r"reestablec|r[eé]tabl|recupera|bring\s+back)\w*\b",
     re.I,
 )
+_RESPONSE_ONLY_DELIVERABLE = re.compile(
+    r"\b(?:write|draft|produce|prepare|create|generate|compile|"
+    r"escribe|redacta|prepara|crea|genera|elabora)\w*\s+"
+    r"(?:(?:a|an|the|un|una|el|la)\s+)?"
+    r"(?:reports?|summar(?:y|ies)|analys(?:is|es)|recommendations?|plans?|"
+    r"proposals?|briefs?|answers?|explanations?|findings|"
+    r"informes?|res[uú]menes?|an[aá]lisis|recomendaciones?|planes?|"
+    r"propuestas?|respuestas?|explicaciones?|hallazgos?)\b",
+    re.I,
+)
+_EXPLICIT_DELIVERABLE_DESTINATION = re.compile(
+    r"^\s+(?:(?:to|into|in|at|as|en|a|como)\s+)?"
+    r"(?:(?:the|el|la|un|una)\s+)?"
+    r"(?:(?:file|archivo|fichero)\b|[\x60']?[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,12}\b)",
+    re.I,
+)
+
+
+def _without_response_only_deliverables(text: str) -> str:
+    """Remove answer-format verbs unless they target an explicit file."""
+
+    def replacement(match: re.Match[str]) -> str:
+        tail = text[match.end():match.end() + 100]
+        if _EXPLICIT_DELIVERABLE_DESTINATION.search(tail):
+            return match.group(0)
+        return " " * len(match.group(0))
+
+    return _RESPONSE_ONLY_DELIVERABLE.sub(replacement, text)
+
+
+_DIRECT_MAKE_MODIFY = re.compile(
+    r"(?:^|[.!?;]\s)(?:please\s+|por\s+favor\s+)?"
+    r"(?:make\b|haz\s+que\b)",
+    re.I,
+)
 _IMPERATIVE_MODIFY = re.compile(
     r"(?:^|[.!?;]\s)(?:please\s+|por\s+favor\s+)?"
     r"(?:make\b|haz\s+que\b|quiero\s+que\b|i\s+(?:want|need)\b)",
@@ -139,10 +174,11 @@ def _ordered(values: set[str], order: tuple[str, ...]) -> tuple[Any, ...]:
 
 def _literal_signals(text: str) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
     searchable = _QUOTED.sub(" ", text)
+    action_searchable = _without_response_only_deliverables(searchable)
     negated = {match.group("verb").lower() for match in _NEGATED_OPERATION.finditer(searchable)}
     operations: set[str] = set()
     for operation, pattern in _OPERATION_PATTERNS.items():
-        match = pattern.search(searchable)
+        match = pattern.search(action_searchable)
         if match is None:
             continue
         token = match.group(0).lower()
@@ -158,9 +194,18 @@ def _literal_signals(text: str) -> tuple[set[str], set[str], set[str], set[str],
     authority = {"answer"}
     if operations & {"research", "review", "bugfix", "performance"}:
         authority.add("diagnose")
-    if not read_only and (
-        _MODIFY.search(searchable) or _IMPERATIVE_MODIFY.search(searchable)
-    ):
+    modifying_operations = {
+        "bugfix", "feature", "refactor", "performance", "docs", "migration",
+    }
+    explicit_modify = _MODIFY.search(action_searchable) is not None
+    imperative_modify = (
+        _DIRECT_MAKE_MODIFY.search(action_searchable) is not None
+        or (
+            _IMPERATIVE_MODIFY.search(action_searchable) is not None
+            and bool(operations & modifying_operations)
+        )
+    )
+    if not read_only and (explicit_modify or imperative_modify):
         authority.add("modify")
     if not read_only and _COMMIT.search(searchable):
         authority.update({"modify", "commit"})
@@ -186,9 +231,6 @@ def _literal_signals(text: str) -> tuple[set[str], set[str], set[str], set[str],
         risks.add("external_write")
 
     result: set[str] = set()
-    modifying_operations = {
-        "bugfix", "feature", "refactor", "performance", "docs", "migration",
-    }
     if "review" in operations and not operations & modifying_operations:
         result.add("report")
     elif "modify" in authority:

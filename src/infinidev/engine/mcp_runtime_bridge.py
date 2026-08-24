@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from infinidev.engine.runtime_state import TaskStatus
-
 
 class McpRuntimeBridge:
     """Translate raw MCP events into runtime memory + task state updates.
@@ -46,17 +44,15 @@ class McpRuntimeBridge:
             if self._on_unavailable is not None:
                 self._on_unavailable(server, event.get("tool", ""))
         elif kind == "failure":
-            self._runtime.remember(
-                f"{server} failure ({event.get('count')}): {event.get('error')}",
-                kind="mcp_failure",
-                importance=0.6,
+            detail = (
+                f"{server} failure ({event.get('count')}): {event.get('error')}"
             )
-            task_id = self._runtime.state.current_task_id
-            if task_id:
-                for task in self._runtime.state.tasks:
-                    if task.id == task_id:
-                        task.status = TaskStatus.BLOCKED
-                        break
+            if self._runtime.state.current_task_id:
+                self._runtime.block_current_task(detail)
+            else:
+                self._runtime.remember(
+                    detail, kind="mcp_failure", importance=0.6
+                )
 
     def attach(self, manager: Any) -> None:
         """Register the bridge as *manager*'s event handler."""

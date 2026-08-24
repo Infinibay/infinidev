@@ -68,6 +68,8 @@ class FileManager:
         if app.explorer_visible:
             if self._tree_control is None:
                 self._init_tree()
+            else:
+                self._start_file_watcher()
             if self._tree_window is not None:
                 try:
                     app.app.layout.focus(self._tree_window)
@@ -95,7 +97,13 @@ class FileManager:
     def _start_file_watcher(self) -> None:
         """Start background file watcher to refresh the tree on changes."""
         if self._file_watcher is not None:
-            return
+            if self._file_watcher.is_running():
+                return
+            try:
+                self._file_watcher.stop()
+            except Exception:
+                return
+            self._file_watcher = None
         try:
             from infinidev.cli.file_watcher import FileWatcher, WATCHFILES_AVAILABLE
             if not WATCHFILES_AVAILABLE:
@@ -110,13 +118,27 @@ class FileManager:
                 self._app.invalidate()
 
             cwd = os.getcwd()
-            self._file_watcher = FileWatcher(
+            watcher = FileWatcher(
                 workspace=cwd,
                 callback=_on_change,
                 visible_paths_callback=lambda: self._tree_control.expanded_dirs()
                     if self._tree_control is not None else {cwd},
             )
-            self._file_watcher.start()
+            # Publish before start so teardown can still discover a worker if
+            # start raises after launching it. Clean failures clear the slot,
+            # allowing a later explorer open to retry.
+            self._file_watcher = watcher
+            try:
+                started = watcher.start()
+            except Exception:
+                try:
+                    watcher.stop()
+                except Exception:
+                    raise
+                self._file_watcher = None
+                raise
+            if not started:
+                self._file_watcher = None
         except Exception:
             pass  # Non-critical — explorer works without live updates
 

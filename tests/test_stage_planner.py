@@ -147,6 +147,39 @@ def test_complete_goal_with_ledger_evidence_is_accepted(scripted):
     assert isinstance(decision, CompleteGoalDecision)
 
 
+def test_complete_goal_accepts_explicit_no_edit_task_evidence(scripted):
+    state = StagedPlanningState(goal=GoalSpec(
+        title="Confirm existing behavior",
+        user_request="Implement the behavior if missing.",
+        intent="implementation",
+    ))
+    stage = state.add_stage(StageSpec.model_validate(_stage_args("Verify behavior")))
+    stage.status = "evaluating"
+    task = stage.tasks[0]
+    task.status = "completed"
+    evidence = EvidenceEntry(
+        kind="task_result",
+        summary="Behavior already exists and focused checks pass.",
+        stage_id=stage.id,
+        task_id=task.spec.id,
+        details={
+            "task_status": "completed",
+            "workspace_changed": False,
+            "no_edit_accepted": True,
+        },
+    )
+    state.add_evidence(evidence)
+    task.evidence_ids.append(evidence.id)
+    scripted([_response([_call(
+        "complete_goal",
+        {"evidence": [f"{evidence.id}: verified existing behavior"]},
+    )])])
+
+    decision = run_stage_planner(state)
+
+    assert isinstance(decision, CompleteGoalDecision)
+
+
 def test_complete_goal_rejects_uncited_evidence_claim(scripted):
     scripted([
         _response([_call("complete_goal", {"evidence": ["Tests pass"]})]),
@@ -353,3 +386,56 @@ def test_implementation_goal_rejects_consecutive_discovery_stages(scripted):
 
     assert isinstance(decision, BlockGoalDecision)
     assert decision.reason == "Delivery needs user authority"
+
+
+def test_terminal_tool_cannot_share_a_turn_with_exploration(scripted):
+    state = _state(evidence=True)
+    evidence_id = state.evidence[0].id
+    scripted([
+        _response([
+            _call(
+                "complete_goal",
+                {"evidence": [f"{evidence_id}: tests pass"]},
+                "complete",
+            ),
+            _call("read_file", {"file_path": "src/a.py"}, "read"),
+        ]),
+        _response([_call("emit_stage", _stage_args())]),
+    ])
+
+    decision = run_stage_planner(state)
+
+    assert isinstance(decision, EmitStageDecision)
+
+
+def test_complete_goal_requires_exact_evidence_id_not_prefix(scripted):
+    state = _state(evidence=True)
+    evidence_id = state.evidence[0].id
+    scripted([
+        _response([_call(
+            "complete_goal",
+            {"evidence": [f"{evidence_id}-forged: tests pass"]},
+        )]),
+        _response([_call("emit_stage", _stage_args())]),
+    ])
+
+    decision = run_stage_planner(state)
+
+    assert isinstance(decision, EmitStageDecision)
+
+
+def test_complete_goal_rejects_latest_stage_with_unfinished_tasks(scripted):
+    state = _state(evidence=True)
+    state.add_stage(StageSpec.model_validate(_stage_args("Still running")))
+    evidence_id = state.evidence[0].id
+    scripted([
+        _response([_call(
+            "complete_goal",
+            {"evidence": [f"{evidence_id}: prior observation"]},
+        )]),
+        _response([_call("emit_stage", _stage_args("Finish delivery"))]),
+    ])
+
+    decision = run_stage_planner(state)
+
+    assert isinstance(decision, EmitStageDecision)

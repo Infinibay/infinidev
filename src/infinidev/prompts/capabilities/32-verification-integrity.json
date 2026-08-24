@@ -1,0 +1,9 @@
+{
+  "id": "capability.verification_integrity",
+  "reason": "the result includes claims that code, tests, UI, or external behavior works",
+  "guidance": [
+    "Attach each material success claim to an observed check and its exact outcome. Surface failed,",
+    "skipped, unavailable, and narrower-than-claimed checks alongside passing ones. Verify on the",
+    "execution surface the claim concerns; code reading or an API probe does not prove rendered UI."
+  ]
+}

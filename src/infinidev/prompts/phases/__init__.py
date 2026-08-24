@@ -150,7 +150,8 @@ def get_strategy(task_type: str) -> PhaseStrategy:
 
     Defaults to task_type ``'feature'`` when *task_type* is unknown.
     """
-    base = STRATEGIES.get(task_type, STRATEGIES["feature"])
+    resolved_task_type = task_type if task_type in STRATEGIES else "feature"
+    base = STRATEGIES[resolved_task_type]
 
     from infinidev.prompts.variants import resolve_style, get_variant
 
@@ -159,7 +160,7 @@ def get_strategy(task_type: str) -> PhaseStrategy:
     from infinidev.prompts.profiles import resolve_prompt_fragment
 
     def fragment(suffix: str, default: str) -> str:
-        name = f"phase.{task_type}.{suffix}"
+        name = f"phase.{resolved_task_type}.{suffix}"
         return resolve_prompt_fragment(name, suffix.removesuffix("_identity"), default, get_variant(name, style)) or ""
 
     return PhaseStrategy(

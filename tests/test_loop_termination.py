@@ -131,6 +131,112 @@ def test_cancel_survives_until_the_turn_ends():
 # ── liveness is not the budget counter ───────────────────────────────
 
 
+def test_guardrail_validation_precedes_terminal_finish() -> None:
+    from infinidev.engine.loop.engine import LoopEngine
+
+    calls: list[tuple[str, str]] = []
+
+    class _StepManager:
+        def finish(self, _ctx, _status, _iteration, result):
+            calls.append(("finish", result))
+            return result
+
+    engine = LoopEngine()
+
+    def apply_guardrail(_ctx, result, *args, **kwargs):
+        calls.append(("guardrail", result))
+        return "corrected result"
+
+    engine._apply_guardrail = apply_guardrail
+    ctx = SimpleNamespace(
+        start_iteration=0,
+        project_id=1,
+        agent_id="a1",
+        state=LoopState(),
+        guardrail=object(),
+        guardrail_max_retries=2,
+        llm_params={},
+        system_prompt="system",
+        desc="task",
+        expected="result",
+        tool_schemas=[],
+        tool_dispatch={},
+        max_per_action=0,
+    )
+    step_result = StepResult(
+        summary="original result",
+        status="done",
+        final_answer="original result",
+    )
+
+    terminal = engine._check_termination(
+        ctx,
+        step_result,
+        _StepManager(),
+        iteration=0,
+        consecutive_all_done=0,
+    )
+
+    assert terminal == "corrected result"
+    assert calls == [
+        ("guardrail", "original result"),
+        ("finish", "corrected result"),
+    ]
+
+
+def test_guardrail_precedes_implicit_all_steps_done_finish() -> None:
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    calls: list[tuple[str, str]] = []
+
+    class _StepManager:
+        def finish(self, _ctx, _status, _iteration, result):
+            calls.append(("finish", result))
+            return result
+
+    engine = LoopEngine()
+
+    def apply_guardrail(_ctx, result, *args, **kwargs):
+        calls.append(("guardrail", result))
+        return "corrected fallback"
+
+    engine._apply_guardrail = apply_guardrail
+    state = LoopState()
+    state.plan.steps = [
+        PlanStep(index=1, title="Completed work", status="done"),
+    ]
+    ctx = SimpleNamespace(
+        start_iteration=0,
+        project_id=1,
+        agent_id="a1",
+        state=state,
+        guardrail=object(),
+        guardrail_max_retries=2,
+        llm_params={},
+        system_prompt="system",
+        desc="task",
+        expected="result",
+        tool_schemas=[],
+        tool_dispatch={},
+        max_per_action=0,
+    )
+
+    terminal = engine._check_termination(
+        ctx,
+        StepResult(summary="original fallback", status="continue"),
+        _StepManager(),
+        iteration=2,
+        consecutive_all_done=2,
+    )
+
+    assert terminal == "corrected fallback"
+    assert calls == [
+        ("guardrail", "original fallback"),
+        ("finish", "corrected fallback"),
+    ]
+
+
 def test_a_step_closed_with_only_pseudo_tools_is_not_a_stall():
     """think + step_complete executes no regular tool and is not a stall."""
     result = StepResult(summary="done thinking", status="continue")
@@ -756,6 +862,7 @@ def test_no_edit_can_close_an_unedited_feature_task():
     assert _enforce_edit_requirement(ctx, result) is False
     assert result.status == "done"
     assert result.interrupted is False
+    assert ctx.state.task_no_edit_accepted is True
 
 
 def test_verified_noop_step_can_close_an_already_satisfied_feature_task():
@@ -819,6 +926,21 @@ def test_implementation_step_cannot_close_without_an_edit():
     assert _enforce_step_effect(ctx, result) is True
     assert result.interrupted is True
     assert _should_advance_plan(result) is False
+
+
+def test_read_only_task_is_not_forced_to_edit_by_a_change_looking_step():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.task = SimpleNamespace(kind="investigation")
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Write the research report", status="active"),
+    ]
+    result = StepResult(summary="Findings are ready", status="done")
+    result.behavior_tracker = SimpleNamespace(files_edited=set())
+
+    assert _enforce_step_effect(ctx, result) is False
+    assert result.interrupted is False
 
 
 def test_no_edit_can_close_an_unedited_implementation_step():
@@ -1622,6 +1744,40 @@ def test_pending_step_reconciliation_precedes_whole_task_edit_gate():
     assert result.status == "continue"
     assert result.interrupted is False
     assert _should_advance_plan(result) is True
+
+
+def test_task_completion_folds_pending_model_step_after_edit_interruption(tmp_path):
+    from infinidev.engine.file_change_tracker import FileChangeTracker
+    from infinidev.engine.loop.plan_step import PlanStep
+    from infinidev.engine.loop.step_manager import StepManager
+    from infinidev.engine.workspace_baseline import WorkspaceBaseline
+
+    path = tmp_path / "event_dispatch.py"
+    path.write_text("enabled = False\n")
+    tracker = FileChangeTracker(WorkspaceBaseline.capture(str(tmp_path)))
+    ctx = _ctx()
+    ctx.agent = SimpleNamespace(workspace_path=str(tmp_path))
+    ctx.file_tracker = tracker
+    ctx.state.plan.steps = [
+        PlanStep(index=1, title="Implement event dispatch", status="active"),
+        PlanStep(index=2, title="Implement event dispatch hardening"),
+    ]
+    ctx.state.step_entry_change_fingerprints[1] = tracker.change_fingerprint(
+        reconcile=True
+    )
+    path.write_text("enabled = True\n")
+    tracker.record(str(path), "enabled = False\n", "enabled = True\n")
+    result = StepResult(summary="Implementation and focused test complete", status="done")
+    result.behavior_tracker = SimpleNamespace(
+        files_edited=set(),
+        successful_test_commands=["python -m pytest tests/test_event_dispatch.py -q"],
+    )
+
+    reconciled = StepManager.reconcile_task_completion(ctx, result)
+
+    assert reconciled.status == "done"
+    assert ctx.state.plan.steps[1].status == "done"
+    assert "dispatch, event" in ctx.state.plan.steps[1].conclusion
 
 
 # ── the critic's veto is bounded too ─────────────────────────────────

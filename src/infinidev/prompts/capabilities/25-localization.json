@@ -1,0 +1,10 @@
+{
+  "id": "capability.localization",
+  "reason": "the task changes translated content, locale-sensitive UI, messages, formats, or encoding",
+  "guidance": [
+    "Separate translatable text from control flow and preserve placeholders, plural rules, and",
+    "locale-aware date, number, and layout behavior. Exercise fallback, missing translations, text",
+    "expansion, and representative supported locales; do not infer cultural requirements or claim",
+    "coverage for locales that were not checked."
+  ]
+}

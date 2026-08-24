@@ -415,6 +415,17 @@ END;
 -- record remains ``execution_events``. A graph can always be rebuilt by
 -- replaying a run's graph_* events through the reducer, so these rows are
 -- disposable cache, never the source of truth.
+CREATE TABLE IF NOT EXISTS graph_states (
+    run_id               TEXT PRIMARY KEY REFERENCES engine_runs(run_id),
+    session_id           TEXT NOT NULL DEFAULT '',
+    revision             INTEGER NOT NULL DEFAULT 0,
+    version              INTEGER NOT NULL DEFAULT 0,
+    goal_revisions_json  TEXT NOT NULL DEFAULT '[]',
+    updated_at           REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_graph_states_session
+    ON graph_states(session_id);
+
 CREATE TABLE IF NOT EXISTS graph_nodes (
     node_id          TEXT NOT NULL,
     run_id           TEXT NOT NULL REFERENCES engine_runs(run_id),

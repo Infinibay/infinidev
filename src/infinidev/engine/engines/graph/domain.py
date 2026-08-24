@@ -64,7 +64,14 @@ KNOWN_NODE_TYPES: frozenset[str] = frozenset({
 #: Node types that represent executable work the scheduler may select.
 EXECUTABLE_NODE_TYPES: frozenset[str] = frozenset({NODE_WORK, NODE_VERIFICATION})
 
-#: Node types that must carry evidence before they may resolve (§6).
+#: Nodes that can directly ground a claim. Research observations use evidence;
+#: development may additionally cite a durable artifact or an exact code
+#: location. Proof is not synonymous with a file edit.
+PROOF_NODE_TYPES: frozenset[str] = frozenset({
+    NODE_EVIDENCE, NODE_ARTIFACT_REF, NODE_CODE_REF,
+})
+
+#: Node types that need proof only when they resolve as confirmed (§6).
 EVIDENCE_REQUIRED_NODE_TYPES: frozenset[str] = frozenset({
     NODE_WORK, NODE_VERIFICATION, NODE_HYPOTHESIS, NODE_REQUIREMENT,
 })
@@ -185,13 +192,44 @@ class GraphNode(BaseModel):
     created_at: float = Field(default_factory=_now)
     updated_at: float = Field(default_factory=_now)
 
-    def with_updates(self, **changes: Any) -> "GraphNode":
+    def with_updates(
+        self,
+        *,
+        at: float | None = None,
+        **changes: Any,
+    ) -> "GraphNode":
         """Return a copy with fields replaced and version/updated_at bumped."""
         data = self.model_dump()
         data.update(changes)
         data["version"] = self.version + 1
-        data["updated_at"] = _now()
+        data["updated_at"] = _now() if at is None else at
         return GraphNode.model_validate(data)
+
+
+def is_successfully_resolved(
+    node: GraphNode,
+    state: GraphState | None = None,
+) -> bool:
+    """Return whether a node is confirmed and grounded by current proof."""
+    if (
+        node.lifecycle is not Lifecycle.RESOLVED
+        or node.verdict is not Verdict.CONFIRMED
+        or node.freshness is not Freshness.CURRENT
+    ):
+        return False
+    if node.node_type not in EVIDENCE_REQUIRED_NODE_TYPES:
+        return True
+    if not node.evidence_refs:
+        return False
+    if state is None:
+        return True
+    return any(
+        proof is not None
+        and proof.node_type in PROOF_NODE_TYPES
+        and proof.freshness is Freshness.CURRENT
+        for proof_id in node.evidence_refs
+        if (proof := state.nodes.get(proof_id)) is not None
+    )
 
 
 class GraphEdge(BaseModel):
@@ -231,8 +269,9 @@ class GoalRevision(BaseModel):
 class GraphState(BaseModel):
     """The whole in-memory graph for one run.
 
-    ``version`` is the single-writer write counter: every applied operation
-    increments it, so a ``graph_patch`` can carry ``based_on_revision`` and
+    ``version`` is the single-writer write counter: every state-changing
+    operation increments it, so a ``graph_patch`` can carry
+    ``based_on_revision`` and
     the reducer can reject stale writes (§6).
     """
 
@@ -308,6 +347,7 @@ __all__ = [
     "NODE_VERIFICATION",
     "NODE_WORK",
     "OPEN_LIFECYCLES",
+    "PROOF_NODE_TYPES",
     "REVISION_CLARIFICATION",
     "REVISION_CONSTRAINT",
     "REVISION_CONTRADICTION",
@@ -318,6 +358,7 @@ __all__ = [
     "REVISION_REPLACEMENT",
     "TERMINAL_LIFECYCLES",
     "Verdict",
+    "is_successfully_resolved",
     "new_edge_id",
     "new_node_id",
 ]

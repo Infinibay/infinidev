@@ -5,10 +5,9 @@ Every mutation arrives as one :mod:`ops <infinidev.engine.engines.graph.ops>`
 object; :func:`reduce` validates the invariants, applies the change to a copy
 of the state, and returns the new state plus the audit events it produced.
 
-The function is pure — no I/O, no randomness, no generated ids of its own
-(edge ids derive from content) — so replaying the event log through it always
-rebuilds the same graph (§10). Persistence is somebody else's job; see
-``persistence.py``.
+With an explicit applied_at value, the function is deterministic: it performs
+no I/O or random id generation (edge ids derive from content). Persisting
+callers record that timestamp so replay rebuilds the exact same graph (§10).
 
 Invariants enforced (§6):
 
@@ -17,13 +16,14 @@ Invariants enforced (§6):
 * no ``requires`` cycle is created;
 * resolved nodes carry evidence when their type demands it;
 * terminal nodes are immutable;
-* every applied operation bumps the write version exactly once.
+* every state-changing/audited operation bumps the write version exactly once.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from typing import Any
 
 from infinidev.engine.engines.graph.domain import (
@@ -32,6 +32,7 @@ from infinidev.engine.engines.graph.domain import (
     KNOWN_EDGE_TYPES,
     KNOWN_NODE_TYPES,
     KNOWN_REVISION_KINDS,
+    PROOF_NODE_TYPES,
     Freshness,
     GoalRevision,
     GraphEdge,
@@ -39,6 +40,7 @@ from infinidev.engine.engines.graph.domain import (
     GraphState,
     Lifecycle,
     Verdict,
+    is_successfully_resolved,
 )
 from infinidev.engine.engines.graph.ops import (
     AbandonNodeOp,
@@ -97,6 +99,25 @@ def _require_non_terminal(node: GraphNode) -> None:
         )
 
 
+def _require_current_evidence(
+    state: GraphState,
+    evidence_ids: list[str],
+) -> None:
+    """Reject dangling, mistyped, or stale evidence references."""
+    for evidence_id in dict.fromkeys(evidence_ids):
+        evidence = state.nodes.get(evidence_id)
+        if evidence is None:
+            raise GraphInvariantError(f"unknown evidence_id {evidence_id!r}")
+        if evidence.node_type not in PROOF_NODE_TYPES:
+            raise GraphInvariantError(
+                f"node {evidence_id!r} is not a proof-bearing node"
+            )
+        if evidence.freshness is not Freshness.CURRENT:
+            raise GraphInvariantError(
+                f"proof node {evidence_id!r} is not current"
+            )
+
+
 def _would_create_hard_cycle(
     state: GraphState, source: str, target: str
 ) -> bool:
@@ -118,16 +139,24 @@ def _would_create_hard_cycle(
     return False
 
 
-def _promote_ready(state: GraphState, changed_node_id: str) -> None:
+def _promote_ready(
+    state: GraphState,
+    changed_node_id: str,
+    applied_at: float,
+) -> None:
     """Move dependents PROPOSED→READY once all hard deps are resolved."""
     for dependent_id in state.hard_dependents(changed_node_id):
         dependent = state.nodes.get(dependent_id)
         if dependent is None or dependent.lifecycle is not Lifecycle.PROPOSED:
             continue
         deps = [state.nodes.get(d) for d in state.hard_dependencies(dependent_id)]
-        if all(d is not None and d.lifecycle is Lifecycle.RESOLVED for d in deps):
+        if all(
+            d is not None and is_successfully_resolved(d, state)
+            for d in deps
+        ):
             state.nodes[dependent_id] = dependent.with_updates(
-                lifecycle=Lifecycle.READY
+                lifecycle=Lifecycle.READY,
+                at=applied_at,
             )
 
 
@@ -135,7 +164,9 @@ def _promote_ready(state: GraphState, changed_node_id: str) -> None:
 
 
 def _apply_graph_patch(
-    state: GraphState, op: GraphPatchOp
+    state: GraphState,
+    op: GraphPatchOp,
+    applied_at: float,
 ) -> list[dict[str, Any]]:
     if op.based_on_revision != state.revision:
         raise GraphInvariantError(
@@ -161,6 +192,8 @@ def _apply_graph_patch(
             goal_revision=goal_revision,
             budget=dict(spec.budget),
             payload=dict(spec.payload),
+            created_at=applied_at,
+            updated_at=applied_at,
         )
 
     for spec in op.add_edges:
@@ -192,10 +225,12 @@ def _apply_graph_patch(
             confidence=spec.confidence,
             evidence_ref=spec.evidence_ref,
             payload=dict(spec.payload),
+            created_at=applied_at,
         )
 
     for update in op.update_nodes:
         node = _require_node(state, update.node_id)
+        _require_non_terminal(node)
         changes: dict[str, Any] = {}
         if update.title is not None:
             changes["title"] = update.title
@@ -212,7 +247,10 @@ def _apply_graph_patch(
         if update.payload is not None:
             changes["payload"] = {**node.payload, **update.payload}
         if changes:
-            state.nodes[update.node_id] = node.with_updates(**changes)
+            state.nodes[update.node_id] = node.with_updates(
+                at=applied_at,
+                **changes,
+            )
 
     return [
         _event(
@@ -232,12 +270,19 @@ def _apply_graph_patch(
     ]
 
 
-def _apply_activate(state: GraphState, op: ActivateNodeOp) -> list[dict[str, Any]]:
+def _apply_activate(
+    state: GraphState,
+    op: ActivateNodeOp,
+    applied_at: float,
+) -> list[dict[str, Any]]:
     node = _require_node(state, op.node_id)
     _require_non_terminal(node)
     if node.lifecycle is Lifecycle.ACTIVE:
         return []
-    state.nodes[op.node_id] = node.with_updates(lifecycle=Lifecycle.ACTIVE)
+    state.nodes[op.node_id] = node.with_updates(
+        lifecycle=Lifecycle.ACTIVE,
+        at=applied_at,
+    )
     return [
         _event(
             ev.NODE_ACTIVATED,
@@ -248,13 +293,17 @@ def _apply_activate(state: GraphState, op: ActivateNodeOp) -> list[dict[str, Any
     ]
 
 
-def _apply_suspend(state: GraphState, op: SuspendNodeOp) -> list[dict[str, Any]]:
+def _apply_suspend(
+    state: GraphState,
+    op: SuspendNodeOp,
+    applied_at: float,
+) -> list[dict[str, Any]]:
     node = _require_node(state, op.node_id)
     _require_non_terminal(node)
     changes: dict[str, Any] = {"lifecycle": Lifecycle.SUSPENDED}
     if op.checkpoint:
         changes["checkpoint"] = op.checkpoint
-    state.nodes[op.node_id] = node.with_updates(**changes)
+    state.nodes[op.node_id] = node.with_updates(at=applied_at, **changes)
     return [
         _event(
             ev.NODE_CHECKPOINTED,
@@ -266,10 +315,15 @@ def _apply_suspend(state: GraphState, op: SuspendNodeOp) -> list[dict[str, Any]]
 
 
 def _apply_checkpoint(
-    state: GraphState, op: CheckpointNodeOp
+    state: GraphState,
+    op: CheckpointNodeOp,
+    applied_at: float,
 ) -> list[dict[str, Any]]:
     node = _require_node(state, op.node_id)
-    state.nodes[op.node_id] = node.with_updates(checkpoint=op.checkpoint)
+    state.nodes[op.node_id] = node.with_updates(
+        checkpoint=op.checkpoint,
+        at=applied_at,
+    )
     return [
         _event(
             ev.NODE_CHECKPOINTED,
@@ -280,7 +334,11 @@ def _apply_checkpoint(
     ]
 
 
-def _apply_abandon(state: GraphState, op: AbandonNodeOp) -> list[dict[str, Any]]:
+def _apply_abandon(
+    state: GraphState,
+    op: AbandonNodeOp,
+    applied_at: float,
+) -> list[dict[str, Any]]:
     node = _require_node(state, op.node_id)
     if node.lifecycle is Lifecycle.RESOLVED:
         raise GraphInvariantError(
@@ -289,6 +347,7 @@ def _apply_abandon(state: GraphState, op: AbandonNodeOp) -> list[dict[str, Any]]
     state.nodes[op.node_id] = node.with_updates(
         lifecycle=Lifecycle.ABANDONED,
         checkpoint=op.reason or node.checkpoint,
+        at=applied_at,
     )
     return [
         _event(
@@ -301,22 +360,32 @@ def _apply_abandon(state: GraphState, op: AbandonNodeOp) -> list[dict[str, Any]]
 
 
 def _apply_resolve_node(
-    state: GraphState, op: ResolveNodeOp
+    state: GraphState,
+    op: ResolveNodeOp,
+    applied_at: float,
 ) -> list[dict[str, Any]]:
     node = _require_node(state, op.node_id)
     _require_non_terminal(node)
-    if node.node_type in EVIDENCE_REQUIRED_NODE_TYPES and not op.evidence_ids:
+    verdict = Verdict(op.verdict)
+    if (
+        verdict is Verdict.CONFIRMED
+        and node.node_type in EVIDENCE_REQUIRED_NODE_TYPES
+        and not op.evidence_ids
+    ):
         raise GraphInvariantError(
-            f"node {op.node_id!r} ({node.node_type}) cannot resolve without "
-            "evidence; attach evidence first"
+            f"node {op.node_id!r} ({node.node_type}) cannot be confirmed without "
+            "proof; attach an observation, artifact, or code reference first"
         )
+    _require_current_evidence(state, op.evidence_ids)
     state.nodes[op.node_id] = node.with_updates(
         lifecycle=Lifecycle.RESOLVED,
-        verdict=Verdict(op.verdict),
+        verdict=verdict,
+        freshness=Freshness.CURRENT,
         evidence_refs=list(dict.fromkeys([*node.evidence_refs, *op.evidence_ids])),
         checkpoint=op.outcome or node.checkpoint,
+        at=applied_at,
     )
-    _promote_ready(state, op.node_id)
+    _promote_ready(state, op.node_id, applied_at)
     return [
         _event(
             ev.NODE_RESOLVED,
@@ -332,13 +401,18 @@ def _apply_resolve_node(
 
 
 def _apply_attach_evidence(
-    state: GraphState, op: AttachEvidenceOp
+    state: GraphState,
+    op: AttachEvidenceOp,
+    applied_at: float,
 ) -> list[dict[str, Any]]:
     node = _require_node(state, op.node_id)
+    _require_non_terminal(node)
+    _require_current_evidence(state, [op.evidence_id])
     if op.evidence_id in node.evidence_refs:
         return []
     state.nodes[op.node_id] = node.with_updates(
-        evidence_refs=[*node.evidence_refs, op.evidence_id]
+        evidence_refs=[*node.evidence_refs, op.evidence_id],
+        at=applied_at,
     )
     return [
         _event(
@@ -351,7 +425,9 @@ def _apply_attach_evidence(
 
 
 def _apply_revise_goal(
-    state: GraphState, op: ReviseGoalOp
+    state: GraphState,
+    op: ReviseGoalOp,
+    applied_at: float,
 ) -> list[dict[str, Any]]:
     classification = op.classification
     if classification not in KNOWN_REVISION_KINDS:
@@ -364,19 +440,22 @@ def _apply_revise_goal(
             classification=classification,
             author=op.author,
             supersedes=state.revision or None,
+            created_at=applied_at,
         )
     )
     state.revision = new_revision
-    # A goal that changed under the work's feet makes unfinished work stale
-    # until somebody re-validates it (§7 reverse scope, conservative cut).
+    # A destabilising revision invalidates earlier grounding even when a
+    # node had already resolved. Lifecycle records completion history; freshness
+    # records whether that result still proves the current goal (§4.3, §7).
     destabilising = {"replacement", "contradiction", "removed_requirement"}
     if classification in destabilising:
         for node_id, node in state.nodes.items():
-            if node.lifecycle in {Lifecycle.RESOLVED, Lifecycle.ABANDONED}:
+            if node.lifecycle is Lifecycle.ABANDONED:
                 continue
             if node.freshness is Freshness.CURRENT:
                 state.nodes[node_id] = node.with_updates(
-                    freshness=Freshness.STALE
+                    freshness=Freshness.STALE,
+                    at=applied_at,
                 )
     return [
         _event(
@@ -392,7 +471,9 @@ def _apply_revise_goal(
 
 
 def _apply_resolve_goal(
-    state: GraphState, op: ResolveGoalOp
+    state: GraphState,
+    op: ResolveGoalOp,
+    applied_at: float,
 ) -> list[dict[str, Any]]:
     if op.revision_id != state.revision:
         raise GraphInvariantError(
@@ -401,6 +482,14 @@ def _apply_resolve_goal(
         )
     if not op.evidence_ids:
         raise GraphInvariantError("resolve_goal requires at least one evidence id")
+    _require_current_evidence(state, op.evidence_ids)
+
+    from infinidev.engine.engines.graph.completion import evaluate_goal
+
+    assessment = evaluate_goal(state)
+    if assessment.status != "complete":
+        detail = ", ".join(assessment.missing[:5]) or "; ".join(assessment.reasons)
+        raise GraphInvariantError(f"goal is not complete: {detail}")
     return [
         _event(
             ev.GOAL_RESOLVED,
@@ -413,13 +502,19 @@ def _apply_resolve_goal(
 # ── entry point ──────────────────────────────────────────────────────────────
 
 
-def reduce(state: GraphState, op: GraphOp) -> tuple[GraphState, list[dict[str, Any]]]:
+def reduce(
+    state: GraphState,
+    op: GraphOp,
+    *,
+    applied_at: float | None = None,
+) -> tuple[GraphState, list[dict[str, Any]]]:
     """Apply one operation; return the new state and the audit events.
 
     Raises :class:`GraphInvariantError` without mutating *state* when any
     invariant fails.
     """
     working = state.model_copy(deep=True)
+    operation_time = time.time() if applied_at is None else applied_at
 
     handlers = {
         "graph_patch": _apply_graph_patch,
@@ -436,8 +531,9 @@ def reduce(state: GraphState, op: GraphOp) -> tuple[GraphState, list[dict[str, A
     if handler is None:
         raise GraphInvariantError(f"unknown graph op kind {op.kind!r}")
 
-    events = handler(working, op)
-    working.version += 1
+    events = handler(working, op, operation_time)
+    if events:
+        working.version += 1
     return working, events
 
 

@@ -396,11 +396,12 @@ class Explorer(Agent):
     def analyze(self, problem):
         subs = decompose(problem, max_children=4, max_depth=4)
         for sub in subs:
-            evidence = gather_with_tools(sub)
+            support = gather_with_tools(sub) if depends_on_observable_state(sub) else reason(sub)
             sub.status = assess(solvable | unsolvable | mitigable)
-            assert every_fact_cites_tool_output
+            assert each_fact_declares_source(tool_output | user_input | reasoning)
+            never(invent_tool_output)
         propagate_results_upward()
-        return synthesize(grounded_in_evidence)
+        return synthesize(grounded_in_declared_support)
 
     # When something seems impossible, decompose the assumptions
     # Discarded branches still carry useful info — note why discarded

@@ -76,10 +76,10 @@ class DesignBrief:
         affected_files: Files the council expects the work to touch.
         dissent: Minority positions worth flagging — the best signal of
             where a real product decision may be hiding.
-        user_decision_required: True when the council hit a fork it must
-            NOT resolve on its own (a product/design choice that belongs
-            to the user). The model decides technical questions itself;
-            this flag is reserved for genuine product forks.
+        user_decision_required: True when the council found a genuine
+            product preference worth surfacing. The council still emits
+            a recommended default, so this advisory flag never stalls
+            execution.
         open_questions_for_user: The concrete questions to ask, in the
             user's language. Empty unless ``user_decision_required``.
     """
@@ -127,6 +127,13 @@ class DesignBrief:
         if self.dissent:
             lines += ["", "Dissent (minority positions, flagged):"]
             lines += [f"  - {d}" for d in self.dissent]
+        if self.open_questions_for_user:
+            lines += [
+                "",
+                "Advisory product questions (execution continues with the "
+                "chosen approach):",
+            ]
+            lines += [f"  - {q}" for q in self.open_questions_for_user]
         return "\n".join(lines)
 
     def render_questions_for_user(self) -> str:
@@ -134,8 +141,7 @@ class DesignBrief:
         if not self.open_questions_for_user:
             return ""
         lines = [
-            "The council reached a point that needs your decision before "
-            "implementation:",
+            "The council flagged an open product preference for your review:",
             "",
             f"Context: {self.chosen_approach}",
             "",

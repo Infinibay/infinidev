@@ -1,0 +1,9 @@
+{
+  "id": "capability.concurrency",
+  "reason": "the work touches threads, async tasks, queues, locks, retries, or cancellation",
+  "guidance": [
+    "State ownership, ordering, completion, and accounting invariants before changing concurrent",
+    "control flow. Cover cancellation, worker failure, restart, and shutdown with deterministic",
+    "synchronization; do not use timing sleeps as proof when an observable event or barrier exists."
+  ]
+}

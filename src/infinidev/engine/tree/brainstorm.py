@@ -88,7 +88,6 @@ def execute_brainstorm(
         llm_params, anti_messages, [ANTI_PATTERN_SCHEMA],
         "identify_obvious", tree, manual_tc,
     )
-    tree.total_llm_calls += 1
 
     anti_patterns: list[dict] = []
     assumptions: list[str] = []
@@ -141,7 +140,6 @@ def execute_brainstorm(
             llm_params, diverge_messages, [DIVERGE_SCHEMA],
             "propose_idea", tree, manual_tc,
         )
-        tree.total_llm_calls += 1
 
         if idea_result:
             idea_title = idea_result.get("idea_title", f"Idea {i}")
@@ -222,7 +220,6 @@ def execute_brainstorm(
             llm_params, cross_messages, [CROSS_SCHEMA],
             "cross_ideas", tree, manual_tc,
         )
-        tree.total_llm_calls += 1
 
         if cross_result:
             hybrid_title = cross_result.get("hybrid_title", "Hybrid idea")
@@ -284,7 +281,6 @@ def execute_brainstorm(
         llm_params, converge_messages, [CONVERGE_SCHEMA],
         "rank_ideas", tree, manual_tc,
     )
-    tree.total_llm_calls += 1
 
     if converge_result:
         tree.synthesis = format_brainstorm_synthesis(converge_result)

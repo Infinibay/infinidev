@@ -1,0 +1,9 @@
+{
+  "id": "capability.algorithmic_correctness",
+  "reason": "the work introduces nontrivial traversal, scheduling, parsing, optimization, or large-data logic",
+  "guidance": [
+    "State invariants, termination conditions, complexity expectations, and boundary cases before",
+    "implementation. Exercise adversarial, empty, and duplicate inputs, plus inputs near the stated",
+    "scale limit; a plausible happy-path result does not establish algorithmic correctness."
+  ]
+}

@@ -202,6 +202,68 @@ class TestBriefParsing:
 # ── Runner orchestration (LLM monkeypatched) ─────────────────────────────
 
 
+class TestPipelineCouncilPhase:
+    def test_product_questions_are_advisory_and_never_block(
+        self, monkeypatch
+    ):
+        from infinidev.config.settings import settings
+        from infinidev.engine.orchestration.escalation_packet import (
+            EscalationPacket,
+        )
+        from infinidev.engine.orchestration.hooks import NoOpHooks
+        from infinidev.engine.orchestration.pipeline import _run_council_phase
+
+        brief = DesignBrief(
+            question="Latency or cost?",
+            chosen_approach="Prefer the balanced default",
+            user_decision_required=True,
+            open_questions_for_user=["Should latency win over cost?"],
+        )
+        monkeypatch.setattr(settings, "COUNCIL_ENABLED", True)
+        monkeypatch.setattr(
+            "infinidev.engine.council.run_council",
+            lambda *args, **kwargs: brief,
+        )
+
+        class Hooks(NoOpHooks):
+            def __init__(self):
+                self.statuses = []
+                self.notifications = []
+
+            def on_status(self, level, message):
+                self.statuses.append((level, message))
+
+            def notify(self, speaker, message, kind="agent"):
+                self.notifications.append((speaker, message, kind))
+
+            def ask_user(self, prompt, kind="text"):
+                raise AssertionError("Council completion must not wait for input")
+
+        hooks = Hooks()
+        escalation = EscalationPacket(
+            user_request="Implement the cache",
+            understanding="Choose a cache design and implement it.",
+            council_requested=True,
+        )
+
+        enriched = _run_council_phase(
+            escalation=escalation,
+            session_id="council-advisory",
+            project_id=1,
+            workspace_path="/workspace",
+            hooks=hooks,
+        )
+
+        assert enriched.user_request == escalation.user_request
+        assert enriched.design_brief is brief
+        assert any(
+            level == "warn" and "continuing" in message.lower()
+            for level, message in hooks.statuses
+        )
+        preview = "\n".join(message for _, message, _ in hooks.notifications)
+        assert "Should latency win over cost?" in preview
+
+
 def _roster(n=2):
     return CouncilRoster(
         question="How to build it?",

@@ -19,6 +19,7 @@ from infinidev.engine.engines.graph.ops import (
     EdgeSpec,
     GraphPatchOp,
     NodeSpec,
+    NodeUpdate,
     ResolveGoalOp,
     ResolveNodeOp,
     ReviseGoalOp,
@@ -30,6 +31,10 @@ from infinidev.engine.engines.graph.reducer import GraphInvariantError, reduce
 def _state() -> GraphState:
     state = GraphState(run_id="run-test")
     state, _ = reduce(state, ReviseGoalOp(text="Build the feature"))
+    state, _ = reduce(state, GraphPatchOp(
+        add_nodes=[NodeSpec(node_id="e1", node_type="evidence")],
+        based_on_revision=state.revision,
+    ))
     return state
 
 
@@ -62,6 +67,23 @@ class TestGoalRevision:
         )
         assert state.nodes["w1"].freshness is Freshness.STALE
 
+    def test_destabilising_revision_marks_resolved_nodes_stale(self):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work", title="work"),
+        ]))
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="w1", evidence_ids=["e1"], outcome="done"),
+        )
+
+        state, _ = reduce(
+            state, ReviseGoalOp(text="changed", classification="replacement")
+        )
+
+        assert state.nodes["w1"].lifecycle is Lifecycle.RESOLVED
+        assert state.nodes["w1"].freshness is Freshness.STALE
+
     def test_clarification_does_not_stale_nodes(self):
         state = _state()
         state, _ = reduce(state, _patch(state, nodes=[
@@ -90,6 +112,19 @@ class TestGraphPatchInvariants:
             reduce(state, _patch(state, nodes=[
                 NodeSpec(node_id="w1", node_type="work"),
             ]))
+
+    def test_terminal_node_update_rejected(self):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="q1", node_type="question", title="done"),
+        ]))
+        state, _ = reduce(state, ResolveNodeOp(node_id="q1", evidence_ids=[]))
+
+        with pytest.raises(GraphInvariantError, match="terminal nodes are immutable"):
+            reduce(state, GraphPatchOp(
+                update_nodes=[NodeUpdate(node_id="q1", title="rewritten")],
+                based_on_revision=state.revision,
+            ))
 
     def test_edge_with_missing_endpoint_rejected(self):
         state = _state()
@@ -192,6 +227,43 @@ class TestLifecycleTransitions:
         # dependent promoted proposed → ready
         assert state.nodes["w1"].lifecycle is Lifecycle.READY
 
+    def test_resolving_stale_node_refreshes_its_evidence(self):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work"),
+        ]))
+        state.nodes["w1"] = state.nodes["w1"].with_updates(
+            freshness=Freshness.STALE
+        )
+
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="w1", evidence_ids=["e1"], outcome="verified"),
+        )
+
+        assert state.nodes["w1"].freshness is Freshness.CURRENT
+
+    def test_rejected_dependency_does_not_promote_dependents(self):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="dep", node_type="work"),
+            NodeSpec(node_id="w1", node_type="work"),
+        ], edges=[
+            EdgeSpec(source="w1", target="dep", edge_type=EDGE_REQUIRES),
+        ]))
+
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(
+                node_id="dep",
+                evidence_ids=[],
+                outcome="failed",
+                verdict="rejected",
+            ),
+        )
+
+        assert state.nodes["w1"].lifecycle is Lifecycle.PROPOSED
+
     def test_terminal_node_is_immutable(self):
         state = _state()
         state, _ = reduce(state, _patch(state, nodes=[
@@ -226,16 +298,102 @@ class TestLifecycleTransitions:
 
 
 class TestAttachEvidenceAndResolveGoal:
+    def test_evidence_references_must_name_current_evidence_nodes(self):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work"),
+            NodeSpec(node_id="not-evidence", node_type="work"),
+            NodeSpec(node_id="stale-evidence", node_type="evidence"),
+        ]))
+        state.nodes["stale-evidence"] = state.nodes[
+            "stale-evidence"
+        ].with_updates(freshness=Freshness.STALE)
+
+        for operation in (
+            AttachEvidenceOp(node_id="w1", evidence_id="missing"),
+            ResolveNodeOp(node_id="w1", evidence_ids=["missing"]),
+        ):
+            with pytest.raises(GraphInvariantError, match="unknown evidence_id"):
+                reduce(state, operation)
+
+        for operation in (
+            AttachEvidenceOp(node_id="w1", evidence_id="not-evidence"),
+            ResolveNodeOp(node_id="w1", evidence_ids=["not-evidence"]),
+        ):
+            with pytest.raises(GraphInvariantError, match="not a proof-bearing node"):
+                reduce(state, operation)
+
+        with pytest.raises(GraphInvariantError, match="not current"):
+            reduce(
+                state,
+                ResolveNodeOp(
+                    node_id="w1",
+                    evidence_ids=["stale-evidence"],
+                ),
+            )
+
+    @pytest.mark.parametrize("node_type", ["evidence", "artifact_ref", "code_ref"])
+    def test_current_proof_bearing_nodes_can_ground_resolution(self, node_type):
+        state = _state()
+        proof_id = f"proof-{node_type}"
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work"),
+            NodeSpec(node_id=proof_id, node_type=node_type),
+        ]))
+
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="w1", evidence_ids=[proof_id], outcome="done"),
+        )
+
+        assert state.nodes["w1"].evidence_refs == [proof_id]
+
+    @pytest.mark.parametrize("verdict", ["rejected", "inconclusive"])
+    def test_non_confirmed_work_can_close_without_fabricated_proof(self, verdict):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work"),
+        ]))
+
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="w1", evidence_ids=[], verdict=verdict),
+        )
+
+        assert state.nodes["w1"].verdict is Verdict(verdict)
+        assert state.nodes["w1"].evidence_refs == []
+
+    def test_resolve_goal_rejects_unmaterialized_evidence(self):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work"),
+        ]))
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="w1", evidence_ids=["e1"], outcome="done"),
+        )
+
+        with pytest.raises(GraphInvariantError, match="unknown evidence_id"):
+            reduce(
+                state,
+                ResolveGoalOp(
+                    revision_id=state.revision,
+                    evidence_ids=["fabricated"],
+                ),
+            )
+
     def test_attach_evidence_idempotent(self):
         state = _state()
         state, _ = reduce(state, _patch(state, nodes=[
             NodeSpec(node_id="w1", node_type="work"),
         ]))
         state, _ = reduce(state, AttachEvidenceOp(node_id="w1", evidence_id="e1"))
+        version = state.version
         state, events = reduce(
             state, AttachEvidenceOp(node_id="w1", evidence_id="e1")
         )
         assert state.nodes["w1"].evidence_refs == ["e1"]
+        assert state.version == version
         assert events == []
 
     def test_resolve_goal_requires_matching_revision(self):
@@ -248,8 +406,27 @@ class TestAttachEvidenceAndResolveGoal:
         with pytest.raises(GraphInvariantError):
             reduce(state, ResolveGoalOp(revision_id=state.revision, evidence_ids=[]))
 
+    def test_resolve_goal_rejects_incomplete_graph(self):
+        state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work"),
+        ]))
+
+        with pytest.raises(GraphInvariantError, match="not complete"):
+            reduce(
+                state,
+                ResolveGoalOp(revision_id=state.revision, evidence_ids=["e1"]),
+            )
+
     def test_resolve_goal_emits_event(self):
         state = _state()
+        state, _ = reduce(state, _patch(state, nodes=[
+            NodeSpec(node_id="w1", node_type="work"),
+        ]))
+        state, _ = reduce(
+            state,
+            ResolveNodeOp(node_id="w1", evidence_ids=["e1"], outcome="done"),
+        )
         state, events = reduce(
             state, ResolveGoalOp(revision_id=state.revision, evidence_ids=["e1"])
         )

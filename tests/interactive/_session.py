@@ -159,7 +159,7 @@ class Session:
         the prompt_toolkit screen took over.
         """
         self._child.expect(
-            r"(Welcome to Infinidev|Type your instruction)",
+            r"(Welcome to Infinidev|Type your instruction|Ask anything, or / for commands)",
             timeout=timeout,
         )
 

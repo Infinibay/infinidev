@@ -1,0 +1,10 @@
+{
+  "id": "capability.testing",
+  "reason": "the current task requires adding, changing, or validating executable behavior",
+  "guidance": [
+    "Choose the smallest test that would fail for the named regression or prove the requested path.",
+    "Keep assertions tied to public behavior rather than implementation details, then run that test",
+    "and report exactly what its result establishes. Expand coverage only when the first result",
+    "exposes another affected boundary."
+  ]
+}

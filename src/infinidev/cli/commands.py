@@ -19,11 +19,20 @@ import click
 from infinidev.config.settings import settings
 
 
-def handle_command(cmd_text: str):
-    """Handle / commands."""
+def handle_command(cmd_text: str, session_id: str | None = None):
+    """Handle / commands for the active classic session."""
     parts = cmd_text.split()
     cmd = parts[0].lower()
     
+    if cmd == "/prompts":
+        from infinidev.prompts.commands import handle_prompts_command
+
+        try:
+            click.echo(handle_prompts_command(parts))
+        except (OSError, ValueError) as exc:
+            click.echo(click.style(f"Could not update prompt capabilities: {exc}", fg="red"))
+        return True
+
     if cmd == "/models":
         subcmd = parts[1].lower() if len(parts) > 1 else "info"
         
@@ -123,6 +132,11 @@ def handle_command(cmd_text: str):
     elif cmd == "/help":
         click.echo(click.style("Available commands:", bold=True))
         click.echo("  /models            - Show current model configuration")
+        click.echo("  /prompts           - List optional prompt capabilities")
+        click.echo("  /prompts search <term> - Find capabilities by name or activation condition")
+        click.echo("  /prompts show <name> - Preview a capability before enabling it")
+        click.echo("  /prompts enable|disable <name> - Toggle a capability for future tasks")
+        click.echo("  /prompts reset <name> - Remove your override and inherit the catalog state")
         click.echo("  /models set <name> - Change Ollama model (e.g., /models set llama3)")
         click.echo("  /settings          - Show current settings")
         click.echo("  /settings <key>    - Show specific setting")
@@ -140,8 +154,23 @@ def handle_command(cmd_text: str):
         click.echo("  /init              - Explore and document the current project")
         click.echo("  /tasks [id]        - List background tasks (or show one task's output)")
         click.echo("  /agents [council] [agent] - Inspect council and agent transcripts")
+        click.echo("  /session <name>    - Name the current session (--resume manages prior ones)")
         click.echo("  /exit, /quit       - Exit the CLI")
         click.echo("  /help              - Show this help")
+        return True
+
+    elif cmd == "/session":
+        if session_id is None:
+            click.echo(click.style("No active session to name.", fg="red"))
+            return True
+        from infinidev.cli.session_resume import name_session
+
+        title = cmd_text.partition(" ")[2]
+        normalized = name_session(session_id, title)
+        if normalized:
+            click.echo(click.style(f"Session named: {normalized}", fg="green"))
+        else:
+            click.echo(click.style("Usage: /session <name>", fg="yellow"))
         return True
 
     elif cmd == "/tasks":
