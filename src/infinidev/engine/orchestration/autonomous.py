@@ -434,33 +434,26 @@ def apply_autonomous_to_packet(
     *,
     explicit_hint: bool = False,
 ) -> Any:
-    """Return a copy of ``packet`` with ``autonomous=True`` when intent matches.
+    """Apply an explicit autonomous-mode signal to an escalation packet.
 
-    ``packet`` is expected to expose an ``autonomous`` boolean attribute
-    (``EscalationPacket.autonomous`` added in this step). The helper keeps
-    the :class:`dataclasses.replace`-style immutability: it never mutates
-    the original packet, so frozen-dataclass semantics are honoured.
+    ``packet`` is expected to expose an ``autonomous`` boolean attribute.
+    The helper preserves frozen-dataclass semantics by returning a replacement
+    instead of mutating the original packet.
 
-    Detection runs when *any* of these hold:
-      * the caller passed ``explicit_hint=True`` (used by the pipeline's
-        ``autonomous`` kwarg to force-enable the chain);
-      * the supplied ``user_input`` matches the autonomous phrase;
-      * the packet's stored ``user_request`` matches (useful when no
-        ``user_input`` was forwarded and the literal request is the
-        only copy);
-      * the packet's ``user_signal`` matches (the chat agent frequently
-        records the user's literal phrase here even when paraphrasing
-        elsewhere).
+    Natural-language text is deliberately not an activation boundary. Both
+    the user's request and model-generated fields such as ``user_signal`` may
+    contain phrases that resemble autonomous intent without the user entering
+    ``/auto``. Callers must therefore pass ``explicit_hint=True`` after an
+    explicit mode command, or provide an already-marked packet when continuing
+    an active autonomous chain.
+
+    ``user_input`` remains accepted for compatibility with existing callers,
+    but it cannot enable autonomous mode.
     """
-    already = bool(getattr(packet, "autonomous", False))
-    if already:
+    del user_input
+    if bool(getattr(packet, "autonomous", False)):
         return packet
-    if (
-        explicit_hint
-        or detect_autonomous_intent(user_input or "")
-        or detect_autonomous_intent(getattr(packet, "user_request", "") or "")
-        or detect_autonomous_intent(getattr(packet, "user_signal", "") or "")
-    ):
+    if explicit_hint:
         try:
             return replace(packet, autonomous=True)
         except (TypeError, ValueError):

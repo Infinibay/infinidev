@@ -3,8 +3,8 @@
 Wires together three concerns that the budget-only tests in
 ``test_autonomous_budget.py`` leave on the shelf:
 
-  * the chat-agent-side intent detector (``detect_autonomous_intent`` /
-    ``apply_autonomous_to_packet``);
+  * the explicit autonomous activation boundary in
+    ``apply_autonomous_to_packet``;
   * the pipeline-side ``autonomous`` kwarg that drives chained plans;
   * the per-tope stopping conditions evaluated against a stub engine.
 
@@ -81,23 +81,16 @@ def test_detect_autonomous_intent_rejects_unrelated_text(text: str) -> None:
     assert detect_autonomous_intent(text) is False
 
 
-def test_apply_autonomous_to_packet_stamps_packet_when_user_signal_matches() -> None:
-    """The chat agent stamps the ``user_signal``; the helper must react.
-
-    Mirrors the accepted contract from the Step 3 description: a packet
-    whose ``user_signal`` contains "manejate vos" is treated the same
-    as if the user had typed it in their original message — the chain
-    fires. This protects against the model paraphrasing rather than
-    echoing the literal phrase.
-    """
+def test_apply_autonomous_to_packet_ignores_natural_language_signals() -> None:
+    """Request and model-generated text cannot substitute for explicit ``/auto``."""
     packet = EscalationPacket(
-        user_request="fix bug",
+        user_request="manejate vos con este bug",
         understanding="fix bug",
         user_signal="user said 'maneja vos solo con esto'",
     )
-    stamped = apply_autonomous_to_packet(packet)
-    assert stamped.autonomous is True
-    assert stamped.user_signal == "user said 'maneja vos solo con esto'"
+    stamped = apply_autonomous_to_packet(packet, user_input="keep going without asking")
+    assert stamped.autonomous is False
+    assert stamped is packet
 
 
 def test_apply_autonomous_to_packet_respects_explicit_hint() -> None:
@@ -115,14 +108,13 @@ def test_apply_autonomous_to_packet_respects_explicit_hint() -> None:
 def test_apply_autonomous_to_packet_is_idempotent() -> None:
     """Re-applying on an already-stamped packet returns the same object."""
     packet = EscalationPacket(
-        user_request="manejate vos",
+        user_request="fix bug",
         understanding="fix bug",
+        autonomous=True,
     )
-    once = apply_autonomous_to_packet(packet)
-    twice = apply_autonomous_to_packet(once)
-    assert twice.autonomous is True
-    # Once replaces, but the value is unchanged — id is per-build, not stable.
-    assert twice.user_request == "manejate vos"
+    stamped = apply_autonomous_to_packet(packet)
+    assert stamped is packet
+    assert stamped.autonomous is True
 
 
 def test_apply_autonomous_to_packet_leaves_unrelated_alone() -> None:
@@ -616,27 +608,17 @@ def test_pipeline_stops_after_exactly_max_plans(monkeypatch) -> None:
     )
 
 
-def test_chat_agent_user_signal_manejate_vos_enables_autonomous(monkeypatch) -> None:
-    """Detection runs on the packet's ``user_signal`` even when the literal
-    request did not include the autonomous phrase — the chain still fires.
-
-    This mirrors the Step 3 acceptance criterion that the chat agent
-    signals "manejate vos" *in user_signal* turns on autonomous mode
-    for that turn: the helper stamps the packet on its way out of the
-    chat agent, the pipeline picks it up via ``escalation.autonomous``.
-    """
+def test_normal_request_ignores_autonomous_text_in_user_signal(monkeypatch) -> None:
+    """A normal request executes once even if generated packet text resembles AUTO."""
     packet_in = EscalationPacket(
         user_request="please fix the auth migration",
         understanding="fix auth",
         user_signal="(user said: manejate vos con esto)",
     )
-    stamped = apply_autonomous_to_packet(packet_in)
-    assert stamped.autonomous is True
+    unstamped = apply_autonomous_to_packet(packet_in)
+    assert unstamped.autonomous is False
 
-    # Now exercise the pipeline with the stamped packet and confirm the
-    # engine is invoked twice (the user's literal text contained no
-    # autonomous phrase; the chain flag came entirely from user_signal).
-    packets = [stamped, stamped]
+    packets = [unstamped, unstamped]
     engine = _CountingEngine(plan_count=10)
     monkeypatch.setattr(_settings_module(), "AUTONOMOUS_UNLIMITED", False)
     monkeypatch.setattr(_settings_module(), "AUTONOMOUS_MAX_PLANS", 2)
@@ -658,12 +640,12 @@ def test_chat_agent_user_signal_manejate_vos_enables_autonomous(monkeypatch) -> 
         engine=engine,
         reviewer=_FakeReviewer(),
         hooks=_CountingHooks(),
-        # NOTE: no autonomous kwarg — must still chain because the
-        # chat-agent stamp set the flag.
+        # No autonomous kwarg: neither request text nor packet fields may
+        # turn a regular request into an autonomous chain.
     )
 
-    assert len(engine.calls) == 2, (
-        f"chain should fire from stamped packet; got {len(engine.calls)}"
+    assert len(engine.calls) == 1, (
+        f"normal request must execute once; got {len(engine.calls)}"
     )
 
 
