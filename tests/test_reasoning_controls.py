@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from infinidev.config.reasoning import (
@@ -78,6 +80,95 @@ def test_openai_levels_survive_actual_responses_bridge(monkeypatch, model, level
         params, {}, {}, MagicMock(),
     )
     assert payload["reasoning"]["effort"] == level
+
+
+@pytest.mark.parametrize("model,level", [
+    (model, level)
+    for model in ("gpt-6-astra", "gpt-5.6-sol")
+    for level in ("low", "medium", "high", "xhigh", "max")
+] + [("gpt-5.6-sol", "none")])
+@pytest.mark.parametrize("stream", [False, True])
+def test_openai_effort_survives_full_completion_to_http(monkeypatch, model, level, stream):
+    import litellm
+
+    from infinidev.config.llm import get_litellm_params
+    from infinidev.engine.llm_client import call_llm
+    from litellm.llms.custom_httpx.http_handler import HTTPHandler
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "LLM_MODEL", f"openai/{model}")
+    monkeypatch.setattr(settings, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setattr(settings, "LLM_TEMPERATURE", 0.2)
+    monkeypatch.setattr(settings, "THINKING_BUDGET", level)
+    monkeypatch.setattr(litellm, "drop_params", False)
+    requests = []
+
+    def post(self, url, **kwargs):
+        payload = kwargs["json"] if "json" in kwargs else json.loads(kwargs["data"])
+        requests.append((url, payload))
+        response = {
+            "id": "resp_test", "object": "response", "created_at": 1,
+            "model": model, "status": "completed", "error": None,
+            "output": [{"id": "msg_test", "type": "message", "role": "assistant",
+                        "status": "completed", "content": [{
+                            "type": "output_text", "text": "Checked.", "annotations": [],
+                        }]}],
+            "usage": {"input_tokens": 8, "output_tokens": 2, "total_tokens": 10},
+        }
+        if kwargs.get("stream"):
+            item = response["output"][0]
+            part = item["content"][0]
+            indices = {"item_id": item["id"], "output_index": 0, "content_index": 0}
+            events = [
+                {"type": "response.created", "response": {
+                    **response, "output": [], "status": "in_progress",
+                }},
+                {"type": "response.output_item.added", "output_index": 0, "item": {
+                    **item, "content": [], "status": "in_progress",
+                }},
+                {"type": "response.content_part.added", **indices,
+                 "part": {**part, "text": ""}},
+                {"type": "response.output_text.delta", **indices, "delta": "Checked."},
+                {"type": "response.output_text.done", **indices, "text": "Checked."},
+                {"type": "response.content_part.done", **indices, "part": part},
+                {"type": "response.output_item.done", "output_index": 0, "item": item},
+                {"type": "response.completed", "response": response},
+            ]
+            data = "".join(
+                f"event: {event['type']}\ndata: "
+                + json.dumps({**event, "sequence_number": i}) + "\n\n"
+                for i, event in enumerate(events)
+            )
+            return httpx.Response(200, request=httpx.Request("POST", url),
+                                  headers={"content-type": "text/event-stream"}, text=data)
+        return httpx.Response(200, request=httpx.Request("POST", url), json=response)
+
+    monkeypatch.setattr(HTTPHandler, "post", post)
+    params = get_litellm_params()
+    response = call_llm(params, [{"role": "user", "content": "Inspect the source"}],
+                        tools=[{"type": "function", "function": {
+                            "name": "read_file", "parameters": {
+                                "type": "object", "properties": {},
+                            },
+                        }}], retry_attempts=1,
+                        on_thinking_chunk=(lambda text: None) if stream else None)
+    assert response.choices[0].message.content == "Checked."
+    assert len(requests) == 1
+    url, payload = requests[0]
+    assert url == "https://api.openai.com/v1/responses"
+    assert payload["model"] == model
+    assert payload["reasoning"]["effort"] == level
+    assert "reasoning_effort" not in payload
+    assert "allowed_openai_params" not in payload
+    assert payload["tools"][0]["type"] == "function"
+    assert payload["tool_choice"] == "auto"
+    assert payload["store"] is False
+    assert "reasoning.encrypted_content" in payload["include"]
+    if level == "none":
+        assert payload["temperature"] == 0.2
+    else:
+        assert "temperature" not in payload
 
 
 @pytest.mark.parametrize("model", ["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"])

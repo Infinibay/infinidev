@@ -288,6 +288,10 @@ def normalize_model_request(params: dict[str, Any], *, bridge: bool = False) -> 
     model = str(params.get("model", ""))
     slug = model.rsplit("/", 1)[-1]
     if model.startswith("openai/"):
+        effort = params.get("reasoning_effort")
+        if effort is None:
+            effort = (params.get("extra_body") or {}).get("reasoning")
+        effort_level = effort.get("effort") if isinstance(effort, dict) else effort
         if slug == "gpt-6-astra" or slug.startswith(("gpt-5.6", "gpt-5.5")):
             params["model"] = f"openai/responses/{slug}"
             extra = params.setdefault("extra_body", {})
@@ -297,7 +301,7 @@ def normalize_model_request(params: dict[str, Any], *, bridge: bool = False) -> 
                 included.append("reasoning.encrypted_content")
             extra["include"] = included
         if slug == "gpt-6-astra" or (
-            slug.startswith("gpt-5") and params.get("reasoning_effort") != "none"
+            slug.startswith("gpt-5") and effort_level != "none"
         ):
             for key in ("temperature", "top_p", "top_logprobs", "logprobs"):
                 params.pop(key, None)
@@ -311,11 +315,30 @@ def normalize_model_request(params: dict[str, Any], *, bridge: bool = False) -> 
                     body["include"] = [v for v in body["include"]
                                        if v != "message.output_text.logprobs"]
         if bridge and "/responses/" in params["model"]:
-            effort = params.get("reasoning_effort")
-            # The locked SDK silently drops unrecognized string levels such
-            # as max. Its documented dict path preserves the provider value.
-            if isinstance(effort, str):
-                params["reasoning_effort"] = {"effort": effort}
+            profile = effort_profile("openai", model)
+            if profile.mechanism == "openai":
+                # completion() validates against its older Chat Completions
+                # catalog before entering the Responses bridge. Preserve only
+                # these reviewed Responses fields through that earlier gate.
+                allowed = list(params.get("allowed_openai_params") or [])
+                if "tool_choice" in params and "tool_choice" not in allowed:
+                    allowed.append("tool_choice")
+                params["allowed_openai_params"] = allowed
+                if effort_level == "none" and "none" in profile.choices:
+                    # The same Chat catalog predates sampling support on new
+                    # GPT-5 aliases with reasoning disabled.
+                    extra = params.setdefault("extra_body", {})
+                    for key in ("temperature", "top_p"):
+                        if key in params:
+                            extra[key] = params.pop(key)
+            # Chat validation can reject Astra before reaching Responses;
+            # GPT-5's mapper also rewrites dicts and drops newer levels. The
+            # native Responses body bypasses both lossy Chat conversions.
+            effort = params.pop("reasoning_effort", None)
+            if effort is not None:
+                reasoning = {"effort": effort} if isinstance(effort, str) else dict(effort)
+                extra = params.setdefault("extra_body", {})
+                extra["reasoning"] = {**extra.get("reasoning", {}), **reasoning}
     if model.startswith("anthropic/"):
         profile = effort_profile("anthropic", model)
         response_format = params.get("response_format")

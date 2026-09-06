@@ -118,11 +118,22 @@ def _register_custom_models() -> None:
                     **litellm.model_cost[model_id],
                     "max_input_tokens": info["max_input_tokens"],
                 }
+        from infinidev.config.reasoning import _CLAUDE_ADAPTIVE, effort_profile
+
+        # Responses has its own sampling gate, backed by the model catalog.
+        # Registering also updates provider lookup for bare model names;
+        # editing model_cost alone leaves that gate unable to find aliases.
+        for slug in ("gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"):
+            for key in (slug, f"openai/{slug}"):
+                litellm.register_model({key: {
+                    **litellm.model_cost.get(key, {}),
+                    "litellm_provider": "openai",
+                    "supports_none_reasoning_effort": True,
+                }})
+
         # Anthropic's SDK gates effort using these metadata flags before
         # sending HTTP. Exact reviewed contracts cover newer aliases even
         # when the locked SDK's bundled catalog predates their release.
-        from infinidev.config.reasoning import _CLAUDE_ADAPTIVE, effort_profile
-
         for slug in _CLAUDE_ADAPTIVE:
             profile = effort_profile("anthropic", slug)
             for key in (slug, f"anthropic/{slug}"):

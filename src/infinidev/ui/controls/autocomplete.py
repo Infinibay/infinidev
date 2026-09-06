@@ -25,7 +25,6 @@ COMMANDS = [
     ("/prompts disable", "Disable a capability for future tasks"),
     ("/prompts reset", "Remove your override and inherit the catalog state"),
     ("/effort", "Reasoning depth: show the levels this model accepts"),
-    ("/effort high", "Set reasoning effort (levels vary per model)"),
     ("/engine", "Task engine: show or set orchestrator|auto|task|react|staged|graph_beta"),
     ("/engine orchestrator", "Coordinate tickets, specialists, shared notes and peer messages"),
     ("/engine task", "Set the task engine (orchestrator|auto|task|react|staged|graph_beta)"),
@@ -72,8 +71,17 @@ class AutocompleteState:
         """Update matches based on current input text."""
         text = text.lstrip()
         if text.startswith("/"):
+            commands = COMMANDS
+            if text == "/effort" or text.startswith("/effort "):
+                from infinidev.config.reasoning import effort_choices
+
+                choices, _ = effort_choices()
+                commands = [*COMMANDS, *(
+                    (f"/effort {level}", "Set reasoning effort for the selected model")
+                    for level in choices
+                )]
             self.matches = [
-                (cmd, desc) for cmd, desc in COMMANDS
+                (cmd, desc) for cmd, desc in commands
                 if cmd.startswith(text)
             ]
             self.visible = len(self.matches) > 0

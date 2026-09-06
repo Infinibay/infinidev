@@ -8,6 +8,9 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
+from infinidev.config.settings import settings
 from infinidev.ui.controls.autocomplete import AutocompleteState
 
 
@@ -92,3 +95,34 @@ def test_auto_pause_prefix_filters_to_subcommand_only():
     state.update("/auto p")
     match_cmds = [c for c, _ in state.matches]
     assert match_cmds == ["/auto pause"]
+
+
+@pytest.mark.parametrize("provider,model,levels", [
+    ("openai", "gpt-6-astra", "low medium high xhigh max"),
+    ("anthropic", "claude-sonnet-4-6", "off low medium high max"),
+    ("qwen", "qwen3.8-max", "off low medium xhigh"),
+    ("zai", "glm-5.3", "low high max"),
+    ("openai", "gpt-4.1", ""),
+])
+@pytest.mark.parametrize("prefix", ["/effort", "/effort "])
+def test_effort_completions_match_selected_model(monkeypatch, provider, model, levels, prefix):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", provider)
+    monkeypatch.setattr(settings, "LLM_MODEL", model)
+    state = AutocompleteState()
+    state.update(prefix)
+    commands = [command for command, _ in state.matches]
+    expected = (["/effort"] if prefix == "/effort" else [])
+    expected += [f"/effort {level}" for level in levels.split()]
+    assert commands == expected
+
+
+def test_effort_completions_refresh_after_switching_model(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "LLM_MODEL", "gpt-6-astra")
+    state = AutocompleteState()
+    state.update("/effort m")
+    assert [c for c, _ in state.matches] == ["/effort medium", "/effort max"]
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "qwen")
+    monkeypatch.setattr(settings, "LLM_MODEL", "qwen3.8-max")
+    state.update("/effort m")
+    assert [c for c, _ in state.matches] == ["/effort medium"]

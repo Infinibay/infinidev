@@ -15,6 +15,8 @@ La CLI clásica y la TUI utilizan el mismo catálogo y representación. Si se ca
 modelo, una preferencia guardada que no existe en el nuevo modelo se traduce a un nivel
 admitido y el listado muestra la traducción. Por ejemplo, `high` pasa a `xhigh` en Qwen
 3.8; `medium` pasa a `high` en GLM 5.3. El comando rechaza valores nuevos inválidos.
+El autocompletado de `/effort` también consulta ese catálogo al escribir y actualiza
+las opciones cuando se cambia de modelo; no ofrece un nivel fijo para todos.
 
 `custom` identifica un presupuesto de tokens, configurado mediante
 `INFINIDEV_THINKING_BUDGET_TOKENS`. `off`/`none` se ofrecen solamente cuando el contrato
@@ -50,9 +52,15 @@ En **Codex**, los valores y ventanas vienen de `~/.codex/models_cache.json`, inc
 niveles adicionales publicados por ese catálogo. Sin archivo se ofrecen los tres niveles
 conservadores existentes; no se copian las ventanas ni los permisos de la API pública.
 
-El SDK bloqueado descarta niveles de Responses que desconoce, incluido `max`, al recibir
-un string. El adaptador usa su camino de diccionario `{"effort": "max"}` para conservar
-el valor en el JSON HTTP. Las pruebas ejecutan esa transformación real sin llamar modelos.
+El SDK bloqueado valida los parámetros como Chat Completions antes de entrar en Responses:
+puede rechazar `reasoning_effort` para Astra y `tool_choice` para GPT-5.6. Además, su mapper
+de GPT-5 convierte diccionarios de esfuerzo a strings y puede perder niveles nuevos.
+El adaptador coloca `reasoning` en el cuerpo nativo de Responses y permite `tool_choice`
+en esa validación previa para los contratos revisados. Con `none`, conserva los parámetros
+de sampling admitidos mediante el mismo cuerpo nativo y registra esa capacidad en el SDK,
+incluido el proveedor de los alias nuevos. No activa el descarte global de
+parámetros. Las pruebas recorren `get_litellm_params`, `call_llm`, `litellm.completion`,
+la validación y las transformaciones hasta HTTP simulado, con y sin streaming.
 También se eliminan parámetros de sampling incompatibles y se adapta la retención de
 caché antigua de Astra en la frontera final, cubriendo llamadas auxiliares directas.
 
