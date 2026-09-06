@@ -8,6 +8,8 @@ session notes (survive process exit), and the one-shot resume checkpoint
 
 import os
 
+import pytest
+
 from infinidev.db.service import (
     delete_session,
     get_all_turns,
@@ -555,6 +557,46 @@ class TestAllTurns:
 
 
 class TestStructuredSessionState:
+    @pytest.mark.parametrize("field", ["loop_resume", "staged_planning"])
+    def test_checkpoint_writer_does_not_overwrite_a_newer_sidebar(
+        self, temp_db, monkeypatch, field
+    ):
+        from infinidev.db import service
+
+        register_session("concurrent-runtime", "/work")
+        persist_session_runtime_state(
+            "concurrent-runtime", task_description="Old task", ui_state={"text": "old"},
+        )
+        execute = service.execute_with_retry
+        interleaved = False
+
+        def update_sidebar_after_first_operation(fn, *args, **kwargs):
+            nonlocal interleaved
+            result = execute(fn, *args, **kwargs)
+            if not interleaved:
+                interleaved = True
+                persist_session_runtime_state(
+                    "concurrent-runtime",
+                    task_description="Latest task",
+                    plan_steps=[{"title": "Latest step"}],
+                    ui_state={"text": "latest"},
+                )
+            return result
+
+        monkeypatch.setattr(service, "execute_with_retry", update_sidebar_after_first_operation)
+        snapshot = {"state": {"notes": ["Keep progress"]}}
+        writer = (
+            persist_loop_resume_checkpoint if field == "loop_resume"
+            else persist_staged_planning_state
+        )
+        writer("concurrent-runtime", snapshot)
+
+        runtime = get_session_runtime_state("concurrent-runtime")
+        assert runtime["task_description"] == "Latest task"
+        assert runtime["plan_steps"] == [{"title": "Latest step"}]
+        assert runtime["ui_state"]["text"] == "latest"
+        assert runtime["ui_state"][field] == snapshot
+
     def test_tool_call_is_updated_in_place_without_truncation(self, temp_db):
         register_session("s", "/work")
         message_id = store_session_message(

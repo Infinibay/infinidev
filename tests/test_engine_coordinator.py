@@ -121,6 +121,34 @@ def _completed_staged_state() -> StagedPlanningState:
 
 
 class TestCoordinatorStaged:
+    def test_projection_construction_failure_does_not_leave_run_open(
+        self, temp_db, monkeypatch, mode
+    ):
+        from infinidev.engine.engines import coordinator
+
+        mode("staged")
+        engine = _LoopEngine("ok", "done")
+        monkeypatch.setattr(
+            staged_pipeline_mod,
+            "run_staged_goal",
+            lambda **kwargs: staged_pipeline_mod.StagedRunResult(
+                text="Goal complete.", engine=engine, state=_completed_staged_state(),
+            ),
+        )
+
+        def broken_projection(state):
+            raise ValueError("projection unavailable")
+
+        monkeypatch.setattr(coordinator, "_staged_projection_events", broken_projection)
+        result = run_selected_engine(
+            escalation=_packet(), agent=_Agent(), engine=engine, reviewer=None,
+            hooks=_Hooks(), session_id="projection-error", project_id=1,
+            workspace_path="/workspace",
+        )
+
+        assert result.status == STATUS_COMPLETED
+        assert store.get_run(result.run_id)["status"] == STATUS_COMPLETED
+
     def test_staged_mode_dispatches_and_records(self, temp_db, monkeypatch, mode):
         mode("staged")
         engine = _LoopEngine("ok", "done")

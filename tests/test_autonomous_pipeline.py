@@ -40,6 +40,15 @@ from infinidev.tools.base.context import (
 )
 
 
+@pytest.fixture(autouse=True)
+def legacy_chat_chain(monkeypatch):
+    """These cases exercise the router's autonomous chain, not a session team."""
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "task")
+    monkeypatch.setattr(settings, "TASK_POLICIES_ENABLED", False)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Intent detector — pure-function unit tests
 # ─────────────────────────────────────────────────────────────────────────

@@ -78,6 +78,7 @@ def _pin_staged_engine(monkeypatch):
     from infinidev.config.settings import settings
 
     monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "staged")
+    monkeypatch.setattr(settings, "TASK_POLICIES_ENABLED", False)
 
 
 class _RecordingHooks:

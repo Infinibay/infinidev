@@ -49,6 +49,18 @@ from infinidev.tools.meta.notifications_tool import (
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def isolated_notification_log(tmp_path, monkeypatch):
+    """Notification tests must never append to the user's real log."""
+    from infinidev.notifications import channels
+
+    resolve = channels._resolve_log_path
+    monkeypatch.setattr(
+        channels, "_resolve_log_path",
+        lambda configured: resolve(configured or str(tmp_path / "notifications.log")),
+    )
+
+
 @pytest.fixture
 def tmp_db(tmp_path: Path) -> Path:
     return tmp_path / "notifications.db"
@@ -338,6 +350,31 @@ class TestCronParser:
 
 
 class TestChannels:
+    def test_console_creates_configured_parent_directory(self, tmp_path):
+        log = tmp_path / "nested" / "notifications.log"
+
+        deliver_console(ChannelConfig(log_path=str(log)), {"name": "nested"})
+
+        assert json.loads(log.read_text())["name"] == "nested"
+
+    def test_console_still_logs_when_parent_cannot_be_created(
+        self, tmp_path, monkeypatch, caplog,
+    ):
+        import logging
+
+        def denied_mkdir(*args, **kwargs):
+            raise PermissionError("log directory denied")
+
+        monkeypatch.setattr(Path, "mkdir", denied_mkdir)
+        with caplog.at_level(logging.INFO, logger="infinidev.notifications.channels"):
+            deliver_console(
+                ChannelConfig(log_path=str(tmp_path / "missing" / "notifications.log")),
+                {"name": "visible in console"},
+            )
+
+        assert "log directory denied" in caplog.text
+        assert "notification fired:" in caplog.text
+
     def test_render_template_basic(self):
         out = render_template(
             "{name} ok at {fired_at}", {"name": "x", "fired_at": 1.0}

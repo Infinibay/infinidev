@@ -199,6 +199,16 @@ class StepCompleteGate:
         ):
             return True
 
+        team = getattr(self._engine, "_team_runtime", None)
+        if (team is not None and getattr(self._engine, "_team_actor", "") == "orchestrator"
+                and step_complete_status(step_complete_call) == "done"):
+            reason = team.completion_blocker()
+            if reason:
+                self._engine._overwrite_step_complete_tool_result(
+                    messages, step_complete_call.id, "Completion held: " + reason,
+                )
+                return True
+
         review = self._engine._critic.review_step_complete(
             ctx, messages, step_complete_call, reasoning,
             self._engine._overwrite_step_complete_tool_result,

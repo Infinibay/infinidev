@@ -26,10 +26,12 @@ from infinidev.config.settings import settings
 
 ENGINE_REACT = "react"
 ENGINE_TASK = "task"
+ENGINE_ORCHESTRATOR = "orchestrator"
 ENGINE_STAGED = "staged"
 ENGINE_GRAPH_BETA = "graph_beta"
 
-VALID_MODES = ("auto", ENGINE_TASK, ENGINE_REACT, ENGINE_STAGED, ENGINE_GRAPH_BETA)
+VALID_MODES = (ENGINE_ORCHESTRATOR, "auto", ENGINE_TASK, ENGINE_REACT,
+               ENGINE_STAGED, ENGINE_GRAPH_BETA)
 
 # Feature tokens that tilt the auto classifier. Kept bilingual-light: the
 # product surface is Spanish, code/requests are often English.
@@ -202,6 +204,13 @@ def select_engine(escalation: Any, mode: str | None = None) -> EngineSelection:
     """
     resolved_mode = normalize_mode(mode if mode is not None else settings.TASK_ENGINE_MODE)
 
+    if resolved_mode == ENGINE_ORCHESTRATOR:
+        return EngineSelection(
+            engine=ENGINE_ORCHESTRATOR, requested_mode=resolved_mode, confidence=1.0,
+            reasons=["user_facing_orchestrator_with_scoped_workers"],
+            estimated_overhead="medium",
+        )
+
     if resolved_mode == ENGINE_REACT:
         return EngineSelection(
             engine=ENGINE_REACT,
@@ -246,6 +255,7 @@ __all__ = [
     "ENGINE_GRAPH_BETA",
     "ENGINE_REACT",
     "ENGINE_TASK",
+    "ENGINE_ORCHESTRATOR",
     "ENGINE_STAGED",
     "EngineSelection",
     "VALID_MODES",

@@ -31,6 +31,10 @@ from infinidev.engine.orchestration.chat_agent import (
 @pytest.fixture(autouse=True)
 def _single_stage_planner(monkeypatch):
     """Develop-path streaming tests use the real staged pipeline deterministically."""
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "staged")
+    monkeypatch.setattr(settings, "TASK_POLICIES_ENABLED", False)
     from infinidev.engine.analysis.staged_planning import (
         CompleteGoalDecision,
         EmitStageDecision,
@@ -569,7 +573,10 @@ class TestRespondReplyLandsInChatOnce:
         assert app._chat_history_control.show_thinking is True
         assert app._chat_history_control.work_label == "Working..."
 
-    def test_develop_path_leaves_flag_unset_so_worker_shows_result(self, monkeypatch):
+    def test_develop_path_leaves_flag_unset_so_worker_shows_result(self, monkeypatch, temp_db):
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "task")
         from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
         from infinidev.engine.orchestration.escalation_packet import EscalationPacket
         from infinidev.engine.orchestration.pipeline import run_task

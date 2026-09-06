@@ -1165,6 +1165,11 @@ class ToolRunner:
                     and progress_after != progress_before
                 ),
                 workspace_fingerprint=workspace_fingerprint,
+                awaiting_workers=bool(
+                    tc.function.name == "team_wait"
+                    and (team := getattr(self._engine, "_team_runtime", None))
+                    and team.has_active_workers
+                ),
             )
 
             if not tool_error and not no_new_evidence:

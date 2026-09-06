@@ -21,9 +21,7 @@ def _resolve_log_path(configured: str | None) -> Path:
     """Pick a log path; default to ``~/.infinidev/notifications.log``."""
     if configured:
         return Path(configured).expanduser()
-    path = Path.home() / ".infinidev" / "notifications.log"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    return Path.home() / ".infinidev" / "notifications.log"
 
 
 def deliver_console(config: ChannelConfig, payload: dict[str, Any]) -> None:
@@ -42,6 +40,7 @@ def deliver_console(config: ChannelConfig, payload: dict[str, Any]) -> None:
     }
     line = json.dumps(record, sort_keys=True)
     try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except OSError as exc:

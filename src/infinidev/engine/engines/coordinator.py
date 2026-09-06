@@ -33,6 +33,7 @@ from infinidev.engine.engines.base import (
 )
 from infinidev.engine.engines.routing import (
     ENGINE_GRAPH_BETA,
+    ENGINE_ORCHESTRATOR,
     ENGINE_REACT,
     ENGINE_STAGED,
     ENGINE_TASK,
@@ -352,7 +353,11 @@ def run_selected_engine(
     dispatch["run_id"] = run_id
 
     # ── Dispatch ───────────────────────────────────────────────────────────
-    if selection.engine == ENGINE_REACT:
+    if selection.engine == ENGINE_ORCHESTRATOR:
+        from infinidev.engine.engines.orchestrator import OrchestratorAdapter
+
+        adapter = OrchestratorAdapter()
+    elif selection.engine == ENGINE_REACT:
         from infinidev.engine.engines.react import ReactAdapter
 
         adapter = ReactAdapter()
@@ -418,7 +423,9 @@ def run_selected_engine(
     }.get(result.status, ev.RUN_FAILED)
 
     if result.engine_name == ENGINE_STAGED and result.state is not None:
-        projection_events = _staged_projection_events(result.state)
+        projection_events = []
+        with best_effort("staged projection construction failed"):
+            projection_events = _staged_projection_events(result.state)
         for event_type, node_id, payload in projection_events:
             with best_effort(
                 "staged projection event %s failed",

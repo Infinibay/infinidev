@@ -78,8 +78,8 @@ Una configuración vacía conserva exactamente la composición incorporada.
 ## Catálogo, primera ejecución y precedencia de archivos
 
 En la primera carga predeterminada, Infinidev crea `~/.infinidev/prompts/`. Si el
-directorio está vacío, materializa siete perfiles iniciales. Los primeros seis exponen los
-101 fragmentos activos del runtime. Cada entrada declara `"enabled_by_default": true` de
+directorio está vacío, materializa ocho perfiles iniciales. Los primeros siete exponen los
+103 fragmentos activos del runtime. Cada entrada declara `"enabled_by_default": true` de
 forma visible y mantiene habilitada la conducta incorporada, para mostrar tanto el estado
 de fábrica como una organización editable por capacidad:
 
@@ -89,12 +89,13 @@ de fábrica como una organización editable por capacidad:
 ├── 20-planning.json
 ├── 30-review.json
 ├── 40-collaboration.json
+├── 45-team.json
 ├── 50-investigation.json
 ├── 60-execution.json
 └── 90-optional-capabilities.json
 ```
 
-El séptimo archivo, `90-optional-capabilities.json`, ofrece un catálogo de 42 guías
+El octavo archivo, `90-optional-capabilities.json`, ofrece un catálogo de 42 guías
 adicionales para `debugging`, pruebas, revisión, seguridad, documentación, performance,
 accesibilidad,
 migraciones de datos, claridad de requisitos, impacto arquitectónico, contratos de API,
@@ -199,8 +200,8 @@ configuración específica sustituya solamente lo que necesita.
 
 ## Catálogo estable actual
 
-Los identificadores son nombres con puntos. Los siguientes son los 101 fragmentos activos
-que la composición actual resuelve mediante perfiles: 71 bloques con nombre fijo y 30
+Los identificadores son nombres con puntos. Los siguientes son los 103 fragmentos activos
+que la composición actual resuelve mediante perfiles: 73 bloques con nombre fijo y 30
 bloques de estrategia (cinco tipos de tarea por tres fases, con guía e identidad
 independientes). Las capacidades opcionales se enumeran por separado más adelante.
 
@@ -214,6 +215,14 @@ independientes). Las capacidades opcionales se enumeran por separado más adelan
 El objetivo de la tarea, el plan activo, la acción actual, su salida esperada y los
 contratos de terminación/herramientas no son fragmentos independientes: forman el
 estado mínimo que permite al engine avanzar con seguridad.
+
+### Equipo (`team`)
+
+`team.orchestrator_guidance` y `team.worker_guidance` controlan la guía de método del
+equipo. Las identidades de autor, la lista efectiva de herramientas, el alcance del
+usuario y el requisito de revisión son contratos del runtime y permanecen activos.
+Cada delegado recibe el mismo snapshot de perfiles del turno más la especialidad
+que asignó el orquestador, identificada como texto derivado del orquestador.
 
 ### Planificadores (`plan`)
 

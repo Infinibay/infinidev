@@ -21,6 +21,7 @@ _PENDING_RESULT_CHARS = 32_000
 _TEST_OUTPUT_CHARS = 64_000
 _HISTORY_LIMIT = 50
 _OPENED_FILE_LIMIT = 16
+_NON_RESUMABLE_STATUSES = frozenset({"done", "completed", "cancelled", "failed"})
 
 
 def _clip_middle(text: Any, limit: int) -> str:
@@ -107,6 +108,27 @@ def _bounded_state(state: Any) -> dict[str, Any]:
     return raw
 
 
+def _compact_history(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Bound summary prose while retaining step identifiers and evidence flags."""
+    return [
+        {
+            key: (
+                _clip_middle(value, 2_000) if isinstance(value, str)
+                else [_clip_middle(item, 500) for item in value[-8:]]
+                if isinstance(value, list)
+                else value
+            )
+            for key, value in record.items()
+        }
+        for record in records
+    ]
+
+
+def _checkpoint_size(checkpoint: dict[str, Any]) -> int:
+    """Measure the JSON representation used by session persistence, including spaces."""
+    return len(json.dumps(checkpoint, ensure_ascii=False, default=str).encode("utf-8"))
+
+
 def build_loop_resume_checkpoint(
     state: Any,
     task_prompt: tuple[str, str],
@@ -114,7 +136,7 @@ def build_loop_resume_checkpoint(
     *,
     terminal_status: str = "",
 ) -> dict[str, Any]:
-    """Build a Pydantic-restorable checkpoint under a hard storage bound."""
+    """Build a bounded checkpoint, rejecting scope too large to preserve safely."""
     identity = _task_identity(task_prompt, task)
     checkpoint = {
         "version": CHECKPOINT_VERSION,
@@ -124,10 +146,7 @@ def build_loop_resume_checkpoint(
         "terminal_status": str(terminal_status or "").strip().lower(),
         "state": _bounded_state(state),
     }
-    encoded = json.dumps(
-        checkpoint, ensure_ascii=False, default=str, separators=(",", ":")
-    ).encode("utf-8")
-    if len(encoded) <= CHECKPOINT_MAX_UTF8_BYTES:
+    if _checkpoint_size(checkpoint) <= CHECKPOINT_MAX_UTF8_BYTES:
         return checkpoint
 
     # Source bodies and verbose diagnostics are recoverable with tools. The
@@ -138,7 +157,10 @@ def build_loop_resume_checkpoint(
     compact["last_test_output"] = _clip_tail(
         compact.get("last_test_output", ""), 16_000
     )
-    compact["history"] = list(compact.get("history") or [])[-20:]
+    compact["history"] = _compact_history(list(compact.get("history") or [])[-20:])
+    compact["notes"] = [
+        _clip_middle(note, 4_000) for note in list(compact.get("notes") or [])[-20:]
+    ]
     compact["prompt_composition_history"] = []
     compact["request_payload_history"] = []
     compact["runtime_behavior_events"] = list(
@@ -150,10 +172,7 @@ def build_loop_resume_checkpoint(
     ]
     checkpoint["state"] = compact
 
-    encoded = json.dumps(
-        checkpoint, ensure_ascii=False, default=str, separators=(",", ":")
-    ).encode("utf-8")
-    if len(encoded) > CHECKPOINT_MAX_UTF8_BYTES:
+    if _checkpoint_size(checkpoint) > CHECKPOINT_MAX_UTF8_BYTES:
         # This is a last-resort structural checkpoint. LoopState supplies
         # defaults for omitted fields; retaining these fields is enough to
         # continue the active plan without replaying the transcript.
@@ -180,6 +199,16 @@ def build_loop_resume_checkpoint(
         checkpoint["state"] = {
             key: value for key, value in compact.items() if key in essential_names
         }
+        checkpoint["state"]["history"] = compact["history"][-6:]
+    if _checkpoint_size(checkpoint) > CHECKPOINT_MAX_UTF8_BYTES:
+        if checkpoint["terminal_status"] in _NON_RESUMABLE_STATUSES:
+            # A terminal marker must replace any earlier resumable snapshot,
+            # even when the final plan cannot fit. It needs no executable state.
+            checkpoint["state"] = {}
+            return checkpoint
+        # Never truncate executable checks or drop approved/pending scope to
+        # make a checkpoint fit. The caller keeps the last durable snapshot.
+        raise ValueError("Loop resume checkpoint exceeds the storage limit")
     return checkpoint
 
 
@@ -195,12 +224,7 @@ def resume_state_for_task(
         return None
     if checkpoint.get("task_key") != task_key(task_prompt, task):
         return None
-    if str(checkpoint.get("terminal_status") or "").lower() in {
-        "done",
-        "completed",
-        "cancelled",
-        "failed",
-    }:
+    if str(checkpoint.get("terminal_status") or "").strip().lower() in _NON_RESUMABLE_STATUSES:
         return None
     state = checkpoint.get("state")
     return dict(state) if isinstance(state, dict) and state else None

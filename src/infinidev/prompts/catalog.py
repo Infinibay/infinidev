@@ -154,6 +154,10 @@ STARTER_PROMPT_PROFILES: tuple[tuple[str, str], ...] = (
         ),
     ),
     (
+        "45-team.json",
+        _starter_document({"team": ("team.orchestrator_guidance", "team.worker_guidance")}),
+    ),
+    (
         "50-investigation.json",
         _starter_document(
             {

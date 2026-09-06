@@ -88,7 +88,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "  /prompts enable|disable <n>  Toggle it for future tasks\n"
         "  /prompts reset <name>        Remove your override and inherit state\n"
         "  /effort [level]              Reasoning depth this model accepts\n"
-        "  /engine [mode]               Task engine: auto|task|react|staged|graph_beta\n"
+        "  /engine [mode]               Task engine: orchestrator|auto|task|react|staged|graph_beta\n"
         "  /settings [key] [value]      Show or change settings\n"
         "  /mcp [restart <name>]        Index server health (Ken and others)\n"
         "  /plan <task>                 Plan, review, then execute\n"
@@ -730,49 +730,15 @@ def handle_engine(app: InfinidevApp, parts: list[str]) -> None:
 
 
 def _effort_choices() -> tuple[list[str], bool]:
-    """The reasoning levels worth offering, and whether they came from a model.
+    from infinidev.config.reasoning import effort_choices
 
-    On the ChatGPT subscription the levels are per-model and published by the
-    Codex catalog, so a frontier model offers ``max`` and ``ultra`` while a
-    smaller one stops at ``xhigh``. Offering a level the model does not have
-    earns a 400 the user cannot predict, so the catalog decides. Every other
-    provider gets the generic presets, which is what THINKING_BUDGET has
-    always meant there.
-    """
-    from infinidev.config.llm import CHATGPT_SUBSCRIPTION_PROVIDER
-    from infinidev.config.settings import settings
-    from infinidev.config.thinking_budget import subscription_efforts
-
-    if settings.LLM_PROVIDER == CHATGPT_SUBSCRIPTION_PROVIDER:
-        levels = subscription_efforts()
-        if levels:
-            return levels, True
-    return ["low", "medium", "high", "ultra"], False
+    return effort_choices()
 
 
 def _effort_in_effect() -> str:
-    """What the next request will actually carry, described in one line.
+    from infinidev.config.reasoning import effort_in_effect
 
-    Built by running the real ``apply_thinking_budget`` over an empty kwargs
-    dict rather than by re-deriving it here. A description that can disagree
-    with the code is worse than no description.
-    """
-    from infinidev.config.settings import settings
-    from infinidev.config.thinking_budget import apply_thinking_budget
-
-    probe: dict[str, Any] = {}
-    try:
-        apply_thinking_budget(probe, settings.LLM_PROVIDER, settings.LLM_MODEL)
-    except Exception as exc:
-        return f"could not resolve ({exc})"
-
-    if "reasoning_effort" in probe:
-        return f"reasoning_effort={probe['reasoning_effort']}"
-    if "thinking" in probe:
-        return f"thinking={probe['thinking']}"
-    if "max_tokens" in probe:
-        return f"max_tokens={probe['max_tokens']}"
-    return "no thinking parameter sent"
+    return effort_in_effect()
 
 
 def handle_effort(app: InfinidevApp, parts: list[str]) -> None:
@@ -782,26 +748,12 @@ def handle_effort(app: InfinidevApp, parts: list[str]) -> None:
     """
     from infinidev.config.settings import settings, reload_all
 
-    choices, from_catalog = _effort_choices()
-    current = (settings.THINKING_BUDGET or "").lower().strip()
+    choices, _ = _effort_choices()
 
     if len(parts) == 1:
-        source = (
-            f"published by {settings.LLM_MODEL}"
-            if from_catalog
-            else "generic presets for this provider"
-        )
-        listed = "\n".join(
-            f"  {'>' if level == current else ' '} {level}" for level in choices
-        )
-        extra = "" if current in choices else f"\n  (current: {current})"
-        app.add_message(
-            "System",
-            f"Reasoning effort — {source}\n{listed}{extra}\n\n"
-            f"In effect now: {_effort_in_effect()}\n"
-            f"Change it with /effort <level>",
-            "system",
-        )
+        from infinidev.config.reasoning import effort_listing
+
+        app.add_message("System", effort_listing(), "system")
         return
 
     wanted = parts[1].lower().strip()
@@ -814,7 +766,9 @@ def handle_effort(app: InfinidevApp, parts: list[str]) -> None:
         )
         return
 
-    settings.save_user_settings({"THINKING_BUDGET": wanted})
+    settings.save_user_settings({
+        "THINKING_BUDGET": wanted, "THINKING_ENABLED": wanted not in {"off", "none"},
+    })
     reload_all()
     app.add_message(
         "System",

@@ -1,19 +1,8 @@
-"""Thinking budget — provider-aware reasoning token limits.
+"""Reasoning controls and compatibility output budgets.
 
-Translates the user-facing THINKING_BUDGET preset into provider-specific
-LLM parameters. Each provider has its own mechanism:
-
-    Provider        | Mechanism
-    ────────────────┼──────────────────────────────────────────
-    Anthropic       | thinking.budget_tokens  (dedicated field)
-    OpenAI (o-series)| reasoning_effort "low"/"medium"/"high"
-    Gemini          | thinking_config.thinking_budget (tokens)
-    DeepSeek        | max_tokens (total, includes reasoning)
-    Ollama/Qwen     | /think vs /no_think prompt tag + max_tokens
-    llama.cpp       | max_tokens
-    vLLM            | max_tokens
-    OpenRouter      | provider-dependent, uses max_tokens
-    Others          | max_tokens (universal fallback)
+Verified model/API contracts are applied by config.reasoning. The legacy
+branches below preserve compatibility for routes without a known contract;
+their output caps are not advertised as reasoning-effort controls.
 """
 
 from __future__ import annotations
@@ -189,6 +178,11 @@ def apply_thinking_budget(
     Called from ``call_llm()`` after basic kwargs are assembled but
     before the LLM call is made.
     """
+    from infinidev.config.reasoning import apply_reasoning
+
+    if apply_reasoning(kwargs, provider_id, model, enabled=enabled):
+        return
+
     # ── Master toggle ────────────────────────────────────────────
     thinking_enabled = settings.THINKING_ENABLED if enabled is None else enabled
     if not thinking_enabled:

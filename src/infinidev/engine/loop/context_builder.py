@@ -165,6 +165,7 @@ def build_execution_context(
     caps = get_model_capabilities()
     manual_tc = not caps.supports_function_calling
     is_small = _is_small_model()
+    task_profile = getattr(kwargs.get("task"), "task_profile", None)
 
     tools = _resolve_tools(
         agent,
@@ -172,6 +173,7 @@ def build_execution_context(
         is_small,
         description=task_prompt[0],
         initial_plan=kwargs.get("initial_plan"),
+        task_profile=task_profile,
     )
     if (
         kwargs.get("skip_plan", False)
@@ -189,7 +191,6 @@ def build_execution_context(
     )
     tool_dispatch = build_tool_dispatch(tools) if tools else {}
 
-    task_profile = getattr(kwargs.get("task"), "task_profile", None)
     prompt_configuration = (
         kwargs.get("prompt_configuration")
         or EffectivePromptConfiguration.compile()
@@ -407,10 +408,7 @@ def _restore_or_start(resume_state: dict | None) -> LoopState:
 
     state = LoopState.model_validate(resume_state)
     if state.plan.steps and not state.plan.active_step:
-        for step in state.plan.steps:
-            if step.status == "pending":
-                step.status = "active"
-                break
+        state.plan.activate_next()
     logger.info("LoopEngine: resuming from iteration %d", state.iteration_count)
     return state
 

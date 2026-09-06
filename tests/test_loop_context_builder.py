@@ -5,6 +5,55 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from infinidev.engine.loop import context_builder
+from infinidev.engine.loop.loop_plan import LoopPlan, PlanStep
+from infinidev.engine.loop.loop_state import LoopState
+
+
+def test_resume_keeps_execution_phase_priority() -> None:
+    state = LoopState(plan=LoopPlan(
+        execution_phase="change",
+        steps=[
+            PlanStep(index=1, title="Verify parser behavior"),
+            PlanStep(index=2, title="Fix parser bug"),
+        ],
+    ))
+
+    restored = context_builder._restore_or_start(state.model_dump(mode="json"))
+
+    assert restored.plan.active_step.index == 2
+    assert restored.plan.steps[0].status == "pending"
+
+
+def test_execution_toolbox_includes_capabilities_from_structured_task(tmp_path, monkeypatch):
+    from infinidev.engine.task_policies.models import TaskProfile
+    from infinidev.tools import get_tools_for_role
+
+    monkeypatch.setattr(context_builder.settings, "DYNAMIC_TOOL_ROUTING_ENABLED", True)
+    monkeypatch.setattr(context_builder.settings, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(
+        context_builder, "get_litellm_params", lambda: {"model": "openai/gpt-5.6-terra"},
+    )
+    monkeypatch.setattr(context_builder, "_is_small_model", lambda: False)
+    monkeypatch.setattr(
+        context_builder, "get_model_capabilities",
+        lambda: SimpleNamespace(supports_function_calling=True),
+    )
+    agent = SimpleNamespace(
+        agent_id="developer-1", project_id=1, name="developer", role="developer",
+        backstory="", workspace_path=str(tmp_path), tools=get_tools_for_role("developer"),
+    )
+    task = SimpleNamespace(task_profile=TaskProfile(operations=("refactor",)))
+
+    ctx = context_builder.build_execution_context(
+        SimpleNamespace(_last_file_tracker=None), agent,
+        ("Reorganiza el módulo conservando su comportamiento.", "Verified result"),
+        task=task, verbose=False,
+    )
+
+    names = {tool.name for tool in ctx.tools}
+    assert "rename_symbol" in names
+    assert "read_file" in names
+    assert "web_search" not in names
 
 
 def test_developer_identity_is_tool_aware_independent_of_task_policy() -> None:

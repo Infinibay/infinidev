@@ -179,11 +179,10 @@ class Settings(BaseSettings):
     IMAGE_ASSET_STAGING_GRACE_SECONDS: int = 60 * 60
 
     # Thinking / Reasoning
-    # NOTE: Anthropic, OpenAI, and Gemini enforce thinking budgets server-side.
-    # Local providers (Ollama, llama.cpp, vLLM) use prompt tags (/no_think)
-    # which the model may ignore — disabling thinking is best-effort only.
-    THINKING_ENABLED: bool = True  # Master toggle �� disables all reasoning when False
-    # Budget presets: "low", "medium", "high", "ultra", "custom"
+    # Contracts vary by model and API. Mandatory-reasoning models resolve
+    # disabled preferences to their lowest available level.
+    THINKING_ENABLED: bool = True
+    # /effort validates model-specific levels; custom selects a token budget.
     THINKING_BUDGET: str = "medium"
     THINKING_BUDGET_TOKENS: int = 4096  # Used when THINKING_BUDGET="custom"
 
@@ -301,10 +300,15 @@ class Settings(BaseSettings):
     LOOP_CUSTOM_TEST_COMMANDS: str = ""
 
     # ── Task engine selection (docs/GRAPH_ENGINE_BETA_DESIGN.md §9) ────
-    # ``task`` is the normal path: one durable user Task with a developer-owned
-    # rolling Step plan. ``staged`` and ``react`` remain explicit compatibility
-    # modes; graph_beta remains an experimental branching mode.
-    TASK_ENGINE_MODE: str = "task"  # auto | task | react | staged | graph_beta
+    # New configurations use a conversational lead with scoped workers.
+    # Existing saved engine choices are preserved; task/staged/react remain
+    # explicit compatibility modes and graph_beta an experimental branching mode.
+    TASK_ENGINE_MODE: str = "orchestrator"  # orchestrator | auto | task | react | staged | graph_beta
+    TEAM_MAX_WORKERS: int = Field(default=3, ge=1, le=16)
+    TEAM_MAX_AGENTS: int = Field(default=12, ge=1, le=100)
+    TEAM_MAX_FOLLOWUPS: int = Field(default=8, ge=0, le=100)
+    TEAM_WORKER_MAX_ITERATIONS: int = Field(default=12, ge=1)
+    TEAM_WORKER_MAX_TOOL_CALLS: int = Field(default=80, ge=1)
     # Whether the Auto coordinator may pick graph_beta for non-linear,
     # branching work. Explicit `graph_beta` always runs the Graph engine
     # regardless of this flag.

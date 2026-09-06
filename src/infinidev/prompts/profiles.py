@@ -7,6 +7,7 @@ an empty catalog preserves the built-in prompt composition.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from types import MappingProxyType
 from typing import Mapping, TypeAlias
 
 from infinidev.config.settings import get_base_dir, settings
-from infinidev.prompts.catalog import materialize_starter_prompt_profiles
+from infinidev.prompts.catalog import STARTER_PROMPT_PROFILES, materialize_starter_prompt_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -208,10 +209,26 @@ def load_prompt_profiles(path: Path | None = None) -> dict[str, object]:
         return _load_prompt_profile(path) if path.exists() else {}
 
     catalog_path = get_prompt_catalog_path()
-    materialize_starter_prompt_profiles(catalog_path)
+    packaged: dict[str, str] = {}
+    try:
+        materialize_starter_prompt_profiles(catalog_path)
+    except OSError as err:
+        if err.errno not in {errno.EACCES, errno.EPERM, errno.EROFS}:
+            raise
+        logger.warning("Cannot publish prompt starters in %s: %s", catalog_path, err)
+        packaged = dict(STARTER_PROMPT_PROFILES)
+
+    # Read-only installations use the same defaults and filename precedence
+    # as a writable catalog; existing user files still replace their starters.
+    profile_paths = {path.name: path for path in catalog_path.glob("*.json")}
     merged: dict[str, object] = {}
-    for profile_path in sorted(catalog_path.glob("*.json"), key=lambda item: item.name):
-        _merge_document(merged, _load_prompt_profile(profile_path))
+    for filename in sorted(packaged.keys() | profile_paths.keys()):
+        document = (
+            _load_prompt_profile(profile_paths[filename])
+            if filename in profile_paths
+            else json.loads(packaged[filename])
+        )
+        _merge_document(merged, document)
 
     project_path = get_prompt_profile_path()
     if project_path.exists():

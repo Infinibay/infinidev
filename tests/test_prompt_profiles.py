@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import errno
 from importlib.resources import files
 import json
 import os
@@ -40,6 +41,8 @@ def _configuration(tmp_path, document: dict) -> EffectivePromptConfiguration:
 
 
 _FIXED_PROFILE_IDS = {
+    "team.orchestrator_guidance",
+    "team.worker_guidance",
     "loop.identity",
     "loop.protocol",
     "loop.behavior_guidelines",
@@ -130,13 +133,13 @@ def test_documented_catalog_enumerates_every_supported_profile_id() -> None:
     ).read_text(encoding="utf-8")
     prefixes = (
         "loop|iteration|task_planner|stage_planner|reviewer|extractor|judge|"
-        "evidence|adversarial|chat|council|gather|summary|phase"
+        "evidence|adversarial|chat|council|gather|summary|phase|team"
     )
     documented = set(re.findall(rf"`(({prefixes})\.[a-z_.]+)`", documentation))
     documented_ids = {profile_id for profile_id, _prefix in documented}
     expected = _expected_profile_ids()
 
-    assert len(expected) == 101
+    assert len(expected) == 103
     assert documented_ids == expected
 
 
@@ -196,7 +199,7 @@ def test_starter_catalog_enumerates_every_supported_profile_id_once() -> None:
 
     names = [name for _phase, name, _entry in occurrences]
     optional_names = {name for name, _body in OPTIONAL_CAPABILITIES}
-    assert len(names) == 101 + len(optional_names)
+    assert len(names) == 103 + len(optional_names)
     assert len(names) == len(set(names))
     assert set(names) == _expected_profile_ids() | optional_names
     for _phase, name, entry in occurrences:
@@ -343,6 +346,51 @@ def test_default_catalog_materializes_starters_lazily(tmp_path, monkeypatch) -> 
         profile = configuration.resolve(phase, name)
         assert profile.enabled is True
         assert profile.enabled_by_default is True
+
+
+@pytest.mark.parametrize("error_code", [errno.EACCES, errno.EPERM, errno.EROFS])
+def test_read_only_catalog_uses_packaged_defaults_and_existing_overrides(
+    tmp_path, monkeypatch, error_code,
+) -> None:
+    from infinidev.prompts import profiles
+
+    catalog = tmp_path / "prompts"
+    catalog.mkdir()
+    (catalog / "99-custom.json").write_text(
+        json.dumps({"develop": {"loop.identity": False}}), encoding="utf-8",
+    )
+    project = tmp_path / "project.json"
+    project.write_text(
+        json.dumps({"develop": {"loop.protocol": False}}), encoding="utf-8",
+    )
+    monkeypatch.setattr(profiles, "get_prompt_catalog_path", lambda: catalog)
+    monkeypatch.setattr(profiles, "get_prompt_profile_path", lambda: project)
+
+    def cannot_publish(path):
+        raise OSError(error_code, "read-only catalog")
+
+    monkeypatch.setattr(profiles, "materialize_starter_prompt_profiles", cannot_publish)
+
+    configuration = EffectivePromptConfiguration.compile()
+
+    assert not configuration.resolve("develop", "loop.identity").enabled
+    assert not configuration.resolve("develop", "loop.protocol").enabled
+    for name, _body in OPTIONAL_CAPABILITIES:
+        assert not configuration.resolve("develop", name).enabled
+    assert len(list(catalog.iterdir())) == 1
+
+
+def test_catalog_publication_io_errors_are_not_hidden(tmp_path, monkeypatch) -> None:
+    from infinidev.prompts import profiles
+
+    monkeypatch.setattr(profiles, "get_prompt_catalog_path", lambda: tmp_path)
+
+    def broken_storage(path):
+        raise OSError(errno.EIO, "storage failed")
+
+    monkeypatch.setattr(profiles, "materialize_starter_prompt_profiles", broken_storage)
+    with pytest.raises(OSError, match="storage failed"):
+        EffectivePromptConfiguration.compile()
 
 
 def test_default_catalog_publishes_complete_starters_during_concurrent_startup(

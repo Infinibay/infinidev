@@ -10,7 +10,7 @@ ReasoningVisibility = Literal["provider_exposed", "unavailable"]
 
 _TEXT_KEYS = ("text", "thinking", "summary", "reasoning_content")
 _OPAQUE_TYPES = frozenset({"redacted_thinking", "encrypted_thinking"})
-_HISTORY_FIELDS = ("reasoning_content", "thinking_blocks", "reasoning_details")
+_HISTORY_FIELDS = ("reasoning_content", "thinking_blocks", "reasoning_details", "reasoning_items")
 _PROVIDER_HISTORY_FIELDS = frozenset({"reasoning_details", "thought_signatures"})
 
 

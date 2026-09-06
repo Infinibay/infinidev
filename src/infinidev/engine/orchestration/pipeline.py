@@ -1,14 +1,12 @@
-"""Unified, UI-agnostic task pipeline — chat-agent-first edition.
+"""Unified, UI-agnostic lifecycle for ordinary user messages.
 
 This module owns the entire task lifecycle as a single function
 :func:`run_task`:
 
-  user turn  →  ChatAgent  →  (respond?)  done.
-                    │
-                    └ (escalate)  Stage Planner
-                                      ├─ complete / block
-                                      └─ Stage → Task Planner → LoopEngine → Review
-                                                   ↑___________________________|
+The default principal receives the message directly and decides whether to
+answer, inspect evidence or delegate workers. It owns tickets and reviews;
+the user supplies the task without selecting an orchestration command.
+Explicit compatibility engines retain their chat-router/planner pipelines.
 
 Every side effect that needs to reach a human (showing the chat reply,
 showing the plan, status updates) goes through the
@@ -818,24 +816,11 @@ def run_task(
     _hook_reentry: bool = False,
     _autonomous_budget: Any = None,
 ) -> str:
-    """Run a complete task through the chat-agent-first pipeline.
+    """Run an ordinary message through the principal and its chosen work.
 
-    Flow:
-
-      1. ChatAgent receives the user's message. Returns ``respond`` or
-         ``escalate``.
-      2. On ``respond`` — the reply is shown via ``hooks.notify`` and
-         ``run_task`` returns the reply text. No analyst, no developer.
-      3. On ``escalate`` — the ``user_visible_preview`` is shown, then
-         the planner produces a :class:`Plan`. The plan overview is
-         shown via ``hooks.notify`` (non-blocking — approval already
-         happened in chat).
-      4. Gather runs (if enabled), then the developer executes with
-         ``initial_plan=plan``.
-      5. Review runs if files changed.
-
-    The ``analyst`` parameter is GONE. The old :class:`AnalysisEngine`
-    was deleted in the same commit that introduced this rewrite.
+    The default principal receives the literal request and owns delegation
+    and review. Compatibility engines first use ChatAgent to respond or
+    escalate, then run their selected planning/execution adapter.
 
     Callers must still construct ``agent``, ``engine``, ``reviewer``,
     and ``hooks``. The project_id and workspace_path for the chat agent
@@ -1055,16 +1040,31 @@ def run_task(
         turn_context = _join_blocks(turn_context, repository_context)
         chat_input = f"{user_input}\n\n{turn_context}"
         hooks.on_status("info", f"Target repository: {display_target}")
-    chat_result = run_chat_agent(
-        chat_input,
-        session_id=session_id,
-        project_id=agent_project_id,
-        workspace_path=agent_workspace,
-        hooks=hooks,
-        attachments=attachments,
-        autonomous_hint=autonomous,
-        prompt_configuration=prompt_configuration,
-    )
+    from infinidev.config.settings import settings as _settings
+    from infinidev.engine.engines.routing import ENGINE_ORCHESTRATOR, normalize_mode
+
+    orchestrating = normalize_mode(_settings.TASK_ENGINE_MODE) == ENGINE_ORCHESTRATOR
+    if orchestrating:
+        from infinidev.engine.orchestration.chat_agent_result import ChatAgentResult
+        from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+
+        # The principal owns the conversation and decides whether work needs
+        # delegation. A short router must not finish research before it runs.
+        chat_result = ChatAgentResult(kind="escalate", escalation=EscalationPacket(
+            user_request=user_input.strip(), understanding="",
+            attachments=list(attachments or []), autonomous=autonomous,
+        ))
+    else:
+        chat_result = run_chat_agent(
+            chat_input,
+            session_id=session_id,
+            project_id=agent_project_id,
+            workspace_path=agent_workspace,
+            hooks=hooks,
+            attachments=attachments,
+            autonomous_hint=autonomous,
+            prompt_configuration=prompt_configuration,
+        )
 
     if chat_result.kind == "respond":
         if chat_result.error_traceback:
@@ -1151,7 +1151,7 @@ def run_task(
     # Runs before the council/planner so both build on a grounded spec
     # instead of the raw request. Single configured model; soft-fails to
     # the original escalation (returns None → no grounded_spec attached).
-    escalation = _run_elaboration_phase(
+    escalation = escalation if orchestrating else _run_elaboration_phase(
         escalation=escalation,
         session_id=session_id,
         project_id=agent_project_id,
@@ -1175,7 +1175,7 @@ def run_task(
     # Runs only when the chat agent flagged council_requested. Enriches
     # the escalation with a synthesised design_brief that the planner
     # then reads. Soft-fails to the original escalation.
-    escalation = _run_council_phase(
+    escalation = escalation if orchestrating else _run_council_phase(
         escalation=escalation,
         session_id=session_id,
         project_id=agent_project_id,
@@ -1190,7 +1190,7 @@ def run_task(
     from infinidev.config.settings import settings as _settings
     from infinidev.engine.task_policies import resolve_task_profile
 
-    if _settings.TASK_POLICIES_ENABLED:
+    if _settings.TASK_POLICIES_ENABLED and not orchestrating:
         task_profile = resolve_task_profile(
             escalation.user_request,
             enable_embeddings=_settings.TASK_POLICIES_EMBEDDINGS_ENABLED,
@@ -1221,11 +1221,8 @@ def run_task(
     if hasattr(agent, "backstory"):
         agent.backstory = flow_config.backstory
 
-    # Engine selection — the coordinator resolves TASK_ENGINE_MODE
-    # (auto|task|react|staged|graph_beta), records the decision in the
-    # execution event log, and dispatches to exactly one matching adapter.
-    # Task is the normal durable-Task/rolling-Step loop; compatibility and
-    # experimental engines remain explicit alternatives. See beta design §16.
+    # Ordinary messages reach the principal by default; compatibility
+    # selections use their own adapter. The event log records the dispatch.
     from infinidev.engine.engines import run_selected_engine
 
     engine_run = run_selected_engine(

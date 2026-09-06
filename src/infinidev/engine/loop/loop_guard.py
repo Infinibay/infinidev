@@ -88,8 +88,11 @@ class LoopGuard:
         *,
         made_progress: bool = False,
         workspace_fingerprint: Any | None = None,
+        awaiting_workers: bool = False,
     ) -> None:
         """Track repetition, errors, and evidence-free tool drift."""
+        if tool_name == "team_wait" and awaiting_workers and not had_error:
+            return
         workspace_progress = False
         if workspace_fingerprint is not None:
             workspace_progress = self._observe_workspace_fingerprint(

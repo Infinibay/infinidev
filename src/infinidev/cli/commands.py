@@ -144,7 +144,7 @@ def handle_command(cmd_text: str, session_id: str | None = None):
         click.echo("  /settings reset    - Reset to defaults")
         click.echo("  /settings export   - Export settings to file")
         click.echo("  /settings import   - Import settings from file")
-        click.echo("  /engine [mode]     - Show or set task engine (auto|task|react|staged|graph_beta)")
+        click.echo("  /engine [mode]     - Set orchestrator|auto|task|react|staged|graph_beta")
         click.echo("  /reindex [--full]  - Re-index the workspace (--full clears DB first)")
         click.echo("  /think             - Enable deep analysis for the next task")
         click.echo("  /effort [level]    - Show or set reasoning effort (levels depend on model)")
@@ -336,43 +336,15 @@ def _render_agents_classic(parts: list[str]) -> None:
 
 
 def _effort_choices() -> tuple[list[str], bool]:
-    """Reasoning levels worth offering, and whether they came from a model.
+    from infinidev.config.reasoning import effort_choices
 
-    Mirrors the TUI handler: on the ChatGPT subscription the catalog decides
-    (per-model levels), every other provider gets the generic presets.
-    """
-    from infinidev.config.llm import CHATGPT_SUBSCRIPTION_PROVIDER
-    from infinidev.config.thinking_budget import subscription_efforts
-
-    if settings.LLM_PROVIDER == CHATGPT_SUBSCRIPTION_PROVIDER:
-        levels = subscription_efforts()
-        if levels:
-            return levels, True
-    return ["low", "medium", "high", "ultra"], False
+    return effort_choices()
 
 
 def _effort_in_effect() -> str:
-    """What the next request will actually carry, described in one line.
+    from infinidev.config.reasoning import effort_in_effect
 
-    Built by running the real ``apply_thinking_budget`` over an empty kwargs
-    dict rather than by re-deriving it here — a description that can disagree
-    with the code is worse than no description.
-    """
-    from infinidev.config.thinking_budget import apply_thinking_budget
-
-    probe: dict = {}
-    try:
-        apply_thinking_budget(probe, settings.LLM_PROVIDER, settings.LLM_MODEL)
-    except Exception as exc:
-        return f"could not resolve ({exc})"
-
-    if "reasoning_effort" in probe:
-        return f"reasoning_effort={probe['reasoning_effort']}"
-    if "thinking" in probe:
-        return f"thinking={probe['thinking']}"
-    if "max_tokens" in probe:
-        return f"max_tokens={probe['max_tokens']}"
-    return "no thinking parameter sent"
+    return effort_in_effect()
 
 
 def handle_effort_command(parts: list[str]) -> None:
@@ -382,26 +354,12 @@ def handle_effort_command(parts: list[str]) -> None:
     """
     from infinidev.config.settings import reload_all
 
-    choices, from_catalog = _effort_choices()
-    current = (settings.THINKING_BUDGET or "").lower().strip()
+    choices, _ = _effort_choices()
 
     if len(parts) == 1:
-        source = (
-            f"published by {settings.LLM_MODEL}"
-            if from_catalog
-            else "generic presets for this provider"
-        )
-        listed = "\n".join(
-            f"  {'>' if level == current else ' '} {level}" for level in choices
-        )
-        extra = "" if current in choices else f"\n  (current: {current})"
-        click.echo(click.style("Reasoning effort — " + source, bold=True))
-        click.echo(listed)
-        if extra:
-            click.echo(extra)
-        click.echo("")
-        click.echo(f"In effect now: {_effort_in_effect()}")
-        click.echo("Change it with /effort <level>")
+        from infinidev.config.reasoning import effort_listing
+
+        click.echo(effort_listing())
         return
 
     wanted = parts[1].lower().strip()
@@ -413,7 +371,9 @@ def handle_effort_command(parts: list[str]) -> None:
         click.echo(f"Choose one of: {', '.join(choices)}")
         return
 
-    settings.save_user_settings({"THINKING_BUDGET": wanted})
+    settings.save_user_settings({
+        "THINKING_BUDGET": wanted, "THINKING_ENABLED": wanted not in {"off", "none"},
+    })
     reload_all()
     click.echo(click.style(
         f"Reasoning effort set to {wanted}. In effect: {_effort_in_effect()}",
@@ -434,6 +394,7 @@ def handle_engine_command(parts: list[str]):
             marker = "*" if mode == current else " "
             click.echo(f"  {marker} {mode}")
         click.echo("")
+        click.echo("  orchestrator  lead agent delegates, coordinates and reviews a persistent team")
         click.echo("  auto        coordinator picks per task and explains why")
         click.echo("  task        durable task with a rolling developer-owned plan")
         click.echo("  react       fast budgeted loop, no plan (small tasks)")

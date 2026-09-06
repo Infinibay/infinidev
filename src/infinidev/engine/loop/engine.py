@@ -723,6 +723,9 @@ class LoopEngine(AgentEngine):
     ) -> None:
         """Inject user guidance and optional images into the running loop."""
         self._user_message_injector.inject(message, attachments)
+        team = getattr(self, "_team_runtime", None)
+        if team is not None and getattr(self, "_team_actor", "") == "orchestrator":
+            team.forward_user_guidance(message, attachments)
 
     def _drain_user_messages(self) -> list[str]:
         return self._user_message_injector.drain()
@@ -731,6 +734,41 @@ class LoopEngine(AgentEngine):
         self, ctx: "ExecutionContext", messages: list[dict[str, Any]],
     ) -> None:
         self._user_message_injector.inject_mid_step(ctx, messages)
+        self._inject_team_updates(messages)
+
+    def _inject_team_updates(self, messages: list[dict[str, Any]]) -> bool:
+        """Inject collaborator evidence separately from urgent user guidance."""
+        team = getattr(self, "_team_runtime", None)
+        if team is None:
+            return False
+        updates = team.poll(self._team_actor)
+        if not updates:
+            return False
+        from html import escape
+
+        peers = []
+        delivered_user = False
+        for event in json.loads(updates):
+            if event["kind"] == "user_guidance" and event["author"] == "user":
+                if self._team_actor == "orchestrator":
+                    continue  # The principal's existing injector already owns this input.
+                content = ('<user-guidance authority="USER_LITERAL">\n'
+                           + escape(event["content"]) + "\n</user-guidance>")
+                attachments = team.guidance_attachments(event["id"])
+                if attachments:
+                    from infinidev.engine.multimodal import build_user_content
+
+                    content = build_user_content(content, attachments)
+                messages.append({"role": "user", "content": content})
+                delivered_user = True
+            else:
+                peers.append(event)
+        if peers:
+            messages.append({"role": "user", "content": (
+                '<team-updates authority="COLLABORATOR_EVIDENCE">\n'
+                + escape(json.dumps(peers, ensure_ascii=False)) + "\n</team-updates>"
+            )})
+        return bool(peers) or delivered_user
 
     def _queue_context_rank_guidance(self, messages: list[str]) -> None:
         """Refresh automatic retrieval after live user guidance changes the task."""
@@ -743,9 +781,17 @@ class LoopEngine(AgentEngine):
         messages: list[dict[str, Any]],
         step_complete_id: str,
     ) -> bool:
-        return self._user_message_injector.reject_step_complete_on_late_message(
+        if self._user_message_injector.reject_step_complete_on_late_message(
             ctx, messages, step_complete_id,
-        )
+        ):
+            return True
+        if self._inject_team_updates(messages):
+            self._overwrite_step_complete_tool_result(
+                messages, step_complete_id,
+                "Team updates arrived while finishing. Read them before completing this step.",
+            )
+            return True
+        return False
 
     @staticmethod
     def _overwrite_step_complete_tool_result(
@@ -788,6 +834,9 @@ class LoopEngine(AgentEngine):
         # Wake a cooperative foreground tool immediately as well. The task
         # flag remains set after the tool returns, so the loop still stops.
         self._tool_cancel_event.set()
+        team = getattr(self, "_team_runtime", None)
+        if team is not None and getattr(self, "_team_actor", "") == "orchestrator":
+            team.cancel()
 
     def cancel_active_tool(self) -> bool:
         """Ask the current foreground tool batch to stop, without ending the task."""
@@ -1146,6 +1195,9 @@ class LoopEngine(AgentEngine):
         set_file_tracker(ctx.agent_id, ctx.file_tracker)
 
         def _request_capability(capability: str, rationale: str) -> str:
+            if getattr(self, "_tool_allowlist_locked", False):
+                return json.dumps({"error": "This run has a fixed tool allowlist. "
+                                   "Ask the orchestrator to revise the assignment."})
             if not settings.DYNAMIC_TOOL_ROUTING_ENABLED:
                 return json.dumps({"error": "Dynamic tool routing is disabled"})
             from infinidev.engine.schema_sanitizer import build_tool_schemas

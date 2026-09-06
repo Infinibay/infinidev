@@ -138,7 +138,7 @@ def build_system_prompt(
 
     configuration = prompt_configuration or EffectivePromptConfiguration.compile()
     if small_model:
-        identity = CLI_AGENT_IDENTITY_SMALL
+        identity = identity_override or CLI_AGENT_IDENTITY_SMALL
         protocol = LOOP_PROTOCOL_SMALL
         behavior = BEHAVIOR_GUIDELINES_SMALL
     else:

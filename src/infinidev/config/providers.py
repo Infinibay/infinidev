@@ -50,6 +50,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         # the generation, Sol/Terra/Luna are the tiers (flagship / balanced /
         # fastest). `gpt-5.6` remains valid alongside the three.
         static_models=[
+            "gpt-6-astra",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -110,6 +111,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         # all. Retired and deprecated models are left out — offering a model
         # the API will refuse is worse than a short list.
         static_models=[
+            "claude-fable-5-1",
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-fable-5",
@@ -153,6 +155,8 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=True,
         static_models=[
+            "glm-5.3",
+            "glm-5.3-flash",
             "glm-5.2",
             "glm-5.1",
             "glm-5",
@@ -173,6 +177,8 @@ PROVIDERS: dict[str, ProviderConfig] = {
         model_list_format="openai",
         is_native=False,
         static_models=[
+            "glm-5.3",
+            "glm-5.3-flash",
             "glm-5.2",
             "glm-5.1",
             "glm-5",
@@ -287,6 +293,10 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         model_list_format="openai",
         static_models=[
+            "qwen3.8-max",
+            "qwen3.8-flash",
+            "qwen3.8-27b",
+            "qwen3.8-2.4t-a95b",
             "qwen3.7-max",
             "qwen3.7-plus",
             "qwen3.6-max-preview",
@@ -323,6 +333,8 @@ PROVIDERS: dict[str, ProviderConfig] = {
         # catalog exposed by DashScope.
         model_list_format="static",
         static_models=[
+            "qwen3.8-max",
+            "qwen3.8-flash",
             "qwen3.8-max-preview",
             "qwen3.7-max",
             "qwen3.7-plus",

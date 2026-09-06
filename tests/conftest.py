@@ -106,6 +106,15 @@ def bound_tool(tool_context):
 # ── Settings override helpers ────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _isolated_prompt_catalog(tmp_path, monkeypatch):
+    """Keep prompt-loading tests independent of the user's shared catalog."""
+    monkeypatch.setattr(
+        "infinidev.prompts.profiles.get_prompt_catalog_path",
+        lambda: tmp_path / "user-prompts",
+    )
+
+
 @pytest.fixture
 def sandbox_disabled():
     """Ensure sandbox is disabled for the duration of the test."""

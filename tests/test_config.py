@@ -349,13 +349,13 @@ class TestModelCapabilities:
         assert caps.supports_function_calling is False
         assert caps.supports_tool_choice_required is False
 
-    def test_reset_capabilities(self):
-        """_reset_capabilities restores defaults, then auto-detection re-probes."""
+    def test_reset_capabilities(self, monkeypatch):
+        """Reset defaults, then resolve a known preset independently of user settings."""
         import infinidev.config.model_capabilities as mc
+        monkeypatch.setattr(settings, "LLM_PROVIDER", "openai")
+        monkeypatch.setattr(mc, "_detect_vision_support", lambda: False)
         mc._reset_capabilities()
         # After reset, the module-level singleton is unprobed
         assert mc._capabilities.probed is False
-        # But get_model_capabilities() triggers auto-detection (for ollama),
-        # so the returned object is always probed
         caps = mc.get_model_capabilities()
         assert caps.probed is True

@@ -67,7 +67,7 @@ _silence_litellm_debug_output()
 
 
 def _register_custom_models() -> None:
-    """Add model entries that LiteLLM doesn't ship yet."""
+    """Add missing models and apply maintained context limits to existing entries."""
     try:
         import litellm
 
@@ -111,6 +111,31 @@ def _register_custom_models() -> None:
             if model_id not in litellm.model_cost:
                 litellm.model_cost[model_id] = info
                 logger.debug("Registered custom model: %s", model_id)
+            else:
+                # A bundled entry can still have a stale context limit. Keep
+                # its pricing and capabilities while applying our override.
+                litellm.model_cost[model_id] = {
+                    **litellm.model_cost[model_id],
+                    "max_input_tokens": info["max_input_tokens"],
+                }
+        # Anthropic's SDK gates effort using these metadata flags before
+        # sending HTTP. Exact reviewed contracts cover newer aliases even
+        # when the locked SDK's bundled catalog predates their release.
+        from infinidev.config.reasoning import _CLAUDE_ADAPTIVE, effort_profile
+
+        for slug in _CLAUDE_ADAPTIVE:
+            profile = effort_profile("anthropic", slug)
+            for key in (slug, f"anthropic/{slug}"):
+                litellm.model_cost[key] = {
+                    **litellm.model_cost.get(key, {}),
+                    "litellm_provider": "anthropic", "mode": "chat",
+                    "max_input_tokens": 1_000_000, "max_output_tokens": 128_000,
+                    "supports_function_calling": True, "supports_vision": True,
+                    "supports_reasoning": True, "supports_output_config": True,
+                    "supports_adaptive_thinking": True,
+                    **{f"supports_{level}_reasoning_effort": True
+                       for level in profile.choices if level != "off"},
+                }
     except Exception as exc:
         logger.debug("Could not register custom models: %s", exc)
 
@@ -157,6 +182,9 @@ def _install_global_response_normalizer() -> None:
             from infinidev.engine.subscription_safety import pace_llm_request
 
             pace_llm_request()
+            from infinidev.config.reasoning import normalize_model_request
+
+            normalize_model_request(kwargs, bridge=True)
             if _is_codex_request(kwargs):
                 kwargs = _sanitized_for_codex(kwargs)
             if _needs_forced_streaming(kwargs):
@@ -377,6 +405,21 @@ def apply_provider_transport(params: dict[str, Any], provider_id: str) -> None:
     """
     _apply_chatgpt_subscription(params, provider_id)
     _apply_qwen_subscription(params, provider_id)
+    if provider_id == "openai" and settings.LLM_PROVIDER == "openai_subscription":
+        # A metered helper and a Codex principal share the OpenAI prefix.
+        # Keep their route distinguishable to downstream call builders.
+        from infinidev.config.providers import get_provider
+
+        params.setdefault("api_base", get_provider("openai").default_base_url)
+    from infinidev.config.reasoning import apply_reasoning, normalize_model_request
+
+    # Preserve controls supplied explicitly by evaluation/helper callers.
+    body = params.get("extra_body") or {}
+    if not any(key in params or key in body for key in (
+        "thinking", "reasoning", "reasoning_effort", "enable_thinking", "thinking_budget",
+    )):
+        apply_reasoning(params, provider_id, str(params.get("model", "")))
+    normalize_model_request(params)
 
 
 def _codex_api_base() -> str:
@@ -389,6 +432,33 @@ def _codex_api_base() -> str:
 
     base = get_provider(CHATGPT_SUBSCRIPTION_PROVIDER).default_base_url or ""
     return base.rstrip("/").lower()
+
+
+def provider_for_request(params: dict[str, Any], fallback: str) -> str:
+    """Resolve helper calls from their route instead of the principal's settings."""
+    from infinidev.config.providers import PROVIDERS
+
+    base = str(params.get("api_base") or "").rstrip("/").lower()
+    prefix = str(params.get("model", "")).split("/", 1)[0]
+    if base:
+        for provider in PROVIDERS.values():
+            if base == provider.default_base_url.rstrip("/").lower():
+                return provider.id
+    if not base and prefix == "openai" and fallback == "openai_subscription":
+        return fallback
+    native = {
+        "openai": "openai", "anthropic": "anthropic", "gemini": "gemini",
+        "zai": "zai", "moonshot": "kimi", "minimax": "minimax", "mistral": "mistral",
+        "deepseek": "deepseek", "openrouter": "openrouter",
+        "ollama": "ollama", "ollama_chat": "ollama",
+    }
+    if prefix in native:
+        return native[prefix]
+    if prefix == "custom_openai" and fallback not in {
+        "qwen", "qwen_subscription", "llama_cpp", "vllm", "gmi", "openai_compatible",
+    }:
+        return "openai_compatible"
+    return fallback
 
 
 def _is_codex_request(kwargs: dict[str, Any]) -> bool:

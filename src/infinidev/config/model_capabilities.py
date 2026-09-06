@@ -154,7 +154,11 @@ def _bare_model(model: str) -> str:
 
 def _is_reviewed_vision_model(model: str) -> bool:
     """Return whether an exact model has reviewed image-input support."""
-    return _bare_model(model) == "gpt-5.6-sol"
+    return _bare_model(model) in {
+        "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6",
+        "claude-fable-5-1", "glm-5.3-flash", "qwen3.8-max", "qwen3.8-max-preview",
+        "qwen3.8-flash", "qwen3.8-27b", "qwen3.8-2.4t-a95b",
+    }
 
 
 def _generation_route_from_settings() -> ImageGenerationRoute | None:

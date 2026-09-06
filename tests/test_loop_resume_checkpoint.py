@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
+from infinidev.engine.loop.action_record import ActionRecord
 from infinidev.engine.loop.loop_plan import LoopPlan, PlanStep
 from infinidev.engine.loop.loop_state import LoopState
 from infinidev.engine.loop.resume_checkpoint import (
@@ -80,6 +83,58 @@ def test_checkpoint_bounds_large_current_step_outputs() -> None:
     assert len(encoded) <= CHECKPOINT_MAX_UTF8_BYTES
     assert len(checkpoint["state"]["pending_archive"]) <= 24
     assert "checkpoint truncated" in checkpoint["state"]["pending_archive"][-1][2]
+
+
+def test_checkpoint_bounds_large_notes_and_history_without_losing_active_plan() -> None:
+    state = LoopState(
+        plan=LoopPlan(steps=[PlanStep(index=7, title="Fix persistence", status="active")]),
+        notes=["🔍" * 100_000 for _ in range(30)],
+        history=[ActionRecord(step_index=6, summary="observed " * 500_000)],
+        total_tool_calls=123,
+    )
+
+    checkpoint = build_loop_resume_checkpoint(state, _prompt(), _task())
+
+    assert len(json.dumps(checkpoint, ensure_ascii=False).encode("utf-8")) <= (
+        CHECKPOINT_MAX_UTF8_BYTES
+    )
+    restored = LoopState.model_validate(checkpoint["state"])
+    assert restored.plan == state.plan
+    assert restored.total_tool_calls == 123
+    assert restored.notes and restored.history
+    assert state.notes[0] == "🔍" * 100_000
+
+
+def test_checkpoint_rejects_irreducible_plan_instead_of_exceeding_storage_bound() -> None:
+    state = LoopState(plan=LoopPlan(steps=[
+        PlanStep(index=1, title="Keep approved scope", detail="x" * 3_000_000,
+                 user_approved=True, status="active"),
+    ]))
+
+    with pytest.raises(ValueError, match="checkpoint.*limit"):
+        build_loop_resume_checkpoint(state, _prompt(), _task())
+
+
+def test_terminal_checkpoint_can_close_an_oversized_plan(temp_db) -> None:
+    from infinidev.db.service import register_session
+    from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.tools.base.context import set_context
+
+    register_session("oversized-terminal", "/work")
+    set_context(agent_id="developer", session_id="oversized-terminal")
+    state = LoopState(plan=LoopPlan(steps=[
+        PlanStep(index=1, title="Complete the implementation", status="active"),
+    ]))
+    ctx = SimpleNamespace(state=state, desc=_prompt()[0], expected=_prompt()[1], task=_task())
+    engine = LoopEngine()
+    engine._checkpoint(ctx)
+    assert engine._load_persisted_resume_state(_prompt(), _task()) is not None
+
+    state.plan.steps[0].detail = "x" * 3_000_000
+    state.plan.steps[0].status = "done"
+    engine._checkpoint(ctx, terminal_status="done")
+
+    assert engine._load_persisted_resume_state(_prompt(), _task()) is None
 
 
 def test_interrupted_step_context_is_plain_bounded_data() -> None:

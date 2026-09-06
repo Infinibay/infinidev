@@ -34,6 +34,7 @@ _OLLAMA_CTX_CACHE: dict[tuple[str, str], int | None] = {}
 # catalogs such as OpenRouter continue to work without a local mirror.
 _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     # OpenAI
+    "gpt-6-astra": 1_050_000,
     "gpt-5.6-sol": 1_050_000,
     "gpt-5.6-terra": 1_050_000,
     "gpt-5.6-luna": 1_050_000,
@@ -50,6 +51,7 @@ _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     # Anthropic — aliases, matching the catalog in config/providers.py. A
     # dated id here would only ever match a dated id there, and the catalog
     # no longer offers any.
+    "claude-fable-5-1": 1_000_000,
     "claude-opus-5": 1_000_000,
     "claude-sonnet-5": 1_000_000,
     "claude-fable-5": 1_000_000,
@@ -72,7 +74,9 @@ _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     "gemini-2.5-flash": 1_048_576,
     "gemini-2.5-flash-lite": 1_048_576,
     # Z.AI
-    "glm-5.2": 200_000,
+    "glm-5.3": 1_000_000,
+    "glm-5.3-flash": 1_000_000,
+    "glm-5.2": 1_000_000,
     "glm-5.1": 200_000,
     "glm-5": 200_000,
     "glm-5-turbo": 200_000,
@@ -85,6 +89,10 @@ _CLOUD_CTX_OVERRIDES: dict[str, int] = {
     # Qwen — LiteLLM indexes DashScope models under prefixes that never match
     # this provider's `custom_openai/` prefix.  Only limits explicitly listed
     # by Alibaba are included; the unlisted legacy aliases remain unknown.
+    "qwen3.8-max": 1_000_000,
+    "qwen3.8-flash": 1_000_000,
+    "qwen3.8-27b": 1_000_000,
+    "qwen3.8-2.4t-a95b": 1_000_000,
     "qwen3.8-max-preview": 1_000_000,
     "qwen3.7-max": 1_000_000,
     "qwen3.7-plus": 1_000_000,

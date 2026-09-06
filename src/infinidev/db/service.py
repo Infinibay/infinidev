@@ -614,6 +614,8 @@ def persist_session_runtime_state(
     requested_ui_state = dict(ui_state or {})
 
     def _upsert(conn):
+        conn.execute("BEGIN IMMEDIATE")
+        merged_ui_state = dict(requested_ui_state)
         existing = conn.execute(
             "SELECT ui_state_json FROM session_runtime_state WHERE session_id = ?",
             (session_id,),
@@ -628,11 +630,11 @@ def persist_session_runtime_state(
                 # A routine sidebar repaint must merge, not erase, them.
                 for durable_key in ("staged_planning", "loop_resume"):
                     if (
-                        durable_key not in requested_ui_state
+                        durable_key not in merged_ui_state
                         and durable_key in prior_ui
                     ):
-                        requested_ui_state[durable_key] = prior_ui[durable_key]
-        ui_json = json.dumps(requested_ui_state, ensure_ascii=False, default=str)
+                        merged_ui_state[durable_key] = prior_ui[durable_key]
+        ui_json = json.dumps(merged_ui_state, ensure_ascii=False, default=str)
         conn.execute(
             """
             INSERT INTO session_runtime_state
@@ -687,6 +689,54 @@ def get_session_runtime_state(session_id: str) -> dict[str, Any]:
     return execute_with_retry(_query) or {}
 
 
+def _persist_session_runtime_field(
+    session_id: str,
+    field: str,
+    value: dict[str, Any],
+    *,
+    task_description: str = "",
+) -> None:
+    """Merge an engine-owned field without replaying a stale sidebar snapshot."""
+    if not session_id:
+        return
+
+    def _upsert(conn):
+        # The UI and engine use separate connections. Lock before reading so
+        # neither writer can replace state committed during a read/write gap.
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT task_description, ui_state_json FROM session_runtime_state "
+            "WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        ui_state = {}
+        description = task_description
+        if existing:
+            description = existing["task_description"] or task_description
+            try:
+                prior_ui = json.loads(existing["ui_state_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                prior_ui = {}
+            if isinstance(prior_ui, dict):
+                ui_state = prior_ui
+        ui_state[field] = value
+        conn.execute(
+            """
+            INSERT INTO session_runtime_state
+                (session_id, task_description, ui_state_json, updated_at)
+            VALUES (?, ?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+            ON CONFLICT(session_id) DO UPDATE SET
+                task_description = excluded.task_description,
+                ui_state_json = excluded.ui_state_json,
+                updated_at = excluded.updated_at
+            """,
+            (session_id, description, json.dumps(ui_state, ensure_ascii=False, default=str)),
+        )
+        conn.commit()
+
+    execute_with_retry(_upsert)
+
+
 def persist_staged_planning_state(
     session_id: str,
     state: dict[str, Any],
@@ -694,14 +744,8 @@ def persist_staged_planning_state(
     task_description: str = "",
 ) -> None:
     """Merge a durable staged-planning snapshot into the session state."""
-    current = get_session_runtime_state(session_id)
-    ui_state = dict(current.get("ui_state") or {})
-    ui_state["staged_planning"] = state
-    persist_session_runtime_state(
-        session_id,
-        task_description=str(current.get("task_description") or task_description),
-        plan_steps=list(current.get("plan_steps") or []),
-        ui_state=ui_state,
+    _persist_session_runtime_field(
+        session_id, "staged_planning", state, task_description=task_description,
     )
 
 
@@ -712,15 +756,7 @@ def persist_loop_resume_checkpoint(
     """Merge the latest bounded LoopEngine checkpoint into session state."""
     if not session_id or not isinstance(checkpoint, dict):
         return
-    current = get_session_runtime_state(session_id)
-    ui_state = dict(current.get("ui_state") or {})
-    ui_state["loop_resume"] = checkpoint
-    persist_session_runtime_state(
-        session_id,
-        task_description=str(current.get("task_description") or ""),
-        plan_steps=list(current.get("plan_steps") or []),
-        ui_state=ui_state,
-    )
+    _persist_session_runtime_field(session_id, "loop_resume", checkpoint)
 
 
 def get_all_turns(

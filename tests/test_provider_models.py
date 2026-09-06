@@ -28,6 +28,30 @@ def test_minimax_m3_litellm_metadata_uses_its_documented_context() -> None:
     assert litellm.model_cost["minimax/MiniMax-M3"]["max_input_tokens"] == 1_000_000
 
 
+def test_custom_model_registration_updates_stale_context_without_replacing_pricing(
+    monkeypatch,
+) -> None:
+    import litellm
+
+    from infinidev.config.llm import _register_custom_models
+
+    monkeypatch.setattr(litellm, "model_cost", {
+        "minimax/MiniMax-M3": {
+            "max_input_tokens": 512_000,
+            "max_output_tokens": 12345,
+            "input_cost_per_token": 0.000001,
+        },
+    })
+
+    _register_custom_models()
+
+    assert litellm.model_cost["minimax/MiniMax-M3"] == {
+        "max_input_tokens": 1_000_000,
+        "max_output_tokens": 12345,
+        "input_cost_per_token": 0.000001,
+    }
+
+
 def test_catalog_models_use_provider_prefixes() -> None:
     assert get_provider("kimi").prefix == "moonshot/"
     assert get_provider("zai").prefix == "zai/"
@@ -65,6 +89,7 @@ def test_qwen_token_plan_transport_overrides_stale_metered_base() -> None:
             "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
         ),
         "api_key": "subscription-key",
+        "extra_body": {"enable_thinking": True, "reasoning_effort": "medium"},
     }
 
 

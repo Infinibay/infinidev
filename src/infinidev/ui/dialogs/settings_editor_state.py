@@ -58,7 +58,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "Engine": [
         ("TASK_ENGINE_MODE",
          "Task engine: auto picks per task; explicit modes stay pinned",
-         "select:auto,task,react,staged,graph_beta"),
+         "select:orchestrator,auto,task,react,staged,graph_beta"),
         ("AUTO_ENGINE_ALLOW_GRAPH",
          "Let auto pick graph_beta for branching work", "bool"),
         ("ENGINE_SHOW_SELECTION_REASON",

@@ -282,8 +282,16 @@ def call_llm(
     progress. The final assembled response is still returned normally.
     """
     import litellm
-    from infinidev.config.model_capabilities import get_model_capabilities
-    caps = get_model_capabilities()
+    from infinidev.config.llm import provider_for_request
+    from infinidev.config.model_capabilities import (
+        ModelCapabilities, _PROVIDER_PRESETS, get_model_capabilities,
+    )
+
+    provider_id = provider_for_request(params, settings.LLM_PROVIDER)
+    caps = (get_model_capabilities() if provider_id == settings.LLM_PROVIDER else
+            _PROVIDER_PRESETS.get(provider_id, ModelCapabilities(
+                supports_json_mode=False, supports_tool_choice_required=False,
+            )))
 
     kwargs: dict[str, Any] = {**params, "messages": messages}
     # call_llm owns the retry loop. Leaving LiteLLM's retry budget enabled
@@ -298,7 +306,7 @@ def call_llm(
         # rejects the ``tool_choice`` parameter itself. Omitting it lets the
         # backend's automatic selection apply on the first request, which is
         # essential for no-retry evaluation runs.
-        if settings.LLM_PROVIDER != "openai_subscription":
+        if provider_id != "openai_subscription":
             # Downgrade tool_choice if model doesn't support "required"
             if tool_choice == "required" and not caps.supports_tool_choice_required:
                 kwargs["tool_choice"] = "auto"
@@ -319,14 +327,14 @@ def call_llm(
     from infinidev.config.thinking_budget import apply_thinking_budget
     apply_thinking_budget(
         kwargs,
-        settings.LLM_PROVIDER,
+        provider_id,
         kwargs["model"],
         enabled=thinking_enabled,
     )
 
     # --- Apply prompt caching ---
     from infinidev.config.prompt_cache import apply_prompt_caching
-    apply_prompt_caching(kwargs, settings.LLM_PROVIDER)
+    apply_prompt_caching(kwargs, provider_id)
 
     # --- Pre-LLM hook ---
     from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent
@@ -352,7 +360,7 @@ def call_llm(
     # is exactly what made the context bar's "used" count drift. Anthropic,
     # Gemini and Ollama report usage natively, so we skip the flag there to
     # avoid passing a param their (non-OpenAI) endpoints may reject.
-    if use_streaming and settings.LLM_PROVIDER in _STREAM_USAGE_PROVIDERS:
+    if use_streaming and provider_id in _STREAM_USAGE_PROVIDERS:
         kwargs["stream_options"] = {"include_usage": True}
 
     attempts = (
