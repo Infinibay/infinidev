@@ -9,9 +9,11 @@ outcome short-circuit and the ``from_settings`` defensive defaults.
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 
+import pytest
+
+from infinidev.engine.orchestration import autonomous
 from infinidev.engine.orchestration.autonomous import (
     DEFAULT_IDLE_PASSES,
     DEFAULT_MAX_PLANS,
@@ -23,6 +25,14 @@ from infinidev.engine.orchestration.autonomous import (
     should_continue,
     stop_reason,
 )
+
+
+@pytest.fixture
+def budget_clock(monkeypatch):
+    """Advance elapsed time without depending on the runner's uptime."""
+    clock = SimpleNamespace(now=1.0)
+    monkeypatch.setattr(autonomous, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    return clock
 
 
 # ── Defaults ──────────────────────────────────────────────────────────
@@ -82,15 +92,13 @@ def test_token_budget_tope_stops_when_consumed_matches():
     assert should_continue(budget, "continue") is False
 
 
-def test_wall_seconds_tope_stops_when_elapsed_matches():
+def test_wall_seconds_tope_stops_when_elapsed_matches(budget_clock):
     """wall_seconds is evaluated against ``time.monotonic`` anchored at
-    ``start``. We override the anchor to a known past value so the test
-    is deterministic and does not rely on real wall-clock waits.
+    ``start``. Advance a controlled clock to verify the exact boundary.
     """
     budget = AutonomousBudget(wall_seconds=60, max_plans=10)
     budget.start()
-    # Pretend start happened 60s in the past.
-    budget.wall_started_at = time.monotonic() - 60.0
+    budget_clock.now += 60.0
     assert should_continue(budget, "continue") is False
 
 
@@ -230,7 +238,7 @@ def test_budget_status_text_includes_all_four_counters():
     assert "idle 0/1" in text
 
 
-def test_stop_reason_is_concrete_when_chain_terminates():
+def test_stop_reason_is_concrete_when_chain_terminates(budget_clock):
     """After the chain stops, the chat agent should be able to tell the
     user *why* (vs. just "stopped"). The mapping must cover every
     termination path.
@@ -246,7 +254,7 @@ def test_stop_reason_is_concrete_when_chain_terminates():
 
     budget3 = AutonomousBudget(max_plans=10, wall_seconds=60)
     budget3.start()
-    budget3.wall_started_at = time.monotonic() - 60.0
+    budget_clock.now += 60.0
     assert stop_reason(budget3) == "reached wall_seconds=60"
 
     budget4 = AutonomousBudget(max_plans=10, idle_passes=1)
@@ -385,13 +393,13 @@ def test_unlimited_should_continue_ignores_token_budget():
     assert should_continue(budget, "continue") is True
 
 
-def test_unlimited_should_continue_ignores_wall_clock():
+def test_unlimited_should_continue_ignores_wall_clock(budget_clock):
     """Wall clock is also ignored. The chain runs until the engine
     itself reports a terminal outcome.
     """
     budget = AutonomousBudget(max_plans=100, wall_seconds=10, unlimited=True)
     budget.start()
-    budget.wall_started_at = time.monotonic() - 1_000.0
+    budget_clock.now += 1_000.0
     assert budget.wall_elapsed > budget.wall_seconds
     assert should_continue(budget, "continue") is True
 
@@ -431,7 +439,7 @@ def test_unlimited_ignores_engine_terminal_outcomes():
     assert should_continue(budget, "idle") is True
 
 
-def test_unlimited_stop_reason_is_none_while_chain_runs():
+def test_unlimited_stop_reason_is_none_while_chain_runs(budget_clock):
     """In unlimited mode ``stop_reason`` must return ``None`` while the
     chain is allowed to continue, regardless of which other fuse is
     "exhausted". Otherwise the chat agent would falsely announce a
@@ -439,7 +447,8 @@ def test_unlimited_stop_reason_is_none_while_chain_runs():
     """
     budget = AutonomousBudget(max_plans=2, token_budget=10, wall_seconds=1, idle_passes=1, unlimited=True)
     budget.record_outcome("continue", tokens_used=10)
-    budget.wall_started_at = time.monotonic() - 100.0
+    budget.start()
+    budget_clock.now += 100.0
     assert stop_reason(budget) is None
 
 

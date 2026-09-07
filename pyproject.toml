@@ -1,6 +1,6 @@
 [project]
 name = "infinidev"
-version = "0.22.0"
+version = "0.22.1"
 description = "A terminal-based AI programming tool using agent loops."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,7 +23,7 @@ dependencies = [
     "pydantic>=2.11.0",
     "pydantic-settings>=2.10.0",
     "python-dotenv>=1.0.0",
-    "litellm>=1.81.0,!=1.82.7,!=1.82.8",
+    "litellm>=1.89.1",
     "ollama>=0.6.0",
     "chromadb>=1.1.0",
     "numpy>=2.0.0",
