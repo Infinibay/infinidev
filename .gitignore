@@ -87,3 +87,10 @@ bench/data/*.jsonl
 .qwen/
 # Merge-conflict / backup artifacts
 *.orig
+
+# Browser build (included in release wheels after npm run build)
+web/node_modules/
+web/test-results/
+web/playwright-report/
+web/*.tsbuildinfo
+src/infinidev/server/static/

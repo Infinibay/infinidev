@@ -18,6 +18,14 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build web interface
+        working-directory: web
+        run: npm ci && npm run build
       - name: Build wheel and source distribution
         run: uv build
       - name: Validate distribution metadata
@@ -37,6 +45,36 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
       - name: Install locked dependencies
-        run: uv sync --locked --python ${{ matrix.python-version }}
+        run: uv sync --locked --extra web --python ${{ matrix.python-version }}
       - name: Run tests
-        run: uv run --python ${{ matrix.python-version }} pytest -x --tb=short
+        run: uv run --locked --extra web --python ${{ matrix.python-version }} pytest -x --tb=short
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install and test frontend
+        working-directory: web
+        run: npm ci && npm test && npm run build
+      - name: Install browser
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Install browser test server dependencies
+        run: uv sync --locked --extra web
+      - name: Browser integration tests
+        working-directory: web
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-results
+          path: web/test-results

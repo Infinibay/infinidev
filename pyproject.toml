@@ -1,7 +1,7 @@
 [project]
 name = "infinidev"
-version = "0.22.1"
-description = "A terminal-based AI programming tool using agent loops."
+version = "0.23.0"
+description = "An AI programming harness with terminal and web interfaces."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -69,7 +69,10 @@ Repository = "https://github.com/Infinibay/infinidev.git"
 Issues = "https://github.com/Infinibay/infinidev/issues"
 
 [project.scripts]
-infinidev = "infinidev.cli.main:main"
+infinidev = "infinidev.cli.entry:main"
+
+[tool.hatch.build]
+artifacts = ["src/infinidev/server/static/**"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/infinidev"]
@@ -80,6 +83,14 @@ include = [
     "/LICENSE.md",
     "/README.md",
     "/pyproject.toml",
+    "/web/src",
+    "/web/scripts",
+    "/web/package.json",
+    "/web/package-lock.json",
+    "/web/tsconfig.json",
+    "/web/vite.config.ts",
+    "/web/index.html",
+    "/docs/web-harness.md",
 ]
 
 [build-system]
@@ -100,6 +111,7 @@ filterwarnings = [
 ]
 #   uv run pytest --override-ini="addopts="
 [project.optional-dependencies]
+web = ["fastapi>=0.115", "uvicorn>=0.34", "websockets>=13"]
 cuda = ["cupy-cuda12x>=13.0.0"]
 # MNN-backed embedder — ~10x faster than ChromaDB ONNX on CPU, identical
 # output (cosine 1.0000 vs ONNX). Opt-in via INFINIDEV_MNN_MODEL_PATH.

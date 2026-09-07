@@ -969,6 +969,22 @@ wheels = [
 ]
 
 [[package]]
+name = "fastapi"
+version = "0.141.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8a/02/91e3416a8fdd715abb903a952a6bec7cdd8d14eed55d415fc8595524c319/fastapi-0.141.1.tar.gz", hash = "sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1", size = 425799, upload-time = "2026-07-29T17:18:05.568Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/03/10388a42375ee7e4ac9b94eb2c5c569c8b5795e377e701c9ac3ad63de890/fastapi-0.141.1-py3-none-any.whl", hash = "sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3", size = 131954, upload-time = "2026-07-29T17:18:04.364Z" },
+]
+
+[[package]]
 name = "fastcore"
 version = "1.12.43"
 source = { registry = "https://pypi.org/simple" }
@@ -1582,7 +1598,7 @@ wheels = [
 
 [[package]]
 name = "infinidev"
-version = "0.22.1"
+version = "0.23.0"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
@@ -1655,6 +1671,11 @@ mnn = [
     { name = "mnn" },
     { name = "transformers" },
 ]
+web = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1677,6 +1698,7 @@ requires-dist = [
     { name = "datasets", marker = "extra == 'finetune-unsloth'", specifier = ">4.1,<4.4" },
     { name = "deepspeed", marker = "sys_platform == 'linux' and extra == 'finetune'", specifier = ">=0.17,<1" },
     { name = "duckduckgo-search", specifier = ">=8.1.0" },
+    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "ken-rank", specifier = ">=0.13.1" },
     { name = "langdetect", specifier = ">=1.0.9" },
@@ -1723,11 +1745,13 @@ requires-dist = [
     { name = "tree-sitter-yaml", specifier = ">=0.6.0" },
     { name = "trl", marker = "extra == 'finetune-unsloth'", specifier = ">=0.24,<2" },
     { name = "unsloth", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'finetune-unsloth'", specifier = ">=2026.3.17,<2027" },
+    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.34" },
     { name = "watchfiles", specifier = ">=0.24.0" },
+    { name = "websockets", marker = "extra == 'web'", specifier = ">=13" },
     { name = "wordfreq", specifier = ">=3.1.1" },
     { name = "yappi", specifier = ">=1.6.0" },
 ]
-provides-extras = ["cuda", "mnn", "finetune", "finetune-unsloth"]
+provides-extras = ["web", "cuda", "mnn", "finetune", "finetune-unsloth"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -12,6 +12,11 @@ and keep project knowledge across sessions.
 It works with hosted models through LiteLLM and with local models through
 [Ollama](https://ollama.com).
 
+An optional React web workspace provides conversations, named teams and tickets,
+shared notes, live process output, file diffs, findings, model settings and usage.
+It drives the same harness as the terminal. See [Web workspace](docs/web-harness.md)
+for setup, development and the current scope.
+
 ![Infinidev TUI](https://raw.githubusercontent.com/Infinibay/infinidev/main/public/screenshot.png)
 
 ## Install
