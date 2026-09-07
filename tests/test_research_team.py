@@ -66,6 +66,36 @@ def _delegate(team, ticket, **kwargs):
                          tools=kwargs.pop("tools", ["read_file"]), **kwargs)
 
 
+def test_member_name_and_display_role_reach_messages_and_notes(team):
+    runtime = team()
+    member = _delegate(runtime, _ticket(runtime), name="Lucía", role="Researcher")
+    _finish(runtime)
+    assert member["role"] == "Researcher"
+    assert runtime.read()["agents"][1]["role"] == "Researcher"
+    message = runtime.send(ROOT, recipient="Lucía", content="Check the gradients")
+    assert message["recipient"] == member["id"]
+    assert message["recipient_label"] == "Lucía · Researcher"
+    assert message["author_label"] == "Orchestrator"
+    note = runtime.write_note(member["id"], content="Cache inspected", kind="observation", refs=[])
+    assert note["author_label"] == "Lucía · Researcher"
+    _finish(runtime)
+    runtime.close()
+    resumed = team()
+    assert resumed.read()["agents"][1]["role"] == "Researcher"
+    assert resumed.read(view="notes")["events"][0]["author_label"] == "Lucía · Researcher"
+
+
+def test_delegation_schema_requires_a_descriptive_role():
+    from infinidev.tools.team.tools import DelegateInput
+
+    payload = dict(ticket_id="t_1", name="Lucía", system_prompt="Inspect source", tools=[])
+    with pytest.raises(ValidationError):
+        DelegateInput(**payload)
+    with pytest.raises(ValidationError):
+        DelegateInput(**payload, role="   ")
+    assert DelegateInput(**payload, role="Researcher").role == "Researcher"
+
+
 def test_reports_require_review_and_dependencies_require_acceptance(team):
     runtime = team()
     first = _ticket(runtime)

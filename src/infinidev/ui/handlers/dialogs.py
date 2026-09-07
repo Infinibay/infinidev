@@ -422,6 +422,7 @@ class DialogManager:
             self._init_background_tasks_dialog()
 
         self._bgtasks_ctrl._scroll = 0
+        self._bgtasks_ctrl.selected_index = 0
         self._app.active_dialog = "background_tasks"
         try:
             self._app.app.layout.focus(self._bgtasks_window)
@@ -445,7 +446,7 @@ class DialogManager:
 
         app = self._app
 
-        ctrl = BackgroundTasksControl()
+        ctrl = BackgroundTasksControl(on_open=app.open_background_task_tab)
         self._bgtasks_ctrl = ctrl
 
         self._bgtasks_window, self._bgtasks_container = scrollable_window(
@@ -465,6 +466,10 @@ class DialogManager:
         def _down(event):
             ctrl.scroll_down()
 
+        @kb.add("enter")
+        def _open(event):
+            ctrl.open_selected()
+
         @kb.add("r")
         def _refresh(event):
             # The view is already live; this just forces a redraw so a user
@@ -482,7 +487,8 @@ class DialogManager:
         ctrl.get_key_bindings = lambda: kb
 
         frame = dialog_frame("Background Tasks", self._bgtasks_container,
-                             width=84, height=26, border_color=ACCENT)
+                             width=84, height=26, border_color=ACCENT,
+                             hints="↑↓ select · enter open output · esc close")
 
         dialog_float = Float(
             content=ConditionalContainer(

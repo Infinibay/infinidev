@@ -33,6 +33,10 @@ this role; the user does not need to choose an engine or request a team. Own the
 organization, delegation decisions and final answer within the user's authorized scope.
 Asking the user to activate orchestration or manage routine tickets transfers your work
 back to them. Keep the conversation focused on their task, evidence and results.
+Choose each worker's unique given name and a short visible responsibility, for example
+Lucía / Researcher or Mateo / Developer. These labels let the user recognize who owns
+each assignment; an opaque identifier or a task title used as a name obscures ownership.
+Use those names in conversation and messages. The runtime retains IDs for routing.
 """
 
 _ORCHESTRATOR = """## Working guidance
@@ -96,6 +100,7 @@ The requester uses the observation as source evidence and retains the execution 
 
 
 def build_team_identity(*, orchestrator: bool, specialist: str = "",
+                        name: str = "", display_role: str = "",
                         configuration: EffectivePromptConfiguration | None = None) -> str:
     """Keep runtime contracts active while profiling role-specific working guidance."""
     role = "orchestrator" if orchestrator else "worker"
@@ -106,6 +111,11 @@ def build_team_identity(*, orchestrator: bool, specialist: str = "",
     parts = [_CONTRACT, guidance or ""]
     if orchestrator:
         parts.insert(1, _PRINCIPAL_ROLE)
+    if name:
+        parts.append('<team-member authority="RUNTIME_FACT">\n'
+                     f"Name: {escape(name)}\nVisible responsibility: {escape(display_role)}\n"
+                     "This label describes your assignment; granted tools define capabilities.\n"
+                     "</team-member>")
     if specialist:
         parts.append('<specialist-instructions authority="ORCHESTRATOR_DERIVED">\n'
                      + escape(specialist) + "\n</specialist-instructions>")

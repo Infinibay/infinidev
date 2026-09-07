@@ -63,7 +63,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "PANELS\n"
         "  Alt+.  ·  F4  ·  /sidebar    Session panel (steps, files, context)\n"
         "  Ctrl+E        ·  /files      File tree\n"
-        "  Ctrl+B        ·  /tasks      Background tasks\n"
+        "  Ctrl+B        ·  /ps /bg     Background tasks (Enter opens live output)\n"
         "  Ctrl+A        ·  /agents     Council and subagent chats\n"
         "\n"
         "KEYS\n"
@@ -88,6 +88,7 @@ def _cmd_help(app: InfinidevApp, parts: list[str]) -> None:
         "  /prompts enable|disable <n>  Toggle it for future tasks\n"
         "  /prompts reset <name>        Remove your override and inherit state\n"
         "  /effort [level]              Reasoning depth this model accepts\n"
+        "  /usage                       Provider usage, quota and billing availability\n"
         "  /engine [mode]               Task engine: orchestrator|auto|task|react|staged|graph_beta\n"
         "  /settings [key] [value]      Show or change settings\n"
         "  /mcp [restart <name>]        Index server health (Ken and others)\n"
@@ -154,13 +155,41 @@ def _cmd_effort(app: InfinidevApp, parts: list[str]) -> None:
     handle_effort(app, parts)
 
 
+def _cmd_usage(app: InfinidevApp, parts: list[str]) -> None:
+    from infinidev.config.usage import UsageSelection, render_usage
+    from infinidev.ui.workers import run_in_background
+
+    if len(parts) != 1:
+        app.add_message("System", "Usage: /usage", "system")
+        return
+    if getattr(app, "_usage_pending", False):
+        app.flash_status("Usage query already in progress")
+        return
+    selection = UsageSelection.current()
+    app._usage_pending = True
+    app.flash_status("Reading provider usage…")
+
+    def query():
+        try:
+            app.add_message("System", render_usage(selection), "system")
+        finally:
+            app._usage_pending = False
+
+    run_in_background(app, query)
+
+
 def _cmd_findings(app: InfinidevApp, parts: list[str]) -> None:
     app.dialog_manager.open_findings(filter_type=None)
 
 
 def _cmd_tasks(app: InfinidevApp, parts: list[str]) -> None:
-    """Open the background-tasks explorer (same as Ctrl+B)."""
-    app.dialog_manager.open_background_tasks()
+    """List background tasks or open one task's live output tab."""
+    if len(parts) > 2:
+        app.add_message("System", f"Usage: {parts[0]} [task-id]", "system")
+    elif len(parts) == 2:
+        app.open_background_task_tab(parts[1])
+    else:
+        app.dialog_manager.open_background_tasks()
 
 
 def _cmd_agents(app: InfinidevApp, parts: list[str]) -> None:
@@ -600,10 +629,13 @@ _COMMAND_TABLE: dict[str, Any] = {
     "/models": _cmd_models,
     "/prompts": _cmd_prompts,
     "/effort": _cmd_effort,
+    "/usage": _cmd_usage,
     "/debug": _cmd_debug,
     "/notes": _cmd_notes,
     "/findings": _cmd_findings,
     "/tasks": _cmd_tasks,
+    "/ps": _cmd_tasks,
+    "/bg": _cmd_tasks,
     "/agents": _cmd_agents,
     "/knowledge": _cmd_knowledge,
     "/documentation": _cmd_docs,

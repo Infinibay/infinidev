@@ -25,7 +25,8 @@ class CreateTicketInput(BaseModel):
 
 class DelegateInput(BaseModel):
     ticket_id: Name
-    name: Name
+    name: Name = Field(description="Unique human-readable given name, e.g. Lucía or Mateo")
+    role: Name = Field(description="Visible responsibility, e.g. Researcher, Developer, Reviewer")
     system_prompt: Text = Field(description="Specialist guidance within inherited user/project scope")
     tools: list[Name] = Field(max_length=80, description="Exact names from team_tool_catalog")
     worker_id: Name | None = Field(default=None, description="Reuse an idle worker from the roster")
@@ -106,7 +107,9 @@ class CreateTicketTool(TeamTool):
 
 class DelegateTool(TeamTool):
     name: str = "team_delegate"
-    description: str = "Start a ticket worker asynchronously with a specialist prompt and exact tools."
+    description: str = (
+        "Start a ticket worker with a chosen name, visible role, specialist prompt and exact tools."
+    )
     args_schema: type[BaseModel] = DelegateInput
 
 

@@ -148,11 +148,13 @@ def handle_command(cmd_text: str, session_id: str | None = None):
         click.echo("  /reindex [--full]  - Re-index the workspace (--full clears DB first)")
         click.echo("  /think             - Enable deep analysis for the next task")
         click.echo("  /effort [level]    - Show or set reasoning effort (levels depend on model)")
+        click.echo("  /usage             - Show provider usage, quota and billing availability")
         click.echo("  /explore <problem> - Decompose and explore a complex problem")
         click.echo("  /brainstorm <problem> - Creative ideation with forced perspectives")
         click.echo("  /refactor [scope]  - Refactor code (modularize, clean, restructure)")
         click.echo("  /init              - Explore and document the current project")
         click.echo("  /tasks [id]        - List background tasks (or show one task's output)")
+        click.echo("  /ps [id], /bg [id] - Aliases for /tasks (live output tabs in TUI mode)")
         click.echo("  /agents [council] [agent] - Inspect council and agent transcripts")
         click.echo("  /session <name>    - Name the current session (--resume manages prior ones)")
         click.echo("  /exit, /quit       - Exit the CLI")
@@ -173,7 +175,7 @@ def handle_command(cmd_text: str, session_id: str | None = None):
             click.echo(click.style("Usage: /session <name>", fg="yellow"))
         return True
 
-    elif cmd == "/tasks":
+    elif cmd in {"/tasks", "/ps", "/bg"}:
         _render_background_tasks_classic(parts[1] if len(parts) > 1 else None)
         return True
 
@@ -194,6 +196,12 @@ def handle_command(cmd_text: str, session_id: str | None = None):
 
     elif cmd == "/effort":
         handle_effort_command(parts)
+        return True
+
+    elif cmd == "/usage":
+        from infinidev.config.usage import render_usage
+
+        click.echo(render_usage() if len(parts) == 1 else "Usage: /usage")
         return True
 
     elif cmd == "/init":

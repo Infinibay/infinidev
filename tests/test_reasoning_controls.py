@@ -92,6 +92,8 @@ def test_openai_effort_survives_full_completion_to_http(monkeypatch, model, leve
     import litellm
 
     from infinidev.config.llm import get_litellm_params
+    from infinidev.config.usage import UsageSelection
+    from infinidev.engine import usage
     from infinidev.engine.llm_client import call_llm
     from litellm.llms.custom_httpx.http_handler import HTTPHandler
 
@@ -102,6 +104,8 @@ def test_openai_effort_survives_full_completion_to_http(monkeypatch, model, leve
     monkeypatch.setattr(settings, "LLM_TEMPERATURE", 0.2)
     monkeypatch.setattr(settings, "THINKING_BUDGET", level)
     monkeypatch.setattr(litellm, "drop_params", False)
+    ledger = usage.UsageLedger()
+    monkeypatch.setattr(usage, "usage_ledger", ledger)
     requests = []
 
     def post(self, url, **kwargs):
@@ -154,6 +158,10 @@ def test_openai_effort_survives_full_completion_to_http(monkeypatch, model, leve
                         }}], retry_attempts=1,
                         on_thinking_chunk=(lambda text: None) if stream else None)
     assert response.choices[0].message.content == "Checked."
+    snapshot = ledger.snapshot(UsageSelection.current().request_params())
+    assert snapshot["requests"] == 1
+    assert snapshot["input_tokens"] == 8
+    assert snapshot["output_tokens"] == 2
     assert len(requests) == 1
     url, payload = requests[0]
     assert url == "https://api.openai.com/v1/responses"

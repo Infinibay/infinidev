@@ -75,6 +75,8 @@ for the catalog format and precedence rules.
 ## What it includes
 
 - A live terminal UI with task progress, diffs, files, logs, and context usage.
+- Live output tabs for background commands through `/ps` or `/bg`.
+- Research teams with named specialists, visible roles, shared notes, and direct messages.
 - Plan-execute-summarize and staged execution for long, multi-step tasks.
 - File, shell, Git, web, code-intelligence, knowledge, and image tools.
 - Persistent, searchable working memory with recoverable tool evidence.
@@ -95,6 +97,8 @@ for the catalog format and precedence rules.
 | `/plan <task>` | Review a plan before execution |
 | `/mcp` | Show MCP server health |
 | `/findings` | Browse saved project knowledge |
+| `/ps` or `/bg` | Select a background task and open its live output |
+| `/usage` | Show usage and available quota information for the selected provider |
 | `/reindex` | Rebuild the local code index |
 | `/clear` | Clear the transcript |
 | `/exit` | Quit |
@@ -103,11 +107,10 @@ for the catalog format and precedence rules.
 
 ```text
 request
-  -> read-only chat agent
-  -> planner (when code work is needed)
-  -> plan-execute-summarize loop
-  -> tests and objective checks
-  -> review
+  -> principal agent
+  -> direct work or tickets and delegated specialists
+  -> evidence, tests, and objective checks
+  -> principal review
   -> result
 ```
 
@@ -120,6 +123,10 @@ recent completed councils by default, while always preserving active councils. S
 `COUNCIL_HISTORY_LIMIT` in `.infinidev/settings.json` (or
 `INFINIDEV_COUNCIL_HISTORY_LIMIT`) to a non-negative number; use `0` to discard a
 transcript after its completion event or `null` for unlimited retention.
+
+See [Background tasks](docs/background-tasks.md) for output tabs and shortcuts,
+[Research teams](docs/research-teams.md) for delegation and shared notes, and
+[Provider usage](docs/usage.md) for quota sources and optional billing credentials.
 
 ## Development
 

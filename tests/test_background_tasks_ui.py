@@ -75,7 +75,7 @@ class TestTuiControl:
         ctrl = BackgroundTasksControl()
         ctrl.create_content(80, 24)
         ctrl.scroll_up()  # already at top
-        assert ctrl._scroll == 0
+        assert ctrl.selected_index == 0
 
 
 class TestClassicRenderer:

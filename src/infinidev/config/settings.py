@@ -132,6 +132,8 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "ollama_chat/qwen2.5-coder:7b"
     LLM_BASE_URL: str = "http://localhost:11434"
     LLM_API_KEY: str = "ollama"
+    USAGE_OPENAI_ADMIN_KEY: str = ""
+    USAGE_ANTHROPIC_ADMIN_KEY: str = ""
     LLM_TIMEOUT: int = 1800  # Request timeout in seconds (default 30 min for large local models)
     # Hosted APIs should fail back to the engine while recovery is still
     # useful. Editable/self-hosted endpoints keep LLM_TIMEOUT because large

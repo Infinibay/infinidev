@@ -65,6 +65,8 @@ class BackgroundTask:
         self.killed_reason: str | None = None
         self._stdout = bytearray()
         self._stderr = bytearray()
+        self._combined = bytearray()
+        self._combined_discarded = 0
         self._lock = threading.Lock()
         self._reader = threading.Thread(
             target=self._pump, name=f"bg-pump-{task_id}", daemon=True
@@ -99,6 +101,11 @@ class BackgroundTask:
                     # Keep only the trailing window per stream.
                     if len(buf) > _MAX_BUFFER_BYTES:
                         del buf[:-_MAX_BUFFER_BYTES]
+                    self._combined.extend(data)
+                    discarded = max(0, len(self._combined) - _MAX_BUFFER_BYTES)
+                    if discarded:
+                        del self._combined[:discarded]
+                        self._combined_discarded += discarded
         # Close any pipes still open — the EOF branch closes per-stream, but
         # the select-error `break` above exits with handles still in `fds`,
         # which would otherwise leak the pipe fds for the process's lifetime.
@@ -177,6 +184,17 @@ class BackgroundTask:
             out = bytes(self._stdout)
             err = bytes(self._stderr)
         return out.decode(errors="replace"), err.decode(errors="replace")
+
+    def combined_output(self) -> tuple[str, int]:
+        """Return output in capture order and the number of discarded bytes.
+
+        Unlike output(), this snapshot never waits for the reader thread:
+        live UI renders must stay responsive while inherited pipes drain.
+        """
+        with self._lock:
+            data = bytes(self._combined)
+            discarded = self._combined_discarded
+        return data.decode(errors="replace"), discarded
 
     # ── Control ──────────────────────────────────────────────────────
     def wait(

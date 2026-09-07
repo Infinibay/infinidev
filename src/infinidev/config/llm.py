@@ -202,6 +202,9 @@ def _install_global_response_normalizer() -> None:
                 response = _completion_via_forced_stream(_original, args, kwargs)
             else:
                 response = _original(*args, **kwargs)
+            from infinidev.engine.usage import usage_ledger
+
+            response = usage_ledger.observe(response, kwargs)
             if kwargs.get("stream"):
                 return response
             try:

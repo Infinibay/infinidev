@@ -24,6 +24,21 @@ def test_widget_registered_under_tool_call_type():
     assert get_widget("tool_call").__class__.__name__ == "ToolCallWidget"
 
 
+def test_team_message_shows_names_and_roles_without_mutating_ids(widget):
+    message = {
+        "tool_name": "team_send_message", "args": {"recipient": "w_123"},
+        "result": json.dumps({"author": "orchestrator", "author_label": "Orchestrator",
+                              "recipient": "w_123", "recipient_label": "Lucía · Researcher",
+                              "content": "Check the cache"}),
+    }
+    rendered = _flat(widget.render(message, 100))
+    assert "Lucía · Researcher" in rendered
+    assert "Orchestrator" in rendered
+    assert "w_123" not in rendered
+    assert message["args"]["recipient"] == "w_123"
+    assert json.loads(message["result"])["recipient"] == "w_123"
+
+
 # ── Per-tool formatter coverage ─────────────────────────────────────────
 
 

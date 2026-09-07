@@ -23,7 +23,9 @@ intérprete permite las operaciones normales de esa herramienta dentro del sandb
    establecida y consultas directas. Si delega, crea tickets con pregunta, entregable,
    aceptación, restricciones y dependencias.
 2. Consulta `team_tool_catalog` y utiliza `team_delegate` para asignar un ticket,
-   `system_prompt`, nombre y herramientas. No carga todos los esquemas en su propio prompt.
+   `system_prompt`, nombre, rol visible y herramientas. Elige un nombre de persona único
+   y una responsabilidad breve, por ejemplo `Lucía · Researcher` o `Mateo · Developer`.
+   No carga todos los esquemas en su propio prompt.
 3. Los trabajadores inspeccionan fuentes, ejecutan comprobaciones autorizadas, publican
    notas y preguntan a compañeros. Reciben también los adjuntos del turno.
 4. Un reporte entregado deja el ticket en `review`. El principal inspecciona su evidencia
@@ -37,13 +39,20 @@ verdadera. El prompt exige contrastar evidencia y conservar los resultados negat
 
 ## Conversación y notas
 
+Las delegaciones, el tablero, las notas y los mensajes muestran el nombre y rol del
+responsable. El rol es descriptivo: no concede herramientas ni reemplaza el rol interno
+que controla permisos. Los IDs permanecen en los datos guardados y en las respuestas
+copiadas de las herramientas para conservar referencias estables. Las consultas del
+historial resuelven las etiquetas con el nombre y rol actuales del miembro.
+
 `team_send_message` acepta el ID o nombre de un compañero, `orchestrator` o `all`.
-Devuelve inmediatamente un ID. Ejemplo de interacción:
+Los nombres se comparan sin distinguir mayúsculas. Devuelve inmediatamente un ID.
+Ejemplo de interacción:
 
 ```text
-Investigador: Che, ¿puedes averiguar si la escritura del cache hace detach?
-Auditor: Sí. En cache.py:42 se llama detach antes de guardar. Inspeccioné el código;
-         todavía no ejecuté una prueba de autograd. [reply_to: ID de la pregunta]
+Lucía · Researcher: Che, ¿puedes averiguar si la escritura del cache hace detach?
+Mateo · Developer: Sí. En cache.py:42 se llama detach antes de guardar. Inspeccioné
+                  el código; todavía no ejecuté autograd. [reply_to: ID de la pregunta]
 ```
 
 Una pregunta nueva puede reactivar a un trabajador inactivo. Las respuestas con

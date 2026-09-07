@@ -13,6 +13,13 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def member_label(member: dict) -> str:
+    """Human-facing identity; operational IDs and capability roles stay separate."""
+    name = member.get("name") or member["id"]
+    role = member.get("role") or "Specialist"
+    return name if name.casefold() == role.casefold() else f"{name} · {role}"
+
+
 class TeamStore:
     """Keep one board per workspace/session; serialize competing updates in SQLite."""
 
@@ -105,8 +112,17 @@ class TeamStore:
             fields = ("id", "kind", "author", "recipient", "ticket_id", "reply_to",
                       "supersedes", "content", "refs", "created_at", "superseded_by")
             result = [dict(zip(fields, row)) for row in rows]
+            team = conn.execute("SELECT state FROM research_teams WHERE id = ?",
+                                (self.team_id,)).fetchone()
+            members = json.loads(team[0]).get("agents", {}) if team else {}
             for item in result:
                 item["refs"] = json.loads(item["refs"])
+                for field in ("author", "recipient"):
+                    actor = item[field]
+                    if actor in members:
+                        item[f"{field}_label"] = member_label(members[actor])
+                    elif actor in {"user", "all"}:
+                        item[f"{field}_label"] = "You" if actor == "user" else "Everyone"
             return result
 
         return execute_with_retry(read)

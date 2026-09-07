@@ -88,6 +88,10 @@ class InfinidevApp:
         self._agent_tab_messages: dict[str, list[dict[str, Any]]] = {}
         self._agent_tab_controls: dict[str, ChatHistoryControl] = {}
         self._agent_tab_windows: dict[str, Any] = {}
+        self._background_tab_names: dict[str, str] = {}
+        self._background_tab_controls: dict[str, Any] = {}
+        self._background_tab_windows: dict[str, Any] = {}
+        self._background_tab_containers: dict[str, Any] = {}
         # Attachment tray: images queued for the next submit via /attach or
         # drag-drop auto-detect. Drained when the user submits the message
         # that actually carries them.
@@ -466,7 +470,9 @@ class InfinidevApp:
         def _tick():
             while True:
                 time.sleep(0.33)  # ~3 FPS — enough for smooth spinners
-                if self._engine_running or self._streaming_token_count > 0:
+                if (self._engine_running or self._streaming_token_count > 0
+                        or self.active_dialog == "background_tasks"
+                        or self.active_tab in self._background_tab_controls):
                     try:
                         self.invalidate()
                     except Exception:
@@ -1227,6 +1233,15 @@ class InfinidevApp:
         return self.file_manager.get_explorer_content()
 
     def close_active_tab(self) -> None:
+        if self.active_tab in self._background_tab_controls:
+            tab_id = self.active_tab
+            self._background_tab_names.pop(tab_id, None)
+            self._background_tab_controls.pop(tab_id, None)
+            self._background_tab_windows.pop(tab_id, None)
+            self._background_tab_containers.pop(tab_id, None)
+            self.active_tab = "chat"
+            self.focus_chat()
+            return
         if self.active_tab in self._agent_tab_names:
             tab_id = self.active_tab
             self._agent_tab_names.pop(tab_id, None)
@@ -1248,8 +1263,37 @@ class InfinidevApp:
         pass  # Phase 8
 
     def show_background_tasks(self) -> None:
-        """Open the background-tasks explorer (Ctrl+B / /tasks)."""
+        """Open the background-tasks selector (Ctrl+B, /ps, /bg, /tasks)."""
         self.dialog_manager.open_background_tasks()
+
+    def open_background_task_tab(self, task_id: str) -> None:
+        """Open or focus a live output view; closing it leaves the process running."""
+        from infinidev.tools.shell.background_manager import get_background_manager
+        from infinidev.ui.controls.background_output import BackgroundTaskOutputControl
+        from infinidev.ui.controls.clickable_scrollbar import scrollable_window
+
+        task = get_background_manager().get(task_id)
+        if task is None:
+            self.flash_status(f"No background task '{task_id}'")
+            return
+        tab_id = f"background:{task_id}"
+        if tab_id not in self._background_tab_controls:
+            control = BackgroundTaskOutputControl(task)
+            window, container = scrollable_window(
+                control, wrap_lines=False, get_vertical_scroll=control.get_vertical_scroll,
+            )
+            self._background_tab_names[tab_id] = f"{task_id} · {task.description[:28]}"
+            self._background_tab_controls[tab_id] = control
+            self._background_tab_windows[tab_id] = window
+            self._background_tab_containers[tab_id] = HSplit([
+                Window(FormattedTextControl(control.status_fragments), height=1),
+                container,
+                Window(FormattedTextControl(
+                    " ↑↓ / PgUp / PgDn scroll · End follow · Ctrl+W close · F2 chat"
+                ), height=1, style=TEXT_MUTED),
+            ])
+        self.active_dialog = None
+        self._switch_tab(tab_id)
 
     def show_agents(self) -> None:
         """Open the council/agent inspector."""
@@ -1441,6 +1485,11 @@ class InfinidevApp:
         self.dialog_manager.open_findings(filter_type=filter_type)
 
     def _switch_tab(self, tab_id: str) -> None:
+        if tab_id in self._background_tab_windows:
+            self.active_tab = tab_id
+            self.app.layout.focus(self._background_tab_windows[tab_id])
+            self.invalidate()
+            return
         if tab_id in self._agent_tab_names:
             self.active_tab = tab_id
             self.invalidate()
@@ -1523,6 +1572,7 @@ class InfinidevApp:
         cache_key = (
             self.active_tab, tuple(self._tab_names.items()),
             tuple(self._agent_tab_names.items()), frozenset(self._dirty_files),
+            tuple(self._background_tab_names.items()),
         )
         cached = getattr(self, "_tab_bar_cache", None)
         cached_key = getattr(self, "_tab_bar_cache_key", None)
@@ -1541,8 +1591,9 @@ class InfinidevApp:
         else:
             fragments.append((f"{TEXT_MUTED} bg:{SURFACE_LIGHT}", " Chat ", _click_chat))
 
-        # File tabs
-        for tab_id, name in self._agent_tab_names.items():
+        for tab_id, name in (
+            *self._agent_tab_names.items(), *self._background_tab_names.items(),
+        ):
             def _click_agent_tab(mouse_event, tid=tab_id):
                 if mouse_event.event_type == MouseEventType.MOUSE_UP:
                     self._switch_tab(tid)
@@ -1578,6 +1629,9 @@ class InfinidevApp:
         """Return the stable Window/container for the currently active tab."""
         if self.active_tab == "chat":
             return self._chat_content_window
+        background_view = self._background_tab_containers.get(self.active_tab)
+        if background_view is not None:
+            return background_view
         agent_window = self._agent_tab_windows.get(self.active_tab)
         if agent_window is not None:
             return agent_window

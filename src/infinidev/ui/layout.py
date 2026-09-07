@@ -99,6 +99,7 @@ def build_layout(app_state: InfinidevApp) -> Layout:
         filter=Condition(lambda: bool(
             getattr(app_state, "_tab_names", None)
             or getattr(app_state, "_agent_tab_names", None)
+            or getattr(app_state, "_background_tab_names", None)
         )),
     )
 

@@ -163,6 +163,7 @@ def create_global_keybindings(app_state) -> KeyBindings:
     @kb.add("f2")
     def focus_chat(event):
         """Move focus to the chat input."""
+        app_state.active_tab = "chat"
         app_state.focus_chat()
 
     @kb.add("f3")
@@ -183,6 +184,10 @@ def create_global_keybindings(app_state) -> KeyBindings:
     #    regardless of which control owns focus. Home/End stay local
     #    to the chat control to avoid hijacking buffer Home/End.
     def _chat_ctrl():
+        background = getattr(app_state, "_background_tab_controls", {})
+        active = getattr(app_state, "active_tab", "chat")
+        if active in background:
+            return background[active]
         return getattr(app_state, "_chat_history_control", None)
 
     @kb.add("pageup")

@@ -615,7 +615,35 @@ def _fmt_web(args, result, error, width) -> SectionList:
     return [_kv("target", target)]
 
 
+def _team_display(value):
+    """Resolve attributed team labels for display without changing stored tool output."""
+    if isinstance(value, list):
+        return [_team_display(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    return {
+        key: value.get(f"{key}_label") or _team_display(item)
+        for key, item in value.items() if not key.endswith("_label")
+    }
+
+
+def _fmt_team(args, result, error, width) -> SectionList:
+    parsed = _try_parse_json(result)
+    display_args = dict(args)
+    if isinstance(parsed, dict):
+        for key in ("recipient", "author", "assignee"):
+            if key in display_args and parsed.get(f"{key}_label"):
+                display_args[key] = parsed[f"{key}_label"]
+    output = json.dumps(_team_display(parsed), ensure_ascii=False) if parsed is not None else result
+    return _fmt_default("team", display_args, output, error, width)
+
+
 _TOOL_FORMATTERS: dict[str, Callable[[dict, str, str, int], SectionList]] = {
+    "team_send_message": _fmt_team,
+    "team_write_note": _fmt_team,
+    "team_read": _fmt_team,
+    "team_wait": _fmt_team,
+    "team_delegate": _fmt_team,
     "read_file": _fmt_read_file,
     "partial_read": _fmt_partial_read,
     "create_file": _fmt_create_file,

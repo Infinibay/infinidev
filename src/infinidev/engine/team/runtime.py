@@ -13,7 +13,7 @@ from copy import copy
 from pathlib import Path
 from typing import Any, Callable
 
-from infinidev.engine.team.store import TeamStore, now
+from infinidev.engine.team.store import TeamStore, member_label, now
 
 logger = logging.getLogger(__name__)
 ROOT = "orchestrator"
@@ -88,6 +88,7 @@ class TeamRuntime:
                              workspace_path=workspace_path)
             for member in state["agents"].values():
                 member["status"] = "idle"
+                member.setdefault("role", "Specialist")
             for ticket in state["tickets"].values():
                 if ticket["status"] == "running":
                     ticket["status"] = "interrupted"
@@ -97,7 +98,7 @@ class TeamRuntime:
             state.update(running=True, owner_pid=os.getpid(), run_id=self._run_id)
             cursor = state["agents"].get(ROOT, {}).get("cursor", 0)
             state["agents"][ROOT] = {"id": ROOT, "name": "Orchestrator", "status": "running",
-                                     "cursor": cursor}
+                                     "role": "Orchestrator", "cursor": cursor}
             emit("lifecycle", ROOT, "Team attached to this turn; persisted state is not liveness")
             if user_request:
                 emit("user_guidance", "user", user_request, recipient="all")
@@ -141,8 +142,14 @@ class TeamRuntime:
         return self.store.update(create)
 
     def delegate(self, actor: str, *, ticket_id: str, name: str,
-                 system_prompt: str, tools: list[str], worker_id: str | None = None) -> dict:
+                 system_prompt: str, tools: list[str], worker_id: str | None = None,
+                 role: str = "Specialist") -> dict:
         self._require_root(actor)
+        name, role = name.strip(), role.strip()
+        if not name or not role:
+            raise ValueError("A worker needs a name and a visible role")
+        if name.casefold() in {ROOT, "all", "user"}:
+            raise ValueError("Choose a worker name distinct from built-in recipients")
         self.refresh_catalog()
         if self._stopped.is_set():
             raise ValueError("Team is stopping")
@@ -162,10 +169,10 @@ class TeamRuntime:
                 raise ValueError("Ticket is not ready for delegation")
             if any(state["tickets"][dep]["status"] != "accepted" for dep in ticket["dependencies"]):
                 raise ValueError("Dependencies must be reviewed and accepted before delegation")
-            if any(m.get("name") == name and m["id"] != member_id
+            if any(m.get("name", "").casefold() == name.casefold() and m["id"] != member_id
                    for m in state["agents"].values()):
                 raise ValueError("Choose a unique worker name")
-            member = dict(id=member_id, name=name, ticket_id=ticket_id,
+            member = dict(id=member_id, name=name, role=role, ticket_id=ticket_id,
                           system_prompt=system_prompt, tools=list(dict.fromkeys(tools)),
                           status="queued", cursor=self._cursors.get(member_id, 0))
             state["agents"][member_id] = member
@@ -176,7 +183,7 @@ class TeamRuntime:
         with self._lock:
             member = self.store.update(assign)
             self._schedule(member_id, assignment=True)
-        self._notice(f"{name}: {self.store.snapshot()['tickets'][ticket_id]['title']}")
+        self._notice(f"{member_label(member)}: {self.store.snapshot()['tickets'][ticket_id]['title']}")
         return member
 
     @staticmethod
@@ -240,7 +247,7 @@ class TeamRuntime:
             state = self.store.snapshot()
             if recipient not in state["agents"] and recipient != "all":
                 matches = [m["id"] for m in state["agents"].values()
-                           if m["name"] == recipient]
+                           if m["name"].casefold() == recipient.casefold()]
                 if len(matches) != 1:
                     raise ValueError("Unknown recipient; consult team_read for the roster")
                 recipient = matches[0]
@@ -305,7 +312,9 @@ class TeamRuntime:
                 "team_id": self.store.team_id,
                 "agents": [{k: v for k, v in m.items() if k != "system_prompt"}
                            for m in state["agents"].values()],
-                "tickets": list(state["tickets"].values()),
+                "tickets": [dict(t, assignee_label=member_label(state["agents"][t["assignee"]]))
+                            if t.get("assignee") in state["agents"] else t
+                            for t in state["tickets"].values()],
             }
         kind = {"notes": "note", "messages": "message", "events": None}[view]
         page = self.store.events(after=after, limit=limit, kind=kind, ticket_id=ticket_id)

@@ -58,6 +58,7 @@ def run_worker(team: Any, member: dict, ticket: dict, assignment: bool) -> tuple
             task_tools=tools,
             identity_override=build_team_identity(
                 orchestrator=False, specialist=member["system_prompt"],
+                name=member["name"], display_role=member.get("role", "Specialist"),
                 configuration=team.prompt_configuration,
             ),
             prompt_configuration=team.prompt_configuration,
