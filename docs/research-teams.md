@@ -55,10 +55,19 @@ Mateo · Developer: Sí. En cache.py:42 se llama detach antes de guardar. Inspec
                   el código; todavía no ejecuté autograd. [reply_to: ID de la pregunta]
 ```
 
-Una pregunta nueva puede reactivar a un trabajador inactivo. Las respuestas con
-`reply_to` llegan a los agentes activos y quedan en el historial; no reactivan por sí
-solas a los inactivos, para evitar conversaciones infinitas de acuses de recibo. Cada
-agente puede consultar conversaciones anteriores con `team_read(view="messages")`.
+Los mensajes tienen tipo `request`, `reply` o `info`. Un pedido nuevo y su respuesta
+pueden reactivar a un trabajador que terminó su ejecución. Una respuesta a otra respuesta
+y los avisos `info` quedan disponibles sin iniciar otra ejecución; esto evita cadenas
+automáticas de agradecimientos. Sin tipo explícito, `reply_to` selecciona `reply`; los
+demás mensajes son pedidos. Una nueva pregunta dentro de un hilo puede declarar
+`message_type="request"` junto con `reply_to`.
+
+Cada conversación conserva `thread_id`, el vínculo `reply_to` y el ticket original.
+`team_read(view="messages", thread_id=ID)` recupera el hilo. Los estados `queued`,
+`delivered` y `answered` distinguen entrega al contexto y respuesta registrada: la
+entrega no demuestra que el modelo comprendió el contenido. Los broadcasts incluyen
+la lista `delivered_to`. La web agrupa preguntas y respuestas, permite buscar y filtrar
+por participante, y abre páginas del hilo completo fuera de la ventana reciente.
 Los mensajes de compañeros están etiquetados como evidencia de colaboradores, separados
 de los mensajes nuevos del usuario. Una petición de un compañero no amplía el alcance.
 
@@ -104,6 +113,63 @@ Las métricas del resultado suman tokens, herramientas e iteraciones del princip
 todos los trabajadores, incluidas sus reactivaciones. `/think` y `GATHER_ENABLED`
 conservan la recopilación de contexto previa cuando el usuario la solicita.
 No es un canal para contactar procesos Codex arbitrarios del sistema.
+
+## Descanso y eventos
+
+El principal y los especialistas pueden llamar `team_idle`. La llamada suspende la pila
+actual y conserva su conversación, sin nuevas llamadas al modelo ni al crítico por la
+espera. El agente elige uno o varios eventos:
+
+| Evento | Despierta cuando |
+| --- | --- |
+| `message` | Llega un mensaje dirigido al agente o a `all`, incluidas respuestas y avisos |
+| `report` | Un compañero entrega un reporte |
+| `background_task` | Un proceso termina y su salida fue drenada, con éxito, error o cancelación |
+| `note` | Otro miembro o el usuario publica una nota |
+| `ticket` | Otro miembro crea, delega o revisa un ticket |
+
+Los eventos se combinan como alternativas. `sender` filtra el autor, `ticket_id` el
+ticket, `reply_to` la respuesta a un mensaje propio y `task_ids` los procesos. Los
+filtros por autor/ticket se aplican a eventos del equipo; los de proceso sólo a procesos
+del workspace. `after` permite indicar un cursor; por defecto se consideran las novedades
+desde la última entrega. Una respuesta a `reply_to` o un proceso explícito ya terminado
+se devuelve inmediatamente, incluso si terminó antes de registrar la espera.
+
+Por defecto se espera un mensaje o reporte sin plazo. `timeout` agrega un plazo en
+segundos, hasta siete días. `team_wait(seconds=…)` conserva una forma breve de esa espera.
+Las instrucciones nuevas del usuario y la cancelación siempre interrumpen el descanso,
+aunque el agente haya elegido otros eventos. La web muestra motivo, condiciones y último
+despertar; la TUI recibe avisos de descanso y reanudación.
+
+```json
+{"recipient": "Mateo", "content": "¿El cache hace detach?", "message_type": "request"}
+```
+
+Si `team_send_message` devuelve el ID 42, el agente puede usar:
+
+```json
+{"events": ["message"], "reply_to": 42, "reason": "Espero la inspección del cache"}
+```
+
+O esperar una corrida sin consultar el modelo periódicamente:
+
+```json
+{"events": ["background_task", "message"], "task_ids": ["bg-3"], "reason": "Espero la evaluación o una consulta del equipo"}
+```
+
+Un especialista dormido libera su cupo de ejecución y su exclusividad de escritura.
+Al despertar recupera ambos antes de continuar. Los archivos modificados durante ese
+intervalo se excluyen de su rollback y de su evidencia de cambios propios, y se invalidan
+sus copias de lectura; el principal conserva el diff global. Si otro agente modificó el
+mismo archivo, se transfiere el seguimiento de ese archivo completo para no revertir
+ediciones ajenas. El modelo recibe los paths y debe releerlos antes de editar.
+
+El descanso vive en el proceso del harness. Cerrar el servidor o la TUI cancela las
+esperas; reabrir la sesión recupera el historial, sin prometer reanudar una pila dormida.
+`TEAM_MAX_WORKERS` limita agentes ejecutando, y `TEAM_MAX_AGENTS` limita identidades y
+pilas retenidas. Despertar una pila existente no consume una reactivación automática;
+iniciar una ejecución nueva tras un pedido o una respuesta sí cuenta para
+`TEAM_MAX_FOLLOWUPS`.
 
 ## Prompts y verificación
 

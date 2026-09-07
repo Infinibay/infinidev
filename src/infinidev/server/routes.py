@@ -168,6 +168,25 @@ def processes() -> dict:
                                  for t in get_background_manager().list()]})
 
 
+@api_router.get("/sessions/{session_id}/threads/{thread_id}")
+def conversation_thread(request: Request, session_id: str, thread_id: int,
+                        after: int = Query(0, ge=0)) -> dict:
+    from infinidev.engine.team.store import TeamStore
+
+    _session(request, session_id)
+    key = json.dumps([1, str(request.app.state.runtime.root), session_id])
+    store = TeamStore(hashlib.sha256(key.encode()).hexdigest())
+    try:
+        original = store.event(thread_id)
+    except ValueError:
+        raise HTTPException(404, "Conversation not found in this team.") from None
+    if original["kind"] != "message":
+        raise HTTPException(404, "Conversation not found in this team.")
+    events = store.events(kind="message", thread_id=original["thread_id"], after=after, limit=100)
+    return public({"events": events, "next": events[-1]["id"] if events else after,
+                   "has_more": len(events) == 100})
+
+
 class Note(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
 
@@ -184,6 +203,10 @@ def add_note(request: Request, session_id: str, body: Note) -> dict:
     content = body.content.strip()
     if not content:
         raise HTTPException(400, "A note cannot be empty.")
+    session = _session(request, session_id)
+    live = getattr(session.engine, "_team_runtime", None) if session.engine else None
+    if live is not None:
+        return public(live.write_note("user", content=content, kind="observation", refs=[]))
     event_id = store.update(lambda state, emit: emit(
         "note", "user", json.dumps({"kind": "observation", "text": content}),
     ))

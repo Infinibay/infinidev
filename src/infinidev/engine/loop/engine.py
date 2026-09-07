@@ -837,6 +837,8 @@ class LoopEngine(AgentEngine):
         team = getattr(self, "_team_runtime", None)
         if team is not None and getattr(self, "_team_actor", "") == "orchestrator":
             team.cancel()
+        elif team is not None:
+            team.wake_waiters()
 
     def cancel_active_tool(self) -> bool:
         """Ask the current foreground tool batch to stop, without ending the task."""
@@ -844,6 +846,9 @@ class LoopEngine(AgentEngine):
             if not self._tool_running_event.is_set():
                 return False
             self._tool_cancel_event.set()
+            team = getattr(self, "_team_runtime", None)
+            if team is not None:
+                team.wake_waiters()
             return True
 
     @property

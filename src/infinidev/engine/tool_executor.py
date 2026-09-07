@@ -44,7 +44,7 @@ WRITE_TOOLS = {
     "update_documentation", "delete_documentation",
     "send_message",
     "team_create_ticket", "team_delegate", "team_review_ticket", "team_write_note",
-    "team_send_message", "team_wait",
+    "team_send_message", "team_wait", "team_idle",
     # Plan edits are a read-modify-write on one shared LoopPlan: the
     # auto-assigned index is computed from the current steps and consumed
     # by apply_operations, which reassigns the list, appends and sorts it

@@ -164,7 +164,7 @@ def test_idle_peer_wakes_for_question_and_reply_is_threaded_without_ping_pong(te
     assert messages[-1]["reply_to"] == question["id"]
     assert messages[-1]["author"] == bob["id"]
     assert runs.count((bob["id"], False)) == 1
-    assert (alice["id"], False) not in runs
+    assert runs.count((alice["id"], False)) == 1
     assert runtime.store.snapshot()["tickets"][bob["ticket_id"]]["result"] == "Source checked"
 
 
@@ -200,7 +200,9 @@ def test_worker_cannot_delegate_or_grant_unknown_tools(team):
         runtime.create_ticket(member["id"], title="x", objective="x", acceptance=["x"],
                               constraints=[], dependencies=[])
     tools = build_team_tools(runtime, member["id"], orchestrator=False)
-    assert {t.name for t in tools} == {"team_read", "team_write_note", "team_send_message"}
+    assert {t.name for t in tools} == {
+        "team_read", "team_write_note", "team_send_message", "team_idle", "team_wait",
+    }
 
 
 def test_bound_authorship_and_argument_validation(team):
@@ -265,6 +267,225 @@ def test_workspace_writers_are_serialized(team):
     _delegate(runtime, _ticket(runtime), name="Writer B", tools=["create_file"])
     _finish(runtime)
     assert peak == 1
+
+
+def test_idle_releases_worker_capacity_and_writer_lease_for_a_peer_reply(team):
+    sleeping = threading.Event()
+    resumed = []
+
+    def runner(runtime, member, ticket, assignment):
+        runtime.poll(member["id"])
+        if member["name"] == "Alice":
+            sleeping.set()
+            result = runtime.idle(member["id"], events=["message"], sender="Bob", timeout=2)
+            resumed.append(result)
+        else:
+            runtime.send(member["id"], recipient="Alice", content="Source checked")
+        return "Report", "completed"
+
+    runtime = team(runner=runner, max_workers=1)
+    # Register Bob while Alice still owns the sole execution slot.
+    with runtime._lock:
+        _delegate(runtime, _ticket(runtime), name="Alice", tools=["create_file"])
+        _delegate(runtime, _ticket(runtime), name="Bob", tools=["create_file"])
+    assert sleeping.wait(2)
+    _finish(runtime)
+    assert resumed[0]["reason"] == "event"
+    assert resumed[0]["events"][0]["content"] == "Source checked"
+
+
+def test_idle_filters_events_and_user_guidance_always_wakes(team):
+    runtime = team()
+    member = _delegate(runtime, _ticket(runtime))
+    _finish(runtime)
+    runtime.poll(ROOT)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        waiting = pool.submit(runtime.idle, ROOT, events=["report"], timeout=2)
+        runtime.send(member["id"], recipient=ROOT, content="FYI", message_type="info")
+        runtime.write_note(member["id"], content="Observation", kind="observation", refs=[])
+        assert not waiting.done()
+        runtime.forward_user_guidance("Stop the experiment and inspect the source")
+        result = waiting.result(2)
+    assert result["reason"] == "user_guidance"
+    assert runtime.store.snapshot()["agents"][ROOT]["status"] == "running"
+
+
+def test_idle_status_callback_does_not_hold_the_team_lock(team):
+    entered, sent = threading.Event(), threading.Event()
+    delivered_during_callback = []
+
+    def on_status(level, message):
+        if "idle —" in message:
+            entered.set()
+            delivered_during_callback.append(sent.wait(2))
+
+    runtime = team(on_status=on_status)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(runtime.idle, ROOT, events=["message"])
+        assert entered.wait(2)
+        runtime.forward_user_guidance("Continue with the new evidence")
+        sent.set()
+        assert pending.result(2)["reason"] == "user_guidance"
+    assert delivered_during_callback == [True]
+
+
+def test_principal_discards_cached_source_after_sleep_without_resetting_global_diff(team):
+    from infinidev.engine.loop.loop_state import LoopState
+    from infinidev.tools.base.context import set_loop_state
+
+    sleeping = threading.Event()
+    runtime = team(on_status=lambda level, message: sleeping.set())
+    state = LoopState()
+    state.cache_file("cache.py", "stale source")
+    state.read_delivery_revisions["cache.py"] = "old revision"
+    set_loop_state("root-agent", state)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(runtime.idle, ROOT, events=["message"])
+        assert sleeping.wait(2)
+        runtime.forward_user_guidance("Inspect the updated cache")
+        assert pending.result(2)["reason"] == "user_guidance"
+    assert not state.opened_files
+    assert not state.read_delivery_revisions
+
+
+def test_reply_subscription_handles_reply_before_wait_and_reports_delivery(team):
+    runtime = team()
+    member = _delegate(runtime, _ticket(runtime))
+    _finish(runtime)
+    request = runtime.send(ROOT, recipient=member["id"], content="Check the caller")
+    _finish(runtime)
+    reply = runtime.send(member["id"], recipient=ROOT, content="caller.py:12",
+                         reply_to=request["id"])
+    runtime.poll(ROOT)
+    result = runtime.idle(ROOT, events=["message"], reply_to=request["id"], timeout=0.2)
+    assert result["reason"] == "event"
+    assert result["events"][0]["id"] == reply["id"]
+    thread = runtime.read(view="messages", thread_id=request["id"])["events"]
+    assert [e["id"] for e in thread] == [request["id"], reply["id"]]
+    assert thread[0]["delivery"] == "answered"
+    assert thread[1]["delivery"] == "delivered"
+
+
+def test_cancel_wakes_idle_without_waiting_for_timeout(team):
+    runtime = team()
+    runtime.poll(ROOT)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(runtime.idle, ROOT, events=["message"])
+        runtime.cancel()
+        assert pending.result(2)["reason"] == "cancelled"
+
+
+def test_idle_delivery_does_not_swallow_unmatched_peer_or_user_updates(team):
+    runtime = team()
+    member = _delegate(runtime, _ticket(runtime))
+    _finish(runtime)
+    runtime.poll(ROOT)
+    note = runtime.write_note(member["id"], content="Caveat", kind="observation", refs=[])
+    message = runtime.send(member["id"], recipient=ROOT, content="Answer")
+    result = runtime.idle(ROOT, events=["message"], timeout=0)
+    assert result["events"][0]["id"] == message["id"]
+    updates = json.loads(runtime.poll(ROOT))
+    assert note["id"] in [e["id"] for e in updates]
+    assert message["id"] not in [e["id"] for e in updates]
+    assert runtime.idle(ROOT, events=["message"], timeout=0)["reason"] == "timeout"
+
+
+def test_idle_tool_cancellation_and_team_close_release_a_sleeping_worker(team):
+    entered = threading.Event()
+    results = []
+
+    def runner(runtime, member, ticket, assignment):
+        engine = LoopEngine()
+        engine._team_runtime, engine._team_actor = runtime, member["id"]
+        runtime.attach_engine(member["id"], engine)
+        runtime.poll(member["id"])
+        entered.set()
+        results.append(runtime.idle(member["id"], events=["message"]))
+        return "Stopped", "cancelled"
+
+    runtime = team(runner=runner, max_workers=1)
+    member = _delegate(runtime, _ticket(runtime))
+    assert entered.wait(2)
+    runtime.review(ROOT, ticket_id=member["ticket_id"], decision="cancelled", reason="User stopped")
+    _finish(runtime)
+    assert results[0]["reason"] == "cancelled"
+    assert not runtime._executing
+    assert runtime._writing is None
+    assert "waiting" not in runtime.store.snapshot()["agents"][member["id"]]
+
+
+def test_idle_rejects_unknown_sources_and_incompatible_filters(team):
+    runtime = team()
+    with pytest.raises(ValueError, match="Unknown recipient"):
+        runtime.idle(ROOT, sender="Missing")
+    with pytest.raises(ValueError, match="Unknown background task"):
+        runtime.idle(ROOT, events=["background_task"], task_ids=["bg-missing"])
+    with pytest.raises(ValidationError, match="reply_to requires"):
+        runtime.idle(ROOT, events=["report"], reply_to=1)
+
+
+def test_information_does_not_spawn_workers_and_reply_to_reply_does_not_ping_pong(team):
+    calls = []
+
+    def runner(runtime, member, ticket, assignment):
+        calls.append(member["id"])
+        runtime.poll(member["id"])
+        return "Report", "completed"
+
+    runtime = team(runner=runner)
+    member = _delegate(runtime, _ticket(runtime))
+    _finish(runtime)
+    request = runtime.send(ROOT, recipient=member["id"], content="Question")
+    _finish(runtime)
+    reply = runtime.send(member["id"], recipient=ROOT, content="Answer", reply_to=request["id"])
+    runtime.send(ROOT, recipient=member["id"], content="Thanks", reply_to=reply["id"])
+    runtime.send(ROOT, recipient=member["id"], content="An update", message_type="info")
+    assert len(calls) == 2
+    assert not runtime.has_active_workers
+
+
+def test_legacy_conversation_migration_preserves_nested_reply_threads(temp_db):
+    from infinidev.engine.team.store import TeamStore
+    from infinidev.tools.base.db import execute_with_retry
+
+    def legacy(conn):
+        conn.executescript(
+            "CREATE TABLE research_team_events (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " team_id TEXT, kind TEXT, author TEXT, recipient TEXT, ticket_id TEXT,"
+            " reply_to INTEGER, supersedes INTEGER, content TEXT, refs TEXT, created_at TEXT);"
+            "INSERT INTO research_team_events VALUES"
+            " (1,'legacy','message','a','b',NULL,NULL,NULL,'Question','[]','2026-01-01'),"
+            " (2,'legacy','message','b','a',NULL,1,NULL,'Answer','[]','2026-01-01'),"
+            " (3,'legacy','message','a','b',NULL,2,NULL,'Follow-up','[]','2026-01-01');"
+        )
+
+    execute_with_retry(legacy)
+    store = TeamStore("legacy")
+    events = store.events(thread_id=1)
+    assert [e["content"] for e in events] == ["Question", "Answer", "Follow-up"]
+    assert [e["message_type"] for e in events] == ["request", "reply", "reply"]
+    assert store.event(1)["delivery"] == "answered"
+
+
+def test_background_completion_wakes_every_subscriber_after_output_is_drained(
+    team, workspace_dir, monkeypatch,
+):
+    from infinidev.tools.shell import background_manager
+
+    manager = background_manager.BackgroundTaskManager()
+    monkeypatch.setattr(background_manager, "_manager", manager)
+    first = team()
+    second = team(session_id="second")
+    task = manager.start("sleep 0.1; printf done", "Fixture", str(workspace_dir))
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda runtime: runtime.idle(
+                ROOT, events=["background_task"], task_ids=[task.id], timeout=2,
+            ), [first, second]))
+        assert all(result["reason"] == "event" for result in results)
+        assert all(result["events"][0]["stdout"] == "done" for result in results)
+    finally:
+        manager.shutdown()
 
 
 def test_peer_updates_are_not_urgent_user_instructions(team):
@@ -370,7 +591,7 @@ def test_worker_context_enforces_grants_and_inherits_prompt_rules(
     _finish(runtime)
     ctx = captured["context"]
     assert {tool.name for tool in ctx.tools} == {
-        "read_file", "team_send_message", "team_write_note", "team_read",
+        "read_file", "team_send_message", "team_write_note", "team_read", "team_idle", "team_wait",
     }
     assert "create_file" not in ctx.tool_dispatch
     assert "team_delegate" not in ctx.tool_dispatch
@@ -453,6 +674,16 @@ def test_legitimate_waits_do_not_trigger_repetition_but_errors_still_do():
     assert guard.consecutive_tool_errors == 1
     guard.on_tool_result("team_wait", "{}", False, awaiting_workers=False)
     assert guard.non_progress_tool_calls == 2
+
+
+@pytest.mark.parametrize("name", ["team_idle", "team_wait"])
+def test_idle_does_not_start_an_auxiliary_model_call(name, monkeypatch):
+    from infinidev.engine.loop.critic_liaison import CriticLiaison
+
+    liaison = CriticLiaison()
+    monkeypatch.setattr(liaison, "get", lambda ctx: pytest.fail("Idle must not call the critic"))
+    call = SimpleNamespace(function=SimpleNamespace(name=name))
+    assert liaison.review_alongside(None, [], [call], None, lambda: 7) == 7
 
 
 def test_real_user_guidance_keeps_user_authority_in_worker_context(team):

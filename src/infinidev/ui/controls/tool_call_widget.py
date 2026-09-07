@@ -643,6 +643,7 @@ _TOOL_FORMATTERS: dict[str, Callable[[dict, str, str, int], SectionList]] = {
     "team_write_note": _fmt_team,
     "team_read": _fmt_team,
     "team_wait": _fmt_team,
+    "team_idle": _fmt_team,
     "team_delegate": _fmt_team,
     "read_file": _fmt_read_file,
     "partial_read": _fmt_partial_read,

@@ -11,7 +11,7 @@ import difflib
 import hashlib
 import os
 
-from infinidev.engine.workspace_baseline import WorkspaceBaseline
+from infinidev.engine.workspace_baseline import WorkspaceBaseline, WorkspaceFileState
 
 
 class FileChangeTracker:
@@ -29,6 +29,29 @@ class FileChangeTracker:
     @property
     def baseline(self) -> WorkspaceBaseline | None:
         return self._baseline
+
+    def exclude_external_changes(self, before: dict[str, WorkspaceFileState]) -> list[str]:
+        """Relinquish paths changed while a team worker released its workspace lease.
+
+        The principal still reviews the overall diff. A resumed specialist must
+        not roll back a peer's changes or cite them as its own verification.
+        """
+        if self._baseline is None:
+            return []
+        after = self._baseline.current_states()
+        changed = sorted(path for path in before.keys() | after.keys()
+                         if before.get(path) != after.get(path))
+        for relative in changed:
+            if relative in after:
+                self._baseline.files[relative] = after[relative]
+            else:
+                self._baseline.files.pop(relative, None)
+            path = os.path.join(self._baseline.root, relative)
+            for mapping in (self._originals, self._current, self._change_counts,
+                            self._reasons, self._deleted_symbols):
+                mapping.pop(path, None)
+        self._active = True
+        return changed
 
     def reconcile_workspace(self) -> None:
         """Merge final on-disk changes that bypassed known edit tools."""

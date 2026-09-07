@@ -71,8 +71,8 @@ def seed(state, emit):
         't_eval': {'id': 't_eval', 'title': 'Check evaluation coverage', 'objective': 'Verify held-out examples and leakage checks.', 'status': 'pending', 'assignee': 'w_nora'},
     })
     emit('note', 'w_mara', json.dumps({'kind': 'finding', 'text': '**Baseline located.** Three seeds use the same evaluation split. Keep the seed set fixed for the next comparison.'}))
-    emit('message', 'w_leo', 'Can you confirm whether the evaluation includes unseen memory keys?', recipient='w_nora', ticket_id='t_eval')
-    emit('message', 'w_nora', 'Yes. The held-out set includes unseen keys; I’m checking that the retrieval cache is cleared between runs.', recipient='w_leo', ticket_id='t_eval')
+    question = emit('message', 'w_leo', 'Can you confirm whether the evaluation includes unseen memory keys?', recipient='w_nora', ticket_id='t_eval', message_type='request')
+    emit('message', 'w_nora', 'Yes. The held-out set includes unseen keys; I’m checking that the retrieval cache is cleared between runs.', recipient='w_leo', ticket_id='t_eval', reply_to=question, thread_id=question, message_type='reply')
 store.update(seed)
 
 def finding(conn):
@@ -92,6 +92,21 @@ infinidev.agents.base.InfinidevAgent = lambda **_: SimpleNamespace(
 def run_task(**kwargs):
     hooks = kwargs['hooks']
     hooks.on_phase('execute')
+    if kwargs['user_input'] == 'idle fixture':
+        from infinidev.engine.team.runtime import ROOT, TeamRuntime
+
+        runtime = TeamRuntime(session_id=hooks.session.session_id, project_id=1,
+                              workspace_path=str(workspace), root_agent_id='browser-root',
+                              catalog=[], on_status=hooks.on_status)
+        engine = kwargs['engine']
+        engine._team_runtime, engine._team_actor = runtime, ROOT
+        try:
+            runtime.poll(ROOT)
+            result = runtime.idle(ROOT, events=['note'], reason='Waiting for your research note')
+            return 'Woke after shared note.' if result['reason'] == 'event' else 'Wait cancelled.'
+        finally:
+            runtime.close()
+            engine._team_runtime = None
     if 'permission' in kwargs['user_input'].lower():
         answer = hooks.session.ask('Run the baseline test?', 'permission', details='pytest tests/test_memory.py')
         result = 'Permission granted.' if answer == 'allow' else 'Permission denied.'
@@ -115,4 +130,5 @@ get_background_manager().start(
 )
 
 import uvicorn
-uvicorn.run(create_app(token='browser-test-token', initialize=False), host='127.0.0.1', port=8765)
+uvicorn.run(create_app(token='browser-test-token', initialize=False), host='127.0.0.1',
+            port=int(os.environ.get('INFINIDEV_E2E_PORT', '18765')))

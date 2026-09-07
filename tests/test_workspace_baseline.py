@@ -42,6 +42,28 @@ def test_preexisting_dirty_file_is_not_attributed_when_unchanged(tmp_path) -> No
     assert tracker.get_all_paths() == []
 
 
+def test_idle_worker_excludes_peer_changes_and_retains_untouched_own_edits(tmp_path) -> None:
+    root = _repo(tmp_path)
+    own = root / "own.py"
+    shared = root / "tracked.py"
+    tracker = FileChangeTracker(WorkspaceBaseline.capture(str(root)))
+    own.write_text("own change\n")
+    shared.write_text("first worker change\n")
+    before = tracker.baseline.current_states()
+    tracker.deactivate()
+    shared.write_text("second worker change\n")
+    added = root / "peer.py"
+    added.write_text("peer change\n")
+
+    assert tracker.exclude_external_changes(before) == ["peer.py", "tracked.py"]
+    assert tracker.get_all_paths() == [str(own)]
+    assert tracker.get_diff(str(shared)) is None
+    shared.write_text("resumed worker change\n")
+    diff = tracker.get_diff(str(shared))
+    assert "-second worker change" in diff
+    assert "+resumed worker change" in diff
+
+
 def test_detects_change_relative_to_preexisting_dirty_content(tmp_path) -> None:
     root = _repo(tmp_path)
     (root / "tracked.py").write_text("user change\n")

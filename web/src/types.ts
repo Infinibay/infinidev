@@ -80,6 +80,18 @@ export interface TeamAgent {
   tool_names?: string[];
   system_prompt?: string;
   ticket_id?: string;
+  cursor?: number;
+  received?: number[];
+  waiting?: {
+    events: string[];
+    reason: string;
+    since: string;
+    sender?: string;
+    reply_to?: number;
+    task_ids?: string[];
+    ticket_id?: string;
+    timeout?: number;
+  };
   [key: string]: unknown;
 }
 export interface Ticket {
@@ -97,7 +109,12 @@ export interface TeamEvent {
   kind: string;
   author: string;
   author_label?: string;
+  recipient?: string;
   recipient_label?: string;
+  thread_id?: number;
+  reply_to?: number;
+  message_type?: "request" | "reply" | "info";
+  delivery?: string;
   content: string;
   created_at: string;
   ticket_id?: string;

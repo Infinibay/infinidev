@@ -21,6 +21,50 @@ import {
   PageTitle,
 } from "./components";
 import type { Team, TeamAgent, Ticket } from "./types";
+import { TeamConversations } from "./TeamConversations";
+
+function IdleDetails({ agent }: { agent: TeamAgent }) {
+  if (!agent.waiting) return null;
+  const wait = agent.waiting;
+  return (
+    <div className="idle-details">
+      <h3>Idle · waiting for an event</h3>
+      <p>{wait.reason}</p>
+      <dl>
+        <dt>Wake on</dt>
+        <dd>{wait.events.map((e) => e.replaceAll("_", " ")).join(", ")}</dd>
+        {wait.sender && (
+          <>
+            <dt>From</dt>
+            <dd>{wait.sender}</dd>
+          </>
+        )}
+        {wait.reply_to && (
+          <>
+            <dt>Answer to</dt>
+            <dd>Message #{wait.reply_to}</dd>
+          </>
+        )}
+        {!!wait.task_ids?.length && (
+          <>
+            <dt>Processes</dt>
+            <dd>{wait.task_ids.join(", ")}</dd>
+          </>
+        )}
+        <dt>Timeout</dt>
+        <dd>
+          {wait.timeout == null
+            ? "Until an event arrives"
+            : `${wait.timeout} seconds`}
+        </dd>
+      </dl>
+      <small>
+        No model calls while idle. User guidance and cancellation interrupt the
+        wait.
+      </small>
+    </div>
+  );
+}
 
 function AssignmentDetails({ value }: { value: TeamAgent | Ticket }) {
   if (typeof value.role === "string")
@@ -30,6 +74,7 @@ function AssignmentDetails({ value }: { value: TeamAgent | Ticket }) {
           <Badge status={String(value.status || "idle")} />
           <span>{value.role}</span>
         </div>
+        <IdleDetails agent={value as TeamAgent} />
         <h3>Granted tools</h3>
         <div className="tool-grants">
           {(Array.isArray(value.tools) ? value.tools : []).map((tool) => (
@@ -118,6 +163,11 @@ export function TeamView({
   const [saving, setSaving] = useState(false);
   const agents = Object.entries(team?.board.agents || {});
   const tickets = Object.entries(team?.board.tickets || {});
+  const selectedValue = selected?.value.id
+    ? team?.board.agents?.[selected.value.id] ||
+      team?.board.tickets?.[selected.value.id] ||
+      selected.value
+    : selected?.value;
   const groups = [
     {
       name: "To do",
@@ -207,6 +257,9 @@ export function TeamView({
                 </div>
                 <h3>{agent.name || id}</h3>
                 <p>{agent.role || "Specialist"}</p>
+                {team?.live && agent.waiting && (
+                  <div className="idle-hint">Idle · {agent.waiting.reason}</div>
+                )}
                 <div className="agent-card-footer">
                   <span>
                     {id === "orchestrator"
@@ -231,6 +284,9 @@ export function TeamView({
               <Tabs.Trigger value="messages">
                 <MessageSquare size={16} />
                 Communication
+              </Tabs.Trigger>
+              <Tabs.Trigger value="activity">
+                <CircleDot size={16} /> Activity
               </Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="tickets">
@@ -319,9 +375,12 @@ export function TeamView({
               )}
             </Tabs.Content>
             <Tabs.Content value="messages">
+              {team && <TeamConversations team={team} sessionId={sessionId} />}
+            </Tabs.Content>
+            <Tabs.Content value="activity">
               <div className="team-timeline">
                 {team?.events
-                  .filter((e) => e.kind !== "note")
+                  .filter((e) => e.kind !== "note" && e.kind !== "message")
                   .slice()
                   .reverse()
                   .map((event) => (
@@ -372,7 +431,7 @@ export function TeamView({
       >
         {selected && (
           <>
-            <AssignmentDetails value={selected.value} />
+            <AssignmentDetails value={selectedValue || selected.value} />
             <button
               className="button primary"
               onClick={() => {

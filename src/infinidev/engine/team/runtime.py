@@ -70,13 +70,18 @@ class TeamRuntime:
         self._runner = worker_runner
         self._on_status = on_status
         self._lock = threading.RLock()
+        self._condition = threading.Condition(self._lock)
         self._changed = threading.Event()
         self._stopped = threading.Event()
-        self._writers = threading.Lock()
         self._active: set[str] = set()
+        self._executing: set[str] = set()
+        self._writing: str | None = None
+        self._max_workers = max(1, max_workers)
+        self._background_seen: dict[str, set[str]] = {}
         self._engines: dict[str, Any] = {}
         self._worker_metrics: dict[str, int] = {}
         self._cursors: dict[str, int] = {}
+        self._delivered_events: dict[str, set[int]] = {}
         self._followups: dict[str, int] = {}
         self._run_id = uuid.uuid4().hex
 
@@ -88,6 +93,7 @@ class TeamRuntime:
                              workspace_path=workspace_path)
             for member in state["agents"].values():
                 member["status"] = "idle"
+                member.pop("waiting", None)
                 member.setdefault("role", "Specialist")
             for ticket in state["tickets"].values():
                 if ticket["status"] == "running":
@@ -106,8 +112,15 @@ class TeamRuntime:
         self.store.update(claim)
         self._cursors = {key: member.get("cursor", 0)
                          for key, member in self.store.snapshot()["agents"].items()}
-        self._pool = ThreadPoolExecutor(max_workers=max(1, max_workers),
+        self._delivered_events = {key: set(member.get("received", []))
+                                 for key, member in self.store.snapshot()["agents"].items()}
+        # Sleeping stacks retain context; execution leases, not thread count,
+        # enforce concurrency. Each registered specialist can have one stack.
+        self._pool = ThreadPoolExecutor(max_workers=max(1, max_agents),
                                         thread_name_prefix="infinidev-team")
+        from infinidev.tools.shell.background_manager import subscribe_completions
+
+        self._unsubscribe_background = subscribe_completions(lambda task: self.wake_waiters())
 
     def actor(self, agent_id: str) -> str:
         if agent_id == self.root_agent_id:
@@ -115,6 +128,57 @@ class TeamRuntime:
         if agent_id in self.store.snapshot()["agents"] and agent_id != ROOT:
             return agent_id
         raise ValueError("Agent is not a member of this team")
+
+    def resolve_recipient(self, recipient: str) -> str:
+        """Resolve a stable ID or unambiguous display name within this team."""
+        state = self.store.snapshot()
+        if recipient in state["agents"] or recipient == "all":
+            return recipient
+        matches = [m["id"] for m in state["agents"].values()
+                   if m["name"].casefold() == recipient.casefold()]
+        if len(matches) != 1:
+            raise ValueError("Unknown recipient; consult team_read for the roster")
+        return matches[0]
+
+    def wake_waiters(self) -> None:
+        """Signal all subscriptions; each waiter checks its own durable cursor."""
+        with self._condition:
+            self._changed.set()
+            self._condition.notify_all()
+
+    def _cancelled(self, actor: str) -> bool:
+        engine = self._engines.get(actor)
+        ticket_id = self.store.snapshot()["agents"].get(actor, {}).get("ticket_id")
+        ticket = self.store.snapshot()["tickets"].get(ticket_id, {})
+        return (self._stopped.is_set() or bool(engine and getattr(engine, "is_cancelled", False))
+                or ticket.get("status") == "cancelled")
+
+    def _acquire_worker(self, actor: str) -> bool:
+        with self._condition:
+            member = self.store.snapshot()["agents"][actor]
+            writes = any(not getattr(self.catalog[n], "is_read_only", False)
+                         for n in member["tools"])
+            while not self._cancelled(actor):
+                if len(self._executing) < self._max_workers and (not writes or not self._writing):
+                    self._executing.add(actor)
+                    if writes:
+                        self._writing = actor
+                    return True
+                self._condition.wait()
+            return False
+
+    def _release_worker(self, actor: str) -> None:
+        with self._condition:
+            self._executing.discard(actor)
+            if self._writing == actor:
+                self._writing = None
+            self._condition.notify_all()
+
+    def idle(self, actor: str, **kwargs: Any) -> dict:
+        """Suspend a model's current stack until a selected event arrives."""
+        from infinidev.engine.team.waiting import IdleInput, wait_for_events
+
+        return wait_for_events(self, actor, IdleInput(**kwargs))
 
     @staticmethod
     def _require_root(actor: str) -> None:
@@ -139,7 +203,9 @@ class TeamRuntime:
             emit("ticket", actor, json.dumps(ticket), ticket_id=ticket_id)
             return ticket
 
-        return self.store.update(create)
+        ticket = self.store.update(create)
+        self.wake_waiters()
+        return ticket
 
     def delegate(self, actor: str, *, ticket_id: str, name: str,
                  system_prompt: str, tools: list[str], worker_id: str | None = None,
@@ -183,6 +249,7 @@ class TeamRuntime:
         with self._lock:
             member = self.store.update(assign)
             self._schedule(member_id, assignment=True)
+            self.wake_waiters()
         self._notice(f"{member_label(member)}: {self.store.snapshot()['tickets'][ticket_id]['title']}")
         return member
 
@@ -220,7 +287,7 @@ class TeamRuntime:
                 engine = self._engines.get(ticket.get("assignee"))
                 if engine is not None:
                     engine.cancel()
-            self._changed.set()
+            self.wake_waiters()
             return ticket
 
     def write_note(self, actor: str, *, content: str, kind: str, refs: list[str],
@@ -238,43 +305,65 @@ class TeamRuntime:
                             ticket_id=ticket_id, supersedes=supersedes, refs=refs)
 
             event_id = self.store.update(append)
-            self._changed.set()
+            self.wake_waiters()
             return self.store.event(event_id)
 
     def send(self, actor: str, *, recipient: str, content: str,
-             reply_to: int | None = None, ticket_id: str | None = None) -> dict:
+             reply_to: int | None = None, ticket_id: str | None = None,
+             message_type: str | None = None) -> dict:
         with self._lock:
             state = self.store.snapshot()
-            if recipient not in state["agents"] and recipient != "all":
-                matches = [m["id"] for m in state["agents"].values()
-                           if m["name"].casefold() == recipient.casefold()]
-                if len(matches) != 1:
-                    raise ValueError("Unknown recipient; consult team_read for the roster")
-                recipient = matches[0]
+            recipient = self.resolve_recipient(recipient)
             if recipient == actor:
                 raise ValueError("Send the message to another team member")
+            message_type = message_type or ("reply" if reply_to is not None else "request")
+            if message_type not in {"request", "reply", "info"}:
+                raise ValueError("Message type must be request, reply or info")
+            if message_type == "reply" and reply_to is None:
+                raise ValueError("A reply needs the original message ID in reply_to")
+            thread_id = None
             if reply_to is not None:
                 original = self.store.event(reply_to)
                 if (original["kind"] != "message" or original["author"] != recipient
                         or original["recipient"] not in {actor, "all"}):
                     raise ValueError("Reply must address the sender of a message delivered to you")
+                thread_id = original["thread_id"]
+                ticket_id = ticket_id or original["ticket_id"]
 
             def append(current, emit):
                 if ticket_id:
                     self._ticket(current, ticket_id)
                 return emit("message", actor, content, recipient=recipient,
-                            ticket_id=ticket_id, reply_to=reply_to)
+                            ticket_id=ticket_id, reply_to=reply_to,
+                            message_type=message_type, thread_id=thread_id)
 
             event_id = self.store.update(append)
-            # Replies are delivered to active loops but do not start an endless
-            # chain of idle workers acknowledging each other's acknowledgements.
-            if reply_to is None and not self._stopped.is_set():
+            if self._starts_followup(self.store.event(event_id)) and not self._stopped.is_set():
                 targets = state["agents"] if recipient == "all" else [recipient]
                 for target in targets:
                     if target not in {ROOT, actor} and target not in self._active:
                         self._schedule(target, assignment=False)
-            self._changed.set()
+            self.wake_waiters()
             return self.store.event(event_id)
+
+    def _starts_followup(self, event: dict) -> bool:
+        if event["message_type"] == "request":
+            return True
+        # A requested answer wakes its requester; acknowledgements and FYIs
+        # remain readable without starting unbounded conversational ping-pong.
+        return bool(event["message_type"] == "reply" and event["reply_to"]
+                    and self.store.event(event["reply_to"])["message_type"] == "request")
+
+    def _has_pending_request(self, actor: str) -> bool:
+        cursor = self._cursors.get(actor, 0)
+        while True:
+            page = self.store.events(after=cursor, kind="message", recipient=actor, limit=100)
+            if any(e["author"] != actor and e["id"] not in self._delivered_events.get(actor, set())
+                   and self._starts_followup(e) for e in page):
+                return True
+            if len(page) < 100:
+                return False
+            cursor = page[-1]["id"]
 
     def poll(self, actor: str) -> str:
         """Deliver new attributed events without upgrading them to user authority."""
@@ -283,11 +372,24 @@ class TeamRuntime:
                                      recipient=actor, limit=20)
             if not page:
                 return ""
+            delivered = self._delivered_events.setdefault(actor, set())
+            visible = [e for e in page if e["author"] != actor and e["id"] not in delivered]
             self._cursors[actor] = page[-1]["id"]
+            delivered.intersection_update({event_id for event_id in delivered
+                                           if event_id > self._cursors[actor]})
             self.store.update(lambda state, emit: state["agents"][actor].update(
-                cursor=page[-1]["id"]))
-            visible = [e for e in page if e["author"] != actor]
+                cursor=page[-1]["id"], received=sorted(delivered)))
             return json.dumps(visible, ensure_ascii=False) if visible else ""
+
+    def acknowledge_events(self, actor: str, events: list[dict]) -> None:
+        """Record delivery by an idle result without swallowing unmatched updates."""
+        with self._lock:
+            received = self._delivered_events.setdefault(actor, set())
+            received.update(e["id"] for e in events if isinstance(e.get("id"), int)
+                            and e["id"] > self._cursors.get(actor, 0)
+                            and e["kind"] != "user_guidance")
+            self.store.update(lambda state, emit: state["agents"][actor].update(
+                received=sorted(received)))
 
     def forward_user_guidance(self, content: str, attachments: list | None = None) -> None:
         """Called only by the root loop's user-input path, never by an agent tool."""
@@ -297,7 +399,7 @@ class TeamRuntime:
             if attachments:
                 self._guidance_attachments[event_id] = list(attachments)
                 self.attachments.extend(attachments)
-        self._changed.set()
+        self.wake_waiters()
 
     def guidance_attachments(self, event_id: int) -> list:
         """Live image payloads stay in memory, separate from the durable event log."""
@@ -305,7 +407,7 @@ class TeamRuntime:
             return list(self._guidance_attachments.get(event_id, []))
 
     def read(self, *, view: str = "board", after: int = 0, limit: int = 50,
-             ticket_id: str | None = None) -> dict:
+             ticket_id: str | None = None, thread_id: int | None = None) -> dict:
         if view == "board":
             state = self.store.snapshot()
             return {
@@ -317,7 +419,8 @@ class TeamRuntime:
                             for t in state["tickets"].values()],
             }
         kind = {"notes": "note", "messages": "message", "events": None}[view]
-        page = self.store.events(after=after, limit=limit, kind=kind, ticket_id=ticket_id)
+        page = self.store.events(after=after, limit=limit, kind=kind, ticket_id=ticket_id,
+                                 thread_id=thread_id)
         return {"events": page, "next_after": page[-1]["id"] if page else after,
                 "page_full": len(page) == min(100, limit)}
 
@@ -365,22 +468,12 @@ class TeamRuntime:
         from infinidev.engine.team.worker import run_worker
 
         result, status = "Worker cancelled before starting", "cancelled"
-        writer_acquired = False
         try:
             member = self.store.snapshot()["agents"][member_id]
             missing = set(member["tools"]) - self.catalog.keys()
             if missing:
                 raise ValueError(f"Previously granted tools no longer available: {sorted(missing)}")
-            writes = any(not getattr(self.catalog[n], "is_read_only", False)
-                         for n in member["tools"])
-            # Shared workspace baselines and edits cannot be owned concurrently.
-            # Unknown/MCP effects are conservatively treated as writes.
-            if writes:
-                while not self._stopped.is_set():
-                    if self._writers.acquire(timeout=0.1):
-                        writer_acquired = True
-                        break
-            if not self._stopped.is_set():
+            if self._acquire_worker(member_id):
                 ticket = self.store.snapshot()["tickets"][member["ticket_id"]]
                 if ticket["status"] != "cancelled":
                     self.store.update(lambda state, emit: state["agents"][member_id].update(
@@ -391,8 +484,7 @@ class TeamRuntime:
             logger.exception("Team worker %s failed", member_id)
             result, status = f"Worker failed: {type(exc).__name__}: {exc}", "failed"
         finally:
-            if writer_acquired:
-                self._writers.release()
+            self._release_worker(member_id)
             with self._lock:
                 metrics = loop_observed_metrics(self._engines.get(member_id))
                 for key, value in metrics.items():
@@ -415,12 +507,10 @@ class TeamRuntime:
                 finally:
                     self._engines.pop(member_id, None)
                     self._active.discard(member_id)
-                    self._changed.set()
+                    self.wake_waiters()
                 # A request can arrive after the last model call but before
                 # this transition to idle. Never strand it in that race.
-                unread = self.store.events(after=self._cursors.get(member_id, 0),
-                                           kind="message", recipient=member_id, limit=100)
-                if any(e["author"] != member_id and e["reply_to"] is None for e in unread):
+                if self._has_pending_request(member_id):
                     self._schedule(member_id, assignment=False)
             self._notice(f"{member_id}: {status}; report saved")
 
@@ -435,12 +525,13 @@ class TeamRuntime:
         with self._lock:
             for engine in self._engines.values():
                 engine.cancel()
-        self._changed.set()
+        self.wake_waiters()
 
     def close(self) -> None:
         """Wait for cooperative cancellation before releasing the durable owner."""
         self.cancel()
         self._pool.shutdown(wait=True)
+        self._unsubscribe_background()
 
         def release(state, emit):
             state["running"] = False

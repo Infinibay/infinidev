@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr, StringConstraints
 
+from infinidev.engine.team.waiting import IdleInput
 from infinidev.tools.base.base_tool import InfinibayBaseTool
 from infinidev.tools.base.context import bind_tools_to_agent
 
@@ -43,6 +44,10 @@ class MessageInput(BaseModel):
     content: Text
     reply_to: int | None = Field(default=None, ge=1)
     ticket_id: Name | None = None
+    message_type: Literal["request", "reply", "info"] | None = Field(
+        default=None, description="request asks for action; reply answers reply_to; info needs no answer. "
+        "Default: reply when reply_to is set, otherwise request.",
+    )
 
 
 class NoteInput(BaseModel):
@@ -58,10 +63,11 @@ class ReadTeamInput(BaseModel):
     after: int = Field(default=0, ge=0)
     limit: int = Field(default=50, ge=1, le=100)
     ticket_id: Name | None = None
+    thread_id: int | None = Field(default=None, ge=1, description="Read one conversation thread")
 
 
 class WaitTeamInput(BaseModel):
-    seconds: float = Field(default=5, ge=0, le=10)
+    seconds: float | None = Field(default=None, ge=0, le=604800)
 
 
 class CatalogInput(BaseModel):
@@ -90,8 +96,9 @@ class TeamTool(InfinibayBaseTool):
                           if query in (t.name + " " + t.description).casefold()]
             elif operation in {"read", "wait"}:
                 if operation == "wait":
-                    self._team._require_root(actor)
-                result = getattr(self._team, operation)(**kwargs)
+                    result = self._team.idle(actor, timeout=kwargs.get("seconds"))
+                else:
+                    result = self._team.read(**kwargs)
             else:
                 result = getattr(self._team, operation)(actor, **kwargs)
             return json.dumps(result, ensure_ascii=False)
@@ -123,7 +130,8 @@ class TeamMessageTool(TeamTool):
     name: str = "team_send_message"
     description: str = (
         "Ask a teammate a question, reply using reply_to, or share information. "
-        "Returns immediately; a new request can wake an idle worker. Messages stay in team history."
+        "Requests and their answers can wake recipients; info does not start a completed worker. "
+        "Returns a durable ID/thread and delivery status. Use team_idle(reply_to=ID) for an answer."
     )
     args_schema: type[BaseModel] = MessageInput
 
@@ -148,8 +156,22 @@ class ReadTeamTool(TeamTool):
 
 class WaitTeamTool(TeamTool):
     name: str = "team_wait"
-    description: str = "Wait up to ten seconds for team activity, then return the current board."
+    description: str = (
+        "Idle until a message, report or user guidance arrives, without model polling. "
+        "Optional seconds sets a timeout. Use team_idle for event filters."
+    )
     args_schema: type[BaseModel] = WaitTeamInput
+
+
+class IdleTeamTool(TeamTool):
+    name: str = "team_idle"
+    description: str = (
+        "Suspend this agent until a selected event arrives, retaining context without model calls. "
+        "Choose message/report/background_task/note/ticket, with optional sender, reply_to, task_ids "
+        "and ticket_id filters. Releases worker capacity and workspace lease. User guidance and "
+        "cancellation always interrupt. Omit timeout to sleep until an event."
+    )
+    args_schema: type[BaseModel] = IdleInput
 
 
 class TeamCatalogTool(TeamTool):
@@ -160,10 +182,11 @@ class TeamCatalogTool(TeamTool):
 
 def build_team_tools(team: Any, agent_id: str, *, orchestrator: bool) -> list:
     """Construct fresh, scoped tool instances for one team member."""
-    entries = [(TeamMessageTool, "send"), (TeamNoteTool, "write_note"), (ReadTeamTool, "read")]
+    entries = [(TeamMessageTool, "send"), (TeamNoteTool, "write_note"), (ReadTeamTool, "read"),
+               (IdleTeamTool, "idle"), (WaitTeamTool, "wait")]
     if orchestrator:
         entries += [(CreateTicketTool, "create_ticket"), (DelegateTool, "delegate"),
-                    (ReviewTicketTool, "review"), (WaitTeamTool, "wait"),
+                    (ReviewTicketTool, "review"),
                     (TeamCatalogTool, "catalog")]
     tools = []
     for cls, operation in entries:

@@ -50,6 +50,17 @@ test("workspace, team, notes, tools, logs and source are real API views", async 
   await expect(
     page.getByText("Can you confirm whether", { exact: false }),
   ).toBeVisible();
+  await expect(page.locator(".conversation-thread")).toHaveCount(1);
+  await expect(page.getByText("answered", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open full thread" }).click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "held-out set includes unseen keys",
+  );
+  await page.keyboard.press("Escape");
+  await page.screenshot({
+    path: "test-results/conversations.png",
+    fullPage: true,
+  });
   await page.getByRole("button", { name: "Processes", exact: true }).click();
   await expect(page.locator(".terminal-output pre")).toContainText(
     "Starting baseline evaluation",
@@ -145,6 +156,44 @@ test("messages stream once, permissions survive reload, and session names persis
   await page.reload();
   await expect(
     page.getByText("Research follow-up", { exact: true }).first(),
+  ).toBeVisible();
+});
+
+test("an idle agent survives reload and wakes when a shared note is published", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "New session", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Message Infinidev" })
+    .fill("idle fixture");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await page.getByRole("button", { name: "Team", exact: true }).click();
+  await expect(
+    page.getByText("Idle · Waiting for your research note"),
+  ).toBeVisible();
+  await page.locator(".agent-card").click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Until an event arrives",
+  );
+  await page.screenshot({
+    path: "test-results/idle-agent.png",
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await page.getByRole("button", { name: "Team", exact: true }).click();
+  await expect(
+    page.getByText("Idle · Waiting for your research note"),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Shared notes" }).click();
+  await page.getByRole("button", { name: "Add a note" }).click();
+  await page
+    .getByRole("textbox", { name: "Shared note" })
+    .fill("New evidence is available.");
+  await page.getByRole("button", { name: "Save note" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await expect(
+    page.getByText("Woke after shared note.", { exact: true }),
   ).toBeVisible();
 });
 

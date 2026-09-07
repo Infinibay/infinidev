@@ -254,6 +254,96 @@ textarea {
 .badge-idle {
   color: var(--muted);
 }
+.badge-delivered,
+.badge-answered {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.idle-hint {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--green-soft);
+  font-size: 12px;
+}
+.idle-details {
+  border-left: 3px solid var(--green);
+  padding: 0 16px 12px;
+  margin: 20px 0;
+}
+.idle-details dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 20px;
+  font-size: 13px;
+}
+.idle-details dd {
+  margin: 0;
+}
+.conversation-filters {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.conversation-filters label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+.conversation-filters input,
+.conversation-filters select {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 9px 12px;
+  min-width: 0;
+}
+.conversation-filters input {
+  width: 100%;
+}
+.conversation-threads {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 24px;
+}
+.conversation-thread {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 18px;
+  background: var(--panel);
+  min-width: 0;
+}
+.thread-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.thread-heading > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.peer-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 16px 0;
+}
+.peer-message > div:last-child {
+  min-width: 0;
+  flex: 1;
+}
+.peer-message small {
+  color: var(--muted);
+}
 .tooltip {
   z-index: 200;
   background: #17251d;

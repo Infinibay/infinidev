@@ -99,6 +99,14 @@ the server's launch URL. Vite proxies `/api` and `/ws` to Python.
 - Inspect specialist names, roles, exact prompts and granted tools; browse ticket
   objectives, acceptance conditions, results and reviews. Shared notes and team
   messages retain author labels. User-authored notes are stored as `user`.
+- Agents can idle on selected messages, replies, reports, notes, ticket changes
+  or background process completions without calling their model while waiting.
+  Team cards show the reason; their details show wake conditions. A browser
+  refresh preserves the wait. Shared notes published in the web UI notify live
+  subscribers, and user guidance or cancellation always interrupts sleep.
+  Communication groups request/reply threads with delivery status, search and
+  participant filters; the full thread opens with paginated durable history.
+  See [research teams](research-teams.md) for event filters and runtime limits.
 - Open background processes in output tabs, follow retained stdout/stderr, copy or
   download the retained log, and stop the process. Output refreshes every 750 ms.
   The manager belongs to this server process; processes in another TUI instance

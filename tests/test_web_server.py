@@ -110,6 +110,31 @@ def test_model_effort_options_come_from_selected_model(web_client, monkeypatch):
     assert response["effort"]["choices"] == ["low", "medium", "high", "xhigh", "max"]
 
 
+def test_conversation_thread_keeps_replies_and_is_scoped_to_the_session(web_client):
+    import hashlib
+    import json
+
+    from infinidev.engine.team.store import TeamStore
+
+    client, app = web_client
+    session_id = client.post("/api/sessions", json={}).json()["session_id"]
+    other = client.post("/api/sessions", json={}).json()["session_id"]
+    key = json.dumps([1, str(app.state.runtime.root), session_id])
+    store = TeamStore(hashlib.sha256(key.encode()).hexdigest())
+
+    def conversation(state, emit):
+        question = emit("message", "a", "Question", recipient="b", message_type="request")
+        emit("message", "b", "Answer", recipient="a", reply_to=question,
+             thread_id=question, message_type="reply")
+        return question
+
+    question = store.update(conversation)
+    response = client.get(f"/api/sessions/{session_id}/threads/{question}")
+    assert response.status_code == 200
+    assert [e["content"] for e in response.json()["events"]] == ["Question", "Answer"]
+    assert client.get(f"/api/sessions/{other}/threads/{question}").status_code == 404
+
+
 def _wait_until(predicate, timeout=3):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

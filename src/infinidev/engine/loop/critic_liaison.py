@@ -147,12 +147,17 @@ class CriticLiaison:
         the critic would otherwise see the actions without the thinking
         that led to them.
         """
+        reviewable = [call for call in tool_calls
+                      if getattr(getattr(call, "function", None), "name", None)
+                      not in {"team_idle", "team_wait"}]
+        if not reviewable:
+            return run_tools()
         critic = self.get(ctx)
         if critic is None:
             return run_tools()
 
         messages_snapshot = list(messages)
-        calls_snapshot = list(tool_calls)
+        calls_snapshot = list(reviewable)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             tools_future = pool.submit(run_tools)

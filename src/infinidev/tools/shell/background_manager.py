@@ -25,6 +25,7 @@ import signal
 import subprocess
 import threading
 import time
+from typing import Callable
 
 from infinidev.tools.shell.shell_invocation import shell_invocation
 
@@ -131,6 +132,8 @@ class BackgroundTask:
         # is drained into a <background-task-finished> prompt block each turn.
         if newly_finished and self.killed_reason is None:
             _queue_completion(self.id)
+        if newly_finished:
+            _notify_completion(self)
 
     # ── State accessors ──────────────────────────────────────────────
     @property
@@ -400,6 +403,29 @@ class BackgroundTaskManager:
 # write to it; the prompt builder reads and clears it.
 _pending_completions: list[str] = []
 _completions_lock = threading.Lock()
+_completion_listeners: set[Callable[[BackgroundTask], None]] = set()
+
+
+def subscribe_completions(callback: Callable[[BackgroundTask], None]) -> Callable[[], None]:
+    """Observe completions without consuming another agent's notifications."""
+    with _completions_lock:
+        _completion_listeners.add(callback)
+
+    def unsubscribe() -> None:
+        with _completions_lock:
+            _completion_listeners.discard(callback)
+
+    return unsubscribe
+
+
+def _notify_completion(task: BackgroundTask) -> None:
+    with _completions_lock:
+        callbacks = tuple(_completion_listeners)
+    for callback in callbacks:
+        try:
+            callback(task)
+        except Exception:
+            logger.exception("Background completion listener failed for %s", task.id)
 
 
 def _queue_completion(task_id: str) -> None:

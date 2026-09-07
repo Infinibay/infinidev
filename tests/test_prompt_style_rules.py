@@ -84,6 +84,7 @@ RUNTIME_PROMPT_MODULES = [
     "infinidev.engine.orchestration.pipeline",
     "infinidev.engine.engines.orchestrator",
     "infinidev.engine.team.runtime",
+    "infinidev.engine.team.waiting",
     "infinidev.engine.team.worker",
     "infinidev.tools.team.tools",
     "infinidev.engine.phases.investigator",
@@ -109,6 +110,11 @@ RUNTIME_PROMPT_MODULES = [
 ]
 
 RUNTIME_PROMPT_ROLES = {
+    "infinidev.engine.engines.orchestrator": {"team_orchestrator"},
+    "infinidev.engine.team.runtime": {"team_orchestrator"},
+    "infinidev.engine.team.waiting": {"team_worker"},
+    "infinidev.engine.team.worker": {"team_worker"},
+    "infinidev.tools.team.tools": {"team_orchestrator"},
     "infinidev.engine.analysis.planner": {"task_planner"},
     "infinidev.engine.council.agent_loop": {
         "council_member",
@@ -163,6 +169,7 @@ UNSCHEMA_TOOLS = frozenset({
 # Which directory under prompts/ belongs to which tool tier.
 ROLE_BY_DIR = {"chat_agent": "chat_agent", "analyst": "planner"}
 ROLE_BY_PROMPT = {
+    "team.py": "team_orchestrator",
     "analyst/stage_planner_prompt.py": "stage_planner",
     "analyst/task_planner_prompt.py": "task_planner",
 }
@@ -246,10 +253,17 @@ def _active_engine_schemas() -> list[dict]:
     ]
 
 
-def _tool_names(role: str) -> set[str]:
+def _role_tools(role: str) -> list:
     from infinidev.tools import get_tools_for_role
+    from infinidev.tools.team import build_team_tools
 
-    names = {t.name for t in get_tools_for_role(role)}
+    if role in {"team_orchestrator", "team_worker"}:
+        return build_team_tools(None, "prompt-surface", orchestrator=role == "team_orchestrator")
+    return get_tools_for_role(role)
+
+
+def _tool_names(role: str) -> set[str]:
+    names = {t.name for t in _role_tools(role)}
     names |= {s.get("function", {}).get("name", "") for s in _pseudo_schemas()}
     return (names | set(KEN_TOOLS) | set(UNSCHEMA_TOOLS)) - {""}
 
@@ -261,8 +275,6 @@ def _parameter_names() -> set[str]:
     (``**final_answer**:``), so the only way to tell them apart is to know
     which names are parameters.
     """
-    from infinidev.tools import get_tools_for_role
-
     params: set[str] = set()
     for role in (
         "developer",
@@ -270,8 +282,10 @@ def _parameter_names() -> set[str]:
         "planner",
         "stage_planner",
         "task_planner",
+        "team_orchestrator",
+        "team_worker",
     ):
-        for tool in get_tools_for_role(role):
+        for tool in _role_tools(role):
             schema = getattr(tool, "args_schema", None)
             params |= set(getattr(schema, "model_fields", {}) or {})
     for schema in _active_engine_schemas():
