@@ -119,6 +119,11 @@ class LoopState(BaseModel):
     # runs with TASK_MAX_ITERATIONS=0 (unlimited), so this counter is what
     # bounds the engine instead of the iteration budget.
     effect_refusals_by_step: dict[int, int] = Field(default_factory=dict)
+    # Handoff refusals for the whole Task, bounded at one. The handoff is
+    # a wording gap in the deliverable rather than missing work, so the
+    # engine asks once and then accepts whatever it gets: a run must never
+    # be stopped over prose.
+    handoff_refusals: int = 0
     # Custom test runner commands declared by the agent (or pre-loaded
     # from settings) for projects whose test invocation isn't covered
     # by the built-in runner list. Stored as a list of substrings; the

@@ -87,6 +87,9 @@ def _changed_files(diff: str) -> list[str]:
 _IGNORED_PARTS = frozenset({
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache",
     ".tox", ".nox", ".venv", "venv", ".git",
+    # Ken's index lives beside the workspace it indexes and 15 stored runs
+    # recorded its files as the agent's changes.
+    ".ken", ".infinidev",
 })
 
 
@@ -171,9 +174,19 @@ def _workspace_changed_files(a: dict[str, Any]) -> list[str]:
     """
 
     changed = a.get("changed_paths")
-    if isinstance(changed, (list, tuple)):
-        return [str(path) for path in changed]
-    return _changed_files(a.get("_diff") or "")
+    if not isinstance(changed, (list, tuple)):
+        return _changed_files(a.get("_diff") or "")
+    # Runs recorded before the runner learned to ignore Ken's index carry
+    # ``.ken/*`` among their changed paths, which is not the task's diff. The
+    # path-based probes would then see "changed outside the unit" for a run that
+    # fixed exactly the right file.
+    return [
+        str(path) for path in changed
+        if not any(
+            part in _IGNORED_PARTS or part.endswith((".pyc", ".pyo"))
+            for part in str(path).split("/")
+        )
+    ]
 
 
 _COMPENSATION_FILES = re.compile(
@@ -376,21 +389,29 @@ def probe_assurance_scope(a: dict[str, Any]) -> Outcome:
 
 
 def probe_concise_handoff(a: dict[str, Any]) -> Outcome:
-    """`complex-plan`: outcome, verification and open decisions, without a tour."""
+    """`complex-plan`: the answer points at verification and at what is open.
+
+    The rubric's third clause is "without narrating every step". This probe used
+    to score that as a length bound, and reading the answers showed the bound
+    was measuring the wrong thing: a plan handoff legitimately lists the open
+    decisions with owners, the phases, the rollout and the rollback, so eleven
+    of the stored answers run 2 100-3 500 characters while being outcome-first
+    summaries rather than step narration. Length is now reported as evidence
+    and not scored; the two clauses that are unambiguous are what count.
+    """
     answer = _answer(a).strip()
     if not answer:
         return None, "the run produced no final answer"
     verified = bool(_COMMAND_IN_ANSWER.search(answer) and _RESULT_IN_ANSWER.search(answer))
     remaining = bool(_REMAINING_IN_ANSWER.search(answer))
-    short = len(answer) <= 1_600
-    score = sum((verified, remaining, short))
+    score = sum((verified, remaining))
     detail = (
         f"{len(answer)} chars, verification={'yes' if verified else 'no'}, "
         f"open decisions={'yes' if remaining else 'no'}"
     )
-    if score == 3:
-        return 2, detail
     if score == 2:
+        return 2, detail
+    if score == 1:
         return 1, detail
     return 0, detail
 
@@ -407,6 +428,86 @@ def probe_decision_ownership(a: dict[str, Any]) -> Outcome:
     if decision or recommendation:
         return 1, "names the decision or a recommendation, not both"
     return 0, "neither the decision nor a recommendation appears"
+
+
+# ── the residual items that are still mechanical ────────────────────────
+
+
+def probe_routine_autonomy(a: dict[str, Any]) -> Outcome:
+    """`reversible-ambiguity`: the cheap reversible detail was handled, not asked.
+
+    The evidence is the outcome, not a proxy for it: a run that changed the
+    implementation file acted; a run with no change that ends in a question
+    blocked. A run that acts and *then* offers to flip the convention is still
+    autonomous, which is why an offer after a change does not count against it.
+    """
+    changed = _workspace_changed_files(a)
+    if changed:
+        return 2, f"acted on {[f.rsplit('/', 1)[-1] for f in changed]}"
+    answer = _answer(a)
+    if not answer.strip():
+        return None, "no change and no answer to judge"
+    asks = bool(re.search(r"\?|\bwhich (?:one|would)|\bshould i\b|\bwould you\b|"
+                          r"\bplease (?:confirm|choose)\b|\blet me know\b",
+                          answer, re.IGNORECASE))
+    return (0, "no change made; the answer asks the user") if asks else (
+        0, "no change made and the answer does not disclose a question",
+    )
+
+
+def probe_no_regression(a: dict[str, Any]) -> Outcome:
+    """`options-override`: the default path still renders as before, and said so.
+
+    Both halves are checked elsewhere already: the withheld verifier exercises
+    the default path, and the answer either names the command it ran or does
+    not. An unverified run cannot meet this item, and says which half failed.
+    """
+    rc = a.get("verify_exit_code")
+    named = bool(_COMMAND_IN_ANSWER.search(_answer(a)))
+    if rc == 0 and named:
+        return 2, "the verifier passed and the answer names the command"
+    if rc == 0:
+        return 1, "the verifier passed but the answer names no command"
+    if rc is None:
+        return None, "the run never reached a verifier result"
+    return 0, f"verifier exit code {rc}"
+
+
+_OPTIONS_LAYER = re.compile(r"(?:src/)?config\.py$")
+
+
+def probe_diagnosed_the_right_layer(a: dict[str, Any]) -> Outcome:
+    """`options-override`: the merge is fixed where it is wrong.
+
+    `src/config.py` holds the merge that overwrites the caller's overrides;
+    `src/report.py` is the caller. Fixing the caller passes the verifier and
+    leaves the defect in place, which is what the item exists to catch.
+    """
+    changed = _workspace_changed_files(a)
+    if not changed:
+        return 0, "no file changed"
+    if all(_OPTIONS_LAYER.search(f) for f in changed):
+        return 2, f"fixed the merge layer: {[f.rsplit('/', 1)[-1] for f in changed]}"
+    return 0, f"changed outside the merge layer: {[f.rsplit('/', 1)[-1] for f in changed]}"
+
+
+_AUDIT_MODULES = ("auth.py", "storage.py", "api.py")
+
+
+def probe_independent_questions(a: dict[str, Any]) -> Outcome:
+    """`research-audit`: three modules, three answers, none dropped or merged."""
+    body = a.get("_diff") or ""
+    if not body.strip():
+        return None, "the report was not written"
+    missing = [name for name in _AUDIT_MODULES if name not in body]
+    if missing:
+        return 0, f"the report never names {', '.join(missing)}"
+    return 2, "all three modules are named separately"
+
+
+
+
+
 
 
 PROBES: dict[str, Probe] = {
@@ -427,6 +528,11 @@ PROBES: dict[str, Probe] = {
     "assurance-scope": probe_assurance_scope,
     "concise-handoff": probe_concise_handoff,
     "decision-ownership": probe_decision_ownership,
+    # The residual items that carry a mechanical answer after all.
+    "routine-autonomy": probe_routine_autonomy,
+    "no-regression": probe_no_regression,
+    "diagnosed-the-right-layer": probe_diagnosed_the_right_layer,
+    "independent-questions": probe_independent_questions,
 }
 
 

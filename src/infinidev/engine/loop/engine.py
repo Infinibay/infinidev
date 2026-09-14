@@ -511,6 +511,58 @@ def _enforce_edit_requirement(
     return True
 
 
+def _handoff_notice_enabled() -> bool:
+    """Whether the engine asks once for a check the user could run.
+
+    Separate switch from ``LOOP_CLOSURE_FEEDBACK_ENABLED`` because it is a
+    different kind of gate: the others refuse missing work, this one refuses a
+    wording gap and must never stop a run. Off means the final answer is
+    accepted exactly as written.
+    """
+    with best_effort("handoff notice setting read failed"):
+        from infinidev.config.settings import settings
+
+        return bool(getattr(settings, "LOOP_HANDOFF_NOTICE_ENABLED", True))
+    return True
+
+
+def _enforce_handoff_contract(
+    step_result: StepResult,
+    *,
+    requested_status: str,
+    requested_final_answer: str | None,
+) -> bool:
+    """Pause a `done` whose final answer names no check the user can run.
+
+    Narrow on purpose. It fires only when the model itself wrote a command into
+    ``evidence_summary`` — the schema asks for "the command and its exit status"
+    — and then handed the user an answer that names none. Measured over 25
+    planning runs, 18 named one; the engine stays quiet about the other 7
+    rather than judging prose.
+
+    Unlike the edit and Step-effect gates, exhausting this one must never end a
+    run: the work exists and only the wording is short. The caller accepts the
+    model's close after ``MAX_HANDOFF_REFUSALS``.
+    """
+    from infinidev.engine.loop.engine_notice import names_a_verification_command
+
+    if requested_status != "done":
+        return False
+    answer = str(requested_final_answer or "").strip()
+    if not answer or names_a_verification_command(answer):
+        return False
+    if not names_a_verification_command(step_result.evidence_summary):
+        return False
+    step_result.status = "continue"
+    step_result.final_answer = None
+    step_result.interrupted = True
+    step_result.summary = (
+        f"{step_result.summary.rstrip()} Completion was deferred because the "
+        "final answer names no command the user can run."
+    ).strip()
+    return True
+
+
 def _enforce_step_effect(ctx: ExecutionContext, step_result: StepResult) -> bool:
     """Keep a change Step active until it has concrete edit evidence.
 
@@ -1117,6 +1169,23 @@ class LoopEngine(AgentEngine):
                     agent_id=ctx.agent_id,
                 )
                 refusal_kind = "step_effect"
+            if (
+                not refusal_kind
+                and _handoff_notice_enabled()
+                and _enforce_handoff_contract(
+                    step_result,
+                    requested_status=requested_status,
+                    requested_final_answer=requested_final_answer,
+                )
+            ):
+                _emit_log(
+                    "warning",
+                    f"{_YELLOW}⚠ Final answer names no command the user can "
+                    f"run — asking once for the verification line{_RESET}",
+                    project_id=ctx.project_id,
+                    agent_id=ctx.agent_id,
+                )
+                refusal_kind = "handoff"
             if refusal_kind and _closure_feedback_enabled():
                 terminal = self._deliver_closure_refusal(
                     ctx, step_mgr, refusal_kind, iteration, step_result,
@@ -1249,11 +1318,39 @@ class LoopEngine(AgentEngine):
         """
         from infinidev.engine.loop.engine_notice import (
             MAX_CLOSURE_REFUSALS,
+            MAX_HANDOFF_REFUSALS,
             build_edit_requirement_notice,
+            build_handoff_notice,
             build_step_effect_notice,
             note_closure_refusal,
+            note_handoff_refusal,
             queue_engine_notice,
         )
+
+        if kind == "handoff":
+            # Bounded per Task and never terminal: the deliverable exists, so
+            # the engine asks once and then accepts the close as it stands.
+            attempt = note_handoff_refusal(ctx.state)
+            if attempt <= MAX_HANDOFF_REFUSALS:
+                queue_engine_notice(
+                    ctx.state,
+                    build_handoff_notice(
+                        evidence=step_result.evidence_summary,
+                        attempt=attempt,
+                    ),
+                )
+                return None
+            step_result.status = requested_status
+            step_result.interrupted = requested_interrupted
+            step_result.final_answer = requested_final_answer
+            _emit_log(
+                "warning",
+                f"{_YELLOW}⚠ Final answer still names no command; accepting "
+                f"the close rather than spending a round on wording{_RESET}",
+                project_id=ctx.project_id,
+                agent_id=ctx.agent_id,
+            )
+            return None
 
         active = getattr(getattr(ctx.state, "plan", None), "active_step", None)
         step_index = int(getattr(active, "index", -1) or -1)

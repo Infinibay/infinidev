@@ -12,7 +12,7 @@ de declarar un resultado. El detalle está en §6; los límites, en cada secció
 | Respuesta final con contrato de verificación | línea `Verification:` 6/16 → 16/16; respuestas sobre 250 palabras 2/16 → 0/16 | **medido** |
 | Cierre de Step rechazado en silencio (livelock) | racha de rondas sin trabajo: 11 → 0 | **medido** (falla intermitente) |
 | Presión de agrupación de tool calls | sin efecto (0,90 → 1,00 llamadas por ronda) | **resultado negativo**, apagado por defecto |
-| Catálogo de políticas condicionales | loop directo (18 parejas): −10,4 % tokens, −23,6 % latencia al no renderizarlo. En el modo que se envía (8 parejas): **−11,5 % tokens, p=0,031**, pero **+13,6 % latencia en 7/8 parejas** | **decisión: el flag queda en `true`**; el router no es gratis en latencia y eso sólo se ve con `pipeline_mode: true` (§6.1.3) |
+| Catálogo de políticas condicionales | dos muestras independientes en el modo que se envía: **−11,5 %** (p=0,031) y **−25,6 %** (p=0,016) de tokens, 16/16 de éxito. La latencia se movió +13,6 % en una y **−36,7 %** en la otra | **decisión: el flag queda en `true`**; el costo en latencia era ruido, con la diferencia entre brazos 10–25× menor que la dispersión dentro de un brazo (§6.1.26) |
 | **Modo de engine por defecto vs `task`** | contador corregido, 8 parejas pareadas: success **8/8 vs 8/8**, tokens facturados **−81,0 %**, rondas de modelo **−64,5 %**, latencia **−73,0 %**, todo con **p=0,0078** (§6.1.23). Los workers que escriben **están serializados por código** (`runtime.py:156`), así que la delegación no puede paralelizar trabajo de código (§6.1.12) |
 | El contador de tokens no contaba todo | el camino `task` omitía 5 fases y el `orchestrator` omitía **los loops de sus workers**: el costo real del orquestador es 1,68×–1,77× lo reportado. Corregido contando en la frontera del proveedor: **−89,0 % / −83,8 % por pareja y −73 % de rondas de modelo** | **defecto de medición corregido**; el −82,9 % pasa a ser un piso, no la cifra final (§6.1.8) |
 | **El router de políticas, medido aislado** | ruteo local **4 ms**; `preferred` **2,91 s por turno** (12,1 s en el peor), 446 tokens de prompt por turno **invisibles para los contadores**, y quita una etiqueta de método justificada en 2 de 11 requests | **cambiado a `fallback`**: gratis en 10 de 11, conserva la capacidad y no resta (§6.1.21) |
@@ -24,6 +24,10 @@ de declarar un resultado. El detalle está en §6; los límites, en cada secció
 | Corregir la hoja rota contra reescribir una sana | `default` reescribió una hoja conforme (`v + 9` → `v + 58`) en 1 de 3; `lean` corrigió `v - 40` en 3 de 3. Ambos pasan el verificador | **medido**: `located-the-leaf` 1,33 vs **2,00** (§6.1.20) |
 | El mismo archivo contado dos veces (`abspath` vs `realpath`) | 22 de 32 ejecuciones traían el diff duplicado: `changed_lines` se inflaba al doble en unas y no en otras, y el revisor recibía el diff dos veces en el prompt | **arreglado en el producto y en la métrica**; los titulares no se mueven y una pareja de 16 cambia de dirección (§6.1.16) |
 | **Calidad juzgada, por primera vez** | 16 ejecuciones pareadas contra sus ítems `human_review`, juez ciego: **default 1,81 vs `lean` 1,94** (máx. 2); 14 de 16 ítems empatan | **medido**; los dos ítems que difieren van a favor de `lean` con n=1, y así queda declarado (§6.1.17) |
+| **Calidad de la configuración enviada** | 90 ejecuciones `lean` + `task`, **19 ítems decididos por programa**: **todos en 2,00 salvo `concise-handoff` en 1,62**, con las dos únicas fallas siendo corridas que no corrieron | **medido**; el proxy de longitud de §6.1.24 y los dos probes de vocabulario de §6.1.27 eran del instrumento, no del engine |
+| El único loop sin tope de resultado | el developer era el único de seis loops sin `max_chars`: una lectura de 42 770 caracteres se reenviaba en cada ronda. Ahorro del payload acumulado: mediana **0 %**, máximo **44,5 %**, agregado 7,3 % sobre las 29 ejecuciones afectadas | **arreglado** con el mismo manejador que los otros cinco, después del archivado; 3/3 completan y el tope no se disparó (§6.1.33) |
+| Un argumento con forma de diccionario tumbaba el turno | `(args.get("message") or "").strip()` sobre `{"message": {"text": …}}`: 1 de 3 ejecuciones moría con `AttributeError` y el turno entero se perdía | **arreglado en 8 sitios** con coerción central; 2/3 completadas antes, 3/3 después (§6.1.30) |
+| Una promesa no es una entrega | 1 de 318 ejecuciones terminó con el chat agent prometiendo el trabajo: 0 rondas del loop, 0 archivos, y la promesa como respuesta | **arreglado**: un `respond` que promete trabajo de ingeniería se escala (§6.1.25) |
 | **Rúbricas resueltas por programa** | 13 de 16 ítems deciden con evidencia del artefacto y **abstienen** cuando no la tienen. En `lean`: mueven `concise-handoff` (+1,00), `failure-recognition` (+0,50) y `verification-reported` (+0,50), todo a favor de `lean` — los mismos ítems que el juez ciego, por otro método | **medido**, dos instrumentos coinciden (§6.1.18). Cubre el 58 % de las 578 instancias de rúbrica guardadas |
 | `__pycache__` en el baseline de la tarea | en 15 ejecuciones el diff del revisor traía caché compilada, y en `wide-sum` era el **91,5–95,5 %** del payload (7 370 de 7 980 caracteres) | **arreglado** en el fixture, en `init_git_workspace` y en el probe (§6.1.19) |
 
@@ -52,13 +56,13 @@ no contaba todo**: omitía cinco fases del camino `task` y los loops de los work
 del `orchestrator`, en direcciones opuestas (§6.1.8). Ahora se cuenta en la
 frontera del proveedor.
 
-**Qué queda abierto**, en orden: resolver la contradicción de latencia del
-catálogo de políticas (el ahorro de tokens está resuelto con p=0,031; la latencia
-se mueve al revés en 7 de 8 parejas); hacer que el engine **note** el traspaso
-flojo, que es el único ítem de rúbrica por debajo de 1,67 en el corpus entero y el
-único donde el orquestador gana; y terminar de puntuar las rúbricas
-`human_review` de las campañas que faltan, que es lectura y no cuesta tokens de
-modelo.
+**Qué queda abierto**: puntuar el residuo de rúbricas `human_review` que ningún
+probe decide —`evidence-depth`, `report-usability`, `routine-autonomy`,
+`verification-interpretation`, `recommendation-calibration`— sobre el resto del
+corpus, que es lectura del paquete ciego y **cero llamadas al modelo**; y ampliar
+la muestra del default de engine si se quiere citar un intervalo en vez de un
+p-valor. Las dos contradicciones medidas que quedaban están cerradas: la del
+router (§6.1.21) y la del catálogo (§6.1.26).
 
 ---
 
@@ -1988,6 +1992,476 @@ tragárselo. Un aviso equivalente —"tu respuesta final no nombra el comando qu
 corriste ni lo que queda abierto"— es la palanca, y queda anotada en §7 en lugar
 de improvisada al final de esta ronda.
 
+### 6.1.24 El traspaso flojo: implementado, medido inerte, y el proxy de longitud que lo inflaba
+
+§6.1.22 dejó `concise-handoff` como el único ítem flojo (1,28 contra 1,67 del
+siguiente) y §6.1.23 lo dio como la única diferencia de calidad entre modos
+(2,00 contra 0,50). La conclusión parecía obvia: el engine debería **notar** que
+una respuesta `done` no nombra ningún comando y pedirlo una vez. Está
+implementado (`LOOP_HANDOFF_NOTICE_ENABLED`, contador propio, tope de **una**
+negativa por Task, nunca terminal: es un defecto de redacción, no trabajo
+faltante).
+
+**Y medido, no dispara.** A/B `handoff-off` contra `handoff-on`, 3 repeticiones ×
+`complex-plan`, mismo config y mismo día
+(`bench/runs/20260913-engine-v2/ab-handoff/comparison.md`): **nada resuelto** en
+ninguna métrica (1/1 parejas en tokens, 2/0 en latencia) y, lo importante, **el
+aviso no se disparó en ninguna ejecución del brazo `on`**: las cuatro respuestas
+completas del experimento nombran un comando de verificación.
+
+La razón es que la brecha que yo había medido era **histórica**. El "7 de 25 sin
+comando" de §6.1.22 viene del corpus entero, dominado por ejecuciones anteriores
+a `lean`, en modo `orchestrator` y de la era previa a los arreglos. En la
+configuración enviada, `complex-plan` nombra un comando en **9 de 12** corridas, y
+las 3 que no lo hacen **no llegan al loop**: dos son halt y una es la falla de
+§6.1.25. Ninguna compuerta dentro del loop puede arreglar una corrida que nunca
+corrió.
+
+**Y el proxy estaba mal.** Descomponiendo el ítem en sus tres componentes sobre
+las 12 corridas de la configuración enviada:
+
+| componente | cumple |
+| --- | ---: |
+| nombra comando y resultado | 9 / 12 |
+| apunta a lo que queda abierto | 10 / 12 |
+| **bajo 1 600 caracteres** | **5 / 12** |
+
+El componente que más fallaba era **la longitud**, que no es lo que la rúbrica
+pide: pide "sin narrar cada paso". Leí once respuestas largas del corpus y **no
+narran pasos**: son resúmenes con el resultado primero, las decisiones abiertas
+con dueño y default, las fases, el rollout, el rollback y el resultado de la
+verificación — es decir, exactamente el contenido que la tarea pidió. Un traspaso
+de un plan legítimamente ocupa 2 000–3 500 caracteres. El límite de 1 600 era
+mío, no del engine.
+
+Corregido: la longitud se **reporta** como evidencia y no se puntúa; el ítem
+puntúa los dos componentes que la rúbrica nombra sin ambigüedad. Efecto sobre el
+corpus entero (35 ejecuciones): `concise-handoff` pasa de **1,28 a 1,74** —de
+outlier a la mitad del pelotón— y sobre la configuración enviada (13
+ejecuciones) de 1,40 a **1,62**, con las dos únicas fallas plenas siendo las dos
+corridas que no corrieron. `ab-generality` sigue dando `lean` por delante (2,00
+contra 1,50) con la mitad del margen anterior.
+
+Es la **cuarta** vez en el proyecto que el instrumento, y no el engine, era el
+defectuoso. El aviso de traspaso se queda igual: es correcto, está acotado, no
+puede terminar un run y protege la propiedad en vez de mejorarla.
+
+### 6.1.25 Una promesa no es una entrega
+
+Buscando por qué el brazo `on` había fallado una corrida apareció lo peor que
+puede aparecer en este corpus: **un run que termina con una promesa.**
+
+```
+final_answer: "I will draft PLAN.md now, scoped to the tenant export change in
+requirements.md, and then run verify.py to confirm it passes."
+verify_exit_code: 1        changed_paths: []
+request_payload_history: 0 rounds        tool_trace: []
+```
+
+Cero rondas del loop, cero llamadas de herramienta, ningún archivo creado. El
+**chat agent** —que es de sólo lectura— decidió que el pedido era conversacional,
+respondió con lo que iba a hacer, y el pipeline devolvió esa promesa como la
+respuesta del turno. El usuario lee que el trabajo se va a hacer; el trabajo no se
+hace.
+
+**Frecuencia, medida sobre las 318 ejecuciones guardadas**: 2 terminaron sin que
+el loop corriera una sola ronda. Una es el halt de elaboración de §6.1.14; la
+otra es esta. Es raro y es la peor forma posible: las otras fallas al menos fallan
+a la vista.
+
+**El arreglo es determinista, no un párrafo más.** El prompt del chat agent ya
+dice que hay que escalar ante un pedido de ejecución directa, así que no faltaba
+la instrucción: faltaba la consecuencia. `promises_instead_of_working()`
+(`engine/orchestration/chat_agent.py`) detecta una respuesta que **abre** con un
+compromiso en primera persona seguido de un verbo de ingeniería, y el pipeline
+convierte ese `respond` en un `escalate` —el paquete que el pedido debió generar
+desde el principio—. Es conservador por construcción: exige que el compromiso
+abra la respuesta y que la primera oración nombre trabajo de ingeniería, así que
+"I will explain why the cache is stale" y las respuestas largas quedan intactas.
+Sin interruptor: la alternativa al arreglo es la falla.
+
+### 6.1.26 La contradicción del catálogo: resuelta como ruido, con los números de la propia campaña
+
+Quedaba una sola contradicción medida sin explicar. El A/B del catálogo de
+políticas (§6.1.3) dio, en el modo que se envía, **−11,5 % de tokens de prompt**
+(6/2, p=0,031) junto con **+13,6 % de latencia** (1/7), y las dos cosas no pueden
+venir del mismo cambio si el cambio es *menos prompt*.
+
+**La respuesta estaba en la campaña, sin correr nada nuevo.** Desagregando las 8
+parejas por tarea y por ronda:
+
+| tarea | rep | tokens all → sel | llamadas | latencia |
+| --- | ---: | ---: | ---: | ---: |
+| `cart-immutability` | 0 | 78 332 → 104 158 | 7 → 9 | 60 → 86 |
+| `cart-immutability` | 1 | 87 267 → 144 623 | 11 → 13 | 86 → 132 |
+| `evidence-code-review` | 0 | 95 546 → 84 237 | 5 → 5 | 143 → **304** |
+| `evidence-code-review` | 1 | 99 161 → 77 915 | 9 → 7 | 124 → 205 |
+| `options-override` | 0 | 75 780 → 53 718 | 9 → 9 | 40 → 64 |
+| `options-override` | 1 | 87 797 → 68 668 | 9 → 9 | 38 → 46 |
+| `tool-failure-recovery` | 0 | 75 808 → 54 879 | 9 → 10 | 65 → 85 |
+| `tool-failure-recovery` | 1 | 68 904 → 52 962 | 7 → 7 | 87 → 60 |
+
+En **cinco de las ocho parejas la latencia empeora mientras los tokens bajan y las
+rondas no suben** — y el caso que domina la mediana es
+`evidence-code-review`, que duplica su latencia (143 → 304 s) **con el mismo
+número de llamadas y menos tokens**. Ningún recorte de 3,7 KB de prompt produce
+eso. Los tokens de completion tampoco lo explican: son similares (±30 %) y los
+segundos por cada mil tokens generados suben igual, o sea que el mismo volumen de
+salida tardó más — variabilidad del proveedor, no del cambio.
+
+Y la escala del efecto lo cierra:
+
+| | latencia |
+| --- | ---: |
+| diferencia entre medianas (all → selected) | **+10,3 s** |
+| dispersión dentro de `all` (máx − mín) | 104,8 s |
+| dispersión dentro de `selected` | 258,1 s |
+
+La diferencia **entre** brazos es **10 a 25 veces menor** que la dispersión
+**dentro** de un brazo. Con eso, con p=1,0 del propio test de signos, con la
+dirección contraria a la del único mecanismo posible, y con la prueba de
+mecanismo de §6.1.21 mostrando que el clasificador corre en los dos brazos, la
+conclusión no es "no lo sabemos": es que **el +13,6 % no es un efecto**.
+
+**Y una réplica independiente lo confirma, con la latencia al revés.** Las mismas
+4 tareas × 2 repeticiones, corridas de nuevo
+(`bench/runs/20260913-engine-v2/ab-policy-pipeline2/comparison.md`):
+
+| | muestra original (8 parejas) | réplica (8 parejas) |
+| --- | ---: | ---: |
+| tokens de prompt facturados | −11,5 % (6/2, p=0,031) | **−25,6 %** (7/1, p=0,016) |
+| latencia | **+13,6 %** (1/7, p=1,0) | **−36,7 %** (5/3, p=0,06) |
+| success | 8/8 vs 8/8 | 8/8 vs 8/8 |
+| `changed_lines`, placeholders, archivos de más | 0 | 0 |
+
+**Dos muestras del mismo contraste dan signos opuestos en latencia.** Eso es lo
+que se ve cuando no hay efecto: el ahorro de tokens replica con el mismo signo y
+más grande con el contador corregido, y la latencia se mueve −13,6 % en una
+muestra y +36,7 % en la otra. (La réplica corre además con el clasificador ya en
+`fallback` (§6.1.21), así que su latencia absoluta no es comparable con la del
+original; lo que importa es que la *dirección* de la diferencia está en duda, no
+que haya cambiado el nivel.)
+
+Queda entonces: **el catálogo de políticas condicionales se paga —−11,5 % y
+−25,6 % de tokens en dos muestras, con 16/16 de éxito— y su costo en latencia no
+es medible con este diseño.** La contradicción que §6.1.3 dejó abierta no era un
+efecto sin explicar: era ruido con un mecanismo ausente, y ahora tiene la prueba
+de que se mueve en las dos direcciones.
+
+### 6.1.27 El residuo de rúbricas: cuatro probes más, y dos que hubo que sacar
+
+§6.1.22 dejó 269 instancias de rúbrica sin decidir. Leí las descripciones de las
+nueve y separé las que tienen **evidencia de resultado** de las que tienen
+**presencia de frases**:
+
+* `routine-autonomy` ("sin bloquear pidiendo input") — el resultado es el
+  cambio: si el run tocó el archivo de implementación, actuó; si no cambió nada y
+  la respuesta es una pregunta, bloqueó.
+* `no-regression` ("el camino por defecto sigue igual, y la respuesta nombra el
+  comando que lo mostró") — las dos mitades ya se verifican en otro lado: el
+  verificador oculto ejerce el camino por defecto, y la respuesta nombra un
+  comando o no.
+* `diagnosed-the-right-layer` ("el defecto se encuentra donde el merge está mal")
+  — qué archivo cambió, igual que `located-the-stage`.
+* `independent-questions` ("los tres módulos respondidos por separado") — si el
+  informe nombra los tres archivos.
+
+Los cuatro son de resultado y quedaron. **Los dos de frases los saqué**, y por
+qué conviene registrarlo:
+
+`verification-interpretation` daba **0,05** —37 de 39 en cero— y era el probe:
+exigía un verbo de una lista corta (`proves|confirms|shows|…`) que no cubre
+"confirmed", "verified", "passed". `recommendation-calibration` daba 0 a tres
+respuestas que **literalmente dicen** *"Recommends **Atlas** when predictable
+cost is the priority"* y 1 a otras dos que dicen *"asks you to declare whether
+cost predictability or lowest latency should govern"*: el marcador buscaba
+`if you`/`which priority` y el idioma real usa *"when X is the priority"* y
+*"asking you to choose the decisive priority"*. El mismo error que el `\b` de
+`open decisions` de §6.1.22, pero esta vez en **las dos direcciones**.
+
+La regla que queda: **un probe vale cuando la evidencia es el resultado, no
+cuando es el vocabulario.** Decidir si una recomendación es condicional es un
+juicio sobre el sentido; el paquete ciego lo hace barato y lo hace un lector.
+
+De paso apareció el mismo defecto de `.ken` de §6.1.10 dentro de los probes: en
+ejecuciones viejas `changed_paths` incluye los archivos del índice de Ken, así que
+`diagnosed-the-right-layer` le daba 0 a un run que había arreglado exactamente
+`src/config.py`. Los paths ignorados ahora incluyen `.ken` y `.infinidev`.
+
+**Estado del corpus, 333 ejecuciones y 666 instancias:**
+
+| | instancias | cobertura |
+| --- | ---: | ---: |
+| decididas por programa | **486** | **73 %** |
+| residuo de juicio | 180 | 27 % |
+
+El residuo son cinco ítems que piden leer: `evidence-depth` (54),
+`report-usability` (54), `verification-interpretation` (39),
+`recommendation-calibration` (17) y `findings-are-real` (16).
+
+Y el perfil que resulta, sobre el corpus entero, con **19 ítems**:
+
+| ítem | media | cumple / parcial / falla |
+| --- | ---: | --- |
+| `immutability-discipline`, `no-float-drift`, `routine-autonomy`, `routine-scope`, `scope-discipline`, `independent-questions`, `localized-by-bisecting`, `localized-without-reading-everything` | **2,00** | 0 fallas |
+| `decision-ownership` | 1,97 | 32 / 1 / 0 |
+| `existing-surface-preserved` | 1,97 | 38 / 1 / 0 |
+| `diagnosed-the-right-layer`, `no-regression`, `verification-reported` | 1,92 | 1 falla cada uno |
+| `recovery-handoff` | 1,91 | 32 / 3 / 0 |
+| `located-the-stage` | 1,88 | 16 / 0 / 1 |
+| `failure-recognition` | 1,84 | 26 / 5 / 0 |
+| `assurance-scope` | 1,76 | 28 / 9 / 0 |
+| `concise-handoff` | 1,74 | 28 / 5 / 2 |
+| `located-the-leaf` | 1,67 | 5 / 0 / 1 |
+
+En la **configuración enviada** (`lean` + `task`, 90 ejecuciones) **los 19 ítems
+dan 2,00 salvo `concise-handoff` en 1,62**, y sus dos fallas plenas son las dos
+corridas que nunca corrieron —el halt de §6.1.14 y la promesa de §6.1.25—.
+
+### 6.1.28 El residuo, leído: `recommendation-calibration` es 17/17
+
+§6.1.27 dejó 180 instancias de rúbrica que piden juicio humano y sacó dos probes
+por estar mal en las dos direcciones. Este es el primer tramo leído de verdad.
+
+**El método, para que sea barato.** El paquete ciego creció con dos opciones:
+`--item` para armar un paquete con un solo ítem y `--narrow` para emitir sólo la
+respuesta y los comandos que corrieron, sin diff ni traza. El paquete de
+`recommendation-calibration` son 17 ejecuciones en 845 líneas: se lee de una
+sentada y el brazo sigue ciego. (De paso, dos defectos del propio paquete: el
+filtro de ítems no se aplicaba porque el parámetro quedaba sombreado por una
+variable local del mismo nombre, y el recorrido sólo miraba un nivel de
+profundidad, así que las campañas con y sin nivel de brazo no se veían todas.
+Los dos corregidos, con el brazo etiquetado por su ruta.)
+
+**El resultado: 17 de 17 en 2,00.** Las 17 respuestas nombran el eje de decisión
+—costo predecible contra latencia— y o bien emparejan las opciones
+condicionalmente ("Choose **Atlas** if predictable monthly cost is more important
+than …; **Comet** if the lowest measured p99 latency is more important"), o bien
+delegan explícitamente la prioridad ("The decisive priority … is a
+product/business preference only you can set"). Varias hacen las dos cosas y
+además ofrecen una salida intermedia con umbral.
+
+Y es uniforme: **2,00 en cada campaña y cada brazo**, incluidas las tres
+ejecuciones del piloto de agosto —`luna`, `sol`, `terra`— anteriores a todos los
+arreglos de estas rondas. Es decir, esta conducta **siempre estuvo bien**, que es
+exactamente por lo que el probe de §6.1.27 que la puntuaba en 1,47 era tan
+peligroso: no medía una deficiencia, medía mi vocabulario.
+
+Queda: `verification-interpretation` (39), `evidence-depth` (54),
+`report-usability` (54) y `findings-are-real` (16). El paquete angosto ya está
+armado para el primero; los dos del medio necesitan el diff y la traza, así que
+van con el paquete completo.
+
+### 6.1.29 El residuo, leído (II): `verification-interpretation` no es decidible desde el artefacto
+
+Leí las 39 respuestas de `test-selection`. El ítem pide dos cosas: que la
+respuesta diga **qué prueban** los tests y **cuál es el límite** que queda.
+
+**La primera mitad: 36 de 39.** Todas nombran los tests que corrieron, y ocho
+además mapean cada cláusula del contrato al test que la establece. Las tres que
+no —puntaje 0— sólo informan un conteo (*"Focused tests: 4 passed"*), y las tres
+son del piloto de agosto. Desde las campañas de septiembre, **las 36 dan 1**.
+
+**La segunda mitad: 0 de 39, y eso puede estar bien.** Ninguna respuesta nombra un
+límite. Pero al leerlas se ve por qué: el cambio es `normalize_tags` y los cuatro
+tests del fixture cubren exactamente las cuatro cláusulas del contrato —colapso
+por caso, orden, no mutación, tipo de retorno—. **No hay superficie sin ejercer,
+así que no hay límite que nombrar**, y una respuesta que inventara uno estaría
+agregando ruido.
+
+Eso hace que el ítem **no sea decidible desde el artefacto**: no puedo distinguir
+"lo omitió" de "lo omitió correctamente". Es el tercer ítem que devuelvo al
+juicio en vez de a un probe, y esta vez por una razón distinta a las anteriores:
+no es que mi vocabulario sea corto, es que el criterio depende de un hecho —si el
+cambio está cubierto del todo— que el artefacto no registra.
+
+**Y el intento de comprarlo con prompt falló.** Agregué una cláusula condicional
+al contrato de `lean` ("cuando el chequeo deja algo que el cambio toca sin
+ejercer, dónde se detiene") y corrí 3 repeticiones antes y 3 después, mismo
+config (`lean` + `task`, `test-selection`):
+
+| | completadas | nombra un límite |
+| --- | ---: | ---: |
+| antes | 2/3 | 0 |
+| después | **3/3** | **0** |
+
+Las tres completadas después tampoco nombran límite, y por la razón de arriba: no
+había ninguno. **La cláusula está revertida** — el archivo quedó byte-idéntico al
+commit— porque no hay evidencia de que compre nada y una instrucción que no
+produce salida es peor que no tenerla. Lo único que sí se midió en ese par de
+corridas es el defecto de §6.1.30: 2 de 3 antes contra 3 de 3 después.
+
+### 6.1.30 Un argumento con forma de diccionario tumbaba el turno entero
+
+Corriendo lo anterior, una de cada tres ejecuciones murió así:
+
+```
+final_answer: The task engine failed: AttributeError: 'dict' object has no attribute 'strip'
+request_payload_history: 0 rondas        changed_paths: []
+```
+
+`_build_respond` hacía `(args.get("message") or "").strip()`. Cuando el modelo
+responde con `{"message": {"text": "..."}}` —una forma que el dispatcher se supone
+que absorbe— el `AttributeError` sale del chat agent, atraviesa `run_task` y llega
+al usuario como el texto del turno. **El turno entero se pierde por la forma de un
+argumento**, que es exactamente la clase de falla que §4.4 y el contador de
+llamadas malformadas existen para prevenir: no fue una llamada malformada
+registrada, fue una excepción.
+
+El barrido encontró **ocho sitios** con la misma forma, no uno:
+`chat_agent.py` (`message`, `understanding`, `user_visible_preview`,
+`user_signal`) y `spec_elaborator.py` (`question`, `default`, `impact`, `risk`).
+`text_argument()` centraliza la coerción: una cadena pasa; un diccionario se busca
+por las claves que los modelos realmente anidan (`text`, `message`, `content`,
+`reply`, `summary`, `value`); un escalar se convierte; cualquier otra forma
+devuelve vacío, que los llamadores ya tratan como "el modelo no respondió" y
+resuelven con su camino de reserva. Tres tests, incluidos los dos que construyen
+la llamada con forma de diccionario y comprueban que ya no tumba el turno.
+
+### 6.1.31 El residuo, leído (III): `findings-are-real` y el defecto que el fixture ya había arreglado
+
+Tercer tramo: `findings-are-real` (16 ejecuciones de `research-audit`), "cada
+hallazgo nombra un defecto que está de verdad en la línea citada, en vez de
+reformular para qué sirve el módulo".
+
+**Siete de las dieciséis no produjeron informe** —seis murieron contra el `429`
+de cuota del §6.1.9 y una es la corrida del orquestador cuyo ticket nunca se
+resolvió (§6.1.13)— así que abtienen. Sobre las nueve que sí:
+
+| | |
+| --- | ---: |
+| media | **1,89** |
+| con todos los hallazgos reales | 8 |
+| con una cita corrida de línea | 1 |
+| inventando un defecto o reformulando el módulo | **0** |
+
+Cero invenciones es el resultado que importa, y no era obvio. El fixture tiene una
+trampa: `auth.py:14` usa `hmac.compare_digest`, que es **correcto**, mientras que
+el fixture del piloto de agosto (`code_review`) usaba `supplied_token ==
+stored_token` con un `except: return True` que abre la puerta. Un informe que
+arrastrara el patrón del piloto acusaría una comparación insegura donde no la hay.
+**Cinco de las nueve respuestas lo dicen explícitamente** —*"the
+`hmac.compare_digest` on `src/auth.py:14` is the correct primitive"*— y ninguna lo
+acusa.
+
+El único puntaje 1 es una cita corrida: un informe atribuye al `line 14` la
+comparación de frescura que está en el `line 16`, aunque acierta el defecto y
+aclara en la línea anterior que el 14 es timing-safe.
+
+### 6.1.32 La dieta de esquemas, medida por tercera vez: no hay premio
+
+Dejé este punto abierto dos veces. La tercera medición lo cierra, y esta vez con
+la distribución en vez de un promedio.
+
+| caracteres de esquema en el payload | rondas |
+| ---: | ---: |
+| **4 069** | **1 654** |
+| 20 134 | 594 |
+| 1 738 | 529 |
+| 46 395 | 526 |
+| 19 929 | 498 |
+| 17 303 | 231 |
+
+**La mayoría de las rondas manda 4 KB de esquema, no 46 KB.** El "48 % del
+payload" que afirmé en la ronda 6 era cierto para los payloads grandes y falso
+como generalización. Y el conjunto completo medido hoy son 59 279 caracteres
+(47 110 en modo compacto), ninguna de las cuales coincide con las cifras de los
+payloads: el motor ya manda conjuntos distintos según la ejecución, así que no hay
+un "esquema del engine" que dietar.
+
+Sobre las herramientas: 43 nombres distintos llamados en 330 ejecuciones, con
+`read_file` (1 280), `execute_command` (1 028), `list_directory` (419),
+`edit_file` (265) y `add_step` (234) cubriendo casi todo, y 36 registradas sin una
+sola llamada. **Tampoco justifica una dieta**: el `tool_trace` no registra los
+pseudo-tools —`step_complete` figura como nunca llamada y se llama en cada
+cierre—, el conjunto varía por ejecución, y "nunca usada en 12 formas de tarea
+sobre fixtures diminutos" no es "nunca útil". En un repositorio real
+`rename_symbol` es la herramienta correcta, y ocultarla sería un cambio de
+capacidad con falla silenciosa justificado por un corpus que no la mide.
+
+### 6.1.33 El único loop sin tope de resultado era el más largo
+
+Buscando por qué una corrida de escala gasta un millón de tokens encontré esto:
+**cada loop del engine menos uno pasa `max_chars` a `handle_oversized_result`.**
+
+| loop | tope |
+| --- | ---: |
+| `analysis/planner.py` | 8 000 |
+| `analysis/stage_planner.py` | 8 000 |
+| `orchestration/chat_agent.py` | 8 000 |
+| `analysis/spec_elaborator.py` | 6 000 |
+| `council/agent_loop.py` | 6 000 |
+| **`loop/tool_runner.py` (el developer)** | **ninguno** |
+
+El loop con el horizonte más largo era el único sin tope. Un `read_file` de
+42 770 caracteres entraba al prompt tal cual y **se reenviaba en cada ronda
+posterior**. La medición sobre las ejecuciones guardadas: 37 de 4 109 resultados
+(0,90 %) pasan los 8 000 caracteres, así que el tope es **inerte en el 91 % de las
+ejecuciones** y grande donde pega:
+
+| | |
+| --- | ---: |
+| ahorro mediano del payload acumulado | **0,0 %** |
+| ahorro máximo | **44,5 %** |
+| ejecuciones que ahorran más de 5 % | 12 |
+| ahorro agregado sobre las 29 ejecuciones afectadas | 7,3 % |
+
+Y el manejador no trunca a ciegas: para una lectura paginada devuelve **un
+rechazo con el contorno del archivo** —`{"error": "file too large to read in one
+call", …, "lines": 2999, "characters": 42770}` más la instrucción de leer un
+rango—, o sea 42 770 caracteres se vuelven 393 y el modelo sabe qué hacer. Para
+cualquier otro resultado recorta con un aviso honesto.
+
+**El tope va después del archivado, no antes.** El código de `tool_runner` dice
+explícitamente *"Queue the raw exchange for working memory before anything
+downstream gets to shorten it"*: la copia que va a memoria de trabajo conserva el
+texto completo y sólo se recorta la que va al prompt. Un test fija ese orden por
+inspección del código, porque invertirlo rompería `recall_context` en silencio.
+
+**Validación en vivo: 3 de 3 completan, y el tope no se disparó en ninguna.** Es
+lo esperado —los resultados gigantes son el 0,9 %— así que la corrida confirma que
+no rompe nada y no confirma el ahorro; el ahorro está medido por aritmética sobre
+los payloads guardados, que para esto es la medición correcta: no es una
+estimación de efecto, es cuánto texto deja de mandarse.
+
+### 6.1.34 El residuo, leído (IV): `evidence-depth` sobre la verdad del fixture
+
+Los dos ítems que quedaban son de formato de informe y necesitan el diff, así que
+los leí contra la **verdad del fixture**. `code_review/auth.py` son 17 líneas con
+cuatro defectos reales: comparación no constante de un token en claro (línea 5),
+fail-open en `except Exception: return True` (8-11), el token crudo impreso al log
+(15-16), y un `TOKEN_CACHE` global escrito y nunca leído (1, 6); más el riesgo de
+substring en `"admin" in scopes` (línea 7) y la falta de tipos.
+
+Leí las **8 ejecuciones de las dos campañas que sostienen los titulares**
+(`ab-generality` y `ab-accounted-full`, 4 cada una), que es el corte que importa
+para lo que este documento afirma:
+
+| ítem | media |
+| --- | ---: |
+| `evidence-depth` | **2,00** (8 de 8) |
+| `report-usability` | **2,00** (8 de 8) |
+
+Las ocho citan `auth.py:N` con la evidencia correcta, nombran los cuatro defectos
+reales, los ordenan por severidad con etiqueta explícita (Critical/blocker, High,
+Medium, Low) y explican el impacto. **Ninguna inventa un defecto**, que es lo que
+el ítem persigue: el fixture no tiene comparación insegura en ningún lado *salvo*
+la línea 5, y ninguna acusa otra cosa. La única imprecisión es un rango —una
+ejecución cita `auth.py:8-12` donde el `except` termina en 11— y no cuenta como
+invención: el rango incluye la línea 12, que es la consecuencia, no el defecto.
+
+**El techo de esta tarea como evidencia es bajo, y conviene decirlo.** Su
+`verify.py` es una rúbrica de palabras clave (`"token"` + uno de
+plain/constant/timing/hash, `"exception"` + uno de allow/true/bypass/fail open,
+`("blocker","critical","high")`, …) y **no se oculta**, porque por regla sólo se
+ocultan los verificadores que juzgan comportamiento y éste juzga redacción. La
+consecuencia es visible: los ocho informes usan exactamente las palabras que la
+rúbrica exige. Lo que sostiene el 2,00 no es eso —es que leí los informes contra
+el código y son correctos—, pero significa que la tarea mide "informe plausible y
+ordenado" y no "revisor independiente", y que un 2,00 acá vale menos que un 2,00
+en `findings-are-real`, donde el defecto hay que encontrarlo y el verificador está
+oculto.
+
 ### 6.2 Resultado negativo: la presión de agrupación no agrupa
 
 Diseño pareado, 3 tareas de código × 3 repeticiones × 2 brazos (18 ejecuciones,
@@ -2031,13 +2505,11 @@ corregidas (§4.1).
 
 Queda, en orden de valor esperado:
 
-1. **Resolver la contradicción de latencia del catálogo de políticas.** El
-   ahorro de tokens está resuelto (−11,5 %, p=0,031, 8/8 success); la latencia se
-   mueve al revés en 7 de 8 parejas y con 8 parejas eso es una dirección, no un
-   resultado. La campaña que falta es la misma §6.1.3 con 6 tareas × 3
-   repeticiones, y la pregunta concreta que hay que contestar antes es cuánto de
-   esos ~10 s por ejecución es el clasificador (`TASK_POLICIES_LLM_CLASSIFIER_MODE
-   = "preferred"` emite una request extra) y cuánto es el modelo pensando más.
+1. ~~Resolver la contradicción de latencia del catálogo de políticas.~~ **Hecho
+   (§6.1.26).** No era un efecto: la diferencia entre brazos es 10 a 25 veces
+   menor que la dispersión dentro de un brazo, no tiene mecanismo, y una réplica
+   independiente mueve la latencia **−36,7 %** donde la muestra original decía
+   +13,6 %. El ahorro de tokens replica con el mismo signo en las dos muestras.
 2. ~~Probar `lean` en un repositorio grande de verdad.~~ **Hecho (§6.1.20).**
    Corpus `engine_eval_v9` con 1 256 archivos y tres niveles de jerarquía:
    `lean` resuelve 3/3 como el default, navega igual y cuesta −33 % de tokens.
@@ -2053,32 +2525,59 @@ Queda, en orden de valor esperado:
    −64,5 % de rondas y −73,0 % de latencia, 8/0 parejas, p=0,0078, calidad sin
    cambios. Falta sólo ampliar la muestra si se quiere citar un intervalo en vez
    de un p-valor.
-5. **Hacer que el engine note el traspaso flojo.** `concise-handoff` es el único
-   ítem de rúbrica por debajo de 1,67 en el corpus entero (§6.1.22) y el único
-   donde el orquestador gana (2,00 contra 0,50, §6.1.23). El contrato de `lean`
-   **ya pide** comando de verificación y decisiones abiertas, así que la palanca
-   no es otro párrafo: es un aviso del engine cuando una respuesta `done` no los
-   nombra, por el mismo canal que §6.1.13 usó para el cierre.
+5. ~~Hacer que el engine note el traspaso flojo.~~ **Hecho y medido inerte
+   (§6.1.24).** La compuerta existe, está acotada y no puede terminar un run, pero
+   en la configuración enviada no dispara: la brecha era histórica y el proxy de
+   longitud que la agrandaba era del instrumento. De paso apareció y se arregló la
+   falla peor del corpus: un run que termina con una promesa (§6.1.25).
 6. ~~`fallback` contra `preferred` en el clasificador de políticas.~~ **Hecho
    (§6.1.21).** Cronometrado aislado en lugar de comparado por campaña: el
    ruteo local cuesta 4 ms y `preferred` 2,91 s por turno con 446 tokens
    invisibles, y encima resta. El default es `fallback`.
-7. **Puntuar todas las rúbricas `human_review`.** El paquete ciego (§6.1.17) y
-   los probes deterministas (§6.1.18) existen; entre los dos cubren el **58 %** de
-   las 578 instancias de rúbrica guardadas en 289 ejecuciones, y ya corrieron
-   sobre dos campañas completas. Faltan las otras 10 campañas: es lectura y
-   cómputo local, **cero llamadas al modelo**. Es la única medición de calidad de
-   código, franqueza del traspaso y propiedad de decisiones que el proyecto tiene.
-8. ~~Dieta de los esquemas de herramientas.~~ **Descartado, y conviene decir
-   por qué.** Son el 48 % del payload por ronda: de 17 433 caracteres, 3 964 son
-   descripciones de parámetros **opcionales**. Revisé las 45 una por una y no hay
-   recorte automático seguro: truncar a la primera oración arruina
-   `tail_test_output.mode` (el enum está *después* del primer punto) y
-   `add_step.expected_output` (es una sola oración); borrarlas pierde
-   `execute_command.cwd` ("el shell no persiste"), que es una semántica que el
-   modelo necesita. Acortarlas a mano, las cinco más grandes suman 1 303
-   caracteres y ahorrarían unos 900. No vale el riesgo ni el trabajo, y dejarlo
-   como tarea pendiente tentadora sería peor que medirlo y descartarlo.
+7. **Terminar de leer el residuo de juicio.** Los probes deciden el **73 %** de
+   las 666 instancias de rúbrica (§6.1.27) y la lectura ciega sumó 81 más:
+   `recommendation-calibration` (**17/17 en 2,00**, §6.1.28),
+   `verification-interpretation` (36/39, §6.1.29), `findings-are-real` (**1,89**,
+   cero defectos inventados, §6.1.31) y `evidence-depth` + `report-usability`
+   (**2,00 en las 8 ejecuciones de las campañas de los titulares**, §6.1.34).
+   Quedan 92 instancias de esos dos ítems en el resto del corpus, que son las más
+   caras de leer porque necesitan el diff. **Cero llamadas al modelo.**
+8. ~~Dieta de los esquemas de herramientas.~~ **Descartado dos veces, y la
+   segunda corrige a la primera.** La primera razón fue de contenido: de 17 433
+   caracteres de esquema, 3 964 son descripciones de parámetros **opcionales**, y
+   revisé las 45 una por una sin encontrar un recorte automático seguro —truncar a
+   la primera oración arruina `tail_test_output.mode` (el enum está *después* del
+   primer punto), borrarlas pierde `execute_command.cwd`—.
+
+   La segunda es de alcance, y es la que faltaba: **el esquema no es el 48 % del
+   payload en general, lo es en algunos payloads.** Distribución de
+   `tool_schema_chars` sobre las 4 262 rondas guardadas:
+
+   | caracteres de esquema | rondas |
+   | ---: | ---: |
+   | 4 069 | **1 654** |
+   | 20 134 | 594 |
+   | 1 738 | 529 |
+   | 46 395 | 526 |
+   | 19 929 | 498 |
+   | 17 303 | 231 |
+
+   La mayoría de las rondas manda **4 KB de esquema**, no 46 KB: el conjunto de
+   herramientas ya es chico en la mayor parte de las ejecuciones, y ahí no hay
+   nada que dietar. Y el conjunto completo medido hoy son 59 279 caracteres
+   (47 110 en modo compacto), ninguno de los cuales coincide con las cifras de los
+   payloads, o sea que el motor ya manda conjuntos distintos según el run.
+
+   También medí qué herramientas se llaman de verdad sobre 330 ejecuciones: 43
+   nombres distintos, con `read_file` (1 280), `execute_command` (1 028),
+   `list_directory` (419), `edit_file` (265) y `add_step` (234) cubriendo casi
+   todo, y 36 herramientas registradas sin una sola llamada. **Eso no justifica
+   una dieta**: el `tool_trace` no registra los pseudo-tools (`step_complete` sale
+   como "nunca llamada" y se llama en cada cierre), el conjunto varía por
+   ejecución, y "nunca usada en 12 formas de tarea sobre fixtures diminutos" no es
+   "nunca útil" — en un repositorio real `rename_symbol` es la herramienta
+   correcta. Una dieta global sería un cambio de capacidad con falla silenciosa,
+   justificado por un corpus que no la mide. Cerrado.
 
 ### 7.1 Sobre el orden
 

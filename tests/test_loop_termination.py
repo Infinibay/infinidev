@@ -2136,3 +2136,159 @@ def test_recovery_admits_delegation_for_a_principal_that_cannot_edit():
     assert [tc.function.name for tc, _ in synthetic] == ["web_search"]
     assert "team_delegate" in synthetic[0][1]
     assert "edit that target" not in synthetic[0][1]
+
+
+# ── the handoff notice ─────────────────────────────────────────────────
+
+
+def test_a_done_without_a_command_gets_one_notice():
+    """The model reported a check and then left it out of the user's answer.
+
+    Narrow on purpose: it fires only when `evidence_summary` names a command
+    and the final answer names none. Over 25 planning runs that was 7.
+    """
+    from infinidev.engine.loop.engine import _enforce_handoff_contract
+
+    result = StepResult(
+        summary="Wrote PLAN.md",
+        status="done",
+        final_answer="PLAN.md is in place with seven phases and a rollout plan.",
+        evidence_summary="python3 verify.py exited 0; ls shows no src/",
+    )
+
+    assert _enforce_handoff_contract(
+        result, requested_status="done", requested_final_answer=result.final_answer,
+    ) is True
+    assert result.interrupted is True
+    assert result.status == "continue"
+    assert result.final_answer is None
+    assert "names no command" in result.summary
+
+
+def test_an_answer_that_names_the_command_is_left_alone():
+    from infinidev.engine.loop.engine import _enforce_handoff_contract
+
+    answer = "PLAN.md is in place.\n\nVerification: `python3 verify.py` exited 0."
+    result = StepResult(
+        summary="Wrote PLAN.md",
+        status="done",
+        final_answer=answer,
+        evidence_summary="python3 verify.py exited 0",
+    )
+
+    assert _enforce_handoff_contract(
+        result, requested_status="done", requested_final_answer=answer,
+    ) is False
+    assert result.status == "done"
+
+
+def test_nothing_was_run_so_nothing_is_demanded():
+    """A task finished by inspection must not be asked for a command."""
+    from infinidev.engine.loop.engine import _enforce_handoff_contract
+
+    result = StepResult(
+        summary="Reviewed the file",
+        status="done",
+        final_answer="No defect found in the module.",
+        evidence_summary="read all thirty lines of the module",
+    )
+
+    assert _enforce_handoff_contract(
+        result, requested_status="done", requested_final_answer=result.final_answer,
+    ) is False
+
+
+def test_the_handoff_never_fires_on_a_continue():
+    from infinidev.engine.loop.engine import _enforce_handoff_contract
+
+    result = StepResult(
+        summary="midway",
+        status="continue",
+        final_answer=None,
+        evidence_summary="pytest tests/ -q, 2 failed",
+    )
+
+    assert _enforce_handoff_contract(
+        result, requested_status="continue", requested_final_answer="",
+    ) is False
+
+
+def test_the_handoff_notice_is_bounded_at_one_per_task():
+    """A run is never stopped, and never argued with twice, over wording."""
+    from infinidev.engine.loop.engine_notice import (
+        MAX_HANDOFF_REFUSALS,
+        note_handoff_refusal,
+    )
+    from infinidev.engine.loop.models import LoopState
+
+    state = LoopState()
+    assert MAX_HANDOFF_REFUSALS == 1
+    assert note_handoff_refusal(state) == 1
+    assert note_handoff_refusal(state) == 2, (
+        "the caller accepts the close once the bound is passed, so the counter "
+        "must keep climbing rather than reset"
+    )
+
+
+def test_the_command_predicate_is_conservative():
+    from infinidev.engine.loop.engine_notice import names_a_verification_command
+
+    for named in (
+        "Verification: `python3 verify.py` exited 0",
+        "ran pytest tests/ -q and 4 passed",
+        "`uv run pytest` → 0",
+        "python verify.py",
+        "Verification: `npm test`",
+    ):
+        assert names_a_verification_command(named), named
+
+    for absent in (
+        "The plan is complete with seven phases.",
+        "I reviewed the module and found no defect.",
+        "No command was necessary.",
+        "",
+    ):
+        assert not names_a_verification_command(absent), absent
+
+
+# ── one tool result cannot flood every later round ─────────────────────
+
+
+def test_the_loop_caps_what_one_tool_result_puts_in_the_prompt():
+    """Every other loop caps this; the developer's loop did not.
+
+    A single 20 000-character read was re-sent on every later round of the run.
+    The archive keeps the raw text, so the cap costs the recall path nothing.
+    """
+    from infinidev.engine.loop.tool_runner import _MAX_PROMPT_RESULT_CHARS
+    from infinidev.engine.oversized_result import handle_oversized_result
+
+    assert _MAX_PROMPT_RESULT_CHARS == 8_000, "matches chat agent and planners"
+
+    huge = "\n".join(f"{i}\tline {i}" for i in range(1, 4000))
+    capped = handle_oversized_result(
+        huge, max_chars=_MAX_PROMPT_RESULT_CHARS,
+        tool_name="read_file", tool_args='{"file_path": "src/big.py"}',
+    )
+
+    assert len(capped) < 1_000, "a paginated read becomes an outline, not a dump"
+    assert "file too large to read in one call" in capped
+    assert "offset" in capped or "range" in capped
+
+    small = '{"status": "ok"}'
+    assert handle_oversized_result(
+        small, max_chars=_MAX_PROMPT_RESULT_CHARS, tool_name="edit_file",
+    ) == small
+
+
+def test_the_cap_is_wired_after_the_archive_not_before_it():
+    """The archive must keep the raw exchange, so the cap sits after it."""
+    import inspect
+
+    from infinidev.engine.loop.tool_runner import ToolRunner
+
+    source = inspect.getsource(ToolRunner)
+    archive = source.index("ctx.state.pending_archive.append")
+    cap = source.index("body = handle_oversized_result(")
+
+    assert archive < cap, "capping before archiving would shorten what recall returns"

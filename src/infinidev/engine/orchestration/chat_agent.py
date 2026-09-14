@@ -37,7 +37,11 @@ from infinidev.engine.loop.llm_caller import (
     strip_think_blocks,
 )
 from infinidev.engine.schema_sanitizer import tool_to_openai_schema
-from infinidev.engine.tool_dispatch import build_tool_dispatch, execute_tool_call
+from infinidev.engine.tool_dispatch import (
+    build_tool_dispatch,
+    execute_tool_call,
+    text_argument,
+)
 from infinidev.engine.token_usage import report_prompt_tokens
 from infinidev.engine.oversized_result import (
     DuplicateCallGuard,
@@ -62,6 +66,68 @@ from infinidev.tools.base.context import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+#: A reply that opens with a first-person commitment to do engineering work.
+#: The chat agent is read-only: it cannot do the work, so promising it is a
+#: category error, and the turn ends with the promise as the deliverable.
+_INTENTION = re.compile(
+    r"^\W*(?:(?:sure|okay|ok|alright|got it|of course)[\s,.!:-]*)?"
+    r"(?:i(?:'ll| will| am going to|'m going to| shall)\b"
+    r"|let me\b|now i(?:'ll| will)\b|next,? i(?:'ll| will)\b)",
+    re.IGNORECASE,
+)
+
+#: The work the promise is about. Kept to engineering verbs so that a genuine
+#: conversational reply ("I will explain the trade-off") is left alone.
+_WORK_VERB = re.compile(
+    r"\b(?:implement|create|draft|write|fix|add|build|update|refactor|generate"
+    r"|edit|move|delete|install|test|verify|apply|patch|run|make)\b",
+    re.IGNORECASE,
+)
+
+#: An opening that offers to *talk* about the work is a conversational answer,
+#: not a promise to do it. "I'll walk you through how to build it" names a work
+#: verb and is exactly the reply the chat agent exists to give, so a
+#: communication verb anywhere in the first sentence vetoes the guard. The cost
+#: is a missed promise that also offered to explain; the prompt's own rule is
+#: that a false escalation is worse than an extra turn.
+_COMMUNICATION_VERB = re.compile(
+    r"\b(?:explain|walk|describe|outline|summari[sz]e|clarify|detail|cover|tell"
+    r"|show|answer|discuss|review|compare|list)\b",
+    re.IGNORECASE,
+)
+
+#: A promise is short. A real answer that happens to contain an intent sentence
+#: is not, so the length bound keeps the guard away from prose.
+_PROMISE_MAX_CHARS = 700
+
+_FIRST_SENTENCE = re.compile(r"[^.\n!?]*")
+
+
+def promises_instead_of_working(reply: str) -> bool:
+    """Whether a chat reply commits to work instead of answering.
+
+    One run in the corpus ended with ``"I will draft PLAN.md now, scoped to the
+    tenant export change in requirements.md, and then run verify.py to confirm
+    it passes."`` as the turn's answer: the loop never ran, no file was created,
+    and the user read a promise. The chat agent cannot act, so the promise could
+    only ever be false — the repair is to escalate the turn to the developer,
+    which is what the request asked for in the first place.
+
+    Conservative by construction: the commitment has to open the reply and the
+    first sentence has to name engineering work, so "I will explain why the
+    cache is stale" and long answers are untouched.
+    """
+    text = str(reply or "").strip()
+    if not text or len(text) > _PROMISE_MAX_CHARS:
+        return False
+    match = _FIRST_SENTENCE.match(text)
+    opening = match.group(0) if match else text
+    if _COMMUNICATION_VERB.search(opening):
+        return False
+    return bool(_INTENTION.match(opening) and _WORK_VERB.search(opening))
+
 
 
 # The chat prompt allows 0-3 grounding reads before a mandatory routing
@@ -536,7 +602,7 @@ def _build_respond(
     tc: Any, user_input: str, *, streamed: bool = False,
 ) -> ChatAgentResult:
     args = _parse_args(tc)
-    message = (args.get("message") or "").strip()
+    message = text_argument(args.get("message"))
     if not message:
         return _fallback_respond(
             reason="empty_respond", streamed=streamed,
@@ -549,7 +615,7 @@ def _build_escalate(
     apply_autonomous: Callable[[EscalationPacket], EscalationPacket] | None = None,
 ) -> ChatAgentResult:
     args = _parse_args(tc)
-    understanding = (args.get("understanding") or "").strip()
+    understanding = text_argument(args.get("understanding"))
     if not understanding:
         # Defensive: escalate with empty understanding is a useless
         # handoff. Fall back to respond so the user isn't stranded.
@@ -568,8 +634,8 @@ def _build_escalate(
         user_request=user_input.strip(),
         understanding=understanding,
         opened_files=[str(p) for p in opened],
-        user_visible_preview=(args.get("user_visible_preview") or "").strip(),
-        user_signal=(args.get("user_signal") or "").strip(),
+        user_visible_preview=text_argument(args.get("user_visible_preview")),
+        user_signal=text_argument(args.get("user_signal")),
         suggested_flow="develop",  # v1 restriction
         council_requested=bool(args.get("council_requested")),
         council_focus=focus,  # type: ignore[arg-type]

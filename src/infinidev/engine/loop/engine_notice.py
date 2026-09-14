@@ -27,12 +27,41 @@ this counter a gate that can refuse forever would spin forever.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 #: Consecutive refusals for one Step before the engine stops negotiating and
 #: closes the run. Three leaves room for a genuine wrong turn plus a
 #: correction, without paying for the same rejected closure indefinitely.
 MAX_CLOSURE_REFUSALS = 3
+
+#: Handoff refusals are counted per Task, not per Step, and the bound is one.
+#: The handoff is a wording defect in the deliverable, not a missing piece of
+#: work, so a second round of it would be the engine arguing about prose.
+MAX_HANDOFF_REFUSALS = 1
+
+#: Tokens a final answer can use to name the check it ran. Conservative on
+#: purpose: a false positive here costs the user a round, so a runner has to be
+#: a whole word and a command has to follow it.
+_COMMAND_HINT = re.compile(
+    r"`[^`]*\b(?:pytest|python3?|uv|pip|npm|npx|yarn|pnpm|make|cargo|go|bash|sh"
+    r"|ruff|mypy|flake8|black|node|deno|bundle|rake|gradle|mvn|dotnet|php|ruby)\b[^`]*`"
+    r"|\b(?:pytest|python3?|uv|npm|npx|make|cargo|ruff|mypy|deno)\s+[-\w./]",
+    re.IGNORECASE,
+)
+
+
+def names_a_verification_command(text: str) -> bool:
+    """Whether *text* names a command the reader could run to check the work.
+
+    Used to decide one thing only: the model said a check ran in
+    ``evidence_summary`` and then handed the user an answer that names no
+    command at all. Measured over 25 planning runs, 18 named one, so the
+    engine stays quiet the other 7 rather than guessing at prose quality.
+    """
+
+    return bool(_COMMAND_HINT.search(str(text or "")))
+
 
 _HEADER = '<engine-notice priority="critical" reason="closure-rejected">'
 
@@ -104,6 +133,52 @@ def build_step_effect_notice(
     )
 
 
+def build_handoff_notice(*, evidence: str, attempt: int) -> str:
+    """Notice for a `done` whose final answer names no check the user can run.
+
+    Not a claim that the work is wrong. The engine only fires this when the
+    model itself wrote a check into ``evidence_summary`` and then left it out
+    of the answer the user reads, so the notice quotes it back rather than
+    asking for a judgment the engine cannot make.
+    """
+    quoted = evidence.strip()[:400] or "(none recorded)"
+    return _box(
+        'Your step_complete(status="done") was REJECTED — one more line, then it '
+        "closes.",
+        (
+            "Why: it is not a defect in the deliverable, it is a gap in what the "
+            "user can check. You reported this check in `evidence_summary`:\n\n"
+            f"    {quoted}\n\n"
+            "Your `final_answer` names no command at all, so the user has to take "
+            "the result on trust.\n\n"
+            "Call `step_complete` again with `status=\"done\"`, the same summary "
+            "and the same evidence, and a `final_answer` that keeps the outcome "
+            "first and then adds one `Verification:` line naming the exact command "
+            "you ran and what it returned. If nothing was actually run, say what "
+            "you did instead — a limitation stated is worth more than a claim."
+            + (
+                f"\nThis is handoff refusal {attempt} of {MAX_HANDOFF_REFUSALS}; "
+                "the next close is accepted as it stands."
+                if attempt >= MAX_HANDOFF_REFUSALS
+                else ""
+            )
+        ),
+    )
+
+
+def note_handoff_refusal(state: Any) -> int:
+    """Increment and return the per-Task handoff refusal count."""
+    if state is None:
+        return 1
+    state.handoff_refusals = int(getattr(state, "handoff_refusals", 0) or 0) + 1
+    return state.handoff_refusals
+
+
+def clear_handoff_refusals(state: Any) -> None:
+    if state is not None:
+        state.handoff_refusals = 0
+
+
 def queue_engine_notice(state: Any, text: str) -> None:
     """Store *text* as the notice the next prompt build will render."""
     if state is None or not text:
@@ -142,9 +217,14 @@ def clear_closure_refusals(state: Any, step_index: int) -> None:
 
 __all__ = [
     "MAX_CLOSURE_REFUSALS",
+    "MAX_HANDOFF_REFUSALS",
     "build_edit_requirement_notice",
+    "build_handoff_notice",
     "build_step_effect_notice",
     "clear_closure_refusals",
+    "clear_handoff_refusals",
+    "names_a_verification_command",
+    "note_handoff_refusal",
     "drain_engine_notice",
     "note_closure_refusal",
     "queue_engine_notice",

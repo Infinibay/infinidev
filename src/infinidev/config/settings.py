@@ -278,6 +278,13 @@ class Settings(BaseSettings):
     # behaviour, where the gate flipped the step result without telling the
     # model and the model answered by retrying the same rejected close.
     LOOP_CLOSURE_FEEDBACK_ENABLED: bool = True
+    # Ask once, per Task, for a `final_answer` that names a command the user can
+    # run, when the model's own evidence_summary named one and the answer did
+    # not. Measured over 25 planning runs: 18 named a command, so this stays
+    # quiet on the majority. It never ends a run — after one refusal the close is
+    # accepted as it stands, because the work exists and only the wording is
+    # short. False accepts every final answer exactly as written.
+    LOOP_HANDOFF_NOTICE_ENABLED: bool = True
     # Ask the model to issue its independent discovery calls in one response
     # after two consecutive single-read rounds. Default OFF because it was
     # measured and did not work: 3 tasks x 3 repetitions x 2 arms on

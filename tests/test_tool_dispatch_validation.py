@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from pydantic import BaseModel, Field
 
@@ -445,3 +446,58 @@ def test_a_genuinely_unknown_tool_still_gets_the_similarity_list() -> None:
 
     assert "Unknown tool" in payload["error"]
     assert "execute_command" in payload["error"]
+
+
+# ── a model-authored argument is not always a string ───────────────────
+
+
+def test_a_dict_shaped_message_no_longer_crashes_the_turn():
+    """`(args.get("message") or "").strip()` raised AttributeError on a dict.
+
+    One `test-selection` run in three failed with "The task engine failed:
+    AttributeError: 'dict' object has no attribute 'strip'" — the whole turn
+    lost to a shape the dispatcher is supposed to absorb.
+    """
+    from infinidev.engine.orchestration.chat_agent import _build_respond
+
+    call = SimpleNamespace(
+        id="c1",
+        function=SimpleNamespace(
+            name="respond",
+            arguments=json.dumps({"message": {"text": "All four tests pass."}}),
+        ),
+    )
+
+    result = _build_respond(call, "fix the tags")
+
+    assert result.kind == "respond"
+    assert result.reply == "All four tests pass."
+
+
+def test_a_dict_shaped_understanding_does_not_crash_the_escalation():
+    from infinidev.engine.orchestration.chat_agent import _build_escalate
+
+    call = SimpleNamespace(
+        id="c2",
+        function=SimpleNamespace(
+            name="escalate",
+            arguments=json.dumps({"understanding": {"text": "Fix the rounding."}}),
+        ),
+    )
+
+    result = _build_escalate(call, "fix the rounding")
+
+    assert result.kind == "escalate"
+    assert result.escalation.understanding == "Fix the rounding."
+
+
+def test_the_coercion_refuses_what_it_cannot_read():
+    """A shape with no text under a known key is "no answer", not a repr."""
+    from infinidev.engine.tool_dispatch import text_argument
+
+    assert text_argument({"message": {"text": "nested"}}) == ""
+    assert text_argument(["a"]) == ""
+    assert text_argument(None) == ""
+    assert text_argument({"other": "x"}) == ""
+    assert text_argument("  spaced  ") == "spaced"
+    assert text_argument(3) == "3"

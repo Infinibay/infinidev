@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 _MAX_RESULT_CHARS = 6000
 
 # ── Public entry point ────────────────────────────────────────────────────
+from infinidev.engine.tool_dispatch import text_argument
 
 
 def should_elaborate(escalation: EscalationPacket) -> bool:
@@ -498,7 +499,7 @@ def _admissible_clarifications(
         if not isinstance(entry, dict):
             continue
 
-        question = (entry.get("question") or "").strip()
+        question = text_argument(entry.get("question"))
         if not question:
             continue
         key = question.lower().rstrip("?. ")
@@ -506,15 +507,15 @@ def _admissible_clarifications(
             continue
         seen.add(key)
 
-        default = (entry.get("default") or "").strip()
+        default = text_argument(entry.get("default"))
         options = [
             o.strip() for o in (entry.get("options") or []) if isinstance(o, str) and o.strip()
         ]
         # The default is an option whether or not the model listed it as one.
         if default and default not in options:
             options.insert(0, default)
-        impact = (entry.get("impact") or "").strip()
-        risk = (entry.get("risk") or "costly_to_reverse").strip()
+        impact = text_argument(entry.get("impact"))
+        risk = text_argument(entry.get("risk")) or "costly_to_reverse"
         if risk not in {
             "local_reversible", "costly_to_reverse", "external_or_destructive"
         }:

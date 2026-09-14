@@ -33,6 +33,7 @@ from infinidev.engine.engine_logging import (
     is_hallucinated_call_error,
 )
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
+from infinidev.engine.oversized_result import handle_oversized_result
 from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.llm_caller import ClassifiedCalls, LLMCallResult
 from infinidev.engine.loop.step_manager import _get_settings
@@ -50,6 +51,13 @@ from infinidev.tools.base.context import get_current_workspace_path
 
 if TYPE_CHECKING:
     from infinidev.engine.loop.behavior_tracker import BehaviorTracker
+
+
+#: Largest tool result the developer's prompt may carry. Matches the chat
+#: agent, the planner and the stage planner (8 000); the spec elaborator and the
+#: council use 6 000. Over it, ``handle_oversized_result`` returns an outline and
+#: a refusal for a paginated file read, or an honest trim for anything else.
+_MAX_PROMPT_RESULT_CHARS = 8_000
 
 logger = logging.getLogger(__name__)
 
@@ -1280,6 +1288,20 @@ class ToolRunner:
             # tool messages) nor on small models (compacted in place).
             ctx.state.pending_archive.append(
                 (tc.function.name, str(tc.function.arguments or ""), body)
+            )
+
+            # Every other loop in the engine caps what one tool result may
+            # put into the prompt — planner, stage planner, spec elaborator,
+            # council and the chat agent all pass ``max_chars`` to
+            # ``handle_oversized_result``. The developer's loop, the one with
+            # the longest horizon, did not: a single 20 000-character read was
+            # re-sent on every later round of the run. The archive above keeps
+            # the raw text, so capping here costs the recovery path nothing.
+            body = handle_oversized_result(
+                body,
+                max_chars=_MAX_PROMPT_RESULT_CHARS,
+                tool_name=tc.function.name,
+                tool_args=tc.function.arguments,
             )
 
             if ctx.manual_tc:

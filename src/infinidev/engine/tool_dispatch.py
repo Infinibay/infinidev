@@ -57,6 +57,37 @@ _SCHEMA_KEY_WRAPPER = re.compile(
     re.IGNORECASE,
 )
 
+#: Keys a model reaches for when it wraps a string argument in an object.
+_TEXT_ARGUMENT_KEYS = ("text", "message", "content", "reply", "summary", "value")
+
+
+def text_argument(value: Any) -> str:
+    """Coerce a model-authored argument to text instead of assuming a string.
+
+    ``(args.get("message") or "").strip()`` raises ``AttributeError: 'dict'
+    object has no attribute 'strip'`` when the model answers with
+    ``{"message": {"text": "..."}}``, and the exception reaches the user as
+    "The task engine failed: ..." — the whole turn lost to a shape the
+    dispatcher is supposed to absorb. Measured: one ``test-selection`` run in
+    three failed that way.
+
+    Strings pass through stripped; a mapping is searched for the keys models
+    actually nest under; scalars are stringified; anything else is empty, which
+    callers already treat as "the model did not answer".
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in _TEXT_ARGUMENT_KEYS:
+            inner = value.get(key)
+            if isinstance(inner, str) and inner.strip():
+                return inner.strip()
+        return ""
+    if isinstance(value, (int, float, bool)):
+        return str(value).strip()
+    return ""
+
+
 def _normalize_execute_command_cwd(args: dict[str, Any]) -> None:
     """Move a strict leading ``cd PATH &&`` into execute_command's cwd.
 

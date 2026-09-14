@@ -671,3 +671,59 @@ class TestKenSeesTheTurn:
         assert ken.starts == 3, "every turn asks; the client decides"
         assert ken.prompts == ["first", "second", "third"]
         assert len(ken.turn_ends) == 3
+
+
+# ── a promise is not an answer ─────────────────────────────────────────
+
+
+def test_a_chat_reply_that_promises_work_is_escalated(monkeypatch):
+    """The chat agent is read-only, so a promise is a lie the turn ends on.
+
+    One corpus run answered ``"I will draft PLAN.md now, scoped to the tenant
+    export change in requirements.md, and then run verify.py to confirm it
+    passes."`` — no loop round ran, no file was created, and the user read the
+    promise as the deliverable.
+    """
+    from infinidev.engine.orchestration.chat_agent import promises_instead_of_working
+
+    assert promises_instead_of_working(
+        "I will draft PLAN.md now, scoped to the tenant export change in "
+        "requirements.md, and then run verify.py to confirm it passes."
+    )
+    assert promises_instead_of_working("Let me fix the rounding and run the tests.")
+    assert promises_instead_of_working("Sure, I will create the migration.")
+
+
+def test_a_conversational_reply_that_mentions_a_future_is_left_alone():
+    from infinidev.engine.orchestration.chat_agent import promises_instead_of_working
+
+    assert not promises_instead_of_working(
+        "I will explain why the cache is stale: it is keyed by path."
+    )
+    assert not promises_instead_of_working(
+        "The rounding truncates because integer division drops the remainder."
+    )
+    assert not promises_instead_of_working("pytest tests/ -q passes, 4 tests.")
+    # Long answers are prose, not a promise, whatever they open with.
+    assert not promises_instead_of_working("I will draft PLAN.md now. " + "x" * 800)
+    assert not promises_instead_of_working("")
+
+
+def test_a_chat_reply_that_offers_to_explain_is_not_a_promise():
+    """The chat agent exists to answer questions, so an offer to talk is fine.
+
+    A work verb alone is not enough: "I'll walk you through how to build it"
+    and "I will show you how to test it" are the answers this agent is for, and
+    the prompt's own rule is that a false escalation is worse than an extra
+    turn.
+    """
+    from infinidev.engine.orchestration.chat_agent import promises_instead_of_working
+
+    for conversational in (
+        "I'll walk you through how to build it.",
+        "I will explain the trade-off and then write the config.",
+        "I will show you how to test it.",
+        "Let me summarise the plan.",
+        "Let me review the module and report the defect.",
+    ):
+        assert not promises_instead_of_working(conversational), conversational

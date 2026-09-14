@@ -1,6 +1,6 @@
 [project]
 name = "infinidev"
-version = "0.25.0"
+version = "0.26.0"
 description = "An AI programming harness with terminal and web interfaces."
 readme = "README.md"
 requires-python = ">=3.11"

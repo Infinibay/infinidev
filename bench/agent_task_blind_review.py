@@ -123,20 +123,26 @@ def build_packet(
     *,
     seed: int = 20_260_914,
     repetitions: set[int] | None = None,
+    only_items: set[str] | None = None,
+    narrow: bool = False,
 ) -> dict[str, Any]:
     """Write a blinded review packet plus the key that unblinds it."""
 
     artifacts: list[dict[str, Any]] = []
-    for run_path in sorted(arm_root.glob("*/artifacts/*/run.json")):
+    for run_path in sorted(arm_root.rglob("run.json")):
         artifact = _load(run_path)
         items = [
             {"id": item["id"], "description": item["description"]}
             for item in (artifact.get("rubric") or [])
             if item.get("kind") == "human_review"
+            and (only_items is None or item["id"] in only_items)
         ]
         if not items:
             continue
-        arm = run_path.parts[-4]
+        # ``<root>/<campaign>[/<arm>]/artifacts/<run>/run.json``; keep the
+        # campaign too, so a packet built over many campaigns still separates
+        # them when the key is read.
+        arm = run_path.parent.parent.parent.relative_to(arm_root).as_posix()
         folder = run_path.parent.name  # <task>.r<rep>.baseline
         task = folder.split(".r")[0]
         repetition = int(folder.split(".r")[1].split(".")[0])
@@ -153,7 +159,13 @@ def build_packet(
             "diff": deduplicated_diff(
                 str(artifact.get("changed_files_summary") or "")
             )[:_MAX_DIFF_CHARS],
-            "trace": _trace(artifact),
+            "trace": [] if narrow else _trace(artifact),
+            "commands": [
+                str((call.get("arguments") or {}).get("command") or "")
+                for call in (artifact.get("tool_trace") or [])
+                if str(call.get("tool_name")) == "execute_command"
+                and isinstance(call.get("arguments"), dict)
+            ] if narrow else [],
         })
 
     if not artifacts:
@@ -219,6 +231,26 @@ def render_packet(packet: list[dict[str, Any]]) -> str:
         lines.append(entry["answer"] or "(empty)")
         lines.append("```")
         lines.append("")
+        if entry.get("commands"):
+            lines.append("**Commands run.**")
+            lines.append("")
+            lines.append("```")
+            lines.extend(command or "(empty)" for command in entry["commands"])
+            lines.append("```")
+            lines.append("")
+            lines.append("**Tool sequence.**")
+            lines.append("")
+            lines.append("```")
+            lines.append(f"({len(entry['trace'])} steps, omitted in narrow mode)")
+            lines.append("```")
+            lines.append("")
+            lines.append("**Diff.**")
+            lines.append("")
+            lines.append("```diff")
+            lines.append("(omitted in narrow mode)")
+            lines.append("```")
+            lines.append("")
+            continue
         lines.append("**Tool sequence.**")
         lines.append("")
         lines.append("```")
@@ -318,6 +350,14 @@ def main() -> None:
         "--repetition", type=int, action="append", default=None,
         help="score only this repetition (repeatable); default is every one",
     )
+    packet.add_argument(
+        "--item", action="append", default=None,
+        help="only runs carrying this rubric item (repeatable)",
+    )
+    packet.add_argument(
+        "--narrow", action="store_true",
+        help="answer plus commands only; for items that need no diff or trace",
+    )
 
     join = sub.add_parser("report", help="join scores with the key and compare")
     join.add_argument("key", type=Path)
@@ -332,6 +372,8 @@ def main() -> None:
             args.output,
             seed=args.seed,
             repetitions=set(args.repetition) if args.repetition else None,
+            only_items=set(args.item) if args.item else None,
+            narrow=args.narrow,
         )
         print(json.dumps(info, indent=2))
         print(f"wrote {args.output.with_suffix('.review.md')}")
