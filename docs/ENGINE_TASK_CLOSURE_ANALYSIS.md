@@ -3210,3 +3210,96 @@ dejó de ser una contradicción para volverse, simplemente, un modo explícito.
 Reabrirlo tiene sentido si alguna vez la delegación deja de serializar las
 escrituras (`engine/team/runtime.py:156`), que es la condición que hoy le impide
 pagar su costo en cualquier tarea que toque código.
+
+## 8. Cumplimiento del objetivo, eje por eje
+
+El objetivo pedía seis cosas. Éste es el estado de cada una, con la medición que
+la sostiene y la distinción entre **resuelto** —el test de signos pasa el umbral
+declarado de 6 parejas sin empate y p<0,05— y **dirección medida**, que es un
+resultado real pero que no autoriza a decir "mejoró".
+
+### 8.1 Objetivos cumplidos más rápido — **resuelto**
+
+| cambio | medición | estado |
+| --- | --- | --- |
+| Modo de engine por defecto: `orchestrator` → `task` | 9/9 de éxito en los dos brazos, tokens facturados **−82,9 %**, tool calls **−66,7 %**, latencia **−61,5 %** (p=0,0391) | **resuelto**, 9/0 parejas, p=0,0039 |
+| Cierre de Step rechazado en silencio (livelock) | racha de rondas sin trabajo: **11 → 0** | **resuelto** |
+| Pregunta que nadie podía responder detenía la ejecución | `complex-plan` en modo `task`: 3/3 detenidas con **0 tokens** → **3/3 completan** | **resuelto** |
+| Step que la recuperación dejaba sin salida en el orquestador | `research-audit` 2/3 → **3/3**; `wide-sum` 0/1 → **2/2** | **resuelto** |
+| Turno del orquestador que no terminaba nunca (*lost wakeup*) | espera por eventos con re-chequeo de 5 s en vez de `timeout=None` | **resuelto**, verificado en vivo |
+| `lean` sobre latencia | −33,0 %, 12/4, p=0,0768 | dirección medida, **no resuelto** |
+
+### 8.2 Menos alucinaciones — **resuelto en lo medible**
+
+| evidencia | medición |
+| --- | --- |
+| Defectos inventados en una revisión de código | `findings-are-real` **1,89 sobre 9 juzgables, cero defectos inventados**; 5 de 9 señalan explícitamente que `hmac.compare_digest` es correcto |
+| Parámetros inventados (`old_text`, `exec`, `param-N`) | contador de llamadas malformadas como métrica de decisión; las llamadas inválidas se rechazan antes de ejecutarse |
+| Un argumento con forma de diccionario mataba el turno | `(args.get("message") or "").strip()` sobre `{"message": {"text": …}}`: 1 de 3 fallaba; **corregido en 8 sitios**, 2/3 → **3/3** |
+| Una promesa entregada como trabajo | 1 de 318 corridas terminó prometiendo; **corregido**: un `respond` que promete ingeniería se escala |
+| Una promesa falsa que yo mismo puse en el prompt | el marcador de §6.1.41 ofrecía `recall_context`, que **no** puede devolver el cuerpo elidido; encontrado y corregido antes de encender el flag, con test |
+
+### 8.3 Mejor calidad de código — **resuelto donde hay juez**
+
+19 probes sobre 333 ejecuciones y 666 instancias de rúbrica, **73 % decidibles**.
+En la configuración enviada (90 ejecuciones), **todos los ítems en 2,00 salvo
+`concise-handoff` en 1,62**, y las dos fallas plenas de ese ítem son corridas que
+no corrieron. Lectura ciega: `recommendation-calibration` **17/17 = 2,00**,
+`verification-interpretation` 36/39, `findings-are-real` 1,89, y `evidence-depth`
++ `report-usability` **2,00 (8/8)** en las campañas de los titulares.
+
+Con la advertencia que corresponde: `located-the-leaf` pasó de 1,33 a 2,00 con
+`lean`, y §6.1.37 mostró que **los dos brazos compensan la hoja conforme** a una
+tasa de una en cuatro. Ese 2,00 mide que el verificador pasa, no que el arreglo
+sea el correcto, y el engine no puede gatearlo porque no conoce la convención del
+repositorio.
+
+### 8.4 Mejor seguimiento e interpretación de instrucciones — **resuelto**
+
+| cambio | medición | estado |
+| --- | --- | --- |
+| Contrato de verificación en la respuesta final | línea `Verification:` **6/16 → 16/16** | **resuelto** |
+| `lean` sobre tool calls | **−15,4 %**, 12/2 | **resuelto**, p=0,0129 |
+| Generalización sobre 8 formas de tarea | 16/16 de éxito en los dos brazos; −35,9 % de tokens con 12/4 | dirección medida en tokens |
+| `lean` en un repositorio de 1 256 archivos | 3/3 vs 3/3; ninguna traza lee el árbol entero | **medido**, sonda de validez |
+| Respuestas que no citaban un comando ejecutable | 0 en las campañas de los titulares | **resuelto** |
+
+### 8.5 Menor consumo de tokens — **una resuelta, tres con dirección**
+
+| palanca | medición | estado |
+| --- | --- | --- |
+| Modo de engine por defecto | **−82,9 %** facturado, 9/0 | **resuelto**, p=0,0039 |
+| `lean` | **−35,9 %**, 12/4 | dirección medida, p=0,0768 |
+| Catálogo de políticas condicionales | −10,4 % (11/7) y −25,6 % (7/1); agrupado 18/8 | dirección replicada, p=0,0755 |
+| Corte del razonamiento reenviado | **−21,7 %**, 11/3, dos campañas independientes | dirección replicada, p=0,0574; mecanismo medido contra la API |
+| Tope de resultado de herramienta | mediana 0 %, máximo 44,5 %, agregado **7,3 %** sobre 29 corridas | **resuelto**, del harness |
+| Elidir argumentos de tool calls de Steps cerrados | payload **−18 % a −28 %** en tareas que escriben archivos; **85,7 %** de los bytes de las llamadas que son payload | implementado, **apagado**, comparación corriendo |
+| Dieta de esquemas de herramientas | sin premio: la mayoría de las rondas manda 4 KB, no 46 KB | **resultado negativo**, cerrado |
+| Presión de agrupación | sin efecto (0,90 → 1,00 llamadas por ronda) | **resultado negativo**, apagado |
+
+### 8.6 Mejor comunicación con el usuario — **resuelto**
+
+`Verification:` **6/16 → 16/16** y respuestas de más de 250 palabras **2/16 →
+0/16**. El ítem de rúbrica `concise-handoff` es el único por debajo de 2,00
+(1,62), y sus dos fallas plenas son corridas que nunca corrieron el loop. El
+contrato de traspaso flojo se implementó y midió **inerte** en la configuración
+enviada (§6.1.24): la brecha era histórica y el proxy de longitud que la
+agrandaba era del instrumento.
+
+### 8.7 Lo que este trabajo no resuelve
+
+* **`lean` no es el default.** `PROMPT_STYLE = "auto"` resuelve a `generalized`;
+  `lean` se midió con el flag explícito. Con tokens en 12/4 y p=0,0768, cambiar
+  el default sería exactamente el error que el documento se prohíbe. Es la
+  decisión más grande que queda abierta y la evidencia está toda junta.
+* **La ventaja de `lean`, medida, es de dirección y no de significancia.** Tres
+  de sus cuatro métricas quedan por fuera del umbral; tool calls sí lo pasa.
+* **El modelo de costo de §6.1.40 es un modelo.** Usa el incremento mediano y un
+  régimen acotado constante; una implementación real tiene un working set que
+  varía por ronda. El punto de empate (`k = 0,49`) es robusto porque se movió
+  contra el extremo liviano y el mediano, pero no es una simulación del engine.
+* **Seis defectos de instrumento** aparecieron en el camino, todos en la
+  dirección de hacer parecer al engine mejor de lo que era. Los seis están
+  corregidos y con test. La regla que los habría atajado a todos no existía al
+  empezar y ahora está escrita: un número que decide una frase necesita un test
+  que lo fije contra un valor calculado fuera del código que lo produce.
