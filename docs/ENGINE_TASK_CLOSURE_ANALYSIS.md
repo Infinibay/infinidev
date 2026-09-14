@@ -29,7 +29,7 @@ de declarar un resultado. El detalle está en §6; los límites, en cada secció
 | El harness no atribuye el 22 % del payload | **Resuelto, y las dos exclusiones de §6.1.35 eran falsas.** El razonamiento del modelo **sí** se reenvía (`main` lo mete en el turno del asistente) y MiniMax lo factura a **1 token por 8 caracteres**, medido contra la API con la pendiente idéntica en los dos campos y lineal de 0 a 48 000 caracteres. Y los argumentos de las tool calls no son 2 513 caracteres: en una tarea que escribe archivos son el **30 % del payload** | **arreglado**: `trim_superseded_reasoning` borra el razonamiento de todo turno ya cerrado y conserva el material opaco; `measure_request_payload` ahora atribuye cada carácter y `payload_unattributed_chars` es 0 (§6.1.39) |
 | **Reconstruir el contexto o dejarlo crecer** | El engine **ya deja crecer**: 269 de 308 corridas crecen monótonamente, 1,71× el payload inicial, **+2 277 caracteres por petición**. Con `k` = acierto de cache sobre fresco, un harness que reconstruye gana sólo si su working set `D <= d(N−1)[N−(1−k)(N−2)]/2N`; el prefijo estable y el recargo de escritura **se cancelan** entre los dos regímenes | **medido y contestado**: el working set real que el engine reconstruye mide **1 511 tokens** (p10 328, p90 2 431), el empate está en **`k = 0,49`**, y los nueve proveedores que publican cache (0,07–0,25) quedan del lado de dejar crecer; sólo `Groq`/`Fireworks`, sin cache publicado, favorecen reconstruir. Herramienta: `bench/context_regime_cost.py` (§6.1.40) |
 | **El test de signos no contaba las parejas que empeoraban** | `trials = empates + mejoras`: las derrotas no entraban en el conteo, así que un resultado mixto se evaluaba como si sólo existieran las parejas favorables. **12 mejor / 4 peor daba p=0,0005 en vez de 0,0768**; con cero derrotas las dos fórmulas coinciden, y por eso el titular del modo de engine sobrevivió intacto. Recalculadas las **20 campañas guardadas**: **56 métricas se mueven y 16 pierden significancia** | **sexto defecto de instrumento, y el único que inflaba los titulares.** Corregido y con cinco tests contra binomios calculados a mano (§6.1.38). Las filas de arriba ya están corregidas; las tablas del cuerpo llevan su nota |
-| **Corte del razonamiento reenviado** | el turno del asistente lleva el razonamiento del modelo y viaja en todas las peticiones siguientes; MiniMax lo factura a **1 token por 8 caracteres**. `trim_superseded_reasoning` lo borra de todo turno ya cerrado y conserva el material opaco | **implementado y medido**: razonamiento en la última petición **9,0 % del payload → 0 %**, tokens facturados **−19,8 %**, 6/6 de éxito, 5/1 parejas. El test de signos **no lo resuelve** (p=0,2188); campaña extendida en curso (§6.1.39) |
+| **Corte del razonamiento reenviado** | el turno del asistente lleva el razonamiento del modelo y viaja en todas las peticiones siguientes; MiniMax lo factura a **1 token por 8 caracteres**, medido contra la API. `trim_superseded_reasoning` lo borra de todo turno ya cerrado y conserva el material opaco | **implementado y medido en dos campañas independientes**: razonamiento en la última petición **9,0 % del payload → 0 %**, tokens facturados **−21,7 %**, **14/14 de éxito**, **11/3 parejas, p=0,0574**. Dirección replicada, precisión no alcanzada: queda **no resuelto** por el umbral declarado (§6.1.39) |
 | El único loop sin tope de resultado | el developer era el único de seis loops sin `max_chars`: una lectura de 42 770 caracteres se reenviaba en cada ronda. Ahorro del payload acumulado: mediana **0 %**, máximo **44,5 %**, agregado 7,3 % sobre las 29 ejecuciones afectadas | **arreglado** con el mismo manejador que los otros cinco, después del archivado; 3/3 completan y el tope no se disparó (§6.1.33) |
 | Un argumento con forma de diccionario tumbaba el turno | `(args.get("message") or "").strip()` sobre `{"message": {"text": …}}`: 1 de 3 ejecuciones moría con `AttributeError` y el turno entero se perdía | **arreglado en 8 sitios** con coerción central; 2/3 completadas antes, 3/3 después (§6.1.30) |
 | Una promesa no es una entrega | 1 de 318 ejecuciones terminó con el chat agent prometiendo el trabajo: 0 rondas del loop, 0 archivos, y la promesa como respuesta | **arreglado**: un `respond` que promete trabajo de ingeniería se escala (§6.1.25) |
@@ -2804,27 +2804,44 @@ disco y el resultado dice que se escribió; ésas son las dos rutas reales, y so
 las que el marcador de §6.1.41 nombra. Queda declarado con su número, y su
 implementación y su comparación pareada están en §6.1.41.
 
-**El corte de razonamiento, medido** (6 parejas, `complex-plan` y
-`test-selection` × 3, condición `baseline`, `bench/runs/20260914-trim2/`):
+**El corte de razonamiento, medido en dos campañas independientes** (14 parejas
+en total, condición `baseline`, tareas disjuntas: `complex-plan` y
+`test-selection` × 3 en `bench/runs/20260914-trim2/`, y `reversible-ambiguity`,
+`evidence-code-review`, `user-owned-tradeoff` y `tool-failure-recovery` × 2 en
+`bench/runs/20260914-trim3/`):
 
 | | off | on |
 | --- | ---: | ---: |
 | razonamiento en la última petición | 189–9 959 ch (mediana **9,0 %** del payload) | **0 ch (0,0 %)** |
-| tokens de prompt facturados | 106 297 | 85 295 (**−19,8 %**) |
-| parejas mejor/peor | — | 5 / 1 |
-| p (test de signos corregido, §6.1.38) | — | **0,2188** |
-| success | 6/6 | 6/6 |
-| `cache_hit_rate` | 82,1 % | 74,0 % |
+| tokens de prompt facturados (14 parejas) | 101 448 | 79 440 (**−21,7 %**) |
+| parejas mejor/peor | — | **11 / 3** |
+| p (test de signos corregido, §6.1.38) | — | **0,0574** |
+| success | 14/14 | 14/14 |
+| `cache_hit_rate` | 84,5 % | 75,2 % |
 
-**La dirección es consistente y el test no la resuelve.** Cinco de seis parejas
-bajan y el mecanismo está probado con medición directa contra la API, pero con
-una derrota el test de signos necesita más parejas: 5/1 con n=6 da p=0,2188 y no
-0,0625 como decía el test defectuoso de §6.1.38. Una campaña extendida sobre
-cuatro formas de tarea más está corriendo para cerrarlo. Lo que sí se ve es un
-efecto secundario esperado y no obvio: el **hit rate baja** (82,1 % → 74,0 %),
-porque el bloque dinámico se encoge y el prefijo estable pasa a ser una fracción
-mayor de una petición más chica. El total facturado baja igual, que es lo que
-importa — pero un hit rate más alto no es el objetivo, y este cambio lo demuestra.
+Las dos campañas van en la misma dirección por separado: −19,8 % (5/1) y
+−20,8 % (6/2). Agrupadas, **11 de 14 parejas bajan y el p-valor queda en 0,0574
+— justo por fuera del umbral declarado.** No lo cuento como resuelto, y no voy a
+agregar parejas hasta que cruce: sería elegir la muestra por el resultado, que es
+exactamente lo que este documento se prohíbe. Lo que sí está probado, con
+medición directa contra la API, es el **mecanismo**: 1 token facturado por cada 8
+caracteres de razonamiento reenviado, lineal de 0 a 48 000, y 0 caracteres en la
+última petición cuando el corte está activo. O sea: el efecto existe y es del
+tamaño que dice; lo que falta es precisión sobre el estimador, no evidencia de
+que el efecto esté ahí.
+
+Dos efectos secundarios, uno esperado y uno no:
+
+* El **hit rate baja** (84,5 % → 75,2 %), porque el bloque dinámico se encoge y el
+  prefijo estable pasa a ser una fracción mayor de una petición más chica. El
+  total facturado baja igual, que es lo que importa — pero **un hit rate más alto
+  no es el objetivo**, y este cambio lo demuestra: perseguirlo habría bloqueado
+  una mejora real.
+* Las **rondas de modelo bajan 23,1 %** (10/4, p=0,1796), y los tokens de
+  completion **suben 3,9 %** (9/5, p=0,42). Ninguna de las dos está resuelta; las
+  dos son del tamaño del ruido a este n. Si la caída de rondas fuera real sería
+  el mismo patrón que ya apareció con `lean` (§6.1.1): menos contexto redundante,
+  menos rondas, y una respuesta un poco más larga por ronda.
 
 ### 6.1.40 Reconstruir el contexto o dejar que crezca: qué es más barato
 
