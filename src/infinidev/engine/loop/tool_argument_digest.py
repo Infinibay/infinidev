@@ -37,8 +37,19 @@ _ELIDE_OVER_CHARS = 400
 
 #: The marker a model reads in place of a body. It deliberately names the size,
 #: so a model that wants the content back knows whether re-reading is worth a
-#: round, and names the tool that has it.
-_ELIDE_TEMPLATE = "<elided by infinidev: {size} chars; re-read the file or use recall_context>"
+#: round.
+#:
+#: The wording is load-bearing and must stay true. It cannot offer
+#: ``recall_context``: the archive stores a call's *result* as the record's
+#: content and uses the arguments only to build the title
+#: (``WorkingMemory._extract``), so the body of an elided argument is not what a
+#: recall returns. Promising it would send the model after evidence that is not
+#: there — the precise failure this lever exists to reduce. What is true is that
+#: the result above is untouched, and that a file body is on disk.
+_ELIDE_TEMPLATE = (
+    "<elided by infinidev: {size} chars; the tool result above is unchanged"
+    " — read the file if you need its content>"
+)
 
 
 def _elide_value(value: Any) -> tuple[Any, int]:

@@ -36,8 +36,8 @@ def test_a_long_body_is_replaced_and_a_short_argument_is_left_alone() -> None:
     assert parsed["file_path"] == "a.py"
     assert parsed["content"].startswith("<elided by infinidev:")
     assert str(len(body)) in parsed["content"]
-    # The marker names a way to get it back.
-    assert "recall_context" in parsed["content"]
+    # The marker may only promise what the engine can actually deliver.
+    assert "read the file" in parsed["content"]
 
 
 def test_a_short_argument_is_returned_byte_identical() -> None:
@@ -155,3 +155,30 @@ def test_a_transcript_whose_calls_are_all_small_reports_no_saving() -> None:
     ]
 
     assert trim_superseded_tool_arguments(messages) == 0
+
+
+def test_the_marker_never_promises_a_recall_that_cannot_return_the_body() -> None:
+    """The archive stores a call's *result*, not its arguments.
+
+    ``WorkingMemory._extract`` pairs an assistant call with its ``role: tool``
+    result and files the *result* as the record's content; the arguments are
+    used only to build the title. So an elided body is not what ``recall_context``
+    returns, and a marker that offered it would send the model after evidence
+    that does not exist.
+    """
+    body = "z" * 2_000
+    digested, _ = digest_arguments(json.dumps({"file_path": "a.py", "content": body}))
+    marker = json.loads(digested)["content"]
+
+    assert "recall_context" not in marker
+    # What it does promise has to hold: the result is untouched, and a file body
+    # is on disk.
+    assert "tool result above is unchanged" in marker
+    assert "read the file" in marker
+
+
+def test_the_marker_names_the_size_so_re_reading_can_be_weighed() -> None:
+    body = "z" * 4_321
+    digested, _ = digest_arguments(json.dumps({"path": "a.py", "text": body}))
+
+    assert "4321" in json.loads(digested)["text"]

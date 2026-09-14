@@ -2791,16 +2791,18 @@ entero y
 el cuerpo del archivo *es* el argumento. Desde ahí viaja en todas las peticiones
 siguientes.
 
-**Eso es una palanca medida y no tomada, y es más grande que el razonamiento.**
-Un argumento de una tool call cuyo Step ya cerró es exactamente lo que el diseño
-del engine dice archivar en vez de reenviar —el resumen de paso existe para
-eso, y `recall_context` lo recupera—, igual que el razonamiento. Pero a
-diferencia del razonamiento no hay un argumento de protocolo que lo justifique
-en ninguna parte: el proveedor necesita el `id` y el nombre para casar el
-resultado de la herramienta, no el cuerpo. Queda declarado con su número y **sin
-implementar**, porque cambiar el contenido que el modelo ve a mitad de una
-corrida necesita su propia comparación pareada antes de existir, y esa no se
-corrió. El orden de valor esperado está en §7.
+**Eso es una palanca medida, y es más grande que el razonamiento.** Nada en el
+protocolo la justifica: el proveedor necesita el `id` y el nombre para casar el
+resultado de la herramienta, no el cuerpo. Y a diferencia del razonamiento
+—donde hay que conservar bloques con firma para que Anthropic y Gemini acepten la
+cadena— acá no hay material opaco que preservar.
+
+Lo que **no** se puede afirmar es que `recall_context` devuelva el cuerpo:
+`WorkingMemory._extract` archiva el *resultado* de la llamada, y usa los
+argumentos sólo para el título. Para un archivo escrito el cuerpo está en el
+disco y el resultado dice que se escribió; ésas son las dos rutas reales, y son
+las que el marcador de §6.1.41 nombra. Queda declarado con su número, y su
+implementación y su comparación pareada están en §6.1.41.
 
 **El corte de razonamiento, medido** (6 parejas, `complex-plan` y
 `test-selection` × 3, condición `baseline`, `bench/runs/20260914-trim2/`):
@@ -2934,10 +2936,9 @@ desde la ronda que lo escribe viaja en todas las siguientes.
 
 Nada en el protocolo exige que esos bytes sean los originales. El proveedor
 necesita el `id` y el `name` para que el resultado de la herramienta tenga una
-llamada que contestar; el argumento es salida previa del propio modelo. Y el
-loop ya tiene tres registros más baratos del mismo hecho: el mensaje de
-*resultado*, el resumen de paso que sustituye al transcript cuando el Step
-cierra, y el archivo que `recall_context` busca.
+llamada que contestar; el argumento es salida previa del propio modelo. Y para
+un archivo escrito, el cuerpo está en el disco y el mensaje de *resultado* dice
+que se escribió.
 
 **Lo implementado es más angosto que borrar los argumentos.**
 `trim_superseded_tool_arguments` conserva **todas las claves y la forma del
@@ -2947,9 +2948,20 @@ proveedor que valide la forma sigue viendo la forma; el modelo sigue viendo qué
 llamó y dónde; deja de ver un archivo que ya escribió:
 
 ```
-{"file_path":"a.py","content":"<elided by infinidev: 2400 chars; re-read the file
- or use recall_context>"}
+{"file_path":"a.py","content":"<elided by infinidev: 2400 chars; the tool result
+ above is unchanged — read the file if you need its content>"}
 ```
+
+**El texto del marcador es load-bearing y por eso dice sólo lo que es cierto.**
+La primera versión ofrecía `recall_context`, y era **falso**:
+`WorkingMemory._extract` empareja la llamada del asistente con su resultado
+`role: "tool"` y archiva **el resultado** como contenido del registro; los
+argumentos sólo se usan para construir el título. O sea que un cuerpo elidido
+**no** es lo que devuelve un recall, y ofrecerlo mandaría al modelo a buscar
+evidencia que no está — exactamente la falla que esta palanca existe para
+reducir. Lo que sí es cierto: el resultado de arriba no se toca, y el cuerpo de
+un archivo está en el disco. El marcador dice eso y nada más, y hay un test que
+falla si alguna vez vuelve a nombrar `recall_context`.
 
 Sólo se tocan los turnos **ya cerrados** —todos menos el último, cuyos resultados
 viajan en la misma petición—, que es la misma frontera que usa el corte de
@@ -2958,18 +2970,57 @@ no parsea **no se reescribe nunca**: una llamada malformada es un hecho de la
 corrida, y reescribirla lo escondería y podría convertir una falla diagnosticable
 en otra distinta.
 
-**El ahorro estimado, sobre las corridas guardadas**, según qué fracción de los
-argumentos supere el umbral:
+**La regla medida contra cada llamada real del corpus**, no supuesta
+(`python -m bench.tool_argument_census --runs bench/runs`, 4 397 llamadas
+registradas en `tool_trace`):
 
-| corrida | payload | `tool_calls` | −70 % | −85 % |
+| | |
+| --- | ---: |
+| llamadas reales | 4 397 |
+| que no parsean | **0** |
+| con un valor de más de 400 caracteres | 409 (**9,3 %**) |
+| bytes de argumentos en total | 2 009 179 |
+| elidibles | 1 351 482 (**67,3 %**) |
+| de las llamadas de 500+ caracteres (las que son payload) | 540 |
+| bytes elidibles en ésas | **85,7 %** |
+
+Dónde están los bytes: `create_file` 1 042 152 elidibles en 157 llamadas,
+`team_delegate` 128 153 en 87, `execute_command` 98 366 en 1 105, `edit_file`
+31 123 en 278. O sea: **la regla dispara en una minoría de llamadas y se lleva
+casi todos los bytes**, porque las llamadas en las que dispara son justo las que
+cargan el cuerpo de un archivo. Y **cero llamadas reales sin parsear**, que es lo
+que decide si el 67,3 % existe o es parcial.
+
+Combinado con el payload de cada corrida:
+
+| corrida | payload | `tool_calls` | −67 % | −86 % |
 | --- | ---: | ---: | ---: | ---: |
-| `complex-plan` r2 | 63 918 | **21 127 (33 %)** | −23,1 % | −28,1 % |
-| `complex-plan` r1 | 57 229 | 15 491 (27 %) | −18,9 % | −23,0 % |
-| `test-selection` r2 | 40 162 | 3 510 (9 %) | −6,1 % | −7,4 % |
-| `test-selection` r1 | 37 945 | 1 845 (5 %) | −3,4 % | −4,1 % |
+| `complex-plan` r2 | 63 918 | **21 127 (33 %)** | −22,2 % | −28,4 % |
+| `complex-plan` r1 | 57 229 | 15 491 (27 %) | −18,2 % | −23,3 % |
+| `test-selection` r2 | 40 162 | 3 510 (9 %) | −5,9 % | −7,5 % |
+| `test-selection` r1 | 37 945 | 1 845 (5 %) | −3,3 % | −4,2 % |
 
-O sea: entre **−19 % y −28 %** en las tareas que escriben archivos y entre −3 %
-y −7 % en las que leen, que es exactamente la asimetría que el censo predice.
+O sea: entre **−18 % y −28 %** en las tareas que escriben archivos y entre −3 %
+y −8 % en las que leen, que es exactamente la asimetría que el censo predice.
+
+**Antes de gastar una campaña, una sonda contra el proveedor vivo**, porque el
+riesgo de esta palanca es de protocolo y se puede descartar en dos llamadas. La
+misma conversación —dos `create_file` con 300 líneas de cuerpo cada uno, y una
+pregunta sobre la primera línea del primero— transcripta entera y transcripta
+con los argumentos elididos:
+
+| transcripción | prompt tokens | finish | ¿llamó a `read_file`? | respuesta |
+| --- | ---: | --- | --- | --- |
+| entera | 3 019 | stop | no | "The first line of a.py is `print('hello')`." |
+| elidida | **1 841** | stop | no | "The first line of `a.py` is `print('hello')`." |
+
+Dos de dos en cada brazo. El proveedor **acepta** los argumentos elididos —no
+hay error de protocolo: el `id` y el `name` siguen ahí y el resultado de la
+herramienta tiene su llamada— y el modelo **contesta igual**, porque el dato que
+necesita lo tiene el mensaje de resultado, que no se toca. −39 % de tokens de
+prompt en esa conversación. Eso no reemplaza la comparación pareada —una sonda
+de dos llamadas no mide una corrida de diez rondas— pero sí elimina la
+explicación más barata de que la palanca no sirva.
 
 **El interruptor existe y está apagado por defecto**
 (`LOOP_TOOL_ARGUMENT_TRIM_ENABLED = False`), y eso es deliberado, no una
@@ -3099,23 +3150,20 @@ Queda, en orden de valor esperado:
    correcta. Una dieta global sería un cambio de capacidad con falla silenciosa,
    justificado por un corpus que no la mide. Cerrado.
 
-9. **Compactar los argumentos de las tool calls de Steps ya cerrados.** El cubo
-   más grande del payload después de `content`, y el único que crece a saltos:
-   **30 % en `complex-plan`** (15 758 de 51 721 caracteres en la última
-   petición), 5 % en `test-selection` (§6.1.39). El salto es la escritura de un
-   archivo —el cuerpo del archivo *es* el argumento— y desde ahí viaja en todas
-   las peticiones siguientes. El proveedor necesita el `id` y el nombre para
-   casar el resultado de la herramienta, no el cuerpo, y el engine ya archiva el
-   detalle y lo recupera con `recall_context`; un digest con nombre, ruta y
-   tamaño es la forma que el resto del diseño ya usa. **No implementado**: cambia
-   lo que el modelo ve a mitad de una corrida y necesita su propia comparación
-   pareada. Es la palanca más grande que queda y la más barata de medir, porque
-   el censo que la dimensiona ya existe. **Implementado y apagado**
-   (`LOOP_TOOL_ARGUMENT_TRIM_ENABLED`, §6.1.41): elidir los valores de texto
-   largos de los argumentos de Steps cerrados, conservando la forma del JSON y
-   el `id`/`name` de cada llamada, con −19 a −28 % del payload estimado en
-   tareas que escriben archivos. Falta la comparación pareada que decide si el
-   ahorro supera a la ronda que el modelo pueda gastar releyendo.
+9. **Compactar los argumentos de las tool calls de Steps ya cerrados.
+   Implementado y apagado** (`LOOP_TOOL_ARGUMENT_TRIM_ENABLED`, §6.1.41). El
+   cubo más grande del payload después de `content`, y el único que crece a
+   saltos: **hasta 33 %** (21 127 caracteres en `complex-plan.r2`), 5 % en
+   `test-selection` (§6.1.39). El salto es la escritura de un archivo —el cuerpo
+   del archivo *es* el argumento— y desde ahí viaja en todas las peticiones
+   siguientes. El proveedor necesita el `id` y el nombre para casar el resultado
+   de la herramienta, no el cuerpo. Medido contra las 4 397 llamadas del corpus:
+   la regla dispara en el 9,3 % de ellas y se lleva el **85,7 % de los bytes** de
+   las que son payload, con **cero llamadas sin parsear**; el efecto sobre el
+   payload es **−18 % a −28 %** en tareas que escriben archivos y −3 % a −8 % en
+   las que leen. Falta la comparación pareada que decide si el ahorro supera a la
+   ronda que el modelo pueda gastar releyendo —porque el cuerpo elidido **no** lo
+   devuelve `recall_context`, que archiva resultados, sino el disco.
 10. ~~Reconstruir el contexto contra dejarlo crecer.~~ **Contestado y medido
    (§6.1.40).** El engine ya deja crecer (269 de 308 corridas, 1,71×, +2 277
    caracteres por ronda); el prefijo estable se cancela en la comparación y el
