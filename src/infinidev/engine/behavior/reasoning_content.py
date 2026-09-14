@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -12,6 +13,9 @@ _TEXT_KEYS = ("text", "thinking", "summary", "reasoning_content")
 _OPAQUE_TYPES = frozenset({"redacted_thinking", "encrypted_thinking"})
 _HISTORY_FIELDS = ("reasoning_content", "thinking_blocks", "reasoning_details", "reasoning_items")
 _PROVIDER_HISTORY_FIELDS = frozenset({"reasoning_details", "thought_signatures"})
+#: Keys whose presence makes a reasoning payload an opaque provider token
+#: rather than visible prose. They must survive a round trip verbatim.
+_SIGNATURE_KEYS = frozenset({"signature", "thought_signature", "encrypted_content"})
 
 
 @dataclass(frozen=True)
@@ -173,9 +177,85 @@ def reasoning_history_fields(message: Any) -> dict[str, Any]:
     return result
 
 
+def _carries_opaque_material(value: Any) -> bool:
+    """True when a reasoning payload holds a provider token, not just prose.
+
+    Anthropic thinking blocks and Gemini thought signatures are opaque values
+    the provider requires echoed back verbatim on a tool-use turn.  Plain
+    reasoning text is not, and it is the one worth dropping: MiniMax-M3 bills
+    a re-sent reasoning field at one prompt token per eight characters,
+    measured directly against the live API.
+    """
+    if value is None or isinstance(value, str):
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_carries_opaque_material(item) for item in value)
+    if isinstance(value, dict):
+        if str(value.get("type", "")).casefold() in _OPAQUE_TYPES:
+            return True
+        if any(key in value for key in _SIGNATURE_KEYS):
+            return True
+        return any(_carries_opaque_material(item) for item in value.values())
+    for method_name in ("model_dump", "dict"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            try:
+                return _carries_opaque_material(_plain(value))
+            except Exception:  # pragma: no cover - defensive
+                return True
+    return False
+
+
+def trim_superseded_reasoning(messages: list[dict[str, Any]]) -> int:
+    """Drop visible reasoning from every assistant turn but the newest.
+
+    Only the newest assistant turn still needs it: its tool results travel in
+    the same request, so a provider that wants the thinking block alongside a
+    tool-use turn gets it.  Every older turn has already been resolved, and
+    re-sending its reasoning costs tokens on every remaining request of the
+    run for no protocol benefit.
+
+    Opaque signature material is never dropped anywhere, because Anthropic and
+    Gemini reject a tool-use chain whose thinking blocks came back stripped.
+
+    Returns the number of characters removed.
+    """
+    newest = -1
+    for index, message in enumerate(messages):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            newest = index
+    if newest < 0:
+        return 0
+
+    removed = 0
+    for message in messages[:newest]:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for key in _HISTORY_FIELDS:
+            if key not in message or _carries_opaque_material(message[key]):
+                continue
+            removed += len(json.dumps(message[key], default=str))
+            del message[key]
+        provider_fields = message.get("provider_specific_fields")
+        if not isinstance(provider_fields, dict):
+            continue
+        for key in list(provider_fields):
+            # ``thought_signatures`` is opaque by definition and by name.
+            if key == "thought_signatures" or key not in _PROVIDER_HISTORY_FIELDS:
+                continue
+            if _carries_opaque_material(provider_fields[key]):
+                continue
+            removed += len(json.dumps(provider_fields[key], default=str))
+            del provider_fields[key]
+        if not any(name in provider_fields for name in _PROVIDER_HISTORY_FIELDS):
+            message.pop("provider_specific_fields", None)
+    return removed
+
+
 __all__ = [
     "ReasoningEnvelope",
     "ReasoningStreamAccumulator",
     "extract_reasoning",
     "reasoning_history_fields",
+    "trim_superseded_reasoning",
 ]

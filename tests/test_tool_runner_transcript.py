@@ -151,6 +151,43 @@ def test_assistant_history_preserves_provider_reasoning_protocol_fields() -> Non
     assert assistant["tool_calls"][0]["id"] == "c1"
 
 
+def test_a_superseded_turn_loses_its_reasoning_on_the_next_request() -> None:
+    """The loop re-sends every assistant turn; only the newest needs its reasoning.
+
+    MiniMax-M3 bills a re-sent reasoning field at one prompt token per eight
+    characters, measured against the live API, so a ten-round run was paying for
+    its own deliberation ten times over. The turn that keeps it is the one whose
+    tool results travel in the same request.
+    """
+    messages: list[dict] = []
+
+    def turn(text: str, call_id: str) -> SimpleNamespace:
+        message = SimpleNamespace(
+            content="",
+            reasoning_content=text,
+            provider_specific_fields={
+                "reasoning_details": [{"type": "reasoning.text", "text": text}]
+            },
+        )
+        ToolRunner.append_assistant_message(
+            _ctx(),
+            ClassifiedCalls(regular=[_call(call_id, "read_file")]),
+            messages,
+            SimpleNamespace(message=message, raw_content="", reasoning_content=""),
+        )
+        return message
+
+    turn("round one deliberation", "c1")
+    messages.append({"role": "tool", "content": "r1", "tool_call_id": "c1"})
+    turn("round two deliberation", "c2")
+
+    assert "reasoning_content" not in messages[0]
+    assert "provider_specific_fields" not in messages[0]
+    assert messages[2]["reasoning_content"] == "round two deliberation"
+    # The history stays a valid tool chain: the calls are all still announced.
+    assert [m["tool_calls"][0]["id"] for m in messages if m.get("tool_calls")] == ["c1", "c2"]
+
+
 def test_tool_runner_defers_compaction_until_context_pressure(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("tool-round compaction bypassed context pressure")

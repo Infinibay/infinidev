@@ -90,6 +90,13 @@ def loop_observed_metrics(engine: Any) -> dict[str, int]:
         # counter that moves when the engine gets better at preventing
         # hallucinated calls rather than merely surviving them.
         "observed_malformed_tool_calls": counter(state, "malformed_tool_calls"),
+        # Prompt-cache accounting, which the loop already collected from the
+        # provider's usage and then only printed. A cache read is the cheapest
+        # input token there is, so a change that costs tokens can still be a
+        # win if it moves this — and nothing was measuring it.
+        "observed_cache_read_tokens": counter(state, "cache_read_tokens"),
+        "observed_cache_creation_tokens": counter(state, "cache_creation_tokens"),
+        "observed_cached_prefix_tokens": counter(state, "cached_tokens"),
     }
 
 

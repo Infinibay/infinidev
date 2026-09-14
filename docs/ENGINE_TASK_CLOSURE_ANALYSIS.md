@@ -8,12 +8,12 @@ de declarar un resultado. El detalle está en §6; los límites, en cada secció
 
 | cambio | efecto medido | estado |
 | --- | --- | --- |
-| Variante de prompt `lean` (protocolo, identidad de ingeniería y barras de producto compactos) | −35,9 % tokens de prompt, −15,4 % tool calls, −33 % latencia, 16/16 success; generaliza sobre 8 formas de tarea | **medido**, p=0,0005 |
+| Variante de prompt `lean` (protocolo, identidad de ingeniería y barras de producto compactos) | −35,9 % tokens de prompt y −33 % latencia, **12/4 parejas, p=0,0768**; **tool calls −15,4 %, 12/2, p=0,0129**; 16/16 success; generaliza sobre 8 formas de tarea | **dirección medida, no resuelta** para tokens y latencia; **resuelto** para tool calls. El p=0,0005 que figuraba aquí era del test de signos defectuoso (§6.1.40) |
 | Respuesta final con contrato de verificación | línea `Verification:` 6/16 → 16/16; respuestas sobre 250 palabras 2/16 → 0/16 | **medido** |
 | Cierre de Step rechazado en silencio (livelock) | racha de rondas sin trabajo: 11 → 0 | **medido** (falla intermitente) |
 | Presión de agrupación de tool calls | sin efecto (0,90 → 1,00 llamadas por ronda) | **resultado negativo**, apagado por defecto |
-| Catálogo de políticas condicionales | dos muestras independientes en el modo que se envía: **−11,5 %** (p=0,031) y **−25,6 %** (p=0,016) de tokens, 16/16 de éxito. La latencia se movió +13,6 % en una y **−36,7 %** en la otra | **decisión: el flag queda en `true`**; el costo en latencia era ruido, con la diferencia entre brazos 10–25× menor que la dispersión dentro de un brazo (§6.1.26) |
-| **Modo de engine por defecto vs `task`** | contador corregido, 8 parejas pareadas: success **8/8 vs 8/8**, tokens facturados **−81,0 %**, rondas de modelo **−64,5 %**, latencia **−73,0 %**, todo con **p=0,0078** (§6.1.23). Los workers que escriben **están serializados por código** (`runtime.py:156`), así que la delegación no puede paralelizar trabajo de código (§6.1.12) |
+| Catálogo de políticas condicionales | dos muestras independientes en el modo que se envía: **−10,4 %** (11/7, p=0,48) y **−25,6 %** (7/1, p=0,070) de tokens facturados, 16/16 y 8/8 de éxito. Las dos van en la misma dirección; agrupadas, 18/8, p=0,076. La latencia se movió −23,6 % y **−36,7 %** | **decisión: el flag queda en `true`**, pero por dirección replicada, no por significancia: los dos p-valores publicados antes (0,031 y 0,016) salían del test defectuoso (§6.1.40). El costo en latencia era ruido, con la diferencia entre brazos 10–25× menor que la dispersión dentro de un brazo (§6.1.26) |
+| **Modo de engine por defecto vs `task`** | contador corregido, 10 parejas pareadas (9 sin empate): success **9/9 vs 9/9**, tokens facturados **−82,9 %**, tool calls **−66,7 %**, completion **−83,1 %**, todo con **p=0,0039**, y latencia −61,5 % con **p=0,0391** (§6.1.23). Los workers que escriben **están serializados por código** (`runtime.py:156`), así que la delegación no puede paralelizar trabajo de código (§6.1.12) | **medido, y sobrevive a la corrección del test de signos**: es la fila más fuerte del documento porque 9 de 9 parejas van en la misma dirección (§6.1.40) |
 | El contador de tokens no contaba todo | el camino `task` omitía 5 fases y el `orchestrator` omitía **los loops de sus workers**: el costo real del orquestador es 1,68×–1,77× lo reportado. Corregido contando en la frontera del proveedor: **−89,0 % / −83,8 % por pareja y −73 % de rondas de modelo** | **defecto de medición corregido**; el −82,9 % pasa a ser un piso, no la cifra final (§6.1.8) |
 | **El router de políticas, medido aislado** | ruteo local **4 ms**; `preferred` **2,91 s por turno** (12,1 s en el peor), 446 tokens de prompt por turno **invisibles para los contadores**, y quita una etiqueta de método justificada en 2 de 11 requests | **cambiado a `fallback`**: gratis en 10 de 11, conserva la capacidad y no resta (§6.1.21) |
 | El nicho del orquestador (lectura independiente) contra `task` | `research-audit` ×3: **success 2/3 vs 3/3**, mediana de tokens 771 470 → 90 442 (−88,3 %), tool calls 31 → 10, latencia 405 s → 149 s | **medido**, 3 parejas: la prueba de signos no resuelve (p=0,25); el punto estimado y la falla sí hablan (§6.1.8) |
@@ -25,6 +25,11 @@ de declarar un resultado. El detalle está en §6; los límites, en cada secció
 | El mismo archivo contado dos veces (`abspath` vs `realpath`) | 22 de 32 ejecuciones traían el diff duplicado: `changed_lines` se inflaba al doble en unas y no en otras, y el revisor recibía el diff dos veces en el prompt | **arreglado en el producto y en la métrica**; los titulares no se mueven y una pareja de 16 cambia de dirección (§6.1.16) |
 | **Calidad juzgada, por primera vez** | 16 ejecuciones pareadas contra sus ítems `human_review`, juez ciego: **default 1,81 vs `lean` 1,94** (máx. 2); 14 de 16 ítems empatan | **medido**; los dos ítems que difieren van a favor de `lean` con n=1, y así queda declarado (§6.1.17) |
 | **Calidad de la configuración enviada** | 90 ejecuciones `lean` + `task`, **19 ítems decididos por programa**: **todos en 2,00 salvo `concise-handoff` en 1,62**, con las dos únicas fallas siendo corridas que no corrieron | **medido**; el proxy de longitud de §6.1.24 y los dos probes de vocabulario de §6.1.27 eran del instrumento, no del engine |
+| **El cache de prompt** | la métrica existía en el engine y se descartaba: **ninguna de las 333 ejecuciones guardadas** la tenía. Ahora está en la fila de observación y en la comparación (las dos convenciones de proveedor) | **medido: 64,6 %–93,3 %, media 78 %** en la configuración enviada, que es el techo estructural `(N−1)·P/Σ` (§6.1.36) |
+| El harness no atribuye el 22 % del payload | **Resuelto, y las dos exclusiones de §6.1.35 eran falsas.** El razonamiento del modelo **sí** se reenvía (`main` lo mete en el turno del asistente) y MiniMax lo factura a **1 token por 8 caracteres**, medido contra la API con la pendiente idéntica en los dos campos y lineal de 0 a 48 000 caracteres. Y los argumentos de las tool calls no son 2 513 caracteres: en una tarea que escribe archivos son el **30 % del payload** | **arreglado**: `trim_superseded_reasoning` borra el razonamiento de todo turno ya cerrado y conserva el material opaco; `measure_request_payload` ahora atribuye cada carácter y `payload_unattributed_chars` es 0 (§6.1.39) |
+| **Reconstruir el contexto o dejarlo crecer** | El engine **ya deja crecer**: 269 de 308 corridas crecen monótonamente, 1,71× el payload inicial, **+2 277 caracteres por petición**. Con `k` = acierto de cache sobre fresco, un harness que reconstruye gana sólo si su working set `D <= d(N−1)[N−(1−k)(N−2)]/2N`; el prefijo estable y el recargo de escritura **se cancelan** entre los dos regímenes | **medido y contestado**: el working set real que el engine reconstruye mide **1 511 tokens** (p10 328, p90 2 431), el empate está en **`k = 0,49`**, y los nueve proveedores que publican cache (0,07–0,25) quedan del lado de dejar crecer; sólo `Groq`/`Fireworks`, sin cache publicado, favorecen reconstruir. Herramienta: `bench/context_regime_cost.py` (§6.1.40) |
+| **El test de signos no contaba las parejas que empeoraban** | `trials = empates + mejoras`: las derrotas no entraban en el conteo, así que un resultado mixto se evaluaba como si sólo existieran las parejas favorables. **12 mejor / 4 peor daba p=0,0005 en vez de 0,0768**; con cero derrotas las dos fórmulas coinciden, y por eso el titular del modo de engine sobrevivió intacto. Recalculadas las **20 campañas guardadas**: **56 métricas se mueven y 16 pierden significancia** | **sexto defecto de instrumento, y el único que inflaba los titulares.** Corregido y con cinco tests contra binomios calculados a mano (§6.1.38). Las filas de arriba ya están corregidas; las tablas del cuerpo llevan su nota |
+| **Corte del razonamiento reenviado** | el turno del asistente lleva el razonamiento del modelo y viaja en todas las peticiones siguientes; MiniMax lo factura a **1 token por 8 caracteres**. `trim_superseded_reasoning` lo borra de todo turno ya cerrado y conserva el material opaco | **implementado y medido**: razonamiento en la última petición **9,0 % del payload → 0 %**, tokens facturados **−19,8 %**, 6/6 de éxito, 5/1 parejas. El test de signos **no lo resuelve** (p=0,2188); campaña extendida en curso (§6.1.39) |
 | El único loop sin tope de resultado | el developer era el único de seis loops sin `max_chars`: una lectura de 42 770 caracteres se reenviaba en cada ronda. Ahorro del payload acumulado: mediana **0 %**, máximo **44,5 %**, agregado 7,3 % sobre las 29 ejecuciones afectadas | **arreglado** con el mismo manejador que los otros cinco, después del archivado; 3/3 completan y el tope no se disparó (§6.1.33) |
 | Un argumento con forma de diccionario tumbaba el turno | `(args.get("message") or "").strip()` sobre `{"message": {"text": …}}`: 1 de 3 ejecuciones moría con `AttributeError` y el turno entero se perdía | **arreglado en 8 sitios** con coerción central; 2/3 completadas antes, 3/3 después (§6.1.30) |
 | Una promesa no es una entrega | 1 de 318 ejecuciones terminó con el chat agent prometiendo el trabajo: 0 rondas del loop, 0 archivos, y la promesa como respuesta | **arreglado**: un `respond` que promete trabajo de ingeniería se escala (§6.1.25) |
@@ -45,6 +50,23 @@ cerrar** porque el modo recuperación le escondía la delegación y le rechazaba
 `step_complete` (§6.1.13); y **una pregunta sin destinatario que detenía la
 ejecución entera**, contra el contrato que el propio `Protocol` declara
 (§6.1.14).
+
+**El disco, que se llenó en silencio.** Cada ejecución copia su árbol de fixture
+entero a `<brazo>/artifacts/<run>/workspace` y escribe las mediciones al lado, en
+`run.json`. Los fixtures son grandes —el corpus `deep_repo` tiene 1 256
+archivos—, así que **300 ejecuciones dejaron 105 GB** de copias en `bench/runs` y
+el volumen se llenó a mitad de campaña. La falla no se anuncia: la ejecución que
+la encontró murió con `ENOSPC`, y dos corridas de tests concurrentes sobre el
+mismo volumen informaron **136 errores en archivos que no tenían nada que ver**
+con el cambio bajo prueba. Las copias no son basura —`agent_task_outcome_review`
+lee de ahí el contenido de los archivos cambiados—, así que el arreglo no es
+borrarlas: es `bench/prune_run_workspaces.py`, que informa cuánto ocupan y sólo
+con `--apply` borra los directorios `workspace`, dejando intactos todos los
+`run.json`, `observations.jsonl`, `probes.json` y `comparison.*`, con `--keep-artifacts`
+para tocar sólo las copias cuyo run murió antes de escribir artefacto y que por
+lo tanto no guardan evidencia ninguna. Lo que queda pendiente es la versión
+correcta: **la evidencia de un archivo cambiado pertenece al artefacto, no a una
+copia del repositorio**, y los revisores deberían leerla de `run.json`.
 
 **Qué se arregló en el harness**: `python` fuera del PATH del agente (todas las
 mediciones previas medían en parte el entorno); `.venv`, `.ken` y bases de datos
@@ -724,10 +746,14 @@ pareado es lo que lleva señal.
 
 | métrica | por defecto | `lean` | delta mediana | parejas mejor/peor | p | resuelto |
 | --- | ---: | ---: | ---: | --- | ---: | --- |
-| tokens de prompt | 117 448 | 78 977 | **−32,8 %** | 8 / 1 | 0,0078 | **sí** |
-| tokens de completion | 6 069 | 3 226 | **−46,8 %** | 7 / 2 | 0,0156 | **sí** |
-| latencia | 86,5 s | 37,7 s | **−56,4 %** | 8 / 1 | 0,0078 | **sí** |
-| tool calls | 11 | 10 | −9,1 % | 5 / 3 | 0,2188 | no |
+| tokens de prompt | 117 448 | 78 977 | **−32,8 %** | 8 / 1 | 0,0391 | **sí** |
+| tokens de completion | 6 069 | 3 226 | **−46,8 %** | 7 / 2 | 0,1797 | no |
+| latencia | 86,5 s | 37,7 s | **−56,4 %** | 8 / 1 | 0,0391 | **sí** |
+| tool calls | 11 | 10 | −9,1 % | 5 / 3 | 0,7266 | no |
+
+**Corregido en §6.1.38:** los p-valores de esta tabla salían del test de signos
+defectuoso. Con la corrección, tokens de prompt y latencia siguen resueltos
+(8/1, p=0,0391) y tokens de completion ya no (7/2, p=0,1797).
 | success | 9/9 | 9/9 | — | — | — | — |
 
 Por tarea, todos los pares salvo uno mejoran:
@@ -777,11 +803,16 @@ decisión del usuario, recuperación de herramienta, y los 3 contratos ocultos),
 
 | métrica | por defecto | `lean` | delta mediana | parejas mejor/peor | p | resuelto |
 | --- | ---: | ---: | ---: | --- | ---: | --- |
-| tokens de prompt | 142 851 | 91 572 | **−35,9 %** | 12 / 4 | 0,0005 | **sí** |
+| tokens de prompt | 142 851 | 91 572 | **−35,9 %** | 12 / 4 | 0,0768 | no |
 | tool calls | 13 | 11 | **−15,4 %** | 12 / 2 | 0,0129 | **sí** |
-| latencia | 77,0 s | 51,7 s | **−33,0 %** | 12 / 4 | 0,0005 | **sí** |
-| tokens de completion | 5 108 | 4 995 | −2,2 % | 10 / 6 | 0,002 | sí (magnitud nula) |
+| latencia | 77,0 s | 51,7 s | **−33,0 %** | 12 / 4 | 0,0768 | no |
+| tokens de completion | 5 108 | 4 995 | −2,2 % | 10 / 6 | 0,4545 | no |
 | success | 16/16 | 16/16 | — | — | — | — |
+
+**Corregido en §6.1.38.** Los p-valores de esta tabla salían del test de signos
+que no contaba las parejas que empeoraban: 12/4 daba 0,0005 en vez de 0,0768.
+La dirección no cambia y **tool calls sigue resuelta**; tokens y latencia no, y
+con 12 mejor / 4 peor no podían estarlo a este tamaño de muestra.
 
 Persiste en formas de tarea muy distintas, y las ganancias grandes están donde
 el trabajo es exploratorio: `complex-plan` 205k → 72k tokens, y
@@ -843,9 +874,12 @@ fragmento es específico:
 
 | métrica | con catálogo | sin catálogo | delta | parejas mejor/peor | p |
 | --- | ---: | ---: | ---: | --- | ---: |
-| tokens de prompt | 72 929 | 65 354 | −10,4 % | 11 / 7 | 0,001 |
-| tokens de completion | 2 852 | 2 248 | −21,2 % | 11 / 7 | 0,001 |
-| latencia | 60,4 s | 46,1 s | −23,6 % | 12 / 6 | 0,0005 |
+| tokens de prompt | 72 929 | 65 354 | −10,4 % | 11 / 7 | 0,4807 |
+| tokens de completion | 2 852 | 2 248 | −21,2 % | 11 / 7 | 0,4807 |
+| latencia | 60,4 s | 46,1 s | −23,6 % | 12 / 6 | 0,2379 |
+
+**Corregido en §6.1.38:** los tres p-valores salían del test defectuoso. Lo que
+queda de esta muestra es la dirección (11 mejor / 7 peor), no la significancia.
 | success | 18/18 | 18/18 | — | — | — |
 
 `reversible-ambiguity` (68 049 → 42 839 tokens) y `tool-failure-recovery`
@@ -890,7 +924,8 @@ seleccionada por el perfil), 4 tareas × 2 repeticiones, `pipeline_mode: true`,
 | success | 8/8 | 8/8 | — | — | — | — |
 
 **El ahorro de tokens se reproduce y la ganancia de latencia no.** En el loop
-directo la guía seleccionada era 23,6 % más rápida con p=0,0005; en el modo que
+directo la guía seleccionada era 23,6 % más rápida con p=0,2379 tras la
+corrección de §6.1.38 (0,0005 con el test defectuoso); en el modo que
 ahora se envía es 13,6 % **más lenta**, y en 7 de 8 parejas. La lectura más
 simple es que el router paga latencia (clasificación por embeddings y, con
 `TASK_POLICIES_LLM_CLASSIFIER_MODE = "preferred"`, una request extra) que el
@@ -1630,7 +1665,7 @@ mismos artefactos (`ab-generality`, 16 parejas):
 
 Una de las 16 parejas **cambia de dirección** (`pricing-rounding` r0: crudo decía
 3 contra 4, corregido dice 3 contra 2). Los titulares no se mueven —`prompt_tokens`
-−35,9 % (12/4, p=0,0005) y latencia −33,0 % (12/4, p=0,0005) se recalculan
+−35,9 % (12/4, p=0,0768 tras §6.1.38) y latencia −33,0 % (12/4, mismo p) se recalculan
 idénticos—, pero `changed_lines` nunca más se reporta sin deduplicar, y el
 protocolo del documento gana una regla: **antes de contar líneas de un diff,
 verificar que el diff no tenga el mismo archivo dos veces.**
@@ -1958,9 +1993,13 @@ arreglar código (`cart-immutability`), leer y documentar
 | **rondas de modelo** | 31 | **11** | **−64,5 %** | 8 / 0 | 0,0078 | **sí** |
 | llamadas de herramienta | 24 | 8,5 | −64,6 % | 8 / 0 | 0,0078 | **sí** |
 | **latencia** | 292,6 s | **79,0 s** | **−73,0 %** | 8 / 0 | 0,0078 | **sí** |
-| `changed_lines` | 106,5 | 97,5 | −8,5 % | 4 / 3 | 0,375 | no |
+| `changed_lines` | 106,5 | 97,5 | −8,5 % | 4 / 3 | 1,0 | no |
 | `introduced_placeholders` | 0 | 0 | — | — | — | — |
 | `extra_changed_files`, `malformed_tool_calls`, `max_workless_rounds` | 0 | 0 | — | — | — | — |
+
+**Corregido en §6.1.38:** los seis p-valores de 8/0 no cambian, porque el test
+defectuoso sólo se equivocaba cuando había parejas en contra. `changed_lines`
+pasa de 0,375 a 1,0.
 
 **La corrección agranda el efecto, no lo encoge.** El contador del loop daba
 −77,0 % y el facturado −81,0 %, porque la omisión del orquestador es mayor: su
@@ -2084,7 +2123,8 @@ Sin interruptor: la alternativa al arreglo es la falla.
 
 Quedaba una sola contradicción medida sin explicar. El A/B del catálogo de
 políticas (§6.1.3) dio, en el modo que se envía, **−11,5 % de tokens de prompt**
-(6/2, p=0,031) junto con **+13,6 % de latencia** (1/7), y las dos cosas no pueden
+(6/2, p=0,2891 tras §6.1.38; 0,031 con el test defectuoso) junto con
+**+13,6 % de latencia** (1/7), y las dos cosas no pueden
 venir del mismo cambio si el cambio es *menos prompt*.
 
 **La respuesta estaba en la campaña, sin correr nada nuevo.** Desagregando las 8
@@ -2129,7 +2169,7 @@ conclusión no es "no lo sabemos": es que **el +13,6 % no es un efecto**.
 
 | | muestra original (8 parejas) | réplica (8 parejas) |
 | --- | ---: | ---: |
-| tokens de prompt facturados | −11,5 % (6/2, p=0,031) | **−25,6 %** (7/1, p=0,016) |
+| tokens de prompt facturados | −10,4 % (11/7, p=0,4807) | **−25,6 %** (7/1, p=0,0703) |
 | latencia | **+13,6 %** (1/7, p=1,0) | **−36,7 %** (5/3, p=0,06) |
 | success | 8/8 vs 8/8 | 8/8 vs 8/8 |
 | `changed_lines`, placeholders, archivos de más | 0 | 0 |
@@ -2406,6 +2446,8 @@ ejecuciones** y grande donde pega:
 | ejecuciones que ahorran más de 5 % | 12 |
 | ahorro agregado sobre las 29 ejecuciones afectadas | 7,3 % |
 
+(Ese 7,3 % se midió sobre `request_payload_chars`, que cierra; la *composición* de §6.1.35 es la que no cierra, y por eso no se usa acá.)
+
 Y el manejador no trunca a ciegas: para una lectura paginada devuelve **un
 rechazo con el contorno del archivo** —`{"error": "file too large to read in one
 call", …, "lines": 2999, "characters": 42770}` más la instrucción de leer un
@@ -2461,6 +2503,426 @@ el código y son correctos—, pero significa que la tarea mide "informe plausib
 ordenado" y no "revisor independiente", y que un 2,00 acá vale menos que un 2,00
 en `findings-are-real`, donde el defecto hay que encontrarlo y el verificador está
 oculto.
+
+### 6.1.35 El 22 % del payload que el harness no sabe atribuir
+
+Buscando una palanca más en la composición del payload apareció un agujero en el
+propio instrumento. `message_payload_chars` es el JSON completo de la lista de
+mensajes; `message_content_chars_by_role` suma, por rol, `len(json.dumps(content))`.
+La diferencia entre los dos debería ser la estructura de cada mensaje —`role`,
+`tool_call_id`, los `tool_calls`—, y no lo es:
+
+| ronda | mensajes | suma por rol | payload | diferencia |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 2 | 25 291 | 25 348 | 57 |
+| 1 | 4 | 38 777 | 39 218 | 441 |
+| 10 | 30 | 54 553 | 64 837 | 10 284 |
+| 20 | 51 | 58 908 | 91 068 | 32 160 |
+| 29 | 69 | 62 190 | 101 224 | **39 034** |
+
+En la corrida de escala son **586 924 caracteres, el 22,4 % del payload
+acumulado**, y crecen ~1 300 por ronda. No pude atribuirlos, y descarté las dos
+explicaciones plausibles:
+
+* **no son los argumentos de las tool calls.** El `tool_trace` los guarda
+  completos (`dict(ctx.arguments)`, sólo el *resultado* se corta a 20 000), y
+  suman **2 513 caracteres** en toda la corrida contra 586 924 sin explicar. El
+  mayor es de 581.
+* **no es el razonamiento del modelo.** `reasoning_content` se extrae de la
+  respuesta y lo consumen el checker y la guía; no se anexa a la lista de
+  mensajes que se reenvía.
+
+**Qué invalida esto.** La cifra de §6.1.33 —"los resultados de herramientas son el
+31,4 % del payload"— sale de esa misma tabla por rol, así que **subestima** todo lo
+que esté en el bloque sin atribuir: el 31,4 % es un piso, no una medición. Y
+cualquier análisis de composición que se apoye en `message_content_chars_by_role`
+tiene el mismo problema, incluida la conclusión de que el esquema es "el 48 % del
+payload" que ya había corregido en §6.1.32 por otra razón.
+
+Lo dejo como **hueco de medición del harness**, no como palanca: sin saber qué es
+ese 22 % no se puede dimensionar nada, y afirmar una palanca sobre una tabla que
+no cierra sería el quinto error de instrumento del documento. El arreglo es del
+harness, no del engine: `prompt_composition` debería registrar el
+`len(json.dumps(message))` por mensaje, o directamente el tamaño de cada campo, y
+hoy no lo hace.
+
+### 6.1.36 El cache de prompt: ya está en su techo, y nadie lo estaba midiendo
+
+Pedido explícito: mejorar el cache hit. Primero había que **poder medirlo**, y no
+se podía.
+
+**El engine lo recolectaba y lo tiraba.** `LoopState` tiene
+`cache_creation_tokens`, `cache_read_tokens` y `cached_tokens`, poblados desde el
+`usage` del proveedor; `_log_cache_summary` los imprime en una línea al terminar
+y ahí termina todo. No estaban en `loop_observed_metrics`, así que ningún
+`EngineResult.metrics` los llevaba, y **ninguna de las 333 ejecuciones guardadas
+tiene un número de cache**. El harness estaba descartando la métrica que dice si
+un cambio de prompt ahorró *dinero* y no sólo caracteres.
+
+Ahora: `loop_observed_metrics` los publica, el runner los graba en la fila de
+observación (`cache_read_tokens`, `cache_creation_tokens`, `cached_prefix_tokens`)
+y la comparación suma una métrica derivada `cache_hit_rate` que **cuenta las dos
+convenciones de proveedor** —lo Anthropic (`cache_read_input_tokens`) y lo
+OpenAI/DeepSeek (`prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens`)—,
+porque leer sólo la primera dijo "no hubo cache" en un proveedor que había
+reportado 531 024 tokens cacheados en la misma corrida.
+
+**Medición, configuración enviada, 6 ejecuciones recientes:**
+
+| tarea | rep | prompt | cacheado | hit |
+| --- | ---: | ---: | ---: | ---: |
+| `complex-plan` | 0 | 80 927 | 64 088 | 79,2 % |
+| `complex-plan` | 1 | 132 762 | 103 857 | 78,2 % |
+| `complex-plan` | 2 | 114 337 | 73 918 | 64,6 % |
+| `test-selection` | 0 | 86 140 | 80 384 | **93,3 %** |
+| `test-selection` | 1 | 49 664 | 36 211 | 72,9 % |
+| `test-selection` | 2 | 69 149 | 56 632 | 81,9 % |
+
+**Media 78 %, y está en el techo estructural.** El diseño ya es el correcto: el
+prompt estático es lo primero, con `cache_control` al final del prefijo estable
+(`CACHE_BREAKPOINT_MARKER`, insertado antes del bloque de sesión que crece), y el
+esquema de herramientas lleva su propio punto de corte. La cuenta que confirma el
+techo es la de la primera ronda: con N rondas y un prefijo cacheable de P tokens,
+el máximo posible es `(N−1)·P / Σtokens`, porque la ronda 1 siempre es un fallo.
+Para `test-selection` r1, con ~5 rondas y P ≈ 9 000 tokens, eso da ~72 % contra los
+72,9 % medidos: **se está cacheando prácticamente todo lo cacheable.**
+
+Así que no hay nada que mejorar en el cache, y ahora se puede decir con un número
+en vez de con una impresión. Lo único que subiría la *tasa* es acortar las
+corridas o mover más prompt por encima del punto de corte, y las dos cosas tienen
+su propio costo.
+
+### 6.1.37 Corrección: la "hoja conforme" la reescriben los dos brazos
+
+En §6.1.20 reporté que `default` había reescrito una hoja conforme
+(`v + 9` → `v + 58`) en 1 de 3 mientras `lean` corregía la rota en 3 de 3, y lo
+presenté como una diferencia de calidad. Tres ejecuciones nuevas de
+`deep-localization` con la configuración enviada (`lean` + `task`) muestran que
+**`lean` también lo hace**:
+
+| rep | archivo | línea eliminada | |
+| ---: | --- | --- | --- |
+| 0 | `src/pkgs/pkg_17/mod_07.py` | `return v - 40` | correcto |
+| 1 | `src/pkgs/pkg_17/mod_07.py` | `return v - 40` | correcto |
+| 2 | `src/pkgs/pkg_34/mod_15.py` | `return v + 1` | **compensa** |
+
+El verificador pasa en las tres —el total queda bien— y sólo la línea eliminada
+distingue el arreglo del parche, que es exactamente lo que el probe mira. Pooling:
+`lean` 5 de 6, `default` 2 de 3. **La inferencia de §6.1.20 era un artefacto de
+tres parejas**, y queda corregida: los dos brazos compensan a veces, la tasa es
+del orden de una en cuatro, y el engine no puede gatearlo porque no conoce la
+convención del repositorio —eso lo sabe el pedido, no el motor.
+
+De paso, el mismo día apareció un defecto del instrumento con esta forma:
+`run_probes` recorría `*/artifacts/*/run.json`, un nivel de profundidad, así que
+**una campaña de un solo brazo le daba cero ejecuciones en silencio** —el
+`deep-localization` recién corrido informaba "0 runs"—. `build_packet` ya usaba
+`rglob` desde §6.1.29; ahora los dos, con el brazo etiquetado por su ruta.
+
+### 6.1.38 El test de signos no contaba las parejas que empeoraban
+
+El defecto de instrumento más caro del documento, y el único que **inflaba los
+dos titulares**. La comparación pareada calculaba el p-valor así:
+
+```python
+improved  = sum(1 for d in pairs if d < 0)
+worsened  = sum(1 for d in pairs if d > 0)
+non_tied  = improved + worsened
+p_value   = _sign_test_p_value(len(pairs) - non_tied, improved)   # ←
+```
+
+y la función hacía `trials = ties + directional`, o sea `trials = empates +
+mejoras`. **Las parejas que empeoraban no entraban en el conteo.** El efecto es
+que un resultado mixto se evaluaba como si sólo hubieran existido las parejas
+favorables:
+
+| parejas | p publicado | p correcto |
+| --- | ---: | ---: |
+| 8 mejor / 0 peor | 0,0078 | 0,0078 |
+| 12 mejor / 4 peor | **0,0005** | **0,0768** |
+| 11 mejor / 7 peor | **0,0010** | **0,4807** |
+| 5 mejor / 1 peor | 0,0625 | 0,2188 |
+
+Con cero derrotas las dos fórmulas coinciden —por eso el titular del modo de
+engine, 9/0, sobrevivió intacto—, y con cualquier derrota la publicada es
+demasiado pequeña. Cuanto más mixto el resultado, más grande la mentira.
+
+**Alcance.** Recalculé **todas** las comparaciones guardadas
+(`bench/runs/**/comparison.json`, 20 campañas) desde sus ficheros de
+observaciones, que son la entrada cruda. **56 métricas se mueven y 16 cruzan la
+línea de 0,05 en la dirección mala.** Las que importan:
+
+| campaña | métrica | parejas | p publicado | p correcto |
+| --- | --- | ---: | ---: | ---: |
+| `ab-generality` (`lean`) | `prompt_tokens` | 12/4 | 0,0005 | **0,0768** |
+| `ab-generality` (`lean`) | `latency_seconds` | 12/4 | 0,0005 | **0,0768** |
+| `ab-generality` (`lean`) | `tool_calls` | 12/2 | 0,0020 | **0,0129** ← sigue |
+| `ab-policy` | `prompt_tokens` | 11/7 | 0,0010 | **0,4807** |
+| `ab-policy-pipeline2` | `pipeline_prompt_tokens` | 7/1 | 0,0156 | **0,0703** |
+| `ab-engine-mode-fixed` | `prompt_tokens` | 9/0 | 0,0020 | **0,0039** ← sigue |
+| `ab-engine-mode-fixed` | `latency_seconds` | 8/1 | 0,0039 | **0,0391** ← sigue |
+
+**Qué cambia en las conclusiones, y qué no.**
+
+* La variante `lean` **conserva la dirección** en tokens (−35,9 %), latencia
+  (−33,0 %) y tool calls (−15,4 %), y de las tres sólo **tool calls queda
+  resuelta** (12/2, p=0,0129). Con 16 parejas y 4 derrotas, el test de signos no
+  puede resolver un −35,9 % de tokens: eso necesitaba más parejas, no un
+  p-valor mejor.
+* El catálogo de políticas **pierde las dos significancias** (0,48 y 0,070). Lo
+  que queda es dirección replicada en dos muestras independientes, que agrupadas
+  dan 18/8 y p=0,076: consistente, todavía no resuelto. El flag sigue en `true`
+  porque la decisión original ya se apoyaba en que las dos muestras van en la
+  misma dirección y en que no hay costo medible en latencia, pero la fila del
+  resumen ya no puede decir "medido, p=0,016".
+* El **modo de engine por defecto sobrevive**: 9 de 9 parejas sin empate,
+  −82,9 % de tokens, p=0,0039. Es la afirmación más fuerte del documento y lo
+  era ya antes de la corrección, porque no tiene ninguna pareja en contra.
+
+**El arreglo.** `_sign_test_p_value(improved, worsened)` toma las dos
+direcciones y `trials = improved + worsened`, con cinco tests en
+`tests/test_agent_task_compare.py` que comparan contra binomios calculados a
+mano —incluido el caso 12/4 = 0,0768, que es el que este documento publicaba
+mal—. Los `comparison.json` guardados siguen teniendo los valores viejos; la
+tabla de arriba es el recálculo.
+
+Esto es el **sexto** defecto de instrumento del documento, y el patrón se
+repite: los cinco anteriores también hacían que el engine pareciera mejor de lo
+que era, y los cinco los encontré auditando el instrumento y no el engine. La
+regla que los habría atajado a todos está en la lista desde §6.1.19 y no se
+cumplió: **un número que decide una frase tiene que tener un test que lo fije
+contra un valor calculado fuera del código que lo produce.**
+
+
+
+### 6.1.39 El 22 % del payload era el razonamiento, y sí se reenvía
+
+§6.1.35 dejó **586 924 caracteres (22,4 % del payload) sin atribuir** y descartó
+dos explicaciones. La segunda era falsa:
+
+> no es el razonamiento del modelo. `reasoning_content` se extrae de la
+> respuesta y lo consumen el checker y la guía; no se anexa a la lista de
+> mensajes que se reenvía.
+
+Sí se anexa. `tool_runner.append_assistant_message` llama a
+`reasoning_history_fields(message)` y mete el resultado en el turno del
+asistente (`**history_fields`, `loop/tool_runner.py:256`), y los campos que
+preserva son `reasoning_content`, `thinking_blocks`, `reasoning_details` y
+`reasoning_items`, más `provider_specific_fields.{reasoning_details,
+thought_signatures}`. Esos mensajes son el prefijo de todas las peticiones
+siguientes.
+
+**Lo que MiniMax devuelve y guardábamos, en crudo** (una llamada real, mensaje
+del asistente volcado):
+
+```
+reasoning_content: "The user wants me to think briefly then call read_file..."
+provider_specific_fields:
+  {"name": "MiniMax AI", "audio_content": "",
+   "reasoning_details": [{"type":"reasoning.text","id":"reasoning-text-1",
+                          "format":"MiniMax-response-v1","index":0,
+                          "text":"The user wants me to think briefly..."}],
+   "reasoning_content": "The user wants me to think briefly..."}
+```
+
+El mismo texto **dos veces**, y la copia envuelta pesa ~2,5× más que la llana. No
+hay firma en ninguna de las dos, así que nada obliga a conservarlas.
+
+**Cuánto cuesta, medido contra la API.** Tres transcripciones que sólo difieren
+en la longitud de un campo de razonamiento reenviado (control con 0 caracteres,
+y la misma conversación con 4 000, 16 000 y 48 000):
+
+| campo | 0 ch | 4 000 | 16 000 | 48 000 | pendiente |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `reasoning_details` | 201 | 702 | 2 202 | 6 202 | **1 token por 8 caracteres** |
+| `reasoning_content` | 195 | 702 | 2 202 | 6 202 | **1 token por 8 caracteres** |
+
+La pendiente es idéntica en los dos campos y perfectamente lineal: **el
+razonamiento reenviado se factura**, a 0,125 tokens por carácter, en cada
+petición que lo lleva. Y como el turno del asistente de la ronda *i* viaja en
+todas las peticiones *i+1..N*, un razonamiento de una ronda se paga N−i veces.
+
+**El arreglo.** `trim_superseded_reasoning` (`engine/behavior/reasoning_content.py`)
+borra el razonamiento visible de todo turno del asistente que ya no es el último.
+Sólo el último lo conserva, porque es el único cuyos resultados de herramienta
+viajan en la misma petición que él — y por eso la llamada va *después* del
+`append`, no antes. El material opaco no se toca nunca: un bloque con
+`signature`, `thought_signature`, `encrypted_content`, un tipo
+`redacted_thinking`/`encrypted_thinking`, o el campo `thought_signatures`, se
+conserva en todas partes, porque Anthropic y Gemini rechazan una cadena de
+tool-use cuyos bloques de pensamiento vuelven pelados. Interruptor:
+`LOOP_REASONING_TRIM_ENABLED` (por defecto `true`).
+
+**El instrumento, arreglado en la misma pasada.** `measure_request_payload`
+ahora atribuye **cada carácter** de `message_payload_chars` a un cubo con
+nombre —`message_value_chars_by_key`, más `json_structure_chars`— y publica
+`payload_unattributed_chars`, que debe ser 0. Un test lo fija
+(`test_request_payload_accounts_for_every_character`). Con eso §6.1.35 deja de
+ser un hueco declarado: la tabla por rol no cerraba porque sólo miraba
+`content`, y el asistente con tool calls tiene `content` vacío y el argumento en
+`tool_calls`.
+
+**El censo, con el instrumento arreglado** (6 ejecuciones, brazos `off` de
+`bench/runs/20260914-trim2/`, la última petición de cada corrida, con el corte de
+razonamiento desactivado para ver el razonamiento entero):
+
+| tarea | payload | `content` | `tool_calls` | razonamiento | estructura | sin atribuir |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `complex-plan` r1 | 57 229 | 30 439 (53 %) | **15 491 (27 %)** | 9 959 (17 %) | 842 | **0** |
+| `complex-plan` r2 | 63 918 | 32 723 (51 %) | **21 127 (33 %)** | 9 263 (14 %) | 523 | **0** |
+| `test-selection` r0 | 36 182 | 30 697 (85 %) | 2 443 (7 %) | 2 013 (6 %) | 673 | **0** |
+| `test-selection` r2 | 40 162 | 32 484 (81 %) | 3 510 (9 %) | 3 083 (8 %) | 677 | **0** |
+| `complex-plan` r0 | 49 513 | 48 306 (98 %) | 746 (2 %) | 189 (0,4 %) | 173 | **0** |
+| `test-selection` r1 | 37 945 | 31 327 (83 %) | 1 845 (5 %) | 3 885 (10 %) | 580 | **0** |
+
+Y la **primera** exclusión de §6.1.35 también era falsa:
+
+> no son los argumentos de las tool calls. El `tool_trace` los guarda completos
+> … y suman **2 513 caracteres**
+
+En una tarea que **escribe archivos**, los argumentos de las tool calls son
+hasta el **33 % del payload** (21 127 caracteres en `complex-plan.r2`) contra los
+2 513 que citaba §6.1.35, que salieron de otra corrida y del `tool_trace` —que en modo `orquestador` sólo
+guarda las llamadas del principal, y guarda el `dict` parseado mientras el
+mensaje lleva la cadena JSON—. El salto se ve en la propia curva: en
+`complex-plan.r1` los argumentos pasan de unos cientos de caracteres en la
+primera petición a **15 491** en la última, porque el modelo escribió un archivo
+entero y
+el cuerpo del archivo *es* el argumento. Desde ahí viaja en todas las peticiones
+siguientes.
+
+**Eso es una palanca medida y no tomada, y es más grande que el razonamiento.**
+Un argumento de una tool call cuyo Step ya cerró es exactamente lo que el diseño
+del engine dice archivar en vez de reenviar —el resumen de paso existe para
+eso, y `recall_context` lo recupera—, igual que el razonamiento. Pero a
+diferencia del razonamiento no hay un argumento de protocolo que lo justifique
+en ninguna parte: el proveedor necesita el `id` y el nombre para casar el
+resultado de la herramienta, no el cuerpo. Queda declarado con su número y **sin
+implementar**, porque cambiar el contenido que el modelo ve a mitad de una
+corrida necesita su propia comparación pareada antes de existir, y esa no se
+corrió. El orden de valor esperado está en §7.
+
+**El corte de razonamiento, medido** (6 parejas, `complex-plan` y
+`test-selection` × 3, condición `baseline`, `bench/runs/20260914-trim2/`):
+
+| | off | on |
+| --- | ---: | ---: |
+| razonamiento en la última petición | 189–9 959 ch (mediana **9,0 %** del payload) | **0 ch (0,0 %)** |
+| tokens de prompt facturados | 106 297 | 85 295 (**−19,8 %**) |
+| parejas mejor/peor | — | 5 / 1 |
+| p (test de signos corregido, §6.1.38) | — | **0,2188** |
+| success | 6/6 | 6/6 |
+| `cache_hit_rate` | 82,1 % | 74,0 % |
+
+**La dirección es consistente y el test no la resuelve.** Cinco de seis parejas
+bajan y el mecanismo está probado con medición directa contra la API, pero con
+una derrota el test de signos necesita más parejas: 5/1 con n=6 da p=0,2188 y no
+0,0625 como decía el test defectuoso de §6.1.38. Una campaña extendida sobre
+cuatro formas de tarea más está corriendo para cerrarlo. Lo que sí se ve es un
+efecto secundario esperado y no obvio: el **hit rate baja** (82,1 % → 74,0 %),
+porque el bloque dinámico se encoge y el prefijo estable pasa a ser una fracción
+mayor de una petición más chica. El total facturado baja igual, que es lo que
+importa — pero un hit rate más alto no es el objetivo, y este cambio lo demuestra.
+
+### 6.1.40 Reconstruir el contexto o dejar que crezca: qué es más barato
+
+Pregunta directa: ¿conviene partir el problema en tasks y **reconstruir** el
+contexto en cada una —payload plano, pero sin nada que cachear— o **dejar
+crecer** un historial incremental hasta un umbral y compactar, como hacen los
+demás harnesses?
+
+Primero, el hecho que la pregunta da por supuesto y no es cierto: **este engine
+ya hace lo segundo**. Sobre 308 ejecuciones de la configuración enviada, 269
+crecen monótonamente y 39 muestran dientes de sierra de compactación; el payload
+mediano termina en **1,71×** su tamaño inicial, a **+2 277 caracteres por
+petición**. Lo que el engine reconstruye es el *system* y el *user* —el plan, el
+paso activo, las acciones previas—, y eso es precisamente lo que mantiene el
+prefijo estable y el cache en su techo (§6.1.36). O sea: no hay un trade-off
+entre reconstruir y cachear; hay un prefijo estable, que es lo que hace que el
+cache funcione, y encima un historial que crece.
+
+**El modelo.** Con `k` = precio de un acierto de cache sobre un token de entrada
+fresco, `d` = incremento por ronda, `N` = rondas y `D` = el working set acotado
+que un harness que reconstruye tendría que cargar:
+
+```
+D  <=  d·(N−1)·[N − (1−k)(N−2)] / (2N)
+```
+
+Dos propiedades, ninguna obvia, y las dos importan:
+
+1. **El prefijo estable se cancela.** Los dos regímenes mandan el mismo prefijo
+   `N` veces y lo leen del cache `N−1` veces; cuesta lo mismo en ambos. Por eso
+   esta pregunta no tiene nada que ver con el tamaño del system prompt —ni con
+   un recargo por *escritura* de cache, que los dos pagan igual—. Lo único que
+   decide es la parte variable.
+2. **Un cache peor favorece reconstruir.** El cache es lo que abarata *dejar
+   crecer*. Con cache gratis (`k = 0`) el listón es `d(N−1)/N`; sin ningún cache
+   (`k = 1`), `d(N−1)/2` — el caso más favorable a reconstruir, y el que lo
+   acota para cualquier proveedor.
+
+**El listón, sobre los parámetros medidos** (`d = 2 277` caracteres,
+`N = 10`):
+
+| `k` (acierto / fresco) | working set que aún gana |
+| ---: | ---: |
+| 0,00 (cache gratis) | 2 050 ch — 512 tok |
+| 0,10 (Anthropic, OpenAI, Gemini, DeepSeek, Mistral) | 2 869 ch — **717 tok** |
+| 0,20 (MiniMax-M3, Grok Code Fast) | 3 689 ch — **922 tok** |
+| 0,50 | 6 149 ch — 1 537 tok |
+| 1,00 (sin cache) | 10 248 ch — **2 562 tok** |
+
+**El otro lado de la comparación es medible, y no es una suposición.** El working
+set que un régimen acotado tendría que cargar es el prompt que **el propio
+engine reconstruyó** para una iteración —tarea, plan, paso activo, acciones
+previas— y está en `prompt_composition_history`:
+
+| | caracteres | tokens |
+| --- | ---: | ---: |
+| mediana (308 iteraciones) | 6 043 | **1 511** |
+| extremo liviano (p10) | 1 311 | 328 |
+| extremo pesado (p90) | 9 723 | 2 431 |
+
+**El punto de empate: `k = 0,49`.** Con el working set mediano, reconstruir sale
+más barato sólo si el proveedor cobra el acierto de cache a **más del 49 %** de
+un token fresco. Ninguno de los que publican cache llega ahí:
+
+| proveedor | `k` | escritura | listón | veredicto | append $/run | el cache ahorra |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| `claude-sonnet-4-5` | 0,10 | 1,25× | 717 tok | dejar crecer | 0,0637 | 0,2352 |
+| `claude-opus-4-5` | 0,10 | 1,25× | 717 tok | dejar crecer | 0,1062 | 0,3920 |
+| `gpt-5.1` | 0,10 | — | 717 tok | dejar crecer | 0,0265 | 0,0980 |
+| `gpt-5.2` | 0,10 | — | 717 tok | dejar crecer | 0,0372 | 0,1372 |
+| `gemini-2.5-pro` | 0,10 | — | 717 tok | dejar crecer | 0,0265 | 0,0980 |
+| `deepseek-reasoner` | 0,10 | — | 717 tok | dejar crecer | 0,0059 | 0,0220 |
+| `minimax/MiniMax-M3` | 0,20 | — | 922 tok | dejar crecer | 0,0090 | 0,0209 |
+| `grok-code-fast-1` | 0,20 | — | 922 tok | dejar crecer | 0,0299 | 0,0697 |
+| `mistral-large-latest` | 0,10 | — | 717 tok | dejar crecer | 0,0106 | 0,0392 |
+| `groq/llama-3.3-70b` | 1,00 | — | 2 562 tok | **reconstruir** | 0,0588 | 0,0000 |
+| `fireworks/deepseek-v3` | 1,00 | — | 2 562 tok | **reconstruir** | 0,0897 | 0,0000 |
+
+Los dos últimos **no publican precio de cache**: un repetido se factura como
+fresco. Y en el extremo liviano del working set (328 tokens) el empate se va a
+`k = −0,09`, o sea que **ningún proveedor puede hacer ganar a dejar crecer**.
+
+**Qué se concluye, y qué no.** Sobre cualquier proveedor con cache real, dejar
+crecer gana — y no por el precio, sino porque el working set que un régimen
+acotado necesita (1 511 tokens medianos, y el plan solo ya pesa más que el
+listón) es mayor que lo que el listón permite. Sobre un proveedor sin cache,
+reconstruir gana si el working set se mantiene bajo la mediana, que es un
+objetivo de diseño y no un hecho. O sea que **la respuesta no es la misma para
+todos los proveedores, y depende de una cantidad que el harness ahora mide**.
+
+Lo que sí es igual en todos: el cache vale entre el 60 % y el 80 % de la factura
+de entrada, así que la palanca con retorno no es reorganizar el contexto sino
+**encoger el incremento** —resumen de paso, corte de razonamiento (§6.1.39),
+tope de resultado de herramienta (§6.1.33)—. Cada carácter que se saca del
+incremento se paga una vez como fresco y luego `N−1` veces a precio de acierto,
+y no toca el hit rate, que sigue en su techo.
+
+Herramienta: `python -m bench.context_regime_cost --runs bench/runs`, con los
+precios leídos de `litellm.model_cost` y 13 tests en
+`tests/test_context_regime_cost.py`.
 
 ### 6.2 Resultado negativo: la presión de agrupación no agrupa
 
@@ -2578,6 +3040,26 @@ Queda, en orden de valor esperado:
    "nunca útil" — en un repositorio real `rename_symbol` es la herramienta
    correcta. Una dieta global sería un cambio de capacidad con falla silenciosa,
    justificado por un corpus que no la mide. Cerrado.
+
+9. **Compactar los argumentos de las tool calls de Steps ya cerrados.** El cubo
+   más grande del payload después de `content`, y el único que crece a saltos:
+   **30 % en `complex-plan`** (15 758 de 51 721 caracteres en la última
+   petición), 5 % en `test-selection` (§6.1.39). El salto es la escritura de un
+   archivo —el cuerpo del archivo *es* el argumento— y desde ahí viaja en todas
+   las peticiones siguientes. El proveedor necesita el `id` y el nombre para
+   casar el resultado de la herramienta, no el cuerpo, y el engine ya archiva el
+   detalle y lo recupera con `recall_context`; un digest con nombre, ruta y
+   tamaño es la forma que el resto del diseño ya usa. **No implementado**: cambia
+   lo que el modelo ve a mitad de una corrida y necesita su propia comparación
+   pareada. Es la palanca más grande que queda y la más barata de medir, porque
+   el censo que la dimensiona ya existe.
+10. ~~Reconstruir el contexto contra dejarlo crecer.~~ **Contestado y medido
+   (§6.1.40).** El engine ya deja crecer (269 de 308 corridas, 1,71×, +2 277
+   caracteres por ronda); el prefijo estable se cancela en la comparación y el
+   cache sólo abarata un lado, así que el empate está en `k = 0,49` sobre el
+   working set medido. Con cache real gana dejar crecer en los nueve
+   proveedores que lo publican; con `Groq`/`Fireworks`, que no lo publican,
+   gana reconstruir si el working set baja de la mediana.
 
 ### 7.1 Sobre el orden
 

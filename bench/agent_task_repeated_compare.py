@@ -44,6 +44,8 @@ _METRICS = (
     "completion_tokens",
     "pipeline_completion_tokens",
     "provider_calls",
+    "cache_read_tokens",
+    "cache_hit_rate",
     "tool_calls",
     "malformed_tool_calls",
     "max_workless_rounds",
@@ -264,6 +266,19 @@ def _metric(row: dict, name: str) -> float:
         return float(row.get("prompt_tokens", 0) or 0) + float(
             row.get("aux_prompt_tokens", 0) or 0
         )
+    if name == "cache_hit_rate":
+        # Share of the input the provider served from its prompt cache. It is a
+        # rate, so it is compared as one: higher is better, and a 2-point move
+        # on a long run is worth more than a 2-point move on a short one.
+        total = float(row.get("prompt_tokens", 0) or 0)
+        if not total:
+            return 0.0
+        # Both conventions: Anthropic-style cache reads, and the
+        # OpenAI/DeepSeek-style hit counter MiniMax actually fills in.
+        hits = float(row.get("cache_read_tokens", 0) or 0) + float(
+            row.get("cached_prefix_tokens", 0) or 0
+        )
+        return 100.0 * hits / total
     if name == "pipeline_completion_tokens":
         # Same asymmetry as the prompt side: the phases outside the loop
         # generate output too, and only the loop's output is in
@@ -275,17 +290,20 @@ def _metric(row: dict, name: str) -> float:
     return float(row.get(name, 0) or 0)
 
 
-def _sign_test_p_value(ties: int, directional: int) -> float:
-    """Two-sided sign-test p-value over the pairs that moved at all.
+def _sign_test_p_value(improved: int, worsened: int) -> float:
+    """Two-sided exact sign-test p-value over the pairs that moved.
 
-    With no ties this is the exact binomial test against a fair coin, which is
-    the strongest statement a paired design with this sample size can make.
-    Ties carry no direction and are dropped, as the test requires.
+    ``trials`` is every pair that moved at all — the ones that improved *and*
+    the ones that got worse.  Dropping the losses and testing ``improved``
+    against ``improved`` makes every mixed result look decisive: 12 better and
+    4 worse out of 16 scored p=0.0005 instead of p=0.077, which is the
+    difference between a result and a coin flip.  Ties carry no direction and
+    are dropped, as the test requires.
     """
-    trials = ties + directional
+    trials = improved + worsened
     if trials == 0:
         return 1.0
-    observed = max(ties, directional)
+    observed = max(improved, worsened)
     tail = sum(_comb(trials, k) for k in range(observed, trials + 1))
     return min(1.0, 2 * tail / (2 ** trials))
 
@@ -363,7 +381,7 @@ def compare(arm_a: Arm, arm_b: Arm) -> dict:
         improved = sum(1 for value in pairs if value < 0)
         worsened = sum(1 for value in pairs if value > 0)
         non_tied = improved + worsened
-        p_value = _sign_test_p_value(len(pairs) - non_tied, improved)
+        p_value = _sign_test_p_value(improved, worsened)
         # A sign test on two pairs is not evidence, however small its p-value.
         # ``max_workless_rounds`` is zero for almost every run, so its pairs are
         # mostly ties and one disagreement can look decisive.

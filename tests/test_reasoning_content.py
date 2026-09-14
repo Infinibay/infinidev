@@ -8,6 +8,7 @@ from infinidev.engine.behavior.reasoning_content import (
     ReasoningStreamAccumulator,
     extract_reasoning,
     reasoning_history_fields,
+    trim_superseded_reasoning,
 )
 
 
@@ -81,3 +82,123 @@ def test_minimax_cumulative_stream_snapshots_emit_only_the_suffix() -> None:
     assert first == "inspect"
     assert second == " parser"
     assert duplicate == ""
+
+
+# ── superseded-reasoning trimming ──────────────────────────────────────
+#
+# MiniMax-M3 bills a re-sent reasoning field at one prompt token per eight
+# characters (measured against the live API), and the loop re-sends every
+# assistant turn on every later request. Only the newest assistant turn still
+# needs its reasoning: that is the one whose tool results travel with it.
+
+
+def _minimax_message(reasoning: str, call_id: str) -> dict:
+    """One assistant turn shaped exactly as MiniMax-M3 returns it."""
+    return {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": reasoning,
+        "provider_specific_fields": {
+            "name": "MiniMax AI",
+            "reasoning_details": [
+                {
+                    "type": "reasoning.text",
+                    "id": "reasoning-text-1",
+                    "format": "MiniMax-response-v1",
+                    "index": 0,
+                    "text": reasoning,
+                }
+            ],
+        },
+        "tool_calls": [
+            {"id": call_id, "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+        ],
+    }
+
+
+def test_trim_drops_reasoning_from_superseded_turns_only() -> None:
+    messages = [
+        {"role": "system", "content": "rules"},
+        _minimax_message("first round deliberation", "call_1"),
+        {"role": "tool", "content": "result", "tool_call_id": "call_1"},
+        _minimax_message("second round deliberation", "call_2"),
+    ]
+
+    removed = trim_superseded_reasoning(messages)
+
+    assert removed > 0
+    # The newest turn keeps both copies of its reasoning.
+    assert messages[3]["reasoning_content"] == "second round deliberation"
+    assert messages[3]["provider_specific_fields"]["reasoning_details"][0]["text"] == (
+        "second round deliberation"
+    )
+    # The closed turn keeps neither, and loses the now-empty provider block.
+    assert "reasoning_content" not in messages[1]
+    assert "provider_specific_fields" not in messages[1]
+    # Nothing else about the turn changed: the tool chain stays valid.
+    assert messages[1]["tool_calls"] == [
+        {"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+    ]
+    assert messages[2]["content"] == "result"
+
+
+def test_trim_is_a_no_op_before_a_second_assistant_turn() -> None:
+    messages = [_minimax_message("only turn", "call_1")]
+
+    assert trim_superseded_reasoning(messages) == 0
+    assert messages[0]["reasoning_content"] == "only turn"
+
+
+def test_trim_never_drops_opaque_signature_material() -> None:
+    """Anthropic rejects a tool-use chain whose thinking blocks came back bare."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "thinking_blocks": [
+                {"type": "thinking", "thinking": "prose that could go", "signature": "sig-abc"},
+            ],
+            "tool_calls": [{"id": "call_1"}],
+        },
+        {"role": "tool", "content": "r", "tool_call_id": "call_1"},
+        {
+            "role": "assistant",
+            "content": "",
+            "thinking_blocks": [{"type": "redacted_thinking", "data": "encrypted"}],
+            "provider_specific_fields": {"thought_signatures": ["opaque-token"]},
+            "tool_calls": [{"id": "call_2"}],
+        },
+    ]
+
+    removed = trim_superseded_reasoning(messages)
+
+    assert removed == 0
+    assert messages[0]["thinking_blocks"][0]["signature"] == "sig-abc"
+    assert messages[2]["provider_specific_fields"]["thought_signatures"] == ["opaque-token"]
+
+
+def test_trim_keeps_a_signature_bearing_field_and_drops_a_plain_one_beside_it() -> None:
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning_details": [{"type": "reasoning.text", "text": "plain"}],
+            "provider_specific_fields": {
+                "reasoning_details": [{"type": "reasoning.text", "text": "plain"}],
+                "thought_signatures": ["keep-me"],
+            },
+        },
+        {"role": "assistant", "content": "", "reasoning_content": "newest"},
+    ]
+
+    trim_superseded_reasoning(messages)
+
+    assert "reasoning_details" not in messages[0]
+    assert "reasoning_details" not in messages[0]["provider_specific_fields"]
+    assert messages[0]["provider_specific_fields"]["thought_signatures"] == ["keep-me"]
+
+
+def test_trim_handles_a_transcript_without_assistant_turns() -> None:
+    messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": "go"}]
+
+    assert trim_superseded_reasoning(messages) == 0

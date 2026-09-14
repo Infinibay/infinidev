@@ -197,3 +197,75 @@ def test_request_payload_measures_growing_transcript_by_role() -> None:
     assert result["message_count"] == 4
     assert result["message_content_chars_by_role"]["tool"] > 10
     assert result["request_payload_chars"] > result["message_payload_chars"]
+
+
+def test_request_payload_accounts_for_every_character() -> None:
+    """The by-key split plus the structure must equal the encoded payload.
+
+    The old measurement reported only ``content`` per role, so the assistant's
+    tool-call arguments and the preserved reasoning fields were invisible in
+    the report while still being sent, and billed, on every later round.
+    """
+    messages = [
+        {"role": "system", "content": "rules"},
+        {"role": "user", "content": "task"},
+        {
+            "role": "assistant",
+            "content": None,
+            "reasoning_details": [{"type": "reasoning.text", "text": "why " * 50}],
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"a.py"}'},
+                }
+            ],
+        },
+        {"role": "tool", "content": "a large result", "tool_call_id": "call_1"},
+    ]
+
+    result = measure_request_payload(
+        messages, [{"name": "read_file"}], mode="function_calling", sequence=3
+    )
+
+    assert result["payload_unattributed_chars"] == 0
+    assert (
+        sum(result["message_value_chars_by_key"].values())
+        + result["json_structure_chars"]
+        == result["message_payload_chars"]
+    )
+    # The two buckets the by-role view cannot see are both present and real.
+    assert result["tool_call_argument_chars"] > 50
+    assert result["reasoning_chars"] > 200
+    # ``content`` is still what the by-role view sums to.
+    assert sum(result["message_value_chars_by_key"].values()) > sum(
+        result["message_content_chars_by_role"].values()
+    )
+
+
+def test_request_payload_attributes_one_token_per_eight_reasoning_chars() -> None:
+    """A reasoning field is a real, billable share of the request.
+
+    Measured against MiniMax-M3: a transcript that differs only in the length
+    of one preserved reasoning field costs one prompt token per eight
+    characters of it.
+    """
+    filler = "x" * 8_000
+    base = measure_request_payload(
+        [{"role": "user", "content": "go"}], None, mode="manual", sequence=0
+    )
+    with_reasoning = measure_request_payload(
+        [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "", "reasoning_content": filler},
+        ],
+        None,
+        mode="manual",
+        sequence=1,
+    )
+
+    assert base["reasoning_chars"] == 0
+    # Two quotes around it, and the key that carries it.
+    assert with_reasoning["reasoning_chars"] == 8_000 + 2
+    assert with_reasoning["payload_unattributed_chars"] == 0
+

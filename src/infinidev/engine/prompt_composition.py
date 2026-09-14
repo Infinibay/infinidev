@@ -315,6 +315,13 @@ def measure_prompt_composition(
     }
 
 
+def _json_len(value: Any) -> int:
+    """Length of one value exactly as it appears inside the encoded payload."""
+    return len(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    )
+
+
 def measure_request_payload(
     messages: list[dict[str, Any]],
     tool_schemas: list[dict[str, Any]] | None,
@@ -322,20 +329,59 @@ def measure_request_payload(
     mode: str,
     sequence: int,
 ) -> dict[str, Any]:
-    """Measure the complete message transcript immediately before dispatch."""
+    """Measure the complete message transcript immediately before dispatch.
+
+    Every character of ``message_payload_chars`` is attributed to a named
+    bucket, so the report can say what a request is made of rather than only
+    what its ``content`` fields are.  Two of those buckets are easy to lose
+    track of and both are re-sent on every later round:
+
+    * ``tool_calls`` — the model's own emitted arguments, whose ``content``
+      field is usually empty on the same message.
+    * ``reasoning_*``/``thought_signatures`` — the reasoning fields
+      ``reasoning_history_fields`` preserves for providers that require a
+      thinking block to be echoed back with a tool-use turn.  MiniMax bills
+      them at one token per eight characters, measured directly, so a long
+      run pays for its own deliberation again on every request.
+    """
+    tools = tool_schemas or []
     encoded_messages = json.dumps(
         messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
     )
     encoded_tools = json.dumps(
-        tool_schemas or [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        tools, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
+
     role_chars: dict[str, int] = {}
+    #: Serialized size of every value we send, grouped by the key holding it.
+    #: ``content`` is the same number ``role_chars`` sums to; the rest is the
+    #: payload the by-role view cannot see.
+    key_chars: dict[str, int] = {}
+    key_occurrences: int = 0
     for message in messages:
         role = str(message.get("role", "unknown"))
-        content = json.dumps(
-            message.get("content"), ensure_ascii=False, separators=(",", ":"), default=str
-        )
-        role_chars[role] = role_chars.get(role, 0) + len(content)
+        role_chars[role] = role_chars.get(role, 0) + _json_len(message.get("content"))
+        for key, value in message.items():
+            key_chars[key] = key_chars.get(key, 0) + _json_len(value)
+            key_occurrences += 1
+
+    # Structure that belongs to no value: both outer brackets, the comma
+    # between messages, both braces and the comma after every key but the
+    # last, and the ``"key":`` of each pair.
+    structure_chars = (
+        2
+        + max(len(messages) - 1, 0)
+        + 2 * len(messages)
+        + max(key_occurrences - len(messages), 0)
+        + sum(len(str(key)) + 3 for message in messages for key in message)
+    )
+
+    attributed = sum(key_chars.values()) + structure_chars
+    reasoning_chars = sum(
+        size
+        for key, size in key_chars.items()
+        if key.startswith("reasoning") or key in ("thinking_blocks", "thought_signatures")
+    )
     return {
         "sequence": sequence,
         "mode": mode,
@@ -344,4 +390,12 @@ def measure_request_payload(
         "tool_schema_chars": len(encoded_tools),
         "request_payload_chars": len(encoded_messages) + len(encoded_tools),
         "message_content_chars_by_role": dict(sorted(role_chars.items())),
+        "message_value_chars_by_key": dict(sorted(key_chars.items())),
+        "json_structure_chars": structure_chars,
+        # Non-zero means the decomposition above missed something. It is
+        # recorded rather than asserted so a surprise shows up in the report
+        # instead of breaking a run.
+        "payload_unattributed_chars": len(encoded_messages) - attributed,
+        "reasoning_chars": reasoning_chars,
+        "tool_call_argument_chars": key_chars.get("tool_calls", 0),
     }

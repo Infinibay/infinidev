@@ -235,6 +235,7 @@ class ToolRunner:
         message = llm_result.message
         from infinidev.engine.behavior.reasoning_content import (
             reasoning_history_fields,
+            trim_superseded_reasoning,
         )
 
         history_fields = reasoning_history_fields(message)
@@ -244,30 +245,36 @@ class ToolRunner:
                 "content": getattr(message, "content", "") or llm_result.raw_content,
                 **history_fields,
             })
-            return
+        else:
+            all_calls = list(classified.regular)
+            all_calls += classified.thinks + classified.notes + classified.session_notes
+            if classified.step_complete:
+                all_calls.append(classified.step_complete)
+            messages.append({
+                "role": "assistant",
+                "content": message.content or "",
+                **history_fields,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": normalize_tool_arguments_json(
+                                tc.function.arguments
+                            ),
+                        },
+                    }
+                    for tc in all_calls
+                ],
+            })
 
-        all_calls = list(classified.regular)
-        all_calls += classified.thinks + classified.notes + classified.session_notes
-        if classified.step_complete:
-            all_calls.append(classified.step_complete)
-        messages.append({
-            "role": "assistant",
-            "content": message.content or "",
-            **history_fields,
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": normalize_tool_arguments_json(
-                            tc.function.arguments
-                        ),
-                    },
-                }
-                for tc in all_calls
-            ],
-        })
+        # Trimmed after the append, so the turn just recorded keeps its
+        # reasoning — it is the one whose tool results travel in the next
+        # request — while every closed turn loses a copy that MiniMax bills
+        # again on every remaining round.
+        if getattr(_get_settings(), "LOOP_REASONING_TRIM_ENABLED", True):
+            trim_superseded_reasoning(messages)
 
     @staticmethod
     def append_pseudo_results(

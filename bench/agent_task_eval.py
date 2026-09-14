@@ -157,6 +157,17 @@ class AgentTaskObservation:
     provider_prompt_tokens: int = 0
     provider_completion_tokens: int = 0
     provider_calls: int = 0
+    #: Input tokens the provider served from its prompt cache, and the ones it
+    #: wrote to it. A cache read is the cheapest input token there is, so this
+    #: is the counter that says whether a prompt change paid off in money and
+    #: not only in characters. Defaulted for rows written before it existed.
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    #: Hits reported in the OpenAI/DeepSeek shape (``cached_tokens`` under
+    #: ``prompt_tokens_details``, or ``prompt_cache_hit_tokens``). MiniMax
+    #: reports here and leaves the Anthropic-style fields at zero, so reading
+    #: only one convention says "no caching happened" when it did.
+    cached_prefix_tokens: int = 0
     #: Whether the final answer used the wording the task asked for. Reported,
     #: never gating: the deterministic verdict belongs to the verifier.
     final_answer_patterns_ok: bool = True
@@ -209,6 +220,9 @@ class AgentTaskObservation:
                 value.get("provider_completion_tokens", 0)
             ),
             provider_calls=int(value.get("provider_calls", 0)),
+            cache_read_tokens=int(value.get("cache_read_tokens", 0)),
+            cache_creation_tokens=int(value.get("cache_creation_tokens", 0)),
+            cached_prefix_tokens=int(value.get("cached_prefix_tokens", 0)),
             error=str(value.get("error", "")).strip(),
             run_artifact=str(value.get("run_artifact", "")).strip(),
         )

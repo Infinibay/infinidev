@@ -294,6 +294,15 @@ class Settings(BaseSettings):
     # docs/ENGINE_TASK_CLOSURE_ANALYSIS.md section 6.1). Kept as a switch so it
     # can be re-tested against a model that serialises more than this one.
     LOOP_BATCHING_NUDGE_ENABLED: bool = False
+    # Keep the visible reasoning a provider exposes only on the newest
+    # assistant turn, dropping it from turns whose tool chain is already
+    # closed. MiniMax-M3 bills a re-sent reasoning field at one prompt token
+    # per eight characters, measured against the live API, and it is re-sent
+    # on every remaining request of the run. Opaque signature material
+    # (Anthropic thinking blocks, Gemini thought signatures) is never dropped,
+    # because those providers reject a tool-use chain whose thinking came back
+    # stripped. False keeps every reasoning field on every turn.
+    LOOP_REASONING_TRIM_ENABLED: bool = True
     # Deterministic per-step objective verification: when a planner-authored
     # step carries an executable ``verify`` check, run it on step_complete and
     # block closure (with the failure output) until it passes.

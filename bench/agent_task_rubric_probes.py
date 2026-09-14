@@ -544,12 +544,17 @@ def run_probes(arm_root: Path) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     residual: dict[str, int] = {}
     abstentions: list[dict[str, str]] = []
-    for path in sorted(arm_root.glob("*/artifacts/*/run.json")):
+    for path in sorted(arm_root.rglob("run.json")):
         artifact = json.loads(path.read_text(encoding="utf-8"))
         artifact["_diff"] = deduplicated_diff(
             str(artifact.get("changed_files_summary") or "")
         )
-        arm = path.parts[-4]
+        # ``<root>/<campaign>[/<arm>]/artifacts/<run>/run.json``: a campaign with
+        # one arm and a campaign with two both have to be visible, or the tool
+        # silently reports zero runs for the single-arm layout.
+        arm = path.parent.parent.parent.relative_to(arm_root).as_posix()
+        if arm == ".":
+            arm = arm_root.name
         folder = path.parent.name
         task = folder.split(".r")[0]
         items = [

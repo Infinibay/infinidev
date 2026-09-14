@@ -1195,6 +1195,9 @@ def run_one(
         "provider_prompt_tokens": _AUX_USAGE.provider_prompt,
         "provider_completion_tokens": _AUX_USAGE.provider_completion,
         "provider_calls": _AUX_USAGE.provider_calls,
+        "cache_read_tokens": int(getattr(state, "cache_read_tokens", 0) or 0),
+        "cache_creation_tokens": int(getattr(state, "cache_creation_tokens", 0) or 0),
+        "cached_prefix_tokens": int(getattr(state, "cached_tokens", 0) or 0),
         "malformed_call_reasons": list(
             getattr(state, "malformed_call_reasons", ()) or ()
         ),
@@ -1248,6 +1251,9 @@ def run_one(
         provider_prompt_tokens=_AUX_USAGE.provider_prompt,
         provider_completion_tokens=_AUX_USAGE.provider_completion,
         provider_calls=_AUX_USAGE.provider_calls,
+        cache_read_tokens=int(getattr(state, "cache_read_tokens", 0) or 0),
+        cache_creation_tokens=int(getattr(state, "cache_creation_tokens", 0) or 0),
+        cached_prefix_tokens=int(getattr(state, "cached_tokens", 0) or 0),
         latency_seconds=time.perf_counter() - started,
         tool_calls=int(getattr(state, "total_tool_calls", 0)),
         malformed_tool_calls=int(getattr(state, "malformed_tool_calls", 0)),

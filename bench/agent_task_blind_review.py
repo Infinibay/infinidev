@@ -143,6 +143,8 @@ def build_packet(
         # campaign too, so a packet built over many campaigns still separates
         # them when the key is read.
         arm = run_path.parent.parent.parent.relative_to(arm_root).as_posix()
+        if arm == ".":
+            arm = arm_root.name
         folder = run_path.parent.name  # <task>.r<rep>.baseline
         task = folder.split(".r")[0]
         repetition = int(folder.split(".r")[1].split(".")[0])

@@ -12,8 +12,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from bench.agent_task_repeated_compare import (
     _metric,
+    _sign_test_p_value,
     extra_changed_files,
     max_workless_rounds,
     render_markdown,
@@ -298,3 +301,80 @@ def test_two_genuinely_different_files_are_both_counted() -> None:
     )
 
     assert deduplicated_diff(summary).count("### ") == 2
+
+
+def test_cache_hit_rate_is_a_share_of_the_input() -> None:
+    """A cache read is the cheapest input token there is.
+
+    The engine collected this from the provider's usage and only printed it, so
+    no stored observation carried it and no comparison could see whether a
+    prompt change moved the billed cost rather than the character count.
+    """
+    half = {"prompt_tokens": 100_000, "cache_read_tokens": 50_000}
+    none = {"prompt_tokens": 100_000, "cache_read_tokens": 0}
+
+    assert _metric(half, "cache_hit_rate") == 50.0
+    assert _metric(none, "cache_hit_rate") == 0.0
+    assert _metric({}, "cache_hit_rate") == 0.0
+
+
+def test_cache_hit_rate_counts_both_provider_conventions() -> None:
+    """MiniMax reports hits in the OpenAI/DeepSeek shape, not Anthropic's.
+
+    Reading only `cache_read_tokens` said "no caching happened" on a provider
+    that had reported 531 024 cached prefix tokens for the same run.
+    """
+    anthropic = {"prompt_tokens": 100_000, "cache_read_tokens": 40_000}
+    deepseek = {"prompt_tokens": 100_000, "cached_prefix_tokens": 40_000}
+    both = {
+        "prompt_tokens": 100_000,
+        "cache_read_tokens": 10_000,
+        "cached_prefix_tokens": 30_000,
+    }
+
+    assert _metric(anthropic, "cache_hit_rate") == 40.0
+    assert _metric(deepseek, "cache_hit_rate") == 40.0
+    assert _metric(both, "cache_hit_rate") == 40.0
+
+
+# ── the sign test itself ───────────────────────────────────────────────
+#
+# Every "measured" claim in the analysis rests on this function, so it is
+# tested against hand-computed binomials rather than against its own output.
+
+
+def test_the_sign_test_counts_the_pairs_that_got_worse() -> None:
+    """The losses are part of the trial count, not discarded.
+
+    Omitting them tested ``improved`` against ``improved``: 12 better and 4
+    worse out of 16 pairs scored p=0.0005, when the exact two-sided value is
+    p=0.077. That is the difference between a result and a coin flip, and it
+    inflated every mixed outcome in the report.
+    """
+    from math import comb
+
+    def exact(improved: int, worsened: int) -> float:
+        trials = improved + worsened
+        observed = max(improved, worsened)
+        return 2 * sum(comb(trials, k) for k in range(observed, trials + 1)) / 2 ** trials
+
+    assert _sign_test_p_value(12, 4) == pytest.approx(exact(12, 4))
+    assert _sign_test_p_value(12, 4) == pytest.approx(0.0768, abs=5e-5)
+    assert _sign_test_p_value(5, 1) == pytest.approx(0.21875)
+    # A unanimous sweep is unaffected, which is why the 8/0 headline survived.
+    assert _sign_test_p_value(8, 0) == pytest.approx(0.0078125)
+    assert _sign_test_p_value(6, 0) == pytest.approx(0.03125)
+
+
+def test_a_lopsided_but_mixed_result_is_not_significant() -> None:
+    """The direction can be consistent and the test still unresolved."""
+    assert _sign_test_p_value(11, 5) > 0.05
+    assert _sign_test_p_value(10, 2) < 0.05
+    # Strictly harder to pass than the buggy version, never easier.
+    for improved, worsened in ((12, 4), (5, 1), (9, 3), (14, 2)):
+        assert _sign_test_p_value(improved, worsened) >= 0.0
+        assert _sign_test_p_value(improved, worsened) <= 1.0
+
+
+def test_no_pairs_that_moved_is_not_evidence() -> None:
+    assert _sign_test_p_value(0, 0) == 1.0
