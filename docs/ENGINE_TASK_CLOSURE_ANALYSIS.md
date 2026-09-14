@@ -1,0 +1,2103 @@
+# Engine Task: análisis del ciclo de cierre y primer tramo de mejora
+
+## Resumen
+
+**Qué se midió.** Todas las comparaciones son pareadas por `(tarea, repetición)`
+sobre `MiniMax-M3`, con test de signos y un mínimo de 6 parejas sin empate antes
+de declarar un resultado. El detalle está en §6; los límites, en cada sección.
+
+| cambio | efecto medido | estado |
+| --- | --- | --- |
+| Variante de prompt `lean` (protocolo, identidad de ingeniería y barras de producto compactos) | −35,9 % tokens de prompt, −15,4 % tool calls, −33 % latencia, 16/16 success; generaliza sobre 8 formas de tarea | **medido**, p=0,0005 |
+| Respuesta final con contrato de verificación | línea `Verification:` 6/16 → 16/16; respuestas sobre 250 palabras 2/16 → 0/16 | **medido** |
+| Cierre de Step rechazado en silencio (livelock) | racha de rondas sin trabajo: 11 → 0 | **medido** (falla intermitente) |
+| Presión de agrupación de tool calls | sin efecto (0,90 → 1,00 llamadas por ronda) | **resultado negativo**, apagado por defecto |
+| Catálogo de políticas condicionales | loop directo (18 parejas): −10,4 % tokens, −23,6 % latencia al no renderizarlo. En el modo que se envía (8 parejas): **−11,5 % tokens, p=0,031**, pero **+13,6 % latencia en 7/8 parejas** | **decisión: el flag queda en `true`**; el router no es gratis en latencia y eso sólo se ve con `pipeline_mode: true` (§6.1.3) |
+| **Modo de engine por defecto vs `task`** | contador corregido, 8 parejas pareadas: success **8/8 vs 8/8**, tokens facturados **−81,0 %**, rondas de modelo **−64,5 %**, latencia **−73,0 %**, todo con **p=0,0078** (§6.1.23). Los workers que escriben **están serializados por código** (`runtime.py:156`), así que la delegación no puede paralelizar trabajo de código (§6.1.12) |
+| El contador de tokens no contaba todo | el camino `task` omitía 5 fases y el `orchestrator` omitía **los loops de sus workers**: el costo real del orquestador es 1,68×–1,77× lo reportado. Corregido contando en la frontera del proveedor: **−89,0 % / −83,8 % por pareja y −73 % de rondas de modelo** | **defecto de medición corregido**; el −82,9 % pasa a ser un piso, no la cifra final (§6.1.8) |
+| **El router de políticas, medido aislado** | ruteo local **4 ms**; `preferred` **2,91 s por turno** (12,1 s en el peor), 446 tokens de prompt por turno **invisibles para los contadores**, y quita una etiqueta de método justificada en 2 de 11 requests | **cambiado a `fallback`**: gratis en 10 de 11, conserva la capacidad y no resta (§6.1.21) |
+| El nicho del orquestador (lectura independiente) contra `task` | `research-audit` ×3: **success 2/3 vs 3/3**, mediana de tokens 771 470 → 90 442 (−88,3 %), tool calls 31 → 10, latencia 405 s → 149 s | **medido**, 3 parejas: la prueba de signos no resuelve (p=0,25); el punto estimado y la falla sí hablan (§6.1.8) |
+| Step que la recuperación dejaba sin salida en el orquestador | 1 de 3 auditorías fallaba con 771 470 tokens y `changed_paths: []`; `wide-sum` diagnosticado correcto y no aplicable | **arreglado**; después: `research-audit` 3/3, `wide-sum` 2/2 (§6.1.13) |
+| Pregunta que nadie puede responder detenía la ejecución | `complex-plan` en modo `task`: 3/3 detenidas con **0 tokens**; después del arreglo **3/3 completan**, mediana 79 983 tokens | **arreglado** y medido (§6.1.14) |
+| **Default de engine: `orchestrator` → `task`** | las tres mediciones de arriba, más `complex-plan` en `task` a −87,5 % del costo de `orchestrator` | **cambiado** (`config/settings.py:319-336`), con la medición en el comentario del ajuste |
+| **`lean` en un repositorio que no se puede leer** | corpus v9: 8 hubs → 40 paquetes → 1 200 hojas. **success 3/3 vs 3/3**, tokens facturados −33,0 %, rondas −20,5 %; ninguna traza lee el árbol | **medido** (3 parejas: sonda de validez, no estimación). Cierra la última duda sobre `lean` (§6.1.20) |
+| Corregir la hoja rota contra reescribir una sana | `default` reescribió una hoja conforme (`v + 9` → `v + 58`) en 1 de 3; `lean` corrigió `v - 40` en 3 de 3. Ambos pasan el verificador | **medido**: `located-the-leaf` 1,33 vs **2,00** (§6.1.20) |
+| El mismo archivo contado dos veces (`abspath` vs `realpath`) | 22 de 32 ejecuciones traían el diff duplicado: `changed_lines` se inflaba al doble en unas y no en otras, y el revisor recibía el diff dos veces en el prompt | **arreglado en el producto y en la métrica**; los titulares no se mueven y una pareja de 16 cambia de dirección (§6.1.16) |
+| **Calidad juzgada, por primera vez** | 16 ejecuciones pareadas contra sus ítems `human_review`, juez ciego: **default 1,81 vs `lean` 1,94** (máx. 2); 14 de 16 ítems empatan | **medido**; los dos ítems que difieren van a favor de `lean` con n=1, y así queda declarado (§6.1.17) |
+| **Rúbricas resueltas por programa** | 13 de 16 ítems deciden con evidencia del artefacto y **abstienen** cuando no la tienen. En `lean`: mueven `concise-handoff` (+1,00), `failure-recognition` (+0,50) y `verification-reported` (+0,50), todo a favor de `lean` — los mismos ítems que el juez ciego, por otro método | **medido**, dos instrumentos coinciden (§6.1.18). Cubre el 58 % de las 578 instancias de rúbrica guardadas |
+| `__pycache__` en el baseline de la tarea | en 15 ejecuciones el diff del revisor traía caché compilada, y en `wide-sum` era el **91,5–95,5 %** del payload (7 370 de 7 980 caracteres) | **arreglado** en el fixture, en `init_git_workspace` y en el probe (§6.1.19) |
+
+**Qué se arregló además del prompt**, cada uno con test de regresión: el cierre
+de Step sin aviso al modelo; advertencias de comportamiento falsas al crear
+archivos; parámetros inventados (`old_text`, `exec`, `param-N`, claves con el
+enunciado del esquema); `edit_file` sin `file_path` cuando el archivo prueba la
+intención; `project_stats` fallando cuando no hay índice (que es cuando sirve);
+rechazos de herramienta invisibles para la UI y para la traza; la ruta de una
+herramienta real pero no concedida, que le costaba al orquestador 6 a 10 rondas
+por ejecución; **un turno del orquestador que no terminaba nunca** cuando un
+worker acababa en la ventana entre la comprobación de eventos y la espera
+(*lost wakeup*, §6.1.11); **un Step del orquestador que no se podía avanzar ni
+cerrar** porque el modo recuperación le escondía la delegación y le rechazaba el
+`step_complete` (§6.1.13); y **una pregunta sin destinatario que detenía la
+ejecución entera**, contra el contrato que el propio `Protocol` declara
+(§6.1.14).
+
+**Qué se arregló en el harness**: `python` fuera del PATH del agente (todas las
+mediciones previas medían en parte el entorno); `.venv`, `.ken` y bases de datos
+contadas como cambios del agente; verificadores legibles por el modelo en las
+tareas que ahora se los ocultan; la fila de proyecto que faltaba y rompía todas
+las escrituras de base de datos; la definición de `success`, que fallaba trabajo
+correcto por la redacción de la respuesta final; y **el contador de tokens, que
+no contaba todo**: omitía cinco fases del camino `task` y los loops de los workers
+del `orchestrator`, en direcciones opuestas (§6.1.8). Ahora se cuenta en la
+frontera del proveedor.
+
+**Qué queda abierto**, en orden: resolver la contradicción de latencia del
+catálogo de políticas (el ahorro de tokens está resuelto con p=0,031; la latencia
+se mueve al revés en 7 de 8 parejas); hacer que el engine **note** el traspaso
+flojo, que es el único ítem de rúbrica por debajo de 1,67 en el corpus entero y el
+único donde el orquestador gana; y terminar de puntuar las rúbricas
+`human_review` de las campañas que faltan, que es lectura y no cuesta tokens de
+modelo.
+
+---
+
+Fecha: 2026-09-13. Alcance: análisis estático + medición con MiniMax M3 sobre el
+corpus `bench/agent_task_pilot.approved.jsonl`. Cambios de runtime incluidos y
+testeados; resultados con sus límites declarados.
+
+Este documento complementa [`TASK_HARNESS_LIFECYCLE_AUDIT.md`](TASK_HARNESS_LIFECYCLE_AUDIT.md),
+que audita el ciclo de vida del producto (compromisos, continuidad, recuperación).
+Aquí el foco es distinto: **cuánto cuesta una ejecución y por qué el modelo repite
+trabajo que ya hizo**.
+
+## 1. Método
+
+Tres fuentes de evidencia, en este orden:
+
+1. **Lectura del código** del camino real, no del documentado (ver §2).
+2. **Medición de baseline** con el runner propio del repositorio
+   (`bench/agent_task_run.py`), modelo `MiniMax-M3`, corpus aprobado de 6 tareas,
+   `repetitions: 1`. Cada ejecución corre en un workspace temporal aislado y se
+   puntúa con el `verify_command` de la tarea más los patrones de respuesta final
+   y de acciones requeridos.
+3. **Medición de los artefactos** que el runner deja por ejecución
+   (`run.json`): composición del prompt por iteración, registros de acción,
+   traza de herramientas y estado terminal.
+
+El baseline completo (6 tareas, 1 repetición) costó **1 269 431 tokens de prompt,
+59 040 de completion, 86 tool calls y 834 s**, con **6/6 verificaciones en verde**.
+Ese 6/6 es el dato más importante del documento: el corpus no discrimina por
+éxito, así que la mejora hay que buscarla en **costo, iteraciones y honestidad del
+cierre**, no en el contador de aciertos.
+
+### 1.1 El límite de este corpus, medido
+
+La misma tarea, el mismo modelo, la misma configuración: **18 ejecuciones de
+`complex-plan`** repartidas en todas las campañas registradas.
+
+| | tokens de prompt | tool calls | latencia |
+| --- | ---: | ---: | ---: |
+| mínimo | 54 607 | 6 | 47 s |
+| mediana | 149 203 | 11 | 140 s |
+| máximo | 343 500 | 21 | 431 s |
+
+Un factor de **6,3×** entre la corrida más barata y la más cara. Cualquier
+comparación con `repetitions: 1` sobre pocas tareas no puede resolver efectos
+menores a ese ruido, y es la razón por la que todas las comparaciones de este
+documento son pareadas por `(tarea, repetición)` con test de signos.
+
+> Nota de trazabilidad: una versión anterior de esta sección citaba una corrida
+> de smoke (83 955 tokens / 8 tools / 55 s) cuyo artefacto borré como scratch en
+> la ronda 2. El número era real cuando se midió, pero un número sin artefacto no
+> es evidencia. La tabla de arriba se recalcula desde `observations.jsonl` y cada
+> fila se puede volver a derivar.
+`bench/agent_task_repeated_compare.py` (§5) imprime explícitamente si un delta
+queda por debajo del rango intra-brazo, y con los datos actuales la respuesta es
+"no resuelto" para todas las métricas.
+
+### 1.2 Un corpus que no puede medir lo que el objetivo pide
+
+Las 6 tareas del piloto son tareas de comportamiento, y las dos que ejecutan
+`pytest` **traen los tests que deciden el resultado dentro del workspace**: el
+modelo puede leerlos. `test-selection` no pide implementar una regla, pide
+satisfacer un archivo de tests visible. Eso mide comprensión de lectura, no
+calidad de código ni resistencia a la alucinación, y explica el 6/6 del baseline:
+el corpus no tiene margen para discriminar.
+
+**Corregido como infraestructura.** El contrato de tarea admite ahora
+`withheld_paths`: archivos que se **quitan** del workspace antes de que el agente
+empiece y se **restauran** sólo para correr el verificador. Un archivo que
+aparezca en esa ruta antes de la restauración cuenta como manipulación y falla la
+ejecución. Se añadió la primera tarea que lo usa:
+
+| tarea | qué mide |
+| --- | --- |
+| `pricing-rounding` | redondeo *half-up* de un descuento en centavos, con el contrato numérico oculto |
+| `cart-immutability` | agregar `Cart.discounted(percent)` que **devuelve un objeto nuevo** sin tocar el original, redondea half-up, descarta líneas en cero y no rompe ninguno de los métodos existentes |
+
+Cada fixture se verifica en las dos direcciones por test
+(`test_every_hidden_contract_fails_pristine_and_passes_its_reference`): falla
+antes del cambio y pasa con su solución de referencia. Un contrato que ya pasa
+antes no mide nada, y uno que su propia referencia no puede satisfacer es una
+tarea imposible que en los resultados se ve igual que una difícil.
+
+`pricing-rounding` discrimina interpretar una regla de redondeo enunciada en
+prosa y no introducir aritmética de punto flotante (`round()` de Python usa
+redondeo bancario y falla `0.5`). `cart-immutability` discrimina el diseño de la
+interfaz: la implementación ingenua muta `self.items` y devuelve `self`, que pasa
+cualquier test visible y falla el contrato oculto.
+
+| `options-override` | el arreglo está en un módulo que el modelo tiene que **encontrar**: `render()` delega en `resolve_options()`, y el defecto del merge vive en el segundo. El contrato oculto sólo mira el comportamiento público de `render`, así que cualquier arreglo correcto pasa |
+| `wide-sum` | **localización a escala**: 40 módulos de etapa, uno con la constante mal, y el pedido dice el total correcto (`start + 820`) sin decir dónde. Los tests visibles pasan sobre el código roto, así que el defecto hay que buscarlo comparando etapas o bisecando el total, no leyendo el archivo que falla |
+
+`wide-sum` es la tarea que faltaba para el régimen de **exploración obligatoria**.
+Las otras tres se resuelven leyendo el archivo que nombra el pedido; ésta sólo se
+resuelve encontrando cuál de cuarenta etapas miente, y el pedido no la nombra.
+Es la sonda para la única duda que queda sobre `lean`: si su recorte de rondas
+ahorra exploración o la pierde.
+
+Corpus vigente: `bench/engine_eval_v6.tasks.jsonl` (6 del piloto + 4 contratos
+ocultos), manifiesto `bench/engine_eval_v6.minimax.conditions.json`. Las
+versiones anteriores quedan intactas porque hay campañas que las leen.
+
+### 1.2.1 Alcance: la métrica que faltaba
+
+`extra_changed_files`, derivada del `run.json`, cuenta los archivos que la
+ejecución cambió y la tarea no declaró. "No toques lo que no te pidieron" es una
+barra de producto del prompt y hasta ahora no tenía número. Se calla en las
+tareas que no declaran rutas esperadas, porque ésas no pueden decir qué archivo
+nuevo estaba invitado. Medido sobre el A/B de generalización: **0 archivos extra
+en las 16 ejecuciones**, así que en este corpus el modelo no se fue de alcance.
+
+### 1.2.2 Qué verificadores se pueden ocultar y cuáles no
+
+Ocultar el verificador **no es universalmente mejor**, y la distinción importa:
+
+- Los verificadores del piloto (`complex-plan`, `reversible-ambiguity`,
+  `evidence-code-review`, `user-owned-tradeoff`) son **rúbricas de palabras
+  clave** sobre el entregable. Medido: `complex_plan/verify.py` exige los stems
+  `handoff`, `phase` y `test`, y ninguno aparece en `requirements.md`; salen del
+  enunciado del pedido. Ocultarlo convertiría la tarea en adivinar el vocabulario
+  del corrector, castigando trabajo correcto por elección de palabra. **No se
+  ocultan.**
+- `test-selection` y `tool-failure-recovery` corren `pytest` sobre tests
+  visibles, y el pedido dice explícitamente que ésos son el contrato. Tampoco se
+  ocultan.
+- Los tres contratos nuevos verifican **comportamiento** (salidas de función),
+  no redacción. Esos sí se ocultan, y el modelo no puede leer su examen sin que
+  la tarea deje de medir lo que dice medir.
+
+La regla general: un verificador que juzga texto es una especificación legible y
+debe verse; uno que juzga comportamiento se puede ocultar.
+
+### 1.3 Contar alucinaciones en vez de estimarlas
+
+El objetivo pide "menos alucinaciones" y no existía ninguna cifra.
+`LoopState.malformed_tool_calls` cuenta las llamadas cuya **forma** el modelo
+inventó — herramienta inexistente, parámetro que no existe, argumentos que violan
+su propio esquema, argumentos que no son JSON — y las separa de las herramientas
+que corrieron y fallaron contra el mundo real
+(`engine_logging.is_hallucinated_call_error`). Se propaga a
+`EngineResult.metrics`, al `run.json` del benchmark y a la fila de observaciones,
+y `agent_task_repeated_compare.py` lo trata como una métrica más.
+
+En el baseline aparecen al menos tres casos (`old_text`, `param-1`,
+`parameter name="file_path"`); cada uno cuesta una vuelta completa de modelo.
+
+
+## 2. Cómo corre hoy una tarea (lo que el código hace)
+
+Tres hechos que la documentación no refleja y que cambian dónde hay que mejorar:
+
+1. **El default no es el camino `task`.** `TASK_ENGINE_MODE` vale `"orchestrator"`
+   (`config/settings.py:323`). Ese modo **salta el ChatAgent, la elaboración de
+   spec, el council y el routing de políticas** y va directo a
+   `OrchestratorAdapter`, que llama a `LoopEngine.execute(skip_plan=True,
+   allow_plan_mutation=False)`. El plan nunca se renderiza en ese camino: el
+   modelo ve `<task>` + `<expected-output>` y cierra con `step_complete`.
+   > **Actualizado en esta ronda.** Este hecho describía el estado al empezar el
+   > análisis y es el que abrió la campaña de §6.1.8. El default ahora es
+   > `task`; ver la decisión y sus mediciones al final de §6.1.8. En las
+   > secciones escritas antes de esa campaña, "el modo por defecto" significa
+   > `orchestrator`, que es lo que era entonces.
+2. **El prompt activo es la variante `generalized`, no `full`.**
+   `PROMPT_STYLE` vale `"auto"` (`config/settings.py:509`) y `resolve_style()`
+   devuelve `"generalized"` siempre (`prompts/variants/__init__.py:52`). El
+   `LOOP_PROTOCOL` de 12 168 caracteres que describe `CLAUDE.md` no se envía.
+   También es inalcanzable `loop.identity`: `identity_override` siempre está
+   presente (`engine/loop/context_builder.py:69`).
+3. **El benchmark mide el `LoopEngine` crudo**, no el pipeline: llama
+   `LoopEngine().execute(...)` directamente (`bench/agent_task_run.py:686`). Es
+   la unidad correcta para comparar engines, pero deja fuera del experimento a
+   `TaskAdapter`, al planner y a la revisión.
+
+### 2.1 Un entorno que no dejaba hacer la tarea
+
+Antes de mirar tokens hay un defecto del propio harness: **`python` no resuelve
+al intérprete del runner**. Las tareas piden "corré los tests", el verificador
+los corre con `sys.executable`, y el agente que escribe `python -m pytest`
+recibe `command not found` o un rechazo PEP 668 del intérprete del sistema.
+
+Medido en `pricing-rounding`: el modelo gastó **siete** `execute_command` y creó
+un `.venv` dentro del repositorio de la tarea para poder correr tres tests, en
+un cambio de una línea que igual resolvió bien. El `.venv` además entraba en
+`changed_paths` con miles de archivos de librería y tapaba el cambio real.
+
+Corregido en `bench/agent_task_run.py`: `interpreter_on_path()` pone el binario
+del runner al frente del `PATH` durante la ejecución, y `.venv`/`venv`/caches
+entran en `_IGNORED_PARTS`. **Todas las mediciones anteriores a este arreglo
+miden en parte el entorno**, no la tarea.
+
+### 2.2 Presupuesto de prompt por llamada (camino del benchmark)
+
+Medido sobre `prompt_composition_history` del baseline:
+
+| componente | caracteres | ≈ tokens | ¿cambia por iteración? |
+| --- | ---: | ---: | --- |
+| schemas de herramientas | 17 303 | ~4 300 | no |
+| identidad `develop` (`_DEVELOP_IDENTITY_BASE` + tool usage + safety) | ~9 800 | ~2 450 | no |
+| `BEHAVIOR_GUIDELINES` | 4 203 | ~1 050 | no |
+| protocolo (`generalized`) | 3 082 | ~770 | no |
+| catálogo de políticas condicionales (7 fragmentos + wrappers) | ~3 629 | ~900 | no |
+| **base estática por llamada** | **~42 000** | **~10 500** | no |
+| `<opened-files>`, `<notes>`, `<previous-actions>`, plan | 0–31 000 | 0–7 800 | sí |
+
+El costo total es aproximadamente **iteraciones × 42 000 caracteres**, más el
+crecimiento. Medido: el crecimiento aporta **20,7 %** del payload total
+(356 105 de 1 717 510 caracteres), y el 79 % restante es la base estática
+repetida en cada vuelta.
+
+Conclusión: **la variable dominante es la cantidad de iteraciones.** Reducir
+10 vueltas inútiles vale más que cualquier dieta de tokens.
+
+## 3. Hallazgo principal: el cierre podía rechazarse sin decírselo al modelo
+
+### 3.1 El mecanismo
+
+`StepCompleteGate` corre *dentro* del loop interno y responde el `step_complete`
+sobrescribiendo su resultado de herramienta: el modelo lee "tu cierre fue
+rechazado" y se corrige. Está documentado y funciona.
+
+Dos gates viven **fuera** de ese loop, en `LoopEngine.execute`:
+
+- `_enforce_edit_requirement` (`engine/loop/engine.py:469`) — la tarea pide
+  cambiar el repositorio y no hay ningún edit exitoso.
+- `_enforce_step_effect` (`engine/loop/engine.py:508`) — el Step se llama
+  "Implement…"/"Fix…" y el workspace no muestra cambio neto desde que empezó.
+
+Ambos mutan `step_result` en el lugar (`status = "continue"`,
+`interrupted = True`) y **sólo emiten un log**. La lista `messages` que podrían
+sobrescribir ya no existe: `execute` la descarta y la reconstruye entera en la
+iteración siguiente. El prompt que recibe el modelo es **idéntico** al que
+produjo el cierre rechazado.
+
+Resultado medido en `complex-plan` (baseline): el modelo hizo el trabajo en la
+iteración 0, y después llamó `step_complete` **diez veces más**, con 0–3
+herramientas por vuelta, sin ninguna señal de qué faltaba. Diez vueltas × ~30 000
+tokens = **~300 000 tokens de prompt** — el 24 % de toda la campaña baseline —
+gastados en repetir un cierre ya rechazado.
+
+El log del engine lo muestra sin ambigüedad:
+
+```
+⚠ Implementation Step closed without an edit — resuming the same Step
+⚠ Implementation Step closed without an edit — resuming the same Step
+   (×10, complejo-plan)
+```
+
+### 3.2 Por qué importa más allá del costo
+
+`TASK_MAX_ITERATIONS` vale **0 = ilimitado** (`config/settings.py`). En
+producción no hay tope que corte ese ciclo; el benchmark lo cortó en 12 vueltas
+porque su config declara `max_iterations: 12`. El mismo patrón en la CLI podía
+consumir el presupuesto del usuario indefinidamente.
+
+El audit de ciclo de vida ya había señalado gates sin cota (F06, F11, F13); este
+es el mismo defecto en un gate distinto y con evidencia de producción.
+
+### 3.3 Lo que se hizo
+
+1. **Canal de entrega.** `LoopState.pending_engine_notice`
+   (`loop/loop_state.py:106`) y `build_iteration_prompt` lo renderiza una vez,
+   inmediatamente después de `<task>`, en la posición de mayor atención. El
+   módulo `engine/loop/engine_notice.py` construye el texto: nombra la
+   observación que bloqueó el cierre y la llamada exacta que lo desbloquea
+   (`edit_file` / `create_file`, o `modify_step` para un Step que dejó de ser un
+   cambio, o `no_edit=true` cuando el pedido ya estaba satisfecho).
+2. **Cota por Step.** `LoopState.effect_refusals_by_step` cuenta rechazos
+   consecutivos. Al superar `MAX_CLOSURE_REFUSALS = 3` el engine deja de
+   negociar, y **la salida depende del tipo de gate** para no perder trabajo ni
+   mentir:
+   - `step_effect` con `task_has_edits` verdadero: el trabajo existe en disco y
+     falló la contabilidad del Step. El engine **acepta el cierre** del modelo.
+   - `edit_requirement` (o sin ningún edit en toda la tarea): el run **termina
+     como `exhausted`** en vez de reportar como hecha una tarea de escritura sin
+     una sola escritura.
+3. **Switch de rollout.** `LOOP_CLOSURE_FEEDBACK_ENABLED` (`config/settings.py`)
+   restaura el comportamiento anterior. Sin esto no habría forma de comparar
+   dentro del mismo código ni de retirar el cambio si empeora algo.
+
+Cobertura: `tests/test_loop_termination.py` — 5 tests nuevos que fijan el
+contrato (el aviso se emite y se consume una vez; el aviso de "sin edits"
+ofrece la salida `no_edit`; la tarea sin edits termina en vez de girar; la tarea
+con edits reales no pierde su cierre; el contador es por Step y se limpia al
+avanzar).
+
+## 4. Otros hallazgos con evidencia
+
+### 4.1 Advertencias de comportamiento falsas o inaplicables
+
+La traza del baseline muestra, para una tarea de documentación
+(`complex-plan`), `behavior_score = -3` con:
+
+```
+WARNING: You have read multiple files but saved no notes.
+WARNING: You are editing repo/PLAN.md without reading it first. Always read a file before modifying it.
+NOTE: You edited files but did not run tests this step.
+```
+
+Las tres son ruido en ese contexto: el archivo se creó con `create_file` (no se
+edita algo que no existe), la tarea prohíbe implementar código y el "test" es un
+`verify.py` que el modelo sí ejecutó. Las advertencias se inyectan en resultados
+de herramienta (`behavior_tracker.drain_feedback`, consumido en
+`loop/tool_runner.py:1185`), así que **cuestan tokens y compiten con las
+instrucciones reales**.
+
+**Corregido (parcial).** `ReadBeforeEditRule` ya no se aplica a las herramientas
+de creación: `create_file` falla si el archivo existe
+(`tools/file/create_file_tool.py:37`), así que el archivo que escribe no podía
+haberse leído. La regla de "no corriste tests" se deja como está a propósito: es
+consejo defendible y su corrección exige saber si el proyecto tiene runner, dato
+que `RuleContext` no lleva.
+
+### 4.2 Parámetros alucinados y llamadas malformadas
+
+En el baseline aparecen, entre otras:
+
+```
+Tool edit_file: unexpected kwargs {'old_text'}
+Tool execute_command: unexpected kwargs {'param-1'}
+Tool read_file: unexpected kwargs {'parameter name="file_path"'}
+```
+
+El dispatcher los rechaza con un mensaje correcto (`engine/tool_dispatch.py`,
+reparación de aliases incluida), pero cada uno cuesta una vuelta completa.
+
+**Corregido (parcial).** `_PARAM_ALIASES` cubre ahora las paráfrasis observadas
+(`old_text`, `old_content`, `new_text`, `new_content`, `exec`, `shell_command`,
+`command_line`) y una pasada nueva recupera el nombre cuando el modelo emite el
+enunciado del esquema como clave (`parameter name="file_path"`). Se verificó
+contra los esquemas vivos que ninguno de esos nombres está declarado por
+herramienta alguna, así que el alias no puede robar un parámetro real. Los casos
+`param-1` no son recuperables y siguen costando una vuelta.
+
+### 4.3 El engine no pedía agrupar llamadas independientes
+
+Ni `generalized` ni el `LOOP_PROTOCOL` completo mencionan que una misma
+respuesta puede llevar varias tool calls. El engine sí las ejecuta en lote
+(`ToolRunner._run_batches`), y el benchmark declara `max_tool_calls_per_action:
+20`. El modelo, sin que nadie se lo diga, serializa.
+
+Medido sobre el baseline, contando vueltas de modelo contra llamadas de
+herramienta:
+
+| tarea | vueltas | tool calls | tools/vuelta |
+| --- | ---: | ---: | ---: |
+| complex-plan | 25 | 8 | 0,32 |
+| reversible-ambiguity | 22 | 8 | 0,36 |
+| evidence-code-review | 13 | 10 | 0,77 |
+| test-selection | 19 | 16 | 0,84 |
+| tool-failure-recovery | 36 | 28 | 0,78 |
+| user-owned-tradeoff | 9 | 8 | 0,89 |
+| **total** | **124** | **78** | **0,63** |
+
+Cada vuelta reenvía la base estática completa (~42 000 caracteres). Aun
+descontando las dos tareas con livelock, la media ronda 0,8 llamadas por vuelta:
+la mayoría de los turnos llevan exactamente una lectura.
+
+**Corregido.** Dos canales, porque el problema tiene dos causas:
+
+- **Prompt** (`variants/lean.py`): instrucción explícita de emitir en UNA
+  respuesta todas las llamadas cuyos argumentos no dependan de un resultado
+  pendiente.
+- **Engine** (`LoopGuard.check_single_call_batching`): tras **dos rondas
+  consecutivas de una sola lectura**, el guard añade un recordatorio al
+  transcript. Cuenta por Step y se re-arma al cambiar de Step. Sólo dispara con
+  herramientas de descubrimiento puras (`_BATCHABLE_READS`): escrituras, shell y
+  verificación quedan fuera porque sus argumentos normalmente dependen de la
+  llamada anterior. Switch de rollout: `LOOP_BATCHING_NUDGE_ENABLED`.
+
+
+### 4.4 Contradicciones activas en el protocolo
+
+Con `PROMPT_STYLE=auto`, el texto que se envía contiene:
+
+- `generalized.py:56` — "A step takes 1-8 tool calls; split anything larger".
+  El engine no cuenta tool calls por Step (`LOOP_MAX_TOOL_CALLS_PER_ACTION = 0`)
+  y el `LOOP_PROTOCOL` completo dice lo contrario.
+- `generalized.py:80` — "above 70% usage, wrap up; above 85%, stop immediately".
+  El bloque `<context-budget>` que el engine renderiza en la misma petición dice
+  que la presión de contexto **no** es señal de cierre.
+- `generalized.py:46` — ordena `add_step` cuando el plan está vacío. En el
+  camino default (`skip_plan=True`) `add_step` está **eliminado del schema**.
+
+Un modelo que obedece el prompt hace lo incorrecto; uno que obedece el engine
+ignora el prompt. Las tres instrucciones se eliminan en la variante nueva.
+
+### 4.4.1 El 41 % de los fallos de herramienta eran del entorno, no del modelo
+
+Agregado sobre las 2 185 llamadas de herramienta registradas en todas las
+campañas (`bench/runs/**/artifacts/*/run.json`):
+
+| causa del fallo | llamadas | % de los 189 fallos |
+| --- | ---: | ---: |
+| "no es un repositorio git" | 62 | 33 % |
+| índice de código vacío | 16 | 8 % |
+| resto | 111 | 59 % |
+
+El prompt del engine le dice al modelo que revise sus cambios con `git_diff` y
+`git_status` — mi núcleo `lean` también lo dice — y los fixtures del benchmark
+son **directorios sueltos, sin repositorio**. Cada una de esas llamadas estaba
+condenada antes de que el modelo la hiciera. Un checkout real es un repositorio,
+así que el harness ahora lo provee: `init_git_workspace()` inicializa el
+workspace y commitea el fixture, después del withhold, para que un `git diff`
+muestre sólo el trabajo del agente.
+
+Esto no es cosmético: el benchmark estaba castigando al engine por seguir sus
+propias instrucciones, y 62 llamadas fallidas inflaban la cuenta de tool calls y
+de rondas en todos los números anteriores.
+
+**Y el alcance de la base de datos estaba roto entero.** `findings`, `artifacts`,
+`tasks` y las tablas de conocimiento llevan `project_id REFERENCES projects(id)`.
+La base siembra un único "Default Project", y la evaluación **inventa** su propio
+`project_id` por ejecución (`sha256(seed)[:4]`) sin crear la fila. Toda escritura
+debajo de ese id fallaba la clave foránea — de ahí el
+`Failed to record finding: FOREIGN KEY constraint failed` de la taxonomía. La
+superficie entera respaldada por base de datos quedaba sin ejercitar detrás de
+ese error. `ensure_project()` la registra antes de construir el agente.
+
+### 4.4.2 `project_stats` fallaba justo cuando servía
+
+La docstring de la herramienta dice que es "la primera llamada en cualquier
+tarea de análisis… te dice al instante si el índice está poblado". Cuando el
+índice **no** está poblado —es decir, exactamente cuando uno quiere orientarse—
+devolvía `{"error": "Index is empty for this project"}`. 16 de los fallos
+restantes eran esta llamada, y el modelo tenía que recuperarse leyendo archivos.
+
+Ahora cae al sistema de archivos: cuenta archivos, los agrupa por extensión y
+dice que los símbolos no están indexados. Y un índice **ilegible** (tabla
+ausente) cae igual, nombrando el motivo en la salida en vez de tragárselo: desde
+el punto de vista de quien llama, un índice que no se puede leer es el mismo
+caso que uno vacío, y fallar es el único resultado que una herramienta de
+orientación no debe producir.
+
+### 4.4.3 Por qué las llamadas inventadas no eran diagnosticables
+
+`execute_tool_call` despacha `POST_TOOL` **al final**
+(`engine/tool_dispatch.py:745`), y todos los rechazos por forma —herramienta
+inexistente, JSON inválido, argumentos que no son dict, parámetro que no existe,
+parámetro requerido ausente, validación— hacen `return` antes. Consecuencia
+doble: el transcript del benchmark no registra ninguna de esas llamadas, y el
+contador `malformed_tool_calls` quedaba sin evidencia detrás. Las tres primeras
+ni siquiera disparan `PRE_TOOL` (`:650`), así que la UI no ve esas llamadas en
+absoluto.
+
+**Corregido.** Los 9 sitios de rechazo pasan ahora por `_rejected_call`, que
+construye el contexto y despacha `POST_TOOL` antes de devolver el error. La
+sustitución es uniforme porque `return json.dumps(X)` y
+`_rejected_call(name, hook_metadata, X)` tienen la misma estructura de
+paréntesis, así que el cuerpo de 470 líneas no se tocó. Es seguro porque
+`ui_hooks._on_post_tool` es autocontenido: lee `ctx.result` y emite
+`loop_tool_call` por `tool_run_id`, sin necesitar un `PRE_TOOL` previo — el
+render hace *upsert*. Un test fija que un rechazo llega al hook.
+
+Y para que el contador sea diagnosticable,
+`LoopState.malformed_call_reasons` guarda la llamada y el motivo, y el `run.json`
+los expone. Con eso, la taxonomía real de 10 ejecuciones es:
+
+| patrón | frecuencia |
+| --- | --- |
+| `edit_file` sin `file_path` (el modelo lo omite y confía en el contexto) | dominante |
+| `execute_command({"param-1": "ls -la"})` — clave posicional, valor correcto | ocasional |
+
+El segundo es reparable sin ambigüedad y se reparó: cuando la herramienta tiene
+**exactamente un parámetro requerido**, falta, y la llamada trae **sólo** una
+clave con forma de marcador posicional (`param-1`, `arg0`, `parameter_2`), el
+valor se mueve al parámetro requerido. La regla está acotada a esa forma porque
+una clave como `tool` es un nombre real en otro contexto y mapearla ejecutaría
+lo que no corresponde — el primer intento de la regla rompía exactamente eso, y
+el test que lo detectó quedó como regresión.
+
+El primero **sí se repara, pero sólo cuando el archivo se prueba a sí mismo**.
+`_repair_missing_edit_target` completa `file_path` en un `edit_file` que lo
+omitió únicamente si el Step tiene **exactamente un archivo abierto** y el
+`old_string` exacto **aparece una sola vez** en él. La inferencia no es una
+apuesta: el motor lee el archivo y verifica la coincidencia antes de reescribir
+la llamada. Con dos candidatos, con una coincidencia ambigua, con el archivo
+ilegible o con un `file_path` ya presente, la llamada original se rechaza como
+antes. El test cubre los cuatro rechazos.
+
+Es la diferencia entre *adivinar* qué archivo editar —que es la ayuda silenciosa
+que edita el archivo equivocado— y *demostrar* cuál es.
+
+### 4.5 El catálogo de políticas condicionales se renderiza siempre
+
+Medido construyendo el contexto real de MiniMax-M3:
+
+| configuración | system prompt | fragmentos renderizados |
+| --- | ---: | ---: |
+| por defecto | 22 890 | 7 |
+| `TASK_POLICIES_RENDER_ALL_CONDITIONAL=False` | 19 134 | 0 |
+| `lean` | 17 769 | 7 |
+| `lean` + sin catálogo | **14 013** | 0 |
+
+Son **3 756 caracteres por ronda** (16,4 % del system prompt; 21,4 % del payload
+estático si se combina con `lean`) de guías condicionales envueltas en
+`<prompt-fragment id=… sha256=…><if reason="…">`. En el modo `orchestrator`, que
+es el default, el router de políticas **no corre** (`pipeline.py` lo saltea), así
+que no hay `TaskProfile` y ningún fragmento se selecciona nunca: el motor emite
+siete reglas condicionales para que el modelo elija, en cada petición.
+
+No se cambia el default: los fragmentos contienen método real
+(`bugfix.root_cause`, `refactor.preserve_behavior`, `performance.measure_first`)
+y quitarlos puede costar calidad mientras ahorra tokens. Queda como el próximo
+A/B, con las dos configuraciones ya preparadas
+(`bench/agent_task_run.minimax.policy-{all,selected}.json`).
+
+### 4.6 Cap del bloque `<opened-files>`
+
+`OPENED_FILES_PROMPT_MAX_CHARS = 48_000` (`loop/loop_state.py:25`) por iteración,
+y el contenido se reenvía entero. En `complex-plan` el prompt de usuario pasó de
+1 260 a 31 278 caracteres, y el 33 % del payload total de esa ejecución fue
+crecimiento. No se tocó en este tramo: bajar el cap cambia qué evidencia ve el
+modelo y merece su propia medición.
+
+## 5. Cambios entregados
+
+| artefacto | qué es |
+| --- | --- |
+| `engine/loop/engine_notice.py` | Construcción, encolado y drenaje del aviso de cierre rechazado; contador por Step |
+| `engine/loop/loop_state.py` | `pending_engine_notice`, `effect_refusals_by_step` |
+| `engine/loop/context.py` | Render del `<engine-notice>` tras `<task>`, consumido una vez |
+| `engine/loop/engine.py` | `_deliver_closure_refusal` con cota y salida según el tipo de gate; `_closure_feedback_enabled` |
+| `engine/loop/step_manager.py` | Limpia el contador al avanzar de Step |
+| `engine/loop/loop_guard.py` | `check_single_call_batching`: presión de agrupación tras dos rondas de una sola lectura |
+| `engine/loop/behavior_rules.py` | `ReadBeforeEditRule` excluye las herramientas de creación |
+| `engine/tool_dispatch.py` | Paráfrasis de parámetros observadas + recuperación de claves con el enunciado del esquema |
+| `config/settings.py` | `LOOP_CLOSURE_FEEDBACK_ENABLED`, `LOOP_BATCHING_NUDGE_ENABLED` (switches de rollout) |
+| `prompts/variants/lean.py` | Variante de estilo `lean`: identidad y protocolo compactos, con agrupación de tool calls, evidencia obligatoria y contrato de respuesta final |
+| `prompts/variants/__init__.py` | Carga de la variante `lean` |
+| `tests/test_loop_termination.py` | 8 tests de regresión: contrato de cierre y presión de agrupación |
+| `tests/test_behavior_tracker.py` | 3 tests: crear un archivo no es una edición a ciegas |
+| `tests/test_tool_dispatch_validation.py` | 4 tests: recuperación de parámetros parafraseados y de claves envueltas |
+| `bench/agent_task_run.py` | `prompt_style` y `settings_overrides` en la config; `withheld_paths` fuera del workspace durante la ejecución |
+| `bench/agent_task_eval.py` | `AgentTask.withheld_paths`, `AgentTaskObservation.malformed_tool_calls` |
+| `bench/agent_task_repeated_compare.py` | Comparación pareada por `(tarea, repetición)` con rango intra-brazo y veredicto "resuelto / no resuelto" |
+| `bench/agent_task_fixtures/pricing_rounding/` | Fixture con contrato numérico oculto (`verify_contract.py`) |
+| `bench/agent_task_reference_solutions/pricing-rounding/` | Solución de referencia que el preflight exige que pase |
+| `bench/engine_eval_v2.tasks.jsonl` | Corpus del piloto + la tarea de contrato oculto |
+| `engine/engine_logging.py` | `is_hallucinated_call_error`: separa la forma inventada del fallo real |
+| `engine/loop/tool_runner.py` | Cuenta las llamadas malformadas en el estado |
+| `prompts/variants/lean.py` | `flow.develop.core` y `loop.behavior_guidelines` compactos: −5 121 caracteres por ronda en el system prompt |
+| `prompts/flows/develop.py` | `get_develop_identity` consulta la variante de estilo |
+| `engine/loop/context.py` | Las barras de comportamiento también son variante-adoptables |
+| `bench/agent_task_run.py` | `interpreter_on_path()`: el agente recibe el intérprete que sus tareas asumen |
+| `bench/agent_task_ab.py` | Un comando para correr dos configuraciones y compararlas |
+| `tests/test_lean_prompt_variant.py` | La variante compacta conserva cada regla y recorta ≥20 % |
+| `bench/agent_task_repeated_compare.py` | Veredicto por test de signos pareado, no por rangos marginales |
+| `bench/engine_eval_v5.tasks.jsonl` | Corpus vigente: piloto + 3 contratos ocultos, con el patrón frágil corregido |
+| `bench/agent_task_run.minimax.style-{default,lean}.r2.json` | Configuraciones del A/B de generalización |
+| `bench/agent_task_run.minimax.policy-{all,selected}.json` | Configuraciones del A/B del catálogo de políticas |
+| `bench/agent_task_ab.py` | Reanuda las unidades ya pagadas; un timeout del proveedor deja de costar la campaña entera |
+| `bench/agent_task_run.py` | `pipeline_mode`: corre `run_task` como el producto, para poder medir el modo por defecto |
+| `engine/tool_dispatch.py` | Una herramienta real pero no concedida dice cuál es la ruta, en vez de "unknown tool" |
+| `bench/agent_task_fixtures/wide_tree/` | 40 módulos de etapa con una constante mal: sonda de localización |
+| `tests/test_agent_task_compare.py` | Métricas derivadas del artefacto y el contrato de "la redacción no decide el éxito" |
+| `bench/agent_task_run.py` | `init_git_workspace()`: el workspace de la tarea es un repositorio, como un checkout real |
+| `engine/loop/loop_state.py` | `malformed_call_reasons`: la llamada inventada y su motivo, para que el contador sea diagnosticable |
+| `engine/tool_dispatch.py` | Recupera el parámetro requerido desde una clave posicional inequívoca |
+| `bench/agent_task_answer_quality.py` | Cuatro comprobaciones deterministas sobre la respuesta final, y una tabla pareada |
+| `tests/test_agent_task_answer_quality.py` | Los proxies, y el límite que el informe declara |
+| `engine/tool_dispatch.py` | `_rejected_call`: todo rechazo despacha `POST_TOOL`, así la UI y la traza ven la llamada |
+| `bench/agent_task_run.py` | `ensure_project()`: registra el `project_id` de la evaluación para que las escrituras de la base no violen la clave foránea |
+| `tools/code_intel/project_stats_tool.py` | Resumen desde el sistema de archivos cuando no hay índice o no se puede leer |
+| `engine/loop/tool_runner.py` | `_repair_missing_edit_target`: completa `file_path` sólo si el archivo prueba la intención |
+| `bench/agent_task_fixtures/cart_immutability/` | Contrato oculto de diseño de API e inmutabilidad |
+
+La variante `lean` pasa `tests/test_prompt_style_rules.py` completo (660 tests):
+cada herramienta que nombra existe para el rol, sin hedges evasivos, sin flechas,
+sin palabras que exigen un umbral no declarado.
+
+## 5.1 La dieta de la base estática (determinista)
+
+El prompt se reconstruye entero en cada ronda de modelo, así que cada carácter
+del prefijo estático se paga otra vez. `lean` registra ahora dos bloques más:
+
+| bloque | original | `lean` | delta |
+| --- | ---: | ---: | ---: |
+| `flow.develop.core` (identidad de ingeniería) | 7 152 | 3 162 | −3 990 |
+| `loop.behavior_guidelines` (barras de producto) | 4 203 | 2 556 | −1 647 |
+| **system prompt ensamblado** | **20 056** | **14 935** | **−5 121 (−25,5 %)** |
+
+Medido construyendo el contexto de ejecución real, no estimado:
+
+| componente por ronda de modelo | por defecto | `lean` |
+| --- | ---: | ---: |
+| system prompt | 22 890 | 17 769 |
+| esquemas de herramientas | 17 303 | 17 303 |
+| texto de la tarea | 1 260 | 1 260 |
+| **payload estático por ronda** | **41 453** | **36 332** |
+
+**−5 121 caracteres por ronda, −12,4 %**, con el mismo modelo y la misma
+configuración. El motor ya reduce la superficie de MiniMax-M3 a 19 herramientas
+(17 303 caracteres); los esquemas no cambian con el estilo.
+
+Lo que la versión compacta **no** hace es perder reglas:
+`tests/test_lean_prompt_variant.py` verifica que cada regla de ingeniería
+( lectura antes de editar, verificación, responsabilidad única, consultas
+parametrizadas, sin secretos en salida, comparación en tiempo constante, no
+reorganizar, commit sólo si se pide, patrones con disparador) y cada barra de
+producto (honestidad, no falsear tests, alcance literal, supuestos que no se
+vuelven requisitos, reintentos acotados) sigue enunciada. Lo que se va es el
+encuadre que declara las reglas opcionales, la repetición de lo que el protocolo
+ya dice, y una contradicción con el engine.
+
+## 6. Resultados medidos
+
+Tres configuraciones, corpus aprobado, 1 repetición, `MiniMax-M3`. La tercera es
+la variante `lean` sobre el código corregido.
+
+| tarea | baseline (calls / tokens) | cierre con aviso | cierre con aviso + `lean` |
+| --- | --- | --- | --- |
+| complex-plan | 14 / 343 500 | 10 / 136 790 | 17 / 259 291 |
+| reversible-ambiguity | 8 / 209 708 | 16 / 165 885 | 21 / 253 892 |
+| test-selection | 18 / 164 436 | 24 / 269 510 | 20 / 187 240 |
+| evidence-code-review | 11 / 135 854 | 13 / 158 641 | 23 / 326 085 |
+| user-owned-tradeoff | 7 / 77 066 | 9 / 102 794 | 11 / 95 869 |
+| tool-failure-recovery | 28 / 338 867 | 32 / 276 628 | 17 / 96 625 |
+| **total** | **86 / 1 269 431** | **104 / 1 110 248** | **109 / 1 219 002** |
+| success | 6/6 | 6/6 | 6/6 |
+| completion tokens | 59 040 | 48 797 | 46 257 |
+| latencia | 834 s | 1 037 s | 876 s |
+
+**Lo que estos números sostienen y lo que no.**
+
+Sostienen:
+
+- El ciclo de repetición desapareció. `complex-plan` bajó de 343 500 a 136 790
+  tokens de prompt (−60 %) y no volvió a aparecer `resuming the same Step` en
+  ninguna corrida posterior. Es el efecto que el diagnóstico predecía y el único
+  con una causa identificada y una medición directa.
+- Los tokens de completion bajan en las dos variantes (−17 % y −22 %), lo que es
+  consistente con menos vueltas redundantes.
+- La verificación no se degradó: 6/6 en las tres.
+
+No sostienen:
+
+- **Ninguna diferencia agregada de tokens es concluyente con 1 repetición.** El
+  rango intra-brazo (77 066–343 500 en baseline) es mayor que cualquier delta
+  agregado. `bench/agent_task_repeated_compare.py` marca las cuatro métricas como
+  "no resueltas".
+- La latencia del brazo corregido es **peor** en agregado (834 s → 1 037 s y
+  876 s). Puede ser ruido, o puede ser que el aviso haga trabajar más al modelo
+  donde antes repetía un cierre barato. No hay datos para decidirlo todavía.
+- La variante `lean` no mostró ventaja sobre el cierre con aviso. Su valor
+  esperado está en la agrupación de tool calls, que este corpus de 6 tareas
+  pequeñas no ejercita.
+
+### 6.1 Resultado principal: la dieta de prompt (variante `lean`)
+
+Diseño pareado, 3 tareas de código × 3 repeticiones × 2 brazos (18 ejecuciones,
+`MiniMax-M3`, corpus `engine_eval_v2`), interruptor `PROMPT_STYLE`. Comando:
+`bench/agent_task_ab.py`; resultado en
+`bench/runs/20260913-engine-v2/ab-style/comparison.{md,json}`.
+
+El veredicto es un **test de signos pareado** sobre las 9 parejas
+(tarea, repetición), no una comparación de rangos marginales: los brazos
+comparten tarea y distribución de respuestas del modelo, así que el delta
+pareado es lo que lleva señal.
+
+| métrica | por defecto | `lean` | delta mediana | parejas mejor/peor | p | resuelto |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| tokens de prompt | 117 448 | 78 977 | **−32,8 %** | 8 / 1 | 0,0078 | **sí** |
+| tokens de completion | 6 069 | 3 226 | **−46,8 %** | 7 / 2 | 0,0156 | **sí** |
+| latencia | 86,5 s | 37,7 s | **−56,4 %** | 8 / 1 | 0,0078 | **sí** |
+| tool calls | 11 | 10 | −9,1 % | 5 / 3 | 0,2188 | no |
+| success | 9/9 | 9/9 | — | — | — | — |
+
+Por tarea, todos los pares salvo uno mejoran:
+
+| tarea | tokens de prompt (A/B) | rondas (A/B) | latencia s (A/B) |
+| --- | --- | --- | --- |
+| evidence-code-review | 112 894 / 93 564 | 11 / 10 | 104,0 / 79,7 |
+| pricing-rounding | 132 434 / 67 167 | 13 / 10 | 85,2 / 35,6 |
+| test-selection | 184 300 / 82 772 | 18 / 10 | 66,5 / 34,0 |
+
+Dos cosas que el número agregado no muestra. Primero: la caída de latencia
+(−56 %) es **mayor que la del payload** (−12,4 %), y las rondas de modelo bajan
+de 13 a 10 de mediana, así que el estilo no sólo envía menos texto por ronda:
+también hace menos rondas. Segundo, el límite: 9/9 de éxito en tareas chicas no
+prueba que menos exploración sea segura en tareas grandes. La hipótesis que
+queda abierta es si el estilo recorta exploración útil cuando el repositorio es
+desconocido.
+
+#### Alcance de la ganancia: no todos los modos la reciben
+
+Medido construyendo el contexto real de MiniMax-M3 con cada identidad:
+
+| camino | payload por ronda, por defecto | con `lean` | ahorro |
+| --- | ---: | ---: | ---: |
+| `developer` (lo que mide el benchmark; modos `task`/`auto`/`staged`) | 41 453 | 36 332 | **−12,4 %** |
+| `orchestrator` (el default de entonces) | 37 832 | 36 701 | **−3,0 %** |
+
+La razón es que `lean` compacta `flow.develop.core`, y el camino por defecto **no usa
+esa identidad**: `OrchestratorAdapter` pasa `build_team_identity(orchestrator=True)`
+(5 198 caracteres) como `identity_override`, así que `get_develop_identity` nunca
+corre. Lo que sí llega a los dos caminos es el protocolo y las barras de
+comportamiento, y de ahí sale el 3 %.
+
+Esto acota la afirmación principal: **el −36 % de tokens está medido sobre el camino
+`developer`, no sobre el modo por defecto del producto.** El bloque de 5 198
+caracteres del camino por defecto no es redundante —son semánticas de coordinación:
+tickets, notas compartidas, delegación, `team_idle`— así que no es un recorte
+gratuito y no se tocó. Medir un reemplazo exige que el benchmark corra el modo
+`orchestrator`, que hoy no hace: llama `LoopEngine.execute` directo.
+
+### 6.1.1 ¿Generaliza? 8 tareas × 2 repeticiones
+
+El resultado anterior descansa en 3 tareas de código. Repetido sobre **las 8
+tareas del corpus** (planificación, ambigüedad, selección de tests, revisión,
+decisión del usuario, recuperación de herramienta, y los 3 contratos ocultos),
+16 parejas, `bench/runs/20260913-engine-v2/ab-generality/`:
+
+| métrica | por defecto | `lean` | delta mediana | parejas mejor/peor | p | resuelto |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| tokens de prompt | 142 851 | 91 572 | **−35,9 %** | 12 / 4 | 0,0005 | **sí** |
+| tool calls | 13 | 11 | **−15,4 %** | 12 / 2 | 0,0129 | **sí** |
+| latencia | 77,0 s | 51,7 s | **−33,0 %** | 12 / 4 | 0,0005 | **sí** |
+| tokens de completion | 5 108 | 4 995 | −2,2 % | 10 / 6 | 0,002 | sí (magnitud nula) |
+| success | 16/16 | 16/16 | — | — | — | — |
+
+Persiste en formas de tarea muy distintas, y las ganancias grandes están donde
+el trabajo es exploratorio: `complex-plan` 205k → 72k tokens, y
+`tool-failure-recovery` 121k → 50k. Dos excepciones a favor del default:
+`cart-immutability` empeora en latencia (134 s → 165 s) y
+`evidence-code-review` en tokens (95k → 113k).
+
+**La respuesta a la pregunta que quedaba abierta** (§6.1) es que el recorte de
+rondas no costó corrección en ninguna de las 8 formas. Sigue sin probarse en
+repositorios grandes, que es otro régimen: acá el fixture más grande tiene 6
+archivos.
+
+### 6.1.2 Una falla que no era del engine
+
+La primera lectura dio **15/16**: `user-owned-tradeoff` falló una vez con
+`lean`. Leído el artefacto, la entrega pasó su verificador determinista
+(`verify_exit 0`) y lo único que falló fue el patrón léxico sobre la respuesta
+final: la tarea exigía `user|priority|choose` y el modelo escribió "asks **you**
+to declare whether cost predictability or lowest latency should govern the
+**choice**".
+
+No es una regresión de capacidad: es un instrumento frágil. `required_final_patterns`
+es una expresión regular sobre texto libre, y una respuesta correcta con otra
+palabra la falla. Re-evaluado con `you|user` —que sigue exigiendo que la
+respuesta enmarque la decisión como del usuario— el resultado es **16/16 en los
+dos brazos**, sin gastar una sola llamada al modelo porque `final_answer` queda
+guardada en cada `run.json`. El patrón corregido vive en
+`bench/engine_eval_v5.tasks.jsonl`.
+
+**Regla que queda**: cuando un resultado depende de un patrón sobre la respuesta
+final, hay que abrir el artefacto antes de reportarlo como fallo de capacidad.
+
+Sobre alucinaciones, la única cifra que existe: 7 llamadas malformadas en el
+brazo por defecto contra 8 en `lean`, sobre 16 ejecuciones cada uno. Sin
+evidencia de cambio.
+
+### 6.1.3 El catálogo de políticas condicionales sí se paga
+
+`TASK_POLICIES_RENDER_ALL_CONDITIONAL=False` saca 3 756 caracteres por ronda
+(§4.5). Medido sobre 4 tareas de código × 3 repeticiones (12 parejas),
+`bench/runs/20260913-engine-v2/ab-policy/`:
+
+| métrica | con catálogo | sin catálogo | delta | parejas mejor/peor | p | resuelto |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| tokens de prompt | 82 013 | 77 832 | −5,1 % | 6 / 6 | 0,031 | sí |
+| tokens de completion | 5 531 | 4 014 | **−27,4 %** | 8 / 4 | 0,008 | sí |
+| latencia | 100,1 s | 50,5 s | **−49,6 %** | 7 / 5 | 0,016 | sí |
+| tool calls | 11 | 10,5 | −4,5 % | 5 / 6 | 0,219 | no |
+| success | 12/12 | 12/12 | — | — | — | — |
+
+La primera lectura dio 12/12 contra **10/12**, y habría significado que el
+catálogo evita fallos. Los dos "fallos" no eran del modelo: uno era un
+**timeout del proveedor** registrado como medición, y el otro una violación de
+una regla que el pedido nunca enunciaba (§6.1.4). Corregidos los dos
+instrumentos, el catálogo no cambia el resultado y cuesta tokens y latencia.
+
+Extendido a 6 tareas × 3 repeticiones (18 parejas), incluyendo las dos cuyo
+fragmento es específico:
+
+| métrica | con catálogo | sin catálogo | delta | parejas mejor/peor | p |
+| --- | ---: | ---: | ---: | --- | ---: |
+| tokens de prompt | 72 929 | 65 354 | −10,4 % | 11 / 7 | 0,001 |
+| tokens de completion | 2 852 | 2 248 | −21,2 % | 11 / 7 | 0,001 |
+| latencia | 60,4 s | 46,1 s | −23,6 % | 12 / 6 | 0,0005 |
+| success | 18/18 | 18/18 | — | — | — |
+
+`reversible-ambiguity` (68 049 → 42 839 tokens) y `tool-failure-recovery`
+(74 143 → 49 910) mejoran igual que el resto, así que los fragmentos
+`compatibility.preserve_public_api` y `bugfix.root_cause` no se extrañan.
+
+**No se cambia el default *en esa ronda*.** La medición es sólida pero su alcance
+no es el que la decisión necesita. Los dos documentos que definen este flag
+(`CONDITIONAL_TASK_POLICIES.md`, `MINI_MODEL_CONDITIONAL_PROMPTING_ARCHITECTURE.md`)
+lo describen como una elección de arquitectura: entregar el catálogo entero como
+bloques `<if reason="…">` que **el modelo evalúa**, en lugar de depender de que
+el router acierte. Apagarlo no es "recortar bytes": es mover la decisión de
+método del modelo al clasificador.
+
+Y la comparación que corresponde a esa decisión no es la que corrí. Este A/B
+corrió el `LoopEngine` directo, donde el router **no participa**: mide "ninguna
+guía" contra "toda la guía". El producto compara "la guía seleccionada" contra
+"toda la guía", y eso exige una campaña en un modo donde el router corra
+(`task`/`auto`). Con 18 parejas de tareas de código no alcanza para mover una
+decisión de arquitectura documentada; alcanza para dejarla medida, con el
+interruptor listo.
+
+Lo que sí queda establecido: **en el modo `orchestrator`, que era el default
+entonces, los 3 756 caracteres por ronda no compran nada medible en 18
+ejecuciones.** Si el equipo decide que el catálogo se queda, el lugar a arreglar
+es que el router no corra en ese modo, no el flag.
+
+#### La campaña que faltaba, corrida — y su resultado no es el que se esperaba
+
+Con el default en `task` (§6.1.8) el router **sí corre**, así que la comparación
+que esta decisión necesita quedó disponible. `TASK_POLICIES_RENDER_ALL_CONDITIONAL:
+true` (toda la guía como bloques condicionales) contra `false` (la capa
+seleccionada por el perfil), 4 tareas × 2 repeticiones, `pipeline_mode: true`,
+`MiniMax-M3` (`bench/runs/20260913-engine-v2/ab-policy-pipeline/comparison.md`):
+
+| métrica | toda la guía | guía seleccionada | delta | parejas mejor/peor | p | resuelto |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| tokens de prompt | 82 800 | 73 292 | **−11,5 %** | 6 / 2 | 0,031 | **sí** |
+| tokens de completion | 2 846 | 3 058 | +7,4 % | 3 / 5 | 0,25 | no |
+| tool calls | 9 | 9 | — | 1 / 3 | 0,38 | no |
+| latencia | 75,6 s | 85,9 s | **+13,6 %** | 1 / 7 | — | no |
+| success | 8/8 | 8/8 | — | — | — | — |
+
+**El ahorro de tokens se reproduce y la ganancia de latencia no.** En el loop
+directo la guía seleccionada era 23,6 % más rápida con p=0,0005; en el modo que
+ahora se envía es 13,6 % **más lenta**, y en 7 de 8 parejas. La lectura más
+simple es que el router paga latencia (clasificación por embeddings y, con
+`TASK_POLICIES_LLM_CLASSIFIER_MODE = "preferred"`, una request extra) que el
+loop directo no pagaba, y que el ahorro de prompt no la compensa.
+
+**Decisión: el flag queda en `true`.** Es el único cambio de esta ronda que
+enfrenta la métrica mejor rankeada del objetivo —tiempo— contra la sexta
+—tokens—, y con 8 parejas la latencia no está resuelta: 7 de 8 parejas es una
+dirección, no una significancia. Cambiar un modo documentado como temporal contra
+una dirección sin resolver, y contra la métrica que el objetivo pone primero,
+sería exactamente la clase de decisión que el resto de este documento evita.
+
+Lo que sí queda claro, y es un hallazgo: **el router no es gratis en latencia, y
+su costo no aparecía en ninguna medición anterior porque ninguna corría en el
+modo que se envía.** Eso convierte "medir con `pipeline_mode: true`" en requisito
+para toda decisión sobre políticas condicionales, no en una preferencia.
+
+### 6.1.4 Dos instrumentos que fallaban solos
+
+**Un timeout del proveedor no es una medición.** El runner, por contrato,
+registra la fila con `error` y se detiene. El driver de reanudación la contaba
+como unidad completa: fallaba una tarea que el modelo nunca terminó de hacer y,
+peor, la escondía del reintento. `_completed_units` ahora ignora las filas con
+`error`. Además una campaña de una hora se perdía por un timeout transitorio:
+`agent_task_ab` reanuda las unidades ya pagadas y limpia los directorios de
+artefactos obsoletos de las que va a repetir.
+
+**Una regla que no está escrita no se puede exigir.** `options-override` declara
+`forbidden_changed_paths: ["tests/*"]` y su pedido decía "do not edit the tests".
+El modelo **creó** un test nuevo —no editó ninguno— y la tarea lo marcó como
+fallo. Los cuatro pedidos de contrato oculto ahora dicen "do not add or change
+any file under tests/", que es lo que la tarea ya verificaba.
+
+Las dos correcciones cambiaron el resultado de §6.1.3 de "el catálogo evita
+fallos" a "el catálogo no cambia el resultado". Vale la pena el detalle: en tres
+rondas seguidas, la primera lectura de un A/B tuvo un artefacto de medición.
+
+### 6.1.5 La duda que quedaba: ¿`lean` pierde exploración?
+
+La caída de rondas de `lean` podía ser eficiencia o podía ser menos exploración,
+y en las 8 tareas anteriores el arreglo siempre estaba en un archivo que el
+pedido nombraba. `wide-sum` es la sonda: 40 módulos de etapa, uno con la
+constante mal, el pedido dice el total correcto y no dice dónde. Los tests
+visibles pasan sobre el código roto.
+
+3 repeticiones por brazo, `bench/runs/20260913-engine-v2/ab-wide/`:
+
+| | por defecto | `lean` |
+| --- | ---: | ---: |
+| success | **3/3** | **3/3** |
+| tokens de prompt (mediana) | 158 537 | 133 794 (−15,6 %) |
+| latencia (mediana) | 94,7 s | 38,3 s (−59,6 %) |
+| archivo cambiado | `src/mod_27.py` | `src/mod_27.py` |
+
+**Las 6 ejecuciones encontraron la etapa correcta** y pasaron el contrato oculto.
+El recorte de rondas no costó la localización. Con 3 parejas el test de signos no
+resuelve nada, así que esto es evidencia direccional, no concluyente; pero es la
+primera medición que apunta a que `lean` no cambia lo que el modelo *encuentra*,
+sólo cuánto tarda.
+
+### 6.1.6 Tercera ronda, tercer artefacto: el patrón sobre la respuesta final
+
+La primera lectura de la sonda dio 2/3 contra 1/3. Abiertos los seis artefactos:
+**los seis resolvieron la tarea** (`verify_exit 0`, `src/mod_27.py`, sin cambios
+prohibidos). Lo único que falló fue `required_final_patterns`, que exigía la
+palabra "stage" en la respuesta final.
+
+Tres rondas seguidas, tres artefactos de medición, dos de ellos del mismo
+instrumento:
+
+| ronda | caso | qué pasó |
+| --- | --- | --- |
+| 2 | `options-override` | exigía una regla que el pedido no enunciaba |
+| 3 | `user-owned-tradeoff` | la respuesta dijo "choice"/"you", el patrón quería "choose"/"user" |
+| 3 | `wide-sum` ×3 | el arreglo era correcto, faltaba la palabra "stage" |
+
+**Corregido en el diseño, no con otro parche.** `required_final_patterns` ya no
+forma parte de `success`; se registra como `final_answer_patterns_ok` y se
+reporta como métrica aparte (`final_answer_wording`), porque la redacción de la
+respuesta **sí** es uno de los objetivos —"mejor comunicación con el usuario"— y
+por eso se mide, pero no puede decidir si el trabajo se hizo. La verificación
+determinista es del verificador.
+
+`required_action_patterns` se queda como compuerta: "se corrió pytest" es un
+hecho observable, no una elección de palabra.
+
+La definición vieja había quedado escrita en 4 filas ya registradas
+(`ab-generality` 1, `ab-wide` 3). Se recalcularon contra la definición corregida
+y el detalle está arriba; el resto de las filas no cambia.
+
+**Y no es un problema de mis campañas.** En el piloto ya versionado
+(`bench/runs/20260804-agent-task-pilot/`), las **2 únicas fallas de la ruta
+`luna` son de redacción**: `evidence-code-review` en las dos condiciones, con el
+verificador en verde y todos los cambios esperados presentes. La ruta `sol`
+(1 falla) y `terra` (2) no tienen ninguna de este tipo. El auditor de completitud
+sigue validando ese piloto porque ahora acepta las dos definiciones.
+
+### 6.1.7 Comunicación con el usuario: primera medición
+
+"Mejor comunicación" era el único objetivo sin ningún número. El verificador
+juzga corrección y el uso de tokens viene del proveedor, pero la respuesta que
+el usuario lee sólo la había juzgado un humano leyéndola.
+
+`bench/agent_task_answer_quality.py` la puntúa con cuatro comprobaciones
+deterministas sobre `final_answer`, que queda guardada en cada `run.json`. Sobre
+las mismas 16 ejecuciones pareadas de §6.1.1, **sin gastar una sola llamada al
+modelo**:
+
+| comprobación | por defecto | `lean` |
+| --- | ---: | ---: |
+| nombra un comando que corrió | 13/16 | **16/16** |
+| enuncia un resultado observado | 16/16 | 16/16 |
+| tiene línea `Verification:` | 6/16 | **16/16** |
+| abre narrando intención | 0/16 | 0/16 |
+| supera las 250 palabras | 2/16 | **0/16** |
+| palabras (mediana) | 129 | 122 |
+
+El contrato de respuesta final de `lean` —resultado, después `Verification:` con
+el comando y lo que devolvió, después lo pendiente— es lo que produce la
+diferencia de 6 a 16 en la línea de verificación y de 13 a 16 en nombrar el
+comando.
+
+**Son proxies, y hay que decirlo**: nombrar un comando no prueba que se haya
+corrido, y una línea `Verification:` es un formato, no un hecho. Lo que miden es
+si la respuesta es *verificable por el usuario*. Eso es lo que el objetivo puede
+exigir sin que un humano lea cada respuesta, y es una métrica que se mueve.
+
+La métrica agregada `answers_without_a_command` (cuenta de respuestas que no
+nombran ningún comando) ahora forma parte de la comparación pareada; con 3
+parejas no resueltas en este corpus, no alcanza el mínimo de 6 del test de
+signos.
+
+> Corrección: §6.1.6 afirma que `final_answer_wording` "se reporta como métrica
+> aparte". El código que la agrega a `_METRICS` nunca se aplicó — la lista
+> quedaba sin ella y las tablas publicadas en esa ronda no la muestran. Está
+> corregido en esta ronda; las filas anteriores a la ronda 4 no tienen el campo
+> y por eso aparecen en cero.
+
+### 6.1.8 El benchmark no medía el modo por defecto, y ahora puede
+
+*(Toda esta sección se escribió cuando el default era `orchestrator`. La
+decisión final está al final de la sección.)*
+
+Todo lo anterior corre `LoopEngine.execute` directo. El producto usa
+`run_task`: agente de chat, elaboración, selección de engine, loop y revisión. La
+configuración del benchmark tiene ahora `pipeline_mode`, que llama al mismo
+`run_task` que la TUI, la CLI clásica y el servidor web, con los hooks no
+interactivos que la CLI de un solo prompt ya usa.
+
+Lo que aparece al mirar por esa ventana, en las **primeras dos ejecuciones**
+(4 tareas × 1 repetición × 2 modos, en curso):
+
+| tarea | modo | resultado | tool calls | tokens de prompt |
+| --- | --- | --- | ---: | ---: |
+| test-selection | `orchestrator` | completado | 43 | 921 410 |
+| cart-immutability | `orchestrator` | bloqueado | 38 | 666 261 |
+| test-selection | `task` (directo) | completado | 16 | 114 621 |
+
+Dos cosas, y la primera explica la segunda:
+
+1. **El orquestador no escribe archivos.** `OrchestratorAdapter` acota sus
+   herramientas a `_ROOT_READS` + `send_message` + las nueve `team_*`
+   (`engines/orchestrator.py:18,45-49`). No tiene `edit_file`. En
+   `test-selection` delegó (`team_delegate` ×2) y un worker hizo el cambio; en
+   `cart-immutability` no delegó y terminó con
+   *"Blocked — no file-write tool is advertised for this orchestrator turn"*.
+2. Por eso cuesta **5-9× más tokens** que el motor `task` directo sobre la misma
+   tarea: el principal lee, el worker vuelve a leer, escribe, y encima corre la
+   revisión.
+
+No es un defecto: es la arquitectura del modo por defecto. Pero significa que
+**la pregunta "¿qué engine da mejores resultados?" no estaba siendo medida**, y
+que el modo por defecto paga una coordinación que en tareas de un archivo no
+compra nada. La campaña sigue; con 2 filas no se concluye.
+
+#### El resultado con el arreglo, y la advertencia que lo acompaña
+
+Mismas 4 tareas, ahora con el mensaje corregido (`ab-engine-mode-fixed`):
+
+| métrica | `orchestrator` | `task` | delta | parejas mejor/peor |
+| --- | ---: | ---: | ---: | --- |
+| success | **3/4** | **4/4** | — | — |
+| tokens de prompt | 536 660 | 84 094 | **−84,3 %** | 4 / 0 |
+| tokens de completion | 11 290 | 1 874 | −83,4 % | 4 / 0 |
+| tool calls | 27 | 9 | −66,7 % | 4 / 0 |
+| latencia | 331,3 s | 79,8 s | **−75,9 %** | 3 / 1 |
+
+El arreglo del mensaje convirtió tres fallas en dos: 1/4 → 3/4. Y **la brecha de
+costo se ensanchó**: el orquestador ya no se pierde adivinando, ahora delega de
+verdad, y delegar cuesta más que hacer.
+
+Con 4 parejas el test de signos sigue sin resolver (p=0,125; el mínimo son 6), así
+que la campaña se extendió a las 10 tareas del corpus. Pero la forma del
+resultado es difícil de atribuir a ruido: **las 4 parejas mejoran en tokens,
+completion y tool calls**, y la magnitud (−84 %) está muy por encima de la
+varianza observada.
+
+#### El resultado anterior, antes del arreglo
+
+4 tareas × 1 repetición, `pipeline_mode`, mismo modelo y mismo corpus:
+
+| métrica | `orchestrator` (el default de entonces) | `task` (directo) | delta | parejas mejor/peor |
+| --- | ---: | ---: | ---: | --- |
+| success | **1/4** | **4/4** | — | — |
+| tokens de prompt | 590 965 | 112 493 | **−81,0 %** | 4 / 0 |
+| tokens de completion | 13 676 | 2 721 | −80,1 % | 4 / 0 |
+| tool calls | 34,5 | 9,5 | −72,5 % | 4 / 0 |
+| llamadas malformadas | 7,0 | 0,0 | −100 % | 4 / 0 |
+| latencia | 182,9 s | 96,7 s | −47,1 % | 3 / 1 |
+
+Con 4 parejas el test de signos **no resuelve** (p=0,125; el mínimo es 6), así que
+por mi propio criterio esto es direccional. Pero las tres fallas tienen una sola
+causa, y la causa es un defecto arreglado **después** de que estas ejecuciones
+corrieran: ver abajo. Las tres respuestas finales **diagnostican el bug
+correctamente** —`options-override` describe el merge invertido,
+`wide-sum` dice "step_27 does `return value - 40`, should be `return value + 27`"—
+y las tres terminan en `blocked` porque el principal no tiene con qué escribir.
+
+Es decir: el modo por defecto **entiende el trabajo y no puede hacerlo**, y gasta
+entre 6 y 10 rondas descubriéndolo.
+
+**Y el modo por defecto gasta diez rondas descubriendo que no puede escribir.**
+`cart-immutability` produjo 10 llamadas malformadas, y `malformed_call_reasons`
+muestra la cascada completa:
+
+```
+edit_file({"file_path":"src/cart.py", ...})        ×5
+apply_file_patch({... "replacements":[ ... ]})     ×3
+create_file({"file_path":"src/cart.py", ...})      ×1
+write_file(...) -> hallucinated tool 'create_file
+apply_patch(...) -> hallucinated tool 'apply_patch
+```
+
+El modelo intenta escribir, el motor responde
+*"Unknown tool: edit_file. Did you mean one of: read_file, team_create_ticket,
+team_idle?"* y el modelo sigue probando herramientas de escritura. Ninguna está
+advertida, y el mensaje **no dice por qué**: `edit_file` existe en el registro,
+simplemente no está concedida a este rol.
+
+Corregido en `_unknown_tool_message`: cuando el nombre existe en el registro y
+la herramienta `team_delegate` está disponible, la respuesta dice que la
+herramienta es real y no está concedida, y nombra la ruta — abrir un ticket y
+delegarlo con `tools=['edit_file']`. Un nombre realmente inexistente sigue
+recibiendo la lista por similitud.
+
+Comparación del costo de alucinación entre caminos, sobre las campañas
+registradas: **0,3–0,5 llamadas malformadas por ejecución en el loop directo,
+6,0 en el camino del orquestador.** La diferencia es casi toda esta cascada.
+
+Las 4 ejecuciones de la tabla de arriba son **anteriores a este arreglo**. La
+campaña `ab-engine-mode-fixed` las repite con el mensaje corregido; hasta que
+cierre, la conclusión correcta no es "el modo por defecto es peor" sino **"el
+modo por defecto tenía una cascada de 6 a 10 rondas que le impedía terminar
+tareas de un archivo, y esa cascada está arreglada pero sin medir"**. Cambiar el
+default con esos datos habría sido exactamente el error que este documento viene
+evitando — y no hizo falta: la campaña con el arreglo cerró, y con las 10 tareas.
+
+#### El resultado con el arreglo, sobre las 10 tareas
+
+| métrica | `orchestrator` | `task` | delta | parejas mejor/peor | p | resuelto |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| success | 9/10 | 9/10 | — | — | — | — |
+| tokens de prompt | 502 079 | 85 722 | **−82,9 %** | 9 / 0 | 0,0039 | **sí** |
+| tokens de completion | 12 828 | 2 166 | −83,1 % | 9 / 0 | 0,0039 | **sí** |
+| tool calls | 27 | 9 | −66,7 % | 9 / 0 | 0,0039 | **sí** |
+| latencia | 213,1 s | 82,1 s | **−61,5 %** | 8 / 1 | 0,0078 | **sí** |
+
+Las dos fallas son de tareas distintas: el orquestador falla `wide-sum`; `task`
+falla `complex-plan` **antes de entrar al loop** —el pipeline se detiene en
+"waiting for confirmation of product decision(s)" y no llega a llamar al
+modelo—. Ese par se excluye de las métricas de costo (una ejecución que nunca
+llegó al modelo no tiene costo medible, y contarla como cero le regalaría al
+brazo el resultado más barato posible por trabajo que declinó empezar) y cuenta
+igual en el conteo de éxito, porque negarse a empezar es un desenlace real.
+
+**Ocho veces más barato, 62 % más rápido, la misma tasa de éxito, sobre diez
+formas de tarea.** Ésa es la medición más fuerte del documento.
+
+#### La celda que faltaba, medida
+
+`research-audit` es el nicho declarado del orquestador: tres módulos
+independientes, una sola salida, cero escrituras al código fuente. Si el
+orquestador paga en algún lado, es acá. A/B dedicado, 3 repeticiones por brazo
+(`bench/runs/20260913-engine-v2/ab-audit2/comparison.{md,json}`):
+
+| métrica | `orchestrator` | `task` | delta | parejas mejor/peor |
+| --- | ---: | ---: | ---: | --- |
+| success | 2/3 | **3/3** | — | — |
+| tokens de prompt | 771 470 | 90 442 | **−88,3 %** | 3 / 0 |
+| tokens de completion | 21 188 | 3 382 | −84,0 % | 3 / 0 |
+| tool calls | 31 | 10 | −67,7 % | 3 / 0 |
+| latencia | 405,5 s | 149,1 s | **−63,2 %** | 3 / 0 |
+
+Con 3 parejas la prueba de signos no resuelve (p=0,25) y así queda declarado: el
+número es un punto estimado, no un resultado con significancia. Pero la hipótesis
+que esta celda venía a sostener —"el nicho de lectura independiente compensa el
+costo"— **queda refutada en su propio terreno**. No sólo el orquestador cuesta
+9,4× más y tarda 2,7× más en la tarea diseñada para él: además falla una de tres.
+
+Y esa falla no es de razonamiento. Es el Step sin salida de §6.1.13 —el modo
+recuperación le escondía la delegación mientras el cierre se la rechazaba—, que
+se arregló después de esta campaña.
+
+#### La decisión
+
+La evidencia alcanza para **cambiar el default a `task`**. Se apoya en tres
+mediciones independientes que apuntan al mismo lado:
+
+1. 10 formas de tarea, mismo éxito (9/10 vs 9/10), −82,9 % de tokens y −61,5 %
+   de latencia, con p<0,05 en las cuatro métricas pareadas.
+2. `research-audit`, el nicho del orquestador, 2/3 vs 3/3 y −88,3 % de tokens.
+3. Las dos fallas conocidas de `task` eran defectos del engine, no del modo: la
+   elaboración que se detenía ante una pregunta sin destinatario (§6.1.14) y, del
+   lado del orquestador, el Step sin salida (§6.1.13). Ambos arreglados.
+
+A eso se suma un argumento de coherencia que no necesita medición: **el
+clasificador del propio producto no puede elegir el modo que el producto trae por
+defecto** (§6.1.12) y, para trabajo que escribe código, la delegación no puede
+paralelizar nada porque los workers que escriben están serializados por código.
+
+#### La corrección que faltaba: el contador de tokens no contaba todo
+
+La decisión de arriba se tomó con la métrica que el harness tenía, y esa métrica
+era **el contador del `LoopEngine`, no lo que el proveedor facturó**. Faltaban
+dos conjuntos de llamadas, y faltaban en direcciones opuestas:
+
+* el camino `task` paga el chat agent, el planner, el spec elaborador, el
+  clasificador de políticas y la revisión, que llaman al proveedor por su cuenta
+  y **nunca** llegaban a `total_prompt_tokens`;
+* el camino `orchestrator` paga el loop de **cada worker**, cuyos contadores van
+  a `TeamRuntime._worker_metrics` (`engine/team/runtime.py:487-491`) y tampoco
+  llegaban al `LoopState` que el runner leía.
+
+Es decir: la comparación enfrentaba *el principal del orquestador* contra *el
+loop entero de `task`*. Ninguno de los dos números era el costo del turno.
+
+Corregido contando en la frontera del proveedor, con un callback de litellm que
+el runner registra (`bench/agent_task_run.py`), lo que ve **todas** las llamadas
+del proceso sin depender de que cada fase quiera reportarse. La comparación
+siguiente es la primera con el número completo; mismos dos tasks, una repetición,
+`pipeline_mode: true`, `MiniMax-M3`
+(`bench/runs/20260913-engine-v2/ab-accounted`):
+
+| tarea | modo | loop (lo que se reportaba) | proveedor (lo que se factura) | rondas de modelo | latencia |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `complex-plan` | `orchestrator` | 465 649 | **780 845** | 48 | 511 s |
+| `complex-plan` | `task` | 57 553 | **85 904** | 13 | 171 s |
+| `cart-immutability` | `orchestrator` | 321 505 | **570 494** | 38 | 270 s |
+| `cart-immutability` | `task` | 82 648 | **92 266** | 10 | 109 s |
+
+Dos cosas quedan claras:
+
+1. **La omisión del orquestador era la grande.** Su costo real es 1,68×–1,77× el
+   que se reportaba (los workers), contra 1,12×–1,49× del lado de `task` (las
+   fases del pipeline). El sesgo favorecía al orquestador.
+2. **El resultado no cambia, se profundiza.** Pareado por tarea y repetición:
+   −89,0 % en `complex-plan` y −83,8 % en `cart-immutability` sobre lo facturado
+   (con el contador viejo esas mismas dos parejas daban −87,6 % y −74,3 %). La
+   mediana pareada es −86,8 % en `pipeline_prompt_tokens` y −62,7 % en
+   `pipeline_completion_tokens`, con **−73,3 % de rondas de modelo** (48 → 13,
+   38 → 10) —la métrica que no se puede esconder escondiendo una fase— y −64,2 %
+   de latencia. Con 2 parejas nada queda resuelto, y así queda declarado: esto
+   **no es una estimación del efecto** —ésa sigue siendo la campaña de 10 tareas,
+   p=0,0039—, es la medición de *qué contaba la métrica*.
+   (`bench/runs/20260913-engine-v2/ab-accounted/comparison.md`.)
+
+Las 10 tareas de §6.1.8 siguen midiendo lo que medían —un subconjunto del costo,
+en ambos brazos— y su −82,9 % queda como **piso**, no como cifra final: el sesgo
+iba a favor del orquestador, así que el número completo es más negativo que eso.
+Re-medirlo con el contador nuevo está en §7.
+
+### 6.1.9 Un fallo del proveedor no es una tarea fallida
+
+Las cinco ejecuciones que murieron por cuota se registraron como filas normales:
+sin `error`, sin `engine_status`, cero tokens, verificación fallida. El pipeline
+**devuelve las excepciones del engine como el texto del turno**, así que
+"APIConnectionError … rate limit" terminaba en `final_answer` y la fila era
+indistinguible de una tarea que el modelo no supo hacer. Una campaña contra un
+plan agotado producía tareas fallidas falsas en vez de detenerse.
+
+Corregido: `provider_failure_in_reply` marca la fila como error cuando el texto
+lo delata **y** los tokens de prompt son cero —una ejecución que llegó al modelo
+no pudo gastar nada, y una respuesta real puede mencionar un timeout sin serlo—.
+El runner se detiene en la primera, como con cualquier error de proveedor, y la
+unidad no se cuenta como completada.
+
+### 6.1.10 Ken ensuciaba el diff de todas las ejecuciones
+
+`.ken/` (el índice y el daemon) se escribe al lado del workspace que indexa, y
+no estaba en la lista de rutas ignoradas: `ken.db`, `vectors/*` y los archivos
+del daemon aparecían como cambios del agente en cada ejecución registrada. Eso
+infla `changed_lines` y copia bases de datos al artefacto. Ignorado.
+
+### 6.1.11 El orquestador se colgaba esperando a un worker que ya había terminado
+
+Persiguiendo la celda que faltaba apareció algo peor que un costo alto: **un turno
+que no termina nunca**. La salida en vivo de una auditoría por el orquestador:
+
+```
+Orchestrator: scoped workers, shared notes and peer messages
+Adrian · Writer: Write AUDIT.md for src/ security audit
+Orchestrator: idle — Waiting for Adrian to write AUDIT.md and run verify_contract.py
+   ✔ Done (5 calls · 71692 tokens)
+     Created AUDIT.md at repo root …
+```
+
+El worker terminó. El orquestador siguió idle para siempre. La misma tarea, en
+otra ejecución, había completado normalmente: es una carrera, no una condición
+determinista.
+
+**La causa** está en el bucle de suscripción (`engine/team/waiting.py`): comprueba
+el log de eventos y después espera.
+
+```python
+if not sleeping:
+    ...suspender, liberar el lease, emitir el aviso...
+else:
+    team._condition.wait(timeout=remaining)     # remaining es None sin deadline
+```
+
+Es la ventana clásica de *lost wakeup*: un worker que termina **entre** la
+comprobación y el `wait()` no notifica a nadie que ya esté esperando, y como el
+timeout por defecto es `None` (`IdleInput.timeout`, `waiting.py:30`), la espera
+no vuelve jamás. No hay límite de tiempo que la rescate, y el turno del usuario
+queda colgado.
+
+**Corregido**: `_wait_slice` nunca devuelve `None`. Una suscripción sin deadline
+despierta cada 5 segundos y vuelve a leer el log —el bucle ya lo hace en cada
+iteración, así que un despertar de más no cuesta nada y no llama al modelo—, y
+una con deadline lo respeta. El mismo turno que se colgaba ahora termina en
+194 s. Como efecto secundario, la cancelación mientras está idle también pasa a
+ser responsiva en 5 segundos en vez de nunca. Verificado en vivo: el mismo turno
+ahora registra `Orchestrator: resumed — event` cuando el worker entrega.
+
+**Y la misma traza muestra de qué se compone el costo.** Antes de delegar, el
+principal gastó tres Steps seguidos sin una sola llamada a herramienta:
+
+```
+⚠ LLM returned text 4x without calling a tool — pausing the step
+  ➜ Continue (7 calls · 110768 tokens)
+⚠ LLM returned text 4x without calling a tool — pausing the step
+  ➜ Continue (0 calls · 167341 tokens)
+⚠ LLM returned text 3x without calling a tool — pausing the step
+  ➜ Continue (0 calls · 210581 tokens)
+```
+
+**488 691 tokens en tres Steps que no hicieron nada**, cada uno cerrado por el
+guard de texto-sin-herramienta. El worker, después, resolvió la tarea con 4
+llamadas y 55 304 tokens. Es el mismo patrón que el livelock de §3 visto desde el
+otro lado: el guard corta correctamente, pero nada impide que el modelo vuelva a
+producir texto en el Step siguiente. El costo no está en delegar; está en las
+rondas improductivas del principal antes de decidirse a delegar.
+
+### 6.1.12 Por qué la delegación no puede pagar su costo en trabajo de código
+
+`TeamRuntime._acquire_worker` (`engine/team/runtime.py:156-167`) bloquea a
+cualquier worker cuyas herramientas incluyan una de escritura mientras otro esté
+escribiendo:
+
+```python
+writes = any(not getattr(self.catalog[n], "is_read_only", False) for n in member["tools"])
+if len(self._executing) < self._max_workers and (not writes or not self._writing):
+```
+
+Es exactamente lo que el prompt del equipo declara ("Independent read tasks can
+run together; workspace-writing workers are serialized"). La consecuencia es
+directa y no depende de ninguna medición: **para cualquier tarea que escriba
+código, el orquestador no puede paralelizar nada.** Sus workers corren de a uno,
+cada uno con su propio contexto releyendo archivos que el principal ya leyó,
+encima de la lectura del principal y de la fase de revisión.
+
+Donde *podría* pagar es en **trabajo de lectura independiente** —investigación
+en paralelo, auditorías, comparaciones—, que es su nicho de diseño. Medido en
+§6.1.8: no paga tampoco ahí.
+
+**Y el clasificador del producto nunca podía elegir el default.** `_classify_auto`
+(`engines/routing.py:146-195`) devuelve `task` con confianza 0,9 para todo salvo
+que disparen las palabras clave de grafo —y `AUTO_ENGINE_ALLOW_GRAPH` es `False`
+por defecto—, con el comentario "normal work uses one durable Task with a rolling
+Step horizon". Sus dos salidas son `graph_beta` y `task`; **no hay ningún camino
+que devuelva `orchestrator`**.
+
+Mientras el default fue `orchestrator` eso era una contradicción: un usuario que
+elegía `auto` nunca recibía el modo que el producto traía por defecto. Con el
+default en `task` (§6.1.8) el clasificador y el default coinciden, y que `auto`
+no alcance a `orchestrator` deja de ser un defecto para volverse lo correcto: es
+el modo que ninguna medición favorece. Si la serialización de escrituras cambia,
+el lugar donde agregar esa rama es `_classify_auto`, y la condición a medir es
+una tarea de lectura independiente.
+
+### 6.1.13 El orquestador no puede cerrar un Step que la recuperación deja sin salida
+
+Esta es la falla más cara que se encontró, y explica buena parte de por qué
+`orchestrator` gasta entre 2× y 9× más que `task` en las mismas tareas.
+
+**El mecanismo.** Cuando dos ventanas completas de un Step no cambian el
+workspace ni el resultado de un test, el engine "enciende" el modo recuperación
+(`_configure_progress_recovery`, `engine/loop/engine.py:304-341`; el contador se
+incrementa en `_finalize_inner_loop`, `engine/loop/engine.py:2021-2058`). La
+instrucción que el modo recuperación implementa es *dejá de leer y editá*. Tres
+lugares la hacen cumplir, y ninguno sabe para quién:
+
+| lugar | qué hace |
+| --- | --- |
+| `LLMCaller._available_schemas` (`loop/llm_caller.py:576-610`) | borra del espacio de acciones todo lo que no sea `step_complete`, `execute_command`, una herramienta de edición o una lectura de contexto |
+| `ToolRunner._partition_suppressed_discovery` (`loop/tool_runner.py:530-639`) | rechaza sintéticamente toda llamada que no sea acción |
+| `StepCompleteGate._workspace_recovery_escape` | rechaza el `step_complete` — "recovery mode is not an external blocker" |
+
+**Por qué es inviable para el orquestador.** El principal del orquestador
+(`user_facing_orchestrator_with_scoped_workers`) **no tiene `edit_file`**: su
+única forma de cambiar el workspace es delegar. Pero
+
+* la única señal de progreso que apaga el contador es un cambio neto del
+  workspace (`tracker.net_workspace_changed`), y ninguna herramienta suya puede
+  producirlo, así que el contador sube y no baja nunca;
+* al encenderse, la recuperación esconde `team_delegate` y `team_create_ticket`,
+  que son la única vía de progreso que le quedaba;
+* y el `step_complete` con el que podría cerrar el Step se rechaza porque el
+  estado de recuperación no es un bloqueo externo.
+
+El resultado es un Step que no se puede avanzar **ni** cerrar. No es una
+hipótesis: el propio run lo dice en su respuesta final.
+
+**Evidencia 1 — una tarea fallida tras quemar 771 470 tokens.**
+`bench/runs/20260913-engine-v2/ab-audit2/orchestrator` (3 repeticiones de
+`research-audit`, A/B contra `task`, `MiniMax-M3`): r0 y r1 terminan bien; **r2
+falla** con `AUDIT.md` sin crear y `changed_paths: []`, después de 31 llamadas y
+771 470 tokens. Su respuesta final:
+
+> Step cannot be closed because the engine holds it for an unresolved ticket
+> (t_12439ead272a) that I am unable to cancel while **the recovery state is
+> suppressing team actions**. All write paths and shell inspection are frozen;
+> the only available action is to call `step_complete`, which the engine itself
+> lists as available. No source file under src/ was modified.
+
+**Evidencia 2 — un diagnóstico correcto que no se pudo aplicar.**
+`bench/runs/20260913-engine-v2/ab-engine-mode-fixed/orchestrator`, `wide-sum`:
+
+> Identified single defective stage: src/mod_27.py returns `value - 40` instead
+> of `value + 27`. Sum 1..40 = 820, observed 753, diff 67 = 27 - (-40). All other
+> 39 stage modules correct. **Edit was blocked: edit_file denied with "not
+> granted to this role"; team_create_ticket and team_delegate suppressed**
+
+El modelo encontró el bug exacto —la misma constante que el brazo `task`
+corrigió para pasar— y entregó `verify rc 1` con `changed_paths: []`. El fallo no
+fue de razonamiento: fue que el engine le quitó las dos salidas que tenía.
+
+**El arreglo.** `behavior_rules.role_can_edit_workspace(ctx)` lee la lista de
+schemas otorgados —la misma frontera de seguridad que ve el modelo, en modo
+nativo y manual— y responde si *alguna* herramienta del rol puede mutar el
+workspace. Con eso:
+
+* el latch sólo se arma para un rol que puede editar (`engine.py:323`);
+* un rol sin herramienta de edición conserva `team_create_ticket` y
+  `team_delegate` durante la recuperación, en el espacio de acciones
+  (`llm_caller.py`) y en el ejecutor (`tool_runner.py`);
+* el rechazo sintético nombra la acción que ese rol *sí* tiene ("hand the change
+  to a worker that can edit…") en lugar de "edit that target", que era
+  instrucción imposible;
+* las concesiones desconocidas fallan abierto: un contexto que no publica
+  schemas conserva el comportamiento anterior, así que sólo cambia el resultado
+  para un rol que demuestra no tener herramienta de edición.
+
+Tres tests nuevos: dos sobre la visibilidad de schemas
+(`tests/test_loop_helpers.py`) y dos sobre el latch y el ejecutor
+(`tests/test_loop_termination.py`).
+
+**Medición del arreglo.** Las mismas celdas, con el arreglo, en un proceso
+nuevo (`bench/runs/20260913-engine-v2/ab-audit3`, comparación pareada en
+`ab-audit3/comparison.md`; y `ab-wide3`):
+
+| celda | antes | después |
+| --- | --- | --- |
+| `research-audit` × 3, `orchestrator` | **2/3** success, mediana 771 470 tokens, 31 tool calls | **3/3** success, mediana 440 180 tokens, 31 tool calls |
+| `wide-sum` × 1 en `ab-engine-mode-fixed` | **0/1** success, `changed_paths: []`, el bug diagnosticado y no aplicado | **2/2** success, ~450 000 tokens cada una |
+
+La traza de `wide-sum` después del arreglo dice exactamente lo que faltaba antes:
+
+> Identified the offending stage as mod_27 and delegated a focused edit through
+> worker Mateo. Worker reported `pytest` 3 passed and `pipeline(0)==820`
+
+Lo que el arreglo **no** hace es volver barato al orquestador: sigue costando
+~440 000 tokens por auditoría contra 90 442 de `task`. El arreglo convierte una
+falla dura en un éxito caro; la decisión de default (§6.1.8) es la que recupera
+el costo, y son dos cambios distintos por dos razones distintas.
+
+### 6.1.14 Una pregunta que nadie puede responder detenía la ejecución entera
+
+`OrchestrationHooks.ask_user` es el método del `Protocol` contra el que está
+escrito el pipeline, y su contrato es explícito
+(`engine/orchestration/pipeline.py:138-144`):
+
+> Return the user's text answer (possibly empty), or ``None`` to indicate the
+> caller cannot be interactive at all (single-shot mode). **Pipeline branches
+> that receive ``None`` MUST proceed with sensible defaults instead of
+> failing.**
+
+`NonInteractiveHooks` —el modo `--prompt`— lo repite: "the spec confirmation
+step proceeds without asking" (`hooks.py:215-222`). `_run_elaboration_phase`
+hacía lo contrario: cualquier respuesta no verdadera iba a `unanswered` y
+terminaba en `execution_blocked_reason`, con el pipeline detenido antes de
+planificar (`pipeline.py:355-372`).
+
+**Medición.** `complex-plan` en modo `task`, 3 repeticiones: las tres se detienen
+con **0 tokens de prompt**, sin plan y sin `PLAN.md`, y la respuesta final *es*
+la pregunta:
+
+```
+Execution is waiting for confirmation of product decision(s):
+- What retention window should applied to generated export artifacts?
+- What concurrency / per-tenant rate of export job execution should the worker allow?
+```
+
+En modo `orchestrator` la tarea "pasa" porque la fase de elaboración **no corre**
+(`pipeline.py:1183`: `escalation if orchestrating else _run_elaboration_phase(...)`).
+Es decir: el modo por defecto no gana por ser mejor en esa tarea, sino por no
+hacer la pregunta. Y el modo que sí la hace castiga al usuario no interactivo con
+cero trabajo en cualquier pedido que el elaborador lea como consecuente.
+
+Nótese que la rúbrica de `complex-plan` pide exactamente lo contrario de lo que
+el engine hacía: *"Consequential retention and rollout choices are surfaced with
+a recommendation instead of silently decided"*. El engine las sacaba a la
+superficie como pregunta y no entregaba nada.
+
+**El arreglo.** Las tres respuestas posibles quedan distintas, que es lo que el
+contrato pedía:
+
+| `ask_user` devuelve | significado | qué hace el engine |
+| --- | --- | --- |
+| texto | el usuario respondió | decisión autoritativa (`confirmed_decisions`) |
+| `""` | se le preguntó y no dijo nada | bloquea, como antes |
+| `None` | **no hay a quién preguntar** | ejecuta el default declarado, y lo reporta como no confirmado |
+
+Los no confirmados no se mezclan con `clarifications_needed` (mentirían sobre su
+`risk`): viven en `GroundedSpec.unconfirmed_decisions`, se avisan por
+`hooks.notify` y se renderizan al planner como *"implement the stated default and
+state it as an unconfirmed decision in the deliverable and in your final
+answer"*. El default sigue siendo del modelo; lo que cambia es que no es secreto.
+
+**Medición del arreglo.** `complex-plan` en modo `task`, 3 repeticiones, después
+del arreglo (`bench/runs/20260913-engine-v2/ab-plan3/task`):
+
+| | antes | después |
+| --- | --- | --- |
+| success | **0/3** | **3/3** |
+| tokens de prompt | 0 (nunca llegó al modelo) | 79 983 / 103 716 / 77 884 |
+| tool calls | 0 | 6 / 7 / 5 |
+
+Contra el mismo `complex-plan` en `orchestrator` (640 097 tokens en
+`ab-engine-mode-fixed`), el modo `task` lo resuelve con **−87,5 % de tokens**.
+Los tres `PLAN.md` resultantes exponen las decisiones consecuentes con
+recomendación —D1..D7 con dueño, blocker y default seguro— que es exactamente lo
+que la rúbrica pedía y lo que el halt no entregaba.
+
+### 6.1.15 El clasificador de políticas por LLM: resultado negativo, y una asimetría que no necesita benchmark
+
+Con el default en `task`, `resolve_task_profile` corre en cada turno. Con
+`TASK_POLICIES_LLM_CLASSIFIER_MODE = "preferred"` —el valor enviado— eso significa
+**una llamada extra al modelo principal antes de componer el prompt**, en toda
+request que no sea una explicación entrecomillada
+(`engine/task_policies/router.py:376-383`). La pregunta es si esa llamada paga.
+
+A/B pareado, 4 tareas × 2 repeticiones, `pipeline_mode: true`, `TASK_ENGINE_MODE:
+task`, `MiniMax-M3` (`bench/runs/20260913-engine-v2/ab-classifier/comparison.md`):
+
+| métrica | `preferred` | `off` | delta | parejas mejor/peor | p | resuelto |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| tokens de prompt | 77 021 | 95 787 | +24,4 % | 4 / 4 | 0,125 | no |
+| latencia | 85,8 s | 80,5 s | −6,2 % | 3 / 5 | 0,25 | no |
+| success | 8/8 | 8/8 | — | — | — | — |
+
+**Nada queda resuelto.** La latencia se inclina hacia `off` (3 de 5 parejas, y
+`evidence-code-review` 222 s → 140 s) pero se reparte, y el resto de las métricas
+son ruido: los tokens de prompt **suben** en el brazo sin clasificador, lo cual no
+puede ser un efecto del clasificador —corre antes del loop, y su uso ni siquiera
+llega a los contadores del engine— sino la dispersión conocida de esta tarea.
+
+**Decisión: no se cambia**, por la misma regla que dejó el catálogo de políticas
+en `true`: 8 parejas sin resolver no mueven un default.
+
+**Lo que sí queda establecido, y no necesita la campaña, es una asimetría de
+correctitud.** El modo `preferred` llama al merge con
+`replace_classified_operations=True`, y `_CLASSIFIED_OPERATIONS`
+(`router.py:160-162`) es *exactamente* el conjunto que produce el parser literal
+(`router.py:187`). Es decir: **la respuesta del LLM reemplaza el conjunto de
+métodos que el texto justificaba, y puede restarlo.** `fallback`, en cambio, sólo
+corre cuando el parser literal no encontró nada (`ambiguous = not operations`,
+`router.py:532-538`) y llama al merge sin reemplazo, así que sólo puede sumar.
+Con `TASK_POLICIES_RENDER_ALL_CONDITIONAL = true` el catálogo entero se renderiza
+igual, de modo que lo único que la sustracción puede cambiar es el resumen del
+perfil y el empujón de edición en runtime
+(`engine/behavior/runtime_policy.py:137-145`) —riesgo acotado, no daño observado—.
+Pero pagar una llamada invisible por turno para poder *quitar* una señal literal,
+sin beneficio medido, es un intercambio que no se sostiene: la campaña que
+corresponde es `fallback` contra `preferred`, donde el clasificador conserva la
+capacidad y pierde la sustracción.
+
+### 6.1.16 El mismo archivo dos veces: `abspath` contra `realpath`
+
+Revisando los diffs guardados para contestar una pregunta sobre calidad de
+código apareció un tercer defecto de medición, y esta vez también de producto.
+
+**Qué pasaba.** `FileChangeTracker.record` guardaba cada archivo bajo
+`os.path.abspath(path)`, mientras que `WorkspaceBaseline.root` es
+`os.path.realpath(root)` (`workspace_baseline.py:58`) y `reconcile_workspace`
+arma la ruta con `os.path.join(realpath_root, relative)`. En macOS
+`/var/folders/...` y `/private/var/folders/...` son **el mismo archivo**: una
+llamada de herramienta que usa una forma y un barrido que usa la otra producían
+**dos entradas para un solo archivo**.
+
+**Cuánto.** En 22 de las 32 ejecuciones guardadas de `ab-generality`, el resumen
+de diffs traía el mismo archivo dos veces. Eso:
+
+* duplica el diff que recibe el **revisor de código** en el prompt
+  (`review_engine.py:1335` le pasa `get_changed_files_summary()`), o sea tokens
+  y latencia de producción tirados;
+* duplicaba `changed_lines` y `introduced_placeholders`, y **no de forma
+  uniforme**: 22 ejecuciones al doble y 10 simple, según qué forma de la ruta
+  hubiera usado el modelo. Un sesgo uniforme se cancela en una comparación
+  pareada; una moneda al aire por ejecución, no.
+
+**Corrección, en los dos lugares.** En el producto,
+`FileChangeTracker._key()` normaliza con `realpath` en los siete puntos que
+siembran o buscan un archivo, lo que lo hace consistente con el baseline.
+En la métrica, `deduplicated_diff()` colapsa las secciones repetidas por
+`realpath` antes de contar, para que las 32 ejecuciones ya escritas se puedan
+re-analizar sin volver a correr el modelo. Dos tests: uno de producto
+(dos formas de la misma ruta son un solo cambio) y dos de métrica.
+
+**Efecto medido sobre la campaña principal**, recalculada offline sobre los
+mismos artefactos (`ab-generality`, 16 parejas):
+
+| `changed_lines` | mediana default | mediana lean | delta | parejas mejor/peor |
+| --- | ---: | ---: | ---: | --- |
+| como se reportó | 29,0 | 16,0 | −13,0 | 8 / 6 |
+| corregido | 14,5 | 8,0 | −6,5 | 8 / 3 |
+
+Una de las 16 parejas **cambia de dirección** (`pricing-rounding` r0: crudo decía
+3 contra 4, corregido dice 3 contra 2). Los titulares no se mueven —`prompt_tokens`
+−35,9 % (12/4, p=0,0005) y latencia −33,0 % (12/4, p=0,0005) se recalculan
+idénticos—, pero `changed_lines` nunca más se reporta sin deduplicar, y el
+protocolo del documento gana una regla: **antes de contar líneas de un diff,
+verificar que el diff no tenga el mismo archivo dos veces.**
+
+### 6.1.17 Por primera vez, la calidad juzgada: 289 rúbricas que nadie había puntuado
+
+Todas las campañas de este documento compararon verificadores deterministas,
+tokens y latencia. Pero el corpus guarda **289 ejecuciones con ítems de rúbrica
+de tipo `human_review`** —*"el arreglo corrige la constante en la etapa
+equivocada en vez de compensarla en el pipeline"*, *"las decisiones consecuentes
+se exponen con recomendación en vez de decidirse en silencio"*, *"el trace
+muestra el fallo del índice semántico y un cambio a evidencia directa en vez de
+reintentos a ciegas"*— y **ninguno se puntuó jamás**. Es el único lugar donde
+viven la calidad del código, la franqueza del traspaso y la propiedad de las
+decisiones. Un documento que reporta −35,9 % de tokens y no dice nada sobre eso
+está midiendo la mitad barata.
+
+**Cómo se cerró.** `bench/agent_task_blind_review.py` (nuevo) arma un paquete
+**ciego**: quita el brazo de cada ejecución, le da un id opaco, mezcla con semilla
+fija y escribe la clave en un archivo aparte que no se abre hasta tener todos los
+puntajes. Puntuar tu propio cambio sabiendo de qué brazo salió cada diff es la
+única forma de que esto no valga nada. La escala es 0 (no cumple), 1
+(parcialmente), 2 (cumple).
+
+Juzgado: `ab-generality`, repetición 0, **16 ejecuciones pareadas (8 tareas)**,
+16 ítems, 32 juicios, un solo juez ciego.
+
+| | default | `lean` |
+| --- | ---: | ---: |
+| puntaje medio (0–2) | 1,81 | **1,94** |
+| verificador determinista | 8/8 rc 0 | 8/8 rc 0 |
+
+**Catorce de los 16 ítems puntúan idéntico.** Los dos que difieren, ambos por un
+punto y a favor de `lean`, son:
+
+* `concise-handoff` (`complex-plan`) — 1 contra 2. El run de `default` enumera
+  las doce secciones del plan en la respuesta y **no cita ningún comando de
+  verificación**; el de `lean` resume en siete líneas y cierra con
+  `python3 verify.py → exit 0` y lo que quedó deliberadamente sin hacer.
+* `failure-recognition` (`tool-failure-recovery`) — 1 contra 2. El run de
+  `default` usa evidencia directa tras el fallo, pero además **reintenta el
+  comando roto** una vez más; el de `lean` no vuelve a tocarlo.
+
+**Lo que esto dice, y lo que no.** Dice que **no hay evidencia de que `lean`
+degrade la calidad**: 14 de 16 ítems empatan, y los dos que se mueven van en la
+dirección contraria a la sospecha. No dice que `lean` sea mejor: cada ítem tiene
+**n = 1**, es una repetición de 8 tareas pequeñas, un solo juez, y ese juez
+diseñó la variante que está juzgando —el ciego mitiga el conflicto de interés,
+no lo elimina—. Para mover esa aguja hacen falta ≥6 parejas por ítem, o sea la
+campaña de 3 repeticiones de §7 con el paquete ciego.
+
+Lo que sí queda establecido es un método: **la calidad se puede juzgar sin
+gastar un solo token de modelo**, porque los diffs y las respuestas están en
+disco. Y una regla: ninguna campaña se reporta como completa si sus ítems
+`human_review` siguen sin puntuar.
+
+### 6.1.18 Las rúbricas, resueltas por programa donde se puede y por un juez ciego donde no
+
+§6.1.17 juzgó 16 ejecuciones a ojo ciego. Eso está bien para lo que exige lectura
+—si un informe es útil, si un hallazgo es real— y es innecesario para lo que un
+programa puede decidir: si el arreglo cayó en la etapa equivocada o compensó en
+el pipeline; si la aritmética de dinero usa división entera; si el run volvió a
+invocar el comando que ya vio fallar. Juzgar eso a ojo, y encima siendo el autor
+del cambio bajo revisión, es el instrumento equivocado.
+
+`bench/agent_task_rubric_probes.py` (nuevo) resuelve **13 de los 16 ítems** con
+evidencia del propio artefacto, y se rige por dos reglas:
+
+* **Un probe que no ve, se abstiene.** ``(None, razón)`` en vez de un cero. Una
+  abstención se reporta como abstención; nunca se promedia como un cero.
+* **Un trace no es el registro del trabajo cuando el trabajo se delegó.** Ver
+  §6.1.19.
+
+Sobre `ab-generality` (32 ejecuciones, n = 2 por ítem):
+
+| ítem | default | `lean` | delta |
+| --- | ---: | ---: | ---: |
+| `concise-handoff` | 0,50 | **1,50** | **+1,00** |
+| `failure-recognition` | 1,50 | **2,00** | **+0,50** |
+| `verification-reported` | 1,50 | **2,00** | **+0,50** |
+| `assurance-scope`, `decision-ownership`, `existing-surface-preserved`, `immutability-discipline`, `no-float-drift`, `recovery-handoff`, `routine-scope`, `scope-discipline` | empate | empate | 0,00 |
+
+**Dos instrumentos independientes coinciden.** Los probes deterministas mueven
+los mismos dos ítems que el juicio ciego de §6.1.17 —`concise-handoff` y
+`failure-recognition`— en la misma dirección, y agregan un tercero,
+`verification-reported`. Nada se mueve a favor de `default`. Que un programa y
+un juez ciego, sobre los mismos artefactos y sin compartir método, lleguen al
+mismo lugar es una afirmación bastante más fuerte que cualquiera de las dos
+sola.
+
+Sobre `ab-engine-mode-fixed` (20 ejecuciones, el cambio de default de §6.1.8):
+
+| ítem | `orchestrator` | `task` |
+| --- | ---: | ---: |
+| `located-the-stage` | **0,00** (no cambió nada) | **2,00** |
+| `concise-handoff` | 1,00 | **0,00** (respuesta de 217 caracteres, el halt) |
+| `decision-ownership` | **2,00** | — (sin artefacto que juzgar) |
+| los otros 8 ítems medibles | empate | empate |
+
+Las tres diferencias **son los dos defectos ya conocidos**, no calidad: el
+orquestador no pudo aplicar el arreglo (§6.1.13) y `task` se detuvo antes de
+producir el plan (§6.1.14). Ambos arreglados después. Eso deja una predicción
+verificable para la próxima campaña: con los dos defectos corregidos, estas tres
+filas deberían empatar.
+
+### 6.1.19 Dos defectos más del harness, encontrados validando los probes
+
+**El `tool_trace` sólo registra al principal cuando el trabajo se delegó.** En
+modo `orchestrator` el trace contiene las llamadas del principal —y las
+denegadas, con argumentos vacíos— pero **no** las del worker: ni las lecturas,
+ni la edición, ni el `pytest`. La rúbrica formula varios ítems como *"the exact
+tool trace shows…"*, y para esas ejecuciones el artefacto no contiene la
+evidencia: la primera corrida de los probes le puso **0,00** al orquestador en
+`assurance-scope` y `failure-recognition` por "no corrió tests" y "no invocó el
+comando", cuando lo que faltaba era el registro. Corregido en el probe (abstiene
+si aparece cualquier herramienta de equipo), no en la conclusión. Cualquier
+criterio futuro que se apoye en el trace tiene que declarar lo mismo.
+
+**Un `__pycache__` suelto se volvía parte del baseline de la tarea.** Los fixtures
+no traen `.gitignore`, e `init_git_workspace` hacía `git add -A` sobre el copy:
+dos fixtures tenían `__pycache__/` y `.pytest_cache/` de alguien que corrió
+pytest adentro, esos `.pyc` quedaron **trackeados**, entraron al baseline, y el
+run siguiente los recompiló y los reportó como cambios. El efecto medido, sobre
+los artefactos guardados: en **15 ejecuciones** el diff del revisor contiene
+secciones de caché compilada, y en las de `wide-sum` son el **91,5 %–95,5 %** del
+payload —7 370 de 7 980 caracteres—. En las dos ejecuciones de `wide-sum` que
+fallaron, el diff que recibió el revisor era **sólo** ruido binario.
+
+Corregido en los tres lugares: los fixtures se limpiaron; `init_git_workspace`
+escribe las exclusiones en `.git/info/exclude` (por checkout, nunca comiteado, y
+sin agregarle un archivo al fixture); y el probe ignora cachés al contar archivos
+cambiados. Tres tests, uno de ellos reproduciendo el `__pycache__` sucio y
+comprobando que `git ls-files` no lo lista.
+
+### 6.1.20 La última duda de validez, medida: `lean` en un repositorio que no se puede leer
+
+El resultado principal de este documento es un recorte de rondas y de tokens, y su
+riesgo declarado siempre fue el mismo: **¿y si `lean` deja de explorar?** Las 8
+tareas donde se midió tenían el arreglo en un archivo que el pedido nombraba, y
+la sonda de exploración (`wide-sum`) eran 40 módulos en un directorio — se leen
+en 40 llamadas y no prueba nada sobre la navegación.
+
+**La sonda nueva.** Corpus `engine_eval_v9` y fixture `deep_repo`, generados por
+`bench/build_deeprepo_fixture.py` (determinista, regenerable):
+
+```
+8 hubs  ->  40 paquetes  ->  1 200 hojas          (1 256 archivos)
+```
+
+Cada hoja aplica un offset fijo positivo; los paquetes y los hubs sólo los
+encadenan. Una hoja miente (`v - 40` en lugar de `v + 9`), así que
+`pipeline(0)` devuelve **14 349** donde el pedido declara **14 398**. El defecto
+**no es greppable a propósito**: 52 hojas comparten el offset 9, de modo que el
+faltante de 49 nombra una magnitud y no un lugar. Los tests visibles **pasan**
+sobre el código roto, y `src/pipeline.py`, los hubs, los `pkg_*/__init__.py` y
+`tests/` están prohibidos como destino del arreglo: sólo una hoja puede cambiar.
+Preflight: el fixture pristino falla (rc 1), la solución de referencia arregla
+(rc 0) tocando un solo archivo.
+
+**Resultado, 3 repeticiones × 2 brazos**, `pipeline_mode: true`,
+`TASK_ENGINE_MODE: task`, presupuesto de 120 llamadas
+(`bench/runs/20260913-engine-v2/ab-deeprepo/comparison.md`):
+
+| métrica | default | `lean` | delta | parejas |
+| --- | ---: | ---: | ---: | --- |
+| success | **3/3** | **3/3** | — | — |
+| tokens facturados | 990 394 | 663 605 | **−33,0 %** | 2 / 1 |
+| rondas de modelo | 39 | 31 | −20,5 % | 2 / 1 |
+| latencia | 188,9 s | 213,3 s | +12,9 % | 1 / 2 |
+| llamadas de herramienta | 32 | 34 | +6,2 % | 1 / 1 |
+
+Con 3 parejas nada se resuelve, y así queda declarado: esto es una **sonda de
+validez, no una estimación de efecto**. Lo que la sonda tenía que contestar, lo
+contestó: **`lean` no pierde exploración.** Las seis ejecuciones resolvieron un
+repositorio de 1 256 archivos, y las dos trazas navegan igual —
+~20–23 llamadas, 4–11 lecturas con `mod_` en los argumentos, y **ninguna lee el
+árbol**. El probe `localized-by-bisecting` da 2,00 en los dos brazos, 3/3.
+
+**Y apareció una diferencia de calidad, en el lugar menos esperado.** El probe
+`located-the-leaf` da **default 1,33 contra `lean` 2,00** (3/3). La causa está en
+una sola ejecución: `default` r2 cambió una hoja **conforme** —`return v + 9` a
+`return v + 58`— en lugar de corregir la que miente. Eso restaura el total, pasa
+el verificador, y no es el arreglo que el pedido describe ("exactly one leaf has
+the wrong offset. Find it, fix it"). `lean` corrigió `- 40` a `+ 9` en las tres.
+
+Es exactamente el modo de falla que el ítem de rúbrica existe para detectar, y
+ningún verificador sobre un total puede verlo. El probe tuvo que afilarse dos
+veces para verlo: primero porque contaba archivos temporales fuera del workspace
+(tres ejecuciones de `lean` dejaron un `find_bad.py` en `/private/tmp`, que el
+parser de diffs no distingue de una edición), y después porque "un solo archivo
+de hoja cambió" no distingue *corregir la hoja rota* de *reescribir una sana*.
+Ahora la línea **eliminada** es la que decide, y los cuatro casos están testeados.
+
+**Lo que esto cierra.** El punto 2 de §7 queda hecho: `lean` está medido en un
+repositorio que no se puede leer, y no pierde nada. Lo que queda abierto es el
+costo: ~660 000–990 000 tokens por ejecución en un fixture de 1 256 archivos, el
+décimo más caro que `wide-sum`. La localización jerárquica funciona; el engine
+no tiene una forma barata de *decirle* al modelo que la jerarquía existe, y eso
+es una palanca que este documento no explora.
+
+### 6.1.21 El router se puede medir aislado, y medido no se paga
+
+Dos campañas dejaron esta pregunta abierta: el A/B del catálogo de políticas
+(§6.1.3) dio −11,5 % de tokens y **+13,6 % de latencia**, y el A/B del
+clasificador (§6.1.15) no resolvió nada con 8 parejas. Las dos comparaban
+ejecuciones completas, donde la varianza del modelo es del mismo orden que el
+efecto. Pero el router corre **antes** del loop, una vez por turno, sobre el
+pedido crudo: se puede cronometrar solo.
+
+`bench/task_policy_router_cost.py` (nuevo) lo hace sobre las 11 requests del
+corpus, con los tres modos, midiendo además el uso del proveedor con el mismo
+callback de litellm del §6.1.8:
+
+| modo | mediana por turno |
+| --- | ---: |
+| `off` | **0,004 s** |
+| `fallback` | **0,002 s** |
+| `preferred` | **2,912 s** |
+
+Y el detalle que ninguna campaña podía dar:
+
+* el ruteo local —parser literal, mini-head, retrieval contrastivo— cuesta
+  **4 ms**: es gratis;
+* `preferred` cuesta **2,9 s por turno**, hasta **12,1 s** en `wide-sum`, porque
+  emite una request al modelo principal;
+* esa request gasta **446 tokens de prompt por turno** (15 602 en total, más
+  6 784 de completion) que **no llegan a ningún contador que el engine reporte**;
+* y en 2 de las 11 requests `preferred` **quitó** la etiqueta `feature` que el
+  texto justificaba, porque `merge_llm_result` se llama con
+  `replace_classified_operations=True`.
+
+**Decisión: `TASK_POLICIES_LLM_CLASSIFIER_MODE` pasa de `"preferred"` a
+`"fallback"`.** No hace falta campaña: es una medición de mecanismo, y el
+mecanismo es un costo serial por turno sin beneficio medido —el A/B de 8 parejas
+no resolvió ninguno— que además sólo *restaba*. `fallback` conserva la capacidad
+(el LLM sigue disponible cuando el parser literal no encuentra nada) y es
+**gratis en 10 de las 11 requests**, porque sólo corre en las ambiguas. Dos tests
+fijan el mecanismo: que `off` y `fallback` no toquen el proveedor cuando hay
+método literal, y que `preferred` con una respuesta vacía borre `feature`
+mientras `fallback` lo conserva.
+
+**Lo que esto no explica.** El +13,6 % de latencia del A/B del catálogo no es
+esto: el clasificador corre en los dos brazos, así que no puede producir una
+*diferencia* entre ellos. La contradicción del catálogo sigue abierta y sigue
+siendo el punto 1 de §7.
+
+### 6.1.22 El corpus entero puntuado: 295 ejecuciones, 15 ítems
+
+Los probes de §6.1.18 se corrieron sobre dos campañas. El modo `--scorecard`
+los corre sobre **todo lo guardado**: 295 ejecuciones, 15 ítems de rúbrica
+decididos por programa, cero llamadas al modelo
+(`bench/runs/scorecard-all.md`).
+
+| ítem | n | media | cumple | parcial | falla |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `immutability-discipline` | 30 | **2,00** | 30 | 0 | 0 |
+| `no-float-drift` | 24 | **2,00** | 24 | 0 | 0 |
+| `routine-scope` | 17 | **2,00** | 17 | 0 | 0 |
+| `scope-discipline` | 25 | **2,00** | 25 | 0 | 0 |
+| `localized-by-bisecting` | 6 | **2,00** | 6 | 0 | 0 |
+| `localized-without-reading-everything` | 13 | **2,00** | 13 | 0 | 0 |
+| `existing-surface-preserved` | 31 | 1,97 | 30 | 1 | 0 |
+| `decision-ownership` | 24 | 1,96 | 23 | 1 | 0 |
+| `verification-reported` | 24 | 1,92 | 22 | 2 | 0 |
+| `recovery-handoff` | 31 | 1,90 | 28 | 3 | 0 |
+| `located-the-stage` | 13 | 1,85 | 12 | 0 | 1 |
+| `failure-recognition` | 29 | 1,83 | 24 | 5 | 0 |
+| `assurance-scope` | 37 | 1,76 | 28 | 9 | 0 |
+| `located-the-leaf` | 6 | 1,67 | 5 | 0 | 1 |
+| `concise-handoff` | 25 | **1,28** | 11 | 10 | 4 |
+
+Dos cosas se leen acá. **Seis ítems son perfectos en el corpus entero**: nunca
+se mutó el receptor en `cart-immutability`, nunca se redondeó con float, nunca
+se tocó un archivo de más en `user-owned-tradeoff`, nunca se cambió la
+convención sin declararla, nunca se leyó el árbol en las dos tareas de
+localización. Y **`concise-handoff` es el único ítem flojo**: media 1,28 contra
+1,67 del siguiente, con 4 fallas plenas. Es el traspaso del plan
+(`complex-plan`): la respuesta final nombra el comando de verificación en 18 de
+25 casos, apunta a las decisiones abiertas en 14 de 25, y queda bajo 1 600
+caracteres en 13 de 25. Ningún componente explica la falla por sí solo.
+
+**El instrumento también se equivocó, y hay que decirlo.** La primera corrida
+dio `concise-handoff` en **0,84**, no 1,28. La causa era un `\b` después de
+`open decision`: el patrón exigía el singular, y los modelos escriben "Open
+decisions now owned by the user". Once de las 25 ejecuciones estaban bien y el
+probe las contaba mal. Lo mismo con `exit 0` contra `exits 0` y `exit status: 0`
+en `_RESULT_IN_ANSWER`. Corregidas las dos expresiones, **ninguna comparación
+entre brazos cambia** —`concise-handoff` sigue en 0,50 contra 1,50 en
+`ab-generality`, `located-the-leaf` en 1,33 contra 2,00— y el puntaje del
+corpus sube. Es la tercera vez en el proyecto que el instrumento, y no el
+engine, era el defectuoso; por eso el probe devuelve la evidencia junto con el
+puntaje y el scorecard imprime `n`, `cumple`, `parcial`, `falla` y `abstención`
+en columnas separadas.
+
+**El número que vale para el engine enviado** se obtiene filtrando
+(`bench/runs/scorecard-shipped.md`): `--style lean --engine-mode task` deja 60
+ejecuciones, y ahí **14 de los 15 ítems dan 2,00** —`assurance-scope`,
+`decision-ownership`, `existing-surface-preserved`, `failure-recognition`,
+`immutability-discipline`, `localized-by-bisecting`,
+`localized-without-reading-everything`, `located-the-leaf`, `located-the-stage`,
+`no-float-drift`, `recovery-handoff`, `routine-scope`, `scope-discipline`,
+`verification-reported`— y el único que no es `concise-handoff` con **1,40**
+(3 cumple, 1 parcial, 1 falla).
+
+### 6.1.23 El titular, re-medido con el contador corregido
+
+§6.1.8 comparó los dos modos de engine con el contador del `LoopEngine`, que
+omite los loops de los workers en un brazo y las fases del pipeline en el otro.
+§6.1.8 dejó el −82,9 % como **piso** a la espera de re-medirlo con el contador
+que cuenta lo que el proveedor factura. Esta es esa medición.
+
+**4 tareas × 2 repeticiones × 2 brazos** (16 ejecuciones), `pipeline_mode: true`,
+`prompt_style: lean`, `TASK_ENGINE_MODE` como única diferencia
+(`bench/runs/20260913-engine-v2/ab-accounted-full/comparison.md`). Las tareas
+cubren las cuatro formas donde los modos difieren: planificar (`complex-plan`),
+arreglar código (`cart-immutability`), leer y documentar
+(`evidence-code-review`) y localizar a escala (`wide-sum`).
+
+| métrica | `orchestrator` | `task` | delta | parejas | p | resuelto |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| success | 8/8 | 8/8 | — | — | — | — |
+| **tokens de prompt facturados** | 517 468 | **98 084** | **−81,0 %** | 8 / 0 | 0,0078 | **sí** |
+| tokens de prompt del loop | 373 054 | 85 980 | −77,0 % | 8 / 0 | 0,0078 | **sí** |
+| tokens de completion facturados | 23 623 | 5 790 | −75,5 % | 8 / 0 | 0,0078 | **sí** |
+| **rondas de modelo** | 31 | **11** | **−64,5 %** | 8 / 0 | 0,0078 | **sí** |
+| llamadas de herramienta | 24 | 8,5 | −64,6 % | 8 / 0 | 0,0078 | **sí** |
+| **latencia** | 292,6 s | **79,0 s** | **−73,0 %** | 8 / 0 | 0,0078 | **sí** |
+| `changed_lines` | 106,5 | 97,5 | −8,5 % | 4 / 3 | 0,375 | no |
+| `introduced_placeholders` | 0 | 0 | — | — | — | — |
+| `extra_changed_files`, `malformed_tool_calls`, `max_workless_rounds` | 0 | 0 | — | — | — | — |
+
+**La corrección agranda el efecto, no lo encoge.** El contador del loop daba
+−77,0 % y el facturado −81,0 %, porque la omisión del orquestador es mayor: su
+relación facturado/loop es **1,21–1,75× (media 1,37)** contra **1,09–1,29×
+(media 1,16)** del lado de `task`. Era la predicción de §6.1.8 y se confirmó.
+
+Y las métricas de calidad **no se mueven**: líneas cambiadas, placeholders
+introducidos, archivos de más y llamadas malformadas quedan en cero o empatados.
+Los probes de rúbrica sobre estas 16 ejecuciones dan `located-the-stage` **2,00
+contra 2,00** —el arreglo cae en la etapa correcta en los dos brazos, que es el
+efecto de §6.1.13—, `immutability-discipline`, `existing-surface-preserved` y
+`decision-ownership` en 2,00 los dos.
+
+**La única diferencia de calidad, y es del orquestador.** `concise-handoff` da
+**2,00 contra 0,50** (2 parejas). Las respuestas finales de `complex-plan` en
+modo `task` no cierran con el comando de verificación seguido de lo que queda
+abierto. El contrato de `lean` **ya lo pide con esas palabras** —
+`prompts/variants/lean.py:100-105`: "the outcome in one or two sentences, then a
+`Verification:` line …, then what is not done and any decision that belongs to
+the user. Under 250 words"— así que no es una instrucción faltante: es
+cumplimiento. Sobre las 25 ejecuciones de `complex-plan` del corpus, la respuesta
+nombra el comando de verificación en 18, apunta a las decisiones abiertas en 14,
+y queda bajo 1 600 caracteres en 13 (§6.1.22).
+
+Lo que corresponde, entonces, no es otro párrafo en el prompt sino **hacer que el
+engine lo note**: el contrato de cierre ya rechaza un `step_complete` que no
+produjo un cambio, y desde §6.1.13 ese rechazo se le dice al modelo en vez de
+tragárselo. Un aviso equivalente —"tu respuesta final no nombra el comando que
+corriste ni lo que queda abierto"— es la palanca, y queda anotada en §7 en lugar
+de improvisada al final de esta ronda.
+
+### 6.2 Resultado negativo: la presión de agrupación no agrupa
+
+Diseño pareado, 3 tareas de código × 3 repeticiones × 2 brazos (18 ejecuciones,
+`MiniMax-M3`, corpus `engine_eval_v2`), interruptor
+`LOOP_BATCHING_NUDGE_ENABLED`. Comando:
+`bench/agent_task_ab.py`, resultado completo en
+`bench/runs/20260913-engine-v2/ab-batching/comparison.{md,json}`.
+
+| métrica | sin nudge | con nudge | delta | rango sin / con | resuelto |
+| --- | ---: | ---: | ---: | --- | --- |
+| tokens de prompt | 114 621 | 118 305 | +3,2 % | 61 527–250 109 / 56 345–165 402 | no |
+| tokens de completion | 4 594 | 5 334 | +16,1 % | 1 871–10 807 / 1 736–7 678 | no |
+| tool calls | 11 | 12 | +9,1 % | 8–22 / 9–16 | no |
+| latencia | 64,6 s | 72,0 s | +11,4 % | 33,9–169,5 / 27,1–118,0 | no |
+| success | 9/9 | 9/9 | — | — | — |
+
+Con el test de signos, ninguna métrica queda resuelta: las parejas se reparten
+4/5, 4/5, 3/5 y 5/4. La métrica del mecanismo — llamadas por ronda de modelo,
+leída de los artefactos — se movió de **0,90 a 1,00** de mediana, con rangos que
+se solapan: el modelo ya emite una llamada por ronda y decirle que agrupe no lo
+cambia. Los puntos estimados de todas las demás métricas empeoran.
+
+**Decisión: el nudge queda apagado por defecto** (`LOOP_BATCHING_NUDGE_ENABLED =
+False`) con la medición escrita en el comentario del ajuste. El mecanismo y sus
+tests quedan, para poder reevaluarlo con un modelo que serialice más.
+
+Esto vale más que el cambio que se descartó: mide una intervención que *suena*
+correcta — 124 rondas para 78 llamadas en el baseline, cada ronda reenviando el
+prompt entero — y demuestra que el texto no mueve la aguja. La hipótesis que
+queda viva es que las rondas de una sola llamada son secuenciales por necesidad
+(leer, editar, correr), no por decisión del modelo.
+
+## 7. Qué sigue, en orden de valor esperado
+
+Lo que quedaba de esta lista en las rondas anteriores está hecho: la presión de
+agrupación se midió y se descartó (§6.2), la sonda de exploración obligatoria
+existe y `lean` la pasó (§6.1.5), hay cuatro contratos ocultos con verificador
+invisible (§1.2), el contador de llamadas malformadas es métrica de decisión
+(§4.4.3) y las advertencias inaplicables de creación de archivos están
+corregidas (§4.1).
+
+Queda, en orden de valor esperado:
+
+1. **Resolver la contradicción de latencia del catálogo de políticas.** El
+   ahorro de tokens está resuelto (−11,5 %, p=0,031, 8/8 success); la latencia se
+   mueve al revés en 7 de 8 parejas y con 8 parejas eso es una dirección, no un
+   resultado. La campaña que falta es la misma §6.1.3 con 6 tareas × 3
+   repeticiones, y la pregunta concreta que hay que contestar antes es cuánto de
+   esos ~10 s por ejecución es el clasificador (`TASK_POLICIES_LLM_CLASSIFIER_MODE
+   = "preferred"` emite una request extra) y cuánto es el modelo pensando más.
+2. ~~Probar `lean` en un repositorio grande de verdad.~~ **Hecho (§6.1.20).**
+   Corpus `engine_eval_v9` con 1 256 archivos y tres niveles de jerarquía:
+   `lean` resuelve 3/3 como el default, navega igual y cuesta −33 % de tokens.
+   Lo que la sonda deja abierto no es la validez sino el costo: ~660 000–990 000
+   tokens por ejecución, porque el engine no le dice al modelo que la jerarquía
+   existe y el modelo tiene que descubrirla.
+3. **Un cap de `<opened-files>` por relevancia.** El presupuesto (48 000
+   caracteres) ya se respeta, incluido el primer archivo, que antes lo evadía
+   (§4.6). Falta el paso siguiente: un digest para los archivos que el Step
+   activo no tocó, en vez de reenviar su contenido entero en cada ronda.
+4. ~~Re-medir el nuevo default con el contador corregido.~~ **Hecho (§6.1.23).**
+   4 formas de tarea × 2 repeticiones × 2 brazos: −81,0 % de tokens facturados,
+   −64,5 % de rondas y −73,0 % de latencia, 8/0 parejas, p=0,0078, calidad sin
+   cambios. Falta sólo ampliar la muestra si se quiere citar un intervalo en vez
+   de un p-valor.
+5. **Hacer que el engine note el traspaso flojo.** `concise-handoff` es el único
+   ítem de rúbrica por debajo de 1,67 en el corpus entero (§6.1.22) y el único
+   donde el orquestador gana (2,00 contra 0,50, §6.1.23). El contrato de `lean`
+   **ya pide** comando de verificación y decisiones abiertas, así que la palanca
+   no es otro párrafo: es un aviso del engine cuando una respuesta `done` no los
+   nombra, por el mismo canal que §6.1.13 usó para el cierre.
+6. ~~`fallback` contra `preferred` en el clasificador de políticas.~~ **Hecho
+   (§6.1.21).** Cronometrado aislado en lugar de comparado por campaña: el
+   ruteo local cuesta 4 ms y `preferred` 2,91 s por turno con 446 tokens
+   invisibles, y encima resta. El default es `fallback`.
+7. **Puntuar todas las rúbricas `human_review`.** El paquete ciego (§6.1.17) y
+   los probes deterministas (§6.1.18) existen; entre los dos cubren el **58 %** de
+   las 578 instancias de rúbrica guardadas en 289 ejecuciones, y ya corrieron
+   sobre dos campañas completas. Faltan las otras 10 campañas: es lectura y
+   cómputo local, **cero llamadas al modelo**. Es la única medición de calidad de
+   código, franqueza del traspaso y propiedad de decisiones que el proyecto tiene.
+8. ~~Dieta de los esquemas de herramientas.~~ **Descartado, y conviene decir
+   por qué.** Son el 48 % del payload por ronda: de 17 433 caracteres, 3 964 son
+   descripciones de parámetros **opcionales**. Revisé las 45 una por una y no hay
+   recorte automático seguro: truncar a la primera oración arruina
+   `tail_test_output.mode` (el enum está *después* del primer punto) y
+   `add_step.expected_output` (es una sola oración); borrarlas pierde
+   `execute_command.cwd` ("el shell no persiste"), que es una semántica que el
+   modelo necesita. Acortarlas a mano, las cinco más grandes suman 1 303
+   caracteres y ahorrarían unos 900. No vale el riesgo ni el trabajo, y dejarlo
+   como tarea pendiente tentadora sería peor que medirlo y descartarlo.
+
+### 7.1 Sobre el orden
+
+Lo que quedaba en esta lista al empezar la ronda está hecho: la decisión del modo
+de engine por defecto se tomó con la celda que faltaba medida (§6.1.8) y los dos
+defectos que la bloqueaban quedaron corregidos (§6.1.13, §6.1.14). El 1 es ahora
+el único número que le falta a una decisión de arquitectura ya acotada —y el
+hallazgo de que el router cuesta latencia es nuevo—. El 2 sigue siendo la última
+duda de validez sobre el resultado principal —`lean`— y el 3 la última palanca de
+tokens que no exige tocar la arquitectura.
+
+El 4 merece una nota de método, porque es la quinta vez en este documento que un
+titular cambia después de una corrección de medición: **ninguna campaña de este
+proyecto debería reportar tokens por el contador del engine.** El número que
+importa es el que el proveedor factura, y desde esta ronda el harness lo captura.
+
+Queda fuera de esta lista, y conviene nombrarlo: **`orchestrator` sigue siendo el
+único modo sin camino de entrada desde `auto`**, y con el default en `task` eso
+dejó de ser una contradicción para volverse, simplemente, un modo explícito.
+Reabrirlo tiene sentido si alguna vez la delegación deja de serializar las
+escrituras (`engine/team/runtime.py:156`), que es la condición que hoy le impide
+pagar su costo en cualquier tarea que toque código.

@@ -28,7 +28,10 @@ import shlex
 from typing import Any, TYPE_CHECKING
 
 from infinidev.engine._best_effort import best_effort
-from infinidev.engine.engine_logging import extract_tool_error
+from infinidev.engine.engine_logging import (
+    extract_tool_error,
+    is_hallucinated_call_error,
+)
 from infinidev.engine.formats._normalize import normalize_tool_arguments_json
 from infinidev.engine.loop.execution_context import ExecutionContext
 from infinidev.engine.loop.llm_caller import ClassifiedCalls, LLMCallResult
@@ -81,6 +84,57 @@ def _reconcile_masked_test_exit(result: str) -> str:
     if reconciled is payload:
         return result
     return json.dumps(reconciled)
+
+
+def _repair_missing_edit_target(
+    ctx: ExecutionContext, name: str, arguments: str,
+) -> str:
+    """Name the file for an edit that left it out, when the file proves itself.
+
+    The dominant malformed call in the recorded campaigns is
+    ``edit_file({"old_string": ..., "new_string": ...})`` with no ``file_path``:
+    the model leans on the file it has just been working in. Filling the path in
+    is safe only when the file proves the intent, so the candidate must be a
+    single file this Step has opened AND the exact ``old_string`` must occur in
+    it exactly once. Anything less certain keeps the original call, which the
+    dispatcher rejects with the list of valid parameters.
+    """
+    if name != "edit_file":
+        return arguments
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except (json.JSONDecodeError, TypeError):
+        return arguments
+    if not isinstance(args, dict) or args.get("file_path"):
+        return arguments
+    old_string = args.get("old_string")
+    if not isinstance(old_string, str) or not old_string:
+        return arguments
+
+    state = getattr(ctx, "state", None)
+    candidates = list(getattr(state, "opened_files", {}) or {})
+    if len(candidates) != 1:
+        return arguments
+
+    import os
+
+    path = candidates[0]
+    try:
+        if os.path.getsize(path) > 5_000_000:
+            return arguments
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read()
+    except OSError:
+        return arguments
+    if content.count(old_string) != 1:
+        return arguments
+
+    args["file_path"] = path
+    logger.info(
+        "edit_file: recovered file_path %s from the Step's single opened file "
+        "after verifying old_string occurs there once", path,
+    )
+    return json.dumps(args)
 
 
 class ToolRunner:
@@ -482,13 +536,21 @@ class ToolRunner:
         if not getattr(ctx, "suppress_discovery_this_step", False):
             return [], batch
 
-        from infinidev.engine.loop.behavior_rules import is_workspace_edit_tool
+        from infinidev.engine.loop.behavior_rules import (
+            is_delegation_tool,
+            is_workspace_edit_tool,
+            role_can_edit_workspace,
+        )
         from infinidev.engine.loop.llm_caller import _COMPLETION_TOOL_NAMES
         from infinidev.engine.loop.semantic_stagnation import (
             SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES,
             recovery_source_refresh_available,
         )
 
+        # A principal that was never granted an edit tool makes progress by
+        # dispatching, so handing work to a worker is an action, not the
+        # discovery this gate exists to decline.
+        role_edits = role_can_edit_workspace(ctx)
         synthetic: list[tuple[Any, str]] = []
         executable: list[Any] = []
         for tc in batch:
@@ -497,6 +559,7 @@ class ToolRunner:
             allow_action = (
                 name in _COMPLETION_TOOL_NAMES
                 or is_workspace_edit_tool(name)
+                or (not role_edits and is_delegation_tool(name))
             )
             if (
                 getattr(ctx, "freeze_plan_growth_in_recovery", False)
@@ -567,10 +630,20 @@ class ToolRunner:
                     "successful edit or new test outcome"
                 ),
                 "available_actions": (
-                    "read_file on the exact edit target, edit that target, run "
-                    "the focused test after an edit, or complete the current "
-                    "Step. Shell inspection, broad search, and plan mutation "
-                    "are frozen during recovery"
+                    (
+                        "read_file on the exact edit target, edit that target, run "
+                        "the focused test after an edit, or complete the current "
+                        "Step. Shell inspection, broad search, and plan mutation "
+                        "are frozen during recovery"
+                    )
+                    if role_edits
+                    else (
+                        "hand the change to a worker that can edit "
+                        "(team_create_ticket then team_delegate), ask a worker for "
+                        "its result, or complete the current Step. Reading, shell "
+                        "inspection, broad search, and plan mutation are frozen "
+                        "during recovery"
+                    )
                 ),
             })))
         return synthetic, executable
@@ -1036,13 +1109,16 @@ class ToolRunner:
             hook_meta["total_calls"] = ctx.state.total_tool_calls + offset + 1
             attachments: list = []
             attachments_by_tc[tc.id] = attachments
+            arguments = _repair_missing_edit_target(
+                ctx, tc.function.name, tc.function.arguments,
+            )
             result = execute_tool_call(
-                ctx.tool_dispatch, tc.function.name, tc.function.arguments,
+                ctx.tool_dispatch, tc.function.name, arguments,
                 hook_metadata=hook_meta,
                 attachments_out=attachments,
             )
             maybe_emit_file_change(
-                tc.function.name, tc.function.arguments, result, pre,
+                tc.function.name, arguments, result, pre,
                 ctx.file_tracker, ctx.project_id, ctx.agent_id,
                 self._engine._hooks,
             )
@@ -1115,6 +1191,19 @@ class ToolRunner:
             ))
             tool_error = extract_tool_error(result)
             no_new_evidence = self._is_synthetic_no_evidence_result(result)
+            if tool_error and is_hallucinated_call_error(tool_error):
+                # The model invented the call's shape. Neither the repository
+                # nor the user is implicated, and the retry costs a full prompt
+                # pass, so it is counted separately from ordinary tool failure.
+                ctx.state.malformed_tool_calls += 1
+                ctx.state.malformed_call_reasons = (
+                    ctx.state.malformed_call_reasons
+                    + [
+                        f"{tc.function.name}"
+                        f"({str(tc.function.arguments)[:200]})"
+                        f" -> {tool_error[:160]}"
+                    ]
+                )[-20:]
             tracker.on_tool_call(tc.function.name, tc.function.arguments, bool(tool_error))
 
             if not tool_error and not no_new_evidence:

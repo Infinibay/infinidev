@@ -94,3 +94,6 @@ web/test-results/
 web/playwright-report/
 web/*.tsbuildinfo
 src/infinidev/server/static/
+
+# Rust build output (untracked local workspace)
+target/

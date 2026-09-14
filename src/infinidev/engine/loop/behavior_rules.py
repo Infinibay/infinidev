@@ -21,6 +21,10 @@ _EDIT_TOOLS = frozenset({
     "write_file", "apply_patch", "multi_edit_file",
 })
 
+#: Tools that write a path that cannot already exist, so "read it first" is not
+#: a satisfiable instruction for them.
+_CREATION_TOOLS = frozenset({"create_file", "write_file"})
+
 _READ_TOOLS = frozenset({
     "read_file", "partial_read", "read", "cat",
 })
@@ -39,6 +43,54 @@ def is_workspace_edit_tool(name: str) -> bool:
     the model-authored name, before dispatch canonicalisation.
     """
     return name in _EDIT_TOOLS or local_effects_for_name(name).writes_workspace
+
+
+#: Tools that hand work to a worker able to edit the workspace. For a role
+#: whose own grant has no edit tool — the orchestrator principal delegates
+#: every change — dispatching is the action, not a substitute for one.
+_DELEGATION_TOOLS = frozenset({
+    "team_delegate", "team_create_ticket", "team_review_ticket",
+})
+
+
+def is_delegation_tool(name: str) -> bool:
+    """Return whether a call assigns or hands back work inside the team."""
+
+    return name in _DELEGATION_TOOLS
+
+
+def schema_tool_names(schemas: object) -> set[str]:
+    """Extract tool names from an OpenAI-shaped schema list."""
+
+    names: set[str] = set()
+    for schema in schemas or []:
+        if not isinstance(schema, dict):
+            continue
+        function = schema.get("function")
+        name = function.get("name") if isinstance(function, dict) else schema.get("name")
+        if name:
+            names.add(str(name))
+    return names
+
+
+def role_can_edit_workspace(ctx: object) -> bool:
+    """Whether any tool granted to this run can mutate the workspace.
+
+    The stagnation latch tells the model to stop reading and edit. A role
+    whose grant contains no edit tool cannot obey it, so latching only
+    removes the tools that were still making progress. The granted schema
+    list is the same security boundary the model sees, in both native and
+    manual tool-calling modes.
+
+    Unknown grants fail open: a context that publishes no schema list keeps
+    the latch's original behaviour, so only a role that demonstrably lacks
+    an edit tool changes the outcome.
+    """
+
+    names = schema_tool_names(getattr(ctx, "tool_schemas", None))
+    if not names:
+        return True
+    return any(is_workspace_edit_tool(name) for name in names)
 
 
 # ── Data classes ────────────────────────────────────────────────────────
@@ -86,7 +138,15 @@ class BehaviorRule(ABC):
 # ── Rules ───────────────────────────────────────────────────────────────
 
 class ReadBeforeEditRule(BehaviorRule):
-    """Reward reading a file before editing it; punish blind edits."""
+    """Reward reading a file before editing it; punish blind edits.
+
+    Creation is excluded. ``create_file`` fails when the path already exists,
+    so the file it writes could not have been read, and warning about it told
+    the model to "always read a file before modifying it" for a file that did
+    not exist. That warning cost a real step in the MiniMax-M3 baseline: the
+    model had already produced the correct artifact and the engine spent the
+    next turn arguing with it.
+    """
 
     name = "read_before_edit"
 
@@ -95,6 +155,8 @@ class ReadBeforeEditRule(BehaviorRule):
 
     def on_tool_call(self, ctx: RuleContext) -> list[Feedback]:
         if not is_workspace_edit_tool(ctx.tool_name):
+            return []
+        if ctx.tool_name in _CREATION_TOOLS:
             return []
 
         path = ctx.tool_args.get("file_path", ctx.tool_args.get("path", ""))

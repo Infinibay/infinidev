@@ -49,7 +49,41 @@ def _spec(risk: str) -> GroundedSpec:
     )
 
 
-def test_noninteractive_high_impact_decision_blocks(monkeypatch) -> None:
+def test_a_caller_that_cannot_ask_proceeds_on_the_declared_default(monkeypatch) -> None:
+    """``None`` means "cannot ask", not "the user declined".
+
+    The hook interface (``OrchestrationHooks.ask_user``) states that a
+    branch receiving ``None`` must proceed with sensible defaults instead of
+    failing. Halting here made every one-shot run do zero work on any
+    request whose elaboration found a consequential fork.
+    """
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.spec_elaborator.should_elaborate", lambda _: True
+    )
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.spec_elaborator.elaborate",
+        lambda *args, **kwargs: _spec("costly_to_reverse"),
+    )
+    hooks = _Hooks(answer=None)
+
+    result = _run_elaboration_phase(
+        escalation=_packet(), session_id="s", project_id=None,
+        workspace_path=None, hooks=hooks,
+    )
+
+    spec = result.grounded_spec
+    assert result.execution_blocked_reason == ""
+    assert spec.blocking_clarifications == []
+    assert [c.default for c in spec.unconfirmed_decisions] == ["SQLite"]
+    # The decision has to reach the user, not be silently taken.
+    assert any("No user was available" in message for message in hooks.notified)
+    rendered = spec.render_for_planner()
+    assert "UNCONFIRMED PRODUCT DECISIONS" in rendered
+    assert "proceeding with: SQLite" in rendered
+
+
+def test_an_asked_user_who_gives_nothing_still_blocks(monkeypatch) -> None:
+    """An empty answer is a real answer: the user was asked and said nothing."""
     monkeypatch.setattr(
         "infinidev.engine.analysis.spec_elaborator.should_elaborate", lambda _: True
     )
@@ -60,11 +94,12 @@ def test_noninteractive_high_impact_decision_blocks(monkeypatch) -> None:
 
     result = _run_elaboration_phase(
         escalation=_packet(), session_id="s", project_id=None,
-        workspace_path=None, hooks=_Hooks(answer=None),
+        workspace_path=None, hooks=_Hooks(answer=""),
     )
 
     assert "waiting for confirmation" in result.execution_blocked_reason
     assert result.grounded_spec.blocking_clarifications
+    assert result.grounded_spec.unconfirmed_decisions == []
 
 
 def test_user_answer_replaces_high_impact_default_with_authority(monkeypatch) -> None:

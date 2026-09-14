@@ -60,6 +60,16 @@ class LoopState(BaseModel):
     runtime_interventions_given: list[str] = Field(default_factory=list)
     opened_files_prompt_max_chars: int = 0
     tool_calls_since_last_note: int = 0  # For gentle note-taking nudge
+    # Tool calls the model issued with an invented shape: an unknown tool,
+    # a parameter that does not exist, arguments that fail their own
+    # schema. Counted apart from ordinary tool failure because only the
+    # first kind is a model error, and each one costs a model round trip.
+    malformed_tool_calls: int = 0
+    # Why those calls were rejected, newest last, capped. The counter alone is
+    # not diagnosable: ``execute_tool_call`` dispatches POST_TOOL only at its
+    # end, so a rejection returned early never reaches the transcript trace or
+    # the UI, and the count had no evidence behind it.
+    malformed_call_reasons: list[str] = Field(default_factory=list)
     task_has_edits: bool = False  # Set once when any edit tool succeeds
     # A write Task may legitimately be an already-satisfied no-op. This is set
     # only after the loop accepts an explicit step_complete(no_edit=true), then
@@ -97,6 +107,18 @@ class LoopState(BaseModel):
     # so the same one is never sent twice.
     pending_guidance: str = ""
     guidance_given: list[str] = Field(default_factory=list)
+    # Engine-authored corrective notice delivered verbatim at the top of the
+    # next iteration prompt, then consumed. The outer-loop closure gates
+    # (``_enforce_edit_requirement`` / ``_enforce_step_effect``) decide AFTER
+    # the inner loop has returned, so the messages they could overwrite are
+    # discarded and rebuilt; without this channel the model never learns why
+    # its ``step_complete`` was rejected and simply retries it.
+    pending_engine_notice: str = ""
+    # Consecutive outer-loop closure refusals per Step index. A gate that can
+    # refuse forever without changing its advice is a livelock, and production
+    # runs with TASK_MAX_ITERATIONS=0 (unlimited), so this counter is what
+    # bounds the engine instead of the iteration budget.
+    effect_refusals_by_step: dict[int, int] = Field(default_factory=dict)
     # Custom test runner commands declared by the agent (or pre-loaded
     # from settings) for projects whose test invocation isn't covered
     # by the built-in runner list. Stored as a list of substrings; the

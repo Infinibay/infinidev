@@ -12,13 +12,19 @@ def get_develop_identity(available_tools: set[str] | None = None) -> str:
     does not carry bugfix instructions into unrelated work.
     """
     from infinidev.prompts.tool_hints import build_tool_usage_section
+    from infinidev.prompts.variants import get_variant
 
     if available_tools is not None:
         tool_section = build_tool_usage_section(available_tools)
     else:
         tool_section = _DEVELOP_TOOL_USAGE_FULL
 
-    return _DEVELOP_IDENTITY_BASE + "\n\n" + tool_section + "\n\n" + _DEVELOP_SAFETY
+    # The style registry may carry a compact statement of the same rules.
+    # Imported here rather than at module scope: ``variants`` imports this
+    # module while it is loading its own variants.
+    core = get_variant("flow.develop.core") or _DEVELOP_IDENTITY_BASE
+
+    return core + "\n\n" + tool_section + "\n\n" + _DEVELOP_SAFETY
 
 
 _DEVELOP_IDENTITY_BASE = """\

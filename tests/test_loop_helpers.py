@@ -288,6 +288,61 @@ class TestRollingHorizonToolRouting:
             "edit_file", "execute_command", "step_complete",
         ]
 
+    def test_recovery_keeps_delegation_for_a_principal_that_cannot_edit(self):
+        """The orchestrator principal's only action is handing work to a worker.
+
+        Hiding ``team_delegate`` during recovery left it a Step it could
+        neither advance (no edit tool was ever granted) nor close (the
+        completion gate refuses recovery mode as an external blocker).
+        """
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        schemas = [
+            self._schema("read_file"),
+            self._schema("team_create_ticket"),
+            self._schema("team_delegate"),
+            self._schema("team_wait"),
+            self._schema("execute_command"),
+            self._schema("step_complete"),
+        ]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=None),
+            suppress_discovery_this_step=True,
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+
+        names = [schema["function"]["name"] for schema in available]
+        assert "team_create_ticket" in names
+        assert "team_delegate" in names
+        assert "read_file" not in names
+        assert "team_wait" not in names
+
+    def test_a_grant_with_an_edit_tool_keeps_delegation_hidden(self):
+        """Recovery still means "edit", not "dispatch", for a role that can."""
+        from infinidev.engine.loop.llm_caller import LLMCaller
+
+        schemas = [
+            self._schema("read_file"),
+            self._schema("edit_file"),
+            self._schema("team_delegate"),
+            self._schema("step_complete"),
+        ]
+        ctx = SimpleNamespace(
+            planning_schemas=schemas,
+            tool_schemas=schemas,
+            state=SimpleNamespace(plan=None),
+            suppress_discovery_this_step=True,
+        )
+
+        available = LLMCaller._available_schemas(ctx, is_planning=False)
+
+        names = [schema["function"]["name"] for schema in available]
+        assert "edit_file" in names
+        assert "team_delegate" not in names
+
     def test_semantic_recovery_exposes_only_bounded_local_context(self):
         from infinidev.engine.loop.llm_caller import LLMCaller
 

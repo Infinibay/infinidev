@@ -1,0 +1,19 @@
+{
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3",
+  "base_url": "https://api.minimax.io/v1",
+  "api_key_env": "MINIMAX_API_KEY",
+  "repetitions": 3,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 25,
+  "max_total_tool_calls": 120,
+  "max_tool_calls_per_action": 20,
+  "verify_timeout_seconds": 120.0,
+  "settings_overrides": {
+    "TASK_ENGINE_MODE": "task",
+    "TASK_MAX_TOOL_CALLS": 120
+  },
+  "prompt_style": "lean",
+  "pipeline_mode": true
+}

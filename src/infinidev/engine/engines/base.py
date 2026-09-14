@@ -86,6 +86,10 @@ def loop_observed_metrics(engine: Any) -> dict[str, int]:
         "observed_tool_calls": observed_tool_calls,
         "observed_prompt_tokens": counter(state, "total_prompt_tokens"),
         "observed_completion_tokens": counter(state, "total_completion_tokens"),
+        # Calls the model issued with an invented shape. This is the only
+        # counter that moves when the engine gets better at preventing
+        # hallucinated calls rather than merely surviving them.
+        "observed_malformed_tool_calls": counter(state, "malformed_tool_calls"),
     }
 
 

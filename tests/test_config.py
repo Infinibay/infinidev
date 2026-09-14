@@ -32,7 +32,10 @@ class TestSettings:
         assert s.DEDUP_SIMILARITY_THRESHOLD == 0.82
         assert s.LLM_REMOTE_TIMEOUT == 300
         assert s.KEN_SESSION_ENABLED is True
-        assert s.TASK_POLICIES_LLM_CLASSIFIER_MODE == "preferred"
+        # `fallback`, not `preferred`: measured in isolation, local routing
+        # costs 4 ms while `preferred` costs 2.91 s per turn and 446 invisible
+        # prompt tokens, in exchange for a method label it can only remove.
+        assert s.TASK_POLICIES_LLM_CLASSIFIER_MODE == "fallback"
         assert s.TASK_POLICIES_LLM_CLASSIFIER_MAX_TOKENS == 256
 
     def test_load_from_json_file(self, tmp_path):

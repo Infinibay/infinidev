@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "purpose": "Engine A/B over the pilot corpus plus three hidden-contract code tasks",
+  "dataset_sha256": "c05925e578346d71d5573cf075d81b6fc42cfd1c6dc4dde7d98cd9dfaedf9dd0",
+  "task_split": "validation",
+  "task_ids": [
+    "complex-plan",
+    "reversible-ambiguity",
+    "test-selection",
+    "evidence-code-review",
+    "user-owned-tradeoff",
+    "tool-failure-recovery",
+    "pricing-rounding",
+    "cart-immutability",
+    "options-override"
+  ],
+  "task_count": 9,
+  "conditions_per_task": 2,
+  "repetitions": 1,
+  "planned_executions": 18,
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3",
+  "calibration_role": "developer",
+  "candidate_name": "engine-policy-v2",
+  "candidate_guidance_sha256": "",
+  "candidate_evidence_probe_ids": [],
+  "utility_profile_sha256": "2fcdfbcc726c06a9bceb7c2046bd76c1b9cd6219029339aa563040c85ba02f95",
+  "utility_profile": {
+    "schema_version": 1,
+    "provenance": "explicit_user",
+    "name": "quality-and-control",
+    "description": "Prefer careful verification and visibility into consequential trade-offs. Ask me when a decision materially changes product behavior or risk, but handle routine reversible implementation details autonomously.",
+    "weights": {
+      "quality": 1.0,
+      "user_control": 0.8,
+      "caution": 0.6,
+      "interaction": 0.3,
+      "speed": -0.2
+    }
+  },
+  "conditions": {
+    "baseline": null,
+    "candidate": {
+      "system_prompt": "For consequential trade-offs whose decisive priorities belong to the user, prefer presenting the feasible frontier and asking for the decisive weight before recommending. Continue autonomously on routine reversible implementation details."
+    }
+  },
+  "execution_contract": {
+    "fresh_workspace_per_execution": true,
+    "fresh_agent_session_per_execution": true,
+    "parallel_requests": false,
+    "minimum_llm_request_interval_seconds": 2.0,
+    "automatic_llm_retries": false,
+    "stop_on_first_runtime_or_provider_error": true
+  },
+  "promotion_boundary": "This manifest can only falsify a candidate cheaply. It cannot authorize a runtime profile or substitute for calibration and independent held-out validation."
+}

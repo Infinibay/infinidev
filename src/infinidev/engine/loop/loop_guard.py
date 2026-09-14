@@ -28,6 +28,42 @@ _EDIT_REQUIRING_TASK_KINDS = frozenset({
     "config", "migration", "security",
 })
 
+#: Discovery tools whose calls do not consume each other's results, so a round
+#: of them can carry several calls at no extra cost. Writers, shell commands
+#: and verification are deliberately absent: their arguments usually depend on
+#: what the previous call returned.
+_BATCHABLE_READS = frozenset({
+    "read_file",
+    "code_search",
+    "glob",
+    "list_directory",
+    "git_diff",
+    "git_status",
+    "search_symbols",
+    "list_symbols",
+    "get_symbol_code",
+    "find_references",
+    "project_structure",
+    "analyze_code",
+    "find_similar_methods",
+    "search_by_docstring",
+    "iter_symbols",
+    "project_stats",
+})
+
+#: Consecutive one-read rounds inside one Step before the engine asks for the
+#: remaining reads to travel together.
+_SINGLE_READ_ROUNDS_BEFORE_NUDGE = 2
+
+_BATCHING_NUDGE = (
+    "BATCHING: the last rounds each carried a single read. The engine re-sends "
+    "the whole prompt for every round, so one file per round pays that prompt "
+    "again each time. Issue every independent call you know you need in ONE "
+    "response: the files, searches and diffs whose arguments do not depend on a "
+    "result that is still pending. Keep a call on its own only when its "
+    "arguments come from a result you do not have yet."
+)
+
 
 class LoopGuard:
     """Detects repetition loops, error cascades, and budget exhaustion."""
@@ -57,6 +93,62 @@ class LoopGuard:
         self._test_progress_since_check = False
         self._last_workspace_fingerprint: Any | None = None
         self._seen_workspace_fingerprints: set[Any] = set()
+        # Batching pressure. Keyed by Step so it re-arms on every Step without
+        # needing a hook: the counters below are per-Step observations.
+        self._batching_step_key: int | None = None
+        self._single_read_rounds = 0
+        self._batching_nudged = False
+
+    def check_single_call_batching(
+        self,
+        ctx: ExecutionContext,
+        messages: list[dict[str, Any]],
+        regular_calls: list[Any],
+    ) -> None:
+        """Ask for the remaining independent reads to travel in one response.
+
+        Every round re-sends the whole prompt, so a Step that fetches four
+        files one round at a time pays the static prefix four times. The
+        MiniMax-M3 baseline averaged 0.63 tool calls per model round: most
+        rounds carried exactly one read. Two consecutive one-read rounds is
+        the point where the pattern is visible and one correction still saves
+        prompt passes.
+        """
+        from infinidev.config.settings import settings
+
+        if not bool(getattr(settings, "LOOP_BATCHING_NUDGE_ENABLED", True)):
+            return
+
+        active = getattr(getattr(ctx.state, "plan", None), "active_step", None)
+        step_key = int(getattr(active, "index", -1) or -1)
+        if self._batching_step_key != step_key:
+            self._batching_step_key = step_key
+            self._single_read_rounds = 0
+            self._batching_nudged = False
+
+        name = ""
+        if len(regular_calls) == 1:
+            function = getattr(regular_calls[0], "function", None)
+            name = str(getattr(function, "name", "") or "")
+        if name not in _BATCHABLE_READS:
+            self._single_read_rounds = 0
+            return
+
+        self._single_read_rounds += 1
+        if (
+            self._single_read_rounds < _SINGLE_READ_ROUNDS_BEFORE_NUDGE
+            or self._batching_nudged
+        ):
+            return
+        self._batching_nudged = True
+        _emit_log(
+            "info",
+            f"{_YELLOW}↪ {self._single_read_rounds} consecutive single-read "
+            f"rounds — asking for the remaining reads in one response{_RESET}",
+            project_id=ctx.project_id,
+            agent_id=ctx.agent_id,
+        )
+        messages.append({"role": "user", "content": _BATCHING_NUDGE})
 
     def seed_workspace_fingerprint(self, fingerprint: Any) -> None:
         """Start net-progress tracking from the Step's current workspace."""

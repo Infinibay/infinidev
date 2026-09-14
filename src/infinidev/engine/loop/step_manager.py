@@ -349,6 +349,7 @@ class StepManager:
                 ctx.state.step_entry_change_fingerprints.pop(active.index, None)
                 ctx.state.no_progress_windows_by_step.pop(active.index, None)
                 ctx.state.last_test_outcomes_by_step.pop(active.index, None)
+                ctx.state.effect_refusals_by_step.pop(active.index, None)
             ctx.state.plan.activate_next()
         # Notify a UI hook (if any) that a new step is now active. Best
         # effort — never let a hook error interrupt the engine loop.

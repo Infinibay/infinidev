@@ -64,6 +64,12 @@ class AgentTask:
     required_action_patterns: tuple[str, ...]
     rubric: tuple[RubricItem, ...]
     review_status: str = "draft"
+    # Paths relative to the fixture that are withheld from the agent's
+    # workspace and restored only to run the verifier. Without them a task that
+    # ships its own ``verify.py`` is a reading comprehension exercise: the
+    # model opens the file and satisfies the assertions it finds. With them,
+    # the deterministic verdict measures the implementation instead.
+    withheld_paths: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> AgentTask:
@@ -84,6 +90,7 @@ class AgentTask:
                 for item in _mappings(value.get("rubric"), "rubric")
             ),
             review_status=str(value.get("review_status", "draft")).strip(),
+            withheld_paths=_strings(value.get("withheld_paths")),
         )
         if not all(
             (
@@ -133,6 +140,26 @@ class AgentTaskObservation:
     completion_tokens: int
     latency_seconds: float
     tool_calls: int
+    # Tool calls the model issued with an invented shape (unknown tool,
+    # parameter that does not exist, arguments failing their own schema).
+    # Defaulted so observation files written before the counter existed still
+    # load.
+    malformed_tool_calls: int = 0
+    #: Prompt tokens spent by the phases that call the provider directly —
+    #: chat agent, planner, council, spec elaborator, task-policy classifier.
+    #: They never reach the LoopEngine's counters, so a row that carried only
+    #: ``prompt_tokens`` under-reported whichever arm ran more of them.
+    #: Defaulted for observation files written before it was captured.
+    aux_prompt_tokens: int = 0
+    #: What the provider actually billed for the whole turn, counted at the
+    #: provider boundary. ``prompt_tokens`` is the loop's own tally and is a
+    #: strict subset of this; the difference is every other phase.
+    provider_prompt_tokens: int = 0
+    provider_completion_tokens: int = 0
+    provider_calls: int = 0
+    #: Whether the final answer used the wording the task asked for. Reported,
+    #: never gating: the deterministic verdict belongs to the verifier.
+    final_answer_patterns_ok: bool = True
     error: str = ""
     run_artifact: str = ""
 
@@ -168,10 +195,20 @@ class AgentTaskObservation:
             action_pattern_checks=_bool_mapping(
                 value.get("action_pattern_checks"), "action_pattern_checks"
             ),
+            final_answer_patterns_ok=bool(
+                value.get("final_answer_patterns_ok", True)
+            ),
             prompt_tokens=int(value.get("prompt_tokens", 0)),
             completion_tokens=int(value.get("completion_tokens", 0)),
             latency_seconds=float(value.get("latency_seconds", 0.0)),
             tool_calls=int(value.get("tool_calls", 0)),
+            malformed_tool_calls=int(value.get("malformed_tool_calls", 0)),
+            aux_prompt_tokens=int(value.get("aux_prompt_tokens", 0)),
+            provider_prompt_tokens=int(value.get("provider_prompt_tokens", 0)),
+            provider_completion_tokens=int(
+                value.get("provider_completion_tokens", 0)
+            ),
+            provider_calls=int(value.get("provider_calls", 0)),
             error=str(value.get("error", "")).strip(),
             run_artifact=str(value.get("run_artifact", "")).strip(),
         )
@@ -192,15 +229,25 @@ class AgentTaskObservation:
             row.prompt_tokens, row.completion_tokens, row.tool_calls
         ) < 0 or row.latency_seconds < 0:
             raise ValueError("agent task observation contains a negative measurement")
-        deterministic_success = (
+        # ``final_pattern_checks`` is a regex over free text and is reported,
+        # not gated: it produced false failures on runs whose deliverable had
+        # already passed its own verifier. ``action_pattern_checks`` stays a
+        # gate because it is behavioural — "the tests were run" is observable.
+        behavioural_success = (
             not row.error
             and row.verify_exit_code == 0
             and not row.forbidden_changes
             and not row.missing_expected_changes
-            and all(row.final_pattern_checks.values())
             and all(row.action_pattern_checks.values())
         )
-        if row.success != deterministic_success:
+        # Campaigns recorded before the rule changed stored the stricter
+        # verdict, which also required the answer's wording. Both are accepted
+        # so a frozen campaign still validates while new rows are held to the
+        # behavioural rule.
+        legacy_success = behavioural_success and all(
+            row.final_pattern_checks.values()
+        )
+        if row.success not in (behavioural_success, legacy_success):
             raise ValueError("success must match every deterministic task check")
         return row
 

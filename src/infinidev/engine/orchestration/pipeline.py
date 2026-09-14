@@ -285,13 +285,23 @@ def _run_elaboration_phase(
 
     Runs once per task on the single configured model. Returns a
     possibly-updated EscalationPacket carrying ``grounded_spec``. Local,
-    reversible defaults are surfaced and may proceed. Costly, external, or
-    destructive product forks require a user response; without an interactive
-    answer the packet carries ``execution_blocked_reason`` and the pipeline
-    stops before planning. Soft-fails:
-    any problem (or the complexity gate skipping it) returns the original
-    escalation unchanged — elaboration enriches the handoff, it is never
-    load-bearing for correctness.
+    reversible defaults are surfaced and may proceed.
+
+    High-impact forks (costly to reverse, external, destructive) are put to
+    the user when there is one. The three outcomes are distinct and must stay
+    distinct:
+
+    * the user answered — the answer becomes an authoritative decision;
+    * the user was asked and gave nothing (``""``) — the packet carries
+      ``execution_blocked_reason`` and the pipeline stops before planning;
+    * the caller cannot ask at all (``None``: one-shot, CI, benchmarks) — the
+      declared default is executed and the decision is reported as
+      unconfirmed, because a run that halts on a question nobody can answer
+      is a run that can never finish.
+
+    Soft-fails: any problem (or the complexity gate skipping it) returns the
+    original escalation unchanged — elaboration enriches the handoff, it is
+    never load-bearing for correctness.
     """
     from dataclasses import replace as _dc_replace
     from infinidev.config.settings import settings as _settings
@@ -323,6 +333,7 @@ def _run_elaboration_phase(
 
         confirmed: list[str] = []
         unanswered = []
+        unconfirmed = []
         for decision in spec.blocking_clarifications:
             options = "; ".join(decision.options)
             answer = hooks.ask_user(
@@ -334,7 +345,14 @@ def _run_elaboration_phase(
                 "Reply with your choice. Execution will not start without it.",
                 "text",
             )
-            if answer and answer.strip():
+            if answer is None:
+                # ``None`` is the interface contract's "this caller cannot
+                # ask", not "the user declined": one-shot and CI runs would
+                # otherwise do zero work on any request the elaborator reads
+                # as consequential. Proceed on the declared default and put
+                # the decision in front of whoever reads the result.
+                unconfirmed.append(decision)
+            elif answer.strip():
                 confirmed.append(f"{decision.question} — user answered: {answer.strip()}")
             else:
                 unanswered.append(decision)
@@ -345,6 +363,7 @@ def _run_elaboration_phase(
             spec,
             clarifications_needed=[*spec.defaultable_clarifications, *unanswered],
             confirmed_decisions=[*spec.confirmed_decisions, *confirmed],
+            unconfirmed_decisions=[*spec.unconfirmed_decisions, *unconfirmed],
         )
 
         if unanswered:
@@ -357,6 +376,16 @@ def _run_elaboration_phase(
                 escalation,
                 grounded_spec=spec,
                 execution_blocked_reason=reason,
+            )
+
+        if unconfirmed:
+            hooks.notify(
+                "Infinidev",
+                "No user was available to confirm these high-impact decisions, so "
+                "this run proceeds on the declared default and will report them as "
+                "unconfirmed:\n"
+                + "\n".join(f"  - {c.question} - using: {c.default}" for c in unconfirmed),
+                "agent",
             )
 
         # Only local reversible choices may proceed as non-blocking defaults.

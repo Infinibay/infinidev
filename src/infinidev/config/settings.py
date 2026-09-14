@@ -223,9 +223,20 @@ class Settings(BaseSettings):
     TASK_POLICIES_EMBEDDINGS_ENABLED: bool = True
     TASK_POLICIES_LLM_FALLBACK_ENABLED: bool = False
     # "preferred" asks the user's selected main model for task methods before
-    # composing the main prompt. "fallback" uses it only when local routing
-    # has no method; "off" avoids the extra request.
-    TASK_POLICIES_LLM_CLASSIFIER_MODE: str = "preferred"
+    # composing the main prompt. "fallback" uses it only when local routing has
+    # no method; "off" avoids the extra request.
+    #
+    # ``fallback``, because the isolated measurement says ``preferred`` buys
+    # nothing and costs a serial round trip on every turn: over the 11 corpus
+    # requests, local routing takes a median 4 ms while ``preferred`` takes
+    # 2.91 s (12.1 s on the worst request), and the classifier's ~446 prompt
+    # tokens per turn never reach any counter the engine reports
+    # (``bench/task_policy_router_cost.py``). It also only ever *removed* a
+    # method label — ``feature``, on 2 of 11 requests — because ``preferred``
+    # merges with ``replace_classified_operations=True`` while ``fallback``
+    # merges additively. An 8-pair A/B resolved no benefit either way.
+    # Measurement: docs/ENGINE_TASK_CLOSURE_ANALYSIS.md §6.1.21.
+    TASK_POLICIES_LLM_CLASSIFIER_MODE: str = "fallback"
     TASK_POLICIES_LLM_CLASSIFIER_MAX_TOKENS: int = 256
     TASK_POLICIES_EMBEDDING_MIN_SCORE: float = 0.18
     TASK_POLICIES_EMBEDDING_MIN_MARGIN: float = 0.04
@@ -261,6 +272,21 @@ class Settings(BaseSettings):
     LOOP_SUMMARIZER_MAX_INPUT_TOKENS: int = 4000  # Max tokens from step messages to feed summarizer
     LOOP_SUMMARIZER_TIMEOUT: int = 30  # Seconds; falls back to raw summary on timeout
     LOOP_REQUIRE_NOTE_BEFORE_COMPLETE: bool = True  # Gate step_complete on add_note for small models
+    # Deliver the outer-loop closure refusals (no-edit Task, Step with no net
+    # change) as an actionable notice in the next prompt, and bound how many
+    # times the same rejection may repeat. False restores the previous
+    # behaviour, where the gate flipped the step result without telling the
+    # model and the model answered by retrying the same rejected close.
+    LOOP_CLOSURE_FEEDBACK_ENABLED: bool = True
+    # Ask the model to issue its independent discovery calls in one response
+    # after two consecutive single-read rounds. Default OFF because it was
+    # measured and did not work: 3 tasks x 3 repetitions x 2 arms on
+    # MiniMax-M3 moved tools-per-round from 0.90 to 1.00 median, inside the
+    # within-arm spread, while prompt tokens, completion tokens, tool calls and
+    # latency all moved slightly the wrong way (see
+    # docs/ENGINE_TASK_CLOSURE_ANALYSIS.md section 6.1). Kept as a switch so it
+    # can be re-tested against a model that serialises more than this one.
+    LOOP_BATCHING_NUDGE_ENABLED: bool = False
     # Deterministic per-step objective verification: when a planner-authored
     # step carries an executable ``verify`` check, run it on step_complete and
     # block closure (with the failure output) until it passes.
@@ -302,10 +328,22 @@ class Settings(BaseSettings):
     LOOP_CUSTOM_TEST_COMMANDS: str = ""
 
     # ── Task engine selection (docs/GRAPH_ENGINE_BETA_DESIGN.md §9) ────
-    # New configurations use a conversational lead with scoped workers.
-    # Existing saved engine choices are preserved; task/staged/react remain
-    # explicit compatibility modes and graph_beta an experimental branching mode.
-    TASK_ENGINE_MODE: str = "orchestrator"  # orchestrator | auto | task | react | staged | graph_beta
+    # ``task`` is the default because it is measured, not because it is
+    # newer. Over 10 task shapes: same success rate, −82.9 % prompt tokens
+    # and −61.5 % latency (paired sign test, p<0.05). Over ``research-audit``
+    # — the read-only, one-deliverable shape the orchestrator was designed
+    # for — 3/3 vs 2/3 success at a 9.4× lower token median. The reason is
+    # structural: the orchestrator principal holds no edit tool, and
+    # workspace-writing workers are serialized by ``TeamRuntime``
+    # (``engine/team/runtime.py``), so delegation cannot parallelise any
+    # work that touches code.
+    #
+    # ``orchestrator`` stays fully supported and explicit; a later round can
+    # route to it from ``auto`` once it has a shape where it wins. ``staged``
+    # and ``react`` remain compatibility modes and ``graph_beta`` an
+    # experimental branching mode, as before.
+    # Measurement: docs/ENGINE_TASK_CLOSURE_ANALYSIS.md §6.1.8.
+    TASK_ENGINE_MODE: str = "task"  # orchestrator | auto | task | react | staged | graph_beta
     TEAM_MAX_WORKERS: int = Field(default=3, ge=1, le=16)
     TEAM_MAX_AGENTS: int = Field(default=12, ge=1, le=100)
     TEAM_MAX_FOLLOWUPS: int = Field(default=8, ge=0, le=100)

@@ -574,7 +574,11 @@ class LLMCaller:
                 in _COMPLETION_TOOL_NAMES
             ]
         if not is_planning and getattr(ctx, "suppress_discovery_this_step", False):
-            from infinidev.engine.loop.behavior_rules import is_workspace_edit_tool
+            from infinidev.engine.loop.behavior_rules import (
+                is_delegation_tool,
+                is_workspace_edit_tool,
+                role_can_edit_workspace,
+            )
             from infinidev.engine.loop.semantic_stagnation import (
                 SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES,
                 recovery_source_refresh_available,
@@ -584,6 +588,11 @@ class LLMCaller:
                 getattr(ctx, "semantic_recovery_context_calls", 0) or 0
             )
             source_refresh_available = recovery_source_refresh_available(ctx)
+            # "Stop reading and edit" is only an instruction for a role that
+            # has an edit tool. The orchestrator principal has none: hiding
+            # its delegation schemas left it a Step it could neither advance
+            # nor close.
+            role_edits = role_can_edit_workspace(ctx)
             schemas = [
                 schema for schema in schemas
                 if (
@@ -591,6 +600,7 @@ class LLMCaller:
                     in _COMPLETION_TOOL_NAMES
                     or name == "execute_command"
                     or is_workspace_edit_tool(name)
+                    or (not role_edits and is_delegation_tool(name))
                     or (
                         (source_refresh_available or context_calls > 0)
                         and name in SEMANTIC_RECOVERY_CONTEXT_TOOL_NAMES

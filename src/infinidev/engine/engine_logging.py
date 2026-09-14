@@ -284,6 +284,34 @@ def extract_tool_error(result: str) -> str:
     return ""
 
 
+def is_hallucinated_call_error(error: str) -> bool:
+    """Whether a tool failure is the model inventing the call's shape.
+
+    These failures say nothing about the user's repository and everything
+    about the model guessing a name: an unknown tool, a parameter that does not
+    exist, an argument that fails its own schema, arguments that are not JSON.
+    A tool that ran and failed against the real world is a different event and
+    must not be counted here, which is why the markers are the dispatcher's own
+    rejection strings rather than a generic ``"error"``.
+
+    Counting them is what turns "fewer hallucinated calls" into a number
+    instead of an impression. Each one also costs a full model round trip.
+    """
+    if not error:
+        return False
+    markers = (
+        "Unknown tool:",
+        "hallucinated tool",
+        "unexpected kwargs",
+        "missing required parameter",
+        "argument validation failed",
+        "Invalid JSON arguments",
+        "Expected dict arguments",
+        "EXISTS and is callable",
+    )
+    return any(marker in error for marker in markers)
+
+
 # ── Step-level logging functions ─────────────────────────────────────────
 
 def log_start(agent_id: str, agent_name: str, role: str, desc: str, tool_count: int) -> None:

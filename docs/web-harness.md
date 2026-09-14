@@ -90,7 +90,7 @@ the server's launch URL. Vite proxies `/api` and `/ws` to Python.
 
 ## Included workflows and limits
 
-- Send a normal request; the configured default orchestrator uses the existing
+- Send a normal request; the configured default engine uses the existing
   prompt assembly, repository rules, tools and research capabilities. There is no
   web-specific system prompt replacing those rules.
 - Resume or rename a project session. Streaming answers, tool activity, questions

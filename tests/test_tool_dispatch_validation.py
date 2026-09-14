@@ -59,6 +59,30 @@ class _EditLikeTool(InfinibayBaseTool):
         })
 
 
+class _DelegateLikeTool(InfinibayBaseTool):
+    name: str = "team_delegate"
+    description: str = "Stand in for the orchestrator's delegation tool."
+
+    def _run(self, tools: list[str] | None = None) -> str:
+        return json.dumps({"tools": tools or []})
+
+
+class _DescribeLikeTool(InfinibayBaseTool):
+    name: str = "describe_tool"
+    description: str = "Record the requested help topic."
+
+    def _run(self, context: str | None = None) -> str:
+        return json.dumps({"context": context})
+
+
+class _PatchLikeTool(InfinibayBaseTool):
+    name: str = "apply_file_patch"
+    description: str = "Record normalized patch arguments."
+
+    def _run(self, file_path: str, replacements: list[dict]) -> str:
+        return json.dumps({"file_path": file_path, "replacements": replacements})
+
+
 class _DeclareTestLikeTool(InfinibayBaseTool):
     name: str = "declare_test_command"
     description: str = "Record a custom test command."
@@ -238,3 +262,186 @@ def test_dispatch_routes_read_file_on_directory_to_list_directory(tmp_path) -> N
     )
 
     assert json.loads(result) == {"listed": str(tmp_path)}
+
+
+def test_dispatch_recovers_paraphrased_edit_parameters() -> None:
+    """MiniMax-M3 writes 'old_text' where the schema says 'old_string'."""
+    tool = _EditLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        tool.name,
+        {
+            "file_path": "src/widget.py",
+            "old_text": "before",
+            "new_text": "after",
+        },
+    )
+
+    assert json.loads(result) == {
+        "file_path": "src/widget.py",
+        "old_string": "before",
+        "new_string": "after",
+    }
+
+
+def test_dispatch_recovers_shell_command_alias() -> None:
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call({tool.name: tool}, tool.name, {"exec": "pytest -q"})
+
+    assert json.loads(result)["command"] == "pytest -q"
+
+
+def test_dispatch_recovers_a_schema_wrapped_parameter_key() -> None:
+    """The model emitted the schema's wording as the key, not the key itself."""
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool},
+        tool.name,
+        {'parameter name="command"': "pytest -q", "cwd": "/tmp"},
+    )
+
+    assert json.loads(result) == {"command": "pytest -q", "cwd": "/tmp"}
+
+
+def test_dispatch_leaves_a_real_parameter_name_untouched() -> None:
+    """The recovery must not rewrite a key that is already correct."""
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call({tool.name: tool}, tool.name, {"command": "pytest -q"})
+
+    assert json.loads(result)["command"] == "pytest -q"
+
+
+def test_dispatch_maps_describe_tool_topic_alias() -> None:
+    """MiniMax-M3 asked describe_tool(tool=...) where the schema says context."""
+    tool = _DescribeLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool}, tool.name, {"tool": "edit_file"},
+    )
+
+    assert json.loads(result) == {"context": "edit_file"}
+
+
+def test_describe_tool_alias_does_not_leak_to_other_tools() -> None:
+    """The rewrite is local: 'tool' is not a global alias."""
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call({tool.name: tool}, tool.name, {"tool": "edit_file"})
+
+    assert "error" in json.loads(result)
+
+
+def test_dispatch_maps_apply_file_patch_replacement_aliases() -> None:
+    """MiniMax-M3 passed the patch under 'edits' and 'patch', not 'replacements'."""
+    tool = _PatchLikeTool()
+
+    for alias in ("edits", "patch", "changes"):
+        result = execute_tool_call(
+            {tool.name: tool},
+            tool.name,
+            {"file_path": "src/app.py", alias: [{"old_string": "a", "new_string": "b"}]},
+        )
+        payload = json.loads(result)
+        assert "error" not in payload, f"{alias}: {payload}"
+        assert payload["replacements"] == [{"old_string": "a", "new_string": "b"}]
+
+
+def test_dispatch_recovers_a_required_parameter_from_an_invented_key() -> None:
+    """MiniMax-M3 sent execute_command({"param-1": "ls -la"}).
+
+    One required parameter, one invented key, and the right value: the mapping
+    is unambiguous, and a rejection costs a full model round.
+    """
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call({tool.name: tool}, tool.name, {"param-1": "ls -la"})
+
+    assert json.loads(result) == {"command": "ls -la", "cwd": None}
+
+
+def test_the_recovery_stays_quiet_when_the_required_parameter_is_present() -> None:
+    """Two keys, one valid: the invented one is still an error."""
+    tool = _ShellLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool}, tool.name, {"command": "pwd", "param-1": "ls"},
+    )
+
+    assert "error" in json.loads(result)
+
+
+def test_the_recovery_does_not_guess_with_several_required_parameters() -> None:
+    """edit_file needs three parameters, so an invented key maps to nothing."""
+    tool = _EditLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool}, tool.name, {"param-0": "a", "param-1": "b"},
+    )
+
+    assert "error" in json.loads(result)
+
+
+def test_a_rejected_call_still_reaches_the_hook_chain() -> None:
+    """A call the model made must be observable even when it is rejected.
+
+    ``execute_tool_call`` dispatches POST_TOOL at its end, so every rejection
+    returned early was invisible to the UI and to the transcript trace.
+    """
+    from infinidev.engine.hooks.hooks import HookContext, HookEvent, hook_manager
+
+    seen: list[HookContext] = []
+
+    def _capture(ctx: HookContext) -> None:
+        seen.append(ctx)
+
+    hook_manager.register(
+        HookEvent.POST_TOOL, _capture, priority=950, name="test-post-tool",
+    )
+    try:
+        tool = _ShellLikeTool()
+        # Unknown tool: this path does not even reach PRE_TOOL.
+        execute_tool_call({tool.name: tool}, "no_such_tool", {})
+        # Wrong parameter: this one does, and used to leave the call open.
+        execute_tool_call({tool.name: tool}, tool.name, {"nonsense": 1})
+    finally:
+        hook_manager.unregister(HookEvent.POST_TOOL, "test-post-tool")
+
+    assert len(seen) == 2, f"rejections never reached POST_TOOL: {seen}"
+    assert {ctx.tool_name for ctx in seen} == {"no_such_tool", "execute_command"}
+    assert all('"error"' in (ctx.result or "") for ctx in seen)
+
+
+def test_an_ungranted_but_real_tool_names_the_route() -> None:
+    """The orchestrator holds reads and team tools and no write tool at all.
+
+    `edit_file` exists in the registry, so "unknown tool" is wrong and the
+    similarity list is misleading: one recorded run spent ten rounds guessing
+    at write tools before blocking. The message has to say the tool is real and
+    name the route that reaches it.
+    """
+    tool = _ShellLikeTool()
+    delegate = _DelegateLikeTool()
+
+    result = execute_tool_call(
+        {tool.name: tool, delegate.name: delegate}, "edit_file", {},
+    )
+
+    payload = json.loads(result)
+    assert "exists but is not granted" in payload["error"]
+    assert "team_delegate" in payload["error"]
+    assert "Unknown tool" not in payload["error"]
+
+
+def test_a_genuinely_unknown_tool_still_gets_the_similarity_list() -> None:
+    tool = _ShellLikeTool()
+
+    payload = json.loads(
+        execute_tool_call({tool.name: tool}, "execute_comand", {}),
+    )
+
+    assert "Unknown tool" in payload["error"]
+    assert "execute_command" in payload["error"]

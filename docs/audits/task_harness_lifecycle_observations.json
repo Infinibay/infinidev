@@ -1,0 +1,78 @@
+{
+  "evidence_budget": {
+    "0": {
+      "rework_calls": 0,
+      "result": "certain",
+      "verdict": "REJECTED"
+    },
+    "None": {
+      "rework_calls": 1,
+      "result": "qualified",
+      "verdict": "APPROVED"
+    },
+    "100": {
+      "rework_calls": 1,
+      "result": "qualified",
+      "verdict": "APPROVED"
+    }
+  },
+  "rejected_evidence_status": {
+    "review": "REJECTED",
+    "engine_status": "done",
+    "result": "unsupported answer"
+  },
+  "checkpoint_identity": {
+    "same_task_resumes": true,
+    "followup_resumes": false,
+    "cancelled_same_task_resumes": false
+  },
+  "task_check_authoring": {
+    "bootstrap_verify": null,
+    "add_can_author_verify": false,
+    "modify_can_author_verify": false,
+    "operation_can_author_verify": false,
+    "investigation_asks_for_change": true
+  },
+  "objectives_can_stale_tests": {
+    "events": [
+      "tests_pass",
+      "objective_rework_mutates",
+      "review_approves"
+    ],
+    "test_runs": 1,
+    "verdict": "APPROVED"
+  },
+  "attachment_delivery": {
+    "step_boundary_payload": [
+      "Use this screenshot"
+    ],
+    "late_payload_is_text": true
+  },
+  "verification_fail_open": {
+    "held_for_attempts_1_to_4": [
+      true,
+      true,
+      true,
+      false
+    ],
+    "warning_notes": 1
+  },
+  "empty_verification": {
+    "passed": true,
+    "commands": [],
+    "summary": "No verification commands to run"
+  },
+  "implicit_done_with_blocked_step": {
+    "plan_step_status": "blocked",
+    "implicit_terminal_status": "done",
+    "explicit_done_with_prior_blocked": "done"
+  },
+  "summary_step_identity": {
+    "actually_completed": 1,
+    "summary_recorded_against": 3
+  },
+  "skipped_review_on_error": {
+    "verdict": "SKIPPED",
+    "summary": "Review skipped due to error: provider unavailable"
+  }
+}

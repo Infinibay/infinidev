@@ -887,19 +887,25 @@ class TestFileChangeTrackerReasons:
         assert tracker.get_reasons("/tmp/foo.py") == []
 
     def test_record_deleted_symbols(self):
+        import os
+
         from infinidev.engine.file_change_tracker import FileChangeTracker
         tracker = FileChangeTracker()
         tracker.record_deleted_symbols("/tmp/foo.py", ["old_func", "HelperClass"])
         tracker.record_deleted_symbols("/tmp/foo.py", ["another_func"])
         tracker.record_deleted_symbols("/tmp/bar.py", ["MyClass.my_method"])
 
+        # Keys are canonical: ``/tmp`` is ``/private/tmp`` on macOS, and the
+        # baseline and the reconcile scan already work with the real path.
+        foo = os.path.realpath("/tmp/foo.py")
+        bar = os.path.realpath("/tmp/bar.py")
         deleted = tracker.get_deleted_symbols()
-        assert "/tmp/foo.py" in deleted
-        assert "old_func" in deleted["/tmp/foo.py"]
-        assert "HelperClass" in deleted["/tmp/foo.py"]
-        assert "another_func" in deleted["/tmp/foo.py"]
-        assert "/tmp/bar.py" in deleted
-        assert "MyClass.my_method" in deleted["/tmp/bar.py"]
+        assert foo in deleted
+        assert "old_func" in deleted[foo]
+        assert "HelperClass" in deleted[foo]
+        assert "another_func" in deleted[foo]
+        assert bar in deleted
+        assert "MyClass.my_method" in deleted[bar]
 
     def test_record_deleted_symbols_empty_list_ignored(self):
         from infinidev.engine.file_change_tracker import FileChangeTracker

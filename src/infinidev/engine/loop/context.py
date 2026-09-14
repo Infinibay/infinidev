@@ -159,7 +159,9 @@ def build_system_prompt(
             get_variant("loop.protocol"),
             configuration=configuration,
         ) or ""
-        behavior = BEHAVIOR_GUIDELINES
+        # The bars are not variant-backed by default; a style that states them
+        # once each may register a compact version.
+        behavior = get_variant("loop.behavior_guidelines") or BEHAVIOR_GUIDELINES
 
     behavior = _profiled_block(behavior, "loop.behavior_guidelines", configuration)
     behavior_parts: list[str] = [part for part in (identity, behavior) if part]
@@ -336,6 +338,19 @@ def build_iteration_prompt(
             _append_if(parts, _structured_task_supplement(description))
     else:
         parts.append(f"<task>\n{description}\n</task>")
+
+    # Engine notice — the outer-loop closure gates reject a ``step_complete``
+    # after the inner loop has already returned, so they cannot answer the
+    # tool call the way the in-loop gates do. The rejection travels here
+    # instead, renders once, and is consumed. Without it the next prompt is
+    # byte-identical to the one that produced the rejected closure, which is
+    # a livelock rather than feedback.
+    with best_effort("pending engine notice render failed"):
+        from infinidev.engine.loop.engine_notice import drain_engine_notice
+
+        notice_text = drain_engine_notice(state)
+        if notice_text:
+            parts.append(notice_text)
 
     # Reactive guidance — pre-baked how-to advice queued by the engine
     # at the end of the previous step when a stuck-pattern was detected.
@@ -946,6 +961,18 @@ def _render_background_completions() -> str:
     return "\n".join(lines)
 
 
+#: Smallest slice of a file worth including when it alone exceeds the block.
+#: Below this the head is noise, so the file is listed as omitted instead.
+_MIN_TRUNCATED_FILE_CHARS = 2_000
+
+#: Appended to a truncated file so the model knows the content is partial and
+#: can read the rest deliberately.
+_TRUNCATION_NOTE_TEMPLATE = (
+    "\n… truncated at the context budget; {total} characters on disk. "
+    "Read the rest with read_file(offset=…, limit=…)."
+)
+
+
 def _render_opened_files(state: LoopState) -> str:
     """Files the agent has read or written recently, with TTL labels.
 
@@ -984,23 +1011,37 @@ def _render_opened_files(state: LoopState) -> str:
         return mentioned, int(opened.pinned), int(opened.ttl), -len(opened.content)
 
     ranked = sorted(state.opened_files.items(), key=relevance, reverse=True)
-    selected: list[tuple[str, Any]] = []
+    # ``selected`` carries the text to render, which is the file content except
+    # when the budget truncated it.
+    selected: list[tuple[str, Any, str]] = []
     omitted: list[str] = []
     used_chars = 0
     for path, opened in ranked:
-        size = len(opened.content)
-        if selected and used_chars + size > prompt_budget:
-            omitted.append(path)
-            continue
-        selected.append((path, opened))
-        used_chars += size
+        content = opened.content
+        remaining = prompt_budget - used_chars
+        if len(content) > remaining:
+            # The most relevant file could be larger than the whole block. The
+            # rule used to be "always keep the first one", which made the budget
+            # advisory: read_file accepts a 5 MB file, and one of those would
+            # have been sent whole on every round. Keep the head and say it is
+            # a head, so the model reads the rest deliberately.
+            if not selected and remaining >= _MIN_TRUNCATED_FILE_CHARS:
+                keep = remaining - len(_TRUNCATION_NOTE_TEMPLATE)
+                content = content[:keep] + _TRUNCATION_NOTE_TEMPLATE.format(
+                    total=len(opened.content)
+                )
+            else:
+                omitted.append(path)
+                continue
+        selected.append((path, opened, content))
+        used_chars += len(content)
 
     file_sections: list[str] = []
-    for path, of in selected:
+    for path, of, content in selected:
         if of.pinned:
-            label = f"### {path} (written by you — pinned)\n```\n{of.content}\n```"
+            label = f"### {path} (written by you — pinned)\n```\n{content}\n```"
         else:
-            label = f"### {path} (expires in {of.ttl} tool calls)\n```\n{of.content}\n```"
+            label = f"### {path} (expires in {of.ttl} tool calls)\n```\n{content}\n```"
         file_sections.append(label)
     omitted_block = ""
     if omitted:

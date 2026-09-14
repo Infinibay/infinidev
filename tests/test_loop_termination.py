@@ -1843,3 +1843,296 @@ def test_critic_objection_still_reaches_the_model_after_demotion(monkeypatch):
     assert review.blocked is False
     assert review.followup is not None, "demoted to advice, not to silence"
     assert "tests" in review.followup["content"]
+
+
+# ── an out-of-loop refusal has to reach the model ─────────────────────
+#
+# ``_enforce_edit_requirement`` and ``_enforce_step_effect`` decide after the
+# inner loop returned, so the messages they could answer are discarded and
+# rebuilt. Refusing without a delivered reason produced a byte-identical next
+# prompt: the model retried the same ``step_complete`` and the engine answered
+# with the same refusal. On the MiniMax-M3 baseline that cycle consumed ten of
+# one task's eleven iterations.
+
+
+def _refusal_step_manager() -> tuple[SimpleNamespace, list[tuple[str, str]]]:
+    calls: list[tuple[str, str]] = []
+
+    def finish(ctx, status, iteration, reason=""):
+        calls.append((status, reason))
+        return f"<{status}> {reason}"
+
+    return SimpleNamespace(finish=finish), calls
+
+
+def _active_step_ctx():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _ctx()
+    ctx.state.plan.steps = [PlanStep(
+        index=1, title="Implement the reservation guard", status="active",
+    )]
+    return ctx
+
+
+def _refuse(ctx, step_mgr, kind, engine=None):
+    """Call the refusal gate the way ``execute`` does, returning the result."""
+    from infinidev.engine.loop.engine import LoopEngine
+
+    result = StepResult(summary="done", status="done", final_answer="the answer")
+    return LoopEngine._deliver_closure_refusal(
+        engine or SimpleNamespace(), ctx, step_mgr, kind, 1, result,
+        requested_status="done",
+        requested_interrupted=False,
+        requested_final_answer="the answer",
+    )
+
+
+def test_rejected_closure_queues_an_actionable_notice():
+    from infinidev.engine.loop.engine_notice import drain_engine_notice
+
+    ctx = _active_step_ctx()
+    step_mgr, calls = _refusal_step_manager()
+
+    assert _refuse(ctx, step_mgr, "step_effect") is None
+    assert calls == []
+    notice = drain_engine_notice(ctx.state)
+    assert "<engine-notice" in notice
+    assert "Step 1" in notice and "Implement the reservation guard" in notice
+    assert "edit_file" in notice, "the notice must name the call that unblocks it"
+    assert drain_engine_notice(ctx.state) == "", "rendered once, not every turn"
+
+
+def test_edit_requirement_notice_offers_the_no_edit_escape():
+    from infinidev.engine.loop.engine_notice import drain_engine_notice
+
+    ctx = _active_step_ctx()
+    step_mgr, _ = _refusal_step_manager()
+
+    _refuse(ctx, step_mgr, "edit_requirement")
+
+    notice = drain_engine_notice(ctx.state)
+    assert "no_edit" in notice, (
+        "an already-satisfied Task must have a legitimate way out, or the "
+        "gate turns a no-op into an endless negotiation"
+    )
+
+
+def test_write_task_without_any_edit_stops_instead_of_looping():
+    from infinidev.engine.loop.engine_notice import MAX_CLOSURE_REFUSALS
+
+    ctx = _active_step_ctx()
+    step_mgr, calls = _refusal_step_manager()
+
+    for _ in range(MAX_CLOSURE_REFUSALS):
+        assert _refuse(ctx, step_mgr, "edit_requirement") is None
+
+    terminal = _refuse(ctx, step_mgr, "edit_requirement")
+
+    assert terminal is not None, (
+        "TASK_MAX_ITERATIONS=0 is the shipped default, so an unbounded gate "
+        "spins forever"
+    )
+    assert calls and calls[-1][0] == "exhausted"
+    assert "rejected" in calls[-1][1]
+
+
+def test_real_edit_evidence_ends_the_negotiation_without_losing_the_task():
+    from infinidev.engine.loop.engine_notice import MAX_CLOSURE_REFUSALS
+
+    ctx = _active_step_ctx()
+    ctx.state.task_has_edits = True
+    step_mgr, calls = _refusal_step_manager()
+
+    for _ in range(MAX_CLOSURE_REFUSALS):
+        assert _refuse(ctx, step_mgr, "step_effect") is None
+
+    result = StepResult(summary="done", status="done", final_answer="the answer")
+
+    from infinidev.engine.loop.engine import LoopEngine
+
+    terminal = LoopEngine._deliver_closure_refusal(
+        SimpleNamespace(), ctx, step_mgr, "step_effect", 1, result,
+        requested_status="done",
+        requested_interrupted=False,
+        requested_final_answer="the answer",
+    )
+
+    assert terminal is None, (
+        "the Task holds real edits, so ending the run would throw away work "
+        "the engine already saw land on disk"
+    )
+    assert calls == []
+    assert result.status == "done" and result.final_answer == "the answer"
+
+
+def test_step_refusal_counter_is_per_step_and_clears_on_advance():
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx = _active_step_ctx()
+    step_mgr, _ = _refusal_step_manager()
+
+    _refuse(ctx, step_mgr, "step_effect")
+    _refuse(ctx, step_mgr, "step_effect")
+    assert ctx.state.effect_refusals_by_step == {1: 2}
+
+    ctx.state.plan.steps.append(PlanStep(
+        index=2, title="Verify the guard", status="active",
+    ))
+    ctx.state.plan.steps[0].status = "done"
+    _refuse(ctx, step_mgr, "step_effect")
+
+    assert ctx.state.effect_refusals_by_step == {1: 2, 2: 1}, (
+        "a new Step starts with a clean count"
+    )
+
+
+# ── batching pressure ─────────────────────────────────────────────────
+#
+# The baseline averaged 0.63 tool calls per model round: 124 rounds carried 78
+# calls, and each round re-sends the whole static prompt. Two consecutive
+# one-read rounds is where the pattern is visible and one correction still
+# saves prompt passes.
+
+
+class _Call:
+    def __init__(self, name: str) -> None:
+        self.function = SimpleNamespace(name=name)
+
+
+@pytest.fixture
+def batching_enabled(monkeypatch):
+    """The nudge ships off; these tests are about the mechanism it would add."""
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "LOOP_BATCHING_NUDGE_ENABLED", True, raising=False)
+
+
+def test_two_single_read_rounds_ask_for_one_batched_response(batching_enabled):
+    ctx = _active_step_ctx()
+    guard = LoopGuard(is_small=False)
+    messages: list[dict[str, Any]] = []
+
+    guard.check_single_call_batching(ctx, messages, [_Call("read_file")])
+    assert messages == [], "one round is not yet a pattern"
+
+    guard.check_single_call_batching(ctx, messages, [_Call("read_file")])
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    assert "ONE response" in messages[0]["content"]
+
+
+def test_batching_nudge_fires_once_per_step_and_rearms_on_the_next(batching_enabled):
+    ctx = _active_step_ctx()
+    guard = LoopGuard(is_small=False)
+    messages: list[dict[str, Any]] = []
+
+    for _ in range(4):
+        guard.check_single_call_batching(ctx, messages, [_Call("read_file")])
+    assert len(messages) == 1, "a second nudge in the same Step is nagging"
+
+    from infinidev.engine.loop.plan_step import PlanStep
+
+    ctx.state.plan.steps[0].status = "done"
+    ctx.state.plan.steps.append(PlanStep(index=2, title="Verify", status="active"))
+    for _ in range(2):
+        guard.check_single_call_batching(ctx, messages, [_Call("read_file")])
+    assert len(messages) == 2, "a new Step starts with its own batching budget"
+
+
+def test_a_writer_or_a_batched_round_resets_the_single_read_streak(batching_enabled):
+    ctx = _active_step_ctx()
+    guard = LoopGuard(is_small=False)
+    messages: list[dict[str, Any]] = []
+
+    guard.check_single_call_batching(ctx, messages, [_Call("read_file")])
+    guard.check_single_call_batching(
+        ctx, messages, [_Call("read_file"), _Call("code_search")],
+    )
+    guard.check_single_call_batching(ctx, messages, [_Call("read_file")])
+
+    assert messages == [], (
+        "an edit or a batched round is not a serial-read pattern, so the "
+        "count restarts"
+    )
+
+
+def test_the_batching_nudge_is_off_by_default():
+    """It was measured against MiniMax-M3 and did not change the behaviour.
+
+    Shipping it on because the reasoning sounded right would make the prompt
+    longer for no measured gain.
+    """
+    from infinidev.config.settings import settings
+
+    assert settings.LOOP_BATCHING_NUDGE_ENABLED is False
+
+    ctx = _active_step_ctx()
+    guard = LoopGuard(is_small=False)
+    messages: list[dict[str, Any]] = []
+
+    for _ in range(4):
+        guard.check_single_call_batching(ctx, messages, [_Call("read_file")])
+
+    assert messages == []
+
+
+# ── the stagnation latch must be winnable ─────────────────────────────
+
+
+def test_the_stagnation_latch_does_not_arm_without_an_edit_tool():
+    """A role that cannot edit cannot obey "stop reading and edit".
+
+    The orchestrator principal has no edit tool: it delegates. Arming the
+    latch for it removed the delegation schemas, while the completion gate
+    kept refusing recovery mode as an external blocker, so the Step could
+    be neither advanced nor closed and the whole budget burned in reads.
+    """
+    from infinidev.engine.loop.behavior_rules import role_can_edit_workspace
+
+    assert role_can_edit_workspace(_ctx()) is True, "unknown grants fail open"
+
+    schemas = [
+        {"type": "function", "function": {"name": "read_file"}},
+        {"type": "function", "function": {"name": "team_delegate"}},
+        {"type": "function", "function": {"name": "step_complete"}},
+    ]
+    principal = _ctx()
+    principal.tool_schemas = schemas
+    assert role_can_edit_workspace(principal) is False
+
+    worker = _ctx()
+    worker.tool_schemas = [
+        {"type": "function", "function": {"name": "read_file"}},
+        {"type": "function", "function": {"name": "edit_file"}},
+    ]
+    assert role_can_edit_workspace(worker) is True
+
+
+def test_recovery_admits_delegation_for_a_principal_that_cannot_edit():
+    from infinidev.engine.loop.tool_runner import ToolRunner
+
+    principal = _ctx()
+    principal.tool_schemas = [
+        {"type": "function", "function": {"name": "read_file"}},
+        {"type": "function", "function": {"name": "team_create_ticket"}},
+        {"type": "function", "function": {"name": "team_delegate"}},
+        {"type": "function", "function": {"name": "web_search"}},
+    ]
+    principal.suppress_discovery_this_step = True
+
+    synthetic, executable = ToolRunner._partition_suppressed_discovery(
+        principal,
+        [
+            _tool_call("team_create_ticket"),
+            _tool_call("team_delegate"),
+            _tool_call("web_search"),
+        ],
+    )
+
+    assert [tc.function.name for tc in executable] == [
+        "team_create_ticket", "team_delegate",
+    ]
+    assert [tc.function.name for tc, _ in synthetic] == ["web_search"]
+    assert "team_delegate" in synthetic[0][1]
+    assert "edit that target" not in synthetic[0][1]

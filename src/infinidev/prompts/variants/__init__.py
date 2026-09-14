@@ -54,7 +54,7 @@ def resolve_style() -> str:
 
     Reads ``settings.PROMPT_STYLE``.  When set to ``"auto"`` (the default),
     uses ``generalized`` for all models — shorter prompts with less
-    over-exploration bias. Set to ``"full"``, ``"coding"``, or
+    over-exploration bias. Set to ``"full"``, ``"coding"``, ``"lean"`` or
     ``"extra_simple"`` explicitly if needed.
     """
     from infinidev.config.settings import settings
@@ -91,6 +91,10 @@ def _load_variants() -> None:
         from infinidev.prompts.variants import extra_simple as _es  # noqa: F401
     except Exception as exc:
         logger.debug("Failed to load extra_simple variants: %s", exc)
+    try:
+        from infinidev.prompts.variants import lean as _ln  # noqa: F401
+    except Exception as exc:
+        logger.debug("Failed to load lean variants: %s", exc)
 
 
 _load_variants()

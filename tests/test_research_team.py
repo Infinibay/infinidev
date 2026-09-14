@@ -715,7 +715,13 @@ def test_normal_message_reaches_principal_without_mode_command(
     settings_file.write_text(json.dumps({"LLM_MODEL": "openai/gpt-6-astra"}))
     monkeypatch.setattr("infinidev.config.settings.SETTINGS_FILE", settings_file)
     loaded = Settings.load_user_settings()
-    monkeypatch.setattr(settings, "TASK_ENGINE_MODE", loaded.TASK_ENGINE_MODE)
+    assert loaded.TASK_ENGINE_MODE == "task", (
+        "the shipped default; the orchestrator is asserted below"
+    )
+    # The orchestrator is the one mode with no preliminary router: a message
+    # the user addressed to the team must not be consumed by the chat agent.
+    # Pinned explicitly because the default mode now routes through it first.
+    monkeypatch.setattr(settings, "TASK_ENGINE_MODE", "orchestrator")
     monkeypatch.setattr(settings, "GATHER_ENABLED", False)
     monkeypatch.setattr(settings, "KEN_SESSION_ENABLED", False)
     monkeypatch.setattr("infinidev.engine.orchestration.pipeline._run_task_start_hook",
@@ -773,3 +779,21 @@ def test_principal_role_survives_disabled_optional_working_guidance(tmp_path):
     )
     assert "A normal task message activates this role" in " ".join(identity.split())
     assert "## Working guidance" not in identity
+
+
+def test_an_idle_subscription_never_waits_without_a_timeout() -> None:
+    """A lost wakeup must not hang the turn forever.
+
+    ``wait_for_events`` checks the event log and then waits. A worker that
+    finishes between those two steps notifies nobody the waiter has registered
+    for yet, so an unbounded wait never returns: the orchestrator sat idle with
+    its worker already finished and the turn never came back.
+    """
+    from infinidev.engine.team.waiting import _IDLE_RECHECK_SECONDS, _wait_slice
+
+    assert _wait_slice(None) == _IDLE_RECHECK_SECONDS
+    assert _wait_slice(None) is not None, "None blocks until notified, which hangs"
+    # A deadline is still honoured, and never exceeds the re-check interval.
+    assert _wait_slice(1.5) == 1.5
+    assert _wait_slice(600.0) == _IDLE_RECHECK_SECONDS
+    assert _wait_slice(0.0) == 0.0

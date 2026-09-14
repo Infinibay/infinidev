@@ -781,3 +781,63 @@ def test_profile_event_payload_is_replayable() -> None:
     assert payload["router_version"] == 2
     assert payload["selected_policies"][0]["id"] == "research.evidence_first"
     assert len(payload["selected_policies"][0]["policy_hash"]) == 64
+
+
+def test_local_routing_never_calls_the_provider(monkeypatch) -> None:
+    """`preferred` costs a round trip per turn; `off` and `fallback` do not.
+
+    The mechanism is that `_default_llm_classifier` is the only path to the
+    provider, and `fallback` reaches it only when the literal parser found no
+    method at all. Pinned here because the default was changed on this basis.
+    """
+    from infinidev.engine.task_policies import router
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        router, "_default_llm_classifier",
+        lambda text, **kwargs: calls.append(text) or None,
+    )
+
+    router.resolve_task_profile(
+        "Fix the rounding in apply_discount so it rounds half up.",
+        enable_embeddings=True, llm_classifier_mode="off",
+    )
+    assert calls == [], "off must not reach the provider"
+
+    router.resolve_task_profile(
+        "Fix the rounding in apply_discount so it rounds half up.",
+        enable_embeddings=True, llm_classifier_mode="fallback",
+    )
+    assert calls == [], "a literal method is not ambiguous, so fallback stays local"
+
+    router.resolve_task_profile(
+        "Do the needful with that thing over there.",
+        enable_embeddings=True, llm_classifier_mode="fallback",
+    )
+    assert len(calls) == 1, "fallback reaches the provider only when nothing was found"
+
+
+def test_preferred_replaces_the_literal_operations_and_fallback_only_adds(
+    monkeypatch,
+) -> None:
+    """`preferred` merged with `replace_classified_operations=True` dropped
+    `feature` on two corpus requests. `fallback` merges additively."""
+    from infinidev.engine.task_policies import router
+
+    monkeypatch.setattr(
+        router, "_default_llm_classifier",
+        lambda text, **kwargs: router.ClassifierResult(operations=[], confidence=0.9),
+    )
+    request = "Add a discounted(percent) method to Cart, a new feature."
+
+    preferred = router.resolve_task_profile(
+        request, enable_embeddings=False, llm_classifier_mode="preferred",
+    )
+    fallback = router.resolve_task_profile(
+        request, enable_embeddings=False, llm_classifier_mode="fallback",
+    )
+
+    assert "feature" not in preferred.operations, (
+        "the empty LLM answer replaced the literal set — that is the asymmetry"
+    )
+    assert "feature" in fallback.operations

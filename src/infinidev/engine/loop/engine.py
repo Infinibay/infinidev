@@ -314,7 +314,13 @@ def _configure_progress_recovery(
     step_index = active.index if active is not None else -1
     no_progress_windows = ctx.state.no_progress_windows_by_step.get(step_index, 0)
     transient = bool(getattr(ctx.state, "discovery_suppression_steps", 0))
-    latched = no_progress_windows >= 2
+    from infinidev.engine.loop.behavior_rules import role_can_edit_workspace
+
+    # "Stop reading and edit" is not an instruction a role with no edit tool
+    # can follow. Latching such a Step suppressed the delegation calls that
+    # were its only route to progress, while the completion gate kept
+    # refusing to close it: an unwinnable Step that burned the whole budget.
+    latched = no_progress_windows >= 2 and role_can_edit_workspace(ctx)
     ctx.suppress_discovery_this_step = transient or latched
     if transient:
         ctx.state.discovery_suppression_steps = max(
@@ -413,6 +419,20 @@ def _should_advance_plan(step_result: StepResult) -> bool:
         step_result.status in {"continue", "done", "blocked"}
         and not step_result.interrupted
     )
+
+
+def _closure_feedback_enabled() -> bool:
+    """Whether outer-loop closure refusals are delivered and bounded.
+
+    ``LOOP_CLOSURE_FEEDBACK_ENABLED`` is the rollout switch for the notice
+    channel; read through a function so a settings change applies to the next
+    run without an import-time snapshot.
+    """
+    with best_effort("closure feedback setting read failed"):
+        from infinidev.config.settings import settings
+
+        return bool(getattr(settings, "LOOP_CLOSURE_FEEDBACK_ENABLED", True))
+    return True
 
 
 def _reconcile_step_result(
@@ -1060,9 +1080,17 @@ class LoopEngine(AgentEngine):
                 step_messages_start=step_messages_start,
             )
 
+            # The two gates below decide after the inner loop has returned,
+            # and each mutates ``step_result`` in place. Snapshot what the
+            # model asked for so a Step that exhausts its refusals can still
+            # close on its own terms instead of losing a finished Task.
+            requested_status = step_result.status
+            requested_interrupted = step_result.interrupted
+            requested_final_answer = step_result.final_answer
             step_result, edit_requirement_blocked = _reconcile_step_result(
                 ctx, step_result, step_mgr,
             )
+            refusal_kind = ""
             if edit_requirement_blocked:
                 _emit_log(
                     "warning",
@@ -1071,6 +1099,7 @@ class LoopEngine(AgentEngine):
                     project_id=ctx.project_id,
                     agent_id=ctx.agent_id,
                 )
+                refusal_kind = "edit_requirement"
             if _apply_exploration_policy(ctx, step_result):
                 _emit_log(
                     "warning",
@@ -1079,7 +1108,7 @@ class LoopEngine(AgentEngine):
                     project_id=ctx.project_id,
                     agent_id=ctx.agent_id,
                 )
-            if _enforce_step_effect(ctx, step_result):
+            if not refusal_kind and _enforce_step_effect(ctx, step_result):
                 _emit_log(
                     "warning",
                     f"{_YELLOW}⚠ Implementation Step closed without an edit — "
@@ -1087,6 +1116,16 @@ class LoopEngine(AgentEngine):
                     project_id=ctx.project_id,
                     agent_id=ctx.agent_id,
                 )
+                refusal_kind = "step_effect"
+            if refusal_kind and _closure_feedback_enabled():
+                terminal = self._deliver_closure_refusal(
+                    ctx, step_mgr, refusal_kind, iteration, step_result,
+                    requested_status=requested_status,
+                    requested_interrupted=requested_interrupted,
+                    requested_final_answer=requested_final_answer,
+                )
+                if terminal is not None:
+                    return terminal
 
             # A step interrupted mid-flight did not finish, so the plan must
             # not advance over it and the summariser must not be paid for
@@ -1170,6 +1209,98 @@ class LoopEngine(AgentEngine):
         _emit_log("info", f"{_YELLOW}⚠ Task cancelled by user{_RESET}",
                   project_id=ctx.project_id, agent_id=ctx.agent_id)
         return step_mgr.finish(ctx, "cancelled", iteration)
+
+    def _deliver_closure_refusal(
+        self,
+        ctx: ExecutionContext,
+        step_mgr: StepManager,
+        kind: str,
+        iteration: int,
+        step_result: StepResult,
+        *,
+        requested_status: str,
+        requested_interrupted: bool,
+        requested_final_answer: str | None,
+    ) -> str | None:
+        """Tell the model why its closure was rejected, and bound the exchange.
+
+        The in-loop gates answer the ``step_complete`` tool call directly.
+        These two gates run after the inner loop returns, where the message
+        list is discarded and rebuilt, so the refusal is queued as a notice the
+        next iteration renders once (see ``engine_notice``). Without it the
+        next prompt is byte-identical to the one that produced the rejected
+        closure, which is a livelock rather than feedback.
+
+        Returns a terminal result only for the one case that must stop the run,
+        and ``None`` otherwise. ``TASK_MAX_ITERATIONS = 0`` is the shipped
+        default, so the refusal counter is the only bound on this exchange.
+
+        The two kinds exhaust differently, and the difference is what keeps the
+        ending honest:
+
+        * ``edit_requirement`` — the Task was asked to change the repository and
+          no successful edit exists anywhere in it. After the bound the run
+          stops rather than report a write Task as done with nothing written.
+        * ``step_effect`` — the Task has real edit evidence; only this Step's
+          own net change is missing. After the bound the engine stops
+          negotiating and lets the model's close stand, because the work exists
+          on disk and the alternative is spending the rest of the budget on the
+          same rejected turn.
+        """
+        from infinidev.engine.loop.engine_notice import (
+            MAX_CLOSURE_REFUSALS,
+            build_edit_requirement_notice,
+            build_step_effect_notice,
+            note_closure_refusal,
+            queue_engine_notice,
+        )
+
+        active = getattr(getattr(ctx.state, "plan", None), "active_step", None)
+        step_index = int(getattr(active, "index", -1) or -1)
+        step_title = str(getattr(active, "title", "") or "").strip()
+        attempt = note_closure_refusal(ctx.state, step_index)
+        if attempt <= MAX_CLOSURE_REFUSALS:
+            notice = (
+                build_edit_requirement_notice(attempt=attempt)
+                if kind == "edit_requirement"
+                else build_step_effect_notice(
+                    step_index=step_index,
+                    step_title=step_title,
+                    attempt=attempt,
+                )
+            )
+            queue_engine_notice(ctx.state, notice)
+            return None
+
+        where = f" (Step {step_index}: {step_title})" if step_index >= 0 else ""
+        if kind == "step_effect" and bool(
+            getattr(ctx.state, "task_has_edits", False)
+        ):
+            step_result.status = requested_status
+            step_result.interrupted = requested_interrupted
+            step_result.final_answer = requested_final_answer
+            _emit_log(
+                "warning",
+                f"{_YELLOW}⚠ Step closure was rejected {MAX_CLOSURE_REFUSALS} "
+                f"times{where}; accepting it because the Task holds real edit "
+                f"evidence{_RESET}",
+                project_id=ctx.project_id,
+                agent_id=ctx.agent_id,
+            )
+            return None
+
+        reason = (
+            f"Step closure rejected {MAX_CLOSURE_REFUSALS} times without the "
+            f"edit evidence the engine requires{where}."
+        )
+        _emit_log(
+            "error",
+            f"{_RED}⚠ {reason} Stopping instead of repeating the same rejected "
+            f"closure{_RESET}",
+            project_id=ctx.project_id,
+            agent_id=ctx.agent_id,
+        )
+        return step_mgr.finish(ctx, "exhausted", iteration, reason)
 
     def _init_execution(
         self, ctx: ExecutionContext, task_prompt: tuple[str, str],
@@ -1756,6 +1887,9 @@ class LoopEngine(AgentEngine):
                     guard.check_error_circuit_breaker(ctx, messages)
                     guard.check_note_discipline(ctx, messages)
                     guard.check_progress_drift(ctx, messages)
+                    guard.check_single_call_batching(
+                        ctx, messages, classified.regular,
+                    )
 
                     # A2 — Mid-step guidance: run detectors right after
                     # each successful tool execution so patterns fire on
@@ -1883,6 +2017,8 @@ class LoopEngine(AgentEngine):
             ctx.state.task_has_edits = True
 
         if active is not None:
+            from infinidev.engine.loop.behavior_rules import role_can_edit_workspace
+
             if tracker.net_workspace_changed:
                 ctx.state.edited_step_indices.add(active.index)
             else:
@@ -1891,6 +2027,7 @@ class LoopEngine(AgentEngine):
             if (
                 getattr(ctx, "semantic_stagnation_control", False)
                 and _step_phase(active.title) in {"change", "test_change"}
+                and role_can_edit_workspace(ctx)
             ):
                 test_marker = tuple(sorted(
                     fingerprint

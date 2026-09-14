@@ -26,6 +26,20 @@ class FileChangeTracker:
         self._active: bool = True
         self._baseline = baseline
 
+    @staticmethod
+    def _key(path: str) -> str:
+        """Canonical identity for a changed file.
+
+        ``realpath``, not ``abspath``: the workspace baseline is captured with
+        ``os.path.realpath`` (``WorkspaceBaseline.root``) and
+        ``reconcile_workspace`` joins recorded files onto that root. On macOS a
+        tool call that names ``/var/folders/...`` and a scan that names
+        ``/private/var/folders/...`` are the same file, and keying them
+        separately recorded every edit twice: the reviewer's prompt carried the
+        same diff twice and the change count doubled in 22 of 32 recorded runs.
+        """
+        return os.path.realpath(os.path.expanduser(str(path)))
+
     @property
     def baseline(self) -> WorkspaceBaseline | None:
         return self._baseline
@@ -118,7 +132,7 @@ class FileChangeTracker:
         if not self._active:
             return None
 
-        path = os.path.abspath(path)
+        path = self._key(path)
 
         # Store original only on first touch
         if path not in self._originals:
@@ -131,7 +145,7 @@ class FileChangeTracker:
 
     def get_diff(self, path: str) -> str | None:
         """Generate unified diff for a file (original → current)."""
-        path = os.path.abspath(path)
+        path = self._key(path)
         if self._active and path not in self._current:
             self.reconcile_workspace()
         return self._render_diff(path)
@@ -170,22 +184,22 @@ class FileChangeTracker:
         return "\n".join(diff_lines)
 
     def get_change_count(self, path: str) -> int:
-        return self._change_counts.get(os.path.abspath(path), 0)
+        return self._change_counts.get(self._key(path), 0)
 
     def get_action(self, path: str) -> str:
         """Return 'created' if original was empty, else 'modified'."""
-        path = os.path.abspath(path)
+        path = self._key(path)
         return "created" if not self._originals.get(path, "") else "modified"
 
     def record_reason(self, path: str, reason: str) -> None:
         """Record a reason/description for why a file was changed."""
-        path = os.path.abspath(path)
+        path = self._key(path)
         if reason and reason.strip():
             self._reasons.setdefault(path, []).append(reason.strip())
 
     def get_reasons(self, path: str) -> list[str]:
         """Return all recorded reasons for a file's changes."""
-        return self._reasons.get(os.path.abspath(path), [])
+        return self._reasons.get(self._key(path), [])
 
     def get_all_paths(self) -> list[str]:
         if self._active:
@@ -232,7 +246,7 @@ class FileChangeTracker:
         """
         if not symbols:
             return
-        path = os.path.abspath(path)
+        path = self._key(path)
         self._deleted_symbols.setdefault(path, set()).update(symbols)
 
     def get_deleted_symbols(self) -> dict[str, set[str]]:

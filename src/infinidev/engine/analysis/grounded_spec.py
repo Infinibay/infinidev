@@ -109,6 +109,12 @@ class GroundedSpec:
     # instead of being interrogated before any work happens.
     clarifications_needed: list[Clarification] = field(default_factory=list)
     confirmed_decisions: list[str] = field(default_factory=list)
+    # High-impact decisions that could NOT be put to a user because the
+    # caller is not interactive (``ask_user`` returned ``None``). Each one
+    # proceeds on its declared ``default``, and the planner is told to
+    # state it in the deliverable as an unconfirmed decision. Kept apart
+    # from ``clarifications_needed`` so nothing has to lie about ``risk``.
+    unconfirmed_decisions: list[Clarification] = field(default_factory=list)
     design_direction: str = ""
     alternatives_rejected: list[RejectedAlternative] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
@@ -179,6 +185,16 @@ class GroundedSpec:
         if self.confirmed_decisions:
             lines.append("  USER-CONFIRMED PRODUCT DECISIONS (authoritative):")
             lines += [f"    - {decision}" for decision in self.confirmed_decisions]
+        if self.unconfirmed_decisions:
+            # Nobody could be asked. Do not stall and do not pick a third
+            # option: build the declared default and make the decision
+            # visible in what the user receives.
+            lines.append(
+                "  UNCONFIRMED PRODUCT DECISIONS (nobody could be asked; implement the "
+                "stated default and state it as an unconfirmed decision in the "
+                "deliverable and in your final answer — do NOT block on it):"
+            )
+            lines += [f"    - {c.render()}" for c in self.unconfirmed_decisions]
         if self.blocking_clarifications:
             lines.append(
                 "  BLOCKING PRODUCT DECISIONS (do not plan or execute until confirmed):"
@@ -204,6 +220,7 @@ class GroundedSpec:
             "assumptions": [vars(a) for a in self.assumptions],
             "clarifications_needed": [vars(c) for c in self.clarifications_needed],
             "confirmed_decisions": self.confirmed_decisions,
+            "unconfirmed_decisions": [vars(c) for c in self.unconfirmed_decisions],
             "design_direction": self.design_direction,
             "alternatives_rejected": [vars(r) for r in self.alternatives_rejected],
             "risks": self.risks,

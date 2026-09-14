@@ -17,9 +17,9 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager, nullcontext
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterator, Mapping
+from typing import Any, Iterator, Mapping
 
 from bench.agent_task_eval import (
     AgentTask,
@@ -31,15 +31,44 @@ from bench.agent_task_eval import (
 
 
 MIN_REQUEST_INTERVAL_SECONDS = 2.0
+#: Compiled-cache patterns kept out of the baseline commit and out of any
+#: fixture copy. They are not source, and a run that recompiles them reports
+#: them as changes.
+_CACHE_PATTERNS = (
+    "__pycache__/",
+    "*.py[cod]",
+    ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+)
+
+
 _IGNORED_PARTS = frozenset(
     {
         ".git",
         ".infinidev",
         ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
         "__pycache__",
         "build",
         "node_modules",
         "target",
+        # A workspace-local interpreter the agent creates for itself. The
+        # fixtures ask for pytest, ``python`` on PATH is the system one, and a
+        # PEP 668 refusal leads models to `python -m venv .venv` inside the
+        # task repository. Left in, its thousands of library files become
+        # "changed paths" and drown the artifact copy, hiding the change the
+        # task was about. Observed on MiniMax-M3 with pricing-rounding.
+        ".venv",
+        "venv",
+        # Ken's index and daemon state. It writes them next to the workspace it
+        # indexes, so they land in every changed-path diff: the recorded
+        # orchestrator runs show .ken/ken.db, .ken/vectors/* and the daemon
+        # files counted as the agent's own changes, inflating changed_lines and
+        # the artifact copy.
+        ".ken",
     }
 )
 _IGNORED_PART_SUFFIXES = (".egg-info",)
@@ -75,6 +104,21 @@ class AgentTaskRunConfig:
     treatment: str = "prompt_calibration"
     task_policy_prediction_report: str = ""
     task_policy_prediction_report_sha256: str = ""
+    # Prompt-style variant under test. Empty keeps the product default. The
+    # setting is applied in-process because ``./.infinidev/settings.json``
+    # outranks environment variables in pydantic-settings, so an env override
+    # would silently measure the wrong style.
+    prompt_style: str = ""
+    #: Run the whole orchestration pipeline instead of the loop directly. This
+    #: is what a user gets: chat agent, optional elaboration, engine selection,
+    #: the developer loop and the review phase. Needed to measure the engine
+    #: mode the product actually defaults to, which the direct loop cannot.
+    pipeline_mode: bool = False
+    # Arbitrary ``Settings`` fields applied in-process for this run and
+    # restored afterwards. The evaluation manifests predate most of the knobs
+    # under test, and one entry per setting would mean editing the runner every
+    # time a candidate adds one.
+    settings_overrides: Mapping[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_path(cls, path: Path) -> AgentTaskRunConfig:
@@ -102,6 +146,9 @@ class AgentTaskRunConfig:
             task_policy_prediction_report_sha256=str(
                 value.get("task_policy_prediction_report_sha256", "")
             ).strip(),
+            prompt_style=str(value.get("prompt_style", "")).strip(),
+            pipeline_mode=bool(value.get("pipeline_mode", False)),
+            settings_overrides=dict(value.get("settings_overrides", {}) or {}),
         )
         if not all((config.provider, config.model, config.model_identity)):
             raise ValueError("agent task config needs provider, model, and immutable identity")
@@ -131,6 +178,15 @@ class AgentTaskRunConfig:
             )
         if has_prediction_report and config.treatment != "task_policy":
             raise ValueError("a task-policy prediction report requires task_policy treatment")
+        if config.settings_overrides:
+            from infinidev.config.settings import Settings
+
+            unknown = sorted(set(config.settings_overrides) - set(Settings.model_fields))
+            if unknown:
+                raise ValueError(
+                    "agent task settings overrides are not settings: "
+                    + ", ".join(unknown)
+                )
         return config
 
 
@@ -153,6 +209,296 @@ def _workspace(path: Path) -> Iterator[None]:
 def copy_workspace(source: Path, destination: Path) -> None:
     """Copy an evaluation checkout without expanding repository symlinks."""
     shutil.copytree(source, destination, symlinks=True)
+
+
+class _AuxUsage:
+    """Model calls the LoopEngine's counters never see.
+
+    Two independent sources, because neither alone is complete:
+
+    * ``by_lane`` comes from ``hooks.notify_token_usage``, which the chat
+      agent, the planner and the stage planner call voluntarily. It names the
+      lane but is opt-in — the council, the spec elaborator, the review engine,
+      the adversarial verifier and the task-policy classifier all call
+      ``litellm.completion`` and never report.
+    * ``provider`` counts every successful call in the process at the provider
+      boundary, through a litellm callback. It has no lane but has no gaps.
+
+    An observation row that carried only the loop's own ``prompt_tokens``
+    under-reported exactly the phases a pipeline mode adds, which biased an
+    engine comparison toward whichever arm ran fewer of them.
+    """
+
+    def __init__(self) -> None:
+        self.by_lane: dict[str, int] = {}
+        self.provider_prompt = 0
+        self.provider_completion = 0
+        self.provider_calls = 0
+
+    def reset(self) -> None:
+        self.by_lane = {}
+        self.provider_prompt = 0
+        self.provider_completion = 0
+        self.provider_calls = 0
+
+    def add(self, tokens: int, lane: str) -> None:
+        if tokens > 0:
+            self.by_lane[lane] = self.by_lane.get(lane, 0) + int(tokens)
+
+    def add_provider_call(self, response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        try:
+            prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion = int(getattr(usage, "completion_tokens", 0) or 0)
+        except (TypeError, ValueError):
+            return
+        self.provider_calls += 1
+        self.provider_prompt += prompt
+        self.provider_completion += completion
+
+    @property
+    def total(self) -> int:
+        return sum(self.by_lane.values())
+
+
+#: One accumulator per process. The runner is single-threaded and runs one
+#: unit at a time, so a module-level instance is enough and keeps the hooks
+#: object a plain subclass with no state to thread through ``run_task``.
+_AUX_USAGE = _AuxUsage()
+_CALLBACK_REGISTERED = False
+
+
+def _provider_usage_callback() -> Any:
+    """Register a litellm callback that counts every successful call once."""
+
+    global _CALLBACK_REGISTERED
+    import litellm
+    from litellm.integrations.custom_logger import CustomLogger
+
+    class _ProviderUsage(CustomLogger):
+        def log_success_event(self, kwargs, response_obj, start_time, end_time):
+            _AUX_USAGE.add_provider_call(response_obj)
+
+    watcher = _ProviderUsage()
+    if not _CALLBACK_REGISTERED:
+        litellm.callbacks.append(watcher)
+        _CALLBACK_REGISTERED = True
+    return watcher
+
+
+def _metered_hooks() -> Any:
+    from infinidev.engine.orchestration import NonInteractiveHooks
+
+    class _MeteredHooks(NonInteractiveHooks):
+        def notify_token_usage(self, prompt_tokens: int, lane: str = "chat") -> None:
+            _AUX_USAGE.add(prompt_tokens, lane)
+
+    return _MeteredHooks()
+
+
+def _run_through_pipeline(
+    *,
+    agent: Any,
+    engine: Any,
+    request: str,
+    instruction: str,
+    session_id: str,
+    max_iterations: int,
+) -> str:
+    """Run one user turn the way the product does, and return its reply.
+
+    The direct-loop path bypasses the chat agent, engine selection and the
+    review phase, so it can only measure the loop. This runs ``run_task``, the
+    same entry point the TUI, the classic CLI and the web server use, with the
+    non-interactive hooks the one-shot CLI already relies on.
+    """
+    from infinidev.engine.analysis.review_engine import ReviewEngine
+    from infinidev.engine.orchestration import run_task
+    from infinidev.tools.permission import (
+        make_noninteractive_permission_handler,
+        set_permission_handler,
+    )
+
+    from infinidev.config.settings import settings
+
+    hooks = _metered_hooks()
+    _provider_usage_callback()
+    set_permission_handler(make_noninteractive_permission_handler(request))
+    previous_iterations = settings.TASK_MAX_ITERATIONS
+    if max_iterations > 0:
+        settings.TASK_MAX_ITERATIONS = max_iterations
+    try:
+        return run_task(
+            agent=agent,
+            user_input=f"{request}\n\n{instruction}",
+            session_id=session_id,
+            engine=engine,
+            reviewer=ReviewEngine(),
+            hooks=hooks,
+        ) or ""
+    finally:
+        settings.TASK_MAX_ITERATIONS = previous_iterations
+        set_permission_handler(None)
+
+
+#: A provider failure that reached the reply instead of raising. The pipeline
+#: catches engine exceptions and returns them as the turn's text, so a quota or
+#: network failure produced a row with no error, no status, zero tokens and a
+#: failed verification — indistinguishable from a task the model could not do.
+_PROVIDER_FAILURE = re.compile(
+    r"engine failed|APIConnectionError|RateLimitError|AuthenticationError"
+    r"|litellm\.|usage limit reached",
+    re.IGNORECASE,
+)
+
+
+def provider_failure_in_reply(final_answer: str, prompt_tokens: int) -> str:
+    """The provider failure a run's reply is reporting, if that is what it is.
+
+    Keyed on zero prompt tokens as well as the wording: a run that reached the
+    model cannot have spent nothing, and a real reply can mention a timeout
+    without being one. Six runs against an exhausted plan were recorded as
+    ordinary task failures before this existed.
+    """
+    if prompt_tokens > 0:
+        return ""
+    text = (final_answer or "").strip()
+    if not text or not _PROVIDER_FAILURE.search(text):
+        return ""
+    return text[:300]
+
+
+def ensure_project(project_id: int, name: str) -> None:
+    """Register the project row the task's tools write under.
+
+    ``findings``, ``artifacts``, ``tasks`` and the knowledge tables all carry
+    ``project_id REFERENCES projects(id)``. The database seeds one "Default
+    Project", and the evaluation invents its own id per run, so nothing created
+    the row: every write under it failed the foreign key. The taxonomy recorded
+    "Failed to record finding: FOREIGN KEY constraint failed" as a recurring
+    tool failure, and the whole DB-backed surface was untested behind it.
+    """
+    from infinidev.db.service import execute_with_retry
+
+    def _insert(conn) -> None:
+        conn.execute(
+            "INSERT OR IGNORE INTO projects (id, name, description) "
+            "VALUES (?, ?, ?)",
+            (project_id, name, "agent-task evaluation workspace"),
+        )
+        conn.commit()
+
+    execute_with_retry(_insert)
+
+
+def _exclude_generated_caches(workspace: Path) -> None:
+    """Keep compiled caches out of the workspace baseline.
+
+    Written to ``.git/info/exclude`` rather than a ``.gitignore`` in the tree:
+    the fixture must not gain a file the task did not have, and ``info/exclude``
+    is per-checkout and never committed.
+    """
+
+    exclude = workspace / ".git" / "info" / "exclude"
+    try:
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        missing = [
+            pattern for pattern in _CACHE_PATTERNS
+            if pattern not in existing.splitlines()
+        ]
+        if missing:
+            with exclude.open("a", encoding="utf-8") as handle:
+                if existing and not existing.endswith("\n"):
+                    handle.write("\n")
+                handle.write("\n".join(missing) + "\n")
+    except OSError as exc:  # pragma: no cover - a read-only workspace is not fatal
+        logger.debug("could not write .git/info/exclude: %s", exc)
+
+
+def init_git_workspace(workspace: Path) -> bool:
+    """Make the task workspace a repository with the fixture committed.
+
+    The agent's own instructions send it to ``git_diff`` and ``git_status`` to
+    review what it changed. The fixtures are bare directories, so every one of
+    those calls failed against a workspace that is not a repository: 62 of the
+    189 failed tool calls across the recorded campaigns, 33% of all failures,
+    spent on an environment the request never mentioned. A real checkout is a
+    repository, so the harness supplies one.
+
+    Best effort: a host without ``git`` runs the task as before rather than
+    failing the campaign.
+
+    Generated caches are excluded from the baseline commit. The fixtures carry
+    no ``.gitignore``, so a stray ``__pycache__`` left by someone running pytest
+    inside the fixture directory became a *tracked* file, entered the workspace
+    baseline, and every later run reported the recompiled ``.pyc`` as a change:
+    in one ``wide-sum`` run the reviewer's diff was 7 980 characters of which
+    7 370 — 92 % — were compiled-cache noise.
+    """
+    if not shutil.which("git"):
+        return False
+    _exclude_generated_caches(workspace)
+    commands = (
+        ["git", "init", "--quiet"],
+        ["git", "add", "-A"],
+        [
+            "git", "-c", "user.email=evaluation@localhost",
+            "-c", "user.name=Evaluation", "commit", "--quiet",
+            "-m", "fixture baseline",
+        ],
+    )
+    for command in commands:
+        completed = subprocess.run(
+            command, cwd=workspace, capture_output=True, text=True, timeout=60,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return False
+    return True
+
+
+def _withhold_paths(
+    workspace: Path, paths: tuple[str, ...]
+) -> dict[str, bytes]:
+    """Remove verifier-only files from the agent's workspace.
+
+    Returns the pristine bytes so the verifier can be run against the same
+    files the fixture shipped, not the ones the agent found.
+    """
+    saved: dict[str, bytes] = {}
+    for relative in paths:
+        target = (workspace / relative).resolve()
+        try:
+            target.relative_to(workspace.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"withheld path escapes the workspace: {relative}"
+            ) from exc
+        if not target.is_file():
+            raise ValueError(f"withheld path does not exist: {relative}")
+        saved[relative] = target.read_bytes()
+        target.unlink()
+    return saved
+
+
+def _restore_withheld(
+    workspace: Path, saved: Mapping[str, bytes]
+) -> tuple[str, ...]:
+    """Put the verifier-only files back and report any the agent wrote.
+
+    A path that exists again before the restore is a file the agent created
+    where it had none, which is the one way a run can reach the withheld
+    contract without earning it.
+    """
+    tampered: list[str] = []
+    for relative, content in saved.items():
+        target = workspace / relative
+        if target.exists():
+            tampered.append(relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return tuple(tampered)
 
 
 def _structured_evaluation_task(task: AgentTask, task_profile: object | None) -> object:
@@ -329,6 +675,38 @@ def _canonical_profile_sha(profile: Mapping[str, object]) -> str:
 
 
 @contextmanager
+def interpreter_on_path() -> Iterator[None]:
+    """Make the runner's own interpreter reachable as ``python``.
+
+    Tasks instruct the agent to run the project's tests, and the verifier runs
+    them with ``sys.executable``. Without this, an agent that types the obvious
+    ``python -m pytest`` gets "command not found" or a PEP 668 refusal from the
+    system interpreter, and spends the run building a virtualenv inside the
+    repository instead of doing the task. Observed on MiniMax-M3: seven
+    ``execute_command`` calls and a workspace-local ``.venv`` for a one-line
+    numeric fix that the hidden contract then graded as correct.
+
+    The point is not to help the agent. It is that a harness must provide the
+    environment its own tasks describe, or it measures the environment.
+    """
+    interpreter_bin = str(Path(sys.executable).parent)
+    previous = os.environ.get("PATH", "")
+    if interpreter_bin in previous.split(os.pathsep):
+        yield
+        return
+    os.environ["PATH"] = (
+        interpreter_bin + os.pathsep + previous if previous else interpreter_bin
+    )
+    try:
+        yield
+    finally:
+        if previous:
+            os.environ["PATH"] = previous
+        else:
+            os.environ.pop("PATH", None)
+
+
+@contextmanager
 def configured_evaluation_runtime(
     config: AgentTaskRunConfig,
     condition: str,
@@ -362,6 +740,7 @@ def configured_evaluation_runtime(
         "FILE_OPERATIONS_PERMISSION",
         "TOOL_EFFECTS_PERMISSION",
         "CONTEXT_RANK_ENABLED",
+        "PROMPT_STYLE",
         "USER_PREFERENCE_PROFILE",
         "USER_PREFERENCE_PROFILE_SHA256",
         "PROMPT_CALIBRATION_PROFILE",
@@ -380,6 +759,9 @@ def configured_evaluation_runtime(
         "ADAPTIVE_RUNTIME_REASONING_SHADOW_MODE",
     )
     previous = {name: getattr(settings, name) for name in setting_names}
+    previous.update(
+        {name: getattr(settings, name) for name in config.settings_overrides}
+    )
     provider = get_provider(config.provider)
     model = config.model
     if config.provider != "openai_subscription" and not model.startswith(provider.prefix):
@@ -404,6 +786,10 @@ def configured_evaluation_runtime(
         settings.FILE_OPERATIONS_PERMISSION = "auto_approve"
         settings.TOOL_EFFECTS_PERMISSION = "auto_approve"
         settings.CONTEXT_RANK_ENABLED = False
+        if config.prompt_style:
+            settings.PROMPT_STYLE = config.prompt_style
+        for override_name, override_value in config.settings_overrides.items():
+            setattr(settings, override_name, override_value)
         settings.USER_PREFERENCE_PROFILE = str(profile_path)
         settings.USER_PREFERENCE_PROFILE_SHA256 = profile_sha
         settings.PROMPT_CALIBRATION_PROFILE = ""
@@ -633,14 +1019,24 @@ def run_one(
         temp_root = Path(temp)
         run_workspace = temp_root / "repo"
         copy_workspace(source, run_workspace)
+        withheld = _withhold_paths(run_workspace, task.withheld_paths)
+        # After the withhold, so the committed baseline is exactly what the
+        # agent starts from and a diff shows only the agent's own work.
+        init_git_workspace(run_workspace)
+        withheld_tampering: tuple[str, ...] = ()
         seed = f"{run_name}:{run_workspace.resolve()}"
         project_id = int.from_bytes(hashlib.sha256(seed.encode()).digest()[:4], "big")
         instance_id = f"agent-task-{project_id:08x}-{repetition}"
         try:
-            with configured_evaluation_runtime(config, condition, manifest, temp_root):
+            with interpreter_on_path(), configured_evaluation_runtime(
+                config, condition, manifest, temp_root
+            ):
                 # Tool resolution consults the active model capabilities. Build
                 # both objects only after the evaluation route is installed;
                 # otherwise a previous/default provider contaminates the run.
+                ensure_project(
+                    project_id, f"agent-task::{task.id}::r{repetition}",
+                )
                 engine = LoopEngine()
                 agent = InfinidevAgent(
                     agent_id=f"agent-task-{instance_id}",
@@ -683,22 +1079,36 @@ def run_one(
                             task, resolved_profile
                         )
                     agent.activate_context(session_id=instance_id)
-                    final_answer = engine.execute(
-                        agent,
-                        (
-                            task.request,
-                            "Complete this isolated evaluation task. Do not create branches, commit, push, "
-                            "or modify anything outside the workspace. Leave deterministic verification passing.",
-                        ),
-                        verbose=False,
-                        max_iterations=config.max_iterations,
-                        max_total_tool_calls=config.max_total_tool_calls,
-                        max_tool_calls_per_action=config.max_tool_calls_per_action,
-                        allow_llm_retries=False,
-                        # TreeEngine owns separate budgets and would let one
-                        # benchmark action escape this runner's declared cap.
-                        allow_explore=False,
-                        task=structured_task,
+                    _AUX_USAGE.reset()
+                    instruction = (
+                        "Complete this isolated evaluation task. Do not create branches, commit, push, "
+                        "or modify anything outside the workspace. Leave deterministic verification passing."
+                    )
+                    if config.pipeline_mode:
+                        final_answer = _run_through_pipeline(
+                            agent=agent,
+                            engine=engine,
+                            request=task.request,
+                            instruction=instruction,
+                            session_id=instance_id,
+                            max_iterations=config.max_iterations,
+                        )
+                    else:
+                        final_answer = engine.execute(
+                            agent,
+                            (task.request, instruction),
+                            verbose=False,
+                            max_iterations=config.max_iterations,
+                            max_total_tool_calls=config.max_total_tool_calls,
+                            max_tool_calls_per_action=config.max_tool_calls_per_action,
+                            allow_llm_retries=False,
+                            # TreeEngine owns separate budgets and would let one
+                            # benchmark action escape this runner's declared cap.
+                            allow_explore=False,
+                            task=structured_task,
+                        )
+                    withheld_tampering = _restore_withheld(
+                        run_workspace, withheld,
                     )
                     verified = _verify(
                         task.verify_command,
@@ -715,6 +1125,12 @@ def run_one(
                 agent.deactivate()
         engine_status = str(getattr(engine, "_last_status", "")) if engine else ""
         state = getattr(engine, "_last_state", None) if engine else None
+        if not error:
+            reported = provider_failure_in_reply(
+                final_answer, int(getattr(state, "total_prompt_tokens", 0) or 0),
+            )
+            if reported:
+                error = reported
         history = list(getattr(state, "history", ()))
         changed = changed_paths(source, run_workspace)
         forbidden = tuple(
@@ -731,12 +1147,20 @@ def run_one(
         changed_dir = artifact_dir / "workspace"
         copy_workspace(run_workspace, changed_dir)
 
+    # ``final_checks`` is deliberately NOT part of success. It is a regular
+    # expression over free text, and it produced false failures in three
+    # consecutive rounds: on user-owned-tradeoff ("choice"/"you" where the
+    # pattern wanted "choose"/"user") and on wide-sum (three runs marked failed
+    # while all six had found the right stage and passed the behavioural
+    # verifier). Answer wording is a communication signal, so it is recorded and
+    # reported separately rather than allowed to decide whether the work was
+    # done.
     success = (
         not error
         and verify_exit == 0
         and not forbidden
         and not missing_expected
-        and all(final_checks.values())
+        and not withheld_tampering
         and all(action_checks.values())
     )
     artifact = {
@@ -763,10 +1187,23 @@ def run_one(
             for record in history
         ],
         "tool_trace": tool_trace,
+        "malformed_tool_calls": int(
+            getattr(state, "malformed_tool_calls", 0)
+        ),
+        "aux_prompt_tokens": _AUX_USAGE.total,
+        "aux_prompt_tokens_by_lane": dict(_AUX_USAGE.by_lane),
+        "provider_prompt_tokens": _AUX_USAGE.provider_prompt,
+        "provider_completion_tokens": _AUX_USAGE.provider_completion,
+        "provider_calls": _AUX_USAGE.provider_calls,
+        "malformed_call_reasons": list(
+            getattr(state, "malformed_call_reasons", ()) or ()
+        ),
         "changed_paths": changed,
         "forbidden_changes": forbidden,
         "missing_expected_changes": missing_expected,
+        "withheld_tampering": withheld_tampering,
         "final_pattern_checks": final_checks,
+        "final_answer_patterns_ok": all(final_checks.values()),
         "action_pattern_checks": action_checks,
         "prompt_composition_history": list(getattr(state, "prompt_composition_history", ())),
         "request_payload_history": list(getattr(state, "request_payload_history", ())),
@@ -803,11 +1240,17 @@ def run_one(
         forbidden_changes=forbidden,
         missing_expected_changes=missing_expected,
         final_pattern_checks=final_checks,
+        final_answer_patterns_ok=all(final_checks.values()),
         action_pattern_checks=action_checks,
         prompt_tokens=int(getattr(state, "total_prompt_tokens", 0)),
         completion_tokens=int(getattr(state, "total_completion_tokens", 0)),
+        aux_prompt_tokens=_AUX_USAGE.total,
+        provider_prompt_tokens=_AUX_USAGE.provider_prompt,
+        provider_completion_tokens=_AUX_USAGE.provider_completion,
+        provider_calls=_AUX_USAGE.provider_calls,
         latency_seconds=time.perf_counter() - started,
         tool_calls=int(getattr(state, "total_tool_calls", 0)),
+        malformed_tool_calls=int(getattr(state, "malformed_tool_calls", 0)),
         error=error,
         run_artifact=str(artifact_path),
     )
@@ -856,8 +1299,17 @@ def run_campaign(
     task_ids: tuple[str, ...] = (),
     conditions: tuple[str, ...] = _CONDITIONS,
     acquire_global_lock: bool = True,
+    skip_units: frozenset[tuple[str, int, str]] = frozenset(),
 ) -> None:
-    """Run every task/condition serially and stop on the first runtime error."""
+    """Run every task/condition serially and stop on the first runtime error.
+
+    ``skip_units`` carries ``(task_id, repetition, condition)`` triples already
+    present in the observations file. The runner still stops on the first
+    provider error, because a campaign that silently continues past a broken
+    route reports a shorter sample as if it were the planned one; what
+    ``skip_units`` buys is that the work already paid for is not thrown away
+    when the caller resumes.
+    """
     from infinidev.engine.subscription_safety import subscription_single_flight
 
     config = AgentTaskRunConfig.from_path(config_path)
@@ -880,13 +1332,19 @@ def run_campaign(
     )
     if not selected:
         raise ValueError(f"no selected agent tasks for split: {split}")
-    if observations_path.exists() and observations_path.stat().st_size:
+    if (
+        observations_path.exists()
+        and observations_path.stat().st_size
+        and not skip_units
+    ):
         raise ValueError("agent task observations output must be new and empty")
     lock = subscription_single_flight() if acquire_global_lock else nullcontext()
     with lock:
         for repetition in range(config.repetitions):
             for task in selected:
                 for condition in conditions:
+                    if (task.id, repetition, condition) in skip_units:
+                        continue
                     row = run_one(
                         task,
                         condition,

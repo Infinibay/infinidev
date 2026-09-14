@@ -488,10 +488,12 @@ conserva el presupuesto de razonamiento elegido por el usuario.
   semántica de candidatas.
 - `INFINIDEV_TASK_POLICIES_LLM_FALLBACK_ENABLED`: habilita una sola
   clasificación estructurada para ambigüedad real.
-- `INFINIDEV_TASK_POLICIES_LLM_CLASSIFIER_MODE`: `preferred` (por defecto)
-  consulta primero al mismo modelo seleccionado por el usuario, `fallback`
-  sólo consulta si el routing local no resolvió un método y `off` evita la
-  llamada adicional.
+- `INFINIDEV_TASK_POLICIES_LLM_CLASSIFIER_MODE`: `fallback` (por defecto)
+  consulta al mismo modelo seleccionado por el usuario **sólo** si el routing
+  local no resolvió un método; `preferred` consulta siempre y `off` evita la
+  llamada adicional. Medido aislado: el routing local cuesta 4 ms por turno y
+  `preferred` 2,91 s más 446 tokens de prompt que ningún contador del engine
+  reporta. Ver `docs/ENGINE_TASK_CLOSURE_ANALYSIS.md` §6.1.21.
 - `INFINIDEV_TASK_POLICIES_LLM_CLASSIFIER_MAX_TOKENS`: limita la salida de esa
   microclasificación; 256 fue el menor límite robusto en el piloto con GLM-5.2.
 - `INFINIDEV_TASK_POLICIES_EMBEDDING_MIN_SCORE` y

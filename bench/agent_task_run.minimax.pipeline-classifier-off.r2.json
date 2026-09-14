@@ -1,0 +1,21 @@
+{
+  "provider": "minimax",
+  "model": "MiniMax-M3",
+  "model_identity": "minimax:MiniMax-M3",
+  "base_url": "https://api.minimax.io/v1",
+  "api_key_env": "MINIMAX_API_KEY",
+  "repetitions": 2,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 12,
+  "max_total_tool_calls": 80,
+  "max_tool_calls_per_action": 20,
+  "verify_timeout_seconds": 120.0,
+  "settings_overrides": {
+    "LOOP_CLOSURE_FEEDBACK_ENABLED": true,
+    "TASK_POLICIES_RENDER_ALL_CONDITIONAL": true,
+    "TASK_ENGINE_MODE": "task",
+    "TASK_POLICIES_LLM_CLASSIFIER_MODE": "off"
+  },
+  "prompt_style": "lean",
+  "pipeline_mode": true
+}

@@ -12,7 +12,9 @@ import inspect
 import json
 import logging
 import os
+import re
 import uuid
+from functools import lru_cache
 from typing import Any
 
 from infinidev.engine.schema_sanitizer import (
@@ -37,6 +39,22 @@ logger = logging.getLogger(__name__)
 _USER_STOPPED_TOOL_ERROR = (
     "The user stopped this tool execution. Do not retry the same call unchanged; "
     "choose a narrower approach or ask the user before retrying."
+)
+
+#: A key the model used as a positional placeholder instead of naming the
+#: parameter, e.g. ``param-1``, ``arg0``, ``parameter_2``.
+_PLACEHOLDER_PARAM = re.compile(
+    r"^(?:param|arg|argument|parameter)[-_]?\d+$", re.IGNORECASE
+)
+
+#: A key that is the parameter's schema wording rather than its name, e.g.
+#: ``parameter name="file_path"`` or ``argument: old_string``. Only the shape
+#: models actually emit is accepted; a key that is a real parameter name stays
+#: untouched because the pattern requires the wrapper word.
+_SCHEMA_KEY_WRAPPER = re.compile(
+    r"""^\s*(?:parameter|param|argument|arg)\s*(?:name\s*)?[=:]\s*["']?"""
+    r"""([A-Za-z_][A-Za-z0-9_]*)["']?\s*$""",
+    re.IGNORECASE,
 )
 
 def _normalize_execute_command_cwd(args: dict[str, Any]) -> None:
@@ -239,6 +257,26 @@ def _unknown_tool_message(dispatch: dict[str, Any], name: str) -> str:
         bonus = 0.3 if low.startswith(typed[:6]) or typed.startswith(low[:6]) else 0.0
         return SequenceMatcher(None, typed, low).ratio() + bonus
 
+    # The tool may exist for another role and simply not be granted to this
+    # one. The orchestrator is the case that matters: it holds reads and team
+    # tools by design and no write tool at all, so a model that decides to edit
+    # directly gets "did you mean read_file, team_create_ticket, team_idle?"
+    # and keeps guessing. One recorded run spent ten rounds trying edit_file,
+    # apply_file_patch, create_file, write_file and apply_patch before blocking.
+    # Naming the tool as real and naming the route is what stops the cascade.
+    if _registered_tool_names() and name in _registered_tool_names():
+        if "team_delegate" in dispatch:
+            return (
+                f"Tool '{name}' exists but is not granted to this role. This "
+                f"role owns the objective, not the execution: open a ticket "
+                f"with team_create_ticket, then hand it to a worker with "
+                f"team_delegate and grant it tools=['{name}']."
+            )
+        return (
+            f"Tool '{name}' exists but is not granted to this role. Use one of "
+            f"the tool names advertised for this turn."
+        )
+
     scored = sorted(
         ((closeness(candidate), candidate) for candidate in dispatch), reverse=True,
     )
@@ -250,6 +288,57 @@ def _unknown_tool_message(dispatch: dict[str, Any], name: str) -> str:
     )
     suggestion = f" Did you mean one of: {', '.join(close)}?" if close else ""
     return f"Unknown tool: {name}.{suggestion} {recovery}"
+
+
+def _rejected_call(
+    name: str,
+    hook_metadata: dict[str, Any] | None,
+    payload: dict[str, Any],
+) -> str:
+    """Return a rejection and still tell the hook chain the call happened.
+
+    ``execute_tool_call`` dispatches POST_TOOL at its end, so every rejection
+    returned early was invisible. For an unknown tool or unparsable arguments
+    the UI showed nothing at all, because those paths skip PRE_TOOL too; for a
+    bad parameter it showed a call that never completed. The transcript trace
+    recorded none of them, which left ``LoopState.malformed_tool_calls`` with a
+    count and no evidence behind it.
+
+    ``arguments`` is empty because the paths that reach here either have no
+    parsed arguments or are about to reject them; the message in the payload
+    names what the model actually sent.
+    """
+    body = json.dumps(payload)
+    from infinidev.engine.hooks.hooks import hook_manager, HookContext, HookEvent
+
+    meta = dict(hook_metadata) if hook_metadata else {}
+    meta["tool_run_id"] = str(meta.get("tool_run_id") or uuid.uuid4().hex)
+    ctx = HookContext(
+        event=HookEvent.POST_TOOL,
+        tool_name=name,
+        arguments={},
+        metadata=meta,
+        project_id=meta.pop("project_id", 0),
+        agent_id=meta.pop("agent_id", ""),
+    )
+    ctx.result = body
+    hook_manager.dispatch(ctx)
+    return body
+
+
+@lru_cache(maxsize=1)
+def _registered_tool_names() -> frozenset[str]:
+    """Every tool name the registry knows, regardless of the role's grant.
+
+    Cached because the answer is static for the process and this runs on the
+    rejection path.
+    """
+    try:
+        from infinidev.tools import get_tools_for_role
+
+        return frozenset(tool.name for tool in get_tools_for_role("developer"))
+    except Exception:
+        return frozenset()
 
 
 def execute_tool_call(
@@ -273,19 +362,19 @@ def execute_tool_call(
     tool, name = _resolve_tool(dispatch, name)
 
     if tool is None:
-        return json.dumps({"error": _unknown_tool_message(dispatch, name)})
+        return _rejected_call(name, hook_metadata, {"error": _unknown_tool_message(dispatch, name)})
 
     # Parse arguments
     if isinstance(arguments, str):
         try:
             args = json.loads(arguments) if arguments.strip() else {}
         except json.JSONDecodeError:
-            return json.dumps({"error": f"Invalid JSON arguments: {arguments[:200]}"})
+            return _rejected_call(name, hook_metadata, {"error": f"Invalid JSON arguments: {arguments[:200]}"})
     else:
         args = arguments or {}
 
     if not isinstance(args, dict):
-        return json.dumps({"error": f"Expected dict arguments, got {type(args).__name__}"})
+        return _rejected_call(name, hook_metadata, {"error": f"Expected dict arguments, got {type(args).__name__}"})
 
     # Reading a path is an intent models express more reliably than the
     # file-vs-directory distinction. Resolve that distinction from the
@@ -327,6 +416,13 @@ def execute_tool_call(
     _PARAM_ALIASES = {
         "old_str": "old_string",
         "new_str": "new_string",
+        # Observed on MiniMax-M3 against edit_file: the model paraphrases the
+        # parameter instead of copying it. Each one costs a full round trip
+        # when it is rejected, and neither name is declared by any tool.
+        "old_text": "old_string",
+        "old_content": "old_string",
+        "new_text": "new_string",
+        "new_content": "new_string",
         # All tools now use file_path — alias common LLM variants
         "path": "file_path",
         "filepath": "file_path",
@@ -344,10 +440,32 @@ def execute_tool_call(
         "line_end": "end_line",
         # Command aliases
         "cmd": "command",
+        "exec": "command",
+        "shell_command": "command",
+        "command_line": "command",
         # Replace aliases
         "replacement": "content",
         "new_body": "new_code",
     }
+
+    # Some models emit the parameter's *schema wording* as the key, so a valid
+    # call arrives as ``{"parameter name=\"file_path\": "src/app.py"}`` and is
+    # rejected for an unknown parameter. Observed on MiniMax-M3 with read_file.
+    # The value is correct and the name is recoverable, so recover it instead
+    # of charging the model a turn to retype the same call.
+    for key in list(args):
+        if not isinstance(key, str):
+            continue
+        wrapped = _SCHEMA_KEY_WRAPPER.match(key)
+        if wrapped is None:
+            continue
+        recovered = wrapped.group(1)
+        if recovered not in args:
+            args[recovered] = args.pop(key)
+            logger.info(
+                "Tool %s: recovered parameter '%s' from schema-wrapped key %r",
+                name, recovered, key,
+            )
 
     # Per-tool aliases — aplied BEFORE the global ones. Used when a
     # wrong param name would collide with a real param somewhere else
@@ -373,6 +491,28 @@ def execute_tool_call(
         "declare_test_command": {
             "command": "command_pattern",
         },
+        # MiniMax-M3 asked describe_tool(tool="edit_file") where the schema says
+        # context. Kept local: "tool" is a plausible parameter name elsewhere.
+        "describe_tool": {
+            "tool": "context",
+            "tool_name": "context",
+            "name": "context",
+        },
+        # MiniMax-M3 described the patch instead of naming the schema field:
+        # apply_file_patch(edits=[...]) and apply_file_patch(patch=[...]) where
+        # the parameter is ``replacements``. The value shape is what the schema
+        # asks for, so only the key needs repairing.
+        "apply_file_patch": {
+            "edits": "replacements",
+            "patch": "replacements",
+            "changes": "replacements",
+            "edits_list": "replacements",
+        },
+        "preview_changes": {
+            "edits": "replacements",
+            "patch": "replacements",
+            "changes": "replacements",
+        },
     }
 
     # M3 commonly emits edit_file(replace={old: ..., new: ...}). Preserve
@@ -395,7 +535,7 @@ def execute_tool_call(
     if name == "execute_command" and "is_background" in args:
         is_background = args.pop("is_background")
         if is_background not in (False, None, 0, "", "false", "False", "0"):
-            return json.dumps({
+            return _rejected_call(name, hook_metadata, {
                 "error": (
                     "execute_command cannot run with is_background=true. "
                     "Use run_in_background(command, description) when that "
@@ -455,6 +595,38 @@ def execute_tool_call(
                 if meta in args and meta not in allowed:
                     logger.debug("Tool %s: stripping metadata param '%s'", name, meta)
                     del args[meta]
+            # A model that carries the right value under a positional
+            # placeholder -- execute_command({"param-1": "ls -la"}) -- is one
+            # key away from a valid call. The repair is scoped to keys that are
+            # placeholders by shape, because a word like ``tool`` is a real
+            # name in another context and mapping it would run the wrong thing.
+            # Observed on MiniMax-M3 with execute_command and read_file.
+            unknown = {
+                key for key in args if _PLACEHOLDER_PARAM.match(str(key))
+            }
+            required = {
+                parameter.name
+                for parameter in sig.parameters.values()
+                if parameter.default is inspect.Parameter.empty
+                and parameter.kind
+                in (
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                )
+            }
+            if (
+                len(unknown) == 1
+                and len(required) == 1
+                and set(args) == unknown
+            ):
+                only_required = next(iter(required))
+                invented = next(iter(unknown))
+                logger.info(
+                    "Tool %s: recovered required '%s' from placeholder key '%s'",
+                    name, only_required, invented,
+                )
+                args[only_required] = args.pop(invented)
+
             extra = set(args.keys()) - allowed
             # Zero-arg tools: the rejection message "valid params are: ."
             # is incoherent to the LLM and it concludes the tool is broken.
@@ -476,7 +648,7 @@ def execute_tool_call(
                 # doesn't exist". The phrasing below makes it
                 # IMPOSSIBLE to misread: the tool exists, the call
                 # was almost right, fix the param and retry.
-                return json.dumps({
+                return _rejected_call(name, hook_metadata, {
                     "error": (
                         f"Tool '{name}' EXISTS and is callable — your "
                         f"call was rejected only because of wrong "
@@ -568,7 +740,7 @@ def execute_tool_call(
         }
         missing = required_params - set(args.keys())
         if missing:
-            return json.dumps({
+            return _rejected_call(name, hook_metadata, {
                 "error": (
                     f"Tool '{name}' is missing required parameter(s): "
                     f"{', '.join(sorted(missing))}. "
@@ -616,7 +788,7 @@ def execute_tool_call(
                 location = ".".join(str(part) for part in first.get("loc", ()))
                 message = first.get("msg", "is invalid")
                 detail = f"{location}: {message}" if location else str(message)
-                return json.dumps({
+                return _rejected_call(name, hook_metadata, {
                     "error": (
                         f"Tool '{name}' argument validation failed: {detail}. "
                         "Correct the arguments and call the same tool again."
@@ -625,7 +797,7 @@ def execute_tool_call(
         except ImportError:
             pass
         logger.exception("Tool %s argument validation raised unexpectedly", name)
-        return json.dumps({"error": f"Tool '{name}' argument validation failed: {exc}"})
+        return _rejected_call(name, hook_metadata, {"error": f"Tool '{name}' argument validation failed: {exc}"})
 
     effects = getattr(tool, "effects", None)
     if effects is not None:
@@ -633,7 +805,7 @@ def execute_tool_call(
 
         permission_error = check_effect_permission(name, effects, args, tool=tool)
         if permission_error:
-            return json.dumps({"error": permission_error})
+            return _rejected_call(name, hook_metadata, {"error": permission_error})
 
     # Execute
     cancelled_by_user = False

@@ -15,6 +15,27 @@ from infinidev.tools.shell.background_manager import get_background_manager
 
 EventKind = Literal["message", "report", "background_task", "note", "ticket"]
 
+#: How long a subscription with no deadline sleeps before re-checking. The
+#: check-then-wait in :func:`wait_for_events` is a lost-wakeup window: a worker
+#: that finishes between the check and the wait notifies nobody the waiter has
+#: registered for yet, and an unbounded wait then never returns. The loop
+#: already re-reads the event log on every iteration, so a periodic wakeup is
+#: free — no model call — and it bounds the worst case to this many seconds. It
+#: also makes cancellation responsive while idle.
+_IDLE_RECHECK_SECONDS = 5.0
+
+
+def _wait_slice(remaining: float | None) -> float:
+    """The timeout to hand ``Condition.wait``, never ``None``.
+
+    ``None`` blocks until notified, which is exactly the case that hangs. A
+    subscription with a deadline keeps it; one without re-checks every
+    :data:`_IDLE_RECHECK_SECONDS`.
+    """
+    if remaining is None:
+        return _IDLE_RECHECK_SECONDS
+    return max(0.0, min(remaining, _IDLE_RECHECK_SECONDS))
+
 
 class IdleInput(BaseModel):
     events: list[EventKind] = Field(default_factory=lambda: ["message", "report"],
@@ -147,7 +168,7 @@ def wait_for_events(team: Any, actor: str, spec: IdleInput) -> dict:
                     result = {"reason": "timeout", "events": []}
                     break
                 if not sleeping:
-                    def suspend(current, emit):
+                    def suspend(current, emit):  # noqa: E306 - defined for the store update
                         current["agents"][actor].update(status="waiting", waiting={
                             **spec.model_dump(), "since": now(),
                         })
@@ -162,7 +183,7 @@ def wait_for_events(team: Any, actor: str, spec: IdleInput) -> dict:
                         released = True
                     notice = f"{member_label(state['agents'][actor])}: idle — {spec.reason}"
                 else:
-                    team._condition.wait(timeout=remaining)
+                    team._condition.wait(timeout=_wait_slice(remaining))
             # UI callbacks acquire session locks that user-input paths hold
             # before entering the team. Recheck events after releasing this
             # lock rather than calling the renderer inside the subscription.
