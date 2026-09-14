@@ -303,6 +303,15 @@ class Settings(BaseSettings):
     # because those providers reject a tool-use chain whose thinking came back
     # stripped. False keeps every reasoning field on every turn.
     LOOP_REASONING_TRIM_ENABLED: bool = True
+    # Elide the long string values inside the tool-call arguments the loop
+    # re-sends for Steps that have already closed. On a task that writes files
+    # those arguments are up to 33 % of the request payload, because a written
+    # file's body *is* the argument; the provider needs the call id and the
+    # name, not the bytes, and the result, the step summary and the archive all
+    # record what was written. Default OFF: it changes what the model sees
+    # mid-run, so it ships only once a paired comparison says the round it
+    # never has to spend re-reading costs less than the payload it saves.
+    LOOP_TOOL_ARGUMENT_TRIM_ENABLED: bool = False
     # Deterministic per-step objective verification: when a planner-authored
     # step carries an executable ``verify`` check, run it on step_complete and
     # block closure (with the failure output) until it passes.

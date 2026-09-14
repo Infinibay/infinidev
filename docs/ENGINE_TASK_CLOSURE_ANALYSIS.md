@@ -2924,6 +2924,64 @@ Herramienta: `python -m bench.context_regime_cost --runs bench/runs`, con los
 precios leídos de `litellm.model_cost` y 13 tests en
 `tests/test_context_regime_cost.py`.
 
+### 6.1.41 El cuerpo del archivo que el modelo ya escribió, reenviado en cada ronda
+
+El cubo más grande del payload después de `content`, y la palanca más grande que
+queda (§6.1.39). En una tarea que escribe archivos, los argumentos serializados
+de las tool calls son **hasta el 33 % de la petición** (21 127 caracteres en
+`complex-plan.r2`), porque **el cuerpo del archivo escrito *es* el argumento** y
+desde la ronda que lo escribe viaja en todas las siguientes.
+
+Nada en el protocolo exige que esos bytes sean los originales. El proveedor
+necesita el `id` y el `name` para que el resultado de la herramienta tenga una
+llamada que contestar; el argumento es salida previa del propio modelo. Y el
+loop ya tiene tres registros más baratos del mismo hecho: el mensaje de
+*resultado*, el resumen de paso que sustituye al transcript cuando el Step
+cierra, y el archivo que `recall_context` busca.
+
+**Lo implementado es más angosto que borrar los argumentos.**
+`trim_superseded_tool_arguments` conserva **todas las claves y la forma del
+JSON** y sustituye sólo los *valores de texto largos* (>400 caracteres) por un
+marcador que dice cuánto midió el cuerpo elidido y cómo recuperarlo. Un
+proveedor que valide la forma sigue viendo la forma; el modelo sigue viendo qué
+llamó y dónde; deja de ver un archivo que ya escribió:
+
+```
+{"file_path":"a.py","content":"<elided by infinidev: 2400 chars; re-read the file
+ or use recall_context>"}
+```
+
+Sólo se tocan los turnos **ya cerrados** —todos menos el último, cuyos resultados
+viajan en la misma petición—, que es la misma frontera que usa el corte de
+razonamiento (§6.1.39) y la que el loop ya trata como resuelta. Una llamada que
+no parsea **no se reescribe nunca**: una llamada malformada es un hecho de la
+corrida, y reescribirla lo escondería y podría convertir una falla diagnosticable
+en otra distinta.
+
+**El ahorro estimado, sobre las corridas guardadas**, según qué fracción de los
+argumentos supere el umbral:
+
+| corrida | payload | `tool_calls` | −70 % | −85 % |
+| --- | ---: | ---: | ---: | ---: |
+| `complex-plan` r2 | 63 918 | **21 127 (33 %)** | −23,1 % | −28,1 % |
+| `complex-plan` r1 | 57 229 | 15 491 (27 %) | −18,9 % | −23,0 % |
+| `test-selection` r2 | 40 162 | 3 510 (9 %) | −6,1 % | −7,4 % |
+| `test-selection` r1 | 37 945 | 1 845 (5 %) | −3,4 % | −4,1 % |
+
+O sea: entre **−19 % y −28 %** en las tareas que escriben archivos y entre −3 %
+y −7 % en las que leen, que es exactamente la asimetría que el censo predice.
+
+**El interruptor existe y está apagado por defecto**
+(`LOOP_TOOL_ARGUMENT_TRIM_ENABLED = False`), y eso es deliberado, no una
+indecisión. A diferencia del razonamiento, acá hay un riesgo real y simétrico:
+si el modelo necesita releer lo que escribió, paga una ronda —y una ronda cuesta
+~10 800 equivalentes de token fresco a precio de cache— contra un ahorro que
+sólo existe si no la paga. No hay forma de saber cuál gana sin correr las dos
+versiones sobre tareas que escriben archivos, y esa comparación está en curso.
+Hasta que cierre, lo que este documento afirma es la medición del *payload*, no
+la del *costo*, y la distinción importa: el mismo error de razonamiento es el
+que produjo la fila de `lean` que §6.1.38 tuvo que corregir.
+
 ### 6.2 Resultado negativo: la presión de agrupación no agrupa
 
 Diseño pareado, 3 tareas de código × 3 repeticiones × 2 brazos (18 ejecuciones,
@@ -3052,7 +3110,12 @@ Queda, en orden de valor esperado:
    tamaño es la forma que el resto del diseño ya usa. **No implementado**: cambia
    lo que el modelo ve a mitad de una corrida y necesita su propia comparación
    pareada. Es la palanca más grande que queda y la más barata de medir, porque
-   el censo que la dimensiona ya existe.
+   el censo que la dimensiona ya existe. **Implementado y apagado**
+   (`LOOP_TOOL_ARGUMENT_TRIM_ENABLED`, §6.1.41): elidir los valores de texto
+   largos de los argumentos de Steps cerrados, conservando la forma del JSON y
+   el `id`/`name` de cada llamada, con −19 a −28 % del payload estimado en
+   tareas que escriben archivos. Falta la comparación pareada que decide si el
+   ahorro supera a la ronda que el modelo pueda gastar releyendo.
 10. ~~Reconstruir el contexto contra dejarlo crecer.~~ **Contestado y medido
    (§6.1.40).** El engine ya deja crecer (269 de 308 corridas, 1,71×, +2 277
    caracteres por ronda); el prefijo estable se cancela en la comparación y el

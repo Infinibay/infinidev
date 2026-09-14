@@ -237,6 +237,9 @@ class ToolRunner:
             reasoning_history_fields,
             trim_superseded_reasoning,
         )
+        from infinidev.engine.loop.tool_argument_digest import (
+            trim_superseded_tool_arguments,
+        )
 
         history_fields = reasoning_history_fields(message)
         if ctx.manual_tc:
@@ -273,8 +276,11 @@ class ToolRunner:
         # reasoning — it is the one whose tool results travel in the next
         # request — while every closed turn loses a copy that MiniMax bills
         # again on every remaining round.
-        if getattr(_get_settings(), "LOOP_REASONING_TRIM_ENABLED", True):
+        _settings = _get_settings()
+        if getattr(_settings, "LOOP_REASONING_TRIM_ENABLED", True):
             trim_superseded_reasoning(messages)
+        if getattr(_settings, "LOOP_TOOL_ARGUMENT_TRIM_ENABLED", False):
+            trim_superseded_tool_arguments(messages)
 
     @staticmethod
     def append_pseudo_results(

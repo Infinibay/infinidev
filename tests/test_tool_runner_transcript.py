@@ -188,6 +188,70 @@ def test_a_superseded_turn_loses_its_reasoning_on_the_next_request() -> None:
     assert [m["tool_calls"][0]["id"] for m in messages if m.get("tool_calls")] == ["c1", "c2"]
 
 
+def test_closed_tool_calls_lose_their_payload_when_the_flag_is_on(monkeypatch):
+    """The wiring, not the rule: the loop elides through the same boundary.
+
+    Default off, so this also pins that the shipped behaviour is byte-identical
+    to before unless the setting is turned on.
+    """
+    from infinidev.config.settings import settings
+
+    body = "b" * 5_000
+    monkeypatch.setattr(settings, "LOOP_TOOL_ARGUMENT_TRIM_ENABLED", True)
+    messages: list[dict] = []
+
+    def turn(call_id: str, path: str) -> None:
+        message = SimpleNamespace(content="", reasoning_content="")
+        ToolRunner.append_assistant_message(
+            _ctx(),
+            ClassifiedCalls(
+                regular=[
+                    _call(
+                        call_id,
+                        "create_file",
+                        json.dumps({"file_path": path, "content": body}),
+                    )
+                ]
+            ),
+            messages,
+            SimpleNamespace(message=message, raw_content="", reasoning_content=""),
+        )
+
+    turn("c1", "a.py")
+    messages.append({"role": "tool", "content": "created", "tool_call_id": "c1"})
+    turn("c2", "b.py")
+
+    first = json.loads(messages[0]["tool_calls"][0]["function"]["arguments"])
+    newest = json.loads(messages[2]["tool_calls"][0]["function"]["arguments"])
+    assert "<elided" in first["content"]
+    assert first["file_path"] == "a.py"
+    assert newest["content"] == body
+
+
+def test_closed_tool_calls_keep_their_payload_by_default() -> None:
+    body = "b" * 5_000
+    messages: list[dict] = []
+
+    message = SimpleNamespace(content="", reasoning_content="")
+    ToolRunner.append_assistant_message(
+        _ctx(),
+        ClassifiedCalls(
+            regular=[
+                _call(
+                    "c1",
+                    "create_file",
+                    json.dumps({"file_path": "a.py", "content": body}),
+                )
+            ]
+        ),
+        messages,
+        SimpleNamespace(message=message, raw_content="", reasoning_content=""),
+    )
+
+    kept = json.loads(messages[0]["tool_calls"][0]["function"]["arguments"])
+    assert kept["content"] == body
+
+
 def test_tool_runner_defers_compaction_until_context_pressure(monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("tool-round compaction bypassed context pressure")
