@@ -9,8 +9,10 @@ import pytest
 from infinidev.engine.loop.prompt.text import BEHAVIOR_GUIDELINES
 from infinidev.prompts.variants import (
     _REGISTRY,
+    DEFAULT_STYLE,
     get_variant,
     registered_names,
+    registered_styles,
     resolve_style,
 )
 
@@ -347,3 +349,49 @@ class TestPlaceholdersPreserved:
         assert "{{q_num}}" in prompt
         assert "{{q_total}}" in prompt
         assert "{{question}}" in prompt
+
+
+# ── the picker can reach every style ─────────────────────────────────────
+#
+# The settings dialog used to carry a typed-out list of styles. It listed four
+# and omitted `lean`, which had shipped, been measured as the better default,
+# and was selectable only by editing the settings file by hand. Same failure the
+# provider list had before it was derived from its registry.
+
+
+def test_every_registered_style_is_offered_by_the_settings_dialog() -> None:
+    from infinidev.ui.dialogs.settings_editor_state import SETTINGS_SECTIONS
+
+    options = dict(
+        (key, value) for key, _desc, value in SETTINGS_SECTIONS["Prompts"]
+    )["PROMPT_STYLE"].removeprefix("select:").split(",")
+
+    assert options[0] == "auto", "auto leads the list"
+    for style in registered_styles():
+        assert style in options, f"{style} is registered but not selectable"
+    # And nothing offered that does not exist.
+    for option in options:
+        if option != "auto":
+            assert option in registered_styles(), f"{option} is offered but not registered"
+
+
+def test_the_dialog_names_the_default_the_resolver_actually_picks() -> None:
+    """The description advertised `auto=generalized` after the default changed."""
+    from infinidev.ui.dialogs.settings_editor_state import SETTINGS_SECTIONS
+
+    description = dict(
+        (key, desc) for key, desc, _value in SETTINGS_SECTIONS["Prompts"]
+    )["PROMPT_STYLE"]
+
+    assert f"auto={DEFAULT_STYLE}" in description
+
+
+def test_registered_styles_keeps_a_deliberate_order_and_appends_newcomers() -> None:
+    """A style added later still lands in the list instead of vanishing."""
+    assert registered_styles()[:2] == ["full", "generalized"]
+    assert "lean" in registered_styles()
+    assert registered_styles() == sorted(registered_styles(), key=registered_styles().index)
+
+
+def test_the_shipped_default_is_a_registered_style() -> None:
+    assert DEFAULT_STYLE in registered_styles()

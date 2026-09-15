@@ -49,12 +49,25 @@ def get_variant(name: str, style: str | None = None) -> str | None:
 
 # ── Style resolution ───────────────────────────────────────────────────
 
+#: What ``"auto"`` resolves to. One constant, because the resolver and the
+#: settings dialog's own description of it had already drifted apart: the dialog
+#: still advertised ``auto=generalized`` after the default changed to ``lean``.
+DEFAULT_STYLE = "lean"
+
+#: The order the picker shows styles in. A style registered but missing from
+#: this tuple still appears, sorted at the end, so adding a variant can never
+#: leave it unreachable from the UI again — which is exactly what happened to
+#: ``lean``: it shipped, was measured, and was selectable only by editing the
+#: settings file by hand.
+_STYLE_ORDER = ("full", "generalized", "lean", "coding", "extra_simple")
+
+
 def resolve_style() -> str:
     """Return the effective prompt style.
 
-    Reads ``settings.PROMPT_STYLE``.  ``"auto"`` resolves to ``lean``, which is
-    the default since 0.29.0.  Set ``"generalized"``, ``"full"``, ``"coding"``
-    or ``"extra_simple"`` explicitly to opt out.
+    Reads ``settings.PROMPT_STYLE``.  ``"auto"`` resolves to
+    :data:`DEFAULT_STYLE`.  Set any other registered style explicitly to opt
+    out; see :func:`registered_styles`.
     """
     from infinidev.config.settings import settings
 
@@ -62,7 +75,19 @@ def resolve_style() -> str:
     if style != "auto":
         return style
 
-    return "lean"
+    return DEFAULT_STYLE
+
+
+def registered_styles() -> list[str]:
+    """Return every style that registered a variant, in picker order.
+
+    Derived from the registry rather than typed out: the literal that this
+    replaces listed four styles and silently omitted the fifth.
+    """
+    found = {style for (style, _name) in _REGISTRY}
+    ordered = [style for style in _STYLE_ORDER if style in found]
+    ordered.extend(sorted(found - set(_STYLE_ORDER)))
+    return ordered
 
 
 def registered_names(style: str) -> set[str]:

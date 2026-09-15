@@ -22,6 +22,7 @@ from infinidev.ui.theme import (
     SURFACE, SURFACE_LIGHT, SURFACE_DARK,
 )
 from infinidev.config.providers import list_provider_ids
+from infinidev.prompts.variants import DEFAULT_STYLE, registered_styles
 from infinidev.ui.dialogs.base import dialog_frame
 
 DIALOG_NAME = "settings_editor"
@@ -38,6 +39,9 @@ _PROVIDER_IDS = ",".join(list_provider_ids())
 _PROVIDER_SELECT = f"select:{_PROVIDER_IDS}"
 # Leading empty option: "reuse the main LLM_* settings".
 _OPTIONAL_PROVIDER_SELECT = f"select:,{_PROVIDER_IDS}"
+# `auto` first, then every registered style. Derived so a new variant cannot be
+# selectable in the engine and absent from the dialog.
+_PROMPT_STYLE_SELECT = "select:" + ",".join(("auto", *registered_styles()))
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
@@ -130,7 +134,13 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
         ("TREE_MAX_TOOL_CALLS", "Max tool calls per exploration", "int"),
     ],
     "Prompts": [
-        ("PROMPT_STYLE", "Prompt verbosity style (auto=generalized)", "select:auto,full,generalized,coding,extra_simple"),
+        # Derived, like the provider list above and for the same reason: the
+        # literal that used to sit here listed four styles and omitted `lean`,
+        # which had shipped, been measured as the better default, and was
+        # reachable only by editing the settings file by hand. The description
+        # names the default from the same constant the resolver uses, so it
+        # cannot advertise a style `auto` no longer picks.
+        ("PROMPT_STYLE", f"Prompt verbosity style (auto={DEFAULT_STYLE})", _PROMPT_STYLE_SELECT),
         ("USER_PREFERENCE_PROFILE", "Explicit user preference profile JSON path", "str"),
         ("USER_PREFERENCE_PROFILE_SHA256", "Expected user preference profile SHA-256", "str"),
     ],

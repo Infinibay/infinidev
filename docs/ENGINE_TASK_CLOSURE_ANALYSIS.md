@@ -3502,3 +3502,36 @@ tocar el registro es `./install.sh` **y reiniciar la TUI**, y conviene saberlo
 porque el síntoma —"el proveedor no está en la lista"— no se parece en nada a la
 causa. Queda escrito acá porque costó un rato de diagnóstico y no está en ningún
 otro lugar.
+
+### 9.6 `lean` era el default y no se podía elegir
+
+El mismo defecto que el registro de proveedores ya había tenido, en otra lista:
+el diálogo de settings llevaba **escrita a mano** su lista de estilos,
+
+```python
+("PROMPT_STYLE", "Prompt verbosity style (auto=generalized)",
+ "select:auto,full,generalized,coding,extra_simple"),
+```
+
+con dos fallas en una línea. **`lean` no estaba**, así que un estilo que había
+shippeado, que se había medido como el default mejor y que era el default desde
+0.29.0 **sólo se podía elegir editando el archivo de settings a mano**. Y la
+descripción anunciaba `auto=generalized`, que ya era falso.
+
+Las dos salen de la misma causa: el valor se escribía dos veces y una de las dos
+se quedó atrás. Ahora la lista se **deriva del registro**
+(`registered_styles()`), `auto` va primero, y cualquier estilo que se registre
+después aparece igual —ordenado al final— para que agregar una variante no pueda
+volver a dejarla inalcanzable. La descripción nombra el default desde la misma
+constante que usa el resolver (`DEFAULT_STYLE`), así que no puede anunciar un
+estilo que `auto` ya no elige.
+
+Tres tests lo fijan: que todo estilo registrado sea ofrecible y nada ofrecido
+esté sin registrar, que la descripción nombre el default real, y que
+`DEFAULT_STYLE` sea un estilo registrado.
+
+Vale la pena nombrar el patrón, porque van dos: **el provider y el prompt style
+eran listas escritas a mano al lado de un registro que ya tenía la verdad.** El
+comentario que derivó la primera ya lo decía —"las tres copias a mano se habían
+desincronizado"— y la segunda siguió ahí. Lo que queda pendiente es buscar si hay
+una tercera.
