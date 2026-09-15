@@ -33,6 +33,8 @@ de declarar un resultado. El detalle está en §6; los límites, en cada secció
 | El único loop sin tope de resultado | el developer era el único de seis loops sin `max_chars`: una lectura de 42 770 caracteres se reenviaba en cada ronda. Ahorro del payload acumulado: mediana **0 %**, máximo **44,5 %**, agregado 7,3 % sobre las 29 ejecuciones afectadas | **arreglado** con el mismo manejador que los otros cinco, después del archivado; 3/3 completan y el tope no se disparó (§6.1.33) |
 | Un argumento con forma de diccionario tumbaba el turno | `(args.get("message") or "").strip()` sobre `{"message": {"text": …}}`: 1 de 3 ejecuciones moría con `AttributeError` y el turno entero se perdía | **arreglado en 8 sitios** con coerción central; 2/3 completadas antes, 3/3 después (§6.1.30) |
 | Una promesa no es una entrega | 1 de 318 ejecuciones terminó con el chat agent prometiendo el trabajo: 0 rondas del loop, 0 archivos, y la promesa como respuesta | **arreglado**: un `respond` que promete trabajo de ingeniería se escala (§6.1.25) |
+| **Portabilidad a un segundo proveedor** | DeepSeek: el proveedor no estaba en el registro (resolvía a *ollama*), el modelo pelado no recibía su prefijo, y el modo pensamiento rechaza el `tool_choice="required"` que el loop manda en cada iteración. Los tres corregidos | **medido**: 6 formas de tarea × 2, **12/12 success**, exactamente 1 archivo cambiado por ejecución y el correcto, 0 cambios prohibidos, cache 61–87 %. Una llamada malformada (`Invalid JSON arguments`) recuperada en la misma corrida (§9.4) |
+| **El corte de razonamiento está condicionado al proveedor** | la doc de DeepSeek exige devolver el `reasoning_content` de **todos** los turnos cuando hay `tools`; el corte lo borra. Seis sondas vivas aceptaron la transcripción recortada y **ganó el contrato**, porque el ahorro es de tokens y el modo de falla es la corrida entera | **implementado y verificado en producción**: DeepSeek acumula el razonamiento (0 → 278 → 1 089 dentro de un Step) y MiniMax con el corte cae a 0. La medición de −21,7 % de §6.1.39 queda acotada a los proveedores que no exigen el eco (§9.2) |
 | **Rúbricas resueltas por programa** | 13 de 16 ítems deciden con evidencia del artefacto y **abstienen** cuando no la tienen. En `lean`: mueven `concise-handoff` (+1,00), `failure-recognition` (+0,50) y `verification-reported` (+0,50), todo a favor de `lean` — los mismos ítems que el juez ciego, por otro método | **medido**, dos instrumentos coinciden (§6.1.18). Cubre el 58 % de las 578 instancias de rúbrica guardadas |
 | `__pycache__` en el baseline de la tarea | en 15 ejecuciones el diff del revisor traía caché compilada, y en `wide-sum` era el **91,5–95,5 %** del payload (7 370 de 7 980 caracteres) | **arreglado** en el fixture, en `init_git_workspace` y en el probe (§6.1.19) |
 
@@ -3438,3 +3440,65 @@ condicionada a que el proveedor no exija el eco**, no una mejora universal. Eso
 no invalida su medición —−21,7 % sobre MiniMax, 11/3 parejas— pero sí acota
 dónde se aplica, que es exactamente lo que una medición de un solo proveedor no
 puede decir.
+
+### 9.4 La campaña: 12 ejecuciones sobre `deepseek-flash`
+
+Seis formas de tarea × 2 repeticiones, `pipeline_mode: true`, `prompt_style: lean`,
+`TASK_ENGINE_MODE: task`, condición `baseline`. Es la misma configuración que las
+campañas de MiniMax salvo el proveedor, así que mide portabilidad, no una
+variante.
+
+| | |
+| --- | ---: |
+| ejecuciones | **12** |
+| success | **12/12** |
+| archivos cambiados por ejecución | **exactamente 1**, y el esperado |
+| cambios prohibidos | **0** |
+| cambios esperados faltantes | **0** |
+| verificadores | `exit 0` en las 12 |
+| cache hit | 61 %–87 % |
+
+El archivo tocado es el correcto en cada forma de tarea: `PLAN.md`,
+`REVIEW.md`, `status.py`, `src/tags.py`, `src/inventory.py`, `DECISION.md`.
+Ninguna ejecución tocó nada de más —lo que en MiniMax fue un defecto medido y
+corregido (§6.1.16, `extra_changed_files`)— y ninguna cerró con placeholders.
+
+**Una falla real, y se recuperó.** `evidence-code-review` r0 registró **dos
+llamadas malformadas** con `Invalid JSON arguments`: DeepSeek emitió el JSON de
+un `create_file` con el `REVIEW.md` entero y lo truncó. La ejecución siguió,
+escribió el archivo y pasó el verificador. Es exactamente el modo de falla para
+el que existe el contador de llamadas malformadas y el rechazo previo a la
+ejecución: **1 de 12 ejecuciones lo mostró, y el engine no perdió el turno.**
+Vale registrarlo como lo que es —una tasa del 8 % en un modelo y una tarea, no
+una propiedad del proveedor— y como la primera vez que ese camino se ejerció
+fuera de MiniMax.
+
+**Y la verificación del gate, en las corridas reales.** El corte de razonamiento
+está condicionado a `requires_reasoning_echo` (§9.2). Comprobado sobre los
+artefactos, no sobre el test:
+
+| | razonamiento por petición dentro de un Step |
+| --- | --- |
+| DeepSeek (sin corte) | 0 → 2 → **278 → 1 089** — acumula todos los turnos |
+| MiniMax (con corte) | 200 → 1 810 → 765 → **0** — sólo el turno más nuevo |
+
+DeepSeek crece monótonamente porque cada turno del asistente conserva su
+razonamiento; MiniMax fluctúa y cae a cero porque sólo el último lo conserva. El
+gate hace lo que dice, y ahora está medido en producción en los dos proveedores
+en vez de razonado a partir de la bandera.
+
+### 9.5 Una trampa operativa, no del engine
+
+La lista de proveedores del TUI se construye **al importar el módulo**
+(`_PROVIDER_IDS = ",".join(list_provider_ids())`), y `infinidev` corre desde el
+binario instalado en `~/.local/share/uv/tools/infinidev`. Después de agregar
+DeepSeek al registro, la TUI seguía sin ofrecerlo — porque esa copia era la
+**0.24.0**, cinco releases atrás, y un proceso ya abierto tiene la lista vieja en
+memoria.
+
+Nada de eso es un defecto del engine: es que la instalación es una **instantánea**
+y el registro se lee una vez por proceso. Lo que corresponde hacer después de
+tocar el registro es `./install.sh` **y reiniciar la TUI**, y conviene saberlo
+porque el síntoma —"el proveedor no está en la lista"— no se parece en nada a la
+causa. Queda escrito acá porque costó un rato de diagnóstico y no está en ningún
+otro lugar.
