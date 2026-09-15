@@ -3334,3 +3334,84 @@ agrandaba era del instrumento.
   corregidos y con test. La regla que los habría atajado a todos no existía al
   empezar y ahora está escrita: un número que decide una frase necesita un test
   que lo fije contra un valor calculado fuera del código que lo produce.
+
+## 9. Un segundo proveedor: DeepSeek, y lo que encontró
+
+Correr el engine contra un proveedor distinto no era parte del objetivo original.
+Valió la pena: encontró **una restricción que obligó a cambiar una decisión de
+diseño**, y confirmó que el resto del trabajo no era específico de MiniMax.
+
+### 9.1 El proveedor no existía, aunque el código sí
+
+`reasoning.py` ya tenía una rama para `deepseek-v4`, `llm.py` ya mapeaba el
+prefijo `deepseek` a un id de proveedor, y `thinking_budget.py` ya lo nombraba.
+Pero **no había entrada en el registro de proveedores**, y `get_provider` cae a
+*ollama* cuando el id es desconocido:
+
+| | antes | después |
+| --- | --- | --- |
+| `get_provider("deepseek").id` | `ollama` | `deepseek` |
+| endpoint resuelto | `http://localhost:11434` | `https://api.deepseek.com/v1` |
+| descubrimiento de modelos | `Connection refused` | `deepseek-flash`, `deepseek-v4-pro` |
+| `/settings → provider` | ausente | presente |
+
+La lista de proveedores del TUI **se deriva del registro** desde hace varias
+rondas (el comentario en `settings_editor_state.py` lo dice: las tres copias a
+mano se habían desincronizado), así que registrar el proveedor fue suficiente
+para que apareciera en el diálogo. Verificado, no supuesto.
+
+Un segundo hueco, más general: `get_litellm_params` exigía que el modelo ya
+trajera su prefijo, así que `LLM_MODEL=deepseek-flash` producía el nombre pelado
+y LiteLLM lo rechazaba con *"LLM Provider NOT provided"* **sobre un modelo que
+está en su propio mapa de costos**. Ahora un nombre sin ninguna barra recibe el
+prefijo del registro; uno que ya la tiene no se toca, que es lo que mantiene
+funcionando `minimax/MiniMax-M3`, `openai/responses/gpt-5.5` y un id de Ollama
+con forma `hf.co/usuario/modelo:tag`.
+
+### 9.2 Tres restricciones del modo pensamiento, y una que cambia el diseño
+
+Medidas contra el endpoint vivo, no leídas:
+
+| restricción | medición | efecto |
+| --- | --- | --- |
+| `tool_choice` | `auto`, `none` y omitido **aceptados**; `required` y la forma con función nombrada **rechazados** con 400 *"Thinking mode does not support this tool_choice"* | el loop pedía `required` en cada iteración: **toda corrida moría en la primera petición** |
+| `reasoning_content` | con `tools` presente, **debe devolverse en todos los turnos**; omitirlo es un 400 documentado | **el corte de razonamiento de §6.1.39 no puede correr acá** |
+| `temperature` | ignorada, sin error | el `0.2` fijado es inocuo |
+
+La segunda es la que importa, y **la documentación contradijo a mi sonda**.
+Seis pruebas contra el endpoint —2, 3 y 4 turnos de herramientas, con y sin
+recorte— **aceptaron** la transcripción recortada. La [doc de DeepSeek](https://api-docs.deepseek.com/guides/thinking_mode/)
+dice lo contrario, con estas palabras: *"for requests carrying the `tools`
+parameter, the `reasoning_content` must be fully passed back to the API in all
+subsequent requests… If your code does not correctly pass back
+`reasoning_content`, the API will return a 400 error"*, y hay varios reportes de
+terceros del mismo 400.
+
+**Ganó el contrato.** El ahorro es una optimización de tokens del ~20 %; el modo
+de falla es la corrida entera muerta. Así que el corte ahora está condicionado a
+una capacidad, `requires_reasoning_echo`, que DeepSeek declara y ningún otro
+proveedor de la tabla:
+
+| proveedor | `requires_reasoning_echo` | ¿se recorta el razonamiento? |
+| --- | --- | --- |
+| `deepseek` | **sí** | **no** |
+| `minimax`, `anthropic`, `openai`, `gemini`, … | no | sí |
+
+Y el arreglo del `tool_choice` se hizo con una capacidad **medida y angosta**,
+`restricts_tool_choice_to_auto`, en vez de reutilizar
+`supports_tool_choice_required` — que es *conservadora* y vale `False` para
+MiniMax, que sin embargo sirve `required` perfectamente. Gatear con la
+conservadora habría movido el planner de MiniMax de `required` a `auto` en
+silencio, y **todas las campañas de este documento se corrieron con
+`required`**. La bandera nueva codifica sólo el hecho medido, así que el arreglo
+para DeepSeek no le cuesta nada a la configuración enviada.
+
+### 9.3 Lo que esto dice del resultado principal
+
+Dos de los tres hallazgos son de proveedor, no de engine: el nombre pelado y el
+`tool_choice` habrían roto cualquier harness que hable con este endpoint. El
+tercero es del diseño: **el corte de razonamiento de §6.1.39 es una optimización
+condicionada a que el proveedor no exija el eco**, no una mejora universal. Eso
+no invalida su medición —−21,7 % sobre MiniMax, 11/3 parejas— pero sí acota
+dónde se aplica, que es exactamente lo que una medición de un solo proveedor no
+puede decir.

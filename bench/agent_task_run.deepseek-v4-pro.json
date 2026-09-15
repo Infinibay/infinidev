@@ -1,0 +1,18 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "model_identity": "deepseek:deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com/v1",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "repetitions": 1,
+  "min_request_interval_seconds": 2.0,
+  "max_iterations": 12,
+  "max_total_tool_calls": 80,
+  "max_tool_calls_per_action": 20,
+  "verify_timeout_seconds": 120.0,
+  "prompt_style": "lean",
+  "pipeline_mode": true,
+  "settings_overrides": {
+    "TASK_ENGINE_MODE": "task"
+  }
+}

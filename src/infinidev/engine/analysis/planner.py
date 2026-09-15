@@ -225,7 +225,19 @@ def _run_llm_loop(
         call_kwargs = dict(base_kwargs)
         call_kwargs["messages"] = messages
         call_kwargs["tools"] = tool_schemas
-        call_kwargs["tool_choice"] = "required"
+        # This lane calls LiteLLM directly, so it does not pass through
+        # `call_llm`'s capability downgrade. Asking for a form the provider
+        # rejects is a 400 on the first request of every run: DeepSeek's
+        # thinking mode accepts only "auto" and refuses "required" outright.
+        # "auto" is the weaker instruction, but the planner still parses the
+        # tool call defensively, and a plan is better than a dead run.
+        from infinidev.config.model_capabilities import get_model_capabilities
+
+        call_kwargs["tool_choice"] = (
+            "auto"
+            if get_model_capabilities().restricts_tool_choice_to_auto
+            else "required"
+        )
         call_kwargs.setdefault("temperature", 0.1)
         call_kwargs.setdefault("stream", False)
         call_kwargs.setdefault("max_tokens", 3000)

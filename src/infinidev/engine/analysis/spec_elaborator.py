@@ -643,15 +643,24 @@ def _structured_call(
     call_kwargs.setdefault("temperature", 0.2)
     call_kwargs.setdefault("max_tokens", 2000)
     call_kwargs["stream"] = False
-    # Force the terminator when the provider supports it; harmless otherwise
-    # (we still parse defensively below).
-    try:
-        call_kwargs["tool_choice"] = {
-            "type": "function",
-            "function": {"name": terminator_name},
-        }
-        response = litellm.completion(**call_kwargs)
-    except Exception:
+    # Force the terminator when the provider supports it. The named-function
+    # form is the one DeepSeek's thinking mode refuses with a 400, and the
+    # except below would swallow it — at the cost of a wasted round trip on
+    # every elaboration. Ask the capability first, and keep the defensive parse
+    # either way.
+    from infinidev.config.model_capabilities import get_model_capabilities
+
+    if not get_model_capabilities().restricts_tool_choice_to_auto:
+        try:
+            call_kwargs["tool_choice"] = {
+                "type": "function",
+                "function": {"name": terminator_name},
+            }
+            response = litellm.completion(**call_kwargs)
+        except Exception:
+            call_kwargs.pop("tool_choice", None)
+            response = litellm.completion(**call_kwargs)
+    else:
         call_kwargs.pop("tool_choice", None)
         response = litellm.completion(**call_kwargs)
 

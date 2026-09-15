@@ -362,3 +362,61 @@ class TestModelCapabilities:
         assert mc._capabilities.probed is False
         caps = mc.get_model_capabilities()
         assert caps.probed is True
+
+
+# ── bare model names get their provider's prefix ─────────────────────
+
+
+def test_a_bare_model_name_receives_the_provider_prefix(monkeypatch) -> None:
+    """Selecting the provider should be enough; the registry knows the prefix.
+
+    Without this, `LLM_PROVIDER=deepseek` + `LLM_MODEL=deepseek-flash` produced
+    the bare name, LiteLLM could not infer the route, and the request failed
+    with "LLM Provider NOT provided" on a model it prices in its own cost map.
+    """
+    from infinidev.config import llm as llm_module
+
+    monkeypatch.setattr(llm_module.settings, "LLM_PROVIDER", "deepseek")
+    monkeypatch.setattr(llm_module.settings, "LLM_MODEL", "deepseek-flash")
+    monkeypatch.setattr(llm_module.settings, "LLM_API_KEY", "sk-test")
+
+    assert llm_module.get_litellm_params()["model"] == "deepseek/deepseek-flash"
+
+
+def test_a_model_that_already_names_a_provider_is_untouched(monkeypatch) -> None:
+    """A slash means it is already routed; prepending would mangle it.
+
+    This is the guard that keeps `minimax/MiniMax-M3`,
+    `openai/responses/gpt-5.5` and an Ollama id like `hf.co/user/model:tag`
+    working.
+    """
+    from infinidev.config import llm as llm_module
+
+    for provider_id, model, expected in (
+        ("deepseek", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro"),
+        ("minimax", "minimax/MiniMax-M3", "minimax/MiniMax-M3"),
+        ("ollama", "hf.co/user/model:tag", "hf.co/user/model:tag"),
+    ):
+        monkeypatch.setattr(llm_module.settings, "LLM_PROVIDER", provider_id)
+        monkeypatch.setattr(llm_module.settings, "LLM_MODEL", model)
+        monkeypatch.setattr(llm_module.settings, "LLM_API_KEY", "sk-test")
+
+        assert llm_module.get_litellm_params()["model"] == expected
+
+
+def test_a_bare_ollama_name_reaches_the_chat_endpoint(monkeypatch) -> None:
+    """ollama/ has no function calling; the registry prefix is ollama_chat/."""
+    from infinidev.config import llm as llm_module
+
+    monkeypatch.setattr(llm_module.settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(llm_module.settings, "LLM_MODEL", "qwen3-coder:30b")
+    monkeypatch.setattr(llm_module.settings, "LLM_API_KEY", "")
+
+    assert llm_module.get_litellm_params()["model"] == "ollama_chat/qwen3-coder:30b"
+
+
+def test_an_unknown_provider_id_still_falls_back_without_a_prefix(monkeypatch) -> None:
+    """The ollama fallback for an unknown id must not invent a prefix."""
+    from infinidev.config.providers import get_provider
+
+    assert get_provider("not-a-provider").id == "ollama"

@@ -249,6 +249,26 @@ PROVIDERS: dict[str, ProviderConfig] = {
             "pixtral-large-latest",
         ],
     ),
+    "deepseek": ProviderConfig(
+        id="deepseek",
+        display_name="DeepSeek",
+        prefix="deepseek/",
+        default_base_url="https://api.deepseek.com/v1",
+        model_list_format="openai",
+        is_native=True,
+        # The endpoint serves /models, so this list is the offline floor rather
+        # than the source of truth. It matters anyway: without an entry here the
+        # registry fell back to *ollama*, so LLM_PROVIDER=deepseek resolved to
+        # http://localhost:11434 and every discovery call died with "Connection
+        # refused" — while `reasoning.py` and the prefix map in `llm.py` already
+        # had deepseek branches waiting for an id that could never be selected.
+        # LiteLLM carries the pricing and the context window for both of these,
+        # one of them a 50x cache discount, so its cost map needs nothing.
+        static_models=[
+            "deepseek-flash",
+            "deepseek-v4-pro",
+        ],
+    ),
     "openrouter": ProviderConfig(
         id="openrouter",
         display_name="OpenRouter",

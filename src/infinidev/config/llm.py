@@ -818,11 +818,34 @@ def get_litellm_params_for_assistant() -> dict[str, Any]:
     return params
 
 
+def _ensure_provider_prefix(model: str, provider_id: str) -> str:
+    """Give a bare model name its provider's LiteLLM prefix.
+
+    The registry already knows which prefix a provider needs, so a user who
+    selected the provider should not have to type it again — and when they do
+    not, LiteLLM cannot infer the route and rejects the request with "LLM
+    Provider NOT provided" on a name that is in its own cost map.
+
+    Deliberately narrow: a model carrying *any* slash keeps it. A bare
+    ``minimax/MiniMax-M3``-style id, ``openai/responses/gpt-5.5`` and an Ollama
+    id like ``hf.co/user/model:tag`` are all already routed, and prepending to
+    them would mangle a working setting.
+    """
+    from infinidev.config.providers import get_provider
+
+    prefix = (get_provider(provider_id).prefix or "").strip()
+    if not prefix or "/" in model or model.startswith(prefix):
+        return model
+    return prefix + model
+
+
 def get_litellm_params() -> dict[str, Any]:
     """Return kwargs suitable for ``litellm.completion(**params, messages=...)``."""
     model = settings.LLM_MODEL
     if not model:
         raise RuntimeError("INFINIDEV_LLM_MODEL is not set.")
+
+    model = _ensure_provider_prefix(model, settings.LLM_PROVIDER)
 
     # Auto-correct ollama/ → ollama_chat/ so the /api/chat endpoint is used
     # (ollama/ hits /api/generate which has no function-calling support).

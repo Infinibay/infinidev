@@ -145,6 +145,27 @@ def _repair_missing_edit_target(
     return json.dumps(args)
 
 
+def _requires_reasoning_echo(ctx: Any) -> bool:  # noqa: ARG001 - ctx keeps the call site uniform
+    """Whether this provider needs every earlier turn's reasoning preserved.
+
+    DeepSeek documents it and returns 400 without it. The trim that drops
+    reasoning from closed turns is a token optimisation; against a provider that
+    requires the echo it is a protocol violation, so the capability settles it
+    and the failure mode never gets a chance to.
+    """
+    try:
+        from infinidev.config.model_capabilities import get_model_capabilities
+
+        return bool(
+            getattr(get_model_capabilities(), "requires_reasoning_echo", False)
+        )
+    except Exception:
+        # An unreadable capability must not silently disable a safety rule the
+        # provider documents, but it also must not break the loop: keep the
+        # reasoning, which is the conservative side.
+        return True
+
+
 class ToolRunner:
     """Executes a step's tool calls and writes the result into *messages*."""
 
@@ -277,7 +298,7 @@ class ToolRunner:
         # request — while every closed turn loses a copy that MiniMax bills
         # again on every remaining round.
         _settings = _get_settings()
-        if getattr(_settings, "LOOP_REASONING_TRIM_ENABLED", True):
+        if getattr(_settings, "LOOP_REASONING_TRIM_ENABLED", True) and not _requires_reasoning_echo(ctx):
             trim_superseded_reasoning(messages)
         if getattr(_settings, "LOOP_TOOL_ARGUMENT_TRIM_ENABLED", False):
             trim_superseded_tool_arguments(messages)

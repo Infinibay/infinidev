@@ -406,6 +406,21 @@ class ModelCapabilities:
     supports_vision: bool = False
     has_thinking_sections: bool = False
     needs_schema_sanitization: bool = False
+    #: True when the provider requires every earlier turn's reasoning to be
+    #: echoed back verbatim once the request carries ``tools``. DeepSeek
+    #: documents this and returns 400 when it is missing, so the loop's
+    #: reasoning trim must not run against such a provider: the trim exists to
+    #: save tokens, and a 400 costs the whole run instead.
+    requires_reasoning_echo: bool = False
+    #: True when the only `tool_choice` this model accepts is `"auto"`.
+    #: Distinct from `supports_tool_choice_required`, which is a *conservative*
+    #: "we would not rely on required here" and is False for providers that
+    #: serve it fine. This one records a measured rejection — DeepSeek's
+    #: thinking mode answers 400 for both `"required"` and the named-function
+    #: form — and exists so the lanes that call LiteLLM directly can avoid a
+    #: request the provider is known to refuse without changing what every
+    #: other provider receives.
+    restricts_tool_choice_to_auto: bool = False
     probed: bool = False
     probe_duration: float = 0.0
 
@@ -521,6 +536,26 @@ _PROVIDER_PRESETS: dict[str, ModelCapabilities] = {
         supports_tool_choice_required=False,
         supports_json_mode=True,
         has_thinking_sections=True,  # MiniMax M2.7 sends reasoning_content like DeepSeek
+        probed=True,
+    ),
+    "deepseek": ModelCapabilities(
+        supports_function_calling=True,
+        # Thinking mode accepts only tool_choice="auto". Measured against the
+        # live endpoint: "required" and the named-function form both return 400
+        # "Thinking mode does not support this tool_choice", while "auto",
+        # "none" and omitting it are accepted. The loop asks for "required", so
+        # without this flag every DeepSeek run dies on its first request.
+        supports_tool_choice_required=False,
+        supports_json_mode=True,
+        has_thinking_sections=True,   # reasoning_content at the top level
+        restricts_tool_choice_to_auto=True,
+        # Documented and enforced: with `tools` present, every earlier turn's
+        # reasoning_content must be passed back or the API returns 400. Six
+        # probes against the live endpoint accepted a trimmed transcript, so
+        # enforcement looks partial today — but the contract is explicit, the
+        # failure mode is the whole run, and the saving is a token
+        # optimisation. The contract wins.
+        requires_reasoning_echo=True,
         probed=True,
     ),
     "mistral": ModelCapabilities(

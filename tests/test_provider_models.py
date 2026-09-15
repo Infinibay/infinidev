@@ -237,3 +237,51 @@ def test_openai_api_gpt_56_uses_the_full_model_window() -> None:
         assert get_model_context_window(
             {"model": f"openai/{model}"}, "openai"
         ) == 1_050_000
+
+
+# ── DeepSeek ─────────────────────────────────────────────────────────
+#
+# The registry had no `deepseek` entry even though `reasoning.py` and the
+# prefix map in `llm.py` both already had branches for the id. `get_provider`
+# falls back to *ollama* for an unknown id, so selecting it resolved to
+# http://localhost:11434 and every discovery call died with "Connection
+# refused" — a silence, not an error anybody could act on.
+
+
+def test_deepseek_is_a_registered_native_provider() -> None:
+    provider = get_provider("deepseek")
+
+    assert provider.id == "deepseek"
+    assert provider.prefix == "deepseek/"
+    assert provider.default_base_url == "https://api.deepseek.com/v1"
+    # Native, so no api_base is sent and LiteLLM routes by the prefix.
+    assert provider.is_native is True
+    assert provider.model_list_format == "openai"
+
+
+def test_deepseek_does_not_resolve_to_ollama() -> None:
+    """The fallback that made the gap silent."""
+    provider = get_provider("deepseek")
+
+    assert provider.id != "ollama"
+    assert "localhost" not in provider.default_base_url
+    assert provider.prefix != "ollama_chat/"
+
+
+def test_deepseek_catalog_carries_the_served_model_names() -> None:
+    """These are the two ids the endpoint reports from POST /models."""
+    models = fetch_models("deepseek")
+
+    assert "deepseek/deepseek-flash" in models
+    assert "deepseek/deepseek-v4-pro" in models
+
+
+def test_deepseek_models_are_in_litellms_cost_map() -> None:
+    """No custom registration needed: LiteLLM already prices both."""
+    import litellm
+
+    flash = litellm.model_cost["deepseek/deepseek-flash"]
+    assert flash["input_cost_per_token"] == 3e-07
+    assert flash["max_input_tokens"] == 1_000_000
+    assert flash["supports_reasoning"] is True
+    assert "deepseek/deepseek-v4-pro" in litellm.model_cost
