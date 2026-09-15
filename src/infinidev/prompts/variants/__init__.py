@@ -52,10 +52,9 @@ def get_variant(name: str, style: str | None = None) -> str | None:
 def resolve_style() -> str:
     """Return the effective prompt style.
 
-    Reads ``settings.PROMPT_STYLE``.  When set to ``"auto"`` (the default),
-    uses ``generalized`` for all models — shorter prompts with less
-    over-exploration bias. Set to ``"full"``, ``"coding"``, ``"lean"`` or
-    ``"extra_simple"`` explicitly if needed.
+    Reads ``settings.PROMPT_STYLE``.  ``"auto"`` resolves to ``lean``, which is
+    the default since 0.29.0.  Set ``"generalized"``, ``"full"``, ``"coding"``
+    or ``"extra_simple"`` explicitly to opt out.
     """
     from infinidev.config.settings import settings
 
@@ -63,7 +62,7 @@ def resolve_style() -> str:
     if style != "auto":
         return style
 
-    return "generalized"
+    return "lean"
 
 
 def registered_names(style: str) -> set[str]:

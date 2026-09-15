@@ -8,7 +8,7 @@ de declarar un resultado. El detalle está en §6; los límites, en cada secció
 
 | cambio | efecto medido | estado |
 | --- | --- | --- |
-| Variante de prompt `lean` (protocolo, identidad de ingeniería y barras de producto compactos) | −35,9 % tokens de prompt y −33 % latencia, **12/4 parejas, p=0,0768**; **tool calls −15,4 %, 12/2, p=0,0129**; 16/16 success; generaliza sobre 8 formas de tarea | **dirección medida, no resuelta** para tokens y latencia; **resuelto** para tool calls. El p=0,0005 que figuraba aquí era del test de signos defectuoso (§6.1.40) |
+| Variante de prompt `lean` — **el default desde 0.29.0** | agrupado sobre 19 parejas: tokens de prompt **−32,4 %** (14/5, p=0,0636), latencia **−44,2 %** (13/6), **tool calls −15,4 %** (13/3, **p=0,0213**), completion −7,3 %, success **19/19 en los dos brazos**. Calidad por instrumentos independientes: juez ciego **1,81 → 1,94**, `Verification:` **6/16 → 16/16**, respuestas >250 palabras **2/16 → 0/16** | **decisión humana, no resultado estadístico**: dirección replicada en dos corpus y ninguna métrica en contra, pero el margen de tokens no cruza el umbral declarado. El p=0,0005 que figuraba aquí era del test de signos defectuoso (§6.1.40); el comentario del ajuste lo dice (§8.7) |
 | Respuesta final con contrato de verificación | línea `Verification:` 6/16 → 16/16; respuestas sobre 250 palabras 2/16 → 0/16 | **medido** |
 | Cierre de Step rechazado en silencio (livelock) | racha de rondas sin trabajo: 11 → 0 | **medido** (falla intermitente) |
 | Presión de agrupación de tool calls | sin efecto (0,90 → 1,00 llamadas por ronda) | **resultado negativo**, apagado por defecto |
@@ -3319,10 +3319,33 @@ agrandaba era del instrumento.
 
 ### 8.7 Lo que este trabajo no resuelve
 
-* **`lean` no es el default.** `PROMPT_STYLE = "auto"` resuelve a `generalized`;
-  `lean` se midió con el flag explícito. Con tokens en 12/4 y p=0,0768, cambiar
-  el default sería exactamente el error que el documento se prohíbe. Es la
-  decisión más grande que queda abierta y la evidencia está toda junta.
+* **`lean` ya es el default — por decisión humana, no por medición.**
+  `PROMPT_STYLE = "auto"` resuelve a `lean` desde 0.29.0. **El pedido fue
+  explícito y el usuario decidió con la evidencia delante**, que es su
+  prerrogativa; lo que corresponde es registrar la naturaleza de la decisión,
+  porque no es la misma clase de afirmación que el resto de este documento. La
+  evidencia agrupada sobre 19 parejas pareadas:
+
+  | métrica | `default` | `lean` | delta | parejas | p | resuelto |
+  | --- | ---: | ---: | ---: | --- | ---: | --- |
+  | tool calls | 13 | 11 | **−15,4 %** | 13/3 | **0,0213** | **sí** |
+  | respuestas sin un comando | 0 | 0 | — | 6/0 | **0,0312** | **sí** |
+  | tokens de prompt | 154 108 | 104 186 | **−32,4 %** | 14/5 | 0,0636 | no |
+  | latencia | 101,5 s | 56,7 s | **−44,2 %** | 13/6 | 0,1671 | no |
+  | tokens de completion | 5 920 | 5 488 | −7,3 % | 12/7 | 0,3593 | no |
+  | success | 19/19 | 19/19 | — | — | — | — |
+
+  **Ninguna métrica medida se movió en contra.** La calidad, por instrumentos
+  que no comparten método con el test de signos, fue en la misma dirección:
+  juez ciego **1,81 → 1,94** sobre 16 ítems, línea `Verification:` **6/16 →
+  16/16**, respuestas de más de 250 palabras **2/16 → 0/16**. Y `changed_lines`
+  se movió en direcciones opuestas en los dos corpus, así que no se interpreta.
+
+  Lo que **no** se puede decir: que sea un resultado estadísticamente resuelto.
+  El margen de tokens queda en 14/5 y p=0,0636; una pareja más a favor lo
+  cruzaría, y no se agregó porque elegir la muestra hasta que cruce es lo que
+  este documento se prohíbe. La distinción queda escrita también en el comentario
+  del propio ajuste, para que nadie lea el default como un p-valor.
 * **La ventaja de `lean`, medida, es de dirección y no de significancia.** Tres
   de sus cuatro métricas quedan por fuera del umbral; tool calls sí lo pasa.
 * **El modelo de costo de §6.1.40 es un modelo.** Usa el incremento mediano y un

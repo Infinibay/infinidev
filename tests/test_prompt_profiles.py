@@ -1036,6 +1036,11 @@ def test_optional_system_blocks_share_the_compiled_configuration(
         "infinidev.prompts.tech.get_tech_prompt",
         lambda _hint: "TECHNOLOGY-MARKER",
     )
+    # This test is about which blocks a compiled configuration includes, so it
+    # pins the style it asserts wording from instead of tracking the default.
+    from infinidev.config.settings import settings as _settings
+
+    monkeypatch.setattr(_settings, "PROMPT_STYLE", "generalized")
 
     from infinidev.engine.loop.context import build_system_prompt
 

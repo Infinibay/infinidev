@@ -18,9 +18,20 @@ from infinidev.prompts.variants import (
 # ── resolve_style ────────────────────────────────────────────────────────
 
 class TestResolveStyle:
-    def test_auto_defaults_to_generalized(self):
+    def test_auto_defaults_to_lean(self):
+        """Changed in 0.29.0 by an explicit human decision, not a p-value.
+
+        The measured margin was direction-consistent across two corpora and
+        short of the project's significance bar (14/5 pairs, p=0.064), and the
+        trade-off is written into the setting's own comment.
+        """
         with patch("infinidev.config.settings.settings") as mock_settings:
             mock_settings.PROMPT_STYLE = "auto"
+            assert resolve_style() == "lean"
+
+    def test_generalized_remains_one_setting_away(self):
+        with patch("infinidev.config.settings.settings") as mock_settings:
+            mock_settings.PROMPT_STYLE = "generalized"
             assert resolve_style() == "generalized"
 
     def test_explicit_full(self):

@@ -42,7 +42,9 @@ def _system_prompt(style: str) -> str:
 
 
 def test_lean_cuts_a_quarter_of_the_static_system_prompt() -> None:
-    default = _system_prompt("auto")
+    # Against `generalized` explicitly, not "auto": since 0.29.0 "auto" *is*
+    # lean, so comparing them would assert that a thing is smaller than itself.
+    default = _system_prompt("generalized")
     lean = _system_prompt("lean")
 
     assert len(lean) < len(default) * 0.8, (

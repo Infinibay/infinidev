@@ -563,7 +563,25 @@ class Settings(BaseSettings):
     PROMPT_CACHE_ENABLED: bool = True  # Enable provider-specific prompt caching
 
     # Prompt Style
-    PROMPT_STYLE: str = "auto"  # "auto", "full", "generalized", "coding", "extra_simple"
+    #
+    # "auto" resolves to `lean` since 0.29.0. That is a **human decision, not a
+    # measured one**, and the distinction is recorded here so nobody later reads
+    # the default as a statistical result: over 19 paired MiniMax-M3 runs `lean`
+    # won on every point estimate — prompt tokens -32.4 %, latency -44.2 %,
+    # tool calls -15.4 %, completion tokens -7.3 %, success 19/19 vs 19/19 — and
+    # the exact sign test resolved only two of them (tool calls 13/3 p=0.021,
+    # answers-without-a-command 6/0 p=0.031). The token margin sits at 14/5,
+    # p=0.064, just outside the threshold this project holds itself to. Quality
+    # moved the same way under instruments that do not share its method: blind
+    # judge 1.81 -> 1.94 over 16 items, the `Verification:` line 6/16 -> 16/16,
+    # answers over 250 words 2/16 -> 0/16.
+    #
+    # So: the direction is replicated across two corpora and no metric measured
+    # against it, which is why the default changed; the precision is not there,
+    # which is why this comment exists instead of a p-value. `generalized`
+    # remains one setting away.
+    # "auto", "lean", "full", "generalized", "coding", "extra_simple"
+    PROMPT_STYLE: str = "auto"
 
     # UI
     MARKDOWN_MESSAGES: bool = False  # Render LLM responses with markdown styling
