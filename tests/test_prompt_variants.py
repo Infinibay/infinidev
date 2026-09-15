@@ -395,3 +395,20 @@ def test_registered_styles_keeps_a_deliberate_order_and_appends_newcomers() -> N
 
 def test_the_shipped_default_is_a_registered_style() -> None:
     assert DEFAULT_STYLE in registered_styles()
+
+
+def test_the_engine_mode_picker_is_derived_from_the_router() -> None:
+    """The literal agreed with VALID_MODES by luck, not by construction.
+
+    An engine added to the router's tuple and not to the dialog's literal would
+    have been selectable in the config file and invisible in the picker — the
+    same shape as the prompt-style list, one file over.
+    """
+    from infinidev.engine.engines.routing import VALID_MODES
+    from infinidev.ui.dialogs.settings_editor_state import SETTINGS_SECTIONS
+
+    options = dict(
+        (key, value) for key, _desc, value in SETTINGS_SECTIONS["Engine"]
+    )["TASK_ENGINE_MODE"].removeprefix("select:").split(",")
+
+    assert options == list(VALID_MODES)

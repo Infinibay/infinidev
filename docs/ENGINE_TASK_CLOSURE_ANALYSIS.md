@@ -3535,3 +3535,61 @@ eran listas escritas a mano al lado de un registro que ya tenía la verdad.** El
 comentario que derivó la primera ya lo decía —"las tres copias a mano se habían
 desincronizado"— y la segunda siguió ahí. Lo que queda pendiente es buscar si hay
 una tercera.
+
+### 9.7 La auditoría: tres copias, una viva, dos muertas
+
+Prometí buscar si había una tercera lista escrita a mano. Había **tres más**, y la
+peor no era una duplicación sino un funeral.
+
+**Tres módulos definían `SETTINGS_SECTIONS`:** `settings_editor_state.py`,
+`dropdown_control.py` y `sections_control.py`. Sólo el primero es la fuente de
+verdad — el propio `settings_editor.py` lo dice en un comentario y lo importa de
+ahí, y `SettingsControl` lee de `SettingsEditorState`. Las otras dos eran **copias
+muertas: nada en `src/` las leía.** Sólo las leían dos tests, que afirmaban que
+la última clave de `Permissions` era `MCP_PERMISSION` — y les daba, a las copias
+muertas, la apariencia de estar mantenidas.
+
+Eso es peor que una lista que deriva: es una lista que **no puede** derivar sin
+que nadie se entere, en el archivo donde uno iría a arreglarla. Casi me pasa: el
+arreglo de §9.6 lo hice en `settings_editor_state.py` por suerte, leyendo quién
+importaba qué; si hubiera editado `dropdown_control.py`, el picker habría seguido
+igual y el test correspondiente habría pasado.
+
+Se borraron las dos copias (63 y 57 líneas) y los dos tests que las leían se
+reemplazaron por **un invariante**: que exista exactamente una definición, y que
+los otros dos módulos **no** tengan el atributo. Es un test que impide que el
+patrón vuelva en vez de uno que lo acompaña.
+
+**La tercera lista sí duplicaba algo vivo.** `TASK_ENGINE_MODE` ofrecía
+`select:orchestrator,auto,task,react,staged,graph_beta` escrito a mano, mientras
+`routing.py` ya exporta `VALID_MODES` con los mismos seis. **Hoy coinciden, así
+que era deriva latente y no un bug**: un engine agregado a `VALID_MODES` y no al
+literal habría sido seleccionable en el archivo de settings e invisible en el
+diálogo. Ahora se deriva, con un test que compara la lista del picker contra
+`VALID_MODES` elemento por elemento.
+
+**Lo que revisé y no toqué**, porque el literal *es* la definición y no una copia:
+los modos de permiso (`EXECUTE_COMMANDS_PERMISSION` y `FILE_OPERATIONS_PERMISSION`
+tienen vocabularios distintos a propósito: `allowed_list` contra `allowed_paths`),
+`MCP_PERMISSION`, `BEHAVIOR_JUDGE_MODE`, `BEHAVIOR_CHECK_MODE` y
+`DIFF_DISPLAY_MODE`. Convertir cada literal en un registro habría sido inventar
+indirección donde no hay verdad duplicada.
+
+**Y uno que encontré y no es deriva sino un problema distinto:**
+`THINKING_BUDGET` ofrece un conjunto global (`low, medium, high, ultra, custom`)
+mientras `reasoning.py` resuelve los niveles **por proveedor** desde
+`EffortProfile` — que para Gemini son `("low","medium","high","custom")`, para
+otros `("none","low","medium","high","xhigh")` y para otros `("off","low","high","max")`.
+No es que la lista esté atrasada: es que **una lista global no puede representar
+un conjunto que depende del modelo**. Elegir un nivel que el modelo actual no
+acepta se mapea en silencio. Arreglarlo bien requiere que el picker muestre los
+niveles resueltos para el modelo configurado, que es un cambio de UI y no una
+derivación, y no lo hice sin medirlo.
+
+**El recuento final del patrón:** cuatro listas escritas a mano al lado de una
+fuente de verdad — proveedores (§9.1), estilos de prompt (§9.6), modos de engine,
+y las dos copias muertas del metadata de settings. Tres corregidas por derivación,
+dos borradas. La lección no es "derivá las listas" sino algo más chico y más
+incómodo: **dos de las cuatro no estaban desactualizadas, y una de ellas ni
+siquiera estaba viva.** Buscarlas no se justificaba por un bug, se justifica
+porque el próximo sí lo va a ser.

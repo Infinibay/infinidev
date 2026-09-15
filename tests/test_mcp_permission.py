@@ -46,18 +46,26 @@ def test_permissions_section_lists_three_rows_in_main_state() -> None:
     ]
 
 
-def test_permissions_section_lists_three_rows_in_dropdown_control() -> None:
-    from infinidev.ui.dialogs.dropdown_control import SETTINGS_SECTIONS
+def test_there_is_exactly_one_definition_of_the_settings_metadata() -> None:
+    """The invariant that the two dead copies violated.
 
-    keys = [k for (k, _, _) in SETTINGS_SECTIONS["Permissions"]]
-    assert keys[-1] == "MCP_PERMISSION"
+    `dropdown_control` and `sections_control` each carried a private
+    `SETTINGS_SECTIONS` that nothing in `src/` read — only a test did, which is
+    what made a dead copy look maintained. Three copies of one list is how the
+    provider list and the prompt-style list each drifted; this asserts there is
+    only one place left to edit, so the next person cannot fix the wrong file.
+    """
+    from infinidev.ui.dialogs import (
+        dropdown_control,
+        sections_control,
+        settings_editor_state,
+    )
 
-
-def test_permissions_section_lists_three_rows_in_sections_control() -> None:
-    from infinidev.ui.dialogs.sections_control import SETTINGS_SECTIONS
-
-    keys = [k for (k, _, _) in SETTINGS_SECTIONS["Permissions"]]
-    assert keys[-1] == "MCP_PERMISSION"
+    assert hasattr(settings_editor_state, "SETTINGS_SECTIONS")
+    for module in (dropdown_control, sections_control):
+        assert not hasattr(module, "SETTINGS_SECTIONS"), (
+            f"{module.__name__} carries a second copy of the settings metadata"
+        )
 
 
 def test_mcp_permission_row_uses_select_with_auto_approve_first() -> None:

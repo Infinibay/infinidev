@@ -22,6 +22,7 @@ from infinidev.ui.theme import (
     SURFACE, SURFACE_LIGHT, SURFACE_DARK,
 )
 from infinidev.config.providers import list_provider_ids
+from infinidev.engine.engines.routing import VALID_MODES
 from infinidev.prompts.variants import DEFAULT_STYLE, registered_styles
 from infinidev.ui.dialogs.base import dialog_frame
 
@@ -42,6 +43,10 @@ _OPTIONAL_PROVIDER_SELECT = f"select:,{_PROVIDER_IDS}"
 # `auto` first, then every registered style. Derived so a new variant cannot be
 # selectable in the engine and absent from the dialog.
 _PROMPT_STYLE_SELECT = "select:" + ",".join(("auto", *registered_styles()))
+# Derived from the router's own tuple. The literal that used to sit here agreed
+# with it by luck; an engine added to VALID_MODES and not to the literal would
+# have been reachable from the config file and invisible in the dialog.
+_ENGINE_MODE_SELECT = "select:" + ",".join(VALID_MODES)
 
 SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "LLM": [
@@ -62,7 +67,7 @@ SETTINGS_SECTIONS: dict[str, list[tuple[str, str, str]]] = {
     "Engine": [
         ("TASK_ENGINE_MODE",
          "Task engine: auto picks per task; explicit modes stay pinned",
-         "select:orchestrator,auto,task,react,staged,graph_beta"),
+         _ENGINE_MODE_SELECT),
         ("AUTO_ENGINE_ALLOW_GRAPH",
          "Let auto pick graph_beta for branching work", "bool"),
         ("ENGINE_SHOW_SELECTION_REASON",
