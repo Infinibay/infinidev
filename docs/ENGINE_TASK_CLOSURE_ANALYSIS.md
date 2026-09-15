@@ -3039,6 +3039,37 @@ prompt en esa conversación. Eso no reemplaza la comparación pareada —una son
 de dos llamadas no mide una corrida de diez rondas— pero sí elimina la
 explicación más barata de que la palanca no sirva.
 
+##### El veredicto: la palanca falla, y la comparación lo dice sin ambigüedad
+
+Las dos tareas que más payload de argumentos cargan (`evidence-code-review`,
+mediana 21,4 % del payload; `complex-plan`, hasta 33 %), × 3 repeticiones × 2
+brazos, condición `baseline`:
+
+| métrica | entero | elidido | delta | parejas mejor/peor | p |
+| --- | ---: | ---: | ---: | --- | ---: |
+| **tokens de prompt facturados** | 87 257 | **110 904** | **+27,1 %** | **0 / 5** | 0,0625 |
+| rondas de modelo | 11 | 13 | +18,2 % | 0 / 5 | 0,0625 |
+| tool calls | 6 | 7 | +16,7 % | 1 / 3 | 0,625 |
+| `changed_lines` | 195 | 207 | +6,2 % | 2 / 3 | 1,0 |
+| `cache_hit_rate` | 72,7 % | **84,1 %** | **+15,6 %** | 0 / 5 | 0,0625 |
+| success | 6/6 | 5/6 | — | — | — |
+
+Por tarea se ve el mecanismo: en `complex-plan` el brazo elidido pasó de 6 a
+**11 tool calls** y de ~90 000 a **~150 000 tokens facturados**; en
+`evidence-code-review`, de 6 a 7 llamadas y de 76 000 a 110 000. O sea que el
+modelo **hizo el trabajo de nuevo** —releyó, reescribió, volvió a verificar— en
+lugar de confiar en lo que ya había hecho. El ahorro de payload era real (el
+`cache_hit_rate` sube 15,6 puntos, exactamente la composición que la elisión
+produce) y **lo paga con creces**: menos bytes por petición, más peticiones, y el
+total facturado sube 27 %.
+
+**Un dato que vale más que el resultado: el hit rate subió 15,6 puntos y el
+costo subió 27 %.** Es la segunda vez en este documento que perseguir el cache
+habría sido un error (§6.1.39), y acá está en el mismo experimento y en la
+dirección contraria a la que importa.
+
+El interruptor **queda apagado, y ahora por medición y no por prudencia**:
+
 **El interruptor existe y está apagado por defecto**
 (`LOOP_TOOL_ARGUMENT_TRIM_ENABLED = False`), y eso es deliberado, no una
 indecisión. A diferencia del razonamiento, acá hay un riesgo real y simétrico:
