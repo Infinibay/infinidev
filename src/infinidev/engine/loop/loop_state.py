@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from infinidev.engine.loop.action_record import ActionRecord
 from infinidev.engine.loop.loop_plan import LoopPlan
 from infinidev.engine.loop.opened_file import OpenedFile
+from infinidev.engine.loop.user_guidance import UserGuidance
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class LoopState(BaseModel):
     plan: LoopPlan = Field(default_factory=LoopPlan)
     history: list[ActionRecord] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)  # Scratchpad notes that persist across iterations
+    user_guidance: list[UserGuidance] = Field(default_factory=list)
     opened_files: dict[str, OpenedFile] = Field(default_factory=dict)  # File content cache
     # Exact read_file request -> filesystem revision last delivered to the
     # model. Repeating an unchanged read returns a compact cache notice rather
@@ -231,6 +233,7 @@ class LoopState(BaseModel):
             self.opened_files[path].content = content
             self.opened_files[path].ttl = OPENED_FILE_TTL
             self.opened_files[path].pinned = True
+            self.opened_files[path].requires_revalidation = False
         else:
             self.cache_file(path, content, pinned=True)
 

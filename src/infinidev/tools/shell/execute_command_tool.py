@@ -385,6 +385,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
 
         stdout_buf = bytearray()
         stderr_buf = bytearray()
+        incomplete_streams: set[str] = set()
         from infinidev.engine.tool_progress import (
             emit_tool_output,
             is_tool_cancelled,
@@ -398,11 +399,11 @@ class ExecuteCommandTool(InfinibayBaseTool):
         killed_reason: str | None = None
 
         try:
+            fds = [f for f in (proc.stdout, proc.stderr) if f is not None]
             while proc.poll() is None:
-                fds = [f for f in (proc.stdout, proc.stderr) if f is not None]
-                if not fds:
-                    break
                 try:
+                    # An empty set still sleeps, preserving cancellation and
+                    # timeout checks if the command closed both output streams.
                     ready, _, _ = select.select(fds, [], [], 0.25)
                 except (ValueError, OSError):
                     break
@@ -413,13 +414,16 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     except OSError:
                         data = b""
                     if not data:
+                        fds.remove(r)
                         continue
                     emit_tool_output(data.decode(errors="replace"))
                     if r is proc.stdout:
-                        _extend_bounded(stdout_buf, data, buffer_limit)
+                        if _extend_bounded(stdout_buf, data, buffer_limit):
+                            incomplete_streams.add("stdout")
                     else:
                         discarded = _extend_bounded(stderr_buf, data, buffer_limit)
                         if discarded:
+                            incomplete_streams.add("stderr")
                             stderr_scan_from = max(0, stderr_scan_from - discarded)
 
                 if is_tool_cancelled():
@@ -474,6 +478,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
                     stderr=stderr_buf.decode(errors="replace"),
                     success=False,
                     killed_reason=killed_reason,
+                    incomplete_streams=incomplete_streams,
                 )
 
             # Drain any remaining output after the process exits.
@@ -481,10 +486,12 @@ class ExecuteCommandTool(InfinibayBaseTool):
                 rest_out, rest_err = proc.communicate(timeout=2)
                 if rest_out:
                     emit_tool_output(rest_out.decode(errors="replace"))
-                    _extend_bounded(stdout_buf, rest_out, buffer_limit)
+                    if _extend_bounded(stdout_buf, rest_out, buffer_limit):
+                        incomplete_streams.add("stdout")
                 if rest_err:
                     emit_tool_output(rest_err.decode(errors="replace"))
-                    _extend_bounded(stderr_buf, rest_err, buffer_limit)
+                    if _extend_bounded(stderr_buf, rest_err, buffer_limit):
+                        incomplete_streams.add("stderr")
             except subprocess.TimeoutExpired:
                 self._terminate(proc)
 
@@ -493,7 +500,11 @@ class ExecuteCommandTool(InfinibayBaseTool):
                 stdout=stdout_buf.decode(errors="replace"),
                 stderr=stderr_buf.decode(errors="replace"),
                 success=proc.returncode == 0,
+                incomplete_streams=incomplete_streams,
             )
+        except BaseException:
+            self._terminate(proc)
+            raise
         finally:
             # Ensure file descriptors are closed in every branch.
             for f in (proc.stdin, proc.stdout, proc.stderr):
@@ -511,6 +522,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
         stderr: str,
         success: bool,
         killed_reason: str | None = None,
+        incomplete_streams: set[str] | None = None,
     ) -> dict:
         """Optionally persist over-limit streams, then apply legacy slices.
 
@@ -519,6 +531,8 @@ class ExecuteCommandTool(InfinibayBaseTool):
         failure, this returns exactly the dictionary produced before capture
         existed. A handle is attached only after the store has durably written,
         verified, and catalogued the complete decoded pre-slice text.
+        Streams whose buffers discarded bytes retain their legacy result tail
+        but cannot be advertised as complete captures.
         """
         result: dict = {
             "exit_code": exit_code,
@@ -539,7 +553,7 @@ class ExecuteCommandTool(InfinibayBaseTool):
                 ("stdout", stdout, 10000),
                 ("stderr", stderr, 5000),
             )
-            if len(text) > limit
+            if len(text) > limit and (not incomplete_streams or stream not in incomplete_streams)
         }
         if not over_limit:
             return result

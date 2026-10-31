@@ -2,8 +2,11 @@
   "id": "capability.architecture_impact",
   "reason": "the change crosses module, package, process, or public-contract boundaries",
   "guidance": [
-    "Trace callers, data flow, ownership, and compatibility across each crossed boundary before",
-    "editing it. Keep the boundary movement as small as the requested outcome permits, then exercise",
-    "every affected entry point rather than validating only the edited module."
+    "Trace callers, data flow, ownership and compatibility across each changed boundary. Keep",
+    "invariants with their owner and translate vendor, persistence and transport representations at",
+    "the edge. Use the local domain vocabulary; do not force a shared model across distinct meanings.",
+    "Choose a function or simple use-case flow when it protects the contract. A new layer must hide",
+    "decisions or isolate a volatile dependency, not just forward calls. Move the smallest boundary",
+    "that removes the coupling, then exercise affected entry points and boundary translations."
   ]
 }

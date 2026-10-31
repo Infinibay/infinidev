@@ -96,8 +96,10 @@ TASK_METHOD_FRAGMENTS: tuple[ConditionalPromptFragment, ...] = (
         "bugfix.planner", "bugfix.root_cause", "planner", "plan",
         "Plan from failure evidence to root cause, then to the smallest sufficient "
         "repair. Include a focused regression check that distinguishes the fix from "
-        "merely hiding the symptom.",
-        operation="bugfix", authority="modify", priority=70,
+        "merely hiding the symptom. For uncertain legacy behavior, locate a test seam "
+        "and characterize the contract before restructuring; distinguish a known defect "
+        "from behavior callers depend on.",
+        operation="bugfix", authority="modify", priority=70, version=2,
     ),
     _fragment(
         "bugfix.developer", "bugfix.root_cause", "developer", "execute",
@@ -108,15 +110,19 @@ TASK_METHOD_FRAGMENTS: tuple[ConditionalPromptFragment, ...] = (
     _fragment(
         "bugfix.reviewer", "bugfix.root_cause", "reviewer", "review",
         "Verify that the submitted change addresses the demonstrated cause rather than only the "
-        "symptom, and that the regression check would fail without the correction.",
-        operation="bugfix", authority="modify", priority=70,
+        "symptom, and that the regression check would fail without the correction. Check "
+        "the affected caller contract and failure path; passing a mock-only check does "
+        "not establish that the production boundary works.",
+        operation="bugfix", authority="modify", priority=70, version=2,
     ),
     _fragment(
         "refactor.planner", "refactor.preserve_behavior", "planner", "plan",
         "Plan from an observable baseline. Identify callers and tests, split structural "
         "changes into reversible boundaries, and attach a behavior-preservation check "
-        "to each boundary.",
-        operation="refactor", authority="modify", priority=60,
+        "to each boundary. Name the concrete source of change cost and a stop condition. "
+        "When tests are weak, plan the smallest characterization seam before moving code; "
+        "keep functional changes separate from the structural work.",
+        operation="refactor", authority="modify", priority=60, version=2,
     ),
     _fragment(
         "refactor.developer", "refactor.preserve_behavior", "developer", "execute",
@@ -128,49 +134,66 @@ TASK_METHOD_FRAGMENTS: tuple[ConditionalPromptFragment, ...] = (
     _fragment(
         "refactor.reviewer", "refactor.preserve_behavior", "reviewer", "review",
         "Review behavioral equivalence first: compare public contracts, callers, and test evidence "
-        "before judging the new structure. Treat an observable regression as blocking.",
-        operation="refactor", authority="modify", priority=60,
+        "before judging the new structure. Treat an observable regression as blocking. "
+        "Assess whether decisions are localized and caller knowledge decreased; fewer lines "
+        "or more classes alone do not establish simpler design. Architectural preferences "
+        "without a demonstrated defect remain suggestions.",
+        operation="refactor", authority="modify", priority=60, version=2,
     ),
     _fragment(
         "feature.planner", "feature.contract_first", "planner", "plan",
         "Define the new user-visible contract and acceptance path before implementation. Identify "
-        "integration and compatibility boundaries and plan the smallest end-to-end slice.",
-        operation="feature", authority="modify", priority=50,
+        "integration and compatibility boundaries and plan the smallest end-to-end slice. "
+        "Name the owner of the rules and valid state transitions. If the path writes durable "
+        "or external state, plan for partial failure and safe recovery; keep simple flows "
+        "simple instead of requiring domain layers or a class hierarchy.",
+        operation="feature", authority="modify", priority=50, version=2,
     ),
     _fragment(
         "feature.developer", "feature.contract_first", "developer", "execute",
         "Implement the smallest complete slice of the requested new capability. Follow existing "
         "integration patterns, avoid speculative architecture, and exercise the new "
-        "path end to end.",
-        operation="feature", authority="modify", priority=50,
+        "path end to end. Keep each invariant with the state owner and translate external "
+        "representations at the boundary. For remote or durable side effects, distinguish "
+        "confirmed success from unknown success after timeout; reconcile before retrying "
+        "unless the operation is safe to repeat.",
+        operation="feature", authority="modify", priority=50, version=2,
     ),
     _fragment(
         "feature.reviewer", "feature.contract_first", "reviewer", "review",
         "Map the new user workflow and each explicit acceptance criterion to submitted evidence. "
         "Check integration and failure boundaries without inventing additional product "
-        "requirements.",
-        operation="feature", authority="modify", priority=50,
+        "requirements. On changed stateful paths, check invalid transitions, partial writes "
+        "and repeated effects. Judge abstractions by the decisions they hide, not by a "
+        "preferred pattern or function count.",
+        operation="feature", authority="modify", priority=50, version=2,
     ),
     _fragment(
         "performance.planner", "performance.measure_first", "planner", "plan",
         "Plan a representative measurement before drawing a performance conclusion. If the task "
         "authorizes optimization, make the change depend on an observed bottleneck and compare "
-        "the same workload afterwards; otherwise plan evidence collection and a report only.",
-        operation="performance", priority=55, version=2,
+        "the same workload afterwards; otherwise plan evidence collection and a report only. "
+        "State the workload, metric and environment so the comparison can be reproduced; "
+        "include correctness checks around the optimized path.",
+        operation="performance", priority=55, version=3,
     ),
     _fragment(
         "performance.developer", "performance.measure_first", "developer", "execute",
         "Measure or reproduce a representative baseline and identify the observed bottleneck. "
         "When modification is authorized, optimize that bottleneck, preserve correctness, and "
         "compare the identical workload; in read-only work, report the measurements without "
-        "tuning the implementation.",
-        operation="performance", priority=55, version=2,
+        "tuning the implementation. Keep input size, concurrency and warm/cold cache "
+        "conditions comparable. Hide optimization details behind the existing contract "
+        "and report the measured trade-off rather than theoretical speed alone.",
+        operation="performance", priority=55, version=3,
     ),
     _fragment(
         "performance.reviewer", "performance.measure_first", "reviewer", "review",
         "Require comparable before/after measurements and unchanged correctness. Do not accept a "
-        "performance claim based only on code shape or an unrepresentative workload.",
-        operation="performance", priority=55, version=2,
+        "performance claim based only on code shape or an unrepresentative workload. "
+        "Separate an observed improvement from run-to-run noise or changed inputs/cache "
+        "conditions; name unmeasured claims as limitations rather than inventing results.",
+        operation="performance", priority=55, version=3,
     ),
     _fragment(
         "research.planner", "research.evidence_first", "planner", "plan",

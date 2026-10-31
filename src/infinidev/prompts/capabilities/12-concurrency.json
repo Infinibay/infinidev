@@ -2,8 +2,10 @@
   "id": "capability.concurrency",
   "reason": "the work touches threads, async tasks, queues, locks, retries, or cancellation",
   "guidance": [
-    "State ownership, ordering, completion, and accounting invariants before changing concurrent",
-    "control flow. Cover cancellation, worker failure, restart, and shutdown with deterministic",
-    "synchronization; do not use timing sleeps as proof when an observable event or barrier exists."
+    "State ownership, ordering, completion and accounting invariants before changing concurrent",
+    "control flow. Scope ordering to the entity or stream that needs it; do not assume delivery is",
+    "exactly once. Make repeated or reordered work safe with identity, idempotent transitions or an",
+    "explicit recovery contract. Cover cancellation, worker failure, restart and shutdown using",
+    "observable events or barriers instead of timing sleeps. Keep locks out of slow external calls."
   ]
 }

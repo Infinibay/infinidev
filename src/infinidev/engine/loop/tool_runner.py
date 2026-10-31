@@ -1415,7 +1415,12 @@ class ToolRunner:
         if safe:
             return
 
-        workspace = getattr(ctx, "workspace_path", None) or os.getcwd()
+        workspace = (
+            getattr(ctx, "workspace_path", None)
+            or getattr(getattr(ctx, "agent", None), "workspace_path", None)
+            or get_current_workspace_path()
+            or os.getcwd()
+        )
         for key, opened in list(ctx.state.opened_files.items()):
             if key.startswith("[symbol] "):
                 ctx.state.opened_files.pop(key, None)
@@ -1437,6 +1442,7 @@ class ToolRunner:
                 f"{index + 1:>6}\t{line}"
                 for index, line in enumerate(content.split("\n"))
             )
+            opened.requires_revalidation = False
 
     @staticmethod
     def _propagate_command_output_handles(

@@ -1,7 +1,7 @@
 """Smart reindexing — ensure files are indexed before symbol operations.
 
 Provides `ensure_indexed()` which any tool can call before querying symbols.
-Uses content hash comparison to skip unchanged files.
+Uses content hashes and parser versions to skip up-to-date files.
 """
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+
+from infinidev.code_intel.parsers import detect_language, get_parser_version
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +23,8 @@ def ensure_indexed(
 ) -> bool:
     """Ensure a file is indexed with its current content.
 
-    Compares the stored content hash with the current file content.
-    If different (or not yet indexed), re-indexes the file.
+    Compares content hash and parser version with the stored index state.
+    If either changed (or the file is not yet indexed), re-indexes the file.
 
     Args:
         project_id: Project ID for the index
@@ -41,20 +43,30 @@ def ensure_indexed(
     except (OSError, ValueError):
         return False
 
+    language = detect_language(abs_path)
+    if not language:
+        return False
+
+    from infinidev.code_intel.indexer import MAX_FILE_SIZE, index_file
+
     # Read current content and hash
     try:
         with open(abs_path, "rb") as f:
-            content = f.read()
+            content = f.read(-1 if language == "config" else MAX_FILE_SIZE + 1)
     except (PermissionError, OSError):
+        return False
+
+    if language != "config" and len(content) > MAX_FILE_SIZE:
         return False
 
     current_hash = hashlib.sha256(content).hexdigest()[:16]
 
-    # Compare with stored hash
-    from infinidev.code_intel.index import get_file_hash
-    stored_hash = get_file_hash(project_id, abs_path)
+    from infinidev.code_intel.index import get_file_index_state
+    parser_version = get_parser_version(language)
+    expected_state = (current_hash, parser_version)
+    stored_state = get_file_index_state(project_id, abs_path)
 
-    if stored_hash == current_hash:
+    if stored_state == expected_state:
         if not notify_integrity:
             from infinidev.code_intel.file_change_notifications import (
                 has_integrity_baseline,
@@ -69,7 +81,6 @@ def ensure_indexed(
 
     # Needs (re)indexing
     try:
-        from infinidev.code_intel.indexer import index_file
         count = index_file(
             project_id,
             abs_path,
@@ -80,10 +91,10 @@ def ensure_indexed(
             return True
         # A valid config file (or a source file with zero symbols) is still
         # successfully indexed: index_file stores its hash but returns the
-        # number of symbols, which is legitimately zero. Compare the new hash
+        # number of symbols, which is legitimately zero. Compare the new state
         # instead of treating every zero-symbol result as a failure so queue
         # callbacks accurately report completed tracking work.
-        return get_file_hash(project_id, abs_path) == current_hash
+        return get_file_index_state(project_id, abs_path) == expected_state
     except Exception as exc:
         logger.warning("Failed to index %s: %s", abs_path, str(exc)[:100])
         return False

@@ -17,7 +17,7 @@ CACHE_BREAKPOINT_MARKER = "<!--__INFINIDEV_CACHE_BREAK__-->"
 
 @dataclass(frozen=True)
 class ConditionalPromptFragment:
-    """One bounded instruction selected from a vetted task profile."""
+    """One indivisible instruction; a byte cap must never remove its final clause."""
 
     id: str
     policy_id: str
@@ -55,12 +55,6 @@ class ConditionalPromptSelection:
     fragments: tuple[ConditionalPromptFragment, ...]
     omitted: tuple[tuple[str, str], ...]
     used_utf8_bytes: int
-
-
-def _clip_utf8(text: str, limit: int) -> str:
-    if limit <= 0:
-        return ""
-    return text.encode("utf-8")[:limit].decode("utf-8", errors="ignore").strip()
 
 
 def _model_route_matches(selector: str, *, provider: str, model: str) -> bool:
@@ -138,10 +132,13 @@ def select_conditional_fragments(
     chosen: list[ConditionalPromptFragment] = []
     used = 0
     for fragment in eligible:
-        content = _clip_utf8(fragment.content, fragment.max_utf8_bytes)
+        content = fragment.content
         size = len(content.encode("utf-8"))
-        if not content:
+        if not content.strip():
             omitted.append((fragment.id, "empty"))
+            continue
+        if size > fragment.max_utf8_bytes:
+            omitted.append((fragment.id, "fragment-budget"))
             continue
         if used + size > max(0, max_utf8_bytes):
             omitted.append((fragment.id, "budget"))
@@ -196,9 +193,12 @@ def select_conditional_catalog(
     chosen: list[ConditionalPromptFragment] = []
     used = 0
     for fragment in eligible:
-        content = _clip_utf8(fragment.content, fragment.max_utf8_bytes)
-        if not content:
+        content = fragment.content
+        if not content.strip():
             omitted.append((fragment.id, "empty"))
+            continue
+        if len(content.encode("utf-8")) > fragment.max_utf8_bytes:
+            omitted.append((fragment.id, "fragment-budget"))
             continue
         rendered = (
             f'<if reason="{fragment.condition_reason}">\n'

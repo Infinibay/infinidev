@@ -5,12 +5,16 @@
 [![Tests](https://github.com/Infinibay/infinidev/actions/workflows/tests.yml/badge.svg)](https://github.com/Infinibay/infinidev/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
-Infinidev is an autonomous AI coding agent for the terminal. It can inspect a
-repository, plan changes, edit code, run commands and tests, review its work,
-and keep project knowledge across sessions.
+Infinidev is a coding agent for real repository work, from a focused bug fix to
+a change that takes many steps. It can investigate a problem, plan and implement
+a solution, run checks, review changes, and carry project knowledge into later
+sessions. You work with it through a terminal or the web workspace.
 
-It works with hosted models through LiteLLM and with local models through
-[Ollama](https://ollama.com).
+The product targets capable reasoning and coding models with long context
+windows. Hosted providers work through LiteLLM, including the existing ChatGPT
+subscription integration. Local models through [Ollama](https://ollama.com)
+remain supported. Choose a model for the task; small local models do not set
+the architecture or the quality bar.
 
 An optional React web workspace provides conversations, named teams and tickets,
 shared notes, live process output, file diffs, findings, model settings and usage.
@@ -51,8 +55,14 @@ infinidev
 ```
 
 Use `/models manage` to choose a provider and model, or `/settings` to edit the
-project configuration. By default, Infinidev expects Ollama at
-`http://localhost:11434`.
+project configuration. Select your provider explicitly before starting work.
+For the ChatGPT subscription provider (`openai_subscription`), Infinidev reuses
+the Codex CLI login established by `codex login`; it reads the available models
+and their limits from the CLI's cached catalog. Other hosted providers use their
+configured credentials.
+
+Fresh configurations currently default to Ollama at `http://localhost:11434`;
+that is a compatibility default, not a requirement to run a local model.
 
 Useful command-line modes:
 
@@ -90,6 +100,51 @@ for the catalog format and precedence rules.
 - MCP server support; Ken is used for semantic project context when available.
 - Permission checks, deterministic completion gates, tests, and post-change review.
 - Image attachments, terminal image viewing, and opt-in image generation.
+
+## Working on a longer task
+
+Describe the result you need, the constraints that matter, and how you will know
+it works. For example:
+
+> Find why failed uploads leave orphaned files. Fix the cause, preserve the
+> current API, and add a regression test. Explain any migration I need to run.
+
+Use `/plan <task>` when you want to inspect the route before execution. Plans
+can adapt as evidence changes, while explicitly approved scope stays protected.
+Use `/session <name>` to name the conversation and `--continue` or `--resume` to
+return later. Notes, summaries, and searchable tool evidence support continuity;
+old command output can be recalled without running the command again. Facts
+that may have changed still need to be checked against the current workspace.
+
+The default engineering guidance asks the agent to fill routine gaps with
+reversible choices, compare a simple baseline with alternatives for open design
+questions, and explain decisions in your language. Product choices that remain
+ambiguous, destructive actions outside your authorization, and missing access
+still need your input.
+
+## What makes a result trustworthy
+
+- Tool schemas validate arguments, and execution uses the configured permission
+  policy. A prompt alone is not an authorization boundary.
+- With objective verification enabled (the default), a planned deterministic
+  check can refuse a step's completion. If corrections are exhausted, the step
+  closes as blocked with the failure evidence. A verifier error cannot count as
+  a pass, and a failed recheck revokes that step's earlier positive evidence.
+- Recognized failing tests can veto a successful task close. Post-change review
+  and objective re-verification provide additional checks across steps.
+- A rejected evidence review blocks an informational task too. Invalid reviewer
+  responses cannot count as approval. Cancelled, blocked, or failed rework stops
+  later review operations and keeps the partial result; an operation already
+  running may still finish.
+- The agent should report what changed, which checks ran, and what remains
+  uncertain. A passing check establishes only the behavior it exercises.
+
+These mechanisms help expose mistakes. They do not guarantee that every design
+choice is correct or that an untested path works. Review the diff and the
+verification scope before relying on a consequential change.
+
+See [Reliability and engineering judgment](docs/AGENT_RELIABILITY.md) for the
+implemented checks, evaluation limits, and next work to measure.
 
 ## Essential commands
 

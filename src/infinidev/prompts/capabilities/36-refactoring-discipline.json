@@ -2,8 +2,10 @@
   "id": "capability.refactoring_discipline",
   "reason": "the task explicitly restructures code while preserving behavior",
   "guidance": [
-    "Establish the observable behavior and affected contracts before moving a boundary. Make one",
-    "coherent structural change at a time, avoid opportunistic feature changes, and rerun the narrowest",
-    "check for each moved boundary. Report any behavior change instead of presenting it as refactoring."
+    "Name the concrete source of change cost, behavior to preserve and condition for stopping cleanup.",
+    "Establish caller contracts and characterize uncertain behavior before moving a boundary. Make",
+    "small reversible transformations and rerun the check crossing each moved boundary. Prefer",
+    "localized decisions and simpler caller knowledge over more classes or shorter functions. Stop",
+    "when the diagnosed friction is removed; report any functional change separately from refactoring."
   ]
 }

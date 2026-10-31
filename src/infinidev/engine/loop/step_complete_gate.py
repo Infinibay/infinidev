@@ -52,15 +52,18 @@ import re
 from typing import Any
 
 from infinidev.engine._best_effort import best_effort
+from infinidev.engine.analysis.verification_result import VerificationResult
 from infinidev.engine.engine_logging import emit_log, emit_loop_event
 from infinidev.engine.loop.step_manager import _get_settings
+from infinidev.engine.loop.step_result import StepResult
 
 logger = logging.getLogger(__name__)
 
 _NOTE_NUDGE = (
     "Hold on — before you complete this step, save the key facts you "
     "discovered with add_note (file paths, function names, line numbers, "
-    "decisions). Anything not saved is discarded when this step ends. "
+    "decisions). Raw results leave the next prompt but remain recoverable "
+    "with recall_context. Notes keep key facts immediately available. "
     "Example: add_note(note='auth.py:42 verify_token() uses JWT, no exp "
     "check'). Then call step_complete again — the second call will be "
     "honored."
@@ -146,6 +149,7 @@ class StepCompleteGate:
         # suggestion cannot deadlock the Task.
         self._recoverable_error_fired: set[int] = set()
         self._recovery_escape_fired: set[int] = set()
+        self._terminal_result: StepResult | None = None
 
     @staticmethod
     def _step_key(ctx: Any) -> int:
@@ -169,8 +173,34 @@ class StepCompleteGate:
         self._hook_fired = set()
         self._recoverable_error_fired = set()
         self._recovery_escape_fired = set()
+        self._terminal_result = None
 
     # ── the chain ────────────────────────────────────────────────────
+
+    def evaluate(
+        self,
+        ctx: Any,
+        step_complete_call: Any,
+        messages: list[dict[str, Any]],
+        *,
+        action_tool_calls: int,
+        reasoning: str | None,
+    ) -> StepResult | None:
+        """Return an accepted outcome, or ``None`` for a correction turn.
+
+        A bounded verification failure is a blocked outcome, not permission
+        to accept the model's original success claim.
+        """
+        from infinidev.engine.formats.tool_call_parser import parse_step_complete_args
+
+        if self.blocks(
+            ctx, step_complete_call, messages,
+            action_tool_calls=action_tool_calls, reasoning=reasoning,
+        ):
+            return None
+        return self._terminal_result or parse_step_complete_args(
+            step_complete_call.function.arguments,
+        )
 
     def blocks(
         self,
@@ -182,6 +212,7 @@ class StepCompleteGate:
         reasoning: str | None,
     ) -> bool:
         """``True`` when the step must stay open for one more turn."""
+        self._terminal_result = None
         if self._recoverable_tool_error(ctx, step_complete_call, messages):
             return True
 
@@ -218,6 +249,8 @@ class StepCompleteGate:
 
         if self.objective_unmet(ctx, step_complete_call, messages):
             return True
+        if self._terminal_result is not None:
+            return False
 
         return self._user_hook_holds(ctx, step_complete_call, messages)
 
@@ -450,6 +483,7 @@ class StepCompleteGate:
         deferred to the post-loop verifier so no step_complete ever costs an
         LLM call here.
         """
+        self._terminal_result = None
         settings_ = _get_settings()
         if not getattr(settings_, "LOOP_OBJECTIVE_VERIFY_ENABLED", True):
             return False
@@ -461,9 +495,8 @@ class StepCompleteGate:
         if step_complete_status(step_complete_call) == "blocked":
             return False
 
+        ctx.state.objectively_verified_step_indices.discard(active.index)
         result = self._run_check(ctx, check, active)
-        if result is None:
-            return False  # fail open — the gate must never crash the loop
         if result.passed:
             ctx.state.objectively_verified_step_indices.add(active.index)
             emit_log(
@@ -478,7 +511,7 @@ class StepCompleteGate:
                                           active, check, result, settings_)
 
     @staticmethod
-    def _run_check(ctx: Any, check: Any, active: Any) -> Any | None:
+    def _run_check(ctx: Any, check: Any, active: Any) -> VerificationResult:
         """Execute a verification against the project, not the process cwd."""
         from infinidev.engine.analysis.objective_verifier import ObjectiveVerifier
 
@@ -495,7 +528,10 @@ class StepCompleteGate:
                 "objective verification raised for step %s: %s",
                 getattr(active, "index", "?"), exc,
             )
-            return None
+            return VerificationResult(
+                passed=False,
+                summary=f"Verification could not run ({type(exc).__name__}): {exc}",
+            )
 
     def _block_for_correction(
         self, ctx: Any, messages: list[dict[str, Any]],
@@ -508,12 +544,16 @@ class StepCompleteGate:
         cap = getattr(settings_, "LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS", 3)
 
         if attempts > cap:
-            # Stop blocking to protect the global budget — but an objective
-            # that quietly went unmet is worse than one that failed loudly,
-            # so it is recorded in the notes the summary will read.
             note = (
                 f"⚠ Step {active.index} objective NOT verified after {cap} "
-                f"attempts — {check.kind}: {check.spec}"
+                f"correction turns — {check.kind}: {check.spec}\n"
+                f"{result.format_for_developer() or result.summary}"
+            )
+            self._terminal_result = StepResult(
+                status="blocked", summary=note, evidence_summary=result.summary,
+            )
+            self._engine._overwrite_step_complete_tool_result(
+                messages, step_complete_call.id, note,
             )
             emit_log("error", note, project_id=ctx.project_id, agent_id=ctx.agent_id)
             with best_effort("objective-unmet note append failed"):

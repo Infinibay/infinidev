@@ -48,7 +48,7 @@ Gather (optional, develop flow)        ← gather/runner.py
   ↓
 LoopEngine.execute(initial_plan=plan)  ← loop/engine.py
   ↓
-Review (runs if files changed)         ← analysis/review_engine.py
+Review (code or informational claims)  ← analysis/review_engine.py / evidence_review.py
 ```
 
 The `ChatAgent` owns a short (~20 iteration) read-only LLM loop with
@@ -61,10 +61,10 @@ for the developer's heavy plan-execute-summarize loop.
 
 The developer stage is a **plan-execute-summarize** cycle, not a ReAct loop:
 
-1. **Plan** — either seeded upfront from `initial_plan` (chat-agent-first path, steps marked `user_approved=True`) or bootstrapped by the LLM via `add_step` calls (legacy PhaseEngine path).
-2. **Execute** — One step at a time, up to 4 tool calls per step.
-3. **Summarize** — LLM produces a ~50-token summary; raw tool output is *archived, not discarded* (see Working memory).
-4. **Repeat** — Prompt is rebuilt from scratch each iteration using only compact summaries.
+1. **Plan** — seeded from `initial_plan` or bootstrapped via `add_step`. Planner tactics default to `model_inferred`; direct or confirmed user instructions retain their declared authority.
+2. **Execute** — One Step at a time. Ordinary Steps have no tool-call quota by default; explicit caller limits and resource fuses still apply.
+3. **Summarize** — Record outcomes, decisions, and remaining work; raw tool output is *archived, not discarded* (see Working memory).
+4. **Repeat** — Rebuild the prompt from the plan, notes, summaries, retained source, and current evidence. Retrieve exact older output with `recall_context`.
 
 ### Working memory (`engine/working_memory.py`)
 
@@ -98,7 +98,11 @@ every writer commits inside its own callback (otherwise the embedding
 worker's connection cannot see the rows), and each record carries the
 `db_path` it was written to because the embed worker is process-wide.
 
-The LLM signals step completion via a `step_complete` tool call with `status` (continue/done/blocked), `summary`, and optional plan modifications (add/modify/remove steps). `user_approved` steps are protected — `apply_operations` rejects remove/modify on them so the LLM cannot rewrite an analyst-produced plan mid-execution.
+The LLM signals step completion via `step_complete` with status, summary, and
+verification evidence. Plan changes use `add_step`, `modify_step`, and
+`remove_step` before completion. Explicitly `user_approved` Steps cannot be
+removed; their titles and explanations can be refined without discarding the
+user's scope. Model-inferred tactics remain adaptable as evidence changes.
 
 **`engine.py` holds the shape of a run; the work lives in collaborators.**
 Each is a module in `loop/`, and knowing which one owns a concern is
@@ -111,7 +115,7 @@ usually enough to find the code:
 | `tool_processor.py` | classifying calls into real tools vs pseudo-tools |
 | `tool_runner.py` | executing them and writing results into `messages` |
 | `critic_liaison.py` | the pair-programming critic: advisory, except one veto |
-| `step_complete_gate.py` | the four reasons a step may not close |
+| `step_complete_gate.py` | completion checks and the accepted or blocked Step outcome |
 | `loop_guard.py` | repetition, error circuits, text-only stalls |
 | `step_manager.py` | advancing the plan, summarising, finishing |
 | `run_report.py` | what the finished run tells the reviewer |
@@ -124,6 +128,19 @@ the note check never pays for an LLM call. Every gate refuses the same way:
 by overwriting the `step_complete` tool result, which the model reads as
 "your close was overridden" — far more reliable than a user-role message,
 because following a tool result is its natural mode after a tool call.
+
+The loop consumes `StepCompleteGate.evaluate()`: `None` requests another turn;
+a `StepResult` carries the accepted outcome. Exhausting objective corrections
+returns a blocked result with failure evidence, not the model's original success
+claim. Verifier exceptions count as failed checks, and each recheck revokes the
+Step's previous positive marker before running. See `docs/AGENT_RELIABILITY.md`.
+
+Review rework uses `_review_execution_stopped` in `analysis/review_engine.py`
+to preserve cancelled, blocked, exhausted, and failed execution. The pipeline
+consumes evidence-review rejections as well as code-review rejections; a stopped
+rework cannot be overwritten by a later reviewer verdict. Evidence-review JSON
+is validated before grounding, and nonpositive Task tool budgets remain
+unlimited during evidence rework. Empty rework preserves the prior partial text.
 
 **Dual tool-calling modes:** The engine auto-detects whether the LLM supports native function calling (FC mode) or falls back to parsing tool calls from text JSON (manual mode). Detection happens at startup via `config/model_capabilities.py`.
 
@@ -431,7 +448,7 @@ Currently a stub — `EventBus` with no-op `emit()`. Designed for future WebSock
 
 ## Key Constraints
 
-- Loop limits: max 50 iterations, max 4 tool calls per step, max 200 total tool calls per task
+- Legacy loop default: 50 iterations; tool-call limits default to `0` (unlimited). Durable Task iteration and call limits also default to `0`; callers can impose explicit fuses. See `context_builder.py` and the `LOOP_*`, `TASK_*`, and `STAGED_*` settings for precedence.
 - History window: configurable via `LOOP_HISTORY_WINDOW` (0 = keep all summaries)
 - Semantic dedup threshold: 0.82 cosine similarity for findings
 - File size limit: 5MB for read operations

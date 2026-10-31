@@ -365,6 +365,20 @@ class TeamRuntime:
                 return False
             cursor = page[-1]["id"]
 
+    def pending_user_guidance(self, actor: str) -> list[dict]:
+        """Snapshot unread user instructions without advancing any delivery cursor."""
+        with self._lock:
+            cursor = self._cursors.get(actor, 0)
+            pending = []
+            while True:
+                page = self.store.events(
+                    after=cursor, kind="user_guidance", recipient=actor, limit=100,
+                )
+                pending.extend(event for event in page if event["author"] == "user")
+                if len(page) < 100:
+                    return pending
+                cursor = page[-1]["id"]
+
     def poll(self, actor: str) -> str:
         """Deliver new attributed events without upgrading them to user authority."""
         with self._lock:

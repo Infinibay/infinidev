@@ -164,8 +164,30 @@ class EvidenceReviewEngine:
             value = safe_json_loads(raw)
         except Exception:
             return None
-        if not isinstance(value, dict) or not isinstance(value.get("issues", []), list):
+        if not isinstance(value, dict):
             return None
+        if value.get("verdict") not in ("APPROVED", "REJECTED"):
+            return None
+        summary = value.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            return None
+        issues = value.get("issues")
+        if not isinstance(issues, list):
+            return None
+        for issue in issues:
+            if not isinstance(issue, dict):
+                return None
+            if issue.get("severity") not in ("blocking", "important", "suggestion"):
+                return None
+            if issue.get("category") not in (
+                "unsupported_claim", "source_mismatch", "contradiction",
+                "uncertainty_omitted", "instruction_miss",
+            ):
+                return None
+            if any(not isinstance(issue.get(field), str) for field in (
+                "claim_excerpt", "problem", "evidence", "fix",
+            )):
+                return None
         return value
 
     @staticmethod
@@ -242,6 +264,10 @@ def run_evidence_review_rework_loop(
     """Review and minimally rework informational output within a bounded loop."""
 
     from infinidev.config.settings import settings
+    from infinidev.engine.analysis.review_engine import _review_execution_stopped
+
+    if _review_execution_stopped(engine):
+        return initial_result, None
 
     reviewer = evidence_reviewer or EvidenceReviewEngine(
         prompt_configuration=prompt_configuration
@@ -251,7 +277,11 @@ def run_evidence_review_rework_loop(
     max_rounds = max(1, int(settings.EVIDENCE_REVIEW_MAX_ROUNDS))
 
     for round_index in range(max_rounds):
+        if _review_execution_stopped(engine):
+            return current, last
         evidence = _recent_tool_evidence(session_id)
+        if _review_execution_stopped(engine):
+            return current, last
         last = reviewer.review(
             task_description=task_prompt[0],
             developer_result=current,
@@ -259,6 +289,8 @@ def run_evidence_review_rework_loop(
             acceptance_criteria=acceptance_criteria,
             derived_verification_criteria=derived_verification_criteria,
         )
+        if _review_execution_stopped(engine):
+            return current, last
         if last.verdict in {"APPROVED", "SKIPPED"}:
             if on_status:
                 on_status(last.verdict.lower(), last.summary)
@@ -278,6 +310,7 @@ def run_evidence_review_rework_loop(
         used_calls = getattr(state, "total_tool_calls", 0)
         if (
             max_total_tool_calls is not None
+            and max_total_tool_calls > 0
             and isinstance(used_calls, int)
             and used_calls >= max_total_tool_calls
         ):
@@ -299,6 +332,8 @@ def run_evidence_review_rework_loop(
             "to answer the original request. Clearly label inference and uncertainty.\n\n"
             f"{feedback}"
         )
+        if _review_execution_stopped(engine):
+            return current, last
         agent.activate_context(session_id=session_id)
         try:
             rework_kwargs: dict[str, Any] = dict(rework_execute_kwargs or {})

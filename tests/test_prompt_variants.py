@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -412,3 +415,21 @@ def test_the_engine_mode_picker_is_derived_from_the_router() -> None:
     )["TASK_ENGINE_MODE"].removeprefix("select:").split(",")
 
     assert options == list(VALID_MODES)
+
+
+def test_importing_develop_first_preserves_the_full_prompt_catalog() -> None:
+    """A flow import must not leave a partially registered style behind."""
+    result = subprocess.run(
+        [sys.executable, "-c", (
+            "from infinidev.prompts.flows.develop import DEVELOP_IDENTITY; "
+            "from infinidev.prompts.variants import get_variant; "
+            "assert get_variant('flow.develop.identity', 'full') == DEVELOP_IDENTITY; "
+            "assert get_variant('phase.refactor.execute', 'full')"
+        )],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "LITELLM_LOCAL_MODEL_COST_MAP": "True"},
+    )
+
+    assert result.returncode == 0, result.stderr

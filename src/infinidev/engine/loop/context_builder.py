@@ -407,6 +407,9 @@ def _restore_or_start(resume_state: dict | None) -> LoopState:
         return LoopState()
 
     state = LoopState.model_validate(resume_state)
+    for opened in state.opened_files.values():
+        opened.requires_revalidation = True
+    state.read_delivery_revisions.clear()
     if state.plan.steps and not state.plan.active_step:
         state.plan.activate_next()
     logger.info("LoopEngine: resuming from iteration %d", state.iteration_count)
@@ -422,11 +425,6 @@ def build_iteration_messages(
     engine: Any, ctx: ExecutionContext, iteration: int,
 ) -> list[dict[str, Any]]:
     """Build the fresh two-message conversation for one iteration."""
-    effective_state = ctx.state
-    if ctx.history_window > 0 and len(ctx.state.history) > ctx.history_window:
-        effective_state = ctx.state.model_copy(deep=True)
-        effective_state.history = ctx.state.history[-ctx.history_window :]
-
     first_turn = iteration == ctx.start_iteration
     if first_turn:
         try:
@@ -438,7 +436,27 @@ def build_iteration_messages(
         except Exception:
             engine._project_knowledge = []
 
-    injected = engine._drain_user_messages()
+    from infinidev.engine.loop.user_guidance import retain_user_guidance
+    from infinidev.engine.loop.user_message_injector import InjectedUserMessage
+
+    injector = getattr(engine, "_user_message_injector", None)
+    if injector is not None:
+        injected_items = injector.drain_for_state(ctx.state)
+    else:
+        injected_items = [InjectedUserMessage(text) for text in engine._drain_user_messages()]
+        retain_user_guidance(ctx.state, injected_items)
+    injected = [item.text for item in injected_items]
+    injected_attachments = [attachment for item in injected_items for attachment in item.attachments]
+    if injected:
+        checkpoint = getattr(engine, "_checkpoint", None)
+        if callable(checkpoint):
+            checkpoint(ctx)
+
+    effective_state = ctx.state
+    if ctx.history_window > 0 and len(ctx.state.history) > ctx.history_window:
+        effective_state = ctx.state.model_copy(deep=True)
+        effective_state.history = ctx.state.history[-ctx.history_window :]
+
     pending_rank_guidance = list(getattr(engine, "_cr_pending_user_guidance", ()))
     if pending_rank_guidance:
         engine._cr_pending_user_guidance.clear()
@@ -473,6 +491,7 @@ def build_iteration_messages(
             small_model=ctx.is_small,
             require_step_orientation=getattr(ctx, "require_step_orientation", True),
             prompt_configuration=prompt_configuration,
+            pending_messages_state=ctx.state,
         )
         if first_turn and getattr(ctx, "resumed", False):
             interrupted = render_interrupted_step_context(ctx.state)
@@ -494,7 +513,9 @@ def build_iteration_messages(
 
     return [
         {"role": "system", "content": ctx.system_prompt},
-        {"role": "user", "content": _with_attachments(engine, ctx, user_prompt, first_turn)},
+        {"role": "user", "content": _with_attachments(
+            engine, ctx, user_prompt, first_turn, injected_attachments=injected_attachments,
+        )},
     ]
 
 
@@ -570,8 +591,9 @@ def _rank_query(
 
 def _with_attachments(
     engine: Any, ctx: ExecutionContext, user_prompt: str, first_turn: bool,
+    *, injected_attachments: list[Any] | None = None,
 ) -> Any:
-    """Attach images to the first user turn, and only that one.
+    """Deliver initial images once and newly injected images on their own turn.
 
     Later turns rebuild the prompt from compact summaries; re-sending the
     base64 payload every iteration would bloat the context and, on a billed
@@ -579,8 +601,9 @@ def _with_attachments(
     see gets the paths mentioned as text instead, which at least lets it
     reason about which files were offered.
     """
-    attachments = getattr(engine, "_initial_attachments", None) or []
-    if not attachments or not first_turn:
+    attachments = list(getattr(engine, "_initial_attachments", None) or []) if first_turn else []
+    attachments.extend(injected_attachments or [])
+    if not attachments:
         return user_prompt
 
     if engine._supports_vision_cached is None:

@@ -133,6 +133,7 @@ def test_cancel_survives_until_the_turn_ends():
 
 def test_guardrail_validation_precedes_terminal_finish() -> None:
     from infinidev.engine.loop.engine import LoopEngine
+    from infinidev.engine.loop.guardrail_runner import GuardrailOutcome
 
     calls: list[tuple[str, str]] = []
 
@@ -143,11 +144,11 @@ def test_guardrail_validation_precedes_terminal_finish() -> None:
 
     engine = LoopEngine()
 
-    def apply_guardrail(_ctx, result, *args, **kwargs):
+    def validate_final_result(_ctx, result):
         calls.append(("guardrail", result))
-        return "corrected result"
+        return GuardrailOutcome("corrected result")
 
-    engine._apply_guardrail = apply_guardrail
+    engine._validate_final_result = validate_final_result
     ctx = SimpleNamespace(
         start_iteration=0,
         project_id=1,
@@ -184,7 +185,7 @@ def test_guardrail_validation_precedes_terminal_finish() -> None:
     ]
 
 
-def test_guardrail_precedes_implicit_all_steps_done_finish() -> None:
+def test_finished_steps_request_confirmation_without_finishing_the_task() -> None:
     from infinidev.engine.loop.engine import LoopEngine
     from infinidev.engine.loop.plan_step import PlanStep
 
@@ -197,11 +198,6 @@ def test_guardrail_precedes_implicit_all_steps_done_finish() -> None:
 
     engine = LoopEngine()
 
-    def apply_guardrail(_ctx, result, *args, **kwargs):
-        calls.append(("guardrail", result))
-        return "corrected fallback"
-
-    engine._apply_guardrail = apply_guardrail
     state = LoopState()
     state.plan.steps = [
         PlanStep(index=1, title="Completed work", status="done"),
@@ -230,11 +226,9 @@ def test_guardrail_precedes_implicit_all_steps_done_finish() -> None:
         consecutive_all_done=2,
     )
 
-    assert terminal == "corrected fallback"
-    assert calls == [
-        ("guardrail", "original fallback"),
-        ("finish", "corrected fallback"),
-    ]
+    assert terminal is None
+    assert calls == []
+    assert state.pending_engine_notice
 
 
 def test_a_step_closed_with_only_pseudo_tools_is_not_a_stall():
@@ -365,6 +359,7 @@ class _PlanThenCompleteCaller(_BudgetBoundaryCaller):
 
 def _run_budget_boundary(
     *, max_total_calls: int = 10, caller=None, renew_on_progress: bool = False,
+    verify=None,
 ):
     from infinidev.engine.loop.engine import LoopEngine
     from infinidev.engine.loop.loop_guard import LoopGuard
@@ -380,12 +375,20 @@ def _run_budget_boundary(
     ctx.max_prompt_tokens = None
     ctx.allow_plan_mutation = True
     ctx.skip_plan = False
+    if verify is not None:
+        from infinidev.engine.loop.plan_step import PlanStep
+
+        ctx.state.plan.steps = [
+            PlanStep(index=1, title="Verify the result", status="active", verify=verify),
+        ]
     engine._inject_mid_step_user_messages = lambda _ctx, _messages: None
     engine._guidance = SimpleNamespace(try_queue=lambda *args, **kwargs: None)
     engine._critic = SimpleNamespace(
         review_alongside=lambda _ctx, _messages, _calls, _reasoning, run: run(),
+        review_step_complete=lambda *args: SimpleNamespace(blocked=False),
     )
-    engine._step_gate = SimpleNamespace(blocks=lambda *args, **kwargs: False)
+    if verify is None:
+        engine._step_gate.blocks = lambda *args, **kwargs: False
     engine._build_pseudo_only_messages = lambda *args, **kwargs: None
 
     def execute(
@@ -402,6 +405,20 @@ def _run_budget_boundary(
         ctx, [], 0, caller, ToolProcessor(), LoopGuard(is_small=False),
     )
     return result, caller
+
+
+def test_inner_loop_preserves_terminal_verification_failure(monkeypatch):
+    from infinidev.config.settings import settings
+    from infinidev.engine.analysis.step_verification import StepVerification
+
+    monkeypatch.setattr(settings, "LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS", 0)
+    result, _ = _run_budget_boundary(
+        verify=StepVerification(kind="command", spec="false"),
+    )
+
+    assert result.status == "blocked"
+    assert result.final_answer is None
+    assert "NOT verified" in result.summary
 
 
 def test_per_step_tool_budget_allows_one_completion_only_turn():

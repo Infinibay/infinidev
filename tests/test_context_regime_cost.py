@@ -36,16 +36,25 @@ def test_a_cache_read_is_priced_relative_to_the_input_token() -> None:
     assert prices["write_ratio"] == 0.0
 
 
-def test_a_model_with_no_cache_price_is_not_given_someone_elses() -> None:
+def test_a_model_with_no_cache_price_is_not_given_someone_elses(monkeypatch) -> None:
     """An absent cache price means a repeat costs full, not a fallback rate.
 
     Substituting MiniMax's 0.06/M would have handed Groq and Fireworks a
     discount they do not publish, and which providers actually have a cache is
     the entire subject of the table.
     """
-    prices = prices_for("groq/llama-3.3-70b-versatile")
+    import litellm
+
+    model = "test-provider/model-without-cache-pricing"
+    monkeypatch.setitem(litellm.model_cost, model, {
+        "input_cost_per_token": 2e-06,
+        "output_cost_per_token": 4e-06,
+    })
+    prices = prices_for(model)
 
     assert prices["in_cost_map"] is True
+    assert prices["input"] == 2e-06
+    assert prices["cache_read"] == 2e-06
     assert prices["discount"] == 1.0
     assert prices["has_cache"] is False
 

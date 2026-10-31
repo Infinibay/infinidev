@@ -123,15 +123,31 @@ def deduplicated_diff(summary: str) -> str:
     parts = summary.split("\n\n")
     kept: list[str] = []
     seen: set[str] = set()
+    archived_aliases: set[tuple[str, str, str]] = set()
     for part in parts:
         header = part.splitlines()[0] if part.splitlines() else ""
         match = _DIFF_HEADER.match(header)
         if match is None:
             kept.append(part)
             continue
-        identity = os.path.realpath(match.group("path"))
+        recorded_path = match.group("path")
+        identity = os.path.realpath(recorded_path)
         if identity in seen:
             continue
+        # A missing archived macOS path cannot be resolved by Linux realpath.
+        # Collapse only identical sections under that historical alias; live
+        # distinct files and different recorded changes must remain visible.
+        if recorded_path.startswith(("/private/var/", "/var/")) and not os.path.lexists(
+            recorded_path,
+        ):
+            archive_key = (
+                recorded_path.removeprefix("/private"),
+                match.group("action"),
+                part.partition("\n")[2],
+            )
+            if archive_key in archived_aliases:
+                continue
+            archived_aliases.add(archive_key)
         seen.add(identity)
         kept.append(part)
     return "\n\n".join(kept)

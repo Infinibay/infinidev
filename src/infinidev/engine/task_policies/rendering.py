@@ -70,9 +70,7 @@ def render_all_conditional_task_policy_layer(
         policy = POLICY_BY_ID.get(fragment.policy_id)
         if policy is None:
             continue
-        content = fragment.content.encode("utf-8")[:fragment.max_utf8_bytes].decode(
-            "utf-8", errors="ignore"
-        )
+        content = fragment.content
         reason = escape(fragment.condition_reason, quote=True)
         fragments.append(
             f'<prompt-fragment id="{fragment.id}" version="{fragment.version}" '
@@ -135,9 +133,7 @@ def render_task_policy_layer(
         policy = POLICY_BY_ID.get(fragment.policy_id)
         if policy is None:
             continue
-        content = fragment.content.encode("utf-8")[:fragment.max_utf8_bytes].decode(
-            "utf-8", errors="ignore"
-        )
+        content = fragment.content
         version = versions.get(policy.id, policy.version)
         fragments.append(
             f'<prompt-fragment id="{fragment.id}" version="{fragment.version}" '

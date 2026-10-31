@@ -303,6 +303,43 @@ def test_two_genuinely_different_files_are_both_counted() -> None:
     assert deduplicated_diff(summary).count("### ") == 2
 
 
+def test_archived_var_aliases_with_different_changes_are_not_merged() -> None:
+    from bench.agent_task_repeated_compare import deduplicated_diff
+
+    summary = (
+        "### /var/archive/repo/a.py (modified)\n```diff\n+first\n```\n\n"
+        "### /private/var/archive/repo/a.py (modified)\n```diff\n+second\n```"
+    )
+
+    assert deduplicated_diff(summary) == summary
+
+
+def test_existing_distinct_var_paths_are_not_treated_as_archived_aliases(monkeypatch) -> None:
+    from bench.agent_task_repeated_compare import deduplicated_diff
+
+    summary = (
+        "### /var/data/a.py (modified)\n```diff\n+same\n```\n\n"
+        "### /private/var/data/a.py (modified)\n```diff\n+same\n```"
+    )
+    monkeypatch.setattr("bench.agent_task_repeated_compare.os.path.realpath", lambda path: path)
+    monkeypatch.setattr("bench.agent_task_repeated_compare.os.path.lexists", lambda path: True)
+
+    assert deduplicated_diff(summary) == summary
+
+
+def test_real_symlink_aliases_still_count_as_one_file(tmp_path: Path) -> None:
+    from bench.agent_task_repeated_compare import deduplicated_diff
+
+    source = tmp_path / "source.py"
+    source.write_text("value = 1\n")
+    alias = tmp_path / "alias.py"
+    alias.symlink_to(source)
+    first = f"### {source} (modified)\n```diff\n+value = 1\n```"
+    second = f"### {alias} (modified)\n```diff\n+value = 1\n```"
+
+    assert deduplicated_diff(first + "\n\n" + second) == first
+
+
 def test_cache_hit_rate_is_a_share_of_the_input() -> None:
     """A cache read is the cheapest input token there is.
 

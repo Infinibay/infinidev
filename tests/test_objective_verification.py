@@ -465,6 +465,7 @@ def _make_ctx(verify, workspace, status="continue"):
     state.plan.steps = [PlanStep(index=1, title="patch", verify=verify, status="active")]
     ctx = SimpleNamespace(
         state=state, project_id=1, agent_id="t", workspace_path=str(workspace),
+        is_small=False, manual_tc=False,
     )
     call = SimpleNamespace(
         id="sc1",
@@ -482,6 +483,128 @@ class TestObjectiveGate:
         messages = [{"role": "tool", "tool_call_id": "sc1", "content": "ok"}]
         assert eng._objective_gate_blocks(ctx, call, messages) is False
         assert ctx.state.objectively_verified_step_indices == {1}
+
+
+class TestCompletionDecision:
+    @pytest.fixture(autouse=True)
+    def disable_critic(self, monkeypatch):
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "ASSISTANT_LLM_ENABLED", False)
+
+    @pytest.mark.parametrize("cap", [0, 1, 3])
+    @pytest.mark.parametrize("manual", [False, True])
+    def test_failed_objective_returns_blocked_after_bounded_corrections(
+        self, tmp_path, monkeypatch, cap, manual,
+    ):
+        from infinidev.config.settings import settings
+        from infinidev.engine.loop.step_manager import StepManager
+
+        monkeypatch.setattr(settings, "LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS", cap)
+        eng = LoopEngine()
+        ctx, call = _make_ctx(
+            StepVerification(kind="command", spec="false"), tmp_path, status="done",
+        )
+        ctx.manual_tc = manual
+        messages = [] if manual else [
+            {"role": "tool", "tool_call_id": "sc1", "content": "ok"},
+        ]
+        original_arguments = call.function.arguments
+
+        for _ in range(cap):
+            assert eng._step_gate.evaluate(
+                ctx, call, messages, action_tool_calls=0, reasoning=None,
+            ) is None
+        result = eng._step_gate.evaluate(
+            ctx, call, messages, action_tool_calls=0, reasoning=None,
+        )
+
+        assert result.status == "blocked"
+        assert result.final_answer is None
+        assert "false" in result.summary
+        assert "NOT verified" in result.summary
+        assert result.evidence_summary
+        assert call.function.arguments == original_arguments
+        assert "NOT verified" in messages[-1]["content"]
+        StepManager(eng).advance_plan(ctx, result)
+        assert ctx.state.plan.steps[0].status == "blocked"
+
+    def test_verifier_exception_requires_correction_instead_of_accepting_done(
+        self, tmp_path,
+    ):
+        eng = LoopEngine()
+        ctx, call = _make_ctx(
+            StepVerification(kind="command", spec="true"), tmp_path, status="done",
+        )
+        messages = [{"role": "tool", "tool_call_id": "sc1", "content": "ok"}]
+        with patch.object(ObjectiveVerifier, "verify", side_effect=OSError("verifier unavailable")):
+            blocked = eng._objective_gate_blocks(ctx, call, messages)
+
+        assert blocked is True
+        assert "verifier unavailable" in messages[-1]["content"]
+        assert not ctx.state.objectively_verified_step_indices
+
+    def test_failed_recheck_revokes_earlier_positive_evidence(self, tmp_path):
+        eng = LoopEngine()
+        ctx, call = _make_ctx(
+            StepVerification(kind="file_contains", spec="result.txt", observable="ready"),
+            tmp_path,
+        )
+        target = tmp_path / "result.txt"
+        target.write_text("ready")
+        messages = []
+        assert eng._objective_gate_blocks(ctx, call, messages) is False
+        assert ctx.state.objectively_verified_step_indices == {1}
+
+        target.write_text("broken")
+        assert eng._objective_gate_blocks(ctx, call, messages) is True
+        assert ctx.state.objectively_verified_step_indices == set()
+
+    def test_passing_retry_returns_original_outcome(self, tmp_path):
+        eng = LoopEngine()
+        ctx, call = _make_ctx(
+            StepVerification(kind="file_contains", spec="result.txt", observable="ready"),
+            tmp_path, status="done",
+        )
+        messages = []
+        assert eng._step_gate.evaluate(
+            ctx, call, messages, action_tool_calls=0, reasoning=None,
+        ) is None
+
+        (tmp_path / "result.txt").write_text("ready")
+        result = eng._step_gate.evaluate(
+            ctx, call, messages, action_tool_calls=0, reasoning=None,
+        )
+        assert result.status == "done"
+        assert result.summary == "x"
+        assert ctx.state.objectively_verified_step_indices == {1}
+
+    def test_terminal_failure_skips_hook_and_does_not_leak_to_next_step(
+        self, tmp_path, monkeypatch,
+    ):
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS", 0)
+        eng = LoopEngine()
+        ctx, call = _make_ctx(
+            StepVerification(kind="command", spec="false"), tmp_path, status="done",
+        )
+        with patch.object(eng._step_gate, "_user_hook_holds", return_value=False) as hook:
+            result = eng._step_gate.evaluate(
+                ctx, call, [], action_tool_calls=0, reasoning=None,
+            )
+            assert result.status == "blocked"
+            hook.assert_not_called()
+
+        ctx.state.plan.steps[0].status = "blocked"
+        ctx.state.plan.steps.append(PlanStep(index=2, title="report", status="active"))
+        result = eng._step_gate.evaluate(
+            ctx, call, [], action_tool_calls=0, reasoning=None,
+        )
+        assert result.status == "done"
+
+
+class TestObjectiveGateCompatibility:
 
     def test_fail_blocks_and_overwrites_result(self, tmp_path):
         eng = LoopEngine()

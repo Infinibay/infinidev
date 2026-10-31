@@ -2,8 +2,11 @@
   "id": "capability.test_quality",
   "reason": "tests are flaky, heavily mocked, brittle, or being substantially redesigned",
   "guidance": [
-    "Assert observable contracts, control nondeterminism explicitly, and avoid coupling to internal",
-    "call order unless that order is the contract. Ensure the test exercises real production logic and,",
-    "when practical, demonstrate that the regression assertion fails against the original defect."
+    "Assert observable contracts and control nondeterminism; internal call order matters only when",
+    "that order is the contract. Characterize uncertain legacy behavior before restructuring, but",
+    "do not bless a known defect as correct. Use the smallest seam that exposes the behavior and",
+    "fake only the slow or unavailable boundary; retain a real integration check when storage,",
+    "serialization or protocol semantics are the risk. Show that a regression check detects the",
+    "original failure instead of merely confirming the fake's configured response."
   ]
 }

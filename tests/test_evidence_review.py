@@ -2,13 +2,88 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
+
+import pytest
 
 from infinidev.engine.analysis.evidence_review import (
     EvidenceReviewEngine,
     EvidenceReviewResult,
     run_evidence_review_rework_loop,
 )
+
+
+@pytest.mark.parametrize("payload", [
+    {},
+    {"verdict": "MAYBE", "summary": "Unclear", "issues": []},
+    {"verdict": "APPROVED", "issues": []},
+    {"verdict": "APPROVED", "summary": None, "issues": []},
+    {"verdict": "APPROVED", "summary": "  ", "issues": []},
+    {"verdict": "APPROVED", "summary": "Looks fine"},
+    {"verdict": "REJECTED", "summary": "A problem", "issues": [None]},
+    {"verdict": "REJECTED", "summary": "A problem", "issues": [{"severity": "blocking"}]},
+])
+def test_malformed_reviewer_output_is_skipped_instead_of_approved(
+    monkeypatch, payload,
+) -> None:
+    from infinidev.engine.analysis.review_engine import ReviewEngine
+
+    monkeypatch.setattr(
+        "infinidev.config.llm.get_litellm_params", lambda: {"model": "test-model"},
+    )
+    monkeypatch.setattr(
+        ReviewEngine, "_completion_with_caching",
+        lambda *args: SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload))),
+        ]),
+    )
+
+    result = EvidenceReviewEngine().review(
+        task_description="Explain the behavior", developer_result="A measured result.",
+        evidence="Observed source and output",
+    )
+
+    assert result.verdict == "SKIPPED"
+    assert result.summary == "Evidence reviewer returned invalid JSON."
+
+
+@pytest.mark.parametrize(("payload", "expected_verdict"), [
+    ({"verdict": "APPROVED", "summary": "Supported", "issues": []}, "APPROVED"),
+    ({
+        "verdict": "REJECTED", "summary": "Overstated", "issues": [{
+            "severity": "blocking", "category": "unsupported_claim",
+            "claim_excerpt": "It always works.", "problem": "Not established",
+            "evidence": "The observed case failed", "fix": "Qualify the result",
+        }],
+    }, "REJECTED"),
+    ({
+        "verdict": "REJECTED", "summary": "Ungrounded allegation", "issues": [{
+            "severity": "blocking", "category": "unsupported_claim",
+            "claim_excerpt": "Invented quote", "problem": "Not established",
+            "evidence": "No matching evidence", "fix": "Qualify the result",
+        }],
+    }, "APPROVED"),
+])
+def test_valid_reviewer_output_preserves_grounding(monkeypatch, payload, expected_verdict):
+    from infinidev.engine.analysis.review_engine import ReviewEngine
+
+    monkeypatch.setattr(
+        "infinidev.config.llm.get_litellm_params", lambda: {"model": "test-model"},
+    )
+    monkeypatch.setattr(
+        ReviewEngine, "_completion_with_caching",
+        lambda *args: SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload))),
+        ]),
+    )
+
+    result = EvidenceReviewEngine().review(
+        task_description="Explain the behavior", developer_result="It always works.",
+        evidence="The observed case failed",
+    )
+
+    assert result.verdict == expected_verdict
 
 
 def test_blocking_issue_must_quote_the_submitted_response() -> None:
@@ -51,7 +126,8 @@ def test_exact_unsupported_claim_remains_blocking() -> None:
     assert result.issues[0]["grounded"] is True
 
 
-def test_rework_loop_is_bounded_and_preserves_original_scope(monkeypatch) -> None:
+@pytest.mark.parametrize("budget", [None, 0, -1, 10])
+def test_rework_loop_is_bounded_and_preserves_original_scope(monkeypatch, budget) -> None:
     from infinidev.config.settings import settings
 
     monkeypatch.setattr(settings, "EVIDENCE_REVIEW_MAX_ROUNDS", 2)
@@ -102,6 +178,7 @@ def test_rework_loop_is_bounded_and_preserves_original_scope(monkeypatch) -> Non
         task_prompt=("Investigate the behavior.", "A sourced answer."),
         initial_result="It is certain.",
         evidence_reviewer=Reviewer(),
+        max_total_tool_calls=budget,
     )
 
     assert final == "It may be true."

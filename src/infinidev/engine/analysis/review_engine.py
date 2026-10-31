@@ -1111,6 +1111,17 @@ def _preferred_review_test_command(state: Any) -> str:
     if getattr(state, "last_test_exit_code", None) == 0:
         return str(getattr(state, "last_test_command", "") or "").strip()
     return ""
+
+
+def _review_execution_stopped(engine: Any) -> bool:
+    """Whether review must yield to a stopped developer execution."""
+    return (
+        getattr(engine, "is_cancelled", False) is True
+        or str(getattr(engine, "_last_status", "") or "").strip().lower()
+        in {"blocked", "cancelled", "exhausted", "failed"}
+    )
+
+
 def _review_workspace(engine: Any, agent: Any) -> str | None:
     """Prefer the request's nested repository over the broad file workspace."""
     from infinidev.tools.base.context import (
@@ -1234,6 +1245,8 @@ def run_review_rework_loop(
 
         result_under_test = current_result
         for attempt in range(3):
+            if _review_execution_stopped(engine):
+                return result_under_test
             state = getattr(engine, "_last_state", None)
             preferred_test_command = _preferred_review_test_command(state)
             verifier = VerificationEngine(
@@ -1243,6 +1256,8 @@ def run_review_rework_loop(
             changed = list((engine.get_file_contents() or {}).keys())
             tracker = getattr(engine, 'get_file_tracker', lambda: None)()
             vresult = verifier.verify(changed_files=changed, file_tracker=tracker)
+            if _review_execution_stopped(engine):
+                return result_under_test
 
             if vresult.passed:
                 deterministic_blocker = None
@@ -1263,6 +1278,8 @@ def run_review_rework_loop(
             )
             fix_prompt = (fix_description, task_prompt[1])
 
+            if _review_execution_stopped(engine):
+                return result_under_test
             agent.activate_context(session_id=session_id)
             try:
                 new_result = engine.execute(
@@ -1377,7 +1394,13 @@ def run_review_rework_loop(
 
         rounds = 0
         while True:
-            results = [(idx, title, check, _verify_one(check)) for idx, title, check in checks]
+            results = []
+            for idx, title, check in checks:
+                if _review_execution_stopped(engine):
+                    return current_result
+                results.append((idx, title, check, _verify_one(check)))
+            if _review_execution_stopped(engine):
+                return current_result
             failed = [r for r in results if not r[3].passed]
             unverified = [r for r in results if r[3].unverifiable]
             if unverified:
@@ -1412,6 +1435,8 @@ def run_review_rework_loop(
                 f"{_format_objective_failures(failed)}"
             )
             fix_prompt = (fix_description, task_prompt[1])
+            if _review_execution_stopped(engine):
+                return current_result
             agent.activate_context(session_id=session_id)
             try:
                 new_result = engine.execute(
@@ -1426,6 +1451,8 @@ def run_review_rework_loop(
                 agent.deactivate()
             rounds += 1
 
+    if _review_execution_stopped(engine):
+        return initial_result, None
     reviewer.reset()
     result = initial_result
 
@@ -1437,6 +1464,8 @@ def run_review_rework_loop(
     # verification node owns the repository-wide deterministic gate.
     if run_verification:
         result = _run_verification_and_fix(result)
+    if _review_execution_stopped(engine):
+        return result, None
 
     if deterministic_blocker:
         review = _blocked_review(deterministic_blocker)
@@ -1445,6 +1474,8 @@ def run_review_rework_loop(
 
     # Re-verify objectives together (cross-objective regression backstop).
     result = _run_objective_reverification_and_fix(result, objective_checks)
+    if _review_execution_stopped(engine):
+        return result, None
     if deterministic_blocker:
         review = _blocked_review(deterministic_blocker)
         return result, review
@@ -1473,8 +1504,11 @@ def run_review_rework_loop(
 
     previous_feedback = ""
     plan_steps = getattr(engine, "get_plan_steps", lambda: [])()
+    last_review: ReviewResult | None = None
 
     while True:
+        if _review_execution_stopped(engine):
+            return result, last_review
         changed_files = list((engine.get_file_contents() or {}).keys())
         tracker = getattr(engine, "get_file_tracker", lambda: None)()
         file_changes_summary = engine.get_changed_files_summary()
@@ -1513,6 +1547,8 @@ def run_review_rework_loop(
                 file_changes_summary=file_changes_summary,
             )
 
+        if _review_execution_stopped(engine):
+            return result, last_review
         review = reviewer.review(
             task_description=review_task_description,
             developer_result=result,
@@ -1526,6 +1562,9 @@ def run_review_rework_loop(
             pre_extraction=pre_extraction,
             task_profile=task_profile,
         )
+        last_review = review
+        if _review_execution_stopped(engine):
+            return result, review
 
         if review.is_approved:
             _notify("approved", review.summary)
@@ -1539,6 +1578,8 @@ def run_review_rework_loop(
         feedback = review.format_feedback_for_developer()
         _notify("rejected", review.format_for_user())
 
+        if _review_execution_stopped(engine):
+            return result, review
         if not reviewer.can_review_again or not feedback:
             _notify("max_reviews", "")
             return result, review
@@ -1553,7 +1594,7 @@ def run_review_rework_loop(
 
         agent.activate_context(session_id=session_id)
         try:
-            result = engine.execute(
+            updated = engine.execute(
                 agent=agent,
                 task_prompt=fix_prompt,
                 verbose=True,
@@ -1561,17 +1602,23 @@ def run_review_rework_loop(
                 prompt_configuration=prompt_configuration,
                 **rework_kwargs,
             )
-            if not result or not result.strip():
-                result = "Done. (no additional output)"
+            if updated and updated.strip():
+                result = updated
         finally:
             agent.deactivate()
+        if _review_execution_stopped(engine):
+            return result, review
         if run_verification:
             result = _run_verification_and_fix(result)
+        if _review_execution_stopped(engine):
+            return result, review
         if deterministic_blocker:
             review = _blocked_review(deterministic_blocker)
             _notify("max_reviews", review.format_for_user())
             return result, review
         result = _run_objective_reverification_and_fix(result, objective_checks)
+        if _review_execution_stopped(engine):
+            return result, review
         if deterministic_blocker:
             review = _blocked_review(deterministic_blocker)
             return result, review

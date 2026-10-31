@@ -2,8 +2,10 @@
   "id": "capability.error_recovery",
   "reason": "a workflow can partially fail or retry tool, network, or external operations",
   "guidance": [
-    "Classify failures as transient, permanent, or cancelled and preserve the original cause. Retry",
-    "only transient cases with explicit bounds, and leave state either safely resumable or clearly",
-    "rolled back; never convert a partial failure into reported success."
+    "Classify transient, permanent, cancelled and unknown-success outcomes; preserve the original",
+    "cause. A timeout does not prove a side effect failed: inspect or reconcile state before replay",
+    "unless the operation is idempotent. Bound outbound waits and total retry time, use backoff, and",
+    "avoid retries multiplied across layers. Keep partial work resumable or provide rollback/repair;",
+    "never convert an unknown or partial outcome into success."
   ]
 }

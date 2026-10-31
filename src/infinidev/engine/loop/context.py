@@ -291,16 +291,21 @@ def build_iteration_prompt(
     require_step_orientation: bool = True,
     task: Any | None = None,  # infinidev.engine.orchestration.task_schema.Task
     prompt_configuration: EffectivePromptConfiguration | None = None,
+    pending_messages_state: LoopState | None = None,
 ) -> str:
     """Build the user prompt for one iteration of the loop.
 
     Assembles <project-knowledge>, <task>, <notes>, <plan>,
     <previous-actions>, <current-action>, <next-actions>,
     <expected-output>, <user-message>, and <context-budget> XML blocks.
+
+    ``pending_messages_state`` owns consumable notices when ``state`` is a
+    history-window projection; reading that view must not fork delivery state.
     """
     from infinidev.prompts.profiles import EffectivePromptConfiguration
 
     configuration = prompt_configuration or EffectivePromptConfiguration.compile()
+    pending_state = pending_messages_state if pending_messages_state is not None else state
     parts: list[str] = []
 
     def optional(name: str, block: str) -> None:
@@ -339,6 +344,10 @@ def build_iteration_prompt(
     else:
         parts.append(f"<task>\n{description}\n</task>")
 
+    from infinidev.engine.loop.user_guidance import render_user_guidance
+
+    _append_if(parts, render_user_guidance(state.user_guidance))
+
     # Engine notice — the outer-loop closure gates reject a ``step_complete``
     # after the inner loop has already returned, so they cannot answer the
     # tool call the way the in-loop gates do. The rejection travels here
@@ -348,7 +357,7 @@ def build_iteration_prompt(
     with best_effort("pending engine notice render failed"):
         from infinidev.engine.loop.engine_notice import drain_engine_notice
 
-        notice_text = drain_engine_notice(state)
+        notice_text = drain_engine_notice(pending_state)
         if notice_text:
             parts.append(notice_text)
 
@@ -358,14 +367,14 @@ def build_iteration_prompt(
     # the next one. Pure prompt overhead, no LLM call upstream.
     with best_effort("pending guidance render failed"):
         from infinidev.engine.guidance import drain_pending_guidance
-        guidance_text = drain_pending_guidance(state)
+        guidance_text = drain_pending_guidance(pending_state)
         if guidance_text:
             optional("iteration.reactive_guidance", guidance_text)
 
     with best_effort("runtime intervention render failed"):
         from infinidev.engine.behavior.runtime_policy import drain_runtime_intervention
 
-        runtime_intervention = drain_runtime_intervention(state)
+        runtime_intervention = drain_runtime_intervention(pending_state)
         if runtime_intervention:
             parts.append(runtime_intervention)
 
@@ -561,12 +570,12 @@ def build_iteration_prompt(
                 "then look into your question.\")\n"
                 "Reply in the user's language.\n\n"
                 "ONLY AFTER sending the acknowledgement, continue your work. "
-                "If the user is changing the task or asking you to stop, surface "
-                "it in your send_message acknowledgement, then either add_step for "
-                "the new direction or call step_complete(status=\"done\") and explain "
-                "the change in your final_answer. Do NOT modify_step or remove the "
-                "existing steps — the user-approved plan is protected and those ops "
-                "are silently rejected. "
+                "Apply the user's latest direction before claiming completion. "
+                "Adapt model-inferred Steps with the plan tools available to this "
+                "run, while preserving user requirements the message did not change. "
+                "If the message asks only for status, answer briefly and continue. "
+                "Finish when the updated request is fulfilled or the user explicitly "
+                "asks you to stop. "
                 "Do NOT silently fold this message into your thinking — the "
                 "user is waiting to hear from you.\n"
                 "</urgent-user-message>"
@@ -977,9 +986,9 @@ def _render_opened_files(state: LoopState) -> str:
     """Files the agent has read or written recently, with TTL labels.
 
     The ``<opened-files>`` block is the mechanism that lets the model
-    avoid redundant ``read_file`` calls between steps — the content IS
-    the current file content (refreshed on every edit via the cache
-    handlers in ``tool_executor.py``). Pinned entries are written-by-
+    avoid redundant ``read_file`` calls between steps. Entries are observations
+    from earlier tools; restored snapshots require revalidation before serving
+    as current-state evidence. Pinned entries are written-by-
     model files; the TTL number on unpinned entries counts down to
     eviction as more tool calls happen.
     """
@@ -1038,10 +1047,14 @@ def _render_opened_files(state: LoopState) -> str:
 
     file_sections: list[str] = []
     for path, of, content in selected:
+        provenance = (
+            "; snapshot from before resume — requires revalidation"
+            if of.requires_revalidation else ""
+        )
         if of.pinned:
-            label = f"### {path} (written by you — pinned)\n```\n{content}\n```"
+            label = f"### {path} (written by you — pinned{provenance})\n```\n{content}\n```"
         else:
-            label = f"### {path} (expires in {of.ttl} tool calls)\n```\n{content}\n```"
+            label = f"### {path} (expires in {of.ttl} tool calls{provenance})\n```\n{content}\n```"
         file_sections.append(label)
     omitted_block = ""
     if omitted:
@@ -1054,9 +1067,12 @@ def _render_opened_files(state: LoopState) -> str:
         )
     return (
         "<opened-files>\n"
-        "IMPORTANT: These files are already loaded and up-to-date. "
-        "Do NOT call read_file on them — the content below IS the current file content. "
-        "After you edit a file, it is automatically refreshed here.\n\n"
+        "These are retained observations from earlier tool results. Reuse them "
+        "as context; re-read when current contents or missing ranges are needed. "
+        "Entries marked 'requires revalidation' were restored from an earlier "
+        "execution. Confirm them before using them as evidence of the current "
+        "workspace. File-tool edits refresh their cached entries; external changes "
+        "can make an earlier observation stale.\n\n"
         + "\n\n".join(file_sections)
         + omitted_block
         + "\n</opened-files>"

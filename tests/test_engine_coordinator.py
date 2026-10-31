@@ -87,6 +87,33 @@ def _packet(text: str = "Add JWT to all endpoints") -> EscalationPacket:
     return EscalationPacket(user_request=text, understanding=text)
 
 
+def test_task_adapter_preserves_real_evidence_review_rejection(temp_db, monkeypatch):
+    from infinidev.engine.analysis.evidence_review import EvidenceReviewResult
+    from infinidev.engine.orchestration import pipeline as pipeline_mod
+
+    monkeypatch.setattr(settings, "REVIEW_ENABLED", True)
+    monkeypatch.setattr(settings, "EVIDENCE_REVIEW_ENABLED", True)
+    monkeypatch.setattr(
+        pipeline_mod, "_run_gather_phase", lambda **kwargs: kwargs["task_prompt"],
+    )
+    monkeypatch.setattr(
+        "infinidev.engine.analysis.evidence_review.run_evidence_review_rework_loop",
+        lambda **kwargs: (
+            "Unresolved claim", EvidenceReviewResult("REJECTED", "Not supported"),
+        ),
+    )
+
+    result = TaskAdapter().run(
+        escalation=_packet("Investigate the parser and report its behavior"),
+        agent=_Agent(), engine=_LoopEngine("All correct", "done"),
+        reviewer=None, hooks=_Hooks(), session_id="rejected-evidence",
+        project_id=1, workspace_path="/workspace",
+    )
+
+    assert result.status == STATUS_BLOCKED
+    assert result.user_message == "Unresolved claim"
+
+
 @pytest.fixture
 def mode(monkeypatch):
     def _set(value: str):

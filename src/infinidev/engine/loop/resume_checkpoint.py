@@ -180,6 +180,7 @@ def build_loop_resume_checkpoint(
             "plan",
             "history",
             "notes",
+            "user_guidance",
             "current_step_index",
             "iteration_count",
             "total_tool_calls",

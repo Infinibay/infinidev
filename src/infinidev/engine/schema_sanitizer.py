@@ -195,9 +195,10 @@ STEP_COMPLETE_SCHEMA: dict[str, Any] = {
         "description": (
             "Call step_complete after finishing the current step and checking its "
             "expected_output or success criterion. Supply the file read, test result, "
-            "or command output that proves success. The engine discards this step's "
-            "tool outputs and conversation after the call; only the summary and notes "
-            "survive. Save file paths, symbol names, and decisions with add_note first. "
+            "or command output that proves success. The next prompt is rebuilt from "
+            "the plan, summaries, notes, and retained source. Raw tool output is "
+            "archived and recoverable with recall_context. Save decisions, constraints, "
+            "and key facts with add_note so the next step has them immediately. "
             "Before status='done', record cross-task lessons with add_session_note. "
             "Change the remaining plan with add_step, modify_step, or remove_step before "
             "closing the step."

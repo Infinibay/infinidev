@@ -631,8 +631,9 @@ def _run_review_phase(
     """
     from infinidev.config.settings import settings as _settings
     from infinidev.db.service import get_recent_summaries
+    from infinidev.engine.analysis.review_engine import _review_execution_stopped
 
-    if not _settings.REVIEW_ENABLED:
+    if not _settings.REVIEW_ENABLED or _review_execution_stopped(engine):
         return result
 
     if not engine.has_file_changes():
@@ -654,7 +655,7 @@ def _run_review_phase(
                 )
 
         try:
-            result, _ = run_evidence_review_rework_loop(
+            result, evidence_review = run_evidence_review_rework_loop(
                 engine=engine,
                 agent=agent,
                 session_id=session_id,
@@ -669,11 +670,18 @@ def _run_review_phase(
                 rework_execute_kwargs=rework_execute_kwargs,
                 prompt_configuration=prompt_configuration,
             )
+            if _review_execution_stopped(engine):
+                return result
+            if evidence_review is not None and evidence_review.is_rejected:
+                engine._last_status = "blocked"
+                return result
         except Exception as exc:
             logger.error("Evidence review phase failed: %s", exc, exc_info=True)
             with best_effort("evidence review failure status update failed"):
-                engine._last_status = "failed"
+                if not _review_execution_stopped(engine):
+                    engine._last_status = "failed"
             hooks.on_status("error", f"Evidence review error: {exc}")
+            return result
 
         # Evidence rework is normally read-only, but the developer may have
         # produced a requested report. If so, that new workspace change still
@@ -744,12 +752,17 @@ def _run_review_phase(
             run_verification=run_verification,
             prompt_configuration=prompt_configuration,
         )
-        if review_result is not None and review_result.is_rejected:
+        if (
+            review_result is not None
+            and review_result.is_rejected
+            and not _review_execution_stopped(engine)
+        ):
             engine._last_status = "blocked"
     except Exception as exc:
         logger.error("Review phase failed: %s", exc, exc_info=True)
         with best_effort("code review failure status update failed"):
-            engine._last_status = "failed"
+            if not _review_execution_stopped(engine):
+                engine._last_status = "failed"
         hooks.on_status("error", f"Review error: {exc}")
 
     return result

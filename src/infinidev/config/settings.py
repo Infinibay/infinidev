@@ -318,8 +318,8 @@ class Settings(BaseSettings):
     LOOP_OBJECTIVE_VERIFY_ENABLED: bool = True
     # Max correction turns forced per step before the engine stops blocking
     # (to avoid starving the global budget on one stuck objective). On
-    # exhaustion the step is allowed to close but the unmet objective is
-    # logged and noted so it surfaces rather than silently passing.
+    # exhaustion the Step closes as blocked with the unmet objective and
+    # failure evidence; it must never be accepted as a successful completion.
     LOOP_OBJECTIVE_VERIFY_MAX_ATTEMPTS: int = 3
     LOOP_VALIDATE_SYNTAX_BEFORE_WRITE: bool = True  # tree-sitter syntax check before writing files
     LOOP_GUIDANCE_ENABLED: bool = True  # Inject pre-baked how-to advice when small models get stuck

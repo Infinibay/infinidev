@@ -32,11 +32,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import random
-import re
 from pathlib import Path
 from typing import Any
+
+from bench.agent_task_repeated_compare import deduplicated_diff
 
 #: How much of each artifact reaches the reviewer. The corpus tasks are small
 #: enough that these caps do not truncate a real answer; they exist so a
@@ -49,33 +49,9 @@ _MAX_TRACE_STEPS = 40
 #: finer granularity would be false precision from a single judge.
 SCALE = {0: "not met", 1: "partially", 2: "met"}
 
-_DIFF_HEADER = re.compile(r"^### (?P<path>.+?) \((?P<action>[^)]*)\)$")
-
 
 def _load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def deduplicated_diff(summary: str) -> str:
-    """One section per file, not per path spelling (see §6.1.16)."""
-
-    if not summary:
-        return ""
-    kept: list[str] = []
-    seen: set[str] = set()
-    for part in summary.split("\n\n"):
-        lines = part.splitlines()
-        header = lines[0] if lines else ""
-        match = _DIFF_HEADER.match(header)
-        if match is None:
-            kept.append(part)
-            continue
-        identity = os.path.realpath(match.group("path"))
-        if identity in seen:
-            continue
-        seen.add(identity)
-        kept.append(part)
-    return "\n\n".join(kept)
 
 
 def _trace(artifact: dict[str, Any]) -> list[dict[str, str]]:

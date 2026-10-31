@@ -20,6 +20,7 @@ class OpenedFile(BaseModel):
     content: str
     ttl: int = 8  # Remaining tool calls before expiry
     pinned: bool = False  # True for files the agent wrote/edited
+    requires_revalidation: bool = False
 
     def tick(self, n: int = 1) -> None:
         """Decrement TTL by *n* tool calls (no-op for pinned files)."""

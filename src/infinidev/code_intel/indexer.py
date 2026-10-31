@@ -88,7 +88,7 @@ def index_file(
 
     try:
         with open(file_path, "rb") as f:
-            content = f.read()
+            content = f.read(MAX_FILE_SIZE + 1)
     except (PermissionError, OSError):
         return 0
 

@@ -2,9 +2,11 @@
   "id": "capability.data_migration",
   "reason": "the current task changes persisted data, schemas, or serialized formats",
   "guidance": [
-    "Identify the existing format and every reader and writer affected before changing it. Preserve a",
-    "safe upgrade path, make partial failure recoverable, and avoid irreversible conversion without",
-    "explicit authorization. Exercise representative old and new data and state the compatibility",
-    "boundary established by the check."
+    "Identify the source of truth, format, readers and writers, including old versions and stored",
+    "records. Use additive changes before retiring an in-use representation; separate destructive",
+    "cleanup from the compatible transition. Make backfill restartable and verify partial failure",
+    "recovery by rollback or forward repair. Treat indexes, caches and projections as derived state:",
+    "define invalidation, stale-read behavior and rebuild from authoritative data. Exercise old and",
+    "new records and avoid irreversible conversion without explicit authorization."
   ]
 }

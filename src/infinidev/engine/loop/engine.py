@@ -44,7 +44,7 @@ from infinidev.engine.loop.context_builder import (
 from infinidev.engine.loop.context_manager import ContextManager
 from infinidev.engine.loop.critic_liaison import CriticLiaison
 from infinidev.engine.loop.execution_context import ExecutionContext
-from infinidev.engine.loop.guardrail_runner import apply_guardrail
+from infinidev.engine.loop.guardrail_runner import GuardrailOutcome, evaluate_guardrail
 from infinidev.engine.loop.guidance_handler import GuidanceHandler
 from infinidev.engine.loop.llm_caller import (
     COMPLETION_PLAN_TOOL_NAMES,
@@ -73,9 +73,6 @@ from infinidev.engine.loop.tool_processor import ToolProcessor
 from infinidev.engine.loop.tool_runner import ToolRunner
 from infinidev.engine.loop.user_message_injector import UserMessageInjector
 from infinidev.engine.file_change_tracker import FileChangeTracker
-from infinidev.engine.formats.tool_call_parser import (
-    parse_step_complete_args as _parse_step_complete_args,
-)
 from infinidev.engine.engine_logging import (
     emit_loop_event as _emit_loop_event,
     emit_log as _emit_log,
@@ -746,8 +743,8 @@ class LoopEngine(AgentEngine):
 
     Each iteration rebuilds the prompt from scratch with only:
     system prompt + task + plan + compact summaries + current step.
-    Raw tool output exists only temporarily during a step, then is
-    discarded and replaced with a ~50-token summary.
+    Model-visible tool results remain recoverable through working memory.
+    Later Steps receive summaries and retained literal user guidance.
     """
 
     def __init__(self) -> None:
@@ -805,10 +802,13 @@ class LoopEngine(AgentEngine):
     def _inject_mid_step_user_messages(
         self, ctx: "ExecutionContext", messages: list[dict[str, Any]],
     ) -> None:
-        self._user_message_injector.inject_mid_step(ctx, messages)
-        self._inject_team_updates(messages)
+        if self._user_message_injector.inject_mid_step(ctx, messages):
+            self._checkpoint(ctx)
+        self._inject_team_updates(messages, ctx=ctx)
 
-    def _inject_team_updates(self, messages: list[dict[str, Any]]) -> bool:
+    def _inject_team_updates(
+        self, messages: list[dict[str, Any]], *, ctx: ExecutionContext | None = None,
+    ) -> bool:
         """Inject collaborator evidence separately from urgent user guidance."""
         team = getattr(self, "_team_runtime", None)
         if team is None:
@@ -827,6 +827,14 @@ class LoopEngine(AgentEngine):
                 content = ('<user-guidance authority="USER_LITERAL">\n'
                            + escape(event["content"]) + "\n</user-guidance>")
                 attachments = team.guidance_attachments(event["id"])
+                if ctx is not None:
+                    from infinidev.engine.loop.user_guidance import retain_user_guidance
+                    from infinidev.engine.loop.user_message_injector import InjectedUserMessage
+
+                    retain_user_guidance(ctx.state, [InjectedUserMessage(
+                        event["content"], tuple(attachments or ()),
+                        message_id=f"team:{event['id']}",
+                    )])
                 if attachments:
                     from infinidev.engine.multimodal import build_user_content
 
@@ -840,6 +848,8 @@ class LoopEngine(AgentEngine):
                 '<team-updates authority="COLLABORATOR_EVIDENCE">\n'
                 + escape(json.dumps(peers, ensure_ascii=False)) + "\n</team-updates>"
             )})
+        if delivered_user and ctx is not None:
+            self._checkpoint(ctx)
         return bool(peers) or delivered_user
 
     def _queue_context_rank_guidance(self, messages: list[str]) -> None:
@@ -856,8 +866,9 @@ class LoopEngine(AgentEngine):
         if self._user_message_injector.reject_step_complete_on_late_message(
             ctx, messages, step_complete_id,
         ):
+            self._checkpoint(ctx)
             return True
-        if self._inject_team_updates(messages):
+        if self._inject_team_updates(messages, ctx=ctx):
             self._overwrite_step_complete_tool_result(
                 messages, step_complete_id,
                 "Team updates arrived while finishing. Read them before completing this step.",
@@ -1247,7 +1258,7 @@ class LoopEngine(AgentEngine):
                 )
 
             # Update consecutive all-done counter
-            if step_result.status == "explore":
+            if step_result.status == "explore" or step_result.interrupted:
                 consecutive_all_done = 0
             elif ctx.state.plan.steps and not ctx.state.plan.has_pending:
                 consecutive_all_done += 1
@@ -1657,14 +1668,7 @@ class LoopEngine(AgentEngine):
                           project_id=ctx.project_id, agent_id=ctx.agent_id)
                 step_result.status = "continue"
                 return None
-            result = step_result.final_answer or step_result.summary
-            result = self._apply_guardrail(
-                ctx, result, ctx.guardrail, ctx.guardrail_max_retries,
-                ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
-                ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
-                max_per_action=ctx.max_per_action,
-            )
-            return step_mgr.finish(ctx, "done", iteration, result)
+            return self._finish_validated_task(ctx, step_result, step_mgr, iteration)
 
         if step_result.status == "blocked":
             if ctx.state.plan.has_pending:
@@ -1679,16 +1683,73 @@ class LoopEngine(AgentEngine):
                 return None
             return step_mgr.finish(ctx, "blocked", iteration, step_result.summary)
 
-        if consecutive_all_done >= 2 and ctx.state.plan.steps and not ctx.state.plan.has_pending:
-            result = self._apply_guardrail(
-                ctx, step_result.summary, ctx.guardrail, ctx.guardrail_max_retries,
-                ctx.llm_params, ctx.system_prompt, ctx.desc, ctx.expected,
-                ctx.state, ctx.tool_schemas, ctx.tool_dispatch,
-                max_per_action=ctx.max_per_action,
+        if consecutive_all_done == 2 and ctx.state.plan.steps and not ctx.state.plan.has_pending:
+            from infinidev.engine.loop.engine_notice import queue_engine_notice
+
+            queue_engine_notice(
+                ctx.state,
+                "The listed Steps are closed, but that does not establish Task completion. "
+                "Reassess the original request and retained user guidance. If the outcome "
+                "is verified, call step_complete(status=\"done\") with its evidence and "
+                "final answer; otherwise add the concrete remaining Steps.",
             )
-            return step_mgr.finish(ctx, "done", iteration, result)
 
         return None
+
+    def _finish_validated_task(
+        self, ctx: ExecutionContext, step_result: StepResult,
+        step_mgr: StepManager, iteration: int,
+    ) -> str | None:
+        """Publish completion only for the current instructions and validation."""
+        if self.is_cancelled:
+            return self._finish_cancelled(ctx, step_mgr, iteration)
+        if self._defer_completion_for_input(ctx, step_result):
+            return None
+        guidance_count = len(ctx.state.user_guidance)
+        outcome = self._validate_final_result(
+            ctx, step_result.final_answer or step_result.summary,
+        )
+        if self.is_cancelled or outcome.status == "cancelled":
+            return self._finish_cancelled(ctx, step_mgr, iteration)
+        if self._defer_completion_for_input(ctx, step_result):
+            return None
+        if len(ctx.state.user_guidance) != guidance_count:
+            from infinidev.engine.loop.engine_notice import queue_engine_notice
+
+            queue_engine_notice(
+                ctx.state,
+                "User guidance changed during final correction. Reassess the complete "
+                "updated request and the work already performed before completing the Task.",
+            )
+            step_result.status = "continue"
+            step_result.interrupted = True
+            self._checkpoint(ctx)
+            return None
+        return step_mgr.finish(ctx, outcome.status, iteration, outcome.user_message)
+
+    def _defer_completion_for_input(
+        self, ctx: ExecutionContext, step_result: StepResult,
+    ) -> bool:
+        pending = self._user_message_injector.retain_pending(ctx.state)
+        team = getattr(self, "_team_runtime", None)
+        if team is not None and self._team_actor != "orchestrator":
+            from infinidev.engine.loop.user_guidance import retain_user_guidance
+            from infinidev.engine.loop.user_message_injector import InjectedUserMessage
+
+            forwarded = team.pending_user_guidance(self._team_actor)
+            retain_user_guidance(ctx.state, [
+                InjectedUserMessage(
+                    event["content"], tuple(team.guidance_attachments(event["id"])),
+                    message_id=f"team:{event['id']}",
+                ) for event in forwarded
+            ])
+            pending = pending or bool(forwarded)
+        if not pending:
+            return False
+        self._checkpoint(ctx)
+        step_result.status = "continue"
+        step_result.interrupted = True
+        return True
 
     # ── Private helpers for execute() ───────────────────────────────────
 
@@ -2020,14 +2081,14 @@ class LoopEngine(AgentEngine):
                     # model's claim that this step is finished. Each sends it
                     # back for one more turn; see ``step_complete_gate`` for
                     # the complete chain and its order.
-                    if self._step_gate.blocks(
+                    step_result = self._step_gate.evaluate(
                         ctx, classified.step_complete, messages,
                         action_tool_calls=action_tool_calls,
                         reasoning=getattr(result, "reasoning_content", None),
-                    ):
+                    )
+                    if step_result is None:
                         continue  # Re-enter the loop, don't break.
 
-                    step_result = _parse_step_complete_args(classified.step_complete.function.arguments)
                     break
             else:
                 # Text-only response
@@ -2270,24 +2331,35 @@ class LoopEngine(AgentEngine):
         self._last_total_tool_calls = state.total_tool_calls
         self._last_state = state
 
-    def _apply_guardrail(
-        self,
-        ctx: ExecutionContext,
-        result: str,
-        guardrail: Any | None,
-        max_retries: int,
-        llm_params: dict[str, Any],
-        system_prompt: str,
-        desc: str,
-        expected: str,
-        state: LoopState,
-        tool_schemas: list[dict[str, Any]],
-        tool_dispatch: dict[str, Any],
-        max_per_action: int = 0,
-    ) -> str:
-        """Validate result with guardrail; retry with feedback if it fails."""
-        return apply_guardrail(
-            ctx, result, guardrail, max_retries, llm_params, system_prompt,
-            desc, expected, state, tool_schemas, tool_dispatch, max_per_action,
+    def _validate_final_result(
+        self, ctx: ExecutionContext, result: str,
+    ) -> GuardrailOutcome:
+        """Evaluate final output with the same context and cancellation owner."""
+        def build_correction_messages() -> list[dict[str, Any]]:
+            messages = self._build_iteration_messages(
+                ctx, max(ctx.start_iteration, ctx.state.iteration_count - 1),
+            )
+            self._inject_mid_step_user_messages(ctx, messages)
+            return messages
+
+        def run_correction_tool(name: str, arguments: str) -> str:
+            from infinidev.engine.tool_dispatch import execute_tool_call
+
+            self._begin_tool_batch()
+            try:
+                if self.is_cancelled:
+                    return '{"error": "cancelled"}'
+                return execute_tool_call(
+                    ctx.tool_dispatch, name, arguments,
+                    hook_metadata={"cancel_event": self._tool_cancel_event},
+                )
+            finally:
+                self._finish_tool_batch()
+
+        return evaluate_guardrail(
+            ctx, result,
             hooks=self._hooks,
+            build_context_messages=build_correction_messages,
+            run_tool=run_correction_tool,
+            is_cancelled=lambda: self.is_cancelled,
         )
