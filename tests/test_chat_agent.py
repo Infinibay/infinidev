@@ -433,3 +433,27 @@ class TestToolboxIntegrity:
         }
         overlap = tool_names & forbidden
         assert not overlap, f"chat-agent exposed forbidden tools: {overlap}"
+
+
+class TestChatCancellation:
+    def test_cancelled_response_cannot_execute_tools_or_escalate(self, monkeypatch):
+        import threading
+
+        cancelled = threading.Event()
+        ran = []
+
+        def completion(**kwargs):
+            cancelled.set()
+            return _response([_tc("read_file", {"path": "README.md"})])
+
+        monkeypatch.setattr("litellm.completion", completion)
+        monkeypatch.setattr(chat_agent_mod, "get_litellm_params_for_behavior", lambda: {})
+        monkeypatch.setattr(chat_agent_mod, "execute_tool_call", lambda *args: ran.append(args))
+        result = chat_agent_mod._run_llm_loop(
+            messages=[], tool_schemas=[], dispatch={}, user_input="explain the project",
+            max_iterations=1, cancel_check=cancelled.is_set,
+        )
+
+        assert result.kind == "respond"
+        assert "cancel" in result.reply.lower()
+        assert ran == []

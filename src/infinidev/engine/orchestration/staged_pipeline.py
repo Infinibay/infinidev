@@ -702,7 +702,7 @@ def _goal_from_escalation(escalation: EscalationPacket) -> GoalSpec:
 
 
 def _infer_goal_intent(escalation: EscalationPacket) -> str:
-    """Classify result intent from literal authority, never derived prose."""
+    """Route requested delivery using literal constraints and classified intent."""
     profile = escalation.task_profile
     if profile is None:
         # Task-policy rendering can be disabled, but the literal authority
@@ -718,8 +718,13 @@ def _infer_goal_intent(escalation: EscalationPacket) -> str:
         str(item).casefold()
         for item in (getattr(profile, "authority", ()) or ())
     }
+    if "read_only" in (getattr(profile, "constraints", ()) or ()):
+        return "informational"
     if authority & {"modify", "commit", "publish"}:
         return "implementation"
+    classified_intent = getattr(profile, "classified_intent", None)
+    if classified_intent in {"implementation", "informational"}:
+        return classified_intent
     if authority and authority <= {"answer", "diagnose"}:
         return "informational"
 

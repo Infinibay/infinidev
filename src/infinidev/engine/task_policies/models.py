@@ -17,6 +17,7 @@ Risk = Literal["security", "migration", "destructive", "external_write"]
 ResultKind = Literal["code", "report", "plan", "recommendation"]
 SequenceStep = Literal["investigate", "implement", "verify", "review", "commit", "publish"]
 SelectionSource = Literal["deterministic", "embedding", "llm"]
+RequestedIntent = Literal["implementation", "informational"]
 
 
 class PolicySelection(BaseModel):
@@ -58,6 +59,7 @@ class TaskProfile(BaseModel):
     rejected_candidates: tuple[RejectedPolicyCandidate, ...] = ()
     llm_classifier_used: bool = False
     llm_fallback_used: bool = False
+    classified_intent: RequestedIntent | None = None
     semantic_space_id: str | None = None
     semantic_classifier_version: str | None = None
     semantic_abstained: bool = False
@@ -79,6 +81,7 @@ class TaskProfile(BaseModel):
             "rejected_candidates": [item.model_dump() for item in self.rejected_candidates],
             "llm_classifier_used": self.llm_classifier_used,
             "llm_fallback_used": self.llm_fallback_used,
+            "classified_intent": self.classified_intent,
             "semantic_space_id": self.semantic_space_id,
             "semantic_classifier_version": self.semantic_classifier_version,
             "semantic_abstained": self.semantic_abstained,
@@ -87,7 +90,7 @@ class TaskProfile(BaseModel):
 
 
 class ClassifierResult(BaseModel):
-    """Closed method schema accepted from an optional single-call LLM classifier."""
+    """Requested methods and delivery intent, independently of literal authority."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -97,3 +100,4 @@ class ClassifierResult(BaseModel):
     result: list[ResultKind] = Field(default_factory=list)
     sequence: list[SequenceStep] = Field(default_factory=list)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    classified_intent: RequestedIntent | None = None

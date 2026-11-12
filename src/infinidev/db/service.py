@@ -164,6 +164,12 @@ def init_db():
         _migrate_add_column(conn, "findings", "embedding_space", "TEXT")
         _migrate_add_column(conn, "library_docs", "embedding_space", "TEXT")
         _migrate_add_column(conn, "cr_contexts", "embedding_space", "TEXT")
+        # Chat-history retrieval: the structured transcript also carries the
+        # searchable text plus its embedding so the agent can grep/semantically
+        # search its own past conversation (see tools/knowledge/search_history).
+        _migrate_add_column(conn, "session_messages", "search_text", "TEXT NOT NULL DEFAULT ''")
+        _migrate_add_column(conn, "session_messages", "embedding", "BLOB")
+        _migrate_add_column(conn, "session_messages", "embedding_space", "TEXT NOT NULL DEFAULT ''")
         _migrate_add_column(conn, "cr_interactions", "was_error", "INTEGER DEFAULT 0")
         _migrate_add_column(conn, "cr_session_scores", "productivity", "REAL DEFAULT 1.0")
         _migrate_add_column(conn, "cr_session_scores", "was_edited", "INTEGER DEFAULT 0")
@@ -215,7 +221,60 @@ def init_db():
             )
         conn.commit()
 
+        # Transcript rows written before the retrieval columns existed carry an
+        # empty search_text and would stay invisible to chat search forever.
+        try:
+            _backfill_session_message_search_text(conn)
+        except sqlite3.Error:
+            # Housekeeping only: init_db runs on every startup, so a failed
+            # pass is retried next launch rather than blocking the session.
+            logger.warning("Transcript search-text backfill failed", exc_info=True)
+
     execute_with_retry(_init)
+
+
+def _backfill_session_message_search_text(
+    conn: sqlite3.Connection, *, batch_size: int = 500
+) -> int:
+    """Backfill missing projections and repair the legacy 4,000-character cap.
+
+    Ids are collected up front rather than re-querying ``search_text = ''``:
+    a message with no textual fields legitimately projects to an empty string,
+    and re-matching it would never terminate.
+    """
+    from infinidev.config.secrets import redact
+
+    pending = [
+        row["id"]
+        for row in conn.execute(
+            "SELECT id FROM session_messages WHERE search_text = '' "
+            "OR length(search_text) = 4000 ORDER BY id"
+        ).fetchall()
+    ]
+    for offset in range(0, len(pending), batch_size):
+        batch = pending[offset : offset + batch_size]
+        placeholders = ", ".join("?" for _ in batch)
+        rows = conn.execute(
+            f"SELECT id, message_json FROM session_messages WHERE id IN ({placeholders})",
+            batch,
+        ).fetchall()
+        updates: list[tuple[str, int]] = []
+        for row in rows:
+            try:
+                message = json.loads(row["message_json"])
+            except (TypeError, json.JSONDecodeError):
+                message = None
+            text = _message_search_text(message) if isinstance(message, dict) else ""
+            updates.append((redact(text) if text else "", int(row["id"])))
+        conn.executemany(
+            "UPDATE session_messages SET embedding = CASE WHEN search_text != ? "
+            "THEN NULL ELSE embedding END, search_text = ? WHERE id = ?",
+            [(text, text, message_id) for text, message_id in updates],
+        )
+        conn.commit()
+    if pending:
+        logger.info("Backfilled chat-history search text for %d message(s)", len(pending))
+    return len(pending)
 
 
 def store_conversation_turn(
@@ -260,6 +319,13 @@ def register_session(
     Called once at CLI/TUI startup. Idempotent — resuming an existing
     session re-touches ``last_active_at`` without clobbering its title
     or turn_count.
+
+    Registration is also the retention point: once this session is in the
+    registry, everything older than the newest ``SESSION_RETENTION_COUNT``
+    sessions of the same workspace is deleted (this session always survives).
+    A session with no recorded workspace is not pruned at all — its scope is
+    unknowable, and deleting another project's history is worse than keeping
+    a few extra rows.
     """
     def _upsert(conn):
         conn.execute(
@@ -273,7 +339,28 @@ def register_session(
             (session_id, project_id, workspace_path),
         )
         conn.commit()
-    execute_with_retry(_upsert)
+        # A resume registers without a launch directory, so fall back to the
+        # workspace the session row already carries.
+        if workspace_path is None:
+            row = conn.execute(
+                "SELECT workspace_path FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return row["workspace_path"] if row else None
+        return workspace_path
+
+    effective_workspace = execute_with_retry(_upsert)
+    if effective_workspace is None:
+        return
+
+    try:
+        prune_old_sessions(
+            workspace_path=effective_workspace, keep_session_id=session_id
+        )
+    except Exception:
+        # Retention is housekeeping: a failed prune must not stop a session
+        # from starting.
+        logger.warning("Session retention pass failed", exc_info=True)
 
 
 def rename_session(session_id: str, title: str) -> bool:
@@ -527,6 +614,48 @@ def get_session_notes(session_id: str, limit: int = 50) -> list[str]:
     return execute_with_retry(_query) or []
 
 
+# ── Chat-history retrieval ────────────────────────────────────────────────────
+
+#: Keys holding human-readable text, in a fixed order so the projection is
+#: stable across writes (an unchanged message must not re-embed).
+_HISTORY_TEXT_KEYS = ("content", "text", "message", "summary", "title")
+
+#: Keys holding tool payloads, projected as ``key=…`` fragments.
+_HISTORY_PAYLOAD_KEYS = ("args", "input", "arguments", "result", "output")
+
+
+def _message_search_text(message: dict[str, Any]) -> str:
+    """Flatten one structured transcript message into searchable plain text.
+
+    ``session_messages`` stores renderer-shaped JSON (tool calls, reasoning,
+    diffs). Retrieval needs one deterministic text projection, so every
+    human-readable field is collected in a fixed order. Human prose stays
+    complete so decisions after a long preamble remain searchable; tool
+    payloads are bounded independently below.
+    """
+    parts: list[str] = []
+    speaker = message.get("role") or message.get("type") or message.get("speaker")
+    if isinstance(speaker, str) and speaker.strip():
+        parts.append(f"[{speaker.strip()}]")
+    for key in _HISTORY_TEXT_KEYS:
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+    tool_name = message.get("tool") or message.get("tool_name") or message.get("name")
+    if isinstance(tool_name, str) and tool_name.strip():
+        parts.append(f"tool={tool_name.strip()}")
+    for key in _HISTORY_PAYLOAD_KEYS:
+        value = message.get(key)
+        if value in (None, "", {}, []):
+            continue
+        rendered = value if isinstance(value, str) else json.dumps(
+            value, ensure_ascii=False, default=str
+        )
+        if rendered.strip():
+            parts.append(f"{key}={rendered[:500]}")
+    return " ".join(parts).strip()
+
+
 def store_session_message(
     session_id: str,
     message: dict[str, Any],
@@ -552,19 +681,25 @@ def store_session_message(
     }
     payload = redact(json.dumps(public_message, ensure_ascii=False, default=str))
 
+    search_text = redact(_message_search_text(public_message))
+
     def _upsert(conn):
         if message_id is not None:
             cursor = conn.execute(
-                "UPDATE session_messages SET message_json = ? "
+                "UPDATE session_messages SET message_json = ?, "
+                "embedding = CASE WHEN search_text != ? THEN NULL ELSE embedding END, "
+                "embedding_space = CASE WHEN search_text != ? THEN '' ELSE embedding_space END, "
+                "search_text = ? "
                 "WHERE id = ? AND session_id = ?",
-                (payload, message_id, session_id),
+                (payload, search_text, search_text, search_text, message_id, session_id),
             )
             if cursor.rowcount:
                 conn.commit()
                 return message_id
         cursor = conn.execute(
-            "INSERT INTO session_messages (session_id, message_json) VALUES (?, ?)",
-            (session_id, payload),
+            "INSERT INTO session_messages (session_id, message_json, search_text) "
+            "VALUES (?, ?, ?)",
+            (session_id, payload, search_text),
         )
         conn.commit()
         return int(cursor.lastrowid)
@@ -597,6 +732,232 @@ def get_session_messages(session_id: str) -> list[dict[str, Any]]:
         return messages
 
     return execute_with_retry(_query) or []
+
+
+def _history_snippet(text: str, needle: str, *, width: int = 240) -> str:
+    """Return a window of ``text`` centred on the first occurrence of ``needle``."""
+    if not text:
+        return ""
+    lowered, lowered_needle = text.casefold(), needle.casefold()
+    position = lowered.find(lowered_needle)
+    if position < 0:
+        return text[:width]
+    match_start, match_end = position, position + len(lowered_needle)
+    if len(lowered) != len(text):
+        # Case folding can expand a character (Straße -> strasse). Map the
+        # match back to the stored prose before choosing its excerpt.
+        cursor = 0
+        for index, char in enumerate(text):
+            next_cursor = cursor + len(char.casefold())
+            if cursor <= position < next_cursor:
+                match_start = index
+            if next_cursor >= position + len(lowered_needle):
+                match_end = index + 1
+                break
+            cursor = next_cursor
+    start = max(0, match_start - width // 2)
+    end = min(len(text), match_end + width // 2)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return f"{prefix}{text[start:end]}{suffix}"
+
+
+def search_session_messages(
+    session_id: str,
+    query: str,
+    *,
+    limit: int = 20,
+) -> list[dict]:
+    """Grep the structured transcript of one session, newest match first.
+
+    Every whitespace-separated token of ``query`` must appear in the message's
+    searchable projection (AND semantics), with Unicode case folding. Substring
+    matching keeps punctuation and SQL wildcard characters literal.
+    """
+    if not session_id:
+        return []
+    tokens = [token for token in (query or "").split() if token]
+    if not tokens:
+        return []
+
+    conditions = " AND ".join(["instr(infinidev_casefold(search_text), ?) > 0"] * len(tokens))
+    params: list[Any] = [session_id] + [token.casefold() for token in tokens]
+    params.append(max(1, limit))
+
+    def _query(conn):
+        # SQLite's LIKE/LOWER only fold ASCII; Spanish accents must match too.
+        conn.create_function(
+            "infinidev_casefold", 1, lambda value: (value or "").casefold(), deterministic=True,
+        )
+        rows = conn.execute(
+            "SELECT id, session_id, search_text, created_at FROM session_messages "
+            f"WHERE session_id = ? AND {conditions} ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        needle = tokens[0]
+        return [
+            {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "created_at": row["created_at"],
+                "snippet": _history_snippet(row["search_text"] or "", needle),
+            }
+            for row in rows
+        ]
+
+    return execute_with_retry(_query) or []
+
+
+def get_session_message_window(
+    session_id: str,
+    message_id: int,
+    *,
+    before: int = 3,
+    after: int = 3,
+) -> list[dict]:
+    """Return transcript rows around ``message_id``, oldest first.
+
+    The anchor row carries ``is_anchor = True``. ``before``/``after`` bound the
+    neighbours by row id, so the window is the messages actually adjacent in
+    the transcript rather than a time guess. Returns nothing when the anchor
+    belongs to another session — a window around a foreign id would be
+    misleading rather than merely incomplete.
+    """
+    if not session_id:
+        return []
+    before = max(0, before)
+    after = max(0, after)
+
+    def _query(conn):
+        anchor = conn.execute(
+            "SELECT 1 FROM session_messages WHERE session_id = ? AND id = ?",
+            (session_id, message_id),
+        ).fetchone()
+        if anchor is None:
+            return []
+        rows: list[dict] = []
+        if before:
+            previous = conn.execute(
+                "SELECT id, session_id, search_text, created_at FROM session_messages "
+                "WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
+                (session_id, message_id, before),
+            ).fetchall()
+            rows.extend(dict(row) for row in reversed(previous))
+        following = conn.execute(
+            "SELECT id, session_id, search_text, created_at FROM session_messages "
+            "WHERE session_id = ? AND id >= ? ORDER BY id ASC LIMIT ?",
+            (session_id, message_id, after + 1),
+        ).fetchall()
+        rows.extend(dict(row) for row in following)
+        for row in rows:
+            row["is_anchor"] = row["id"] == message_id
+        return rows
+
+    return execute_with_retry(_query) or []
+
+
+def get_session_message_embedding_rows(session_id: str, *, limit: int = 500) -> list[dict]:
+    """Return the newest transcript rows with their stored vectors, newest first."""
+    if not session_id:
+        return []
+
+    def _query(conn):
+        rows = conn.execute(
+            "SELECT id, search_text, embedding, embedding_space, created_at "
+            "FROM session_messages WHERE session_id = ? AND search_text != '' "
+            "ORDER BY id DESC LIMIT ?",
+            (session_id, max(1, limit)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    return execute_with_retry(_query) or []
+
+
+def store_session_message_embeddings(
+    updates: list[tuple[int, bytes]], embedding_space: str
+) -> None:
+    """Attach derived vectors to transcript rows in one write.
+
+    Only derived data is touched — never ``message_json`` — so a refresh can
+    never corrupt the transcript itself.
+    """
+    payload = [(vector, embedding_space or "", message_id)
+               for message_id, vector in updates if vector]
+    if not payload:
+        return
+
+    def _update(conn):
+        conn.executemany(
+            "UPDATE session_messages SET embedding = ?, embedding_space = ? WHERE id = ?",
+            payload,
+        )
+        conn.commit()
+
+    execute_with_retry(_update)
+
+
+def prune_old_sessions(
+    keep: int | None = None,
+    *,
+    workspace_path: str | None = None,
+    keep_session_id: str | None = None,
+) -> list[str]:
+    """Delete all but the ``keep`` newest sessions of one workspace.
+
+    Called when a session is registered, so the ledger stays bounded without a
+    background job. ``workspace_path=None`` scopes to sessions with no recorded
+    workspace rather than to every workspace in the database — deleting another
+    project's history was never asked for. ``keep_session_id`` is always
+    retained and counts against ``keep``, which covers the case where a resume
+    touches an old session that has already aged out of the newest slice.
+    Returns the deleted session ids.
+    """
+    if keep is None:
+        keep = int(getattr(settings, "SESSION_RETENTION_COUNT", 5) or 0)
+    if keep <= 0:
+        return []
+
+    def _prune(conn):
+        where = "workspace_path IS NULL" if workspace_path is None else "workspace_path = ?"
+        params: list[Any] = [] if workspace_path is None else [workspace_path]
+        rows = conn.execute(
+            f"SELECT session_id FROM sessions WHERE {where} "
+            "ORDER BY last_active_at DESC, rowid DESC",
+            params,
+        ).fetchall()
+        candidates = [row["session_id"] for row in rows]
+        if keep_session_id and keep_session_id in candidates:
+            candidates.remove(keep_session_id)
+            stale = candidates[max(0, keep - 1):]
+        else:
+            stale = candidates[keep:]
+        if not stale:
+            return []
+
+        removed: list[str] = []
+        conn.execute("SAVEPOINT prune_sessions")
+        try:
+            for session_id in stale:
+                for table, selector in _SESSION_DELETE_ORDER:
+                    conn.execute(
+                        f"DELETE FROM {table} WHERE {selector}",
+                        (session_id,) * selector.count("?"),
+                    )
+                conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+                removed.append(session_id)
+            conn.execute("RELEASE SAVEPOINT prune_sessions")
+            conn.commit()
+        except sqlite3.Error:
+            conn.execute("ROLLBACK TO SAVEPOINT prune_sessions")
+            conn.execute("RELEASE SAVEPOINT prune_sessions")
+            raise
+        if removed:
+            logger.info(
+                "Pruned %d old session(s) (keeping %d newest)", len(removed), keep
+            )
+        return removed
+
+    return execute_with_retry(_prune) or []
 
 
 def persist_session_runtime_state(
@@ -823,7 +1184,7 @@ def get_recent_turns_full(
             SELECT role, content
             FROM conversation_turns
             WHERE session_id = ?
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT ?
             """,
             (session_id, limit),

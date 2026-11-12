@@ -377,6 +377,30 @@ class _FakeState:
 class TestRenderNoteNudge:
     """``_render_note_nudge`` guides the model to take notes."""
 
+    def test_roomy_context_does_not_demand_notes(self):
+        from infinidev.engine.loop.context import _render_note_nudge
+
+        state = _FakeState(tool_calls_since_last_note=5, total_tool_calls=5)
+        state.last_prompt_tokens = 11_000
+        assert _render_note_nudge(state, True, max_context_tokens=262_144) == ""
+        assert "SAVE NOTES NOW" in _render_note_nudge(
+            state, True, max_context_tokens=16_384,
+        )
+
+    def test_iteration_uses_real_capacity_for_note_reminders(self):
+        from infinidev.engine.loop.context import build_iteration_prompt
+        from infinidev.engine.loop.models import LoopState
+
+        state = LoopState()
+        state.total_tool_calls = 5
+        state.tool_calls_since_last_note = 5
+        state.last_prompt_tokens = 11_000
+        prompt = build_iteration_prompt(
+            "Change the JSON name", "Preserve other fields", state,
+            max_context_tokens=262_144, small_model=True,
+        )
+        assert "SAVE NOTES NOW" not in prompt
+
     def test_empty_when_below_thresholds(self):
         from infinidev.engine.loop.context import _render_note_nudge
         state = _FakeState(total_tool_calls=1)

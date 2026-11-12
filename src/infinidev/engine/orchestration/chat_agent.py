@@ -33,6 +33,7 @@ from infinidev.config.llm import get_litellm_params_for_behavior
 from infinidev.engine._best_effort import best_effort
 from infinidev.engine.loop.llm_caller import (
     ThinkStreamFilter,
+    decode_literal_unicode_escapes,
     normalize_message_text,
     strip_think_blocks,
 )
@@ -137,6 +138,14 @@ _DEFAULT_MAX_ITERATIONS = 5
 _MAX_RESULT_CHARS = 8000  # trim overly long tool outputs before re-prompting
 
 
+class _ChatCancelled(Exception):
+    """Internal control flow for stopping an in-flight conversational stream."""
+
+
+def _cancelled_result() -> ChatAgentResult:
+    return ChatAgentResult(kind="respond", reply="Cancelled.")
+
+
 def _direct_execution_route(
     user_input: str, attachments: list[Any] | None,
     *, autonomous_hint: bool = False,
@@ -215,6 +224,7 @@ def run_chat_agent(
     attachments: list[Any] | None = None,
     autonomous_hint: bool = False,
     prompt_configuration: EffectivePromptConfiguration | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ChatAgentResult:
     """Run one turn of the chat agent and return its result.
 
@@ -236,6 +246,8 @@ def run_chat_agent(
     prompt_configuration = (
         prompt_configuration or EffectivePromptConfiguration.compile()
     )
+    if cancel_check is not None and cancel_check():
+        return _cancelled_result()
     if not user_input or not user_input.strip():
         return ChatAgentResult(
             kind="respond",
@@ -331,6 +343,7 @@ def run_chat_agent(
             cr_hooks=cr_hooks,
             project_id=project_id,
             apply_autonomous=_apply,
+            cancel_check=cancel_check,
         )
         # Carry the attachments through the escalation packet so the
         # planner and developer can also see the images the user
@@ -385,6 +398,7 @@ def _run_llm_loop(
     cr_hooks: Any | None = None,
     project_id: int | None = None,
     apply_autonomous: Callable[[EscalationPacket], EscalationPacket] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ChatAgentResult:
     import litellm
 
@@ -398,6 +412,8 @@ def _run_llm_loop(
     dup_guard = DuplicateCallGuard()
 
     for iteration in range(max_iterations):
+        if cancel_check is not None and cancel_check():
+            return _cancelled_result()
         # ── Lazy ContextRank injection ─────────────────────────────────
         # Skip the first iteration entirely — trivial chats ("hola",
         # "gracias") terminate there and never need a file list. Starting
@@ -466,13 +482,24 @@ def _run_llm_loop(
         call_kwargs.setdefault("max_tokens", 2000)
 
         response = litellm.completion(**call_kwargs)
+        if cancel_check is not None and cancel_check():
+            close = getattr(response, "close", None)
+            if callable(close):
+                with best_effort("close cancelled chat stream failed"):
+                    close()
+            return _cancelled_result()
         report_prompt_tokens(
             hooks, response, lane="chat",
             messages=messages, model=call_kwargs.get("model", ""),
         )
 
         if stream_mode:
-            content, tool_calls, streamed = _consume_stream(response, hooks)
+            try:
+                content, tool_calls, streamed = _consume_stream(
+                    response, hooks, cancel_check=cancel_check,
+                )
+            except _ChatCancelled:
+                return _cancelled_result()
             # Non-stream responses are normalised globally by the
             # litellm.completion wrapper (see config/llm.py). Streams
             # are assembled locally, so we strip <think> blocks here.
@@ -531,6 +558,8 @@ def _run_llm_loop(
 
         # No terminator — execute read-only tools and continue.
         for tc in tool_calls:
+            if cancel_check is not None and cancel_check():
+                return _cancelled_result()
             result = dup_guard.refusal_for(
                 tc.function.name, tc.function.arguments,
             ) or execute_tool_call(
@@ -557,6 +586,9 @@ def _run_llm_loop(
                 "tool_call_id": tc.id,
                 "content": trimmed,
             })
+
+    if cancel_check is not None and cancel_check():
+        return _cancelled_result()
 
     # Max iterations reached without terminator. Instead of stranding
     # the user with an apology, synthesize an escalation packet from
@@ -602,7 +634,7 @@ def _build_respond(
     tc: Any, user_input: str, *, streamed: bool = False,
 ) -> ChatAgentResult:
     args = _parse_args(tc)
-    message = text_argument(args.get("message"))
+    message = decode_literal_unicode_escapes(text_argument(args.get("message")))
     if not message:
         return _fallback_respond(
             reason="empty_respond", streamed=streamed,
@@ -634,7 +666,9 @@ def _build_escalate(
         user_request=user_input.strip(),
         understanding=understanding,
         opened_files=[str(p) for p in opened],
-        user_visible_preview=text_argument(args.get("user_visible_preview")),
+        user_visible_preview=decode_literal_unicode_escapes(
+            text_argument(args.get("user_visible_preview"))
+        ),
         user_signal=text_argument(args.get("user_signal")),
         suggested_flow="develop",  # v1 restriction
         council_requested=bool(args.get("council_requested")),
@@ -1087,26 +1121,14 @@ def _build_user_message(
     are inlined as a text footnote so the model at least sees the paths.
     """
     trimmed = user_input.strip()
-    turns: list[tuple[str, str]] = []
+    from infinidev.engine.session_context import render_session_context
+
+    conversation = render_session_context(session_id, user_input)
     resumed_state = ""
     is_resuming = bool(session_id and session_id in _RESUME_CONTEXT_ONCE)
     if session_id:
         if is_resuming:
             _RESUME_CONTEXT_ONCE.discard(session_id)
-        try:
-            from infinidev.db.service import get_recent_turns_full
-            # Resume and ordinary turns use the same compact conversation
-            # tail. Execution continuity comes from the Step checkpoint below,
-            # never from replaying an hours-long transcript.
-            turns = get_recent_turns_full(
-                session_id, limit=6, max_chars_per_turn=2000,
-            )
-        except Exception as exc:
-            logger.warning(
-                "chat_agent: session history fetch failed (continuing "
-                "without snapshot): %s", exc,
-            )
-            turns = []
         if is_resuming:
             try:
                 resumed_state = _get_resumed_state_snapshot(session_id)
@@ -1115,19 +1137,8 @@ def _build_user_message(
                     "chat_agent: resumed state fetch failed (continuing "
                     "with conversation history): %s", exc,
                 )
-    if turns or resumed_state:
-        lines = [
-            "Recent conversation (for context; use tools to reground facts):",
-        ]
-        _ROLE_TAGS = {"user": "USER", "work_summary": "WORK_LOG"}
-        for role, content in turns:
-            # WORK_LOG = hidden internal record of work the developer loop
-            # completed last turn (see work_summary.py); not a user-facing
-            # message and not something to echo back.
-            tag = _ROLE_TAGS.get(role, "AGENT")
-            lines.append(f'<turn role="{tag}">')
-            lines.append(content)
-            lines.append("</turn>")
+    if conversation or resumed_state:
+        lines = [conversation] if conversation else []
         if resumed_state:
             lines.extend([
                 "",
@@ -1170,6 +1181,26 @@ def _build_user_message(
 # terminate the match.
 _RESPOND_MESSAGE_RE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)')
 
+# Tail of a delta that may be the start of an escape the next delta
+# completes: a bare backslash, a partial ``\uXXXX``, or a high surrogate
+# waiting for its low half. Held back one delta so the decoder never sees
+# half an escape (and never invents a character for one). A completed pair is
+# held back too: publishing it early would show the raw halves and then break
+# the "new text extends what we already sent" diff once it decodes.
+_ESCAPE_TAIL_RE = re.compile(
+    r"\\u[dD][89abAB][0-9a-fA-F]{2}(?:\\u[dD][c-fC-F][0-9a-fA-F]{2})?$"
+    r"|\\u[0-9a-fA-F]{0,3}$"
+    r"|\\$"
+)
+
+
+def _publishable_prefix(text: str) -> tuple[str, str]:
+    """Split *text* into what is safe to show now and a fragment to hold."""
+    cut = _ESCAPE_TAIL_RE.search(text)
+    if cut is None:
+        return text, ""
+    return text[: cut.start()], text[cut.start():]
+
 
 def _extract_partial_message(args: str) -> str:
     """Return the ``message`` field's content extracted from partial
@@ -1181,6 +1212,13 @@ def _extract_partial_message(args: str) -> str:
     # Minimal unescape. Not a full JSON parser — good enough for the
     # common escapes a chat message contains. The final non-streaming
     # pass (`_build_respond` → `_parse_args`) uses real json.loads.
+    #
+    # The unicode pass runs first: a backend that serialises with
+    # ensure_ascii=True puts ``\u00a1`` in the args here, and this preview
+    # is what the user watches appear — the final reply is never
+    # re-rendered once the stream has been shown. Decoding before the
+    # backslash collapse also keeps a genuine ``\\u0061`` literal intact.
+    raw = decode_literal_unicode_escapes(raw)
     return (
         raw.replace('\\"', '"')
            .replace('\\n', '\n')
@@ -1190,7 +1228,9 @@ def _extract_partial_message(args: str) -> str:
     )
 
 
-def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
+def _consume_stream(
+    stream: Any, hooks: Any, *, cancel_check: Callable[[], bool] | None = None,
+) -> tuple[str, list[Any], bool]:
     """Consume a LiteLLM streaming response, emitting chunks of the
     ``respond`` tool's ``message`` field via ``hooks.notify_stream_chunk``
     as they form.
@@ -1212,8 +1252,19 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
     # until we know whether a block is starting, so the user never
     # sees a stray '<think>' flash on screen.
     content_filter = ThinkStreamFilter()
+    # Escape fragments split across delta boundaries (see _ESCAPE_TAIL_RE),
+    # and the running count of ``` markers — odd means the stream is inside a
+    # code fence, where a literal ``\uXXXX`` is the text the model means.
+    pending_escape = ""
+    fence_markers = 0
 
     for chunk in stream:
+        if cancel_check is not None and cancel_check():
+            close = getattr(stream, "close", None)
+            if callable(close):
+                with best_effort("close cancelled chat stream failed"):
+                    close()
+            raise _ChatCancelled()
         try:
             delta = chunk.choices[0].delta
         except (AttributeError, IndexError):
@@ -1221,15 +1272,25 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
 
         delta_content = normalize_message_text(getattr(delta, "content", None))
         if delta_content:
-            content_buffer += delta_content
-            safe_delta = content_filter.feed(delta_content)
-            if safe_delta:
-                # A provider may emit an internal prose preamble before its
-                # first tool-call delta. Buffer until the stream shape is
-                # known; publishing now leaks narration/reasoning on read or
-                # escalate turns. Plain-text-only responses are emitted once
-                # the stream closes below.
-                visible_content_buffer += safe_delta
+            # Token boundaries cut escapes in half (``\u00`` then ``a1``), and
+            # the decoder leaves an incomplete one alone — so publish only up
+            # to the last complete character and carry the fragment over.
+            pending_escape += delta_content
+            ready, pending_escape = _publishable_prefix(pending_escape)
+            if ready:
+                inside_fence = fence_markers % 2 == 1
+                fence_markers += ready.count("```")
+                if not inside_fence:
+                    ready = decode_literal_unicode_escapes(ready)
+                content_buffer += ready
+                safe_delta = content_filter.feed(ready)
+                if safe_delta:
+                    # A provider may emit an internal prose preamble before
+                    # its first tool-call delta. Buffer until the stream shape
+                    # is known; publishing now leaks narration/reasoning on
+                    # read or escalate turns. Plain-text-only responses are
+                    # emitted once the stream closes below.
+                    visible_content_buffer += safe_delta
 
         delta_tool_calls = getattr(delta, "tool_calls", None) or []
         for tc_delta in delta_tool_calls:
@@ -1247,7 +1308,9 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
                 slot["arguments"] += fn_args
                 # Emit incremental `message` chars only for the respond tool.
                 if slot["name"] == "respond":
-                    current = _extract_partial_message(slot["arguments"])
+                    current, _held = _publishable_prefix(
+                        _extract_partial_message(slot["arguments"]),
+                    )
                     emitted = emitted_per_tc.get(idx, "")
                     if current.startswith(emitted) and len(current) > len(emitted):
                         new_chars = current[len(emitted):]
@@ -1259,6 +1322,16 @@ def _consume_stream(stream: Any, hooks: Any) -> tuple[str, list[Any], bool]:
                                 "notify_stream_chunk failed (tool): %s", exc,
                             )
                         emitted_per_tc[idx] = current
+
+    # Release whatever escape fragment the stream ended on: it never got a
+    # following delta to complete it, and dropping it would truncate the
+    # reply by the last character(s).
+    if pending_escape:
+        released = decode_literal_unicode_escapes(pending_escape)
+        content_buffer += released
+        released_safe = content_filter.feed(released)
+        if released_safe:
+            visible_content_buffer += released_safe
 
     # Flush any held-back safe tail (e.g., partial open-tag fragments
     # that never resolved into a full <think> block).

@@ -509,13 +509,7 @@ def _enforce_edit_requirement(
 
 
 def _handoff_notice_enabled() -> bool:
-    """Whether the engine asks once for a check the user could run.
-
-    Separate switch from ``LOOP_CLOSURE_FEEDBACK_ENABLED`` because it is a
-    different kind of gate: the others refuse missing work, this one refuses a
-    wording gap and must never stop a run. Off means the final answer is
-    accepted exactly as written.
-    """
+    """Whether missing user-facing verification commands are logged."""
     with best_effort("handoff notice setting read failed"):
         from infinidev.config.settings import settings
 
@@ -523,24 +517,13 @@ def _handoff_notice_enabled() -> bool:
     return True
 
 
-def _enforce_handoff_contract(
+def _handoff_command_missing(
     step_result: StepResult,
     *,
     requested_status: str,
     requested_final_answer: str | None,
 ) -> bool:
-    """Pause a `done` whose final answer names no check the user can run.
-
-    Narrow on purpose. It fires only when the model itself wrote a command into
-    ``evidence_summary`` — the schema asks for "the command and its exit status"
-    — and then handed the user an answer that names none. Measured over 25
-    planning runs, 18 named one; the engine stays quiet about the other 7
-    rather than judging prose.
-
-    Unlike the edit and Step-effect gates, exhausting this one must never end a
-    run: the work exists and only the wording is short. The caller accepts the
-    model's close after ``MAX_HANDOFF_REFUSALS``.
-    """
+    """Observe a wording gap without reopening completed, verified work."""
     from infinidev.engine.loop.engine_notice import names_a_verification_command
 
     if requested_status != "done":
@@ -550,13 +533,6 @@ def _enforce_handoff_contract(
         return False
     if not names_a_verification_command(step_result.evidence_summary):
         return False
-    step_result.status = "continue"
-    step_result.final_answer = None
-    step_result.interrupted = True
-    step_result.summary = (
-        f"{step_result.summary.rstrip()} Completion was deferred because the "
-        "final answer names no command the user can run."
-    ).strip()
     return True
 
 
@@ -1183,20 +1159,19 @@ class LoopEngine(AgentEngine):
             if (
                 not refusal_kind
                 and _handoff_notice_enabled()
-                and _enforce_handoff_contract(
+                and _handoff_command_missing(
                     step_result,
                     requested_status=requested_status,
                     requested_final_answer=requested_final_answer,
                 )
             ):
                 _emit_log(
-                    "warning",
-                    f"{_YELLOW}⚠ Final answer names no command the user can "
-                    f"run — asking once for the verification line{_RESET}",
+                    "debug",
+                    "Final answer omits a verification command; preserving "
+                    "the recorded evidence without reopening completed work",
                     project_id=ctx.project_id,
                     agent_id=ctx.agent_id,
                 )
-                refusal_kind = "handoff"
             if refusal_kind and _closure_feedback_enabled():
                 terminal = self._deliver_closure_refusal(
                     ctx, step_mgr, refusal_kind, iteration, step_result,

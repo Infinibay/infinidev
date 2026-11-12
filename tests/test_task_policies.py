@@ -257,6 +257,19 @@ def test_preferred_main_model_replaces_literal_method_but_keeps_authority() -> N
     assert profile.selected_policies[0].source == "llm"
 
 
+def test_semantic_requested_intent_is_preserved_without_granting_authority() -> None:
+    profile = resolve_task_profile(
+        "Necesito que esto quede funcionando.",
+        classifier=lambda _: ClassifierResult(
+            operations=["bugfix"], classified_intent="implementation", confidence=0.95,
+        ),
+        llm_classifier_mode="fallback",
+    )
+    assert profile.classified_intent == "implementation"
+    assert profile.authority == ("answer",)
+    assert profile.event_payload()["classified_intent"] == "implementation"
+
+
 def test_llm_classifier_mode_validation() -> None:
     with pytest.raises(ValueError, match="llm_classifier_mode"):
         resolve_task_profile("test", llm_classifier_mode="sometimes")
@@ -277,7 +290,8 @@ def test_default_classifier_uses_selected_main_model_params(monkeypatch) -> None
     def call(params, messages, **kwargs):
         captured.update({"params": params, "messages": messages, "kwargs": kwargs})
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
-            content='{"operations":["research","performance"],"confidence":0.94}',
+            content='{"operations":["research","performance"],'
+            '"classified_intent":"informational","confidence":0.94}',
         ))])
 
     monkeypatch.setattr(llm_client, "call_llm", call)
@@ -287,6 +301,7 @@ def test_default_classifier_uses_selected_main_model_params(monkeypatch) -> None
     assert result is not None
     assert result.operations == ["research", "performance"]
     assert result.confidence == 0.94
+    assert result.classified_intent == "informational"
     assert captured["params"] == {
         "model": "selected/main-model",
         "api_base": "https://example.test",
@@ -841,3 +856,43 @@ def test_preferred_replaces_the_literal_operations_and_fallback_only_adds(
         "the empty LLM answer replaced the literal set — that is the asymmetry"
     )
     assert "feature" in fallback.operations
+
+
+@pytest.mark.parametrize("message", [
+    "Corrección: cambia solo el nombre a Faro Azul en ACUERDOS.json. "
+    "Conserva todos los demás acuerdos y verifica el JSON.",
+    "Cambiá el nombre en ACUERDOS.json a Faro Azul y verificar el JSON sin cambiar las otras claves.",
+    "Cambiá el nombre en ACUERDOS.json a Faro Azul. Conservá los otros acuerdos y verificá el JSON.",
+])
+def test_explicit_spanish_edit_is_delivery_without_metadata_model_call(message):
+    from infinidev.engine.engines.task import _bootstrap_step
+    from infinidev.engine.loop.loop_plan import _step_phase
+    from infinidev.engine.orchestration.escalation_packet import EscalationPacket
+    from infinidev.engine.orchestration.staged_pipeline import _goal_from_escalation, _task_kind
+
+    def unnecessary_classifier(_text):
+        pytest.fail("A grounded literal edit needs no extra method-classification request")
+
+    profile = resolve_task_profile(
+        message, llm_classifier_mode="fallback", classifier=unnecessary_classifier,
+    )
+    goal = _goal_from_escalation(EscalationPacket(
+        user_request=message, understanding="", task_profile=profile,
+    ))
+    step = _bootstrap_step(SimpleNamespace(title=goal.title, kind=_task_kind(goal.intent, "delivery")))
+
+    assert "modify" in profile.authority
+    assert profile.llm_classifier_used is False
+    assert goal.intent == "implementation"
+    assert _step_phase(step.title) == "change"
+
+
+@pytest.mark.parametrize("message", [
+    "¿Por qué cambia el nombre en ACUERDOS.json? Solo explica.",
+    'El mensaje dice "cambia el nombre"; ¿qué significa?',
+    "No cambies el nombre en ACUERDOS.json; solo revisalo.",
+    "Si cambiara el nombre en ACUERDOS.json, ¿qué pasaría?",
+])
+def test_describing_or_forbidding_spanish_edit_does_not_authorize_it(message):
+    profile = resolve_task_profile(message)
+    assert "modify" not in profile.authority

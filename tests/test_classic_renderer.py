@@ -373,3 +373,24 @@ def test_status_renderer_shows_elapsed_when_running(status):
     assert "s" in flat  # elapsed segment
     # Elapsed should be ~7s.
     assert any(ch.isdigit() for ch in flat)
+
+
+def test_chat_activity_starts_timer_and_fast_result_returns():
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    status = cr.SessionStatus()
+    # Bound the test even if a completed worker fails to wake the UI at startup.
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        watchdog = threading.Timer(2.0, lambda: pipe.send_text("\x03\x03"))
+        watchdog.start()
+        try:
+            result = cr.run_with_live_status(
+                None, lambda: status.run_started_at is not None, status,
+            )
+        finally:
+            watchdog.cancel()
+
+    assert result is True
+    assert status.run_started_at is None

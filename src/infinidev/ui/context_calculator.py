@@ -111,6 +111,39 @@ class ContextWindowCalculator:
         if prompt_tokens > 0:
             self._last_prompt_tokens = prompt_tokens
 
+    def _over_budget_advice(self) -> str:
+        """Name the knob that can actually widen the window for this backend.
+
+        ``INFINIDEV_OLLAMA_NUM_CTX`` is only ever sent to Ollama — every place
+        that builds the request gates it on ``provider_id == "ollama"`` — so
+        quoting it at a llama.cpp or vLLM user points at a setting that does
+        nothing. A self-hosted server allocates its window when it starts, so
+        the knob there is the server's own flag, and
+        ``INFINIDEV_LLM_CONTEXT_WINDOW`` is only the override for what Infinidev
+        *assumes*, never what the server serves. A cloud limit is not the
+        user's to raise, so the only lever there is a shorter prompt.
+        """
+        from infinidev.config.settings import settings
+        from infinidev.engine.loop.model_context import _is_ollama, _is_self_hosted_openai
+
+        # The configured id keeps its provider prefix, which is what lets
+        # ``_is_self_hosted_openai`` recognise an unregistered provider id
+        # routed through the generic OpenAI transport. ``self.model_name`` is
+        # the bare display name and cannot carry that signal.
+        model = settings.LLM_MODEL or self.model_name or ""
+        provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
+
+        if _is_ollama(model, provider_id):
+            return "Raise INFINIDEV_OLLAMA_NUM_CTX or shorten the task."
+        if _is_self_hosted_openai(model, provider_id):
+            return (
+                "Raise the window where it is allocated — llama-server "
+                "--ctx-size, vLLM --max-model-len — or shorten the task. "
+                "INFINIDEV_LLM_CONTEXT_WINDOW only changes what Infinidev "
+                "assumes, not what the server serves."
+            )
+        return "The provider's limit is fixed; shorten the task."
+
     def update_task(self, task_prompt_tokens: int = 0) -> None:
         """Update task context with the exact prompt_tokens from the last LLM call."""
         if task_prompt_tokens:
@@ -125,10 +158,10 @@ class ContextWindowCalculator:
                 self._warned_over_budget = True
                 logger.warning(
                     "Prompt (%d tokens) exceeds the model's effective context "
-                    "window (%d) — the backend is truncating context. Raise "
-                    "INFINIDEV_OLLAMA_NUM_CTX or shorten the task.",
+                    "window (%d) — the backend is truncating context. %s",
                     task_prompt_tokens,
                     self.max_context,
+                    self._over_budget_advice(),
                 )
 
     def start_task(self) -> None:

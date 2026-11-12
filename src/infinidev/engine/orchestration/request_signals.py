@@ -9,17 +9,17 @@ import re
 _EXECUTION_ACTION_RE = re.compile(
     r"\b(?:add|implement|fix|change|update|remove|delete|refactor|create|write|"
     r"build|run|execute|agreg(?:a|ar)|implement(?:a|ar)|arregl(?:a|ar|á)|"
-    r"cambi(?:a|ar)|actualiz(?:a|ar)|elimin(?:a|ar)|cre(?:a|ar)|ejecut(?:a|ar))\b",
+    r"cambi(?:a|ar|á)|actualiz(?:a|ar)|elimin(?:a|ar)|cre(?:a|ar)|ejecut(?:a|ar))\b",
     re.IGNORECASE,
 )
 _EXECUTION_TARGET_RE = re.compile(
     r"\b(?:repo(?:sitory)?|codebase|code|bug|function|helper|class|module|"
     r"archivo|repositorio|c[oó]digo|funci[oó]n|clase|m[oó]dulo)\b|"
-    r"(?:^|\s)(?:src|tests?)/\S+|\b\w+\.(?:py|js|ts|rs|go|java|c|cpp|h)\b",
+    r"(?:^|\s)(?:src|tests?)/\S+|\b\w+\.(?:py|js|ts|rs|go|java|c|cpp|h|json)\b",
     re.IGNORECASE,
 )
 _EXECUTION_VERIFY_RE = re.compile(
-    r"\b(?:tests?|pytest|verify|validate|pruebas?|probar|verificar|validar)\b",
+    r"\b(?:tests?|pytest|verify|validate|pruebas?|probar|verific(?:a|ar|á)|valid(?:a|ar|á))\b",
     re.IGNORECASE,
 )
 _INFORMATIONAL_RE = re.compile(
@@ -44,7 +44,7 @@ _NO_EXECUTION_RE = re.compile(
 # grounding for a substantial request.
 _CONCRETE_TARGET_RE = re.compile(
     r"(?:^|\s)(?:src|tests?)/[^\s,;]+|"
-    r"\b\w+\.(?:py|js|ts|rs|go|java|c|cpp|h)\b|"
+    r"\b\w+\.(?:py|js|ts|rs|go|java|c|cpp|h|json)\b|"
     r"`[^`]+`|"
     r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\b"
 )
@@ -53,6 +53,12 @@ _BEHAVIOR_CONTRACT_RE = re.compile(
     r"cover(?:s|ing)?|cases?|debe|cuando|lanzar|devolver|aceptar|rechazar|"
     r"preservar|sin\s+cambiar|casos?)\b",
     re.IGNORECASE,
+)
+_SPANISH_SCOPE_CONSTRAINT_RE = re.compile(
+    r"\b(?:conserv(?:a|ar|á)|no\s+agregues\s+dependencias)\b", re.IGNORECASE,
+)
+_FILE_SPEC_DETAILS_RE = re.compile(
+    r"\b(?:claves\s+\w+|decisiones\s+vigentes|acuerdos)\b", re.IGNORECASE,
 )
 _REFERENCED_CONTINUATION_RE = re.compile(
     r"\b(?:continue|resume|continua|continuar|reanuda|reanudar)\b",
@@ -91,7 +97,13 @@ def is_grounded_execution_request(user_input: str) -> bool:
     return (
         explicit_execution_score(text) >= 4
         and _CONCRETE_TARGET_RE.search(text) is not None
-        and _BEHAVIOR_CONTRACT_RE.search(text) is not None
+        and (
+            _BEHAVIOR_CONTRACT_RE.search(text) is not None
+            or (
+                _SPANISH_SCOPE_CONSTRAINT_RE.search(text) is not None
+                and _FILE_SPEC_DETAILS_RE.search(text) is not None
+            )
+        )
     )
 
 

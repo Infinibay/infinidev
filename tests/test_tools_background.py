@@ -5,11 +5,13 @@ import time
 
 import pytest
 
+from infinidev.tools.shell import background_manager as bg_module
 from infinidev.tools.shell.background_manager import (
     BackgroundTaskManager,
     acknowledge_completion,
     drain_completed_notifications,
     get_background_manager,
+    shutdown_background_tasks,
 )
 from infinidev.tools.shell.run_in_background import RunInBackgroundTool
 from infinidev.tools.shell.background_status import BackgroundStatusTool
@@ -25,6 +27,28 @@ def _wait_for(predicate, timeout=5.0, interval=0.05):
             return True
         time.sleep(interval)
     return False
+
+
+class TestShutdownBackgroundTasks:
+    """The helper the CLI's ``os._exit`` path calls in place of atexit."""
+
+    def test_kills_surviving_task_in_the_singleton(self, monkeypatch, tmp_path):
+        # A fresh singleton per test; monkeypatch restores the previous one.
+        monkeypatch.setattr(bg_module, "_manager", None)
+        task = get_background_manager().start("sleep 300", "long sleep", str(tmp_path))
+        assert task.is_running
+
+        assert shutdown_background_tasks() is True
+
+        assert not task.is_running
+        assert task.killed_reason == "Process exit cleanup"
+
+    def test_no_manager_created_when_no_job_ever_ran(self, monkeypatch):
+        """A process that never ran a job must not gain a manager or atexit hook."""
+        monkeypatch.setattr(bg_module, "_manager", None)
+
+        assert shutdown_background_tasks() is False
+        assert bg_module._manager is None
 
 
 class TestBackgroundManager:

@@ -754,3 +754,26 @@ class TestEscalateFinalizesOrphanedStream:
         )
         # Nothing was streamed — no orphaned bubble to finalize.
         assert hooks.stream_ends == []
+
+
+def test_chat_cancel_closes_stream_without_publishing_remaining_text():
+    from infinidev.engine.orchestration.chat_agent import _ChatCancelled, _consume_stream
+
+    cancelled = False
+    closed = False
+    hooks = _RecordingHooks()
+
+    class Stream:
+        def __iter__(self):
+            nonlocal cancelled
+            cancelled = True
+            yield _Chunk(choices=[_Choice(delta=_Delta(content="stale answer"))])
+
+        def close(self):
+            nonlocal closed
+            closed = True
+
+    with pytest.raises(_ChatCancelled):
+        _consume_stream(Stream(), hooks, cancel_check=lambda: cancelled)
+    assert closed
+    assert hooks.chunks == []

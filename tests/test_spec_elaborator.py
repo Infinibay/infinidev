@@ -347,3 +347,30 @@ def test_render_handoff_includes_grounded_spec():
     rendered = _render_handoff(packet)
     assert "GROUNDED SPEC" in rendered
     assert "token bucket" in rendered
+
+
+@pytest.mark.parametrize("message", [
+    "Ahora crea solamente ACUERDOS.json con las decisiones vigentes. Usa claves nombre, "
+    "base_de_datos y duracion_minutos. No agregues dependencias ni cambies otros archivos. "
+    "Verifica que el JSON se pueda leer con Python.",
+    "Corrección: cambia solo el nombre a Faro Azul en ACUERDOS.json. "
+    "Conserva todos los demás acuerdos y verifica el JSON.",
+])
+def test_concrete_spanish_file_followup_skips_redundant_spec_passes(message):
+    escalation = EscalationPacket(user_request=message, understanding=message)
+    assert se.should_elaborate(escalation) is False
+
+
+def test_ambiguous_json_request_still_needs_grounding():
+    request = "Crea configuracion.json y verifica que sea correcto para nuestra aplicación."
+    escalation = EscalationPacket(user_request=request, understanding=request)
+    assert se.should_elaborate(escalation) is True
+
+
+@pytest.mark.parametrize("constraint", [
+    "No agregues dependencias.", "Conserva el estilo existente.",
+])
+def test_scope_constraint_does_not_ground_unspecified_json(constraint):
+    message = "Crea configuracion.json y verifica que sea correcto para nuestra aplicación. "
+    escalation = EscalationPacket(user_request=message + constraint, understanding=message)
+    assert se.should_elaborate(escalation) is True

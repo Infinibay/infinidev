@@ -81,6 +81,81 @@ _THINK_OPEN_RE = _re.compile(rf"<(?:{_THINK_TAGS})>", _re.IGNORECASE)
 _THINK_CLOSE_RE = _re.compile(rf"</(?:{_THINK_TAGS})>", _re.IGNORECASE)
 
 
+# A backend that serialises its JSON with ``ensure_ascii=True`` and then
+# re-wraps the payload hands the escapes over as *text*: the user reads
+# ``\u00a1Hola! \ud83d\udc4b`` instead of ``¡Hola! 👋``. Nothing on the
+# inbound path decodes them, so the TUI paints them verbatim.
+#
+# Deliberately narrow, because the same text can be a code sample the model
+# is quoting on purpose:
+#   * only ``\uXXXX`` — never ``codecs`` ``unicode_escape``, which destroys
+#     real UTF-8 and every backslash in the snippet;
+#   * only while the text is still pure ASCII, so an already-decoded reply
+#     is never reinterpreted;
+#   * never inside a code span or fence.
+_UNICODE_ESCAPE_RE = _re.compile(r"(?<!\\)\\u([0-9a-fA-F]{4})")
+# ``\ud83d\udc4b`` is one emoji carried as a UTF-16 surrogate pair; decoding
+# the halves separately would put unencodable lone surrogates in the string.
+_SURROGATE_PAIR_RE = _re.compile(
+    r"(?<!\\)\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})"
+)
+_CODE_REGION_RE = _re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]+`", _re.DOTALL)
+# Codepoints that must stay escaped: a control character or a JSON structural
+# character decoded inside a content blob would take a tool-call payload the
+# FC-fallback still has to parse down with it.
+_UNSAFE_DECODED = frozenset('"\\{}[],') | frozenset(chr(c) for c in range(0x20))
+
+
+def _decode_escapes(chunk: str) -> str:
+    r"""Decode ``\uXXXX`` escapes (surrogate pairs included) in *chunk*."""
+    if "\\u" not in chunk:
+        return chunk
+
+    def _pair(match: _re.Match[str]) -> str:
+        high = int(match.group(1), 16)
+        low = int(match.group(2), 16)
+        return chr(0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00))
+
+    def _single(match: _re.Match[str]) -> str:
+        code = int(match.group(1), 16)
+        if 0xD800 <= code <= 0xDFFF:
+            return match.group(0)  # lone surrogate: leave it as written
+        if chr(code) in _UNSAFE_DECODED:
+            return match.group(0)
+        return chr(code)
+
+    decoded = _SURROGATE_PAIR_RE.sub(_pair, chunk)
+    return _UNICODE_ESCAPE_RE.sub(_single, decoded)
+
+
+def decode_literal_unicode_escapes(text: str) -> str:
+    r"""Repair ASCII-escaped provider text without touching code samples.
+
+    Returns *text* unchanged unless it looks like a payload that was
+    serialised twice: pure ASCII carrying at least one ``\uXXXX`` escape.
+    Code spans and fenced blocks are copied through verbatim, and any
+    failure returns the original string — a wrong guess must never cost the
+    user the message.
+    """
+    if "\\u" not in text or not text.isascii():
+        return text
+    try:
+        if text.count("```") % 2:
+            # Unterminated fence: everything after it is code, not prose.
+            head, sep, tail = text.rpartition("```")
+            return _decode_escapes(head) + sep + tail
+        parts: list[str] = []
+        pos = 0
+        for region in _CODE_REGION_RE.finditer(text):
+            parts.append(_decode_escapes(text[pos:region.start()]))
+            parts.append(region.group(0))
+            pos = region.end()
+        parts.append(_decode_escapes(text[pos:]))
+        return "".join(parts)
+    except (ValueError, OverflowError, RecursionError):
+        return text
+
+
 def normalize_message_text(value: Any) -> str:
     """Return provider message content as text without losing structured data.
 
@@ -89,21 +164,27 @@ def normalize_message_text(value: Any) -> str:
     list of blocks).  The rest of the engine deliberately operates on text,
     so normalize that provider variance once instead of letting a later
     ``.strip()`` fail mid-task.
+
+    Text leaves here already readable: a backend that ASCII-escapes its
+    payload is repaired once, at the boundary every consumer shares, instead
+    of in each renderer.
     """
     if value is None:
         return ""
     if isinstance(value, str):
-        return value
+        return decode_literal_unicode_escapes(value)
     if isinstance(value, list):
         parts = [normalize_message_text(item) for item in value]
         return "\n".join(part for part in parts if part)
     if isinstance(value, dict):
         text = value.get("text")
         if isinstance(text, str):
-            return text
+            return decode_literal_unicode_escapes(text)
         if isinstance(text, dict) and isinstance(text.get("value"), str):
-            return text["value"]
+            return decode_literal_unicode_escapes(text["value"])
         try:
+            # Unknown shapes stay machine-parseable for the tool-call
+            # parsers downstream — they are not prose.
             return json.dumps(value, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
             return str(value)
@@ -278,6 +359,12 @@ def promote_embedded_think(message: Any) -> None:
     raw_content = getattr(message, "content", None)
     existing = normalize_message_text(raw_existing).strip()
     content = normalize_message_text(raw_content)
+    if isinstance(raw_content, str) and content != raw_content:
+        # The transcript persists ``message.content`` verbatim, so an escaped
+        # reply left here comes back in the next turn's history — and the
+        # model starts imitating its own escapes.
+        with best_effort("decode escaped message content failed"):
+            message.content = content
     if not isinstance(raw_content, str):
         with best_effort("normalize structured message content failed"):
             message.content = content

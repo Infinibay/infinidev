@@ -41,7 +41,7 @@ SEPARATOR = "  ·  "
 # list lives behind `?`, which is the last hint to be dropped.
 STATUS_HINTS: tuple[tuple[str, str], ...] = (
     ("?", "help"),
-    ("^C", "stop"),
+    ("Esc", "stop"),
     ("^D", "exit"),
 )
 

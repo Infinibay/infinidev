@@ -661,6 +661,7 @@ def run_with_live_status(
     result_holder: list = []
     error_holder: list[BaseException] = []
     cancel_state = {"presses": 0, "last_press": 0.0}
+    status.run_started_at = time.monotonic()
 
     def _worker() -> None:
         try:
@@ -729,9 +730,15 @@ def run_with_live_status(
 
     threading.Thread(target=_waiter, daemon=True).start()
 
+    def _on_start() -> None:
+        # A fast chat reply can finish before app.loop exists, so the waiter
+        # cannot wake it. Check again on the UI thread after startup.
+        if done.is_set():
+            app.exit()
+
     try:
         with patch_stdout(raw=True):
-            app.run()
+            app.run(pre_run=_on_start)
     except KeyboardInterrupt:
         # Force-exit path: tell engine to cancel and wait for the
         # worker to wind down so we don't leak partial state.
@@ -741,6 +748,8 @@ def run_with_live_status(
             pass
         done.wait(timeout=10.0)
         raise
+    finally:
+        status.run_started_at = None
 
     if error_holder:
         raise error_holder[0]

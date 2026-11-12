@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     DB_PATH: str = Field(default_factory=lambda: str(get_db_path()))
     MAX_RETRIES: int = 5
     RETRY_BASE_DELAY: float = 0.1
+    # Session retention: how many newest sessions of a workspace survive when a
+    # new session is registered. 0 disables pruning.
+    SESSION_RETENTION_COUNT: int = 5
 
     # Timeouts
     COMMAND_TIMEOUT: int = 120
@@ -144,6 +147,13 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.2  # Default temp for the developer loop. Low values favour reliable tool-calling and deterministic edits. Set < 0 to defer to the model/provider default.
     # Zero leaves context allocation to Ollama; a positive value pins num_ctx.
     OLLAMA_NUM_CTX: int = 0
+    # Declares the context window of a backend Infinidev cannot size by itself
+    # (a self-hosted OpenAI-compatible server that exposes no limit endpoint,
+    # or one whose advertised limit is wrong). Wins over every lookup, including
+    # Ollama's trained length, because it is the user asserting real capacity.
+    # Zero means "figure it out"; an over-stated window is worse than an
+    # unknown one, so never set this above what the server actually serves.
+    LLM_CONTEXT_WINDOW: int = 0
     # Opt-in, release-gated guidance selected by the behavioral calibration lab.
     # The profile must match provider/model, immutable model identity, and the
     # active utility profile exactly, and carry an approved guidance hash.
@@ -278,12 +288,8 @@ class Settings(BaseSettings):
     # behaviour, where the gate flipped the step result without telling the
     # model and the model answered by retrying the same rejected close.
     LOOP_CLOSURE_FEEDBACK_ENABLED: bool = True
-    # Ask once, per Task, for a `final_answer` that names a command the user can
-    # run, when the model's own evidence_summary named one and the answer did
-    # not. Measured over 25 planning runs: 18 named a command, so this stays
-    # quiet on the majority. It never ends a run — after one refusal the close is
-    # accepted as it stands, because the work exists and only the wording is
-    # short. False accepts every final answer exactly as written.
+    # Log a missing verification command in the final answer. This is a
+    # wording observation; it must not reopen already completed work.
     LOOP_HANDOFF_NOTICE_ENABLED: bool = True
     # Ask the model to issue its independent discovery calls in one response
     # after two consecutive single-read rounds. Default OFF because it was
@@ -328,7 +334,7 @@ class Settings(BaseSettings):
     # the developer loop did (files + why, per-file changes, challenges) so
     # the NEXT turn's chat agent has continuity instead of starting cold.
     LOOP_WORK_SUMMARY_ENABLED: bool = True  # Generate the hidden end-of-task summary
-    LOOP_WORK_SUMMARY_USE_LLM: bool = True  # Synthesize via the model (vs. deterministic assembly only)
+    LOOP_WORK_SUMMARY_USE_LLM: bool = True  # Compress large handoffs; compact facts need no model
 
     # ── Spec elaboration ─────────────────────────────────────────────
     # Turns a vague requirement into a grounded spec BEFORE planning.

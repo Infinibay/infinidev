@@ -417,7 +417,9 @@ def build_iteration_prompt(
     # Note-taking nudges — two tiers: a gentle reminder when recent
     # tool calls haven't produced a note, and a stronger warning when a
     # step completed without ANY notes at all.
-    note_nudge = _render_note_nudge(state, small_model)
+    note_nudge = _render_note_nudge(
+        state, small_model, max_context_tokens=max_context_tokens,
+    )
     if note_nudge:
         optional("iteration.note_nudge", note_nudge)
 
@@ -1103,7 +1105,9 @@ def _render_notes(state: LoopState) -> str:
     )
 
 
-def _render_note_nudge(state: LoopState, small_model: bool) -> str:
+def _render_note_nudge(
+    state: LoopState, small_model: bool, *, max_context_tokens: int = 0,
+) -> str:
     """Build the note-taking nudge block, or empty if none applies.
 
     Two independent tiers fire:
@@ -1112,6 +1116,12 @@ def _render_note_nudge(state: LoopState, small_model: bool) -> str:
     Both can fire in the same iteration; they address different
     failure modes. Kept separate in the rendered output for clarity.
     """
+    from infinidev.engine.loop.context_manager import ContextManager
+
+    if max_context_tokens > 0 and not ContextManager.under_context_pressure(
+        int(getattr(state, "last_prompt_tokens", 0) or 0), max_context_tokens,
+    ):
+        return ""
     blocks: list[str] = []
 
     if state.tool_calls_since_last_note >= 4 and state.total_tool_calls >= 4:

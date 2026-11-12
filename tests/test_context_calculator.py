@@ -110,6 +110,90 @@ class TestContextWindowCalculator:
         assert calc.task_remaining == 0
         assert calc.task_usage_percentage == 1.0
 
+    def _over_budget_warning(self, monkeypatch, caplog, provider_id, model):
+        """Drive the one-shot overflow warning for a given backend."""
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "LLM_PROVIDER", provider_id)
+        monkeypatch.setattr(settings, "LLM_MODEL", model)
+        monkeypatch.setattr(settings, "OLLAMA_NUM_CTX", 0)
+        monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW", 0)
+
+        caplog.set_level("WARNING", logger="infinidev.ui.context_calculator")
+        calc = ContextWindowCalculator(model_name=model, max_context=1000)
+        calc.update_task(task_prompt_tokens=1500)
+        return "\n".join(r.message for r in caplog.records)
+
+    def test_over_budget_warning_names_ollama_knob_for_ollama(self, monkeypatch, caplog):
+        """Ollama is the one backend that takes num_ctx from a setting."""
+        message = self._over_budget_warning(
+            monkeypatch, caplog, "ollama", "ollama_chat/qwen3"
+        )
+        assert "INFINIDEV_OLLAMA_NUM_CTX" in message
+        assert "INFINIDEV_LLM_CONTEXT_WINDOW" not in message
+
+    @pytest.mark.parametrize("provider_id", ["llama_cpp", "vllm", "openai_compatible"])
+    def test_over_budget_warning_names_server_flag_when_self_hosted(
+        self, monkeypatch, caplog, provider_id
+    ):
+        """A self-hosted server allocates its own window; num_ctx is Ollama-only.
+
+        Telling a llama.cpp/vLLM user to raise INFINIDEV_OLLAMA_NUM_CTX points
+        at a variable config/llm.py never sends them, and raising
+        INFINIDEV_LLM_CONTEXT_WINDOW alone would only make Infinidev assume a
+        window the server still truncates to.
+        """
+        message = self._over_budget_warning(
+            monkeypatch, caplog, provider_id, "custom_openai/qwen"
+        )
+        assert "INFINIDEV_OLLAMA_NUM_CTX" not in message
+        assert "--ctx-size" in message
+        assert "--max-model-len" in message
+        assert "INFINIDEV_LLM_CONTEXT_WINDOW" in message
+
+    def test_over_budget_warning_names_server_flag_for_unregistered_provider(
+        self, monkeypatch, caplog
+    ):
+        """An id outside the registry still reaches the generic OpenAI transport.
+
+        ``_is_self_hosted_openai`` falls back to the ``custom_openai/`` prefix
+        in that case, which only works because the advice reads the configured
+        model id with its prefix rather than the bare display name.
+        """
+        message = self._over_budget_warning(
+            monkeypatch, caplog, "strata", "custom_openai/qwen"
+        )
+        assert "INFINIDEV_OLLAMA_NUM_CTX" not in message
+        assert "--ctx-size" in message
+
+    def test_over_budget_warning_names_no_setting_for_cloud(self, monkeypatch, caplog):
+        """A cloud limit isn't the user's to raise, so only the prompt is."""
+        message = self._over_budget_warning(
+            monkeypatch, caplog, "anthropic", "anthropic/claude-sonnet-5"
+        )
+        assert "INFINIDEV_OLLAMA_NUM_CTX" not in message
+        assert "INFINIDEV_LLM_CONTEXT_WINDOW" not in message
+        assert "shorten the task" in message
+
+    def test_over_budget_warning_fires_once_per_task(self, monkeypatch, caplog):
+        """The one-shot fuse still holds after the advice became a method call."""
+        from infinidev.config.settings import settings
+
+        monkeypatch.setattr(settings, "LLM_PROVIDER", "llama_cpp")
+        monkeypatch.setattr(settings, "LLM_MODEL", "custom_openai/qwen")
+
+        caplog.set_level("WARNING", logger="infinidev.ui.context_calculator")
+        calc = ContextWindowCalculator(model_name="qwen", max_context=1000)
+        calc.update_task(task_prompt_tokens=1500)
+        calc.update_task(task_prompt_tokens=1800)
+        warnings = [r for r in caplog.records if "truncating context" in r.message]
+        assert len(warnings) == 1
+
+        calc.start_task()
+        calc.update_task(task_prompt_tokens=1500)
+        warnings = [r for r in caplog.records if "truncating context" in r.message]
+        assert len(warnings) == 2
+
     def test_context_status_format(self):
         """Test context status dictionary format."""
         calc = ContextWindowCalculator(

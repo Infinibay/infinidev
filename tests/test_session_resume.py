@@ -10,6 +10,7 @@ import os
 
 import pytest
 
+from infinidev.config.settings import settings
 from infinidev.db.service import (
     delete_session,
     get_all_turns,
@@ -75,7 +76,10 @@ class TestSessionRegistry:
         ids = [s["session_id"] for s in list_recent_sessions("/work")]
         assert ids == ["used"]
 
-    def test_recent_sessions_can_return_complete_history(self, temp_db):
+    def test_recent_sessions_can_return_complete_history(self, temp_db, monkeypatch):
+        # Retention would prune all but the newest sessions; this test is about
+        # the listing limits, so pruning is switched off here.
+        monkeypatch.setattr(settings, "SESSION_RETENTION_COUNT", 0)
         for index in range(25):
             session_id = f"session-{index}"
             register_session(session_id, "/work")
@@ -248,9 +252,12 @@ class TestSessionRegistry:
         assert get_session_storage_bytes("missing") == 0
         assert get_session_storage_bytes("") == 0
 
-    def test_storage_bytes_batches_large_session_histories(self, temp_db):
+    def test_storage_bytes_batches_large_session_histories(self, temp_db, monkeypatch):
         from infinidev.db.service import get_sessions_storage_bytes
 
+        # 1001 sessions exist only to exceed the SQL variable batch size;
+        # retention would otherwise delete all but the newest few.
+        monkeypatch.setattr(settings, "SESSION_RETENTION_COUNT", 0)
         session_ids = [f"session-{index}" for index in range(1001)]
         for session_id in session_ids:
             register_session(session_id, "/work")
@@ -1001,11 +1008,12 @@ class TestResumeContextReplay:
         assert "<resumed-session-state>" not in second
 
 
-    def test_resume_uses_compact_conversation_tail_not_200_turn_replay(
-        self, temp_db
+    def test_resume_preserves_conversation_decisions_within_capacity(
+        self, temp_db, monkeypatch
     ):
         from infinidev.engine.orchestration import chat_agent as ca
 
+        monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW", 262_144)
         register_session("compact-tail", "/work")
         for index in range(20):
             store_conversation_turn("compact-tail", "user", f"turn-{index}")
@@ -1014,8 +1022,8 @@ class TestResumeContextReplay:
         prompt = ca._build_user_message("continue", "compact-tail")
 
         assert isinstance(prompt, str)
-        assert "turn-0" not in prompt
-        assert "turn-13" not in prompt
+        assert "turn-0" in prompt
+        assert "turn-13" in prompt
         assert "turn-14" in prompt
         assert "turn-19" in prompt
 

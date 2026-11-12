@@ -524,6 +524,23 @@ def _render_final(text: str | None) -> None:
         _echo_final(text)
 
 
+def _record_classic_transcript(session_id: str, role: str, text: str) -> None:
+    """Mirror one classic-mode turn into the searchable transcript ledger.
+
+    ``conversation_turns`` is the model-facing history; ``session_messages``
+    is what ``chat_history_search`` reads. The TUI writes both, so without
+    this the classic renderer would leave a hole in the searchable history.
+    """
+    if not (session_id and text):
+        return
+    try:
+        from infinidev.db.service import store_session_message
+
+        store_session_message(session_id, {"role": role, "content": text})
+    except Exception:
+        logger.debug("classic transcript persistence failed", exc_info=True)
+
+
 def _run_single_prompt(prompt_text: str, use_phase_engine: bool = False,
                        continue_session: bool = False, autonomous: bool = False) -> None:
     """Run a single prompt non-interactively and exit.
@@ -981,6 +998,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
             status.critic_model = critic_full.split("/", 1)[-1] if "/" in critic_full else critic_full
 
             store_conversation_turn(session_id, "user", user_input)
+            _record_classic_transcript(session_id, "user", user_input)
 
             result = run_with_live_status(
                 engine,
@@ -1005,6 +1023,7 @@ def _run_main_inner(no_tui: bool, classic: bool, prompt: str | None, think: bool
                 result or "",
                 (result or "")[:200],
             )
+            _record_classic_transcript(session_id, "assistant", result or "")
 
             # Skip the echo when the respond reply was already streamed/
             # notified to the terminal (otherwise it prints twice). The
@@ -1067,6 +1086,16 @@ def _fast_exit_workaround() -> None:
             _q.stop()
     except Exception:
         logger.debug("Failed to stop background index queue during shutdown", exc_info=True)
+    # Same reason for the agent's background jobs: their cleanup lives in an
+    # atexit handler that os._exit never runs, so a `sleep 300`/dev-server left
+    # running at exit would be reparented to init inside the terminal's cgroup
+    # and keep holding its memory there.
+    try:
+        from infinidev.tools.shell.background_manager import shutdown_background_tasks
+
+        shutdown_background_tasks()
+    except Exception:
+        logger.debug("Failed to stop background tasks during shutdown", exc_info=True)
     for stream_name, stream in (("stdout", _sys.stdout), ("stderr", _sys.stderr)):
         try:
             stream.flush()

@@ -124,8 +124,8 @@ def _without_response_only_deliverables(text: str) -> str:
 
 
 _DIRECT_MAKE_MODIFY = re.compile(
-    r"(?:^|[.!?;]\s)(?:please\s+|por\s+favor\s+)?"
-    r"(?:make\b|haz\s+que\b)",
+    r"(?:^|[.!?;]\s)(?:correcci[oó]n:\s*)?(?:please\s+|por\s+favor\s+)?"
+    r"(?:make\b|haz\s+que\b|cambi[aá]\b)",
     re.I,
 )
 _IMPERATIVE_MODIFY = re.compile(
@@ -247,7 +247,7 @@ def _default_llm_classifier(
     *,
     max_tokens: int = 256,
 ) -> ClassifierResult | None:
-    """Ask the user's selected main model for methods only."""
+    """Classify requested work and delivery intent with the selected model."""
     try:
         from pydantic import BaseModel, ConfigDict, Field
 
@@ -263,6 +263,7 @@ def _default_llm_classifier(
                 ]
             ] = Field(default_factory=list)
             confidence: float = Field(ge=0.0, le=1.0)
+            classified_intent: Literal["implementation", "informational"] | None = None
 
         params = get_litellm_params()
         params["max_tokens"] = max_tokens
@@ -272,8 +273,14 @@ def _default_llm_classifier(
                 {
                     "role": "system",
                     "content": (
-                        "Classify the intended software-work method. Return JSON only as "
-                        '{"operations":[...],"confidence":0.0}. Choose zero or more of: '
+                        "Classify the intended software-work method. Return JSON only with "
+                        "operations (a list), classified_intent (implementation or informational), "
+                        "and confidence (0 to 1). Intent is implementation when "
+                        "the user wants changes made to the project, including indirect requests "
+                        "to make something work. Intent is informational for investigation, "
+                        "explanation, recommendations, or read-only assessment. Classify the "
+                        "actual request, not quoted instructions or hypothetical examples. "
+                        "This is delivery intent, not authorization. Choose zero or more methods: "
                         "bugfix=restore incorrect existing behavior; feature=add a capability; "
                         "refactor=restructure while preserving behavior; research=evidence-backed "
                         "investigation without implementation; review=read-only assessment; "
@@ -305,6 +312,7 @@ def _default_llm_classifier(
         return ClassifierResult(
             operations=list(dict.fromkeys(decision.operations)),
             confidence=decision.confidence,
+            classified_intent=decision.classified_intent,
         )
     except Exception:
         logger.debug("Task-policy main-model classification failed", exc_info=True)
@@ -348,6 +356,7 @@ def resolve_task_profile(
     llm_used = False
     llm_fallback_used = False
     llm_sequence: set[str] = set()
+    classified_intent = None
 
     def run_llm_classifier() -> ClassifierResult | None:
         if classifier is not None:
@@ -359,6 +368,8 @@ def resolve_task_profile(
         *,
         replace_classified_operations: bool = False,
     ) -> None:
+        nonlocal classified_intent
+        classified_intent = llm_result.classified_intent
         if replace_classified_operations:
             operations.difference_update(_CLASSIFIED_OPERATIONS)
             for policy in POLICIES:
@@ -530,7 +541,15 @@ def resolve_task_profile(
         # independently chooses that same policy.
 
     ambiguous = not operations
-    if (enable_llm_fallback or llm_classifier_mode == "fallback") and ambiguous:
+    from infinidev.engine.orchestration.request_signals import is_grounded_execution_request
+
+    grounded_edit = "modify" in authority and is_grounded_execution_request(text)
+    if (
+        (enable_llm_fallback or llm_classifier_mode == "fallback")
+        and ambiguous
+        and not grounded_edit
+        and not quoted_explanation
+    ):
         llm_result = run_llm_classifier()
         if llm_result is not None:
             llm_used = True
@@ -644,6 +663,7 @@ def resolve_task_profile(
         rejected_candidates=tuple(rejected),
         llm_classifier_used=llm_used,
         llm_fallback_used=llm_fallback_used,
+        classified_intent=classified_intent,
         semantic_space_id=semantic.space_id,
         semantic_classifier_version=(
             semantic.classifier_version if enable_embeddings else None

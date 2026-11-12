@@ -139,6 +139,7 @@ def run_engine_task(
         app.add_message("Error", str(e), "system")
     finally:
         app._engine_running = False
+        app._pipeline_phase = "idle"
         app._chat_history_control.busy = False
         app._context_flow = ""
         # Zero the transient streaming state at the turn boundary. The
@@ -391,7 +392,9 @@ def _drain_pending(app: InfinidevApp) -> None:
     """Process the next queued input if any."""
     if app._pending_inputs:
         next_input = app._pending_inputs.pop(0)
+        text, attachments = next_input if isinstance(next_input, tuple) else (next_input, [])
         app._engine_running = True
         app._chat_history_control.show_thinking = True
+        app._chat_history_control.busy = True
         app.invalidate()
-        run_in_background(app, run_engine_task, app, next_input, exclusive=True)
+        run_in_background(app, run_engine_task, app, text, attachments, exclusive=True)

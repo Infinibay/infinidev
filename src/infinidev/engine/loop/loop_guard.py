@@ -460,8 +460,14 @@ class LoopGuard:
     def check_note_discipline(
         self, ctx: ExecutionContext, messages: list[dict[str, Any]],
     ) -> None:
-        """Nudge small models to save notes after multiple reads without noting."""
+        """Preserve findings before context pressure can evict their source."""
         if not self._is_small:
+            return
+        from infinidev.engine.loop.context_manager import ContextManager
+
+        used = int(getattr(ctx.state, "last_prompt_tokens", 0) or 0)
+        capacity = int(getattr(ctx, "max_context_tokens", 0) or 0)
+        if not ContextManager.under_context_pressure(used, capacity):
             return
         if self.reads_since_last_note >= 2 and not self._note_nudged:
             self._note_nudged = True

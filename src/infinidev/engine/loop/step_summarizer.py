@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import Any
 
 from infinidev.config.settings import settings
@@ -108,6 +109,15 @@ def _summarize_step(
         "anti_patterns": "",
     }
 
+    # The accepted terminal call already supplies the handoff. There is no
+    # next Step to plan or preload; full tool evidence is archived separately.
+    if (
+        step_result.status == "done"
+        and not step_result.interrupted
+        and not state.plan.has_pending
+    ):
+        return {**fallback, "discovered": step_result.evidence_summary}
+
     # Build the user prompt with raw step data
     parts = [f"<task>\n{task_description}\n</task>"]
 
@@ -161,6 +171,10 @@ def _summarize_step(
             if key not in {"tool_choice", "_prompt_configuration"}
         }
         summarizer_params.pop("tools", None)
+        if "extra_body" in summarizer_params:
+            summarizer_params["extra_body"] = deepcopy(summarizer_params["extra_body"])
+        summarizer_params["num_retries"] = 0
+        summarizer_params.pop("retry_strategy", None)
         # Hard timeout: the summarizer is a "best effort" enrichment — if the
         # local model takes longer than this we'd rather fall back to the raw
         # summary than double the wall-clock cost of every step. Configurable
@@ -177,7 +191,14 @@ def _summarize_step(
             "messages": summarizer_messages,
             "max_tokens": 500,
         }
-        apply_prompt_caching(call_kwargs, settings.LLM_PROVIDER)
+        from infinidev.config.thinking_budget import apply_thinking_budget
+        from infinidev.config.llm import provider_for_request
+
+        provider = provider_for_request(call_kwargs, settings.LLM_PROVIDER)
+        apply_thinking_budget(
+            call_kwargs, provider, call_kwargs["model"], enabled=False,
+        )
+        apply_prompt_caching(call_kwargs, provider)
         response = litellm.completion(**call_kwargs)
         content = response.choices[0].message.content or ""
 

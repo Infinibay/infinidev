@@ -160,7 +160,11 @@ CREATE TABLE IF NOT EXISTS session_messages (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT NOT NULL REFERENCES sessions(session_id),
     message_json TEXT NOT NULL,
-    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- migrated retrieval columns — appended in migration order
+    search_text     TEXT NOT NULL DEFAULT '',
+    embedding       BLOB,
+    embedding_space TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_session_messages_session
     ON session_messages(session_id, id);

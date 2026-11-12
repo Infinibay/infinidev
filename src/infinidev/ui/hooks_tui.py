@@ -50,6 +50,7 @@ class TUIHooks:
     # ── Phase / status ───────────────────────────────────────────────────
 
     def on_phase(self, phase: str) -> None:
+        self._app._pipeline_phase = phase
         # Drives the "Actions" indicator and the chat-history "context flow"
         # tag. Idle clears both so the panel returns to its resting state.
         labels = {

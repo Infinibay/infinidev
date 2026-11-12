@@ -1109,7 +1109,15 @@ def run_task(
             attachments=attachments,
             autonomous_hint=autonomous,
             prompt_configuration=prompt_configuration,
+            cancel_check=lambda: getattr(engine, "is_cancelled", False) is True,
         )
+
+    if getattr(engine, "is_cancelled", False) is True:
+        hooks.notify_stream_end("Infinidev", "agent")
+        hooks.on_phase("idle")
+        runtime.cancel()
+        _report_turn_end_to_ken("Cancelled.", session_id)
+        return "Cancelled."
 
     if chat_result.kind == "respond" and promises_instead_of_working(chat_result.reply):
         # A read-only router cannot do the work it just promised. Returning the
@@ -1215,6 +1223,14 @@ def run_task(
         hooks.notify("Infinidev", escalation.user_visible_preview, "agent")
 
     # ── Spec elaboration (vague request → grounded spec) ────────────────
+    # Direct execution bypasses the chat model entirely. Preserve prior user
+    # decisions for every execution adapter, not just a router's paraphrase.
+    from infinidev.engine.session_context import render_session_context
+
+    turn_context = _join_blocks(
+        render_session_context(session_id, user_input), turn_context,
+    )
+
     # Runs before the council/planner so both build on a grounded spec
     # instead of the raw request. Single configured model; soft-fails to
     # the original escalation (returns None → no grounded_spec attached).

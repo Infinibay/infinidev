@@ -42,6 +42,28 @@ def _ctx() -> SimpleNamespace:
     )
 
 
+@pytest.mark.parametrize(("used", "capacity", "expected_nudge"), [
+    (11_000, 262_144, False),
+    (200_000, 262_144, True),
+    (4_000, 8_192, True),
+])
+def test_note_discipline_requires_actual_context_pressure(used, capacity, expected_nudge):
+    ctx = _ctx()
+    ctx.state.last_prompt_tokens = used
+    ctx.max_context_tokens = capacity
+    guard = LoopGuard(is_small=True)
+    guard.reads_since_last_note = 2
+    messages = []
+
+    guard.check_note_discipline(ctx, messages)
+
+    assert bool(messages) is expected_nudge
+    if expected_nudge:
+        assert "add_note" in messages[0]["content"]
+        guard.check_note_discipline(ctx, messages)
+        assert len(messages) == 1
+
+
 # ── cancellation is a status, not a flag ─────────────────────────────
 
 
@@ -2158,13 +2180,9 @@ def test_recovery_admits_delegation_for_a_principal_that_cannot_edit():
 # ── the handoff notice ─────────────────────────────────────────────────
 
 
-def test_a_done_without_a_command_gets_one_notice():
-    """The model reported a check and then left it out of the user's answer.
-
-    Narrow on purpose: it fires only when `evidence_summary` names a command
-    and the final answer names none. Over 25 planning runs that was 7.
-    """
-    from infinidev.engine.loop.engine import _enforce_handoff_contract
+def test_missing_handoff_command_does_not_reopen_completed_work():
+    """A wording observation must preserve a completed, verified result."""
+    from infinidev.engine.loop.engine import _handoff_command_missing
 
     result = StepResult(
         summary="Wrote PLAN.md",
@@ -2173,17 +2191,17 @@ def test_a_done_without_a_command_gets_one_notice():
         evidence_summary="python3 verify.py exited 0; ls shows no src/",
     )
 
-    assert _enforce_handoff_contract(
+    assert _handoff_command_missing(
         result, requested_status="done", requested_final_answer=result.final_answer,
     ) is True
-    assert result.interrupted is True
-    assert result.status == "continue"
-    assert result.final_answer is None
-    assert "names no command" in result.summary
+    assert result.interrupted is False
+    assert result.status == "done"
+    assert result.final_answer == "PLAN.md is in place with seven phases and a rollout plan."
+    assert result.evidence_summary == "python3 verify.py exited 0; ls shows no src/"
 
 
 def test_an_answer_that_names_the_command_is_left_alone():
-    from infinidev.engine.loop.engine import _enforce_handoff_contract
+    from infinidev.engine.loop.engine import _handoff_command_missing
 
     answer = "PLAN.md is in place.\n\nVerification: `python3 verify.py` exited 0."
     result = StepResult(
@@ -2193,7 +2211,7 @@ def test_an_answer_that_names_the_command_is_left_alone():
         evidence_summary="python3 verify.py exited 0",
     )
 
-    assert _enforce_handoff_contract(
+    assert _handoff_command_missing(
         result, requested_status="done", requested_final_answer=answer,
     ) is False
     assert result.status == "done"
@@ -2201,7 +2219,7 @@ def test_an_answer_that_names_the_command_is_left_alone():
 
 def test_nothing_was_run_so_nothing_is_demanded():
     """A task finished by inspection must not be asked for a command."""
-    from infinidev.engine.loop.engine import _enforce_handoff_contract
+    from infinidev.engine.loop.engine import _handoff_command_missing
 
     result = StepResult(
         summary="Reviewed the file",
@@ -2210,13 +2228,13 @@ def test_nothing_was_run_so_nothing_is_demanded():
         evidence_summary="read all thirty lines of the module",
     )
 
-    assert _enforce_handoff_contract(
+    assert _handoff_command_missing(
         result, requested_status="done", requested_final_answer=result.final_answer,
     ) is False
 
 
 def test_the_handoff_never_fires_on_a_continue():
-    from infinidev.engine.loop.engine import _enforce_handoff_contract
+    from infinidev.engine.loop.engine import _handoff_command_missing
 
     result = StepResult(
         summary="midway",
@@ -2225,7 +2243,7 @@ def test_the_handoff_never_fires_on_a_continue():
         evidence_summary="pytest tests/ -q, 2 failed",
     )
 
-    assert _enforce_handoff_contract(
+    assert _handoff_command_missing(
         result, requested_status="continue", requested_final_answer="",
     ) is False
 

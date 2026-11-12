@@ -133,3 +133,36 @@ def test_history_split_hides_from_ui_shows_to_model():
     assert not any("secret" in c for c in compact)
     # ...but present for the model.
     assert "work_summary" in model_roles
+
+
+def test_compact_handoff_preserves_facts_without_another_model_call(monkeypatch):
+    monkeypatch.setattr(settings, "LOOP_WORK_SUMMARY_USE_LLM", True, raising=False)
+    state = LoopState()
+    state.history = [ActionRecord(
+        step_index=1, summary="Renamed only nombre to Faro Azul; JSON assertions passed.",
+        pending_items="Keep SQLite and 50-minute reservations.",
+    )]
+    tracker = _FakeTracker({"ACUERDOS.json": ("modified", ["Requested name correction"])})
+
+    def unnecessary_synthesis(*args, **kwargs):
+        pytest.fail("A compact factual handoff must not block completion on another model request")
+
+    monkeypatch.setattr(ws, "_synthesize_with_llm", unnecessary_synthesis)
+    result = ws.build_work_summary(state, tracker, final_answer="Done.", status="done")
+
+    assert "ACUERDOS.json" in result
+    assert "Faro Azul" in result
+    assert "JSON assertions passed" in result
+    assert "Keep SQLite and 50-minute reservations" in result
+
+
+def test_large_handoff_still_allows_model_compression(monkeypatch):
+    monkeypatch.setattr(settings, "LOOP_WORK_SUMMARY_USE_LLM", True, raising=False)
+    state = LoopState()
+    state.history = [ActionRecord(step_index=1, summary="Large fact. " * 1000)]
+    monkeypatch.setattr(ws, "_synthesize_with_llm", lambda *args, **kwargs: "Compact handoff.")
+
+    result = ws.build_work_summary(state, None, final_answer="Done.", status="done")
+
+    assert "Compact handoff." in result
+    assert "Large fact. " * 1000 not in result

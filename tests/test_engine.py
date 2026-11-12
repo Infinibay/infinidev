@@ -57,6 +57,7 @@ class TestLoopState:
         """Cache bookkeeping is best-effort and cannot abort the engine."""
         state = LoopState()
 
+        caplog.set_level("WARNING", logger="infinidev.engine.loop.loop_state")
         state.cache_file(None, "content")  # type: ignore[arg-type]
         state.cache_file("", "content")
         state.cache_file("valid.py", None)  # type: ignore[arg-type]

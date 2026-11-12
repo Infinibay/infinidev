@@ -145,7 +145,8 @@ class InfinidevApp:
 
     def _init_engine_state(self) -> None:
         self._engine_running: bool = False
-        self._pending_inputs: list[str] = []
+        self._pending_inputs: list[str | tuple[str, list]] = []
+        self._pipeline_phase: str = "idle"
         self._cancel_hold_start: float | None = None
         self._cancel_last_escape: float = 0.0
         self._cancel_watcher_active: bool = False
@@ -1049,10 +1050,15 @@ class InfinidevApp:
                 # the active engine supports it; older/alternate engines may
                 # only support the UI fallback queue.
                 inject_message = getattr(self.engine, "inject_message", None)
-                if callable(inject_message):
+                if (
+                    callable(inject_message)
+                    and getattr(self, "_pipeline_phase", "execute") == "execute"
+                ):
                     inject_message(cleaned_text, attachments)
                 else:
-                    self._pending_inputs.append(cleaned_text)
+                    self._pending_inputs.append(
+                        (cleaned_text, attachments) if attachments else cleaned_text
+                    )
                     self.add_message("System", "Queued — waiting for current task to finish.", "system")
             else:
                 if self._request_context_admission(cleaned_text, attachments):
@@ -1435,7 +1441,7 @@ class InfinidevApp:
         self.status_bar_control.set_status(f"{hint} [{bar}]")
 
     def _execute_cancel(self) -> None:
-        """Trigger engine cancellation and queue a response turn."""
+        """Stop the active task without starting a synthetic model turn."""
         if self._cancel_hold_start is None and not self._engine_running:
             return
         self._cancel_hold_start = None
@@ -1467,13 +1473,6 @@ class InfinidevApp:
         self._persist_session_message(message)
         self._persist_runtime_state()
         self._chat_history_control.invalidate_cache()
-        # Queue a cancel-acknowledgement turn (runs after engine finishes)
-        cancel_prompt = (
-            "[SYSTEM] The user just cancelled the task you were working on. "
-            "Acknowledge the cancellation very briefly (1-2 sentences, in the "
-            "language the user has been using) and ask what they need."
-        )
-        self._pending_inputs.insert(0, cancel_prompt)
         self.invalidate()
 
     # ── Settings dialog ──────────────────────────────────────────────

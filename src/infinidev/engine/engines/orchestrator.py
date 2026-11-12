@@ -17,7 +17,7 @@ from infinidev.tools.team import build_team_tools
 
 _ROOT_READS = {"read_file", "code_search", "list_directory", "glob", "git_diff",
                "git_status", "preview_changes", "web_search", "web_fetch", "read_report",
-               "read_command_output", "history_read", "history_search"}
+               "read_command_output", "history_read", "history_search", "chat_history_search"}
 
 
 class OrchestratorAdapter:

@@ -1,6 +1,9 @@
 """Regression tests for provider model catalogs."""
 
 import re
+from types import SimpleNamespace
+
+import pytest
 
 from infinidev.config.providers import fetch_models, get_provider
 
@@ -285,3 +288,343 @@ def test_deepseek_models_are_in_litellms_cost_map() -> None:
     assert flash["max_input_tokens"] == 1_000_000
     assert flash["supports_reasoning"] is True
     assert "deepseek/deepseek-v4-pro" in litellm.model_cost
+
+
+# ── Context window for backends no catalog knows ─────────────────────
+#
+# A self-hosted OpenAI-compatible server (llama.cpp, vLLM, or any gateway the
+# user points `openai_compatible` at) has no LiteLLM row, so every lookup came
+# back None: the status line showed "?" and the loop ran with no context
+# budget at all. Two mechanisms fix that — a `LLM_CONTEXT_WINDOW` declaration
+# and a probe of the server itself — and both must stay off the path of the
+# providers that already resolve a window.
+
+
+@pytest.fixture
+def context_probe(monkeypatch):
+    """Reset the context-window caches and stub out the probe's HTTP layer."""
+    import httpx
+
+    from infinidev.config.settings import settings
+    from infinidev.engine.loop import model_context
+
+    monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW", 0)
+    monkeypatch.setattr(model_context, "_OLLAMA_CTX_CACHE", {})
+    monkeypatch.setattr(model_context, "_SELF_HOSTED_CTX_CACHE", {})
+
+    calls: list[str] = []
+    posts: list[str] = []
+
+    class _Response:
+        def __init__(self, payload: object, status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+
+        def json(self) -> object:
+            return self._payload
+
+    def install(responses: dict[str, object]) -> None:
+        def fake_get(url: str, headers: object = None, timeout: object = None):
+            calls.append(url)
+            payload = responses.get(url)
+            if isinstance(payload, Exception):
+                raise payload
+            if payload is None:
+                return _Response({}, status_code=404)
+            return _Response(payload)
+
+        def fake_post(url: str, json: object = None, timeout: object = None):
+            # Keeps the Ollama branch off the developer's real localhost.
+            posts.append(url)
+            return _Response({}, status_code=404)
+
+        monkeypatch.setattr(httpx, "get", fake_get)
+        monkeypatch.setattr(httpx, "post", fake_post)
+
+    return SimpleNamespace(calls=calls, posts=posts, install=install)
+
+
+def test_llm_context_window_defaults_to_autodetection(monkeypatch) -> None:
+    """Zero means "figure it out", so the default must not disable probing."""
+    from infinidev.config.settings import Settings
+
+    monkeypatch.delenv("INFINIDEV_LLM_CONTEXT_WINDOW", raising=False)
+    assert Settings().LLM_CONTEXT_WINDOW == 0
+
+
+def test_llm_context_window_override_wins_over_the_catalogs(
+    context_probe, monkeypatch
+) -> None:
+    """The user's declaration beats a probe or a catalog row that may be wrong."""
+    from infinidev.config.settings import settings
+    from infinidev.engine.loop.model_context import (
+        get_model_context_window,
+        get_model_max_context_window,
+    )
+
+    monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW", 131_072)
+
+    # A model with a documented override (400 000) and one with a litellm row:
+    # both report the declared window instead.
+    assert get_model_context_window(
+        {"model": "openai/gpt-5.4-mini"}, "openai"
+    ) == 131_072
+    assert get_model_max_context_window(
+        {"model": "openai/gpt-5.4-mini"}, "openai"
+    ) == 131_072
+    assert not context_probe.calls
+
+
+def test_llm_context_window_override_wins_over_ollama(context_probe, monkeypatch) -> None:
+    """It also short-circuits the Ollama `/api/show` fetch, which is a POST."""
+    from infinidev.config.settings import settings
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW", 262_144)
+
+    assert get_model_context_window(
+        {"model": "ollama_chat/qwen3.8:latest", "base_url": "http://localhost:11434"},
+        "ollama",
+    ) == 262_144
+    assert not context_probe.posts
+
+
+def test_self_hosted_probe_reads_llama_cpp_props(context_probe) -> None:
+    """llama-server publishes the allocated `n_ctx` on `/props`, at the root."""
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install(
+        {
+            "http://localhost:8080/props": {
+                "default_generation_settings": {"n_ctx": 32_768},
+            },
+        }
+    )
+
+    window = get_model_context_window(
+        {
+            "model": "custom_openai/my-model.Q4_K_M.gguf",
+            "base_url": "http://localhost:8080/v1",
+        },
+        "llama_cpp",
+    )
+
+    assert window == 32_768
+    # Both sources are read in one round so the field-priority rule below has
+    # something to rank; the memo keeps it to a single round.
+    assert context_probe.calls == [
+        "http://localhost:8080/props",
+        "http://localhost:8080/v1/models/my-model.Q4_K_M.gguf",
+    ]
+
+
+def test_self_hosted_probe_reads_vllm_model_card(context_probe) -> None:
+    """vLLM has no `/props`; its configured limit is `max_model_len`."""
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install(
+        {
+            "http://localhost:8000/v1/models/strata-code-7b": {
+                "id": "strata-code-7b",
+                "object": "model",
+                "max_model_len": 262_144,
+            },
+        }
+    )
+
+    window = get_model_context_window(
+        {
+            "model": "custom_openai/strata-code-7b",
+            "base_url": "http://localhost:8000/v1",
+        },
+        "vllm",
+    )
+
+    assert window == 262_144
+    # The `/props` miss must not abort the model-card attempt.
+    assert context_probe.calls == [
+        "http://localhost:8000/props",
+        "http://localhost:8000/v1/models/strata-code-7b",
+    ]
+
+
+def test_unregistered_provider_id_still_gets_probed(context_probe) -> None:
+    """A gateway registered as `custom_openai/...` under an unknown id.
+
+    `get_provider` falls back for an unregistered id, so the probe must key on
+    the model prefix as well — otherwise a custom backend is sized by nothing.
+    """
+    from infinidev.engine.loop.model_context import (
+        get_model_context_window,
+        get_model_max_context_window,
+    )
+
+    context_probe.install(
+        {
+            "https://gateway.internal/props": {
+                "default_generation_settings": {"n_ctx": 65_536},
+            },
+        }
+    )
+    params = {
+        "model": "custom_openai/strata-proprietary-9b",
+        "base_url": "https://gateway.internal/v1",
+    }
+
+    assert get_model_context_window(params, "strata") == 65_536
+    assert get_model_max_context_window(params, "strata") == 65_536
+
+
+def test_self_hosted_probe_prefers_the_served_window(context_probe) -> None:
+    """A trained length the server may not serve ranks below a served limit."""
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install(
+        {
+            "http://localhost:8080/props": {"default_generation_settings": {"n_ctx": 32_768}},
+            "http://localhost:8080/v1/models/qwen3": {
+                "details": {"max_context_length": 131_072},
+                "max_position_embeddings": 40_960,
+            },
+        }
+    )
+
+    window = get_model_context_window(
+        {"model": "custom_openai/qwen3", "base_url": "http://localhost:8080/v1"},
+        "llama_cpp",
+    )
+
+    assert window == 131_072
+
+
+def test_self_hosted_probe_returns_none_when_nothing_is_advertised(context_probe) -> None:
+    """Unknown stays unknown: a guessed window silently truncates context."""
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install(
+        {
+            "http://localhost:9000/v1/models/strata-proprietary-9b": {
+                "id": "strata-proprietary-9b",
+                "object": "model",
+                "created": 1_700_000_000,
+            },
+        }
+    )
+
+    assert get_model_context_window(
+        {
+            "model": "custom_openai/strata-proprietary-9b",
+            "base_url": "http://localhost:9000/v1",
+        },
+        "openai_compatible",
+    ) is None
+
+
+def test_self_hosted_probe_ignores_bogus_fields(context_probe) -> None:
+    """Booleans are ints in Python, and a token id is not a context window."""
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install(
+        {
+            "http://localhost:9000/v1/models/strata-proprietary-9b": {
+                "max_model_len": True,
+                "n_ctx": 7,
+                "context_length": 2**40,
+            },
+        }
+    )
+
+    assert get_model_context_window(
+        {
+            "model": "custom_openai/strata-proprietary-9b",
+            "base_url": "http://localhost:9000/v1",
+        },
+        "openai_compatible",
+    ) is None
+
+
+def test_self_hosted_probe_is_memoized(context_probe) -> None:
+    """The context bar recomputes on every refresh; the probe must not follow."""
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install(
+        {"http://localhost:8080/props": {"default_generation_settings": {"n_ctx": 32_768}}}
+    )
+    params = {"model": "custom_openai/qwen3", "base_url": "http://localhost:8080/v1"}
+
+    assert get_model_context_window(params, "llama_cpp") == 32_768
+    assert get_model_context_window(params, "llama_cpp") == 32_768
+    assert len(context_probe.calls) == 2
+
+
+def test_self_hosted_probe_caches_the_unknown_result(context_probe) -> None:
+    """A server that answers nothing must not be probed on every rebuild."""
+    import httpx
+
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install(
+        {
+            "http://localhost:9000/props": httpx.ConnectError("connection refused"),
+            "http://localhost:9000/v1/models/strata-proprietary-9b": httpx.ConnectError(
+                "connection refused"
+            ),
+        }
+    )
+    params = {
+        "model": "custom_openai/strata-proprietary-9b",
+        "base_url": "http://localhost:9000/v1",
+    }
+
+    assert get_model_context_window(params, "openai_compatible") is None
+    assert get_model_context_window(params, "openai_compatible") is None
+    assert len(context_probe.calls) == 3
+
+
+def test_cataloged_providers_are_never_probed_over_http(context_probe) -> None:
+    """The `/props` + model-card probe is for servers with no size catalog.
+
+    Running it against a cloud API would cost a request per context rebuild and
+    could read an unrelated number in a vendor payload as a context window.
+    """
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install({"https://api.openai.com/v1/props": {"n_ctx": 128}})
+
+    assert get_model_context_window({"model": "openai/gpt-5.4-mini"}, "openai") == 400_000
+    # Ollama answers nothing here, so its trained length stays unknown.
+    assert get_model_context_window(
+        {"model": "ollama_chat/qwen3.8:latest", "base_url": "http://localhost:11434"},
+        "ollama",
+    ) is None
+    assert not context_probe.calls
+    assert context_probe.posts == ["http://localhost:11434/api/show"]
+
+
+def test_self_hosted_probe_reads_strata_model_list(context_probe):
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install({
+        "http://localhost:8080/v1/models": {"data": [
+            {"id": "other-model", "meta": {"n_ctx": 1_000_000}},
+            {"id": "local-qwen", "meta": {"n_ctx": 262_144}},
+        ]},
+    })
+
+    assert get_model_context_window({
+        "model": "custom_openai/local-qwen", "base_url": "http://localhost:8080/v1",
+    }, "llama_cpp") == 262_144
+
+
+def test_model_list_never_borrows_another_models_context(context_probe):
+    from infinidev.engine.loop.model_context import get_model_context_window
+
+    context_probe.install({
+        "http://localhost:8080/v1/models": {"data": [
+            {"id": "other-model", "meta": {"n_ctx": 1_000_000}},
+        ]},
+    })
+
+    assert get_model_context_window({
+        "model": "custom_openai/unlisted-local", "base_url": "http://localhost:8080/v1",
+    }, "llama_cpp") is None

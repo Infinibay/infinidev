@@ -5,6 +5,12 @@ context bar.  They used to compute this independently and could disagree —
 the TUI even shipped a hand-maintained dict of cloud context sizes that
 drifted out of date.
 
+Self-hosted OpenAI-compatible servers (llama.cpp, vLLM, and any "OpenAI
+Compatible" endpoint) are asked directly: llama-server publishes ``n_ctx`` on
+``/props`` and vLLM publishes ``max_model_len`` on its model card, so the real
+served window is discoverable instead of unknown. ``LLM_CONTEXT_WINDOW``
+overrides every lookup for the cases where neither source exists.
+
 The subtlety that makes a naive implementation wrong: for Ollama the trained
 context length reported by ``/api/show`` (e.g. 32k, 256k) is not necessarily
 what the server actually serves.  When a positive ``num_ctx`` override is
@@ -26,6 +32,32 @@ from infinidev.engine._best_effort import best_effort
 # every context rebuild.  ``None`` (unknown) is cached too, so a transient
 # Ollama failure doesn't cause repeated timeouts on subsequent calls.
 _OLLAMA_CTX_CACHE: dict[tuple[str, str], int | None] = {}
+
+# (model, base_url) -> served context length discovered from a self-hosted
+# OpenAI-compatible server, or None when it advertises nothing. Memoized for
+# the same reason as the Ollama cache, and ``None`` is cached so an endpoint
+# without a limit endpoint is not probed on every context rebuild.
+_SELF_HOSTED_CTX_CACHE: dict[tuple[str, str], int | None] = {}
+
+# Field names a self-hosted server uses for the window it actually serves,
+# most authoritative first. ``max_context_length`` is llama.cpp's per-model
+# detail; ``max_model_len`` is vLLM's configured limit; ``n_ctx`` is what
+# llama-server allocates. ``max_position_embeddings`` is last on purpose: it is
+# the trained length, which a server may serve less of.
+_SELF_HOSTED_CTX_FIELDS: tuple[str, ...] = (
+    "max_context_length",
+    "max_model_len",
+    "n_ctx",
+    "context_length",
+    "context_window",
+    "max_position_embeddings",
+)
+
+# Guards against reading a nonsense field (a token id, a cache size) as a
+# window, and against a runaway scan of an unexpected payload shape.
+_SELF_HOSTED_CTX_MIN = 128
+_SELF_HOSTED_CTX_MAX = 100_000_000
+_SELF_HOSTED_CTX_MAX_DEPTH = 4
 
 # Provider-documented cloud context windows.  These entries win over LiteLLM:
 # its bundled cost map can know a model while still carrying an older limit
@@ -180,6 +212,109 @@ def _fetch_ollama_trained_context(model: str, base_url: str) -> int | None:
     return result
 
 
+def _is_self_hosted_openai(model: str, provider_id: str | None) -> bool:
+    """Whether the endpoint is a server the user runs, with no size catalog.
+
+    Keyed off ``base_url_editable`` — the registry flag for "the user points
+    this at an arbitrary URL" — rather than a hardcoded list of provider ids,
+    so a new self-hosted provider is covered by registering it. Ollama carries
+    the flag too but has its own ``/api/show`` path above.
+    """
+    from infinidev.config.providers import PROVIDERS
+
+    provider = PROVIDERS.get(provider_id or "")
+    if provider is not None:
+        return provider.base_url_editable and provider.model_list_format != "ollama"
+    # An unregistered id still reaches LiteLLM through its generic
+    # OpenAI-compatible transport, which is the same situation.
+    return model.startswith("custom_openai/")
+
+
+def _collect_context_fields(
+    payload: object,
+    found: dict[str, int],
+    depth: int = 0,
+) -> None:
+    """Collect known context-length fields from a server payload, any nesting.
+
+    Server model cards differ in where they put the number (llama.cpp nests it
+    under ``details``, vLLM keeps it at the top level), so the scan is
+    structural instead of per-server. Only plain ints count; booleans are
+    ``int`` subclasses in Python and are excluded.
+    """
+    if depth > _SELF_HOSTED_CTX_MAX_DEPTH:
+        return
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if (
+                isinstance(key, str)
+                and key in _SELF_HOSTED_CTX_FIELDS
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                and _SELF_HOSTED_CTX_MIN <= value <= _SELF_HOSTED_CTX_MAX
+            ):
+                found.setdefault(key, value)
+            _collect_context_fields(value, found, depth + 1)
+    elif isinstance(payload, list):
+        for item in payload:
+            _collect_context_fields(item, found, depth + 1)
+
+
+
+def _fetch_self_hosted_context(model: str, base_url: str, api_key: str = "") -> int | None:
+    """Served context length from a self-hosted OpenAI-compatible server.
+
+    Tries llama-server's ``/props`` first (one call, reports the allocated
+    ``n_ctx`` regardless of which model is loaded) and then the OpenAI model
+    card, which is where vLLM's ``max_model_len`` and llama.cpp's
+    ``details.max_context_length`` appear. Returns None when the server
+    advertises nothing — an unknown window disables the prompt budget, while an
+    over-stated one makes the backend truncate context silently.
+    """
+    import httpx
+    from urllib.parse import quote
+
+    cache_key = (model, base_url)
+    if cache_key in _SELF_HOSTED_CTX_CACHE:
+        return _SELF_HOSTED_CTX_CACHE[cache_key]
+
+    base = base_url.rstrip("/")
+    # LiteLLM base_urls usually carry the /v1 suffix; /props lives at the root
+    # of the server, the model card under the API root.
+    api_root = base if base.endswith("/v1") else f"{base}/v1"
+    server_root = base[:-3] if base.endswith("/v1") else base
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+    found: dict[str, int] = {}
+    urls = [f"{server_root}/props"]
+    bare = _bare_model(model)
+    if bare:
+        urls.append(f"{api_root}/models/{quote(bare, safe='/')}")
+    for url in urls:
+        with best_effort(f"self-hosted context length probe failed: {url}"):
+            resp = httpx.get(url, headers=headers, timeout=3.0)
+            if resp.status_code == 200:
+                _collect_context_fields(resp.json(), found)
+
+    # Strata advertises per-model capacity on the list endpoint rather than
+    # /props or a model-detail route. Match the selected id before reading it;
+    # a different model's window must never size this conversation.
+    if not found and bare:
+        with best_effort("self-hosted model-list context probe failed"):
+            resp = httpx.get(f"{api_root}/models", headers=headers, timeout=3.0)
+            if resp.status_code == 200:
+                payload = resp.json()
+                rows = payload.get("data", []) if isinstance(payload, dict) else []
+                for row in rows:
+                    if isinstance(row, dict) and row.get("id") == bare:
+                        _collect_context_fields(row, found)
+                        break
+
+    result = next((found[field] for field in _SELF_HOSTED_CTX_FIELDS if field in found), None)
+    _SELF_HOSTED_CTX_CACHE[cache_key] = result
+    return result
+
+
 def _cloud_context_window(model: str) -> int | None:
     """Documented input/context limit for a cloud model, or None if unknown.
 
@@ -221,6 +356,11 @@ def get_model_context_window(
     if provider_id is None:
         provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
 
+    # An explicit declaration is the user asserting real capacity, so it wins
+    # over a probe that may read a trained length the server does not serve.
+    if settings.LLM_CONTEXT_WINDOW > 0:
+        return settings.LLM_CONTEXT_WINDOW
+
     # The subscription serves the same model names as the metered API with
     # different limits — litellm's map says gpt-5.5 takes 1 050 000 input
     # tokens, the Codex backend gives it 272 000. Reading the cost map here
@@ -251,6 +391,20 @@ def get_model_context_window(
         # window is far smaller, so this can still over-report — set num_ctx).
         return trained
 
+    if _is_self_hosted_openai(model, provider_id):
+        base_url = (
+            llm_params.get("base_url")
+            or llm_params.get("api_base")
+            or settings.LLM_BASE_URL
+            or ""
+        )
+        if base_url:
+            probed = _fetch_self_hosted_context(
+                model, base_url, str(llm_params.get("api_key") or "")
+            )
+            if probed:
+                return probed
+
     return _cloud_context_window(model)
 
 
@@ -270,6 +424,9 @@ def get_model_max_context_window(
     if provider_id is None:
         provider_id = getattr(settings, "LLM_PROVIDER", "ollama")
 
+    if settings.LLM_CONTEXT_WINDOW > 0:
+        return settings.LLM_CONTEXT_WINDOW
+
     if _is_ollama(model, provider_id):
         base_url = (
             llm_params.get("base_url")
@@ -278,6 +435,20 @@ def get_model_max_context_window(
             or "http://localhost:11434"
         )
         return _fetch_ollama_trained_context(model, base_url)
+
+    if _is_self_hosted_openai(model, provider_id):
+        base_url = (
+            llm_params.get("base_url")
+            or llm_params.get("api_base")
+            or settings.LLM_BASE_URL
+            or ""
+        )
+        if base_url:
+            probed = _fetch_self_hosted_context(
+                model, base_url, str(llm_params.get("api_key") or "")
+            )
+            if probed:
+                return probed
 
     return _cloud_context_window(model)
 

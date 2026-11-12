@@ -126,6 +126,13 @@ TOOL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Reconstruct the causal chain behind an event, or a run's ordered timeline",
         "history_trace(event_id='evt_ab12') | history_trace(run_id='run_ab12')",
     ),
+    "chat_history_search": (
+        "Search this session's full chat transcript (user, assistant, tool calls) "
+        "and read the messages around a hit",
+        "chat_history_search(query='retention policy') | "
+        "chat_history_search(query='why did we pick sqlite', mode='semantic') | "
+        "chat_history_search(message_id=482, before=5, after=5)",
+    ),
     "write_report": (
         "Save a longer structured report (markdown) as an artifact",
         "write_report(title='Auth audit', content='## Findings\\n...')",

@@ -1157,6 +1157,28 @@ def test_response_only_report_stays_informational_without_attached_profile() -> 
     assert goal.intent == "informational"
 
 
+@pytest.mark.parametrize(
+    ("authority", "constraints", "classified_intent", "expected"),
+    [
+        (("answer",), (), "implementation", "implementation"),
+        (("answer",), (), "informational", "informational"),
+        (("answer",), ("read_only",), "implementation", "informational"),
+        (("answer", "modify"), (), "informational", "implementation"),
+    ],
+)
+def test_classified_requested_intent_routes_goal_with_literal_constraints(
+    authority, constraints, classified_intent, expected,
+) -> None:
+    escalation = EscalationPacket(
+        user_request="Necesito que esto quede funcionando.",
+        understanding="Make the requested outcome work.",
+        task_profile=TaskProfile(
+            authority=authority, constraints=constraints, classified_intent=classified_intent,
+        ),
+    )
+    assert _goal_from_escalation(escalation).intent == expected
+
+
 def test_derived_understanding_cannot_grant_write_intent() -> None:
     escalation = EscalationPacket(
         user_request="Investiga las alternativas y entrega una recomendación.",

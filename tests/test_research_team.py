@@ -744,6 +744,7 @@ def test_normal_message_reaches_principal_without_mode_command(
         )
         assert not runtime.read()["tickets"]
         available = {tool.name: tool for tool in agent.tools}
+        assert "chat_history_search" in available
         if delegate:
             runtime._runner = lambda *args: ("Inspected cache.py:42", "completed")
             ticket = json.loads(available["team_create_ticket"]._run(
@@ -763,7 +764,11 @@ def test_normal_message_reaches_principal_without_mode_command(
         return "Revisado." if delegate else "Hola."
 
     monkeypatch.setattr(LoopEngine, "execute", execute)
-    agent = TeamAgent("root-agent", "Lead", 1, str(workspace_dir), [ReadFileTool()])
+    from infinidev.tools.history import ChatHistorySearchTool
+
+    agent = TeamAgent(
+        "root-agent", "Lead", 1, str(workspace_dir), [ReadFileTool(), ChatHistorySearchTool()],
+    )
     result = run_task(agent=agent, user_input=request, session_id="ordinary-message",
                       engine=LoopEngine(), reviewer=None, hooks=NoOpHooks())
     assert result == ("Revisado." if delegate else "Hola.")

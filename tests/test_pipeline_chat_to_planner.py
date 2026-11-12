@@ -96,6 +96,9 @@ class _RecordingHooks:
     def notify(self, speaker: str, msg: str, kind: str = "agent") -> None:
         self.notifications.append((speaker, msg, kind))
 
+    def notify_stream_end(self, speaker: str, kind: str = "agent") -> None:
+        pass
+
     def ask_user(self, prompt: str, kind: str = "text") -> str | None:
         return None
 
@@ -727,3 +730,70 @@ def test_a_chat_reply_that_offers_to_explain_is_not_a_promise():
         "Let me review the module and report the defect.",
     ):
         assert not promises_instead_of_working(conversational), conversational
+
+
+def test_direct_execution_retains_prior_conversation_constraints(temp_db, monkeypatch):
+    from infinidev.config.settings import settings
+    from infinidev.db.service import store_conversation_turn
+    from infinidev.engine.engines.base import EngineResult
+
+    monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW", 262_144)
+    monkeypatch.setattr(settings, "SPEC_ELABORATION_ENABLED", False)
+    monkeypatch.setattr(settings, "KEN_SESSION_ENABLED", False)
+    store_conversation_turn("continuity", "user", "Faro usa SQLite, sin login.")
+    store_conversation_turn("continuity", "assistant", "De acuerdo.")
+    request = "Create the reservation module as discussed."
+    store_conversation_turn("continuity", "user", request)
+    engine = _FakeEngine()
+    observed = {}
+
+    def execute(**kwargs):
+        observed.update(kwargs)
+        return EngineResult(
+            engine_name="task", status="completed", user_message="Done", engine=engine,
+        )
+
+    monkeypatch.setattr("infinidev.engine.engines.run_selected_engine", execute)
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.chat_agent.run_chat_agent",
+        lambda *_args, **_kwargs: ChatAgentResult(
+            kind="escalate", escalation=EscalationPacket(user_request=request, understanding=""),
+        ),
+    )
+    result = run_task(
+        agent=_FakeAgent(), user_input=request, session_id="continuity",
+        engine=engine, reviewer=_FakeReviewer(), hooks=_RecordingHooks(),
+    )
+
+    assert result == "Done"
+    assert "SQLite, sin login" in observed["turn_context"]
+    assert observed["escalation"].user_request == request
+
+
+def test_cancel_during_chat_does_not_enter_execution_or_end_hooks(temp_db, monkeypatch):
+    from infinidev.config.settings import settings
+
+    monkeypatch.setattr(settings, "KEN_SESSION_ENABLED", False)
+    engine = _FakeEngine()
+    hooks = _RecordingHooks()
+
+    def cancelled_chat(*args, **kwargs):
+        engine.is_cancelled = True
+        return ChatAgentResult(kind="escalate", escalation=EscalationPacket(
+            user_request="do it", understanding="A cancelled handoff",
+        ))
+
+    def unexpected_execution(**kwargs):
+        pytest.fail("A cancelled chat must not start execution")
+
+    monkeypatch.setattr(
+        "infinidev.engine.orchestration.chat_agent.run_chat_agent", cancelled_chat,
+    )
+    monkeypatch.setattr("infinidev.engine.engines.run_selected_engine", unexpected_execution)
+    result = run_task(
+        agent=_FakeAgent(), user_input="do it", session_id="cancel-chat",
+        engine=engine, reviewer=_FakeReviewer(), hooks=hooks,
+    )
+
+    assert "cancel" in result.lower()
+    assert hooks.phases[-1] == "idle"

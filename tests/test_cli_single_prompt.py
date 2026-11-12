@@ -424,6 +424,59 @@ def test_fast_exit_stream_flush_failures_do_not_skip_later_cleanup(
     assert exit_codes == [0]
 
 
+def test_fast_exit_shuts_down_background_tasks_before_forced_exit(
+    cli_main, monkeypatch, caplog
+):
+    """``os._exit`` skips atexit, so the job cleanup has to be explicit.
+
+    Without this the agent's still-running background jobs are reparented to
+    init inside the terminal's cgroup and keep holding memory there.
+    """
+    from infinidev.code_intel import background_indexer
+    from infinidev.tools.shell import background_manager as bg
+
+    order = []
+    monkeypatch.setattr(background_indexer, "get_global_queue", lambda: None)
+    monkeypatch.setattr(
+        bg, "shutdown_background_tasks", lambda: order.append("jobs") or True
+    )
+    monkeypatch.setattr(os, "_exit", lambda code: order.append(("exit", code)))
+
+    with caplog.at_level(logging.DEBUG, logger=cli_main.__name__):
+        cli_main._fast_exit_workaround()
+
+    assert order == ["jobs", ("exit", 0)]
+
+
+def test_fast_exit_background_task_shutdown_failure_still_exits(
+    cli_main, monkeypatch, caplog
+):
+    """A failing job cleanup stays non-fatal, like the queue cleanup beside it."""
+    from infinidev.code_intel import background_indexer
+    from infinidev.tools.shell import background_manager as bg
+
+    def fail():
+        raise RuntimeError("killpg unavailable")
+
+    exit_codes = []
+    monkeypatch.setattr(background_indexer, "get_global_queue", lambda: None)
+    monkeypatch.setattr(bg, "shutdown_background_tasks", fail)
+    monkeypatch.setattr(os, "_exit", exit_codes.append)
+
+    with caplog.at_level(logging.DEBUG, logger=cli_main.__name__):
+        cli_main._fast_exit_workaround()
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Failed to stop background tasks during shutdown"
+    )
+    assert record.levelno == logging.DEBUG
+    assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+    assert exit_codes == [0]
+
+
 def test_final_render_failure_is_logged_and_falls_back_to_plain_text(
     cli_main, monkeypatch, caplog, capsys
 ):

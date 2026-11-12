@@ -209,3 +209,14 @@ def test_task_cancel_releases_pending_analysis_question() -> None:
     assert engine.task_cancel_calls == 1
     assert app._analysis_answer == ""
     analysis_event.set.assert_called_once_with()
+
+
+def test_task_cancel_does_not_start_another_model_turn():
+    engine = _EngineStub(tool_active=False)
+    app = _bare_app(engine)
+    app._pending_inputs = ["My explicit next question"]
+
+    app._execute_cancel()
+
+    assert engine.task_cancel_calls == 1
+    assert app._pending_inputs == ["My explicit next question"]

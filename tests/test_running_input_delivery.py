@@ -48,3 +48,20 @@ def test_running_input_queues_when_engine_has_no_injection_hook() -> None:
     app._handle_submit("Please address this before finishing.")
 
     assert app._pending_inputs == ["Please address this before finishing."]
+
+
+def test_message_during_chat_is_queued_instead_of_lost_in_developer_injector():
+    from infinidev.ui.hooks_tui import TUIHooks
+
+    engine = _InjectingEngine()
+    app = _running_app(engine)
+    app._chat_history_control = SimpleNamespace(show_thinking=False, work_label="")
+    app.invalidate = lambda: None
+    app._persist_runtime_state = lambda: None
+    hooks = TUIHooks(app)
+    hooks.on_phase("chat")
+
+    app._handle_submit("Corrección: el nombre es Faro.")
+
+    assert app._pending_inputs == ["Corrección: el nombre es Faro."]
+    assert engine.messages == []

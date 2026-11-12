@@ -470,3 +470,24 @@ def get_background_manager() -> BackgroundTaskManager:
             if _manager is None:
                 _manager = BackgroundTaskManager()
     return _manager
+
+
+def shutdown_background_tasks() -> bool:
+    """Kill surviving tasks if this process ever started the manager.
+
+    ``BackgroundTaskManager.__init__`` registers ``shutdown`` with ``atexit``,
+    but the CLI's fast-exit path calls ``os._exit`` and skips every atexit
+    handler — so a job still running when the CLI leaves would outlive its
+    parent and keep holding memory inside the terminal's cgroup. Callers that
+    bypass finalisation call this directly.
+
+    Deliberately does not go through ``get_background_manager()``: creating the
+    singleton here would register an atexit handler in a process that never ran
+    a background job. Returns whether any task was killed.
+    """
+    manager = _manager
+    if manager is None:
+        return False
+    running = [t for t in manager.list() if t.is_running]
+    manager.shutdown()
+    return bool(running)

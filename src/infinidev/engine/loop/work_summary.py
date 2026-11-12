@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 # recognise these turns. Kept in one place — the renderer in chat_agent
 # and any future consumer should reference this rather than re-typing it.
 WORK_SUMMARY_ROLE = "work_summary"
+_SYNTHESIS_MIN_BYTES = 4_000
 
 _SYNTHESIS_SYSTEM_PROMPT = """\
 You write a short hand-off note for a coding assistant that just finished \
@@ -98,7 +99,13 @@ def build_work_summary(
 
     deterministic = _render_deterministic(facts, status=status)
 
-    if getattr(settings, "LOOP_WORK_SUMMARY_USE_LLM", True):
+    # A compact factual record is already the handoff. Distilling it again
+    # adds a provider round-trip after the work is finished without improving
+    # continuity. Keep synthesis for records that actually need compression.
+    if (
+        getattr(settings, "LOOP_WORK_SUMMARY_USE_LLM", True)
+        and len(deterministic.encode("utf-8")) > _SYNTHESIS_MIN_BYTES
+    ):
         synthesized = _synthesize_with_llm(
             facts, final_answer=final_answer, status=status,
         )
@@ -192,6 +199,12 @@ def _render_deterministic(facts: dict[str, Any], *, status: str) -> str:
         lines.extend(did)
         lines.append("")
 
+    findings = [step["discovered"] for step in facts["steps"] if step["discovered"]]
+    if findings:
+        lines.append("Evidence / findings:")
+        lines.extend(f"- {finding}" for finding in findings)
+        lines.append("")
+
     if challenges:
         lines.append("Challenges / problems encountered:")
         lines.extend(challenges)
@@ -225,7 +238,7 @@ def _synthesize_with_llm(
     """
     try:
         import litellm
-        from infinidev.config.llm import get_litellm_params
+        from infinidev.config.llm import get_litellm_params, provider_for_request
 
         structured = _render_deterministic(facts, status=status)
         user_content = (
@@ -243,6 +256,15 @@ def _synthesize_with_llm(
         params.setdefault("temperature", 0.2)
         params["stream"] = False
         params["max_tokens"] = 600
+        params["num_retries"] = 0
+        params.pop("retry_strategy", None)
+        params["timeout"] = float(getattr(settings, "LOOP_SUMMARIZER_TIMEOUT", 30) or 30)
+        from infinidev.config.thinking_budget import apply_thinking_budget
+
+        apply_thinking_budget(
+            params, provider_for_request(params, settings.LLM_PROVIDER), params["model"],
+            enabled=False,
+        )
 
         response = litellm.completion(**params)
         text = (response.choices[0].message.content or "").strip()
